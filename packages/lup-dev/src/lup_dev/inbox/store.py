@@ -1187,6 +1187,10 @@ class Inbox(MutableModel):
     changes: Changes | None = None
     """Told each time an item is written, so the host service's watches see it
     (`host/watch.py`); none tells nothing."""
+    version: int = 0
+    """How many items and whereabouts it has written since it was opened: what's
+    made of it in memory, the roster naming its conversations among it
+    (`Delivery.roster`), is made again once it changes."""
 
     @classmethod
     def opened(cls, layout: InboxLayout, changes: Changes | None = None) -> Inbox:
@@ -1237,6 +1241,7 @@ class Inbox(MutableModel):
         """Write `item` through to its file, and hold it, telling `changes` of each conversation it's from, for, or was addressed to."""
         write_model(self.layout.item(item.number), item)
         self.items = {**self.items, item.number: item}
+        self.version += 1
         if self.changes is not None:
             self.changes.changed(
                 Touched(
@@ -1395,4 +1400,5 @@ class Inbox(MutableModel):
         key = place.conversation.key()
         write_model(self.layout.party(key), place)
         self.whereabouts = {**self.whereabouts, key: place}
+        self.version += 1
         return place

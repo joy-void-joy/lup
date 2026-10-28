@@ -35,7 +35,6 @@ from typing import TYPE_CHECKING, override
 
 from lup.types import Model
 from lup_dev.git import Git, GitError, nul_separated
-from lup_dev.host.names import Names
 from lup_dev.host.service import Bearings, Running
 from lup_dev.inbox.delivery import Delivery, clocked, kind, opening, what
 from lup_dev.inbox.reading import Flags, Reader, by_agent
@@ -155,6 +154,11 @@ def read_repository(
     )
 
 
+def starting(reader: Reader) -> list[Conversation]:
+    """Return the conversation `reader` reads for, the session starting, as one that may share a name lup hasn't heard yet; none for the operator."""
+    return [reader.reader] if isinstance(reader.reader, Conversation) else []
+
+
 class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
     """A new main session's bearings, from the inbox `delivery` keeps and the repository's git."""
 
@@ -213,7 +217,6 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
         reader = Reader(
             delivery=self.delivery,
             reader=starting,
-            names=Names(path=self.delivery.layout.names).all(),
         )
         beside = [
             each
@@ -229,12 +232,17 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
                 )
             ],
             self.unlanded(found),
-            self.beside(beside) if len(beside) > 1 else [],
+            self.beside(beside, reader) if len(beside) > 1 else [],
             self.waiting(items, last, reader),
             # lup: defer(issue=262, why="the last handoff's note is told here, after what landed, once `handoff` writes one: it waits for spawn (#117)")
             self.landed(found, last, beside, reader, items),
         ]
         return "\n\n".join("\n".join(each) for each in sections if each)
+
+    @staticmethod
+    def named(last: Conversation, reader: Reader) -> str:
+        """Name `last` for the session starting, which reads: by its name, its runtime's ids beside it where another shares it, the session starting among them, which lup hasn't heard yet."""
+        return reader.roster.who(last, starting(reader))
 
     def unlanded(self, found: Repository) -> list[str]:
         """Say each branch not landed: its worktree, its commits on no remote and the last, and its uncommitted changes; or why git couldn't be read."""
@@ -273,12 +281,12 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
             *(said(each) for each in found.unlanded),
         ]
 
-    def beside(self, beside: list[Running]) -> list[str]:
-        """Say each main session of the repository running beside the one starting, by its name, its runtime's id and its worktree."""
+    def beside(self, beside: list[Running], reader: Reader) -> list[str]:
+        """Say each main session of the repository running beside the one starting, by its name, its runtime's ids beside it where another shares it (`Reader.called`), and its worktree."""
         return [
             "Main sessions of this repository running beside you:",
             *(
-                f"- `{each.name}` ({each.launch.runtime} session {each.session}), "
+                f"- {reader.called(Conversation(repository=each.launch.repository, runtime=each.launch.runtime, session=each.session))}, "
                 f"in {each.launch.worktree}."
                 for each in beside
             ),
@@ -307,7 +315,7 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
             if last is None or not first
             else (
                 f", {'all' if not rest else len(first)} from "
-                f"{reader.titled(last, items)} and its subagents"
+                f"{self.named(last, reader)} and its subagents"
                 f"{', listed first' if rest else ''}"
             )
         )
@@ -316,17 +324,15 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
                 f"Waiting for the operator: {many(len(waiting), 'item')}{whose} "
                 "(`inbox` lists them; with `number`, one whole):"
             ),
-            *self.grouped(first, reader, items),
-            *self.grouped(rest, reader, items),
+            *self.grouped(first, reader),
+            *self.grouped(rest, reader),
         ]
 
-    def grouped(
-        self, items: list[Item], reader: Reader, known: list[Item]
-    ) -> list[str]:
+    def grouped(self, items: list[Item], reader: Reader) -> list[str]:
         """Say `items`: each waiting on the operator a line, then news counted by kind, then flagged writes, an entry for each agent saying its files and the branches whose landings they hold."""
         asking = [
             f"- {cited(item.number)} {what(item)} from "
-            f"{reader.called(item.sender, known, naming='paths')}: {opening(item)}"
+            f"{reader.roster.who(item.sender, starting(reader))}: {opening(item)}"
             for item in items
             if ranked(item.reason).name == "waiting on you"
         ]
@@ -347,7 +353,7 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
                 (
                     "- Flagged writes, holding their branches' landings: "
                     + "; ".join(
-                        f"{reader.called(each.sender, known, naming='paths')}, "
+                        f"{reader.called(each.sender)}, "
                         f"{each.said()} ({each.cited(', ')})"
                         for each in agents
                     )
@@ -376,7 +382,7 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
             if running
             else f"last heard at {clocked(reader.heard(last, items))}"
         )
-        title = reader.titled(last, items)
+        title = self.named(last, reader)
         started = clocked(self.started(last))
         landed = (
             [f"- {each.commit} {each.subject}" for each in found.landed]
@@ -393,6 +399,7 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
             *landed,
             (
                 f"What {title} and the operator said to each other: `inbox` with "
-                f'`conversation` "{last.session}", `every` and `whole`.'
+                f'`conversation` "{reader.roster.handle(last, starting(reader))}", '
+                "`every` and `whole`."
             ),
         ]

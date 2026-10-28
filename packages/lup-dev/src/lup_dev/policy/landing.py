@@ -135,7 +135,8 @@ from lup_dev.host.courier import Conversations
 from lup_dev.host.protocol import HostError, Register
 from lup_dev.host.rooms import RoomTools
 from lup_dev.host.service import Program, executed
-from lup_dev.inbox.delivery import Delivery, who
+from lup_dev.inbox.delivery import Delivery
+from lup_dev.inbox.roster import ids
 from lup_dev.inbox.store import (
     AtLanding,
     ChangedFile,
@@ -1731,7 +1732,7 @@ def called(host: HostLayout, place: Whereabouts) -> str:
         )
     )
     if record is None or kept is None or found is None:
-        return who(conversation)
+        return ids(conversation)
     return f"`{kept.path(found, record.name or record.launch)}`"
 
 

@@ -20,7 +20,7 @@ import shutil
 import sys
 import traceback
 import webbrowser
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
@@ -127,7 +127,6 @@ from lup_dev.inbox.delivery import (
     opening,
     standing,
     what,
-    who,
 )
 from lup_dev.inbox.marks import routes as marks_routes
 from lup_dev.inbox.notices import NotifySend
@@ -138,6 +137,7 @@ from lup_dev.inbox.protocol import (
     FinishItem,
     Items,
     ListInbox,
+    Pathed,
     ReadInbox,
     Readout,
     SendItem,
@@ -150,6 +150,7 @@ from lup_dev.inbox.protocol import (
 )
 from lup_dev.inbox.protocol import routes as inbox_routes
 from lup_dev.inbox.reading import Flags, by_agent, counted
+from lup_dev.inbox.roster import ids
 from lup_dev.inbox.store import (
     Answer,
     Approval,
@@ -793,16 +794,15 @@ def reading() -> HostClient | FromRoom:
     return client
 
 
-def line(entry: Item | Flags, listed: Listed | None = None) -> str:
-    """Say an item in a line: its number, when it was made, what it is, from whom (as it's called, where `listed` knows it) and, for a copy of a message between conversations, to whom, and its first line; for an approval, how to read it whole and answer it. A conversation's flagged writes are one line: each number, the latest's time, how many, and how many files on which branches (`Flags`)."""
-    known = listed or Listed(launches=[])
+def line(entry: Item | Flags, paths: Sequence[Pathed] = ()) -> str:
+    """Say an item in a line: its number, when it was made, what it is, from whom (by its name, where `paths` gives it) and, for a copy of a message between conversations, to whom, and its first line; for an approval, how to read it whole and answer it. A conversation's flagged writes are one line: each number, the latest's time, how many, and how many files on which branches (`Flags`)."""
     if isinstance(entry, Flags):
         last = entry.items[-1]
         where = "" if last.worktree is None else f" in {last.worktree}"
         return (
             f"{entry.cited():>5}  {clocked(entry.made)}  "
             f"{many(len(entry.items), 'flagged write')} from "
-            f"{sender_named(entry.sender, known)}{where}: {entry.said()}"
+            f"{called(entry.sender, paths)}{where}: {entry.said()}"
         )
     item = entry
     where = "" if item.worktree is None else f" in {item.worktree}"
@@ -814,31 +814,28 @@ def line(entry: Item | Flags, listed: Listed | None = None) -> str:
     )
     match item.reason:
         case Message(to=InboxConversation() as to):
-            between = f" to {sender_named(to, known)}"
+            between = f" to {called(to, paths)}"
         case _:
             between = ""
     return (
         f"{cited(item.number):>5}  {clocked(item.made)}  {what(item)} from "
-        f"{sender_named(item.sender, known)}{between}{where}: "
+        f"{called(item.sender, paths)}{between}{where}: "
         f"{opening(item)}{reading}"
     )
 
 
-def sender_named(party: Party, listed: Listed) -> str:
-    """Say who `party` is: a conversation as it's called first, where `listed` knows it: a subagent by its path while its launch runs, a session's own by its launch's name."""
-    talkers = [each for launch in listed.talkers.values() for each in launch]
+def called(party: Party, paths: Sequence[Pathed]) -> str:
+    """Say who `party` is, as lup names them: the operator; a conversation by its path among `paths`, its runtime's ids beside it where another shares the path (`Pathed`), else by those ids."""
     match party:
-        case InboxConversation(session=session, agent=str() as agent):
-            found = [
-                each
-                for each in talkers
-                if each.session == session and each.agent == agent
-            ]
-            return f"`{found[0].path}` ({who(party)})" if found else who(party)
-        case InboxConversation(session=session) if session in listed.sessions:
-            return f"`{listed.sessions[session]}` ({who(party)})"
+        case InboxConversation():
+            found = next((each for each in paths if each.conversation == party), None)
+            if found is None:
+                return ids(party)
+            return (
+                f"`{found.path}` ({ids(party)})" if found.alike else f"`{found.path}`"
+            )
         case _:
-            return who(party)
+            return "the operator"
 
 
 def settled(*, approved: bool) -> str:
@@ -846,16 +843,16 @@ def settled(*, approved: bool) -> str:
     return "approved" if approved else "declined"
 
 
-def heading(item: Item) -> str:
-    """Say what an item is, whose to whom, when it was made and where it stands: a copy of a message between conversations to the conversation it was sent to."""
+def heading(item: Item, paths: Sequence[Pathed] = ()) -> str:
+    """Say what an item is, whose to whom, each by its name where `paths` gives it, when it was made and where it stands: a copy of a message between conversations to the conversation it was sent to."""
     where = "" if item.worktree is None else f" in {item.worktree}"
     match item.reason:
         case Message(to=InboxConversation() as to):
-            recipient = f"{who(to)}, your copy"
+            recipient = f"{called(to, paths)}, your copy"
         case _:
-            recipient = who(item.recipient)
+            recipient = called(item.recipient, paths)
     return (
-        f"{cited(item.number)}, {what(item)} from {who(item.sender)}{where} to "
+        f"{cited(item.number)}, {what(item)} from {called(item.sender, paths)}{where} to "
         f"{recipient}, made {clocked(item.made)}, {standing(item)}:"
     )
 
@@ -876,8 +873,8 @@ def hold_answered(
     )
 
 
-def shown(item: Item) -> str:
-    """Say an item whole, for the operator: an approval by its summary, its whole diff on request."""
+def shown(item: Item, paths: Sequence[Pathed] = ()) -> str:
+    """Say an item whole, for the operator, each conversation by its name where `paths` gives it: an approval by its summary, its whole diff on request."""
     match item.reason:
         case (
             Message(text=text)
@@ -917,10 +914,10 @@ def shown(item: Item) -> str:
             numbers = ", ".join(cited(each) for each in covers)
             body = [
                 *([f"Of {numbers}."] if covers else []),
-                *(f"To {who(each.to)}: {each.text}" for each in letters),
+                *(f"To {called(each.to, paths)}: {each.text}" for each in letters),
                 *(commented(each) for each in comments),
             ]
-    return "\n".join([heading(item), *body])
+    return "\n".join([heading(item, paths), *body])
 
 
 def commented(comment: Comment) -> str:
@@ -949,9 +946,9 @@ def ruling(decision: int) -> Ruling:
     return Ruling(decision=decision, verdict=chosen, comment=comment)
 
 
-def prompted(item: Item) -> AnswerItem:
+def prompted(item: Item, paths: Sequence[Pathed]) -> AnswerItem:
     """Ask the operator their answer to a question, each decision in turn, then a comment on the whole; a plain question, or a reply to a message, in words."""
-    typer.echo(shown(item))
+    typer.echo(shown(item, paths))
     match item.reason:
         case Message() | Friction() | HowItFelt() | Stop() | Flagged():
             words = typer.prompt("Your reply")
@@ -1215,7 +1212,8 @@ def inbox_list(
         )
         typer.echo(client.ask(narrowed, Readout).text)
         return
-    items = sorted(client.ask(asked, Items).items, key=lambda item: item.made)
+    listing = client.ask(asked, Items)
+    items = sorted(listing.items, key=lambda item: item.made)
     if not items:
         narrowed = "" if asked == ListInbox() else " made in that time"
         typer.echo(f"Nothing{narrowed} waits for you.")
@@ -1223,9 +1221,8 @@ def inbox_list(
     # Each conversation's flagged writes are one entry, counted as one against the limit.
     entries = by_agent(items)
     shown = entries if limit is None else latest(entries, lambda each: each.made, limit)
-    listed = client.ask(ListLaunches(), Listed)
     for each in shown:
-        typer.echo(line(each, listed))
+        typer.echo(line(each, listing.paths))
     for left in unlisted(
         len(items) - counted(shown),
         "earlier item",
@@ -1267,7 +1264,8 @@ def inbox_show(
     if diff:
         Terminal().show(client.ask(ShowDiff(number=number), Whole).text)
         return
-    typer.echo(shown(client.ask(ShowItem(number=number), Shown).item))
+    seen = client.ask(ShowItem(number=number), Shown)
+    typer.echo(shown(seen.item, seen.paths))
     if context:
         typer.echo(f"\n{momented(client.ask(ShowContext(number=number), Context))}")
 
@@ -1379,9 +1377,10 @@ def inbox_answer(
     """
     client = answering()
     approvals = InboxApprovals(host=client)
-    item = client.ask(ShowItem(number=number), Shown).item
+    seen = client.ask(ShowItem(number=number), Shown)
+    item = seen.item
     if isinstance(item.reason, HeldChange):
-        held_answer(client, item, approve=approve, comment=comment)
+        held_answer(client, seen, approve=approve, comment=comment)
         return
     if approve is not None:
         given_here = approvals.answer(number, approved=approve, comment=comment or "")
@@ -1403,7 +1402,7 @@ def inbox_answer(
                     asker=Terminal(),
                     approvals=approvals,
                     number=number,
-                    summary=f"{heading(item)}\n{summary}",
+                    summary=f"{heading(item, seen.paths)}\n{summary}",
                     question=text,
                     diff=client.ask(ShowDiff(number=number), Whole).text,
                 )
@@ -1415,24 +1414,26 @@ def inbox_answer(
                     typer.echo(acted)
                 return
             case _:
-                request = prompted(item)
+                request = prompted(item, seen.paths)
     else:
         request = AnswerItem(number=number, rulings=given, comment=comment or "")
-    answer = client.ask(request, Shown).item
+    answered = client.ask(request, Shown)
+    answer = answered.item
     done = "Replied to" if isinstance(answer.reason, Message) else "Answered"
     noun = "reply" if isinstance(answer.reason, Message) else "answer"
     typer.echo(
         f"{done} {cited(number)}: your {noun}, {cited(answer.number)}, is for "
-        f"{who(answer.recipient)}."
+        f"{called(answer.recipient, answered.paths)}."
     )
 
 
 def held_answer(
-    client: HostClient, item: Item, *, approve: bool | None, comment: str | None
+    client: HostClient, seen: Shown, *, approve: bool | None, comment: str | None
 ) -> None:
-    """Answer a held change: as given, or asked at this terminal after its summary and diff."""
+    """Answer a held change, `seen`: as given, or asked at this terminal after its summary and diff."""
+    item = seen.item
     if approve is None:
-        typer.echo(shown(item))
+        typer.echo(shown(item, seen.paths))
         Terminal().show(client.ask(ShowDiff(number=item.number), Whole).text)
     landing = (
         typer.confirm("Let it land?", default=False) if approve is None else approve
@@ -1496,14 +1497,17 @@ def inbox_send(
         case [Addressed(launch=launch, agent=agent)]:
             sent = client.ask(SendItem(launch=launch, text=text, agent=agent), Shown)
             typer.echo(
-                f"Sent {cited(sent.item.number)} to `{to}`, {who(sent.item.recipient)}."
+                f"Sent {cited(sent.item.number)} to "
+                f"{called(sent.item.recipient, sent.paths)}."
             )
             return
         case _:
             pass
     launch = the_launch(listed.launches, to)
-    sent = client.ask(SendItem(launch=launch.launch, text=text), Shown).item
-    typer.echo(f"Sent {cited(sent.number)} to `{launch.name}`, {who(sent.recipient)}.")
+    sent = client.ask(SendItem(launch=launch.launch, text=text), Shown)
+    typer.echo(
+        f"Sent {cited(sent.item.number)} to {called(sent.item.recipient, sent.paths)}."
+    )
 
 
 class Addressed(Model):

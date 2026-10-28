@@ -243,7 +243,7 @@ def test_a_conversation_a_line_names_is_a_span_said_by_its_path_else_its_runtime
     unnamed = listed(sent, paths=[]).received[0]
     assert unnamed.line == [
         Span(text="← @52 note from "),
-        Span(text="claude s1 / a04", conversation=survey),
+        Span(text="subagent a04 of claude session s1", conversation=survey),
         Span(text=" · not told yet"),
     ]
 

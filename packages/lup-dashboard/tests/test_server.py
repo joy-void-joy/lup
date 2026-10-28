@@ -165,6 +165,7 @@ def test_the_socket_sends_a_watchs_replies_under_its_number_then_its_end(
                 "seen": [],
                 "answers": [],
                 "commented": [],
+                "paths": [],
             },
         },
         {
@@ -217,6 +218,7 @@ def test_one_socket_carries_every_watch_and_a_stopped_one_says_no_more(
             "seen": [],
             "answers": [],
             "commented": [],
+            "paths": [],
         },
     }
     assert host.asked == [ListLaunches(), ListInbox()]

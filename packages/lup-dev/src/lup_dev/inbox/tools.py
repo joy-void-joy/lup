@@ -55,7 +55,6 @@ from lup.tools import speaking
 from lup.tools.serving import Answer
 from lup.tools.tool import Accepted, AgentTool, Refused, ToolSpec
 from lup.types import Model
-from lup_dev.host.names import Names
 from lup_dev.host.protocol import Register
 from lup_dev.host.rooms import RoomTools
 from lup_dev.inbox.citations import unresolved
@@ -66,7 +65,6 @@ from lup_dev.inbox.delivery import (
     clocked,
     standing,
     what,
-    who,
     whose,
 )
 from lup_dev.inbox.parts import PartId
@@ -503,27 +501,14 @@ class Speaker(Model, arbitrary_types_allowed=True):
                 return self.reachable(found, "your subagent")
 
     def calls(self, conversation: Conversation) -> list[str]:
-        """Return what `send` takes a subagent by: its own name and its path, as `inbox` reads them (`Reader`), and its runtime's id."""
-        reader = Reader(
-            delivery=self.delivery,
-            reader=self.party,
-            names=Names(path=self.delivery.layout.names).all(),
-        )
-        items = self.delivery.inbox.about(self.party.repository)
-        said = [
-            reader.own(conversation, items),
-            reader.path(conversation, items),
-            conversation.agent,
-        ]
+        """Return what `send` takes a subagent by: its own name and its path, as `inbox` reads them (`Roster`), and its runtime's id."""
+        roster = self.delivery.roster()
+        said = [roster.own(conversation), roster.path(conversation), conversation.agent]
         return [each for each in said if each is not None]
 
-    def called(self, conversation: Conversation) -> str:
-        """Name `conversation` for this one, in an answer of `send`'s: by the name lup calls it by, a subagent with none by its runtime's id."""
-        return (
-            self.delivery.called(conversation)
-            or conversation.agent
-            or who(conversation)
-        )
+    def called(self, party: Party) -> str:
+        """Name `party` for this one, in an answer, as lup calls it (`Roster.who`)."""
+        return self.delivery.roster().who(party)
 
     def reachable(self, conversation: Conversation, whose: str) -> Conversation:
         """Return `conversation`, `whose` it is to this one, where a call of its can still read its inbox; raise `InboxError` where it ended, saying when."""
@@ -531,7 +516,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         if place is None or place.ended is None:
             return conversation
         message = (
-            f"{whose} `{self.called(conversation)}` "
+            f"{whose} {self.called(conversation)} "
             f"ended at {clocked(place.ended)}, so nothing reads its inbox: once its "
             "runtime resumes it, lup hears it again and it can be sent to"
         )
@@ -559,7 +544,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
             else "your subagent"
         )
         return (
-            f"Your message is in the inbox of {whose} `{self.called(recipient)}`, "
+            f"Your message is in the inbox of {whose} {self.called(recipient)}, "
             f"{cited(number)}, "
             f"and the operator has a copy, {cited(copy)}. It's told at its next "
             "call, its turn's end or its `wait_inbox`, whichever comes first"
@@ -657,7 +642,6 @@ class Speaker(Model, arbitrary_types_allowed=True):
         reader = Reader(
             delivery=self.delivery,
             reader=self.party,
-            names=Names(path=self.delivery.layout.names).all(),
             where=" about this repository",
         )
         return Said(text=reader.read(items, reading).text)
@@ -690,9 +674,9 @@ class Speaker(Model, arbitrary_types_allowed=True):
         if self.party in (item.recipient, item.addressed):
             return f"{self.delivery.said(item)}\n\nIt's {standing(item)}."
         sent = (
-            f"you sent to {who(item.recipient)}"
+            f"you sent to {self.called(item.recipient)}"
             if item.sender == self.party
-            else f"from {who(item.sender)} to {who(item.recipient)}"
+            else f"from {self.called(item.sender)} to {self.called(item.recipient)}"
         )
         match item.sender:
             case Conversation():
@@ -730,7 +714,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
             where = (
                 {"on": str(anchor.item)}
                 if anchor.item is not None
-                else {"to": who(anchor.to)}
+                else {"to": self.delivery.roster().called(anchor.to)}
                 if anchor.to is not None
                 else {}
             )

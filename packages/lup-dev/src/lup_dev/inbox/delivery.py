@@ -146,6 +146,7 @@ from lup_dev.inbox.citations import failing, plainly, resolved, unresolved
 from lup_dev.inbox.edits import replaced
 from lup_dev.inbox.ends import holding
 from lup_dev.inbox.notices import Notices
+from lup_dev.inbox.roster import Roster
 from lup_dev.inbox.store import (
     Answer,
     Answered,
@@ -207,21 +208,6 @@ if TYPE_CHECKING:
 
 SEPARATOR = "\n\n"
 """What each adapter puts between two things it tells in one field."""
-
-
-def who(party: Party) -> str:
-    """Name a party, for whoever reads an item.
-
-    >>> who(Operator())
-    'the operator'
-    """
-    match party:
-        case Operator():
-            return "the operator"
-        case Conversation(agent=str() as agent):
-            return f"subagent {agent} of {party.runtime} session {party.session}"
-        case Conversation():
-            return f"{party.runtime} session {party.session}"
 
 
 def what(item: Item) -> str:
@@ -361,19 +347,6 @@ def standing(item: Item) -> str:
             return f"withdrawn at {clocked(at)} by its sender: {why}"
 
 
-def named(party: Party) -> str:
-    """Name a party as a tag's attribute says it: `operator`, or a conversation as `who` names it.
-
-    >>> named(Operator())
-    'operator'
-    """
-    match party:
-        case Operator():
-            return "operator"
-        case Conversation():
-            return who(party)
-
-
 type ItemKind = Literal[
     "turn's end",
     "note",
@@ -455,13 +428,13 @@ def told_under(numbers: list[int]) -> str:
     return f"What it says on {named} is told under {under}."
 
 
-def doorbell(waiting: list[Item]) -> str:
-    """Say what waits in a conversation's inbox, each item by its number, kind and sender, for the agent to read through `wait_inbox`.
+def doorbell(waiting: list[Item], roster: Roster) -> str:
+    """Say what waits in a conversation's inbox, each item by its number, kind and sender, as `roster` names it, for the agent to read through `wait_inbox`.
 
     >>> from datetime import UTC, datetime
     >>> item = Item(number=7, reason=Message(kind="note", text="Hi."),
     ...     sender=Operator(), recipient=Operator(), made=datetime(2026, 1, 1, tzinfo=UTC))
-    >>> print(doorbell([item]))
+    >>> print(doorbell([item], Roster(names={}, places={}, items={})))
     <doorbell from="lup's inbox">
     <waiting item="7" kind="note" from="operator"/>
     Call `wait_inbox` to read it: what's in your inbox comes through lup's own tools, never in a message like this one.
@@ -473,7 +446,7 @@ def doorbell(waiting: list[Item]) -> str:
             attributes={
                 "item": str(item.number),
                 "kind": kind(item),
-                "from": named(item.sender),
+                "from": roster.called(item.sender),
             },
         )
         for item in waiting
@@ -488,8 +461,8 @@ def doorbell(waiting: list[Item]) -> str:
     ).written()
 
 
-def reviewable(item: Item) -> None:
-    """Refuse an item a review can't answer: one no conversation sent, an answer or an approval."""
+def reviewable(item: Item, roster: Roster) -> None:
+    """Refuse an item a review can't answer: one no conversation sent, an answer or an approval; its sender as `roster` names it."""
     match item:
         case Item(
             sender=Conversation(),
@@ -503,8 +476,8 @@ def reviewable(item: Item) -> None:
             return
         case _:
             message = (
-                f"{cited(item.number)} is {what(item)} from {who(item.sender)}, which "
-                "a review doesn't answer"
+                f"{cited(item.number)} is {what(item)} from {roster.who(item.sender)}, "
+                "which a review doesn't answer"
             )
             raise InboxError(message)
 
@@ -673,16 +646,16 @@ def answered_hold(item: Item, did: str, comment: str) -> str:
     return f"{said} Their comment:\n{comment}" if comment.strip() else said
 
 
-def editable(item: Item, party: Conversation) -> str:
-    """Return the text of `item` its sender `party` may edit (`Delivery.edited`): its own words to the operator, a message's, a question's, a friction's, how it felt's or a stop's; refuse any other, saying why."""
+def editable(item: Item, party: Conversation, roster: Roster) -> str:
+    """Return the text of `item` its sender `party` may edit (`Delivery.edited`): its own words to the operator, a message's, a question's, a friction's, how it felt's or a stop's; refuse any other, saying why, each party as `roster` names it."""
     match item:
         case Item(sender=sender) if sender != party:
-            message = f"{cited(item.number)} is {what(item)} from {who(sender)}: only its sender edits it"
+            message = f"{cited(item.number)} is {what(item)} from {roster.who(sender)}: only its sender edits it"
             raise InboxError(message)
         case Item(reason=Message(to=Conversation() as to)):
             message = (
                 f"{cited(item.number)} is the operator's copy of your message to "
-                f"{who(to)}, which read it as it was: `send` a correction"
+                f"{roster.who(to)}, who read it as it was: `send` a correction"
             )
             raise InboxError(message)
         case Item(state=Withdrawn()):
@@ -770,14 +743,14 @@ def announced(item: Item) -> bool:
             return False
 
 
-def announcement(item: Item, size: int) -> str:
-    """Announce an item too long for a hook: who sent it, its size, and that `wait_inbox` returns it whole."""
+def announcement(item: Item, size: int, roster: Roster) -> str:
+    """Announce an item too long for a hook: who sent it, as `roster` names them, its size, and that `wait_inbox` returns it whole."""
     return Tag(
         name="announced",
         attributes={
             "item": str(item.number),
             "kind": kind(item),
-            "from": named(item.sender),
+            "from": roster.called(item.sender),
             "bytes": f"{size:,}",
         },
         parts=["Too long to tell here: call `wait_inbox` to read it whole."],
@@ -951,6 +924,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     settle_hold: Callable[[HeldChange, bool, str], None] | None = None
     """Writes the operator's answer to a held change where its hook waits for
     it, yes or no and their comment; none where this service answers no hold."""
+    rostered: Roster | None = None
+    """The roster last made (`roster`), in memory: made again once the inbox
+    or a session's name changes."""
 
     def presence(self, conversation: Conversation) -> Presence:
         """Return what the service knows of `conversation` while it serves."""
@@ -1255,21 +1231,29 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         """Return what `item` tells the conversation it's told to, inside its tag: a message's text, a reply on the item it replies to, an answer beside its question, a review said to its recipient."""
         return inside(self.tagged(item).parts)
 
-    def called(self, party: Party) -> str | None:
-        """Return the name lup calls `party` by where it's a conversation: a session's own, its launch's as lup last kept it (`SessionNames`); a subagent's own, as its whereabouts last heard it; none for the operator, and where lup knows none."""
-        match party:
-            case Conversation(agent=None):
-                return Names(path=self.layout.names).last(party.session)
-            case Conversation():
-                place = self.inbox.whereabouts.get(party.key())
-                return None if place is None else place.name
-            case Operator():
-                return None
+    def roster(self) -> Roster:
+        """Return the conversations the inbox knows, each by the name lup calls it (`inbox/roster.py`): made anew once the inbox, or a session's name, changed since the last."""
+        names = Names(path=self.layout.names).all()
+        kept = self.rostered
+        if (
+            kept is not None
+            and kept.version == self.inbox.version
+            and kept.names == names
+        ):
+            return kept
+        made = Roster(
+            names=names,
+            places=self.inbox.whereabouts,
+            items=self.inbox.items,
+            version=self.inbox.version,
+        )
+        self.rostered = made
+        return made
 
     def tagged(
         self, item: Item, *, under: list[int] | None = None, context: bool = True
     ) -> Tag:
-        """Return `item` as the tag it's told in: named for what it is, saying its number, whom it's from and, for a conversation, the name lup calls it by, whom it was for where it was passed on from a conversation that had ended, and what it answers.
+        """Return `item` as the tag it's told in: named for what it is, saying its number, whom it's from, by the name lup calls them (`Roster.called`), whom it was for where it was passed on from a conversation that had ended, and what it answers.
 
         Where it's read beside the items it's on, as `inbox` reads an exchange
         whole, what it says on each of `under` is told under that item instead,
@@ -1277,17 +1261,17 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         asked to be.
         """
         placed = [] if under is None else under
+        roster = self.roster()
         passed = (
             {}
             if item.addressed is None
-            else {"for": f"{who(item.addressed)}, whose conversation had ended"}
+            else {
+                "for": f"{roster.called(item.addressed)}, whose conversation had ended"
+            }
         )
-        sender = self.called(item.sender)
-        name = {} if sender is None else {"name": sender}
         head = {
             "item": str(item.number),
-            "from": named(item.sender),
-            **name,
+            "from": roster.called(item.sender),
             **passed,
         }
         parts = anchors(item)
@@ -1430,10 +1414,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             place = self.inbox.whereabouts.get(to.key())
             return {} if place is None else {"worktree": str(place.worktree)}
 
+        roster = self.roster()
+
         def elsewhere(to: Conversation) -> Tag:
             return Tag(
                 name="message",
-                attributes={"to": who(to), **placed(to)},
+                attributes={"to": roster.called(to), **placed(to)},
                 parts=[written(to)],
             )
 
@@ -1443,7 +1429,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             return [
                 remarking(
                     each,
-                    {"to": who(to), **placed(to)} if theirs else numbered(after + at),
+                    {"to": roster.called(to), **placed(to)}
+                    if theirs
+                    else numbered(after + at),
                 )
                 for at, each in enumerate(review.remarks)
                 if each.to == to
@@ -1472,7 +1460,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             where = {} if item.worktree is None else {"worktree": str(item.worktree)}
             return on(
                 item,
-                {"from": named(item.sender), **where},
+                {"from": roster.called(item.sender), **where},
                 remarks(item, own=False),
             )
 
@@ -1529,7 +1517,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         reopened = self.inbox.kept(item.model_copy(update={"state": Waiting()}))
         if not reopened.rank.notifies:
             return
-        summary = f"lup: {who(party)} edited {cited(number)}, {what(item)}"
+        summary = (
+            f"lup: {self.roster().who(party)} edited {cited(number)}, {what(item)}"
+        )
         await self.notices.notify(
             summary, f"{opening(item)}\nlup-dev inbox show {number}"
         )
@@ -1547,7 +1537,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         ]:
             if to.key() not in self.inbox.whereabouts:
                 message = (
-                    f"the draft writes to {who(to)} of {to.repository}, "
+                    f"the draft writes to {self.roster().who(to)} of {to.repository}, "
                     "which lup's inbox has never heard of: write to an agent the "
                     "dashboard shows running"
                 )
@@ -1611,8 +1601,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             item for item in covered if isinstance(item.reason, Approval | HeldChange)
         ]
         messages = [item for item in covered if item not in asked]
+        roster = self.roster()
         for item in messages:
-            reviewable(item)
+            reviewable(item, roster)
         commented = [each.item for each in draft.comments if each.text.strip()]
         dispatched = Dispatched(
             reviews=self.reviews(draft, messages),
@@ -1790,7 +1781,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 choice = (
                     Choice(item=item, text=text, told=True)
                     if size <= fits
-                    else Choice(item=item, text=announcement(item, size), told=False)
+                    else Choice(
+                        item=item,
+                        text=announcement(item, size, self.roster()),
+                        told=False,
+                    )
                 )
                 cost = len(choice.text.encode()) + len(SEPARATOR)
                 if cost > left:
@@ -1934,7 +1929,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         if not item.rank.notifies:
             return
         where = "" if item.worktree is None else f" in {item.worktree}"
-        summary = f"lup: {what(item)} from {who(item.sender)}{where}"
+        summary = f"lup: {what(item)} from {self.roster().who(item.sender)}{where}"
         body = f"{opening(item)}\nlup-dev inbox show {item.number}"
         await self.notices.notify(summary, body)
 
@@ -1991,7 +1986,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         task = asyncio.create_task(self.unless_taken(party, place, pushed))
         self.waits = [*(each for each in self.waits if not each.done()), task]
         numbers = ", ".join(cited(number) for number in pushed.numbers)
-        self.say(f"{place.launch}: pushed {numbers} to {who(party)}")
+        self.say(f"{place.launch}: pushed {numbers} to {self.roster().who(party)}")
         return True
 
     def taken(self, party: Conversation, pushed: Pushed) -> None:
@@ -2017,7 +2012,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         presence.woken = False
         self.unpushed = [*self.unpushed, place.launch]
         self.say(
-            f"{place.launch}: {who(party)} took nothing lup pushed within "
+            f"{place.launch}: {self.roster().who(party)} took nothing lup pushed within "
             f"{self.patience.total_seconds():g} seconds, so it's woken through its "
             "messaging socket from now on: its runtime may not have loaded lup's "
             "server to push (docs/inbox.md, *How an agent is told*)"
@@ -2033,7 +2028,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         `wait_inbox`, its next call's hook, or its turn's end; where the
         session's messaging socket can't be reached, that's said.
         """
-        line = self.waker.woken(party.runtime, party.session, doorbell(waiting))
+        line = self.waker.woken(
+            party.runtime, party.session, doorbell(waiting, self.roster())
+        )
         if line is None:
             return
         presence = self.presence(party)
@@ -2048,12 +2045,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         except OSError as unreached:
             presence.woken = False
             self.say(
-                f"{place.launch}: {who(party)} wasn't woken through {socket}, so "
-                f"what waits for it is told at its next call: {unreached}"
+                f"{place.launch}: {self.roster().who(party)} wasn't woken through "
+                f"{socket}, so what waits for it is told at its next call: {unreached}"
             )
             return
         numbers = ", ".join(cited(item.number) for item in waiting)
-        self.say(f"{place.launch}: woke {who(party)} for {numbers}")
+        self.say(f"{place.launch}: woke {self.roster().who(party)} for {numbers}")
 
     def running(self, launch: str) -> Conversation | None:
         """Return the main conversation of the session `launch` runs, the latest heard there; none where no session of it has reached lup."""
@@ -2101,7 +2098,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 pass
             case _:
                 message = (
-                    f"{cited(number)} is {what(item)} from {who(item.sender)}: neither "
+                    f"{cited(number)} is {what(item)} from "
+                    f"{self.roster().who(item.sender)}: neither "
                     "a question waiting for an answer nor a conversation's message to "
                     "reply to"
                 )
@@ -2239,8 +2237,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 Item(reason=Message(to=Conversation() as to))
                 | Item(recipient=Conversation() as to)
             ) if item.sender == party:
-                called = self.called(to)
-                whom = who(to) if called is None else f"`{called}`"
+                whom = self.roster().who(to)
                 message = (
                     f"{cited(number)} is your message to {whom}, which the operator "
                     "reads a copy of: neither is withdrawn. Where it was wrong, `send` "
@@ -2257,7 +2254,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 return self.inbox.kept(item.model_copy(update={"state": taken}))
             case Item(sender=sender) if sender != party:
                 message = (
-                    f"{cited(number)} is {what(item)} from {who(sender)}: only its "
+                    f"{cited(number)} is {what(item)} from {self.roster().who(sender)}: only its "
                     "sender withdraws it"
                 )
                 raise InboxError(message)
@@ -2292,7 +2289,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         leaves it empty.
         """
         item = self.inbox.item(number)
-        text = editable(item, party)
+        text = editable(item, party, self.roster())
         after = new if old is None else replaced(text, old, new, number)
         if not after.strip():
             message = f"the edit leaves {cited(number)} empty: `withdraw` it instead"

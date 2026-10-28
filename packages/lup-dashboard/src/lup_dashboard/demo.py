@@ -857,6 +857,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     for answer in answers
                 )
             ],
+            paths=self.paths(),
         )
 
     def sending(self, sending: SendItem) -> Shown | Refused:

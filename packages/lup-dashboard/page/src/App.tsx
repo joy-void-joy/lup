@@ -196,7 +196,14 @@ export function App() {
         (list) => list.map((each) => `${each.session} ${each.agent ?? ""} ${each.path}`).join("\n"),
     );
 
-    // A party as it's called: a conversation by its path, else by its runtime's ids.
+    // Each conversation the inbox's items name, with its path as the host names it, by `whose` it is: what names an
+    // agent that isn't running, or isn't its launch's latest session, which no launch listed names.
+    const paths = useMemo(
+        () => new Map((inbox.reply?.kind === "inbox-items" ? (inbox.reply.paths ?? []) : []).map((each) => [whose(each.conversation), each])),
+        [inbox.reply],
+    );
+    // A party as it's called: a conversation by its path, as its launch names it while it runs, else as the host does,
+    // its runtime's ids beside it where another conversation shares the path; by those ids where it has none.
     const called = useCallback(
         (party: Item["sender"]) => {
             if (party.party === "operator") {
@@ -205,9 +212,15 @@ export function App() {
             const talker = talkers.find(
                 (each) => each.session === party.session && (each.agent ?? null) === (party.agent ?? null),
             );
-            return talker?.path ?? `${party.runtime} ${party.session}${party.agent ? ` / ${party.agent}` : ""}`;
+            const named = paths.get(whose(party));
+            const ids = `${party.runtime} ${party.session}${party.agent ? ` / ${party.agent}` : ""}`;
+            const path = talker?.path ?? named?.path;
+            if (path === undefined) {
+                return ids;
+            }
+            return named?.alike === true ? `${path} (${ids})` : path;
         },
-        [talkers],
+        [talkers, paths],
     );
     const named = useCallback((item: Item) => called(item.sender), [called]);
 

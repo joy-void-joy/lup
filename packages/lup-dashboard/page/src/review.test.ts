@@ -1412,7 +1412,7 @@ describe("waited and fresh", () => {
             recipient: from("s2"),
             reason: { reason: "review", comments: [{ item: 52, text: "Why?", quote: null }], message: "", rulings: [] } as unknown as Item["reason"],
         };
-        const seeing = seeingOf({ kind: "inbox-items", items: [NOTE], seen: [{ conversation: from("s1", "a1"), item: 51, at: "2026-10-17T12:00:00Z" }], answers: [review], commented: [] });
+        const seeing = seeingOf({ kind: "inbox-items", items: [NOTE], seen: [{ conversation: from("s1", "a1"), item: 51, at: "2026-10-17T12:00:00Z" }], answers: [review], commented: [], paths: [] });
         expect(seeing.groups.get(whose(from("s1", "a1")))).toBe(51);
         expect([...seeing.commented]).toEqual([52]);
         expect(seeingOf(null)).toBe(UNSEEN);
