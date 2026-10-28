@@ -8,11 +8,15 @@ engine: one typed tree*), as the engine confines what pyright reads
 (`packages/lup-dev/checker/src/confined.ts`).
 """
 
-import os
-import stat
+from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING, BinaryIO
 
+from lup.rooms.homes import opened
 from lup.types import Model
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 
 class Confined(Model):
@@ -36,32 +40,26 @@ class Confined(Model):
     opened instead."""
 
     def read(self, path: Path) -> bytes | None:
-        """Return the content of the regular file at `path`, from the root, where it resolves inside the root; none where it isn't there, or resolves outside.
+        """Return the content of the regular file at `path`, from the root, where it resolves inside the root; none where it isn't there, or resolves outside (`opened`)."""
+        with self.opened(path) as reading:
+            return None if reading is None else reading.read()
 
-        The check is made on the file opened, through `descriptors`, so a link
-        swapped between the check and the read can't win. It's opened without
-        blocking, and read only where it's a regular file, so a named pipe can't
-        hold the host.
+    @contextmanager
+    def opened(self, path: Path) -> Generator[BinaryIO | None]:
+        """Open the regular file at `path`, from the root, for reading as much of it as is wanted, where it resolves inside the root; none where it isn't there, or resolves outside.
+
+        It's opened as the host opens any file a room may have written
+        (`lup.rooms.homes.opened`): the check made on the file opened, through
+        `descriptors`, so a link swapped between the check and the read can't
+        win, without blocking, and only where it's a regular file, so a named
+        pipe can't hold the host.
         """
-        real = self.root.resolve()
-        file = self.root / path
-        named = self.descriptors.is_dir()
-        if not named and not file.resolve().is_relative_to(real):
-            return None
-        try:
-            descriptor = os.open(file, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
-        except OSError:
-            return None
-        try:
-            opened = (self.descriptors / str(descriptor)).readlink() if named else real
-            if not opened.is_relative_to(real):
-                return None
-            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-                return None
-            with os.fdopen(descriptor, "rb", closefd=False) as reading:
-                return reading.read()
-        finally:
-            os.close(descriptor)
+        reading = opened(self.root, self.root / path, self.descriptors)
+        if reading is None:
+            yield None
+            return
+        with reading:
+            yield reading
 
     def text(self, path: Path) -> str | None:
         """Return the file at `path`, as `read` reads it, as text; a byte that isn't UTF-8 is replaced."""

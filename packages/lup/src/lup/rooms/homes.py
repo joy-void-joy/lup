@@ -123,6 +123,30 @@ def landed(home: Path, wanted: dict[Path, bool]) -> None:
                 made(current, name, directory=directory)
 
 
+def regular(
+    path: Path | str, holding: int | None = None, *, follow: bool = False
+) -> int | None:
+    """Open the file at `path`, in the directory whose descriptor is `holding` where it's given, for reading where it's a regular file, and return its descriptor; none where it isn't one, or isn't there: the one way the host opens a file a room may have written.
+
+    Never waiting on a pipe a room left in its place: opening one doesn't
+    block, and it's closed as what it is. Never through a link at its end,
+    which a room could aim at any file the host reads, `/dev/zero` among them,
+    unless `follow`, for a caller that checks where the file opened is
+    itself, as `opened` does.
+    """
+    flags = os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC
+    if not follow:
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags, dir_fd=holding)
+    except OSError:
+        return None
+    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        os.close(descriptor)
+        return None
+    return descriptor
+
+
 def inside(home: Path, path: Path) -> bool:
     """Say whether `path` resolves inside `home`, every link on the way followed: what a room left as a link elsewhere doesn't.
 
@@ -149,21 +173,22 @@ def opened(
 ) -> BinaryIO | None:
     """Open the regular file at `path` for reading where, opened, it's inside `root`, every link followed; none where it isn't there, isn't a regular file, or is elsewhere.
 
-    The check is made on the file opened, through `descriptors`, so a link a
-    room swaps in between a check and the read can't win; it's opened without
-    blocking, so a named pipe can't hold the host. Where `descriptors` isn't
-    there, as off Linux, the path is resolved before it's opened instead.
+    It's opened as every file a room may have written is (`regular`), without
+    blocking, so a named pipe can't hold the host, and only where it's a
+    regular file. The check is made on the file opened, through
+    `descriptors`, so a link a room swaps in between a check and the read
+    can't win. Where `descriptors` isn't there, as off Linux, the path is
+    resolved before it's opened instead.
     """
     real = root.resolve()
     named = descriptors.is_dir()
     if not named and not path.resolve().is_relative_to(real):
         return None
-    try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
-    except OSError:
+    descriptor = regular(path, follow=True)
+    if descriptor is None:
         return None
     found = (descriptors / str(descriptor)).readlink() if named else path.resolve()
-    if not found.is_relative_to(real) or not stat.S_ISREG(os.fstat(descriptor).st_mode):
+    if not found.is_relative_to(real):
         os.close(descriptor)
         return None
     return os.fdopen(descriptor, "rb")

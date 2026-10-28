@@ -11,7 +11,7 @@ import pytest
 from lup.adapters.claude import Claude
 from lup.adapters.codex import Codex
 from lup.rooms.container import Mount
-from lup.rooms.homes import inside, landed, landings, lines, opened
+from lup.rooms.homes import inside, landed, landings, lines, opened, regular
 from lup.sessions.configuration import Item, configured
 from lup.sessions.terminal import (
     Cli,
@@ -603,6 +603,12 @@ def test_nothing_unchanged_too_large_or_through_a_link_is_carried(
         f"No preference was carried back from {carrying.saved}:"
     )
     assert not carrying.into.exists()
+    # A pipe a room left where its settings were is never waited on.
+    carrying.saved.unlink()
+    os.mkfifo(carrying.saved)
+    assert carrying.carried()[0].startswith(
+        f"No preference was carried back from {carrying.saved}:"
+    )
 
 
 def test_a_later_layer_never_writes_through_a_link_an_earlier_one_copied(
@@ -652,3 +658,33 @@ def test_a_toml_preference_keeps_the_rest_of_an_inline_table(tmp_path: Path) -> 
     assert tomllib.loads(carrying.into.read_text()) == {
         "tui": {"vim": True, "theme": "light"}
     }
+
+
+def test_only_a_regular_file_is_opened_to_read_never_a_pipe_nor_a_link_unless_followed(
+    tmp_path: Path,
+) -> None:
+    record = tmp_path / "record.jsonl"
+    record.write_text("{}\n")
+    (tmp_path / "link.jsonl").symlink_to(record)
+    os.mkfifo(tmp_path / "pipe.jsonl")
+    (tmp_path / "directory.jsonl").mkdir()
+    descriptor = regular(record)
+    assert descriptor is not None
+    with open(descriptor) as read:
+        assert read.read() == "{}\n"
+    held = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        relative = regular("record.jsonl", held)
+        assert relative is not None
+        os.close(relative)
+        assert [
+            regular(name, held)
+            for name in ["link.jsonl", "pipe.jsonl", "directory.jsonl", "absent"]
+        ] == [None, None, None, None]
+        followed = regular("link.jsonl", held, follow=True)
+        assert followed is not None
+        os.close(followed)
+        (tmp_path / "piped.jsonl").symlink_to(tmp_path / "pipe.jsonl")
+        assert regular("piped.jsonl", held, follow=True) is None
+    finally:
+        os.close(held)

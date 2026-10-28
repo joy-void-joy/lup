@@ -265,12 +265,14 @@ from lup.sessions.terminal import Cli, Hook, TerminalError
 from lup.tools.serving import Notice
 from lup.types import JsonObject, Model, MutableModel, Settings
 from lup_dev.adapters import Adapter, Pushing
+from lup_dev.host import written
 from lup_dev.host.courier import Failure, Heard, Spawned, Telling
 from lup_dev.host.homes import Found, home_of, translated
 from lup_dev.host.records import (
     Call,
     Called,
     Entry,
+    Home,
     Queued,
     Queues,
     Queuing,
@@ -283,6 +285,9 @@ from lup_dev.host.records import (
     Usage,
     first,
     gist,
+    head,
+    homes,
+    reached,
     within,
 )
 from lup_dev.host.records import Said as Spoken
@@ -297,7 +302,7 @@ from lup_dev.launch.clis import (
     executable,
     text,
 )
-from lup_dev.layout import HostLayout, Layout
+from lup_dev.layout import HomesLayout, HostLayout, Layout
 from lup_dev.policy.before import Decision, Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import (
     Bench,
@@ -1727,14 +1732,22 @@ class ClaudeRecords(Model, Records):
     """Claude Code's records: a folder per directory sessions ran in, under `projects/`, and each session's file history.
 
     A folder's directory is read off its records' own lines, the first naming one,
-    never from the folder's name.
+    never from the folder's name; and a folder is a directory's only where it's
+    named as Claude Code names that directory's (`folder_named`). Every room
+    could write the operator's directory until rooms had homes of their own, so
+    a line saying the repository's directory, written into the folder of
+    another's, would otherwise have that other's sessions taken for the
+    repository's, copied where its rooms read them and moved into their home
+    (`lup_dev.migration`). Each record is read as data alone
+    (`lup_dev.host.records`).
 
     A launched session's is in the home its launch registered alone, as the
     host service kept it (`lup_dev.host.homes`), and any other's in the
     operator's directory alone, so a room can't have one read from its own
     home under another session's id. Rooms write a home, so the record is
     read inside it alone (`Found.root`). The records a module copies (`kept`)
-    are the operator's directory's alone.
+    are each home's: the operator's directory's, the repository's rooms' and
+    the shared one's (`homes`).
     """
 
     directory: Path
@@ -1742,6 +1755,9 @@ class ClaudeRecords(Model, Records):
     host: HostLayout | None = None
     """Where the host service keeps each launched session's home; none looks
     in the operator's directory alone."""
+    homes: HomesLayout | None = None
+    """The rooms' own homes, whose records a module copies beside the
+    operator's (`kept`); none keeps the operator's directory's alone."""
 
     @override
     def conversation(self, session: str, agent: str | None) -> Found | None:
@@ -1780,43 +1796,108 @@ class ClaudeRecords(Model, Records):
         return True
 
     @override
-    def kept(self, under: list[Path]) -> list[Record]:
-        projects = self.directory / "projects"
-        folders = sorted(projects.iterdir()) if projects.is_dir() else []
-        ours = [
-            folder
-            for folder in folders
-            if folder.is_dir() and (ran := ran_in(folder)) and within(ran, under)
-        ]
-        histories = [
-            self.directory / "file-history" / session.stem
-            for folder in ours
-            for session in sorted(folder.glob("*.jsonl"))
-        ]
-        return [
-            *(
-                Record(source=folder, place=PurePosixPath("projects", folder.name))
-                for folder in ours
-            ),
-            *(
-                Record(source=each, place=PurePosixPath("file-history", each.name))
-                for each in histories
-                if each.is_dir()
-            ),
-        ]
+    def kept(self, under: list[Path], repository: Path) -> list[Record]:
+        """Return the folders of `projects/` whose sessions ran under `under`, and each of their sessions' file history, in each home keeping the repository's records: each only where it's reached from its home without a link, a folder's directory read off its records' heads."""
+        held = homes(self.directory, self.homes, repository, Claude().name())
+        return [record for home in held for record in kept_in(home, under)]
+
+
+def session_at(place: PurePosixPath) -> str | None:
+    """Return the session whose own record is at `place` in one of Claude Code's homes, `projects/<folder>/<id>.jsonl`, as `ClaudeRecords.conversation` finds it; none for any other place.
+
+    >>> session_at(PurePosixPath("projects/-w/8f2c.jsonl")), session_at(PurePosixPath("projects/-w/8f2c/subagents/agent-a.jsonl"))
+    ('8f2c', None)
+    """
+    match place.parts:
+        case ("projects", _, name) if PurePosixPath(name).suffix == ".jsonl" and plain(
+            PurePosixPath(name).stem
+        ):
+            return PurePosixPath(name).stem
+        case _:
+            return None
+
+
+def kept_in(home: Home, under: list[Path]) -> list[Record]:
+    """Return the records in one of Claude Code's homes of the sessions that ran under `under`: each folder of `projects/` they ran in, named for the directory its sessions say (`filed`), and each of their sessions' `file-history/`."""
+    directory = home.directory
+    projects = directory / "projects"
+    if not reached(directory, projects) or not projects.is_dir():
+        return []
+    ours = [
+        folder
+        for folder in sorted(projects.iterdir())
+        if folder.is_dir(follow_symlinks=False)
+        and (ran := ran_in(folder)) is not None
+        and filed(folder, ran)
+        and within(ran, under)
+    ]
+    histories = [
+        directory / "file-history" / session.stem
+        for folder in ours
+        for session in sorted(folder.glob("*.jsonl"))
+    ]
+
+    def record(place: PurePosixPath) -> Record:
+        return Record(home=directory, whose=home.whose, place=place)
+
+    return [
+        *(record(PurePosixPath("projects", folder.name)) for folder in ours),
+        *(
+            record(PurePosixPath("file-history", each.name))
+            for each in histories
+            if reached(directory, each) and each.is_dir()
+        ),
+    ]
+
+
+def folder_named(directory: Path) -> str:
+    """Return the name Claude Code gives the folder of the sessions run in `directory`, before it cuts a long one (`filed`): each character but an ASCII letter or digit a `-`, one per UTF-16 unit, as its 2.1.311 binary writes it (`replace(/[^a-zA-Z0-9]/g, "-")`).
+
+    >>> folder_named(Path("/w/lup.git/tree/dev")), folder_named(Path("/w/é😀"))
+    ('-w-lup-git-tree-dev', '-w----')
+    """
+    return "".join(
+        char if char.isascii() and char.isalnum() else "-" * units(char)
+        for char in str(directory)
+    )
+
+
+def units(char: str) -> int:
+    """Return how many UTF-16 units `char` takes, as a JavaScript string counts it: two past the basic plane.
+
+    >>> units("a"), units("😀")
+    (1, 2)
+    """
+    return len(char.encode("utf-16-le")) // 2
+
+
+def filed(folder: Path, ran: Path, longest: int = 200) -> bool:
+    """Say whether `folder` is named as Claude Code names the folder of sessions run in `ran`: its name in full, or, past `longest` units, cut there with a `-` and a hash of its own after, which this doesn't check. A folder whose sessions say otherwise was written so by something else.
+
+    >>> filed(Path("/h/projects/-w-lup-git"), Path("/w/lup.git"))
+    True
+    >>> filed(Path("/h/projects/-w-other"), Path("/w/lup.git"))
+    False
+    >>> filed(Path("/h/projects/-aaa-k3j"), Path("/aaaa"), longest=4)
+    True
+    """
+    named = folder_named(ran)
+    if len(named) <= longest:
+        return folder.name == named
+    # lup: ignore("string-slice", why="Claude Code cuts a long folder's name at a count of units, and what's compared is that cut, not a format read")
+    return folder.name.startswith(f"{named[:longest]}-")
 
 
 def ran_in(folder: Path) -> Path | None:
-    """Return the directory the sessions recorded in `folder` ran in, read off their first line naming one; none where none does."""
+    """Return the directory the sessions recorded in `folder` ran in, read off their first line naming one, within each record's head (`head`); none where none does."""
     for record in sorted(folder.glob("*.jsonl")):
-        with record.open(encoding="utf-8", errors="replace") as lines:
-            for line in lines:
-                try:
-                    located = Located.model_validate_json(line)
-                except ValidationError:
-                    continue
-                if located.cwd is not None:
-                    return located.cwd
+        for line in head(record):
+            try:
+                located = Located.model_validate_json(line)
+            except ValidationError:
+                continue
+            if located.cwd is not None:
+                return located.cwd
     return None
 
 
@@ -2863,6 +2944,405 @@ def followed(kept: Following, raw: bytes, at: int, *, sidechains: bool) -> None:
             return
 
 
+class HostPermissions(Model, extra="ignore", alias_generator=to_camel):
+    """What the operator's own settings let a host session do without asking, and what they ask before or deny."""
+
+    allow: list[str] = []
+    ask: list[str] = []
+    deny: list[str] = []
+    default_mode: str | None = None
+    additional_directories: list[str] = []
+
+
+class HostSettings(Model, extra="ignore", alias_generator=to_camel):
+    """What of the operator's own `settings.json` a host session runs, sets, loads or acts on without asking, read in the `settings` docs (2026-10-28) for the check of what rooms could have written there."""
+
+    hooks: JsonValue = None
+    status_line: JsonValue = None
+    file_suggestion: JsonValue = None
+    api_key_helper: str | None = None
+    aws_auth_refresh: str | None = None
+    aws_credential_export: str | None = None
+    otel_headers_helper: str | None = None
+    env: dict[str, JsonValue] = {}
+    enabled_plugins: dict[str, JsonValue] = {}
+    extra_known_marketplaces: dict[str, JsonValue] = {}
+    permissions: HostPermissions = HostPermissions()
+    skip_dangerous_mode_permission_prompt: bool = False
+    enable_all_project_mcp_servers: bool = False
+
+    def runs(self) -> list[str]:
+        """List each command it has a host session run: its hooks', the status line's, the file suggestion's, and each credential helper."""
+        helpers = [
+            self.api_key_helper,
+            self.aws_auth_refresh,
+            self.aws_credential_export,
+            self.otel_headers_helper,
+        ]
+        return [
+            *written.commands(self.hooks),
+            *written.commands(self.status_line),
+            *written.commands(self.file_suggestion),
+            *(each for each in helpers if each is not None),
+        ]
+
+    def unasked(self) -> list[str]:
+        """Say each thing it lets a host session do without asking."""
+        permissions = self.permissions
+        return [
+            *(f"allows `{each}`" for each in permissions.allow),
+            *(
+                [f"starts in `{permissions.default_mode}`"]
+                if permissions.default_mode not in [None, "default"]
+                else []
+            ),
+            *(
+                f"reaches `{each}` beside its project"
+                for each in permissions.additional_directories
+            ),
+            *(
+                ["skips the warning before bypassing permissions"]
+                if self.skip_dangerous_mode_permission_prompt
+                else []
+            ),
+            *(
+                ["starts every project's MCP servers"]
+                if self.enable_all_project_mcp_servers
+                else []
+            ),
+        ]
+
+    def enabled(self) -> list[str]:
+        """List each plugin it turns on."""
+        return [name for name, on in self.enabled_plugins.items() if on is True]
+
+
+class ClaudeWritten(Model):
+    """What a host Claude Code session acts on in the operator's own directory, which every room could write before rooms had homes of their own, checked as it stands (`lup_dev.host.written`).
+
+    Each item read in the `claude-directory` docs (2026-10-27) and the 2.1.311
+    binary: the settings, memory and what a session loads; what a session runs
+    before its commands; the background sessions' supervisor's state; the mods
+    sessions made; the record folders whose name and sessions disagree; and the
+    login every room could read.
+    """
+
+    directory: Path
+    """The operator's Claude Code directory, `~/.claude` or `CLAUDE_CONFIG_DIR`."""
+    loaded: list[str] = ["agents", "commands", "output-styles", "rules", "workflows"]
+    """The directories whose files a host session loads, beside its skills and
+    plugins."""
+    configuration: list[str] = [
+        "settings.json",
+        "CLAUDE.md",
+        "keybindings.json",
+        "skills",
+        "plugins",
+        "agents",
+        "commands",
+        "output-styles",
+        "rules",
+        "workflows",
+        "dev-mods",
+    ]
+    """Where Claude Code makes no link itself: one found there is said."""
+
+    def checked(self, places: written.Places) -> list[str]:
+        """Say what a host session acts on in the directory, a line each: what's there, what of it looks planted, and what to do."""
+        settings = self.settings()
+        return [
+            *self.read_settings(settings, places),
+            *self.memory(),
+            *self.skills(),
+            *self.plugins(settings),
+            *self.links(places),
+            *self.run_before(places),
+            *self.supervisor(),
+            *self.folders(),
+            *self.login(),
+        ]
+
+    def settings(self) -> HostSettings | str | None:
+        """Read the operator's settings, or say why they couldn't be; none where there are none."""
+        path = self.directory / "settings.json"
+        if not path.exists() and not path.is_symlink():
+            return None
+        held = written.read(path)
+        if held is None:
+            return (
+                "`settings.json` isn't a regular file lup reads, or is past 4 MiB: "
+                "look at it yourself."
+            )
+        try:
+            return HostSettings.model_validate_json(held)
+        except ValidationError:
+            return "`settings.json` isn't settings lup reads: look at it yourself."
+
+    def read_settings(
+        self, settings: HostSettings | str | None, places: written.Places
+    ) -> list[str]:
+        """Say what the settings have a host session run, set, and do without asking, the commands flagged where they name a directory rooms write."""
+        match settings:
+            case None:
+                return []
+            case str():
+                return [settings]
+            case HostSettings():
+                pass
+        runs = [written.quoted(each, places) for each in settings.runs()]
+        said = [
+            *([f"runs on the host {'; '.join(runs)}"] if runs else []),
+            *(
+                [
+                    "sets in every host session's environment "
+                    + ", ".join(f"`{name}`" for name in settings.env)
+                ]
+                if settings.env
+                else []
+            ),
+            *(
+                [
+                    "adds the plugin marketplaces "
+                    + ", ".join(
+                        f"`{name}`" for name in settings.extra_known_marketplaces
+                    )
+                ]
+                if settings.extra_known_marketplaces
+                else []
+            ),
+            *(
+                [f"lets a host session act without asking: {'; '.join(unasked)}"]
+                if (unasked := settings.unasked())
+                else []
+            ),
+        ]
+        first = (
+            f"`settings.json` {'; it '.join(said)}. Each is yours only if you set it."
+            if said
+            else (
+                "`settings.json`: nothing in it runs a command, sets a variable, or "
+                "lets a session act without asking."
+            )
+        )
+        permissions = settings.permissions
+        kept = (
+            f" It asks before {written.counted(len(permissions.ask), 'kind of call', 'kinds of call')} "
+            f"and denies {len(permissions.deny)}: a room could have taken one "
+            "out, so check each you set is there."
+            if permissions.ask or permissions.deny
+            else ""
+        )
+        return [f"{first}{kept}"]
+
+    def memory(self) -> list[str]:
+        """Say the memory every host session reads, and each directory whose files it loads."""
+        memory = written.read(self.directory / "CLAUDE.md")
+        loaded = [
+            f"`{name}/` ({written.counted(len(found), 'file', 'files')})"
+            for name in self.loaded
+            if (found := written.listed(self.directory / name).files)
+        ]
+        return [
+            *(
+                [
+                    (
+                        f"`CLAUDE.md`, {written.counted(len(memory.splitlines()), 'line', 'lines')}, "
+                        "is read into every host session: check it's all yours."
+                    )
+                ]
+                if memory is not None
+                else []
+            ),
+            *(
+                [
+                    (
+                        f"{', '.join(loaded)}: a host session loads each: check "
+                        "they're yours."
+                    )
+                ]
+                if loaded
+                else []
+            ),
+        ]
+
+    def skills(self) -> list[str]:
+        """Say each skill a host session loads, by its directory's name."""
+        found = [
+            each.parent.name
+            for each in written.listed(self.directory / "skills").files
+            if each.name == "SKILL.md"
+            and ".trash" not in each.relative_to(self.directory).parts
+        ]
+        if not found:
+            return []
+        names = sorted(dict.fromkeys(found))
+        copies = (
+            ""
+            if len(names) == len(found)
+            else f", {written.counted(len(found), 'copy', 'copies')} in all"
+        )
+        return [
+            (
+                f"`skills/`: {written.counted(len(names), 'skill', 'skills')} a host "
+                f"session can load{copies}, "
+                f"{', '.join(f'`{name}`' for name in names)}: check each is yours."
+            )
+        ]
+
+    def plugins(self, settings: HostSettings | str | None) -> list[str]:
+        """Say which plugins load in a host session: those the settings turn on, whose code under `plugins/` a room could have changed."""
+        if not (self.directory / "plugins").is_dir():
+            return []
+        enabled = settings.enabled() if isinstance(settings, HostSettings) else []
+        if not enabled:
+            return [
+                (
+                    "`plugins/`: none is turned on in `settings.json`, so none loads in "
+                    "a host session."
+                )
+            ]
+        return [
+            (
+                f"`plugins/`: {', '.join(f'`{name}`' for name in enabled)} turned on, "
+                "whose code under `plugins/` runs in host sessions and a room could have "
+                "changed: reinstall each (`/plugin`)."
+            )
+        ]
+
+    def links(self, places: written.Places) -> list[str]:
+        """Say each link among what a host session loads, where Claude Code makes none, flagged where it lands in a directory rooms write."""
+        found = [
+            each
+            for name in self.configuration
+            for each in written.listed(self.directory / name).links
+        ]
+        return [
+            f"`{each.path.relative_to(self.directory)}` is a link to `{each.aimed}`"
+            + (
+                ", in a directory rooms write"
+                if places.aims(each.path, each.aimed)
+                else ""
+            )
+            + ": Claude Code makes none there, so check it's yours."
+            for each in found
+        ]
+
+    def run_before(self, places: written.Places) -> list[str]:
+        """Say what a host session runs before its commands, which rooms could have written: its shell snapshot and its session's environment."""
+        snapshots = written.listed(self.directory / "shell-snapshots").files
+        environments = self.directory / "session-env"
+        each = (
+            sorted(path for path in environments.iterdir() if path.is_dir())
+            if environments.is_dir() and not environments.is_symlink()
+            else []
+        )
+        holding = [path for path in each if written.listed(path).files]
+        shown = places.shown(self.directory)
+        return [
+            *(
+                [
+                    (
+                        f"`shell-snapshots/`: {written.counted(len(snapshots), 'snapshot', 'snapshots')}. "
+                        "A host session runs its own before each command, and a room "
+                        "could have written any: with no host session running, "
+                        f"`rm {shown}/shell-snapshots/*`; a session makes a new one as it "
+                        "starts."
+                    )
+                ]
+                if snapshots
+                else []
+            ),
+            *(
+                [
+                    (
+                        f"`session-env/`: {written.counted(len(each), 'session', 'sessions')}' "
+                        f"environments, {len(holding)} holding a file, which a session "
+                        "runs before each of its commands, a resumed one too: with no "
+                        f"host session running, `rm -r {shown}/session-env/*`."
+                    )
+                ]
+                if holding
+                else []
+            ),
+        ]
+
+    def supervisor(self) -> list[str]:
+        """Say the state of what runs background sessions, and the mods sessions made: rooms could have written either, and lup can't tell what of them a room changed."""
+        there = [
+            name for name in ["daemon", "jobs"] if (self.directory / name).is_dir()
+        ]
+        mods = self.directory / "dev-mods"
+        made = (
+            [path for path in mods.iterdir() if path.is_dir()]
+            if mods.is_dir() and not mods.is_symlink()
+            else []
+        )
+        return [
+            *(
+                [
+                    (
+                        f"{' and '.join(f'`{name}/`' for name in there)}, the state of "
+                        "the supervisor that runs background sessions, its `control.key` "
+                        "among it: rooms could read and write it, and lup can't tell "
+                        "what of it a room changed: with no background session running, "
+                        "look through it, or remove it."
+                    )
+                ]
+                if there
+                else []
+            ),
+            *(
+                [
+                    (
+                        f"`dev-mods/`: mods made in {written.counted(len(made), 'session', 'sessions')}, "
+                        "which can carry code a session runs: a room could have written "
+                        "any, so look through them, or remove those you don't keep."
+                    )
+                ]
+                if made
+                else []
+            ),
+        ]
+
+    def folders(self) -> list[str]:
+        """Say each record folder whose sessions say they ran in a directory it isn't named for, or that's a link: a room could have written it so, and lup reads it as no directory's."""
+        projects = self.directory / "projects"
+        if not projects.is_dir() or projects.is_symlink():
+            return []
+        entries = sorted(projects.iterdir())
+        return [
+            *(
+                f"`projects/{each.name}` is a link to `{each.readlink()}`: Claude Code "
+                "makes none there, and lup reads none of it."
+                for each in entries
+                if each.is_symlink()
+            ),
+            *(
+                f"`projects/{each.name}` says its sessions ran in {ran}, whose folder "
+                f"Claude Code names `{folder_named(ran)}`: a room could have written "
+                "it so; lup reads it as no directory's, and moves none of it."
+                for each in entries
+                if not each.is_symlink()
+                and each.is_dir()
+                and (ran := ran_in(each)) is not None
+                and not filed(each, ran)
+            ),
+        ]
+
+    def login(self) -> list[str]:
+        """Say how to replace the operator's own login, which every room could read."""
+        if not written.held(self.directory / ".credentials.json"):
+            return []
+        return [
+            (
+                "Your host login, `.credentials.json`, was readable by every room: in a "
+                "Claude Code session on the host, run `/logout` then `/login`, so the "
+                "refresh token they could read is replaced. Whether `/logout` revokes "
+                "it with the provider isn't documented."
+            )
+        ]
+
+
 def login(directory: Path) -> Path:
     """Return where Claude Code keeps its login in a directory of its own at `directory`, as `CLAUDE_CONFIG_DIR` names one: `.credentials.json` there."""
     return ClaudeLayout(home=Path.home(), configured=directory).credentials
@@ -2872,7 +3352,9 @@ def adapter() -> Adapter:
     """Return what lup needs of Claude Code: its hooks answered, and its launch."""
     layout = ClaudeLayout.of(ClaudeSettings())
     machine = Layout.of(LupDevSettings())
-    records = ClaudeRecords(directory=layout.directory, host=machine.host)
+    records = ClaudeRecords(
+        directory=layout.directory, host=machine.host, homes=machine.homes
+    )
     return Adapter(
         runtime=Claude(),
         hook=hook,
@@ -2887,6 +3369,9 @@ def adapter() -> Adapter:
         agent=agent,
         login=login,
         records=records,
+        directory=layout.directory,
+        written=ClaudeWritten(directory=layout.directory).checked,
+        recorded=session_at,
         reader=ClaudeTranscripts(settings=layout.settings, layout=machine),
         queues=ClaudeQueues(records=records),
     )

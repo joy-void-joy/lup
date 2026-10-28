@@ -51,7 +51,7 @@ class StandInRecords(Model, Records):
     directory: Path
 
     @override
-    def kept(self, under: list[Path]) -> list[Record]:
+    def kept(self, under: list[Path], repository: Path) -> list[Record]:
         return []
 
     @override

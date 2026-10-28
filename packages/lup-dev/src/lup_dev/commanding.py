@@ -19,8 +19,10 @@ view's command prints its text form (`Blocks.text`).
 import asyncio
 import inspect
 import os
+from functools import reduce
 from pathlib import Path
-from typing import TYPE_CHECKING, NoReturn, override
+from types import UnionType
+from typing import TYPE_CHECKING, NoReturn, TypeAliasType, get_args, override
 
 import typer
 
@@ -48,8 +50,26 @@ class CommandError(LupDevError):
     """A module's command can't run: no module of the repository has its name, or nothing approved runs it on the host."""
 
 
+def unaliased[T](annotation: T) -> T:
+    """Return `annotation` with each type alias in it, whole or one of a union's, as the type it names: typer knows no alias, so a field typed `Format | None`, `type Format = Literal[…]`, would stop the module's every command.
+
+    >>> from typing import Literal
+    >>> type Shade = Literal["dark", "light"]
+    >>> unaliased(Shade | None) == (Literal["dark", "light"] | None)
+    True
+    """
+    match annotation:
+        case TypeAliasType():
+            return unaliased(annotation.__value__)
+        case UnionType():
+            parts = [unaliased(each) for each in get_args(annotation)]
+            return reduce(lambda left, right: left | right, parts)
+        case _:
+            return annotation
+
+
 def parameter(name: str, field: FieldInfo) -> inspect.Parameter:
-    """Return the typer parameter a model's field is on the command line: an argument where it has no default, else an option named for its alias, else its name, its description the help."""
+    """Return the typer parameter a model's field is on the command line: an argument where it has no default, else an option named for its alias, else its name, its description the help; its type with no alias in it (`unaliased`)."""
     if field.is_required():
         given = typer.Argument(..., help=field.description, show_default=False)
     else:
@@ -60,7 +80,10 @@ def parameter(name: str, field: FieldInfo) -> inspect.Parameter:
             help=field.description,
         )
     return inspect.Parameter(
-        name, inspect.Parameter.KEYWORD_ONLY, annotation=field.annotation, default=given
+        name,
+        inspect.Parameter.KEYWORD_ONLY,
+        annotation=unaliased(field.annotation),
+        default=given,
     )
 
 

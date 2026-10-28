@@ -8,6 +8,7 @@ guidance, the session's settings, the paths to trust, and where its messaging
 socket goes. A room then runs the result in its container (`lup.rooms`).
 """
 
+import errno
 import inspect
 import json
 import os
@@ -26,7 +27,7 @@ from tomlkit.items import InlineTable, Table
 from lup.errors import LupError
 from lup.events import SessionEvent
 from lup.rooms.container import AbsolutePath, Mount
-from lup.rooms.homes import landed, landings
+from lup.rooms.homes import landed, landings, regular
 from lup.sessions import bridge
 from lup.types import JsonObject, Model
 
@@ -441,9 +442,18 @@ class Preferences(Model):
 
 
 def read(path: Path) -> str:
-    """Read `path`'s text, never through a link."""
-    handle = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    with os.fdopen(handle, encoding="utf-8") as opened:
+    """Read `path`'s text as the host reads every file a room may have written (`lup.rooms.homes.regular`): never through a link, never waiting on a pipe, a regular file alone.
+
+    Raise `FileNotFoundError` where nothing is there, and `OSError` where
+    what's there isn't a regular file: a room can leave a pipe where the
+    launch's own settings were, which a read would wait on as the launch ends.
+    """
+    descriptor = regular(path)
+    if descriptor is None:
+        if not path.exists() and not path.is_symlink():
+            raise FileNotFoundError(errno.ENOENT, "nothing is there", str(path))
+        raise OSError(errno.EINVAL, "it isn't a regular file", str(path))
+    with os.fdopen(descriptor, encoding="utf-8") as opened:
         return opened.read()
 
 

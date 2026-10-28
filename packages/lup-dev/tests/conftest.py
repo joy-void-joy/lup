@@ -812,7 +812,7 @@ class Exchanging(Exchanges):
 class NoRecords(Records):
     """A runtime that keeps no records."""
 
-    def kept(self, under: list[Path]) -> list[Record]:
+    def kept(self, under: list[Path], repository: Path) -> list[Record]:
         return []
 
     def held(self, session: str) -> bool:

@@ -14,8 +14,10 @@ class Transcripts(Module):
     name = "transcripts"
 
     serving: Serving = Serving.of(TranscriptsServing)
-    """Copying what the runtime added or grew, when a launch opens and when it
-    stops; reading the copies; and each agent's conversation, live."""
+    """Copying what each runtime added or grew in each of its homes, of the
+    project's sessions and each related repository's, when a launch opens, when
+    it stops and before a room reads them; reading the copies; and each agent's
+    conversation, live."""
     folds: Folds = Folds.of(*FOLD_KINDS)
     """What its conversation folds under: earlier exchanges, runs of calls,
     items' text, and calls' input and output."""
