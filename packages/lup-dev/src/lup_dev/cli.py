@@ -362,13 +362,14 @@ class Adapters(Model, Answerer):
 
 
 class SpawnRecords(Model, Spawns):
-    """How every runtime lup knows recorded its subagents' spawns, as its adapter reads them."""
+    """How every runtime lup knows recorded its subagents' spawns, as its adapter reads them, in the home each launch registered (`lup_dev.host.homes.translated`)."""
 
     adapters: Adapters
+    layout: Layout
 
     @override
     def spawned(self, runtime: str, payload: str) -> Spawned | None:
-        return self.adapters.named(runtime).spawned(payload)
+        return self.adapters.named(runtime).spawned(payload, self.layout)
 
 
 class Couriers(Model, Courier):
@@ -578,7 +579,7 @@ def host_serve(context: typer.Context) -> None:
         answerer=known,
         courier=couriers,
         judge=WorkerJudge(modules=workers),
-        spawns=SpawnRecords(adapters=known),
+        spawns=SpawnRecords(adapters=known, layout=layout),
         post=delivery,
         bearings=RepositoryBearings(
             delivery=delivery, integration=settings.lup_integration_branch

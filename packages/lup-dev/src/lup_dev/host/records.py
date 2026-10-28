@@ -13,12 +13,15 @@ import json
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import Field, JsonValue, ValidationInfo, field_validator
 
 from lup.blocks import Drawer, Tone, Verb
 from lup.types import JsonObject, Model
+
+if TYPE_CHECKING:
+    from lup_dev.host.homes import Found
 
 
 class Record(Model):
@@ -38,8 +41,12 @@ class Records(ABC):
         """Return each record of a session the runtime ran in one of `under`, or in a directory inside one."""
 
     @abstractmethod
-    def conversation(self, session: str, agent: str | None) -> Path | None:
-        """Return the record of one conversation as the runtime keeps it, growing while it runs: session `session`'s own, or its subagent `agent`'s; none where there's none."""
+    def conversation(self, session: str, agent: str | None) -> Found | None:
+        """Return the record of one conversation as the runtime keeps it, growing while it runs, session `session`'s own or its subagent `agent`'s, with the directory it's read inside; none where there's none.
+
+        A launched session's is in the home its launch registered alone, and
+        any other's in the operator's own directory alone (`lup_dev.host.homes`).
+        """
 
 
 class Said(Model):
@@ -194,15 +201,20 @@ class Reader(ABC):
         """Return the record of each session under `copies`, laid out as the runtime lays out its own home; none where there's nothing there."""
 
     @abstractmethod
-    def read(self, record: Path) -> Transcript:
+    def read(self, record: Path, root: Path | None = None) -> Transcript:
         """Read one session's record: what was said, the tools called, its name and where it ran.
 
-        Lines the runtime writes that this doesn't know are passed over.
+        Lines the runtime writes that this doesn't know are passed over, and so
+        is one too long to hold. With `root`, the directory a room may have
+        written the record in, the record and what's read beside it are read
+        only where, opened, they're inside it (`lup.rooms.homes.opened`).
         """
 
     @abstractmethod
-    def calls(self, record: Path, ids: list[str]) -> list[Call]:
-        """Read calls of one conversation's record whole, by the runtime's ids for them: each the record holds, in the order asked."""
+    def calls(
+        self, record: Path, ids: list[str], root: Path | None = None
+    ) -> list[Call]:
+        """Read calls of one conversation's record whole, by the runtime's ids for them: each the record holds, in the order asked; confined to `root` as `read` is."""
 
 
 class Recorded(Model, arbitrary_types_allowed=True):

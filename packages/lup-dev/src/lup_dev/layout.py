@@ -548,6 +548,10 @@ class HostLayout(Model):
         """The name each session last had, by the runtime's id for it, kept in lup's state so a session resumed in a later launch takes it back."""
         return self.state / "session-names.json"
 
+    def home_of(self, runtime: str, session: str) -> Path:
+        """Say where the home a launched session of `runtime` keeps its record in is kept, by the runtime's id for the session: written once, from the launch the service first heard the session from, so a room naming another's session later can't move it (`lup_dev.launch.homes.kept`)."""
+        return self.state / "homes" / runtime / session
+
     @property
     def dashboard_token(self) -> Path:
         """The token the dashboard's API wants (`host/dashboard.py`), kept in lup's state, which no room mounts, so a page left open outlasts a restart."""
@@ -780,13 +784,6 @@ class HomesLayout(Model):
     def shared(self, runtime: str) -> Path:
         """Say where runtime `runtime`'s home every project shares is, for a profile choosing one home across projects."""
         return self.home / "shared" / runtime
-
-    def every(self, runtime: str) -> list[Path]:
-        """List every home of runtime `runtime` on this machine: the shared one, then each project's, those that are there."""
-        projects = self.home / "projects"
-        each = sorted(projects.iterdir()) if projects.is_dir() else []
-        found = [self.shared(runtime), *(project / runtime for project in each)]
-        return [home for home in found if home.is_dir()]
 
 
 class ToldLayout(Model):

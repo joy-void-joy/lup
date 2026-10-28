@@ -89,6 +89,7 @@ from lup_dev.host.courier import (
     Telling,
     Waker,
 )
+from lup_dev.host.homes import kept
 from lup_dev.host.names import Names, claimed, container_name, held, shaped, taken
 from lup_dev.host.protocol import (
     Activity,
@@ -1161,6 +1162,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                 f"is: {unread}"
             )
             return Spoken(answer=await self.judgement(request, payload, writer))
+        if request.home is not None:
+            kept(self.layout, request.runtime, heard.session, request.home)
         conversation = conversations.named(heard.session, heard.agent)
         noted = self.spawning(request, conversations, conversation, heard, payload)
         conversation, said = noted.conversation, noted.said

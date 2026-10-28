@@ -473,7 +473,7 @@ def inboxed(
         layout=machine.host,
         answerer=known,
         courier=couriers,
-        spawns=spawns or cli.SpawnRecords(adapters=known),
+        spawns=spawns or cli.SpawnRecords(adapters=known, layout=machine),
         post=delivery,
         bearings=(
             RepositoryBearings(delivery=delivery, integration="dev")
@@ -531,6 +531,10 @@ def launched(
         container=f"lup-{name}",
         limits=Limits(actions=["fetch"], protected=[]),
         github=None,
+        # The launch's own runtime directory and its home are one place, the
+        # one holding the worktree, where a test writes its records.
+        home=tmp_path.parent,
+        own=tmp_path.parent,
     )
     client(machine.host, clock).register(registered)
     return registered

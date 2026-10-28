@@ -64,6 +64,7 @@ if TYPE_CHECKING:
     from pydantic import JsonValue
 
     from lup.blocks import OfAgent
+    from lup_dev.host.homes import Found
     from lup_dev.host.workers import LaunchModules
 
 RECORDED = Path(__file__).parent / "payloads" / "gh-2.102.0"
@@ -79,7 +80,7 @@ class Nothing(Records):
     def kept(self, under: list[Path]) -> list[Record]:
         return []
 
-    def conversation(self, session: str, agent: str | None) -> Path | None:
+    def conversation(self, session: str, agent: str | None) -> Found | None:
         return None
 
 
@@ -90,11 +91,13 @@ class Unread(RecordsReader):
         del copies
         return []
 
-    def read(self, record: Path) -> Transcript:
+    def read(self, record: Path, root: Path | None = None) -> Transcript:
         message = f"no session is kept at {record}"
         raise FileNotFoundError(message)
 
-    def calls(self, record: Path, ids: list[str]) -> list[RecordedCall]:
+    def calls(
+        self, record: Path, ids: list[str], root: Path | None = None
+    ) -> list[RecordedCall]:
         del record, ids
         return []
 

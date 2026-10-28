@@ -992,7 +992,7 @@ class CallsShowing(Model, Reading[ShowCalls], arbitrary_types_allowed=True):
     @override
     async def answer(self, request: ShowCalls) -> Reply:
         read = await asyncio.to_thread(self.read, request)
-        return await self.calls(request, read.record)
+        return await self.calls(request, read)
 
     @override
     async def scoped(self, request: ShowCalls, repository: Path) -> Reply:
@@ -1005,7 +1005,7 @@ class CallsShowing(Model, Reading[ShowCalls], arbitrary_types_allowed=True):
         if ran is None or not within(ran, under):
             message = "the conversation isn't one of this repository's"
             raise InboxError(message)
-        return await self.calls(request, read.record)
+        return await self.calls(request, read)
 
     def read(self, request: ShowCalls) -> context.Read:
         """Read the conversation's record as it stands: kept as last read where it hasn't changed."""
@@ -1013,10 +1013,14 @@ class CallsShowing(Model, Reading[ShowCalls], arbitrary_types_allowed=True):
             self.recorded, request.runtime, request.session, request.agent
         )
 
-    async def calls(self, request: ShowCalls, record: Path) -> Calls:
-        """Return the calls asked for, read whole from `record`, off the event loop."""
+    async def calls(self, request: ShowCalls, read: context.Read) -> Calls:
+        """Return the calls asked for, read whole from the record `read` read, inside its directory, off the event loop."""
         reader = self.recorded[request.runtime].reader
-        return Calls(calls=await asyncio.to_thread(reader.calls, record, request.calls))
+        return Calls(
+            calls=await asyncio.to_thread(
+                reader.calls, read.record, request.calls, read.root
+            )
+        )
 
 
 class DiffShowing(Model, Reading[ShowDiff], arbitrary_types_allowed=True):

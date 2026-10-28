@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from lup.blocks import OfAgent
     from lup.publishing import Published, Refusal
     from lup_dev.host.courier import Conversation
+    from lup_dev.host.homes import Found
 
 
 class Unread(RecordsReader):
@@ -38,11 +39,13 @@ class Unread(RecordsReader):
         del copies
         return []
 
-    def read(self, record: Path) -> Transcript:
+    def read(self, record: Path, root: Path | None = None) -> Transcript:
         message = f"no session is kept at {record}"
         raise FileNotFoundError(message)
 
-    def calls(self, record: Path, ids: list[str]) -> list[RecordedCall]:
+    def calls(
+        self, record: Path, ids: list[str], root: Path | None = None
+    ) -> list[RecordedCall]:
         del record, ids
         return []
 
@@ -106,7 +109,7 @@ class Held(Records):
         self.record = record
         self.asked: list[list[Path]] = []
 
-    def conversation(self, session: str, agent: str | None) -> Path | None:
+    def conversation(self, session: str, agent: str | None) -> Found | None:
         return None
 
     def kept(self, under: list[Path]) -> list[Record]:
