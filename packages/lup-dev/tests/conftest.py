@@ -753,16 +753,20 @@ def holding_kit(tmp_path: Path) -> Kit:
 
 @pytest.fixture
 def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Layout:
-    """lup's state and data under `tmp_path`, outside any runtime's session."""
+    """lup's state, runtime directory, data, configuration and cache under `tmp_path`, as `Layout.of` reads them, outside any runtime's session."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "xdg-run"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg-cache"))
     monkeypatch.delenv("CLAUDE_CODE_CHILD_SESSION", raising=False)
     monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
     return Layout(
         state=tmp_path / "xdg" / "lup",
+        runtime=tmp_path / "xdg-run" / "lup",
         data=tmp_path / "xdg-data" / "lup",
         config=tmp_path / "xdg-config" / "lup",
+        cache=tmp_path / "xdg-cache" / "lup",
     )
 
 
