@@ -7,16 +7,17 @@ reach a call from code. Its one link to the operator's home is their login:
 `~/.codex/auth.json`). Codex rewrites that file in place, so a refresh writes through
 the link to the one real copy, and logging out from lup's home removes only the link.
 
-A terminal session runs on a home of the rooms' own instead (`CodexHome`), its
-configuration copied from the operator's, with the launch's managed
-requirements, a file of the launch's own, mounted where Codex reads them.
+A terminal session runs in a home of the launch's own on a home of the rooms'
+own instead (`CodexHome`), its configuration copied from the operator's, with
+the launch's managed requirements, a file of the launch's own, mounted where
+Codex reads them.
 """
 
 from importlib.util import find_spec
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lup.sessions.configuration import HomeLaunch, Item
+from lup.sessions.configuration import Item
 from lup.sessions.errors import RuntimeMissingError
 from lup.sessions.terminal import Preference
 from lup.types import Model
@@ -86,12 +87,15 @@ class CodexLayout(Model):
 
 
 class CodexHome(Model):
-    """What Codex keeps in its home, as a home of the rooms' own lays it out (`lup.sessions.terminal.RuntimeHome`).
+    """What Codex keeps in its home, as a launch lays it out on a home of the rooms' own (`lup.sessions.terminal.RuntimeHome`).
 
-    Read in Codex's docs (`agents-md`, `config-basic`, `build-skills`,
-    2026-10-27) and measured on 0.162.0 in a room (`docs/field-notes.md`, *A
-    home of the rooms' own*); what isn't named here is history and state, which
-    every room given the home shares.
+    The directory is the launch's own: every file Codex reads there as
+    configuration or state is the launch's, `.env` among them, whose variables
+    Codex 0.162.0 sets in what it runs, and its SQLite state, where its goals
+    and queued input are kept. Only `shared` is linked into the home the rooms
+    share, from which Codex resumes a thread by its id. Read in Codex's docs
+    (`agents-md`, `config-basic`, `build-skills`, 2026-10-27) and measured on
+    0.162.0 in a room (`docs/field-notes.md`, *A home of the rooms' own*).
     """
 
     directory: Path
@@ -101,14 +105,15 @@ class CodexHome(Model):
         Item(name="rules"),
         Item(name="prompts"),
     ]
-    """Each item of configuration, read-only in the home: the launch's copy of
-    the layers holding it, or empty."""
-    own: list[str] = ["shell_snapshots", "skills", "tmp"]
-    """What each launch's session writes for itself alone: a command runs its
-    session's snapshot from `shell_snapshots/` first, `tmp/arg0/` holds the
-    helpers Codex puts first on its commands' `PATH`, and `skills/.system/`
-    the skills it writes at each start, so a room writing another's would run
-    in it."""
+    """Each item of configuration copied in from the layers."""
+    shared: list[Item] = [
+        Item(name="sessions"),
+        Item(name="archived_sessions"),
+        Item(name="history.jsonl", directory=False),
+        Item(name="session_index.jsonl", directory=False),
+    ]
+    """The history the rooms given the home share: each thread's rollout, the
+    prompts typed, and the threads' names."""
     preferences: list[Preference] = [
         Preference(keys=["model"]),
         Preference(keys=["model_reasoning_effort"]),
@@ -122,7 +127,7 @@ class CodexHome(Model):
 
     @property
     def config(self) -> Path:
-        """Where Codex reads its configuration and saves its preferences: the launch's own, mounted there."""
+        """Where Codex reads its configuration and saves its preferences."""
         return self.directory / "config.toml"
 
     @property
@@ -141,14 +146,9 @@ class CodexLaunch(Model):
     directory: Path
 
     @property
-    def home(self) -> HomeLaunch:
-        """What the launch keeps of its own for Codex's home of the rooms' own: its copies, its empties, and what the session writes for itself."""
-        return HomeLaunch(directory=self.directory / "runtime")
-
-    @property
-    def home_config(self) -> Path:
-        """The configuration the session reads and saves its preferences in, the operator's and the profile's layered: the launch's own, writable."""
-        return self.home.own("config.toml")
+    def user_skills(self) -> Path:
+        """The launch's copy of the operator's own skills, mounted read-only where Codex reads them in the room's home."""
+        return self.directory / "agents-skills"
 
     @property
     def requirements(self) -> Path:

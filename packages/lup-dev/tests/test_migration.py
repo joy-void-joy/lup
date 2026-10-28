@@ -396,10 +396,9 @@ def test_a_repository_s_sessions_move_into_its_rooms_home_and_the_rest_stay(
     assert (home / "file-history" / "s1" / "f@v1").read_text() == "before"
     assert (operator / ".claude" / "projects" / "-w-other" / "s2.jsonl").is_file()
     assert not ours.exists()
-    # Moved, a session's record is read from its room's home, as a resume finds it.
-    assert ClaudeRecords(
-        directory=operator / ".claude", homes=state.homes
-    ).conversation("s1", None) == (home / "projects" / ours.name / "s1.jsonl")
+    # Moved, the operator's directory holds none of the session, so the host
+    # keeps the home a room's hook first names for it (`lup_dev.host.homes`).
+    assert not ClaudeRecords(directory=operator / ".claude").held("s1")
 
 
 def test_a_move_waits_on_each_launch_of_the_repository_still_running(

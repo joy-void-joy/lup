@@ -28,33 +28,27 @@ settings compiled for each runtime*):
   account's `auth.json`, never a keyring the room lacks; with none, the room's
   own home, gone with the launch.
 
-**The home**: a directory of the rooms' own, mounted read-write at its path,
-where Codex keeps its history and state; nothing of the operator's home is
-mounted. Inside it, each item of configuration `CodexHome` names is mounted
-read-only, the launch's copy of the layers holding it, the operator's home's
-and then the home's own, or empty; `config.toml` is the launch's own, the
-layers' merged with what would hand the room a credential left out
-(`blocked`, `lup.sessions.configuration`), the operator's MCP servers among
-it; each of Codex's own profiles, `<name>.config.toml`, is layered the same
-way and mounted read-only, so `--profile` after `--` finds it; the
-operator's `~/.agents/skills` is copied read-only into the room's home;
-`shell_snapshots/`, `skills/` and `tmp/` are the launch's own, since Codex
-runs a snapshot before each command, puts its `tmp/arg0/` helpers first on its
-commands' `PATH`, and writes its own skills at each start; and `auth.json`
-is the account's login, mounted alone, read-write. Codex 0.162.0 saves its
+**The home**: Codex's home is the launch's own, made fresh, mounted read-write
+at its path, and gone with the launch; nothing of the operator's home is
+mounted. Into it go the items of configuration `CodexHome` names, copied from
+the layers holding them, the operator's home and then the home's own;
+`config.toml`, the layers' merged with what would hand the room a credential
+or run a command in it left out (`blocked`, `lup.sessions.configuration`), the
+operator's MCP servers and `notify` among it, so `/model` saves there and what
+changed of its preferences is carried back at the launch's end; each of
+Codex's own profiles, `<name>.config.toml`, layered the same way, so
+`--profile` after `--` finds it; and `auth.json`, the account's login, mounted
+alone, read-write. The operator's `~/.agents/skills` is copied read-only into
+the room's home. The history `CodexHome.shared` names is a link each into the
+home the rooms share, mounted read-write at its path, so a thread resumes by
+its id in any room on it; everything else Codex writes or reads there, its
+`.env`, its SQLite state, its shell snapshots and the helpers it puts on its
+commands' `PATH` among it, is the launch's alone. Codex 0.162.0 saves its
 login in place, keeping the file and its mode, so a sign-in in a room reaches
 the account's file through the mount; it reads an empty file as unreadable
 rather than as no login, and `{}` as signed in, so a login made for an account
 starts empty (measured in a room, `docs/field-notes.md`, *A home of the rooms'
 own*).
-
-**A declared gap:** Codex 0.162.0 saves its configuration by writing a new
-file over `config.toml` (its inode changed, measured in a room), which a
-single file mounted can't take ("Device or resource busy"), so a preference a
-session saves there, `/model`'s choice among them, holds for that session
-alone and isn't carried back; Codex says "Failed to save default model" (its
-binary's text). The launch's copy marks `tui.screen_reader_detection_done`, so
-the save Codex makes at each start isn't one of them.
 
 | lup's event | Codex's hook event |
 |---|---|
@@ -199,14 +193,16 @@ from lup.events import (
     WorktreeAsked,
 )
 from lup.rooms.container import Mount
-from lup.sessions.configuration import Homed, configured, fits, layered, merged
+from lup.sessions.configuration import Homed, configured, fits, layered, linked
 from lup.sessions.terminal import (
     Cli,
     Copy,
+    Left,
     Preferences,
     Setting,
     Terminal,
     TerminalError,
+    Why,
 )
 from lup.types import JsonObject, Model
 
@@ -266,28 +262,30 @@ class OperatorConfig(Model):
         return [field for field, feature in switched.items() if self.keys(feature)]
 
 
-def blocked(path: list[str]) -> bool:
-    """Say whether a key of Codex's configuration, by its path, is left out of a room's copy beside any named like a credential.
+def blocked(path: list[str]) -> Why | None:
+    """Say why a key of Codex's configuration, by its path, is left out of a room's copy, beside any named like a credential and any table holding a `command`; none where it isn't.
 
-    The operator's MCP servers, set up for the host, whose `env` often holds a
-    credential named otherwise; the variables `shell_environment_policy` sets
-    in every command's environment; and the headers of any `otel` exporter,
-    which carry its key whatever they're named.
+    The operator's MCP servers, set up for the host, each a command or a URL
+    whose `env` often holds a credential named otherwise, and `notify`, a
+    command run at each turn's end, would run in the room; the variables
+    `shell_environment_policy` sets in every command's environment, and the
+    headers of any `otel` exporter, which carry its key whatever they're
+    named, would hand the room a credential.
 
-    >>> [blocked(path) for path in [["mcp_servers"], ["otel", "exporter", "otlp-http", "headers"], ["model"]]]
-    [True, True, False]
+    >>> [blocked(path) for path in [["mcp_servers"], ["notify"], ["otel", "exporter", "otlp-http", "headers"], ["model"]]]
+    ['command', 'command', 'credential', None]
     """
     match path:
-        case ["mcp_servers"] | ["shell_environment_policy", "set"]:
-            return True
-        case ["otel", *_, "headers"]:
-            return True
+        case ["mcp_servers"] | ["notify"]:
+            return "command"
+        case ["shell_environment_policy", "set"] | ["otel", *_, "headers"]:
+            return "credential"
         case _:
-            return False
+            return None
 
 
 class AtHome(Model):
-    """What a terminal session of Codex gets on a home of the rooms' own: how its configuration and login reach the home, its own configuration there, and the operator's as lup reads it."""
+    """What a terminal session of Codex gets on a home of the rooms' own: its own home, what's in it, the history it links to, and the operator's configuration as lup reads it."""
 
     homed: Homed
     theirs: OperatorConfig
@@ -297,18 +295,20 @@ class AtHome(Model):
 def at_home(home: RuntimeHome, layout: CodexLayout, launch: CodexLaunch) -> AtHome:
     """Return what a session of Codex gets on the home `home`, its layers below it the operator's Codex home where `home` keeps it, then `home`'s own.
 
-    The configuration, layered with what `blocked` names and any key named
-    like a credential left out of each, is the launch's own `config.toml`,
-    mounted writable where Codex reads it; each of Codex's own profiles a
-    layer holds, `<name>.config.toml`, is layered the same way and mounted
-    read-only. The operator's `~/.agents/skills`, where `home` keeps their
-    layer, is copied and mounted read-only where Codex reads it in the room's
-    home. Raise `TerminalError` where a layer's configuration doesn't read.
+    Its home is the launch's own: the layers' configuration copied in;
+    `config.toml`, layered with what `blocked` names, any key named like a
+    credential and any table holding a command left out of each, and each of
+    Codex's own profiles a layer holds, `<name>.config.toml`, layered the same
+    way, written there; the account's login mounted where Codex reads it; and
+    a link into the home's history for each item `CodexHome.shared` names. The
+    operator's `~/.agents/skills`, where `home` keeps their layer, is copied
+    and mounted read-only where Codex reads it in the room's home. Raise
+    `TerminalError` where a layer's configuration doesn't read.
     """
     room = CodexHome(directory=home.directory)
     layers = [
         *([layout.operator_home] if home.operators else []),
-        *([] if home.own is None else [home.own]),
+        *([] if home.layer is None else [home.layer]),
     ]
     config = layered(layers, "config.toml", "toml", blocked)
     try:
@@ -316,8 +316,6 @@ def at_home(home: RuntimeHome, layout: CodexLayout, launch: CodexLaunch) -> AtHo
     except ValidationError as failed:
         message = f"the configuration layered for the room doesn't read: {failed}"
         raise TerminalError(message) from failed
-    detected: JsonObject = {"tui": {"screen_reader_detection_done": True}}
-    written = merged(detected, config.table)
     names = dict.fromkeys(
         each.name
         for layer in layers
@@ -325,68 +323,50 @@ def at_home(home: RuntimeHome, layout: CodexLayout, launch: CodexLaunch) -> AtHo
         if fits(each, directory=False)
     )
     profiles = {name: layered(layers, name, "toml", blocked) for name in names}
-    placed = configured(room.configuration, layers, room.directory, launch.home)
+    copied = configured(room.configuration, layers, room.directory)
+    history = linked(room.shared, room.directory, home.shared)
     skills = layout.user_skills if home.operators else None
-    copied = skills is not None and fits(skills, directory=True)
-    own = [launch.home.own(name) for name in room.own]
+    lent = skills is not None and fits(skills, directory=True)
     return AtHome(
         homed=Homed(
             copies=[
-                *placed.copies,
+                *copied.copies,
                 *(
-                    [
-                        Copy(
-                            source=skills,
-                            destination=launch.home.copied(".agents-skills"),
-                        )
-                    ]
-                    if copied and skills is not None
+                    [Copy(source=skills, destination=launch.user_skills)]
+                    if lent and skills is not None
                     else []
                 ),
             ],
-            directories=[*placed.directories, *own],
             files={
-                **placed.files,
-                launch.home_config: tomlkit.dumps(written),
+                room.config: tomlkit.dumps(config.table),
                 **{
-                    launch.home.copied(name): tomlkit.dumps(each.table)
+                    room.profile(name): tomlkit.dumps(each.table)
                     for name, each in profiles.items()
                 },
             },
+            links=history.links,
             mounts=[
-                Mount(source=launch.home_config, target=room.config),
+                Mount(source=home.directory),
+                Mount(source=home.shared),
                 Mount(source=home.login, target=room.login),
                 *(
-                    Mount(source=launch.home.own(name), target=room.directory / name)
-                    for name in room.own
-                ),
-                *placed.mounts,
-                *(
-                    Mount(
-                        source=launch.home.copied(name),
-                        target=room.profile(name),
-                        read_only=True,
-                    )
-                    for name in profiles
-                ),
-                *(
-                    [
-                        Mount(
-                            source=launch.home.copied(".agents-skills"),
-                            target=skills,
-                            read_only=True,
-                        )
-                    ]
-                    if copied and skills is not None
+                    [Mount(source=launch.user_skills, target=skills, read_only=True)]
+                    if lent and skills is not None
                     else []
                 ),
             ],
+            shared=history.shared,
             left=[
                 *config.left,
                 *(left for each in profiles.values() for left in each.left),
-                *placed.left,
+                *copied.left,
                 *(
-                    [f"{skills}, which is a link lup doesn't follow"]
+                    [
+                        Left(
+                            said=f"{skills}, which is a link lup doesn't follow",
+                            why="unread",
+                        )
+                    ]
                     if skills is not None and skills.is_symlink()
                     else []
                 ),
@@ -394,13 +374,13 @@ def at_home(home: RuntimeHome, layout: CodexLayout, launch: CodexLaunch) -> AtHo
         ),
         theirs=theirs,
         preferences=None
-        if home.own is None
+        if home.layer is None
         else Preferences(
-            saved=launch.home_config,
-            into=home.own / "config.toml",
+            saved=room.config,
+            into=home.layer / "config.toml",
             syntax="toml",
             written=[
-                Setting(preference=each, value=each.held(written))
+                Setting(preference=each, value=each.held(config.table))
                 for each in room.preferences
             ],
         ),
@@ -634,10 +614,9 @@ def compiled(
         if settings.home is None
         else {"CODEX_HOME": str(settings.home.directory)},
         files={launch.requirements: written, **settings.bridges(), **homed.files},
-        directories=homed.directories,
         copies=homed.copies,
+        links=homed.links,
         mounts=[
-            *([] if settings.home is None else [Mount(source=settings.home.directory)]),
             cli.mount,
             Mount(
                 source=launch.requirements,
@@ -648,6 +627,7 @@ def compiled(
             *homed.mounts,
         ],
         home=None if settings.home is None else settings.home.directory,
+        shared=homed.shared,
         left_out=homed.left,
         preferences=None if home is None else home.preferences,
     )

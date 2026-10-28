@@ -18,12 +18,14 @@ import os
 import shutil
 import stat
 from contextlib import ExitStack
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lup.rooms.container import Mask, Mount
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Iterator
+    from typing import BinaryIO
 
 
 def landings(home: Path, mounts: list[Mount | Mask]) -> dict[Path, bool]:
@@ -164,3 +166,46 @@ def plain(name: str) -> bool:
     return bool(name) and all(
         char.isascii() and (char.isalnum() or char in "-_") for char in name
     )
+
+
+def opened(
+    root: Path, path: Path, descriptors: Path = Path("/proc/self/fd")
+) -> BinaryIO | None:
+    """Open the regular file at `path` for reading where, opened, it's inside `root`, every link followed; none where it isn't there, isn't a regular file, or is elsewhere.
+
+    The check is made on the file opened, through `descriptors`, so a link a
+    room swaps in between a check and the read can't win; it's opened without
+    blocking, so a named pipe can't hold the host. Where `descriptors` isn't
+    there, as off Linux, the path is resolved before it's opened instead.
+    """
+    real = root.resolve()
+    named = descriptors.is_dir()
+    if not named and not path.resolve().is_relative_to(real):
+        return None
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError:
+        return None
+    found = (descriptors / str(descriptor)).readlink() if named else path.resolve()
+    if not found.is_relative_to(real) or not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        os.close(descriptor)
+        return None
+    return os.fdopen(descriptor, "rb")
+
+
+def lines(reading: BinaryIO, largest: int = 64 * 1024 * 1024) -> Iterator[bytes]:
+    r"""Yield each line of `reading`, its newline kept where it has one, leaving out each longer than `largest` bytes, read past without holding it: a room's record could hold a line of gigabytes.
+
+    >>> import io
+    >>> list(lines(io.BytesIO(b"a\n" + b"x" * 9 + b"\nb"), largest=4))
+    [b'a\n', b'b']
+    """
+    while True:
+        line = reading.readline(largest + 1)
+        if not line:
+            return
+        if len(line) <= largest:
+            yield line
+            continue
+        while line and not line.endswith(b"\n"):
+            line = reading.readline(largest)

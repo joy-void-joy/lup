@@ -1,5 +1,6 @@
-"""A home of the rooms' own: each runtime's terminal on one, what a launch makes in it before the run, and the preferences carried back after."""
+"""A home of the rooms' own: each runtime's terminal in a directory of the launch's own on one, what a launch makes before the run, and the preferences carried back after."""
 
+import io
 import json
 import os
 import tomllib
@@ -10,15 +11,17 @@ import pytest
 from lup.adapters.claude import Claude
 from lup.adapters.codex import Codex
 from lup.rooms.container import Mount
-from lup.rooms.homes import inside, landed, landings, regular
-from lup.sessions.configuration import HomeLaunch, Item, configured
+from lup.rooms.homes import inside, landed, landings, lines, opened, regular
+from lup.sessions.configuration import Item, configured
 from lup.sessions.terminal import (
     Cli,
     Copy,
+    Left,
     Preference,
     Preferences,
     RuntimeHome,
     Setting,
+    Shared,
     TerminalSettings,
 )
 
@@ -39,10 +42,11 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def homed(tmp_path: Path, runtime: str, *, operators: bool = True) -> RuntimeHome:
     return RuntimeHome(
-        directory=tmp_path / "homes" / runtime,
+        directory=tmp_path / "launch" / "runtime-home",
+        shared=tmp_path / "homes" / runtime,
         login=tmp_path / "accounts" / "work" / runtime / "login",
         operators=operators,
-        own=tmp_path / "profile" / runtime,
+        layer=tmp_path / "profile" / runtime,
     )
 
 
@@ -52,16 +56,20 @@ def written(path: Path, text: str) -> Path:
     return path
 
 
+def said(left: list[Left]) -> list[tuple[str, str]]:
+    return [(each.said, each.why) for each in left]
+
+
 # Claude Code on a home
 
 
-def test_claude_on_a_home_mounts_it_and_the_login_and_nothing_of_the_operator_s(
+def test_claude_runs_in_the_launch_s_own_directory_linking_its_history_to_the_home(
     tmp_path: Path, home: Path
 ) -> None:
     room = homed(tmp_path, "claude")
     launch = tmp_path / "launch"
-    own = launch / "runtime"
-    at = room.directory
+    own = room.directory
+    shared = room.shared
 
     terminal = Claude().terminal(
         TerminalSettings(directory=launch, cli=CLAUDE_CLI, home=room)
@@ -70,51 +78,38 @@ def test_claude_on_a_home_mounts_it_and_the_login_and_nothing_of_the_operator_s(
     assert terminal.env == {
         "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS": "0",
         "DISABLE_AUTOUPDATER": "1",
-        "CLAUDE_CONFIG_DIR": str(at),
+        "CLAUDE_CONFIG_DIR": str(own),
     }
-    assert terminal.home == at
-    empty_directory = own / "empty" / "directory"
-    empty_file = own / "empty" / "file"
+    assert terminal.home == own
     assert terminal.mounts == [
-        Mount(source=at),
         Mount(source=Path("/opt/clis/claude"), read_only=True),
         Mount(source=launch, read_only=True),
-        Mount(source=own / "launch" / "settings.json", target=at / "settings.json"),
-        Mount(source=launch / "claude.json", target=at / ".claude.json"),
-        Mount(source=room.login, target=at / ".credentials.json"),
-        Mount(source=own / "launch" / "shell-snapshots", target=at / "shell-snapshots"),
-        Mount(source=own / "launch" / "session-env", target=at / "session-env"),
-        Mount(source=empty_file, target=at / "CLAUDE.md", read_only=True),
-        *(
-            Mount(source=empty_directory, target=at / name, read_only=True)
-            for name in [
-                "rules",
-                "skills",
-                "commands",
-                "agents",
-                "output-styles",
-                "workflows",
-                "agent-memory",
-                "plugins",
-            ]
-        ),
-        Mount(source=empty_file, target=at / "keybindings.json", read_only=True),
-        Mount(source=empty_directory, target=at / "themes", read_only=True),
+        Mount(source=own),
+        Mount(source=shared),
+        Mount(source=room.login, target=own / ".credentials.json"),
     ]
+    history = {
+        "projects": True,
+        "file-history": True,
+        "tasks": True,
+        "todos": True,
+        "plans": True,
+        "paste-cache": True,
+        "history.jsonl": False,
+    }
+    assert terminal.links == {own / name: shared / name for name in history}
+    assert terminal.shared == Shared(
+        home=shared, items={shared / name: kind for name, kind in history.items()}
+    )
+    assert json.loads(terminal.files[own / "settings.json"]) == {}
+    assert json.loads(terminal.files[own / ".claude.json"])["hasCompletedOnboarding"]
+    assert launch / "claude.json" not in terminal.files
+    assert terminal.copies == []
     assert not [
         each
         for each in terminal.mounts
         if each.source.is_relative_to(home / ".claude") or each.source == home
     ]
-    assert terminal.directories == [
-        empty_directory,
-        own / "launch" / "shell-snapshots",
-        own / "launch" / "session-env",
-    ]
-    assert terminal.files[empty_file] == ""
-    assert json.loads(terminal.files[own / "launch" / "settings.json"]) == {}
-    assert terminal.copies == []
-    assert terminal.left_out == []
 
 
 OPERATORS = {
@@ -126,48 +121,61 @@ OPERATORS = {
     "awsCredentialExport": "~/bin/aws",
     "otelHeadersHelper": "~/bin/otel",
     "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "notify"}]}]},
-    "statusLine": {"type": "command", "command": "line", "authToken": "t"},
+    "statusLine": {"type": "command", "command": "line"},
+    "fileSuggestion": {"type": "command", "command": "~/bin/files"},
+    "extraKnownMarketplaces": {
+        "corp": {"source": {"source": "git", "url": "https://u:tok@git.example/m.git"}}
+    },
+    "permissions": {"deny": ["WebFetch"], "sessionKey": "s"},
     "includeCoAuthoredBy": False,
 }
-"""The operator's own settings, a credential and its helpers among them."""
+"""The operator's own settings: a credential, its helpers, their hooks, a
+status line and another command, and a URL carrying a login, among them."""
 
 
-def test_claude_layers_the_profile_s_settings_over_the_operator_s_credentials_left_out(
+def test_claude_layers_the_settings_leaving_out_credentials_and_commands_by_why(
     tmp_path: Path, home: Path
 ) -> None:
     operators = written(home / ".claude" / "settings.json", json.dumps(OPERATORS))
     room = homed(tmp_path, "claude")
-    assert room.own is not None
+    assert room.layer is not None
     profile = written(
-        room.own / "settings.json",
+        room.layer / "settings.json",
         json.dumps({"model": "opus", "outputStyle": "terse", "secretSauce": 1}),
     )
-    launch = tmp_path / "launch"
 
     terminal = Claude().terminal(
-        TerminalSettings(directory=launch, cli=CLAUDE_CLI, home=room)
+        TerminalSettings(directory=tmp_path / "launch", cli=CLAUDE_CLI, home=room)
     )
 
-    assert json.loads(
-        terminal.files[launch / "runtime" / "launch" / "settings.json"]
-    ) == {
+    assert json.loads(terminal.files[room.directory / "settings.json"]) == {
         "model": "opus",
         "theme": "dark",
-        "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "notify"}]}]},
-        "statusLine": {"type": "command", "command": "line"},
+        "extraKnownMarketplaces": {
+            "corp": {"source": {"source": "git", "url": "https://git.example/m.git"}}
+        },
+        "permissions": {"deny": ["WebFetch"]},
         "includeCoAuthoredBy": False,
         "outputStyle": "terse",
     }
-    assert terminal.left_out == [
-        f"`env` in {operators}",
-        f"`apiKeyHelper` in {operators}",
-        f"`awsAuthRefresh` in {operators}",
-        f"`awsCredentialExport` in {operators}",
-        f"`otelHeadersHelper` in {operators}",
-        f"`statusLine.authToken` in {operators}",
-        f"`secretSauce` in {profile}",
+    assert said(terminal.left_out) == [
+        (f"`env` in {operators}", "credential"),
+        (f"`apiKeyHelper` in {operators}", "command"),
+        (f"`awsAuthRefresh` in {operators}", "command"),
+        (f"`awsCredentialExport` in {operators}", "command"),
+        (f"`otelHeadersHelper` in {operators}", "command"),
+        (f"`hooks` in {operators}", "command"),
+        (f"`statusLine` in {operators}", "command"),
+        (f"`fileSuggestion` in {operators}", "command"),
+        (
+            f"`extraKnownMarketplaces.corp.source.url` in {operators}",
+            "credential",
+        ),
+        (f"`permissions.sessionKey` in {operators}", "credential"),
+        (f"`secretSauce` in {profile}", "credential"),
     ]
     assert terminal.preferences is not None
+    assert terminal.preferences.saved == room.directory / "settings.json"
     assert terminal.preferences.into == profile
     assert {
         each.preference.name: each.value for each in terminal.preferences.written
@@ -188,22 +196,18 @@ def test_claude_off_the_operator_s_layer_reads_the_profile_s_alone(
     written(home / ".claude" / "settings.json", json.dumps({"model": "sonnet"}))
     (home / ".claude" / "skills" / "theirs").mkdir(parents=True)
     room = homed(tmp_path, "claude", operators=False)
-    assert room.own is not None
-    (room.own / "skills" / "mine").mkdir(parents=True)
-    launch = tmp_path / "launch"
+    assert room.layer is not None
+    (room.layer / "skills" / "mine").mkdir(parents=True)
 
     terminal = Claude().terminal(
-        TerminalSettings(directory=launch, cli=CLAUDE_CLI, home=room)
+        TerminalSettings(directory=tmp_path / "launch", cli=CLAUDE_CLI, home=room)
     )
 
-    assert (
-        json.loads(terminal.files[launch / "runtime" / "launch" / "settings.json"])
-        == {}
-    )
-    assert [each.source for each in terminal.copies] == [room.own / "skills"]
+    assert json.loads(terminal.files[room.directory / "settings.json"]) == {}
+    assert [each.source for each in terminal.copies] == [room.layer / "skills"]
 
 
-def test_claude_copies_each_layer_s_configuration_and_leaves_a_link_said(
+def test_claude_copies_each_layer_s_configuration_into_its_own_directory_links_said(
     tmp_path: Path, home: Path
 ) -> None:
     secret = written(tmp_path / "keys" / "id_ed25519", "PRIVATE")
@@ -213,129 +217,125 @@ def test_claude_copies_each_layer_s_configuration_and_leaves_a_link_said(
     (theirs / "skills" / "keys").symlink_to(secret.parent)
     written(theirs / "plugins" / "installed_plugins.json", "{}")
     written(theirs / "plugins" / "data" / "tokens.json", "token")
+    written(theirs / "agent-memory" / "reviewer" / "MEMORY.md", "another project's")
     os.mkfifo(theirs / "plugins" / "pipe")
     (theirs / "CLAUDE.md").symlink_to(secret)
     room = homed(tmp_path, "claude")
-    assert room.own is not None
-    written(room.own / "skills" / "shared" / "SKILL.md", "the profile's")
-    written(room.own / "CLAUDE.md", "the profile's guidance")
-    launch = tmp_path / "launch"
-    copied = launch / "runtime" / "configuration"
+    assert room.layer is not None
+    written(room.layer / "skills" / "shared" / "SKILL.md", "the profile's")
+    written(room.layer / "CLAUDE.md", "the profile's guidance")
+    own = room.directory
 
     terminal = Claude().terminal(
-        TerminalSettings(directory=launch, cli=CLAUDE_CLI, home=room)
+        TerminalSettings(directory=tmp_path / "launch", cli=CLAUDE_CLI, home=room)
     )
     terminal.prepare()
 
-    assert terminal.left_out == [
-        f"{theirs / 'CLAUDE.md'}, which is a link lup doesn't follow"
+    assert said(terminal.left_out) == [
+        (f"{theirs / 'CLAUDE.md'}, which is a link lup doesn't follow", "unread")
     ]
-    assert (
-        Mount(
-            source=copied / "skills", target=room.directory / "skills", read_only=True
-        )
-        in terminal.mounts
-    )
-    assert (copied / "skills" / "review" / "SKILL.md").read_text() == "theirs"
-    assert (copied / "skills" / "shared" / "SKILL.md").read_text() == "the profile's"
-    assert (copied / "skills" / "keys").is_symlink()
-    assert (copied / "CLAUDE.md").read_text() == "the profile's guidance"
-    assert sorted(each.name for each in (copied / "plugins").iterdir()) == [
+    assert (own / "skills" / "review" / "SKILL.md").read_text() == "theirs"
+    assert (own / "skills" / "shared" / "SKILL.md").read_text() == "the profile's"
+    assert (own / "skills" / "keys").is_symlink()
+    assert (own / "CLAUDE.md").read_text() == "the profile's guidance"
+    assert sorted(each.name for each in (own / "plugins").iterdir()) == [
         "installed_plugins.json"
     ]
+    assert not (own / "agent-memory").exists()
 
 
-def test_claude_s_preparation_makes_each_landing_in_the_home_replacing_a_room_s_links(
+def test_claude_s_preparation_links_the_history_making_it_in_the_home_past_a_room_s_links(
     tmp_path: Path, home: Path
 ) -> None:
     room = homed(tmp_path, "claude")
-    at = room.directory
-    at.mkdir(parents=True)
-    outside = written(tmp_path / "outside" / "bashrc", "the operator's")
-    (at / "settings.json").symlink_to(outside)
-    (at / "skills").symlink_to(outside.parent)
-    (at / "session-env").mkdir()
-    written(at / "session-env" / "kept", "a room's")
+    shared = room.shared
+    shared.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (shared / "projects").symlink_to(outside)
+    written(shared / "history.jsonl", '{"display": "earlier"}\n')
+    written(shared / ".config.json", '{"env": {"PATH": "/tmp/evil"}}')
     room.login.parent.mkdir(parents=True)
     room.login.touch()
-    launch = tmp_path / "launch"
+    own = room.directory
 
     terminal = Claude().terminal(
-        TerminalSettings(directory=launch, cli=CLAUDE_CLI, home=room)
+        TerminalSettings(directory=tmp_path / "launch", cli=CLAUDE_CLI, home=room)
     )
     terminal.prepare()
 
-    assert outside.read_text() == "the operator's"
-    assert sorted(each.name for each in outside.parent.iterdir()) == ["bashrc"]
-    for name in ["settings.json", ".claude.json", ".credentials.json", "CLAUDE.md"]:
-        assert (at / name).is_file()
-        assert not (at / name).is_symlink()
-    for name in ["skills", "plugins", "shell-snapshots", "session-env"]:
-        assert (at / name).is_dir()
-        assert not (at / name).is_symlink()
-    # What the room left where a directory is mounted stays, under the mount.
-    assert (at / "session-env" / "kept").read_text() == "a room's"
+    assert list(outside.iterdir()) == []
+    assert (shared / "projects").is_dir()
+    assert not (shared / "projects").is_symlink()
+    assert (own / "projects").readlink() == shared / "projects"
+    assert (own / "history.jsonl").read_text() == '{"display": "earlier"}\n'
+    assert (own / ".credentials.json").is_file()
+    # What a room left in the shared home outside its history isn't the
+    # launch's: Claude Code reads its own directory, where none is.
+    assert not (own / ".config.json").exists()
 
 
 # Codex on a home
 
 
-def test_codex_on_a_home_mounts_it_the_login_and_its_own_and_nothing_of_the_operator_s(
+def test_codex_runs_in_the_launch_s_own_home_linking_its_history_to_the_shared_one(
     tmp_path: Path, home: Path
 ) -> None:
     room = homed(tmp_path, "codex")
     launch = tmp_path / "launch"
-    own = launch / "runtime"
-    at = room.directory
+    own = room.directory
+    shared = room.shared
 
     terminal = Codex().terminal(
         TerminalSettings(directory=launch, cli=CODEX_CLI, home=room)
     )
 
-    assert terminal.env == {"CODEX_HOME": str(at)}
+    assert terminal.env == {"CODEX_HOME": str(own)}
     assert 'cli_auth_credentials_store="file"' in terminal.command
-    assert terminal.home == at
-    empty_directory = own / "empty" / "directory"
-    empty_file = own / "empty" / "file"
+    assert terminal.home == own
     assert terminal.mounts == [
-        Mount(source=at),
         Mount(source=CODEX_PACKAGE, read_only=True),
         Mount(
             source=launch / "requirements.toml",
             target=Path("/etc/codex/requirements.toml"),
             read_only=True,
         ),
-        Mount(source=own / "launch" / "config.toml", target=at / "config.toml"),
-        Mount(source=room.login, target=at / "auth.json"),
-        Mount(source=own / "launch" / "shell_snapshots", target=at / "shell_snapshots"),
-        Mount(source=own / "launch" / "skills", target=at / "skills"),
-        Mount(source=own / "launch" / "tmp", target=at / "tmp"),
-        Mount(source=empty_file, target=at / "AGENTS.md", read_only=True),
-        Mount(source=empty_file, target=at / "AGENTS.override.md", read_only=True),
-        Mount(source=empty_directory, target=at / "rules", read_only=True),
-        Mount(source=empty_directory, target=at / "prompts", read_only=True),
+        Mount(source=own),
+        Mount(source=shared),
+        Mount(source=room.login, target=own / "auth.json"),
     ]
-    assert tomllib.loads(terminal.files[own / "launch" / "config.toml"]) == {
-        "tui": {"screen_reader_detection_done": True}
+    history = {
+        "sessions": True,
+        "archived_sessions": True,
+        "history.jsonl": False,
+        "session_index.jsonl": False,
     }
+    assert terminal.links == {own / name: shared / name for name in history}
+    assert terminal.shared == Shared(
+        home=shared, items={shared / name: kind for name, kind in history.items()}
+    )
+    assert tomllib.loads(terminal.files[own / "config.toml"]) == {}
 
 
-def test_codex_layers_its_configuration_and_profiles_with_credentials_left_out(
+def test_codex_layers_its_configuration_and_profiles_leaving_out_credentials_and_commands(
     tmp_path: Path, home: Path
 ) -> None:
     operators = written(
         home / ".codex" / "config.toml",
         """\
 model = "gpt-6"
+notify = ["notify-send", "Codex"]
 [tui]
 theme = "dark"
-screen_reader_detection_done = false
 [shell_environment_policy]
 set = { GITHUB_TOKEN = "ghp_x" }
 inherit = "core"
 [model_providers.corp]
-base_url = "https://corp.example"
+base_url = "https://svc:pw@corp.example/v1"
 experimental_bearer_token = "b"
+[model_providers.vault.auth]
+command = "vault"
+args = ["read", "token"]
 [otel.exporter.otlp-http]
 endpoint = "https://otel.example"
 headers = { x-honeycomb-team = "k" }
@@ -349,44 +349,44 @@ env = { DATABASE_URL = "postgres://u:p@h/d" }
         'model = "gpt-6-mini"\n[model_providers.corp]\nhttp_headers = { Authorization = "Bearer b" }\n',
     )
     room = homed(tmp_path, "codex")
-    assert room.own is not None
-    written(room.own / "config.toml", 'model_reasoning_effort = "high"\n')
-    launch = tmp_path / "launch"
-    own = launch / "runtime"
+    assert room.layer is not None
+    written(room.layer / "config.toml", 'model_reasoning_effort = "high"\n')
+    own = room.directory
 
     terminal = Codex().terminal(
-        TerminalSettings(directory=launch, cli=CODEX_CLI, home=room)
+        TerminalSettings(directory=tmp_path / "launch", cli=CODEX_CLI, home=room)
     )
 
-    assert tomllib.loads(terminal.files[own / "launch" / "config.toml"]) == {
+    assert tomllib.loads(terminal.files[own / "config.toml"]) == {
         "model": "gpt-6",
         "model_reasoning_effort": "high",
-        "tui": {"theme": "dark", "screen_reader_detection_done": False},
+        "tui": {"theme": "dark"},
         "shell_environment_policy": {"inherit": "core"},
-        "model_providers": {"corp": {"base_url": "https://corp.example"}},
+        "model_providers": {
+            "corp": {"base_url": "https://corp.example/v1"},
+            "vault": {},
+        },
         "otel": {"exporter": {"otlp-http": {"endpoint": "https://otel.example"}}},
     }
-    assert tomllib.loads(
-        terminal.files[own / "configuration" / "fast.config.toml"]
-    ) == {
+    assert tomllib.loads(terminal.files[own / "fast.config.toml"]) == {
         "model": "gpt-6-mini",
         "model_providers": {"corp": {"http_headers": {}}},
     }
-    assert (
-        Mount(
-            source=own / "configuration" / "fast.config.toml",
-            target=room.directory / "fast.config.toml",
-            read_only=True,
-        )
-        in terminal.mounts
-    )
-    assert terminal.left_out == [
-        f"`mcp_servers` in {operators}",
-        f"`shell_environment_policy.set` in {operators}",
-        f"`model_providers.corp.experimental_bearer_token` in {operators}",
-        f"`otel.exporter.otlp-http.headers` in {operators}",
-        f"`model_providers.corp.http_headers.Authorization` in {fast}",
+    assert said(terminal.left_out) == [
+        (f"`notify` in {operators}", "command"),
+        (f"`mcp_servers` in {operators}", "command"),
+        (f"`shell_environment_policy.set` in {operators}", "credential"),
+        (
+            f"`model_providers.corp.experimental_bearer_token` in {operators}",
+            "credential",
+        ),
+        (f"`model_providers.corp.base_url` in {operators}", "credential"),
+        (f"`model_providers.vault.auth` in {operators}", "command"),
+        (f"`otel.exporter.otlp-http.headers` in {operators}", "credential"),
+        (f"`model_providers.corp.http_headers.Authorization` in {fast}", "credential"),
     ]
+    assert terminal.preferences is not None
+    assert terminal.preferences.saved == own / "config.toml"
 
 
 def test_codex_copies_the_operator_s_own_skills_read_only_into_the_room_s_home(
@@ -394,7 +394,7 @@ def test_codex_copies_the_operator_s_own_skills_read_only_into_the_room_s_home(
 ) -> None:
     written(home / ".agents" / "skills" / "deploy" / "SKILL.md", "theirs")
     launch = tmp_path / "launch"
-    copied = launch / "runtime" / "configuration" / ".agents-skills"
+    copied = launch / "agents-skills"
 
     terminal = Codex().terminal(
         TerminalSettings(directory=launch, cli=CODEX_CLI, home=homed(tmp_path, "codex"))
@@ -484,31 +484,51 @@ def test_a_copy_of_a_link_is_none_and_one_of_nothing_is_nothing(
     assert not (tmp_path / "out" / "b").exists()
 
 
-def test_configuration_mounts_the_copy_where_a_layer_holds_the_item_else_the_empty(
+def test_configuration_is_copied_from_each_layer_holding_the_item_odd_ones_said(
     tmp_path: Path,
 ) -> None:
     lower = tmp_path / "lower"
     upper = tmp_path / "upper"
     (lower / "skills").mkdir(parents=True)
     written(upper / "skills", "a file where a directory goes")
-    launch = HomeLaunch(directory=tmp_path / "launch")
-    at = tmp_path / "home"
+    own = tmp_path / "own"
 
     placed = configured(
         [Item(name="skills"), Item(name="CLAUDE.md", directory=False)],
         [lower, upper],
-        at,
-        launch,
+        own,
     )
 
-    assert placed.copies == [
-        Copy(source=lower / "skills", destination=launch.copied("skills"))
+    assert placed.copies == [Copy(source=lower / "skills", destination=own / "skills")]
+    assert said(placed.left) == [
+        (f"{upper / 'skills'}, which isn't a directory", "unread")
     ]
-    assert placed.mounts == [
-        Mount(source=launch.copied("skills"), target=at / "skills", read_only=True),
-        Mount(source=launch.empty_file, target=at / "CLAUDE.md", read_only=True),
-    ]
-    assert placed.left == [f"{upper / 'skills'}, which isn't a directory"]
+
+
+def test_a_record_is_opened_only_where_it_s_a_file_inside_its_root(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "home"
+    root.mkdir()
+    mine = written(root / "mine.jsonl", "{}\n")
+    secret = written(tmp_path / "secret", "PRIVATE")
+    (root / "linked.jsonl").symlink_to(secret)
+    os.mkfifo(root / "pipe.jsonl")
+
+    reading = opened(root, mine)
+    assert reading is not None
+    with reading:
+        assert reading.read() == b"{}\n"
+    assert opened(root, root / "linked.jsonl") is None
+    assert opened(root, root / "pipe.jsonl") is None
+    assert opened(root, root / "missing.jsonl") is None
+
+
+def test_a_line_too_long_to_hold_is_read_past(tmp_path: Path) -> None:
+    del tmp_path
+    reading = io.BytesIO(b"a\n" + b"x" * 100 + b"\nb\n" + b"y" * 50)
+
+    assert list(lines(reading, largest=10)) == [b"a\n", b"b\n"]
 
 
 # The preferences carried back

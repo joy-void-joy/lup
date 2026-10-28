@@ -252,6 +252,16 @@ class Register(Request, reads=False):
     there, for the launch's hooks, rather than where the runner names the
     host's (`Runner.venv`). None where the room has none, and in a record from
     before launches had them."""
+    home: AbsolutePath | None = None
+    """The history its runtime's sessions share with the other rooms given it
+    (`docs/launch.md`, *A home of the rooms' own*): where the host reads a
+    launched session's record, and what a path a hook names under the launch's
+    own runtime directory (`own`) is read in. None in a record from before
+    launches kept it."""
+    own: AbsolutePath | None = None
+    """The runtime's own directory for the launch, which the room writes, links
+    into `home` among it: a path a hook names inside it is read as the same
+    place in `home`, never through it (`lup_dev.host.homes.translated`)."""
     name: Name | None = None
     """Its name, as it stands: the one asked at registration, made unique
     (`exact`), and each rename since. None in a record from before launches
