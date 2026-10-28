@@ -48,9 +48,7 @@ class LupDevelopment(Module):
       there would be bundled into the host's engine at the next approval
       (`lup_dev/pyright_source.py`). pnpm installs its dependencies, from
       pyright's own lockfile: pnpm 11, the first to read its package age from
-      `~/.config/pnpm/config.yaml` and check a frozen lockfile against it. It's
-      optional, so a room whose image predates it still runs the gate where
-      nothing it builds is stale.
+      `~/.config/pnpm/config.yaml` and check a frozen lockfile against it.
     - The dashboard's page is built the same way, after the engine: its types
       generated from the API's description, type-checked, tested and bundled
       (`packages/lup-dashboard/build.py`), its packages installed by pnpm from
@@ -78,8 +76,6 @@ class LupDevelopment(Module):
             tool="pnpm",
             version=">=11",
             probe=["pnpm", "--version"],
-            # lup: defer(issue=308, why="required once every room's image carries pnpm: optional while rooms launched before it joined the image still run the gate")
-            optional=True,
             why=(
                 "installs the engine's bundler, the dashboard page's packages, and "
                 "pyright's dependencies where the engine's build fetches a release "

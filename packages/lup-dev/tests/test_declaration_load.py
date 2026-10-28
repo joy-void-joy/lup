@@ -208,7 +208,7 @@ def test_lups_own_declaration_is_its_modules_with_its_changes() -> None:
         (each.requirement.tool, each.requirement.optional)
         for each in resolved.requirements
         if each.module == "lup-development"
-    ] == [("pnpm", True)]
+    ] == [("pnpm", False)]
     assert [each.name for each in resolved.packages][-3:] == ["nodejs", "pnpm", "uv"]
     assert resolved.pyright_source is not None
     assert [each.name for each in resolved.guidance] == [
