@@ -339,3 +339,67 @@ export function chords(parts: readonly Part[], pressed: string): Following[] {
     }
     return [...found.values()];
 }
+
+/** The parts of the palette whose keys it runs as chosen, from normal mode: answering, moving, the overview and the folds. */
+const RUNNABLE = new Set(["Answering", "Moving", "The overview", "Folds"]);
+
+/**
+ * Return `keys`, one way of pressing a key as the list writes it (`␣d`, `]]`, `^d`, `zR`), as vim's keymap names each
+ * key pressed (`<Space>`, `d`; `<C-d>`): none for one that's no plain sequence of keys, a motion left to type (`…`),
+ * Enter, Tab or a mark of the margin's.
+ */
+export function vimKeys(keys: string): string[] | null {
+    const pressed: string[] = [];
+    const chars = [...keys];
+    for (let at = 0; at < chars.length; at += 1) {
+        const char = chars[at] ?? "";
+        if (char === "␣") {
+            pressed.push("<Space>");
+        } else if (char === "^" && at + 1 < chars.length && /^[a-z]$/.test(chars[at + 1] ?? "")) {
+            pressed.push(`<C-${chars[at + 1]}>`);
+            at += 1;
+        } else if (/^[\x21-\x7e]$/.test(char)) {
+            pressed.push(char);
+        } else {
+            return null;
+        }
+    }
+    return pressed.length === 0 ? null : pressed;
+}
+
+/**
+ * Return what the palette runs as `key` of the part titled `title` is chosen, as vim's keymap names each key: its
+ * first way of being pressed that's a whole key, as `]]` of `]] [[`, never one leading a chord (`zf`, `␣f`), which
+ * would wait for the next key; none for a key of a part it doesn't run, writing a comment or the clipboard's, or one
+ * none of whose ways is a plain sequence of keys.
+ */
+export function runOf(parts: readonly Part[], title: string, key: Key): string[] | null {
+    if (!RUNNABLE.has(title)) {
+        return null;
+    }
+    for (const way of key.keys.split(" ")) {
+        const pressed = vimKeys(way);
+        if (pressed !== null && chords(parts, way).length === 0) {
+            return pressed;
+        }
+    }
+    return null;
+}
+
+/**
+ * Return how well the search `search` matches an entry of the palette, as cmdk scores one, 0 where it doesn't: each of
+ * its words in the entry's name, its keys and what it's called short (`named`), or in what it does whole (`keywords`),
+ * those found in its name counting most, so `next item` finds `]]` before an entry whose long words hold both.
+ */
+export function searched(named: string, search: string, keywords: readonly string[] = []): number {
+    const words = search.toLowerCase().split(/\s+/).filter((each) => each !== "");
+    if (words.length === 0) {
+        return 1;
+    }
+    const name = named.toLowerCase();
+    const whole = `${name} ${keywords.join(" ").toLowerCase()}`;
+    if (!words.every((each) => whole.includes(each))) {
+        return 0;
+    }
+    return 0.5 + (0.5 * words.filter((each) => name.includes(each)).length) / words.length;
+}

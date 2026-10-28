@@ -245,6 +245,34 @@ kbd {
     background: var(--float-bg);
 }
 
+/* The palette of every key, `?`: each key beside what it does, wrapped, the key's column its own. */
+.keys-palette {
+    width: min(110ch, 96vw);
+}
+
+.keys-palette [cmdk-list] {
+    max-height: 70vh;
+}
+
+.keys-palette .keys-entry {
+    display: grid;
+    grid-template-columns: 16ch 1fr;
+    gap: 2ch;
+    white-space: normal;
+}
+
+.keys-palette kbd {
+    color: var(--fg);
+}
+
+.keys-palette .keys-does {
+    color: var(--muted);
+}
+
+.keys-palette [cmdk-item][data-selected="true"] .keys-does {
+    color: var(--fg);
+}
+
 .palette [cmdk-empty] {
     color: var(--muted);
     padding: 0 1ch;

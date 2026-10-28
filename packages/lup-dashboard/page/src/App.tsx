@@ -24,6 +24,7 @@ import { ask, type Asked, type Replied } from "./api";
 import { cited } from "./comments";
 import { useNow, useSame, useViews, useWatched } from "./hooks";
 import type { Marked } from "./grammar";
+import { feed } from "./editor";
 import { reviewKeys, type Here } from "./keys";
 import { Keys } from "./Keys";
 import { adopt, merged } from "./looks";
@@ -803,6 +804,9 @@ export function App() {
                         parts={parts}
                         here={here}
                         inserting={inserting}
+                        run={(keys) => {
+                            feed(keys);
+                        }}
                         open={listing}
                         setOpen={setListing}
                         pending={chord}

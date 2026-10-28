@@ -612,6 +612,22 @@ function mapKeys(): void {
     map("gd", "lupFollow", "normal");
 }
 
+/** The editor last made, which the palette gives the keys it runs (`feed`). */
+let fed: EditorView | null = null;
+
+/** Give `keys`, as vim's keymap names each key pressed (`<Space>`, `]`), to the editor last made, in normal mode, as if typed; and say whether there was one. */
+export function feed(keys: readonly string[]): boolean {
+    const cm = fed === null ? null : vimOf(fed);
+    if (fed === null || cm === null) {
+        return false;
+    }
+    fed.focus();
+    for (const key of keys) {
+        Vim.handleKey(cm, key, "user");
+    }
+    return true;
+}
+
 /** Return the editor's vim, once it's started. */
 export function vimOf(view: EditorView): CodeMirrorV | null {
     const cm = getCM(view);
@@ -1545,6 +1561,7 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
             }),
         });
         view.current = created;
+        fed = created;
         shifting(created);
         getCM(created)?.on("vim-mode-change", (event: { mode: string }) => {
             // Leaving visual mode, as Esc does, ends a fold-wise selection.
@@ -1573,6 +1590,7 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
         return () => {
             created.destroy();
             view.current = null;
+            fed = fed === created ? null : fed;
         };
         // The editor is made once; what it shows is sent to it by the view.
         // eslint-disable-next-line react-hooks/exhaustive-deps

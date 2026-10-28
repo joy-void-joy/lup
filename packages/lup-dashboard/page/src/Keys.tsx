@@ -1,14 +1,16 @@
 // The line of keys under a view: what the cursor is on and what each verb
 // would do to it there (`Here`), or, in a comment, the keys that end it; and at
-// its end, but in a comment, `?`, which opens the list of them all, in parts;
-// Esc, `q` or `?` closes it, the keyboard back where it was. Once a chord is
+// its end, but in a comment, `?`, which opens the palette of them all, searched
+// by what one would do, what applies where the cursor is first, then each part,
+// Enter running the one chosen where it's keys it runs (`runOf`), Esc closing
+// it, the keyboard back where it was. Once a chord is
 // begun, as with Space, a panel over the line lists the keys that may follow
 // and what each does, after a moment, so a chord typed whole shows none
 // (`keys.ts`; `docs/dashboard.md`, *The keys*).
-import { useEffect, useState, type KeyboardEvent } from "react";
-import { Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
+import { Command } from "cmdk";
+import { useEffect, useState } from "react";
 
-import { ENDING, WRITING, WRITING_HERE, chords, type Here, type Part } from "./keys";
+import { ENDING, WRITING, WRITING_HERE, chords, runOf, searched, vimKeys, type Here, type Part } from "./keys";
 
 interface Props {
     parts: Part[];
@@ -16,16 +18,18 @@ interface Props {
     here: Here;
     /** Whether a comment is being written. */
     inserting: boolean;
-    /** Whether the list of them all is open. */
+    /** Whether the palette of them all is open. */
     open: boolean;
     setOpen: (open: boolean) => void;
+    /** Run keys chosen in the palette, as vim's keymap names each, as if typed in the review, which takes the keyboard back: none, only that. */
+    run: (keys: string[]) => void;
     /** The keys of a chord begun, as the list writes them (`␣`, `␣z`); none where none is. */
     pending?: string;
     /** How long a chord begun waits before what may follow is shown, in milliseconds. */
     waits?: number;
 }
 
-export function Keys({ parts, here, inserting, open, setOpen, pending = "", waits = 250 }: Props) {
+export function Keys({ parts, here, inserting, open, setOpen, run, pending = "", waits = 250 }: Props) {
     // The chord whose following keys are shown, once it has waited.
     const [shown, setShown] = useState("");
     useEffect(() => {
@@ -36,10 +40,17 @@ export function Keys({ parts, here, inserting, open, setOpen, pending = "", wait
         const showing = setTimeout(() => setShown(pending), waits);
         return () => clearTimeout(showing);
     }, [pending, waits]);
-    function pressed(event: KeyboardEvent) {
-        if (event.key === "?" || event.key === "q") {
-            event.preventDefault();
-            setOpen(false);
+    /** Close the palette, and run the keys chosen, where they're keys it runs, in the review, once it has the keyboard back. */
+    function chose(keys: string[] | null) {
+        setOpen(false);
+        requestAnimationFrame(() => run(keys ?? []));
+    }
+
+    /** Open or close the palette as it asks, as Esc closes it, the keyboard going back to the review. */
+    function closing(now: boolean) {
+        setOpen(now);
+        if (!now) {
+            requestAnimationFrame(() => run([]));
         }
     }
     const following = shown === "" ? [] : chords(parts, shown);
@@ -95,30 +106,47 @@ export function Keys({ parts, here, inserting, open, setOpen, pending = "", wait
                     </span>
                 )}
             </div>
-            <ModalOverlay isOpen={open} onOpenChange={setOpen} isDismissable className="keys-overlay">
-                <Modal className="keys-list">
-                    {/* Around the dialog, which takes the keyboard as it opens, so its keys reach here. */}
-                    <div onKeyDown={pressed}>
-                        <Dialog aria-label="All keys">
-                            {parts.map((part) => (
-                                <section key={part.title}>
-                                    <Heading level={2}>{part.title}</Heading>
-                                    <dl>
-                                        {part.keys.map((key) => (
-                                            <div key={`${key.keys} ${key.does}`}>
-                                                <dt>
-                                                    <kbd>{key.keys}</kbd>
-                                                </dt>
-                                                <dd>{key.does}</dd>
-                                            </div>
-                                        ))}
-                                    </dl>
-                                </section>
+            <Command.Dialog
+                open={open}
+                onOpenChange={closing}
+                label="Every key"
+                overlayClassName="palette-overlay"
+                contentClassName="palette keys-palette"
+                filter={(value, search, keywords) => searched(value, search, keywords ?? [])}
+            >
+                <Command.Input placeholder="What would you do? Every key, searchable…" />
+                <Command.List>
+                    <Command.Empty>No key does that.</Command.Empty>
+                    {here.reached.length === 0 ? null : (
+                        <Command.Group heading={`Here: ${here.on}`}>
+                            {here.reached.map((each) => (
+                                <Command.Item key={`here ${each.keys}`} value={`here ${each.keys} ${each.says} ${each.on ?? ""}`} onSelect={() => chose(vimKeys(each.keys.split(" ")[0] ?? ""))}>
+                                    <span>
+                                        <kbd>{each.keys}</kbd> {each.on === null ? null : <span className="keys-on">{each.on}: </span>}
+                                        {each.says}
+                                    </span>
+                                </Command.Item>
                             ))}
-                        </Dialog>
-                    </div>
-                </Modal>
-            </ModalOverlay>
+                        </Command.Group>
+                    )}
+                    {parts.map((part) => (
+                        <Command.Group key={part.title} heading={part.title}>
+                            {part.keys.map((key) => (
+                                <Command.Item
+                                    key={`${part.title} ${key.keys}`}
+                                    value={`${key.keys} ${key.short} · ${part.title}`}
+                                    keywords={[key.does]}
+                                    onSelect={() => chose(runOf(parts, part.title, key))}
+                                >
+                                    <span className="keys-entry">
+                                        <kbd>{key.keys}</kbd> <span className="keys-does">{key.does}</span>
+                                    </span>
+                                </Command.Item>
+                            ))}
+                        </Command.Group>
+                    ))}
+                </Command.List>
+            </Command.Dialog>
         </>
     );
 }

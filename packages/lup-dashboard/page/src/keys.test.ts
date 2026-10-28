@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { LOOKS } from "./fixtures/looks";
-import { ENDING, WRITING, chords, reviewKeys } from "./keys";
+import { ENDING, WRITING, chords, reviewKeys, runOf, searched, vimKeys } from "./keys";
 
 const REVIEW_KEYS = reviewKeys(LOOKS.kinds, LOOKS.verbs);
 const KINDS = LOOKS.kinds;
@@ -92,5 +92,44 @@ describe("what may follow a chord", () => {
         expect(following("zf").map((each) => each.split(" ")[0])).toEqual(letters);
         // Space f and Space F lead the fold-wise selections alone: f and F each follow Space once.
         expect(following("␣").filter((each) => each.startsWith("f ") || each.startsWith("F "))).toEqual(["f select by kind", "F select every one"]);
+    });
+});
+
+describe("what the palette runs", () => {
+    const run = (title: string, keys: string) => {
+        const key = REVIEW_KEYS.find((part) => part.title === title)?.keys.find((each) => each.keys === keys);
+        return key === undefined ? "no key" : runOf(REVIEW_KEYS, title, key);
+    };
+
+    it("names each key pressed as vim's keymap does, Space and Ctrl among them, and none for what's no plain sequence", () => {
+        expect(vimKeys("␣d")).toEqual(["<Space>", "d"]);
+        expect(vimKeys("]]")).toEqual(["]", "]"]);
+        expect(vimKeys("^d")).toEqual(["<C-d>"]);
+        expect(vimKeys("\\")).toEqual(["\\"]);
+        expect([vimKeys("c…"), vimKeys("^⏎"), vimKeys("◆"), vimKeys("")]).toEqual([null, null, null, null]);
+    });
+
+    it("runs a key's first whole way of being pressed, never one leading a chord, nor a comment's or the clipboard's", () => {
+        expect(run("Answering", "␣d")).toEqual(["<Space>", "d"]);
+        expect(run("Answering", "^⏎")).toBeNull();
+        expect(run("Moving", "]] [[")).toEqual(["]", "]"]);
+        expect(run("Moving", "^d ^u ^f ^b")).toEqual(["<C-d>"]);
+        expect(run("Folds", "zR zM")).toEqual(["z", "R"]);
+        expect(run("Folds", "zf")).toBeNull();
+        expect(run("Folds", "␣f")).toBeNull();
+        expect(run("Folds", "zff")).toEqual(["z", "f", "f"]);
+        expect(run("The clipboard", '"+y "*y')).toBeNull();
+        expect(run("Writing a comment", "Esc")).toBeNull();
+    });
+});
+
+describe("searching the palette", () => {
+    it("finds an entry by every word, those in its keys and short name first, never by letters scattered through its words", () => {
+        const pause = searched("␣p pause · Answering", "next item", ["pause the agent at its next call until it's resumed"]);
+        const items = searched("]] [[ items · Moving", "next item", ["next and previous item, on its first line that matters"]);
+        expect(pause).toBe(0);
+        expect(items).toBeGreaterThan(0.5);
+        expect(searched("]f [f files · Moving", "next item", ["next and previous file's header"])).toBe(0);
+        expect(searched("anything", "")).toBe(1);
     });
 });
