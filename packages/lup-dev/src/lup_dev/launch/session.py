@@ -23,6 +23,9 @@ worktree launched, come the library's `TerminalSettings` (`terminal_settings`):
   declaration runs for a section to list (`launch/guidance.py`);
 - the paths trusted: the worktree, and its repository's main worktree, which the
   runtimes ask about for a linked one;
+- the home of the rooms' own the runtime runs on, with the account's login and
+  the profile's configuration over the operator's (`docs/launch.md`, *A home of
+  the rooms' own*);
 - the launch's own directory, where the compiled files are written.
 
 The hook in the room is one command for every runtime, and one for each event:
@@ -68,6 +71,7 @@ from lup.sessions.bridge import Bridge
 from lup.sessions.terminal import (
     Cli,
     Hook,
+    RuntimeHome,
     SessionSettings,
     TerminalSettings,
     ToolServer,
@@ -331,8 +335,9 @@ def terminal_settings(
     shared: dict[str, Path],
     rules: list[Rule],
     lent: list[Lent] | None = None,
+    home: RuntimeHome | None = None,
 ) -> TerminalSettings:
-    """Return what lup adds to the session launched in `worktree`, its files compiled into `directory`.
+    """Return what lup adds to the session launched in `worktree`, its files compiled into `directory`, on `home`.
 
     `tools` are lup's tools the host service serves it, `neighbours` the other
     repositories named for it, as the launch found them, and `lent` the
@@ -363,4 +368,5 @@ def terminal_settings(
         session=session.declared,
         defaults=session.defaults,
         trusted=trusted(worktree),
+        home=home,
     )
