@@ -1,0 +1,66 @@
+[
+  {
+    "name": "how the work went",
+    "repository": "/r/lup.git",
+    "argument": {
+      "number": 58
+    },
+    "given": {
+      "items": [
+        {
+          "number": 58,
+          "reason": {
+            "reason": "how it went",
+            "text": "Steady."
+          },
+          "sender": {
+            "party": "conversation",
+            "repository": "/r/lup.git",
+            "runtime": "claude",
+            "session": "s1",
+            "agent": "a1"
+          },
+          "recipient": {
+            "party": "operator"
+          },
+          "replies": [],
+          "citations": [],
+          "edits": [],
+          "quiet": false,
+          "made": "2026-10-27T09:00:00Z",
+          "state": {
+            "state": "waiting"
+          },
+          "rank": {
+            "name": "news",
+            "order": 1,
+            "notifies": false
+          }
+        }
+      ]
+    },
+    "module": "inbox",
+    "view": "how_it_went",
+    "answer": {
+      "summary": [
+        {
+          "text": "how it went",
+          "tone": "plain"
+        }
+      ],
+      "waiting": false,
+      "count": 0,
+      "offers": [],
+      "blocks": [
+        {
+          "block": "markdown",
+          "id": "text",
+          "version": null,
+          "offers": [],
+          "text": "Steady.",
+          "tone": "plain"
+        }
+      ]
+    }
+  }
+]

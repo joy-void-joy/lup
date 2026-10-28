@@ -1,0 +1,229 @@
+[
+  {
+    "name": "a note",
+    "repository": "/r/lup.git",
+    "argument": {
+      "number": 62
+    },
+    "given": {
+      "items": [
+        {
+          "number": 62,
+          "reason": {
+            "reason": "message",
+            "passages": [],
+            "answers": [],
+            "ending": false,
+            "kind": "note",
+            "text": "Read the records.\n\nFour kinds."
+          },
+          "sender": {
+            "party": "conversation",
+            "repository": "/r/lup.git",
+            "runtime": "claude",
+            "session": "s1",
+            "agent": "a1"
+          },
+          "recipient": {
+            "party": "operator"
+          },
+          "replies": [],
+          "citations": [],
+          "edits": [],
+          "quiet": false,
+          "made": "2026-10-27T09:00:00Z",
+          "state": {
+            "state": "waiting"
+          },
+          "rank": {
+            "name": "news",
+            "order": 1,
+            "notifies": false
+          }
+        }
+      ]
+    },
+    "module": "inbox",
+    "view": "message",
+    "answer": {
+      "summary": [
+        {
+          "text": "note",
+          "tone": "plain"
+        }
+      ],
+      "waiting": false,
+      "count": 0,
+      "offers": [],
+      "blocks": [
+        {
+          "block": "markdown",
+          "id": "text",
+          "version": null,
+          "offers": [],
+          "text": "Read the records.\n\nFour kinds.",
+          "tone": "plain"
+        }
+      ]
+    }
+  },
+  {
+    "name": "a message to another conversation, named by its path",
+    "repository": "/r/lup.git",
+    "argument": {
+      "number": 65
+    },
+    "given": {
+      "items": [
+        {
+          "number": 65,
+          "reason": {
+            "reason": "message",
+            "passages": [],
+            "answers": [],
+            "ending": false,
+            "kind": "note",
+            "text": "Over to you.",
+            "to": {
+              "party": "conversation",
+              "repository": "/r/lup.git",
+              "runtime": "claude",
+              "session": "s1",
+              "agent": "a2"
+            }
+          },
+          "sender": {
+            "party": "conversation",
+            "repository": "/r/lup.git",
+            "runtime": "claude",
+            "session": "s1",
+            "agent": "a1"
+          },
+          "recipient": {
+            "party": "operator"
+          },
+          "replies": [],
+          "citations": [],
+          "edits": [],
+          "quiet": false,
+          "made": "2026-10-27T09:00:00Z",
+          "state": {
+            "state": "waiting"
+          },
+          "rank": {
+            "name": "news",
+            "order": 1,
+            "notifies": false
+          }
+        }
+      ],
+      "paths": {
+        "[\"/r/lup.git\",\"claude\",\"s1\",\"a2\"]": "lup-impl/explore-auth"
+      }
+    },
+    "module": "inbox",
+    "view": "message",
+    "answer": {
+      "summary": [
+        {
+          "text": "note",
+          "tone": "plain"
+        },
+        {
+          "text": " to ",
+          "tone": "plain"
+        },
+        {
+          "text": "lup-impl/explore-auth",
+          "tone": "plain",
+          "conversation": {
+            "runtime": "claude",
+            "session": "s1",
+            "agent": "a2"
+          }
+        }
+      ],
+      "waiting": false,
+      "count": 0,
+      "offers": [],
+      "blocks": [
+        {
+          "block": "markdown",
+          "id": "text",
+          "version": null,
+          "offers": [],
+          "text": "Over to you.",
+          "tone": "plain"
+        }
+      ]
+    }
+  },
+  {
+    "name": "a turn's end",
+    "repository": "/r/lup.git",
+    "argument": {
+      "number": 66
+    },
+    "given": {
+      "items": [
+        {
+          "number": 66,
+          "reason": {
+            "reason": "message",
+            "passages": [],
+            "answers": [],
+            "ending": true,
+            "kind": "note",
+            "text": "Done."
+          },
+          "sender": {
+            "party": "conversation",
+            "repository": "/r/lup.git",
+            "runtime": "claude",
+            "session": "s1",
+            "agent": "a1"
+          },
+          "recipient": {
+            "party": "operator"
+          },
+          "replies": [],
+          "citations": [],
+          "edits": [],
+          "quiet": false,
+          "made": "2026-10-27T09:00:00Z",
+          "state": {
+            "state": "waiting"
+          },
+          "rank": {
+            "name": "news",
+            "order": 1,
+            "notifies": false
+          }
+        }
+      ]
+    },
+    "module": "inbox",
+    "view": "message",
+    "answer": {
+      "summary": [
+        {
+          "text": "turn ended",
+          "tone": "plain"
+        }
+      ],
+      "waiting": false,
+      "count": 0,
+      "offers": [],
+      "blocks": [
+        {
+          "block": "markdown",
+          "id": "text",
+          "version": null,
+          "offers": [],
+          "text": "Done.",
+          "tone": "plain"
+        }
+      ]
+    }
+  }
+]

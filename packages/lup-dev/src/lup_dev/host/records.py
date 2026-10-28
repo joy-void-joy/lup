@@ -17,6 +17,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, JsonValue, ValidationInfo, field_validator
 
+from lup.blocks import Drawer, Tone, Verb
 from lup.types import JsonObject, Model
 
 
@@ -128,6 +129,20 @@ class Task(Model):
     active: str | None = None
     """What the entry says while it's in progress, where the runtime keeps a
     present-tense form of it beside the subject; none where it keeps none."""
+
+
+TASKS_DRAWER = Drawer(letter="t", called="the tasks", colour="link")
+"""Where the dashboard shows an agent's task list, as its runtime keeps it: a
+drawer of the runtime adapters', under each agent's banner, its view `tasks`.
+Its view is the page's own until the adapters are a module of their own (#113,
+step 4); the core's looks place it (`lup_dev.declaration.looks`)."""
+TASK_TONE = Tone(name="task", like="plain")
+"""A line of an agent's task list in its drawer, each entry marked done, in
+progress or to do."""
+PAUSE = Verb(name="pause", key="p", called="pause")
+"""The runtime adapters' verb: pausing an agent, which its banner will offer
+once its host side is designed (#157). `Core` declares it until the adapters
+are a module (#113, step 4), so a person's layer may give it another key."""
 
 
 class Transcript(Model):

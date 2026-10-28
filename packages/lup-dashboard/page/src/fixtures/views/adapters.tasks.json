@@ -1,0 +1,107 @@
+[
+  {
+    "name": "a task list, one in progress",
+    "repository": "/r/lup.git",
+    "argument": {
+      "runtime": "claude",
+      "session": "s1",
+      "agent": "a1"
+    },
+    "given": {
+      "drawers": {
+        "[\"/r/lup.git\",\"claude\",\"s1\",\"a1\"]": {
+          "tasks": [
+            {
+              "id": "1",
+              "subject": "Read the records",
+              "status": "completed",
+              "active": null
+            },
+            {
+              "id": "2",
+              "subject": "Write the reader",
+              "status": "in_progress",
+              "active": "Writing the reader"
+            },
+            {
+              "id": "3",
+              "subject": "Test each kind",
+              "status": "pending",
+              "active": null
+            }
+          ]
+        }
+      }
+    },
+    "module": "adapters",
+    "view": "tasks",
+    "answer": {
+      "summary": [
+        {
+          "text": "tasks 1/3",
+          "tone": "plain"
+        }
+      ],
+      "waiting": false,
+      "count": 0,
+      "offers": [],
+      "blocks": [
+        {
+          "block": "line",
+          "id": "task 1",
+          "version": null,
+          "offers": [],
+          "spans": [
+            {
+              "text": "✓ Read the records",
+              "tone": "task"
+            }
+          ]
+        },
+        {
+          "block": "line",
+          "id": "task 2",
+          "version": null,
+          "offers": [],
+          "spans": [
+            {
+              "text": "▶ Writing the reader",
+              "tone": "task"
+            }
+          ]
+        },
+        {
+          "block": "line",
+          "id": "task 3",
+          "version": null,
+          "offers": [],
+          "spans": [
+            {
+              "text": "· Test each kind",
+              "tone": "task"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "no task list",
+    "repository": "/r/lup.git",
+    "argument": {
+      "runtime": "claude",
+      "session": "s1",
+      "agent": "a1"
+    },
+    "given": {
+      "drawers": {
+        "[\"/r/lup.git\",\"claude\",\"s1\",\"a1\"]": {
+          "tasks": []
+        }
+      }
+    },
+    "module": "adapters",
+    "view": "tasks",
+    "answer": null
+  }
+]

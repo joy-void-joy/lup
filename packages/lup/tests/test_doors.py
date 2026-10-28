@@ -255,7 +255,7 @@ def test_a_view_says_where_its_placed_and_when_its_answered_again() -> None:
 
     door = Views.conversation.viewing()
     assert door is not None
-    assert door.place is not None
+    assert isinstance(door.place, lup.Drawer)
     assert door.place.letter == "v"
     assert door.watch.on == [TurnEnded]
     answer = asyncio.run(
@@ -281,5 +281,7 @@ def test_a_view_takes_what_its_viewed_and_answers_blocks() -> None:
     placed = ViewDoor(place=lup.Drawer(letter="v", called="it", colour="cyan"))
     with pytest.raises(DoorError, match="takes the agent it's of"):
         opened(shown, placed)
+    with pytest.raises(DoorError, match="takes the agent it's of"):
+        opened(shown, ViewDoor(place=lup.Banner()))
     with pytest.raises(DoorError, match="needs a docstring"):
         opened(bare, ViewDoor())

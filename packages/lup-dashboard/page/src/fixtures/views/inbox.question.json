@@ -1,0 +1,76 @@
+[
+  {
+    "name": "a question of numbered decisions with their leans",
+    "repository": "/r/lup.git",
+    "argument": {
+      "number": 51
+    },
+    "given": {
+      "items": [
+        {
+          "number": 51,
+          "reason": {
+            "reason": "question",
+            "text": "Which parser?",
+            "decisions": [
+              {
+                "text": "pydantic",
+                "lean": "yes"
+              },
+              {
+                "text": "by hand",
+                "lean": "no"
+              }
+            ]
+          },
+          "sender": {
+            "party": "conversation",
+            "repository": "/r/lup.git",
+            "runtime": "claude",
+            "session": "s1",
+            "agent": "a1"
+          },
+          "recipient": {
+            "party": "operator"
+          },
+          "replies": [],
+          "citations": [],
+          "edits": [],
+          "quiet": false,
+          "made": "2026-10-27T09:00:00Z",
+          "state": {
+            "state": "waiting"
+          },
+          "rank": {
+            "name": "waiting on you",
+            "order": 0,
+            "notifies": true
+          }
+        }
+      ]
+    },
+    "module": "inbox",
+    "view": "question",
+    "answer": {
+      "summary": [
+        {
+          "text": "question",
+          "tone": "plain"
+        }
+      ],
+      "waiting": false,
+      "count": 0,
+      "offers": [],
+      "blocks": [
+        {
+          "block": "markdown",
+          "id": "text",
+          "version": null,
+          "offers": [],
+          "text": "Which parser?\n1. pydantic\n   lean: yes\n2. by hand\n   lean: no",
+          "tone": "plain"
+        }
+      ]
+    }
+  }
+]

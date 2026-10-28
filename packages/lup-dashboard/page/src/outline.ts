@@ -104,22 +104,15 @@ export function itemStanding(region: Region, draft: Draft, reviewed: string | nu
     return { marks, draft: drafted, fresh: fresh(item, reviewed) };
 }
 
-/** Return what names an item in the overview: its header's first part, `@51 question`. */
-function itemText(text: string, region: Region): string {
-    const header = text.slice(region.header.from, region.header.to);
-    const inner = header.replace(/^── /, "").replace(/ ──$/, "");
-    return inner.split(" · ")[0] ?? inner;
-}
 
 /** Return where each group's own lines end: up to the next group's banner, a subagent's nested under it among them. */
 function ownEnds(laidOut: Laid): number[] {
     return laidOut.groups.map((_, at) => (laidOut.groups[at + 1]?.banner.from ?? laidOut.text.length + 1) - 1);
 }
 
-/** Return how many files a group's "since you approved" has to review, as its label says; none where it has none. */
-function toReview(text: string, group: Group): number {
-    const since = group.drawers.find((each) => each.kind === "since");
-    return since === undefined ? 0 : Number(/(\d+) to review/.exec(text.slice(since.header.from, since.header.to))?.[1] ?? 0);
+/** Return how many of what a group's drawers hold wait on the operator, as each drawer's view counts them: its files to review in "since you approved". */
+function toReview(group: Group): number {
+    return group.drawers.reduce((sum, each) => sum + (each.view.answer?.blocks.count ?? 0), 0);
 }
 
 /**
@@ -161,7 +154,7 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
         const key = group.conversation === null ? null : whose(group.conversation);
         const state = key === null ? null : (states.get(key) ?? null);
         const path = group.conversation === null ? "lup's approvals" : called(group.conversation);
-        const files = toReview(text, group);
+        const files = toReview(group);
         const depth = group.depth + 1;
         rows.push({
             key: `group ${group.place}`,
@@ -183,7 +176,7 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
                 key: `item ${region.item.number}`,
                 kind: "item",
                 depth: depth + 1,
-                text: itemText(text, region),
+                text: region.named,
                 title: text.slice(region.header.from, region.header.to),
                 ...itemStanding(region, draft, reviewed),
                 from: region.header.from,

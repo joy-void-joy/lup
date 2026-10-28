@@ -1,4 +1,5 @@
 import { Vim, type CodeMirrorV, type Pos } from "@replit/codemirror-vim";
+import "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
 import { ClipboardRegister, defineClipboard, registerNamed, yanking, type Reach, type SystemClipboard } from "./clipboard";

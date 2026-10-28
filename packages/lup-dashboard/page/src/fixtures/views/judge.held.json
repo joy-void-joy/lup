@@ -1,0 +1,276 @@
+[
+  {
+    "name": "a held change, its files",
+    "repository": "/r/lup.git",
+    "argument": {
+      "number": 55
+    },
+    "given": {
+      "items": [
+        {
+          "number": 55,
+          "reason": {
+            "reason": "held",
+            "text": "Let the change to 2 files land?",
+            "summary": "reader.py adds an ignore",
+            "worktree": "/w/feat",
+            "landing": null
+          },
+          "sender": {
+            "party": "conversation",
+            "repository": "/r/lup.git",
+            "runtime": "claude",
+            "session": "s1",
+            "agent": "a1"
+          },
+          "recipient": {
+            "party": "operator"
+          },
+          "replies": [],
+          "citations": [],
+          "edits": [],
+          "quiet": false,
+          "made": "2026-10-27T09:00:00Z",
+          "state": {
+            "state": "waiting"
+          },
+          "rank": {
+            "name": "waiting on you",
+            "order": 0,
+            "notifies": true
+          }
+        }
+      ],
+      "files": {
+        "55": {
+          "shown": [
+            {
+              "path": "reader.py",
+              "before": {
+                "kind": "text",
+                "text": "import json\n\n\ndef read(path):\n    return path.read_text()\n"
+              },
+              "after": {
+                "kind": "text",
+                "text": "import json\n\n\ndef read(path):\n    # lup: ignore(\"x\", why=\"y\")\n    return path.read_text().split(\"\\n\")\n"
+              },
+              "reading": {
+                "role": "production",
+                "asks": [
+                  {
+                    "name": "ignore",
+                    "taken": "held",
+                    "line": 5,
+                    "side": "after"
+                  }
+                ],
+                "findings": [
+                  {
+                    "rule": "string-split",
+                    "message": "splits a string\nto parse it",
+                    "steer": "",
+                    "start": 6,
+                    "end": 6,
+                    "taken": "told"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "module": "judge",
+    "view": "held",
+    "answer": {
+      "summary": [
+        {
+          "text": "held change",
+          "tone": "plain"
+        },
+        {
+          "text": " · 1 with an ignore",
+          "tone": "plain"
+        }
+      ],
+      "waiting": false,
+      "count": 0,
+      "offers": [
+        {
+          "action": "inbox-answer-approval",
+          "argument": {
+            "number": 55,
+            "approved": true
+          },
+          "verb": "done",
+          "chord": null,
+          "runs": "once",
+          "commented": true,
+          "says": "approve"
+        },
+        {
+          "action": "inbox-answer-approval",
+          "argument": {
+            "number": 55,
+            "approved": false
+          },
+          "verb": "decline",
+          "chord": null,
+          "runs": "once",
+          "commented": false,
+          "says": "decline"
+        }
+      ],
+      "blocks": [
+        {
+          "block": "markdown",
+          "id": "text",
+          "version": null,
+          "offers": [],
+          "text": "Let the change to 2 files land?\nreader.py adds an ignore",
+          "tone": "plain"
+        },
+        {
+          "block": "diff",
+          "id": "file reader.py",
+          "version": null,
+          "offers": [],
+          "path": "reader.py",
+          "before": {
+            "kind": "text",
+            "text": "import json\n\n\ndef read(path):\n    return path.read_text()\n"
+          },
+          "after": {
+            "kind": "text",
+            "text": "import json\n\n\ndef read(path):\n    # lup: ignore(\"x\", why=\"y\")\n    return path.read_text().split(\"\\n\")\n"
+          },
+          "says": [
+            "adds an ignore",
+            "told: string-split"
+          ],
+          "marks": [
+            {
+              "taken": "held",
+              "said": "adds an ignore",
+              "side": "after",
+              "first": 5,
+              "last": null
+            },
+            {
+              "taken": "told",
+              "said": "string-split: splits a string to parse it",
+              "side": "after",
+              "first": 6,
+              "last": 6
+            }
+          ],
+          "open": true,
+          "automatic": false,
+          "design": false
+        }
+      ]
+    }
+  },
+  {
+    "name": "a hold at landing, its files not read yet",
+    "repository": "/r/lup.git",
+    "argument": {
+      "number": 56
+    },
+    "given": {
+      "items": [
+        {
+          "number": 56,
+          "reason": {
+            "reason": "held",
+            "text": "Land feat?",
+            "summary": "landing waits on reader.py",
+            "worktree": "/w/feat",
+            "landing": {
+              "onto": "dev",
+              "tip": "c0ffee",
+              "path": "reader.py",
+              "branches": [
+                "feat"
+              ],
+              "flags": [
+                59
+              ]
+            }
+          },
+          "sender": {
+            "party": "conversation",
+            "repository": "/r/lup.git",
+            "runtime": "claude",
+            "session": "s1",
+            "agent": "a1"
+          },
+          "recipient": {
+            "party": "operator"
+          },
+          "replies": [],
+          "citations": [],
+          "edits": [],
+          "quiet": false,
+          "made": "2026-10-27T09:00:00Z",
+          "state": {
+            "state": "waiting"
+          },
+          "rank": {
+            "name": "waiting on you",
+            "order": 0,
+            "notifies": true
+          }
+        }
+      ]
+    },
+    "module": "judge",
+    "view": "held",
+    "answer": {
+      "summary": [
+        {
+          "text": "holds a landing",
+          "tone": "plain"
+        }
+      ],
+      "waiting": false,
+      "count": 0,
+      "offers": [
+        {
+          "action": "inbox-answer-approval",
+          "argument": {
+            "number": 56,
+            "approved": true
+          },
+          "verb": "done",
+          "chord": null,
+          "runs": "once",
+          "commented": true,
+          "says": "approve"
+        },
+        {
+          "action": "inbox-answer-approval",
+          "argument": {
+            "number": 56,
+            "approved": false
+          },
+          "verb": "decline",
+          "chord": null,
+          "runs": "once",
+          "commented": false,
+          "says": "decline"
+        }
+      ],
+      "blocks": [
+        {
+          "block": "markdown",
+          "id": "text",
+          "version": null,
+          "offers": [],
+          "text": "Land feat?\nlanding waits on reader.py",
+          "tone": "plain"
+        }
+      ]
+    }
+  }
+]

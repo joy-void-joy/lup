@@ -1,0 +1,150 @@
+[
+  {
+    "name": "a write that landed flagged",
+    "repository": "/r/lup.git",
+    "argument": {
+      "number": 59
+    },
+    "given": {
+      "items": [
+        {
+          "number": 59,
+          "reason": {
+            "reason": "flagged",
+            "text": "reader.py landed, flagged.",
+            "summary": "reader.py adds the class `Reader`",
+            "worktree": "/w/feat",
+            "path": "reader.py",
+            "writes": 1
+          },
+          "sender": {
+            "party": "conversation",
+            "repository": "/r/lup.git",
+            "runtime": "claude",
+            "session": "s1",
+            "agent": "a1"
+          },
+          "recipient": {
+            "party": "operator"
+          },
+          "replies": [],
+          "citations": [],
+          "edits": [],
+          "quiet": false,
+          "made": "2026-10-27T09:00:00Z",
+          "state": {
+            "state": "waiting"
+          },
+          "rank": {
+            "name": "flag",
+            "order": 2,
+            "notifies": false
+          }
+        }
+      ],
+      "files": {
+        "59": {
+          "shown": [
+            {
+              "path": "reader.py",
+              "before": {
+                "kind": "text",
+                "text": "import json\n\n\ndef read(path):\n    return path.read_text()\n"
+              },
+              "after": {
+                "kind": "text",
+                "text": "import json\n\n\ndef read(path):\n    # lup: ignore(\"x\", why=\"y\")\n    return path.read_text().split(\"\\n\")\n"
+              },
+              "reading": {
+                "role": "production",
+                "asks": [
+                  {
+                    "name": "ignore",
+                    "taken": "held",
+                    "line": 5,
+                    "side": "after"
+                  }
+                ],
+                "findings": [
+                  {
+                    "rule": "string-split",
+                    "message": "splits a string\nto parse it",
+                    "steer": "",
+                    "start": 6,
+                    "end": 6,
+                    "taken": "told"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "module": "judge",
+    "view": "flagged",
+    "answer": {
+      "summary": [
+        {
+          "text": "landed, flagged",
+          "tone": "plain"
+        },
+        {
+          "text": " · 1 with an ignore",
+          "tone": "plain"
+        }
+      ],
+      "waiting": false,
+      "count": 0,
+      "offers": [],
+      "blocks": [
+        {
+          "block": "markdown",
+          "id": "text",
+          "version": null,
+          "offers": [],
+          "text": "reader.py landed, flagged.\nreader.py adds the class `Reader`",
+          "tone": "plain"
+        },
+        {
+          "block": "diff",
+          "id": "file reader.py",
+          "version": null,
+          "offers": [],
+          "path": "reader.py",
+          "before": {
+            "kind": "text",
+            "text": "import json\n\n\ndef read(path):\n    return path.read_text()\n"
+          },
+          "after": {
+            "kind": "text",
+            "text": "import json\n\n\ndef read(path):\n    # lup: ignore(\"x\", why=\"y\")\n    return path.read_text().split(\"\\n\")\n"
+          },
+          "says": [
+            "adds an ignore",
+            "told: string-split"
+          ],
+          "marks": [
+            {
+              "taken": "held",
+              "said": "adds an ignore",
+              "side": "after",
+              "first": 5,
+              "last": null
+            },
+            {
+              "taken": "told",
+              "said": "string-split: splits a string to parse it",
+              "side": "after",
+              "first": 6,
+              "last": 6
+            }
+          ],
+          "open": true,
+          "automatic": false,
+          "design": false
+        }
+      ]
+    }
+  }
+]

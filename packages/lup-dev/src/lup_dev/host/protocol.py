@@ -15,7 +15,7 @@ from typing import Annotated, ClassVar, Literal, Unpack, get_args
 
 from pydantic import AfterValidator, ConfigDict
 
-from lup.blocks import Drawer, FoldKind, Tone
+from lup.blocks import Drawer, FoldKind, Tone, Verb
 from lup.rooms.container import AbsolutePath
 from lup.types import Model
 from lup_dev.errors import LupDevError
@@ -388,12 +388,27 @@ class Drawn(Model):
     place: Drawer
 
 
+class Bannered(Model):
+    """A view a module places on each agent's banner, with its module: a part of the banner's line (`lup.Banner`)."""
+
+    module: str
+    """The module's name."""
+    view: str
+    """The view's name: its method's."""
+
+
 class Looks(Model):
-    """How a repository's modules' views look: their fold kinds, their tones, and the drawers they place."""
+    """How a repository's modules' views look: their fold kinds, their tones, the drawers they place, and the parts of the banner, the core's first."""
 
     folds: list[FoldKind] = []
     tones: list[Tone] = []
     drawers: list[Drawn] = []
+    """In the order the page lays them under a banner."""
+    banners: list[Bannered] = []
+    """In the order the page says them on a banner, after what the core says
+    of the agent."""
+    verbs: list[Verb] = []
+    """The verbs the review's keys say, Space and a key, the core's first."""
 
 
 class Listed(Reply):
@@ -416,7 +431,11 @@ class Listed(Reply):
     """By repository's git directory, how its modules' views look, as its
     process said when it last started: the page draws their fold kinds, tones
     and drawers from them. A repository whose process hasn't started since the
-    service did has none yet."""
+    service did has none yet: `standing` stands in for it."""
+    standing: Looks = Looks()
+    """How the views of lup's default declaration look, as the host's own lup
+    resolves it: what the page draws a repository's by until its process says
+    its own, as after each start of the service."""
 
 
 class Done(Reply):

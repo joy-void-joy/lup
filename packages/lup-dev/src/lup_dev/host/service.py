@@ -1765,6 +1765,9 @@ class Listing(Model, Reading[ListLaunches], arbitrary_types_allowed=True):
     launches: Launches
     asking: RepositoryAsking | None = None
     """Says how each repository's views look; none says nothing of them."""
+    standing: Looks = Looks()
+    """How lup's default declaration's views look, which stand in for a
+    repository's until its process says its own."""
 
     def looks(self) -> dict[Path, Looks]:
         """Return how each repository's views look, as its process last said."""
@@ -1784,6 +1787,7 @@ class Listing(Model, Reading[ListLaunches], arbitrary_types_allowed=True):
                 each.launch.launch: self.launches.talkers(each) for each in served
             },
             looks=self.looks(),
+            standing=self.standing,
         )
 
     @override
@@ -1823,6 +1827,7 @@ class Listing(Model, Reading[ListLaunches], arbitrary_types_allowed=True):
                 for place, looks in self.looks().items()
                 if place == repository
             },
+            standing=self.standing,
         )
 
 
@@ -1888,6 +1893,10 @@ class HostService(Model, arbitrary_types_allowed=True):
     """Asks each repository's process with no launch, and says how each
     repository's views look, for the listing (`WorkersAsking`); none says
     nothing of them."""
+    standing: Looks = Looks()
+    """How lup's default declaration's views look, which the listing gives to
+    stand in for a repository's until its process says its own (`cli.py`
+    resolves it); none says nothing."""
     line_limit: int = 16 * 1024 * 1024
     """The longest line lup's tool server reads, one MCP message: well above
     asyncio's 64 KiB, which a long message to the operator could pass."""
@@ -2002,7 +2011,9 @@ class HostService(Model, arbitrary_types_allowed=True):
         own = [
             Route.to(Registering(launches=launches)),
             Route.to(Ending(launches=launches)),
-            Route.reading(Listing(launches=launches, asking=self.asking)),
+            Route.reading(
+                Listing(launches=launches, asking=self.asking, standing=self.standing)
+            ),
             Route.to(Renaming(launches=launches)),
             Route.to(HoldingSetting(launches=launches)),
             Route.reading(HoldingShowing(launches=launches)),

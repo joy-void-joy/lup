@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { watch, type Asked, type Connection, type Replied } from "./api";
+import { instanceOf, type Blocks, type Instance } from "./views";
 
 /** The host's reply to `request`, kept up to date while the component is mounted, and where the watch stands. */
 export function useWatched(request: Asked): { reply: Replied | null; connection: Connection } {
@@ -34,4 +35,36 @@ export function useNow(every = 1000): Date {
         return () => clearInterval(ticking);
     }, [every]);
     return now;
+}
+
+/**
+ * What the host answers of each view in `asked`, each watched while it's asked, answered again at its own triggers
+ * (`docs/host.md`, *The views the dashboard shows*), by its instance's id (`views.ts`); a refusal, or a view not yet
+ * answered, none. A view no longer asked stops being watched, and what it answered goes.
+ */
+export function useViews(asked: readonly Instance[]): ReadonlyMap<string, Blocks> {
+    const [answers, setAnswers] = useState<ReadonlyMap<string, Blocks>>(new Map());
+    const key = JSON.stringify(asked.map((each) => instanceOf(each.repository, each.module, each.view, each.argument)).sort());
+    useEffect(() => {
+        const ids = new Set<string>();
+        const stops = asked.map((each) => {
+            const id = instanceOf(each.repository, each.module, each.view, each.argument);
+            ids.add(id);
+            const request = { kind: "module-view" as const, repository: each.repository, module: each.module, view: each.view, argument: each.argument as never };
+            return watch(
+                request,
+                (reply) => {
+                    if (reply.kind === "module-viewed") {
+                        setAnswers((before) => new Map(before).set(id, reply.blocks));
+                    }
+                },
+                () => undefined,
+            );
+        });
+        setAnswers((before) => new Map([...before].filter(([id]) => ids.has(id))));
+        return () => stops.forEach((stop) => stop());
+        // Watched again only where what's asked changes, by the views' ids.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [key]);
+    return answers;
 }

@@ -21,9 +21,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { doing, everyone, launches, ring, running, type Activity, type Agent, type Running } from "./agents";
 import { ask, type Asked, type Replied } from "./api";
 import { cited } from "./comments";
-import { useNow, useSame, useWatched } from "./hooks";
-import { REVIEW_KEYS, REVIEW_PLACES, type ReviewPlace } from "./keys";
+import { useNow, useSame, useViews, useWatched } from "./hooks";
+import { REVIEW_PLACES, reviewKeys, type ReviewPlace } from "./keys";
 import { Keys } from "./Keys";
+import { adopt, merged } from "./looks";
+import { instanceOf, type Instance } from "./views";
+import { producerOf } from "./views/index";
 import { useNarrow } from "./Outline";
 import { Palette } from "./Palette";
 import { Review, type DrawerKind, type Jump } from "./Review";
@@ -33,7 +36,6 @@ import {
     answer,
     changing,
     covered,
-    currentTask,
     EMPTY,
     flag,
     messages,
@@ -162,6 +164,25 @@ export function App() {
     const [jump, setJump] = useState<Jump | null>(null);
     const keeping = useRef<ReturnType<typeof setTimeout> | null>(null);
     const served = useMemo(() => (reply?.kind === "listed" ? launches(reply) : []), [reply]);
+    // How the views look, each repository's as its process said it and lup's default standing in for the rest, merged:
+    // the same object while the listing says the same of them, which it says again at every hook.
+    const declared = useSame(
+        useMemo(() => (reply?.kind === "listed" ? { looks: reply.looks ?? {}, standing: reply.standing } : null), [reply]),
+        (each) => JSON.stringify(each),
+    );
+    const looks = useMemo(() => {
+        const made = declared === null ? merged({}, { folds: [], tones: [], drawers: [], banners: [], verbs: [] }) : merged(declared.looks, declared.standing);
+        // Taken as what's merged now before anything is drawn by it: the keys, the margin and the fold keys read it as they act.
+        adopt(made);
+        return made;
+    }, [declared]);
+    const parts = useMemo(() => reviewKeys(looks.kinds), [looks]);
+    // A fold kind of another repository's taking a letter one already took is refused it, and said.
+    useEffect(() => {
+        if (looks.refused.length > 0) {
+            setSaid(looks.refused.join(" "));
+        }
+    }, [looks]);
     const agents = useMemo(() => everyone(served), [served]);
     // What the review reads of the listing stays the same object while it says the same (`useSame`): the host
     // answers the watch again at every hook, with what each conversation is doing, and the review lays nothing out
@@ -236,11 +257,36 @@ export function App() {
     // (`useSame`): a hook that changed nothing a banner says, or a record read that changed no task or ring, lays
     // nothing out anew; one that did changes the banner's words, which the text holds, so the review is laid out.
     const bannered = useSame(
-        useMemo(() => new Map(live.map((agent) => [agent.key, bannerOf(agent, drawers.get(agent.key) ?? UNREAD, soon)])), [live, drawers, soon]),
+        useMemo(() => new Map(live.map((agent) => [agent.key, bannerOf(agent, soon)])), [live, soon]),
         (map) => JSON.stringify([...map]),
     );
 
-    // What the banner says of an agent beyond its name: what it's doing, what it's working on, its context, and whether its flagged writes are held.
+    // Each conversation running, by `whose` it is: which of its banner's parts its views say, and what holding its writes asks.
+    const runningNow = useSame(
+        useMemo(() => new Map(live.map((agent) => [agent.key, { launch: agent.launch.launch, holding: agent.talker.holding === true }])), [live]),
+        (map) => JSON.stringify([...map]),
+    );
+    // Each view of an agent's the page doesn't lay out itself, a drawer its repository's modules place, asked of the
+    // host for each agent running; and each a fold of theirs reads as it opens, once opened.
+    const [loads, setLoads] = useState<Instance[]>([]);
+    const placed = useMemo(
+        () =>
+            live.flatMap(({ conversation }) =>
+                looks.drawers(conversation.repository).flatMap((each) =>
+                    producerOf(each.module, each.view) === undefined
+                        ? [{ repository: conversation.repository, module: each.module, view: each.view, argument: { runtime: conversation.runtime, session: conversation.session, agent: conversation.agent ?? null } }]
+                        : [],
+                ),
+            ),
+        [live, looks],
+    );
+    const remote = useViews(useMemo(() => [...placed, ...loads], [placed, loads]));
+    const load = useCallback((view: Instance) => {
+        const id = instanceOf(view.repository, view.module, view.view, view.argument);
+        setLoads((before) => (before.some((each) => instanceOf(each.repository, each.module, each.view, each.argument) === id) ? before : [...before, view]));
+    }, []);
+    // What the banner says of an agent beyond its name: where it is and what it's doing, the core's; what it's working on,
+    // its context and whether its flagged writes are held are its banner's parts, which its views say (`views/`).
     const banner = useCallback(
         (head: Head) => {
             if ("conversation" in head) {
@@ -846,6 +892,10 @@ export function App() {
                         setOverview={setOverview}
                         order={ready ? kept : null}
                         keepOrder={whole ? keepOrder : null}
+                        looks={looks}
+                        running={runningNow}
+                        remote={remote}
+                        load={load}
                     />
                     <div className="status">
                         {!replying ? (
@@ -865,7 +915,7 @@ export function App() {
                         )}
                     </div>
                     <Keys
-                        parts={REVIEW_KEYS}
+                        parts={parts}
                         place={inserting ? "insert" : place}
                         places={REVIEW_PLACES}
                         open={listing}
@@ -899,17 +949,9 @@ function last(path: string): string {
     return name.endsWith(".git") ? name.slice(0, -".git".length) : name;
 }
 
-/** Say an agent's banner beyond its name: where it is, what it's doing as of `now`, what it's working on, its context, and whether its flagged writes are held. */
-function bannerOf(agent: Live, data: AgentDrawers, now: Date): string {
-    const task = currentTask(data.tasks);
-    const usage = data.usage;
-    return [
-        [last(agent.launch.repository), last(agent.launch.worktree), agent.talker.path].join(" · "),
-        doing(agent.talker.activity, now),
-        ...(task === null ? [] : [`▶ ${task}`]),
-        ...(usage === null ? [] : [ring(usage.used, usage.window)]),
-        ...(agent.talker.holding === true ? ["holding"] : []),
-    ].join(" · ");
+/** Say what the core says of an agent on its banner: where it is, and what it's doing as of `now`; its banner's parts, which its views say, come after. */
+function bannerOf(agent: Live, now: Date): string {
+    return [[last(agent.launch.repository), last(agent.launch.worktree), agent.talker.path].join(" · "), doing(agent.talker.activity, now)].join(" · ");
 }
 
 /** Say what marking files reviewed came to: how many, the flagged writes approved with them, and those that changed since the version shown, whose flags wait. */

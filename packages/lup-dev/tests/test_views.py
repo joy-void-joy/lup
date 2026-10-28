@@ -562,7 +562,11 @@ def test_the_dashboard_s_view_is_asked_through_the_host_and_answered_again_as_it
             second = Viewed.model_validate_json(following())
     assert once.blocks.text() == "a1: hello"
     assert once.watch == Watching(of=AGENT, on=["call-finished"])
-    assert [each.view for each in listed.looks[repository].drawers] == ["said"]
+    assert [each.view for each in listed.looks[repository].drawers] == [
+        "tasks",
+        "since",
+        "said",
+    ]
     assert "the operator's" in Refused.model_validate_json(room).error
     assert first.blocks.text() == "a1: hello"
     assert second.blocks.text() == "a1: again"

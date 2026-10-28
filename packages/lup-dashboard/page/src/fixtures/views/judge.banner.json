@@ -1,0 +1,89 @@
+[
+  {
+    "name": "an agent whose flagged writes are held",
+    "repository": "/r/lup.git",
+    "argument": {
+      "runtime": "claude",
+      "session": "s1",
+      "agent": "a1"
+    },
+    "given": {
+      "running": {
+        "[\"/r/lup.git\",\"claude\",\"s1\",\"a1\"]": {
+          "launch": "l1",
+          "holding": true
+        }
+      }
+    },
+    "module": "judge",
+    "view": "banner",
+    "answer": {
+      "summary": [
+        {
+          "text": "holding",
+          "tone": "plain"
+        }
+      ],
+      "waiting": false,
+      "count": 0,
+      "offers": [
+        {
+          "action": "set-holding",
+          "argument": {
+            "launch": "l1",
+            "session": "s1",
+            "agent": "a1",
+            "on": false
+          },
+          "verb": "hold",
+          "chord": null,
+          "runs": "once",
+          "commented": false,
+          "says": "let its flagged writes land"
+        }
+      ],
+      "blocks": []
+    }
+  },
+  {
+    "name": "an agent whose flagged writes land",
+    "repository": "/r/lup.git",
+    "argument": {
+      "runtime": "claude",
+      "session": "s1",
+      "agent": "a1"
+    },
+    "given": {
+      "running": {
+        "[\"/r/lup.git\",\"claude\",\"s1\",\"a1\"]": {
+          "launch": "l1",
+          "holding": false
+        }
+      }
+    },
+    "module": "judge",
+    "view": "banner",
+    "answer": {
+      "summary": [],
+      "waiting": false,
+      "count": 0,
+      "offers": [
+        {
+          "action": "set-holding",
+          "argument": {
+            "launch": "l1",
+            "session": "s1",
+            "agent": "a1",
+            "on": true
+          },
+          "verb": "hold",
+          "chord": null,
+          "runs": "once",
+          "commented": false,
+          "says": "hold its flagged writes"
+        }
+      ],
+      "blocks": []
+    }
+  }
+]

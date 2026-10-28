@@ -65,6 +65,7 @@ from lup_dev.confined import Confined
 from lup_dev.copies import removable
 from lup_dev.declaration.load import declared_profiles, load, person_layer
 from lup_dev.declaration.profiles import chosen
+from lup_dev.declaration.project import Project
 from lup_dev.declaration.requirements import Machine, Report, Tools
 from lup_dev.declaration.requirements import check as checked
 from lup_dev.declaration.resolve import Declaration, Selected, resolve
@@ -596,6 +597,7 @@ def host_serve(context: typer.Context) -> None:
         ],
         modules=workers,
         asking=asking,
+        standing=resolve(Project()).looks,
         say=typer.echo,
         refresh=lambda launch: refreshed(layout.launch(launch.launch)),
         podman=podman,

@@ -36,7 +36,8 @@ from lup_dev import (
 )
 from lup_dev.approval import Approval, ReleaseTool
 from lup_dev.cli import module_command
-from lup_dev.declaration.kinds import Folds, Mounted, Tones
+from lup_dev.declaration.kinds import Folds, Mounted, Tones, Verbs
+from lup_dev.declaration.looks import CORE_LOOKS
 from lup_dev.declaration.resolve import resolve
 from lup_dev.declaration.serving import Operator
 from lup_dev.errors import LupDevError
@@ -868,6 +869,13 @@ class ViewerServing(ModuleServing):
         """Show what it's given, of no agent."""
         return lup.Blocks(blocks=[lup.Line.of("1", viewed.what)])
 
+    @lup.view(place=lup.Banner())
+    async def mood(self, viewed: lup.OfAgent) -> lup.Blocks:
+        """Say the agent's mood on its banner."""
+        return lup.Blocks(
+            summary=[lup.Span(text=f"{viewed.session} is glad", tone="warm")]
+        )
+
     @lup.command
     async def greet(self, asked: Greeting, by: Operator) -> str:
         """Greet someone, as the operator."""
@@ -884,6 +892,7 @@ class Viewer(Module):
     serving: Serving = Serving.of(ViewerServing)
     tones: Tones = Tones.of(lup.Tone(name="warm", colour="orange"))
     folds: Folds = Folds()
+    verbs: Verbs = Verbs()
 
 
 def viewing(tmp_path: Path) -> RepositoryModules:
@@ -897,12 +906,53 @@ def viewing(tmp_path: Path) -> RepositoryModules:
     )
 
 
-def test_a_view_placed_in_a_drawer_resolves_with_its_letter(tmp_path: Path) -> None:
+def test_a_view_placed_in_a_drawer_resolves_with_its_letter_after_the_core_s(
+    tmp_path: Path,
+) -> None:
     looks = viewing(tmp_path).resolved.looks
     assert [(each.view, each.place.letter) for each in looks.drawers] == [
-        ("greeting", "w")
+        *((each.view, each.place.letter) for each in CORE_LOOKS.drawers),
+        ("greeting", "w"),
     ]
-    assert [tone.name for tone in looks.tones] == ["warm"]
+    assert [tone.name for tone in looks.tones] == [
+        *(tone.name for tone in CORE_LOOKS.tones),
+        "warm",
+    ]
+    assert looks.folds == CORE_LOOKS.folds
+
+
+def test_the_core_s_looks_are_the_shell_s_the_runtime_adapters_and_the_judge_s() -> (
+    None
+):
+    assert [fold.name for fold in CORE_LOOKS.folds] == [
+        "group",
+        "item",
+        "file",
+        "body",
+        "lines",
+        "context",
+    ]
+    assert [
+        (each.module, each.view, each.place.letter) for each in CORE_LOOKS.drawers
+    ] == [
+        ("adapters", "tasks", "t"),
+        ("judge", "since", "s"),
+    ]
+    assert [(each.module, each.view) for each in CORE_LOOKS.banners] == [
+        ("adapters", "banner"),
+        ("judge", "banner"),
+    ]
+
+
+def test_a_view_placed_on_the_banner_resolves_as_a_part_of_it_after_the_core_s(
+    tmp_path: Path,
+) -> None:
+    looks = viewing(tmp_path).resolved.looks
+    assert [(each.module, each.view) for each in looks.banners] == [
+        ("adapters", "banner"),
+        ("judge", "banner"),
+        ("viewer", "mood"),
+    ]
 
 
 def test_the_repository_s_process_says_how_its_views_look_as_it_lists_them(
@@ -985,6 +1035,51 @@ def test_two_modules_taking_one_fold_letter_fail_the_load() -> None:
         resolve(Project(modules=Modules.only(Core(), clashing)))
 
 
+@pytest.mark.parametrize(
+    ("letter", "whose"),
+    [("f", "the core"), ("s", "judge"), ("t", "adapters")],
+)
+def test_a_module_taking_a_letter_of_the_core_s_fails_the_load(
+    letter: str, whose: str
+) -> None:
+    clashing = Viewer(
+        folds=Folds.of(
+            lup.FoldKind(
+                name="mine",
+                letter=letter,
+                called="mine",
+                one="mine",
+                level=1,
+                colour="ok",
+            )
+        )
+    )
+    with pytest.raises(ProjectError, match=rf"Fold keys: .*`{letter}` from `{whose}`"):
+        resolve(Project(modules=Modules.only(Core(), clashing)))
+
+
+def test_a_module_naming_a_fold_kind_or_a_tone_as_the_core_does_fails_the_load() -> (
+    None
+):
+    named = Viewer(
+        folds=Folds.of(
+            lup.FoldKind(
+                name="since",
+                letter="z",
+                called="mine",
+                one="mine",
+                level=1,
+                colour="ok",
+            )
+        )
+    )
+    with pytest.raises(ProjectError, match=r"Fold kinds: .*`since` from `judge`"):
+        resolve(Project(modules=Modules.only(Core(), named)))
+    toned = Viewer(tones=Tones.of(lup.Tone(name="summary", colour="ok")))
+    with pytest.raises(ProjectError, match=r"Tones: .*`summary` from `the core`"):
+        resolve(Project(modules=Modules.only(Core(), toned)))
+
+
 def test_a_tone_taking_an_unknown_tone_s_look_fails_the_load() -> None:
     odd = Viewer(tones=Tones.of(lup.Tone(name="odd", like="nowhere")))
     with pytest.raises(ProjectError, match="takes the look of `nowhere`"):
@@ -1048,3 +1143,48 @@ def test_a_first_word_that_isn_t_lup_dev_s_own_names_a_module() -> None:
     assert not module_command(["inbox"])
     assert not module_command(["--help"])
     assert not module_command([])
+
+
+def test_the_verbs_are_the_core_s_the_judge_s_and_the_runtime_s_then_each_module_s(
+    tmp_path: Path,
+) -> None:
+    assert [(each.name, each.key) for each in resolve(Project()).looks.verbs] == [
+        ("done", "d"),
+        ("decline", "x"),
+        ("send", "s"),
+        ("comment", "c"),
+        ("hold", "h"),
+        ("pause", "p"),
+    ]
+    tagging = Viewer(verbs=Verbs.of(lup.Verb(name="tag", key="t", called="tag")))
+    looks = resolve(Project(modules=Modules.only(Core(), tagging))).looks
+    assert [each.name for each in looks.verbs][-1] == "tag"
+    del tmp_path
+
+
+@pytest.mark.parametrize(
+    ("verb", "says"),
+    [
+        (lup.Verb(name="tag", key="d", called="tag"), r"Verb keys: .*`d` from `core`"),
+        (lup.Verb(name="hold", key="q", called="hold"), r"Verbs: .*`hold`"),
+        (lup.Verb(name="zoom", key="z", called="zoom"), r"Verb keys: .*`z`"),
+    ],
+)
+def test_a_verb_taking_a_key_or_a_name_another_has_fails_the_load(
+    verb: lup.Verb, says: str
+) -> None:
+    clashing = Viewer(verbs=Verbs.of(verb))
+    with pytest.raises(ProjectError, match=says):
+        resolve(Project(modules=Modules.only(Core(), clashing)))
+
+
+def test_a_layer_gives_a_verb_another_key() -> None:
+    moved = Core(
+        verbs=Verbs.default().replace(
+            "hold", lup.Verb(name="hold", key="H", called="hold")
+        )
+    )
+    looks = resolve(Project(modules=Modules.only(moved))).looks
+    assert [(each.name, each.key) for each in looks.verbs if each.name == "hold"] == [
+        ("hold", "H")
+    ]

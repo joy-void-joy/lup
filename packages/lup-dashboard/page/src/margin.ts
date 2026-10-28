@@ -7,7 +7,7 @@ import type { EditorState, Extension } from "@codemirror/state";
 import type { ViewUpdate } from "@codemirror/view";
 
 import type { Folding } from "./comments";
-import type { FoldKind } from "./keys";
+import { kindOf } from "./looks";
 
 /** Where the margin reads what folds and when to draw again: the view's folds, and whether an update laid them out anew. */
 export interface Margined {
@@ -15,12 +15,10 @@ export interface Margined {
     redrawn: (update: ViewUpdate) => boolean;
 }
 
-/** The fold kinds whose placeholder says how many lines they hide: the others' summary lines say what they hide. */
-const COUNTED = new Set<FoldKind>(["group", "item", "file", "body", "tasks", "since", "conversation", "earlier", "call"]);
-
 /**
  * Return CodeMirror's folding, each placeholder drawn by the kind of the fold it stands for, of those `margined` says:
- * `⋯`, and how many lines a file, a body or an item hides; a fold of no kind's as `…`.
+ * `⋯`, and how many lines it hides where its kind says so (`Kind.counts`), as a file's, a body's or an item's, whose
+ * summary line doesn't say what it hides; a fold of no kind's as `…`.
  */
 export function placeheld(margined: Margined): Extension {
     return codeFolding({
@@ -41,9 +39,9 @@ export function placeheld(margined: Margined): Extension {
                 shown.textContent = "…";
                 return shown;
             }
-            const { kind, hidden } = JSON.parse(prepared) as { kind: FoldKind; hidden: number };
+            const { kind, hidden } = JSON.parse(prepared) as { kind: string; hidden: number };
             shown.classList.add("fold-placeholder", `fold-${kind}`);
-            shown.textContent = COUNTED.has(kind) ? `⋯ ${hidden} ${hidden === 1 ? "line" : "lines"}` : "⋯";
+            shown.textContent = kindOf(kind)?.counts === true ? `⋯ ${hidden} ${hidden === 1 ? "line" : "lines"}` : "⋯";
             return shown;
         },
     });

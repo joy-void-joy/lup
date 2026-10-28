@@ -41,18 +41,19 @@ import { Compartment, RangeSetBuilder, StateEffect, type Range } from "@codemirr
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { shownOnce, tally, tokensOf, within, type ChangedFile, type Matter, type Taken } from "./code";
+import { tokensOf, within, type Filed, type Matter, type Taken } from "./code";
 import { changes, cited, moved, shownIn, type Block, type Change, type Folding, type Span } from "./comments";
-import { closedAs, folding, hiddenAt, isFolded, reached, reaching, rebuilt, refold, scrollAfterKey, uncovered, useEditor, type Landing } from "./editor";
+import { closedAs, folding, hiddenAt, isFolded, mapLetters, reached, reaching, rebuilt, refold, scrollAfterKey, uncovered, useEditor, type Landing } from "./editor";
 import { Following } from "./follow";
 import { mapOutlineKey, mapScopeKeys, Outline, setOutlineFocus, setOutlineToggle, setScopeJump, useNarrow, type ScopeKey } from "./Outline";
 import { Stack, type Mark as StackMark } from "./Stack";
-import { redrawn, SCOPES, structureMargin, type Labelled, type Structured } from "./rails";
+import { redrawn, structureMargin, type Labelled, type Structured } from "./rails";
 import { itemStanding } from "./outline";
 import { DRAFTED, GLYPHS } from "./Outline";
 import { linesOver, stickies, type Sticky } from "./stack";
 import { depths, levelled, ofKind } from "./folds";
-import { FOLD_KINDS, type DrawerKind, type FoldKind, type ReviewPlace } from "./keys";
+import type { DrawerKind, FoldKind, ReviewPlace } from "./keys";
+import { kindOf, type Merged } from "./looks";
 import { markerEnd, outdated, unfound } from "./exchange";
 import { source, sourced, without, type Source } from "./markdown";
 import {
@@ -68,7 +69,6 @@ import {
     codeFrom,
     drawerAt,
     fileHeads,
-    firstApproval,
     foldKey,
     foldsOf,
     fresh,
@@ -79,6 +79,7 @@ import {
     isRegion,
     isRemark,
     laid,
+    offeredOf,
     news,
     opened,
     ordered,
@@ -95,6 +96,7 @@ import {
     tallied,
     toggled,
     toKeep,
+    viewBlockAt,
     waited,
     whose,
     withWritten,
@@ -119,6 +121,7 @@ import {
     type Written,
 } from "./review";
 import { freshRows, type Fresh } from "./since";
+import type { Instance, Offer, Remote, Running } from "./views";
 
 /** Where the page asks the review to go: an agent's group, by its conversation, numbered so the same one asked twice goes twice. */
 export interface Jump {
@@ -182,6 +185,14 @@ interface Props {
     order: readonly string[] | null;
     /** Tell the host where the groups go once the review is laid out: what's laid out, and what's gone from it; none where what the page shows isn't all the host's answers, as where it refused one. */
     keepOrder: ((keeping: Keeping) => void) | null;
+    /** How the views look, every repository's merged (`looks.ts`): the kinds of fold the keys take, and each repository's drawers. */
+    looks: Merged;
+    /** Each conversation running, by `whose` it is: its banner's parts, and what holding its writes asks. */
+    running: ReadonlyMap<string, Running>;
+    /** What the host answered of each view the page doesn't lay out itself, by its instance's id (`views.ts`). */
+    remote: Remote;
+    /** Told each view a fold reads as it opens, its module's, as the operator opens it, so the page asks it of the host. */
+    load: (view: Instance) => void;
 }
 
 /** Return the classes a line under an item or in a drawer is drawn with: what it shows, and whether it's set in under a summary or a file's header, as a file's reviewed line isn't. */
@@ -234,7 +245,7 @@ function scopesOf(laidOut: Laid): Scope[] {
 }
 
 /** Which lines of a file in `scope` changed since the operator last looked at it; none outside "since you approved". */
-type Freshness = (scope: Scope, file: ChangedFile) => Fresh | null;
+type Freshness = (scope: Scope, file: Filed) => Fresh | null;
 
 /** Paint the changed files' lines from `from` to `to`: each row numbered and marked added, removed or the same, its text highlighted in its file's language, each that matters barred, saying what it triggered, and each changed since the operator last looked at its file (`fresh`) marked. */
 function painted(laidOut: Laid, from: number, to: number, fresh: Freshness): Range<Decoration>[] {
@@ -458,6 +469,10 @@ function decorations(
     for (const scope of scopesOf(laidOut)) {
         if (isDrawer(scope)) {
             marks.push({ from: scope.header.from, to: scope.header.from, value: Decoration.line({ class: drawerClasses(scope) }) });
+            // A view its module answers, each span in the look of its tone (`looks.ts`).
+            for (const span of scope.toned) {
+                marks.push({ from: span.from, to: span.to, value: marked(`tone-${span.tone}`) });
+            }
         } else {
             const region = scope as Region;
             const number = region.item.number;
@@ -478,8 +493,7 @@ function decorations(
         const stops = new Set(scope.stops);
         for (const coded of scope.code) {
             if (coded.row === null) {
-                const first = !isDrawer(scope) && firstApproval((scope as Region).item);
-                const automatic = shownOnce(coded.file, first).automatic ? " code-automatic" : "";
+                const automatic = coded.file.block === "diff" && coded.file.automatic ? " code-automatic" : "";
                 const whole = stops.has(coded.from) ? " code-matters" : "";
                 marks.push({
                     from: coded.from,
@@ -520,32 +534,6 @@ function decorations(
     return builder.finish();
 }
 
-/**
- * Say what an item is in its header: a message by its kind, or as a turn's end; a held change, or one holding a
- * landing; a stop by choice; or the reason's own name.
- */
-function what(item: Item): string {
-    const reason = item.reason;
-    switch (reason.reason) {
-        case "message":
-            return reason.ending === true ? "turn ended" : reason.kind;
-        case "held":
-            return reason.landing == null ? "held change" : "holds a landing";
-        case "stop":
-            return "stopped";
-        case "flagged":
-            return "landed, flagged";
-        default:
-            return reason.reason;
-    }
-}
-
-/** Say whom the operator's copy of a message between conversations was sent to, after what it is in its header (` to explore-auth`); nothing for any other item. */
-function sentTo(item: Item, called: (party: Conversation) => string): string {
-    const reason = item.reason;
-    return reason.reason === "message" && reason.to != null ? ` to ${called(reason.to)}` : "";
-}
-
 /** How an item's header says when it came: made once, since `toLocaleString` makes one at each call, and the review is laid out again at each key typed in a comment. */
 const WHEN = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
@@ -553,15 +541,9 @@ function when(made: string): string {
     return WHEN.format(new Date(made));
 }
 
-/** Return what names an item in the header over the review: the first part of its header, before its first ` · `, without the rule around it. */
-function itemNamed(header: string): string {
-    const inner = header.slice("── ".length, header.length - " ──".length);
-    return inner.split(" · ")[0] ?? inner;
-}
-
 /** The header over the review: where the cursor is, each part marked by its kind, and whom what's being written goes to; at its end, what waits below (`tallied`). */
 function Heading({ parts, tally }: { parts: Where[]; tally: string }) {
-    const letter = (kind: Where["kind"]) => FOLD_KINDS.find((each) => each.kind === kind)?.letter ?? null;
+    const letter = (kind: Where["kind"]) => kindOf(kind)?.letter ?? null;
     // A body around another, which a narrow screen leaves out for the innermost.
     const inner = parts.findLast((each) => each.kind === "body");
     const shown = (part: Where) => (
@@ -595,11 +577,6 @@ function Heading({ parts, tally }: { parts: Where[]; tally: string }) {
 /** Return what names a file of a "since you approved" drawer among what the operator looked at: the drawer, and its path. */
 function lookedAt(of: string, path: string): string {
     return `${of}\n${path}`;
-}
-
-/** Return a file of a "since you approved" drawer as marking it reviewed names it: its path, and the version shown. */
-function viewed(file: SinceFile): Viewed {
-    return { path: file.path, version: file.version ?? null };
 }
 
 /** Return how far below the top of the view the start of the line at `head` is, as a scroll to it measures it, where it's in view; none where it isn't. */
@@ -674,6 +651,10 @@ export function Review({
     setOverview,
     order,
     keepOrder,
+    looks,
+    running,
+    remote,
+    load,
 }: Props) {
     // Where the cursor is, and whether a comment is being written: what the header says.
     const [head, setHead] = useState(0);
@@ -684,21 +665,17 @@ export function Review({
     const places = useRef<string[]>([]);
     const toldOrder = useRef<string[] | null>(null);
     const narrow = useNarrow();
-    const arranging = useMemo(() => ({ parents }), [parents]);
+    const arranging = useMemo(() => ({ parents, looks, running, remote }), [parents, looks, running, remote]);
     const laidOut = useMemo(
         () =>
             laid(
                 items,
                 agents,
-                (head, later) => `━━ ${banner(head)}${later ? " · later" : ""} ━━`,
-                (item, later) => {
-                    const files = around.files.get(item.number);
-                    const counted = files !== undefined && "shown" in files ? tally(files.shown, firstApproval(item)) : "";
-                    const typing = item.reason.reason === "approval" && item.reason.typing;
+                (head, later, parts) => `━━ ${banner(head)}${parts === "" ? "" : ` · ${parts}`}${later ? " · later" : ""} ━━`,
+                // What the item's kind says of it, then what the core says of how it stands.
+                (item, later, said) => {
                     const told = [
-                        `${cited(item.number)} ${what(item)}${sentTo(item, called)}`,
-                        ...(counted === "" ? [] : [counted]),
-                        ...(typing ? ["reading types"] : []),
+                        `${cited(item.number)} ${said}`,
                         ...((item.edits ?? []).length > 0 ? ["edited"] : []),
                         ...(fresh(item, reviewed) ? ["new"] : []),
                         when(item.made),
@@ -717,7 +694,7 @@ export function Review({
         [items, agents, banner, called, draft, around, drawers, reviewed, now, arranging, order],
     );
     // The scopes the header stack pins the headers of.
-    const roots = useMemo(() => stickies(laidOut, laidOut.groups.map((each) => each.depth)), [laidOut]);
+    const roots = useMemo(() => stickies(laidOut), [laidOut]);
     const laidFor = useMemo(
         () => ({
             text: laidOut.text,
@@ -758,6 +735,14 @@ export function Review({
             if (drawer !== undefined) {
                 told(drawer.conversation, drawer.kind);
             }
+            // A fold of a module's view's, read from another of its views as it opens.
+            for (const each of laidOut.drawers) {
+                for (const [name, view] of each.loads) {
+                    if (each.folds.some((own) => own.name === name && foldKey(own) === fold.key)) {
+                        load(view);
+                    }
+                }
+            }
             // A call's input and output, read as its fold opens.
             for (const each of laidOut.drawers) {
                 const call = each.talk?.calls.find((shown) => foldKey({ of: each.of, kind: "call", name: shown.fold.key }) === fold.key);
@@ -787,7 +772,6 @@ export function Review({
         }
         follower.attach(current);
         mapOutlineKey();
-        mapScopeKeys();
         current.dispatch({
             effects: StateEffect.appendConfig.of([
                 gutters.of([]),
@@ -806,6 +790,11 @@ export function Review({
         // Made once, with the editor.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+    // The keys each kind's letter takes, after `zf`, Space `z` `f` and `]`, as the kinds known change.
+    useEffect(() => {
+        mapLetters(looks.kinds);
+        mapScopeKeys(looks.kinds);
+    }, [looks]);
     // What's laid out now, which a click on a citation, or on the passage of the operator's words it answers, reads.
     const laidNow = useRef(laidOut);
     laidNow.current = laidOut;
@@ -851,7 +840,7 @@ export function Review({
     // What the operator last looked at of each file of a "since you approved" drawer (`lookedAt`): the version shown
     // as the cursor last left it, or as the drawer was first read; none for a file they never looked at, as one that
     // came later or came back once reviewed. And the file the cursor is in, which it's looked at once the cursor leaves.
-    const looked = useRef(new Map<string, ChangedFile>());
+    const looked = useRef(new Map<string, Filed>());
     const firstRead = useRef(new Set<string>());
     const inFile = useRef<{ of: string; path: string } | null>(null);
     // The file Space `a` marked reviewed, and what its drawer showed then, so the cursor goes onto its line once the
@@ -889,10 +878,11 @@ export function Review({
             firstRead.current.add(drawer.of);
             for (const each of drawer.files) {
                 const key = lookedAt(drawer.of, each.path);
-                if (each.file == null) {
+                const shownFile = each.file == null ? undefined : drawer.diffs.get(each.path);
+                if (shownFile === undefined) {
                     looked.current.delete(key);
                 } else if (first) {
-                    looked.current.set(key, each.file);
+                    looked.current.set(key, shownFile);
                 }
             }
         }
@@ -908,8 +898,9 @@ export function Review({
         if (was === null || (now !== null && now.of === was.of && now.path === was.path)) {
             return;
         }
-        const standing = laidOut.drawers.find((each) => each.of === was.of)?.files.find((each) => each.path === was.path)?.file;
-        if (standing == null) {
+        const drawerWas = laidOut.drawers.find((each) => each.of === was.of);
+        const standing = drawerWas?.files.find((each) => each.path === was.path)?.file == null ? undefined : drawerWas?.diffs.get(was.path);
+        if (standing === undefined) {
             return;
         }
         looked.current.set(lookedAt(was.of, was.path), standing);
@@ -1107,7 +1098,8 @@ export function Review({
         reviewing.current = null;
         const settled = drawer.settled?.from ?? Infinity;
         const at = (file: SinceFile): number | undefined =>
-            drawer.filed.find((each) => each.file === file.file)?.from ?? drawer.reviewed.find((each) => each.file === file && each.from < settled)?.from;
+            (file.file == null ? undefined : drawer.filed.find((each) => each.file.path === file.path)?.from) ??
+            drawer.reviewed.find((each) => each.file === file && each.from < settled)?.from;
         const after = drawer.files.slice(drawer.files.findIndex((each) => each.path === asked.path) + 1);
         for (const file of after) {
             const found = at(file);
@@ -1157,7 +1149,6 @@ export function Review({
      */
     const labelOf = (kind: FoldKind | Sticky["kind"], from: number): Labelled | null => {
         const plain = (text: string): Labelled => ({ text, state: null, draft: null, fresh: false });
-        const header = laidOut.text.slice(from, laidOut.text.indexOf("\n", from));
         switch (kind) {
             case "group": {
                 const group = laidOut.groups.find((each) => each.banner.from === from);
@@ -1183,26 +1174,27 @@ export function Review({
                     fresh: standing.fresh,
                 };
             }
-            case "drawer":
-            case "tasks":
-            case "since":
-            case "conversation": {
+            case "drawer": {
+                // A drawer by its view's name, the conversation's shorter, marked where it holds what waits on the operator, as its view says.
                 const drawer = laidOut.drawers.find((each) => each.header.from === from);
-                const which = drawer?.kind ?? "since";
-                const waiting = which === "since" && / to review| flagged/.test(header);
-                return { ...plain(which === "conversation" ? "talk" : which), state: waiting ? { glyph: "◇", mark: "to-review" } : null };
+                const which = drawer?.kind ?? "";
+                return { ...plain(which === "conversation" ? "talk" : which), state: drawer?.waiting === true ? { glyph: "◇", mark: "to-review" } : null };
             }
             case "file": {
-                const path = header.split(" · ")[0] ?? "";
+                // A file by its name, flagged where a line in it matters, folded where its view folds it whole, else to review.
                 const scope = scopeAt(laidOut, from);
                 const filed = scope?.filed.find((each) => each.from === from);
-                const matters = filed !== undefined && scope !== undefined && scope.stops.some((each) => each >= filed.from && each <= filed.to);
-                const automatic = /· (automatic|test|data|first approval)/.test(header);
-                const state = matters ? { glyph: "⚑", mark: "flagged" } : automatic ? { glyph: "·", mark: "folded" } : { glyph: "◇", mark: "to-review" };
+                if (filed === undefined || scope === undefined) {
+                    return null;
+                }
+                const path = filed.file.path;
+                const matters = scope.stops.some((each) => each >= filed.from && each <= filed.to);
+                const folded = !(filed.file.open ?? true);
+                const state = matters ? { glyph: "⚑", mark: "flagged" } : folded ? { glyph: "·", mark: "folded" } : { glyph: "◇", mark: "to-review" };
                 return { ...plain(path.split("/").at(-1) ?? path), state };
             }
             default:
-                return null;
+                return kindOf(kind)?.drawer === true ? labelOf("drawer", from) : null;
         }
     };
     /** Go to the next or previous scope of `kind`, as `]` or `[` and its letter does: onto its header, a closed fold hiding it counting as its summary line, brought into view where it isn't (`bring`). */
@@ -1241,7 +1233,7 @@ export function Review({
     const structured = useRef<Structured>({ folds: [], label: () => null, jump: jumpTo, toggle: () => undefined });
     structured.current = {
         folds: laidFor.folds,
-        label: (fold) => (fold.kind !== undefined && SCOPES.has(fold.kind) ? labelOf(fold.kind, fold.summary.from) : null),
+        label: (fold) => (fold.kind !== undefined && fold.scope === true ? labelOf(fold.kind, fold.summary.from) : null),
         jump: jumpTo,
         toggle: (fold) => {
             const current = view.current;
@@ -1291,7 +1283,7 @@ export function Review({
             const walked = scopesOf(laidOut).filter(
                 (scope) =>
                     !laidFor.folds.some(
-                        (fold) => fold.of === scope.of && FOLD_KINDS.some((each) => each.kind === fold.kind && each.own) && isFolded(current.state, fold),
+                        (fold) => fold.of === scope.of && kindOf(fold.kind)?.whole === true && isFolded(current.state, fold),
                     ),
             );
             const target = stepped(
@@ -1356,46 +1348,54 @@ export function Review({
             const effects = reaching(current.state, target);
             current.dispatch({ selection: { anchor: target }, effects, scrollIntoView: true, annotations: reached.of(effects.length) });
         },
+        // Space a and Space x do what the block under the cursor offers for done and decline, the innermost: a file's
+        // line or its reviewed line in "since you approved", an item's kind's view of it anywhere in the item.
         approve: (approved) => {
+            const verb = approved ? "done" : "decline";
             const drawer = sinceHere();
             if (drawer !== undefined) {
                 const file = sinceFileAt(drawer, editor.head());
+                const offer = file === undefined ? undefined : offeredOf(viewBlockAt(laidOut, editor.head())?.block?.offers ?? [], verb);
                 if (file === undefined) {
                     say("Space a marks a file reviewed: put the cursor on one of its lines.");
-                } else if (!approved) {
+                } else if (offer === undefined) {
                     say("A file is marked reviewed or commented on, never declined.");
                 } else {
                     reviewing.current = { of: drawer.of, path: file.path, files: drawer.files };
-                    reviewSince(drawer.conversation, [viewed(file)]);
+                    act(offer, drawer.conversation);
                 }
                 return;
             }
             const region = here();
-            if (region === undefined) {
-                return;
-            }
-            if (answering(region.item).kind === "answer") {
-                approve(region.item.number, approved);
+            const offer = region === undefined ? undefined : offeredOf(region.body.answer?.blocks.offers ?? [], verb);
+            if (region !== undefined && offer !== undefined) {
+                act(offer, region.item.sender.party === "conversation" ? region.item.sender : null);
             }
         },
+        // Space A does what the drawer under the cursor offers for done as a whole: every file it shows marked reviewed.
         approveAll: () => {
             const drawer = sinceHere();
             if (drawer === undefined) {
                 say('Space A marks every file of a "since you approved" drawer reviewed: put the cursor in one.');
                 return;
             }
-            if (drawer.files.length === 0) {
+            const offer = offeredOf(drawer.view.answer?.blocks.offers ?? [], "done");
+            if (drawer.files.length === 0 || offer === undefined) {
                 say("Nothing in this drawer to mark reviewed.");
                 return;
             }
-            reviewSince(drawer.conversation, drawer.files.map(viewed));
+            act(offer, drawer.conversation);
         },
+        // `h` on a banner does what a part of it offers for hold.
         hold: () => {
             const group = groupAt(laidOut, editor.head());
             if (group === undefined || group.conversation === null) {
                 return false;
             }
-            hold(group.conversation);
+            const offer = group.parts.flatMap((each) => each.answer?.blocks.offers ?? []).find((each) => each.verb === "hold");
+            if (offer !== undefined) {
+                act(offer, group.conversation);
+            }
             return true;
         },
         send,
@@ -1416,6 +1416,30 @@ export function Review({
         },
     });
 
+    /**
+     * Do what `offer` offers at once, on what's of `conversation`: until each view's actions are its module's (#247),
+     * each the request it names, as the page sent it before: an approval or a held change answered, the files of
+     * "since you approved" marked reviewed, an agent's flagged writes held.
+     */
+    function act(offer: Offer, conversation: Conversation | null) {
+        const argument = offer.argument as Record<string, unknown>;
+        switch (offer.action) {
+            case "inbox-answer-approval":
+                approve(argument["number"] as number, argument["approved"] as boolean);
+                return;
+            case "policy-review-since":
+                reviewSince(argument["conversation"] as Conversation, argument["files"] as Viewed[]);
+                return;
+            case "set-holding":
+                if (conversation !== null) {
+                    hold(conversation);
+                }
+                return;
+            default:
+                say(`Nothing here does ${offer.says} yet.`);
+        }
+    }
+
     /** Return the folds of the item or the drawer `position` is in, as the editor holds them: those the fold keys reach. */
     function scopeFolds(position: number): Folding[] {
         const keys = new Set(foldsOf(laidOut, position).map(foldKey));
@@ -1427,8 +1451,13 @@ export function Review({
     const focusing = useCallback((focus: (() => void) | null) => setOutlineFocus(focus), []);
 
     const naming = {
-        group: (group: Group) => banner(group.head),
-        item: (region: Region) => itemNamed(laidOut.text.slice(region.header.from, region.header.to)),
+        // A group by its banner's words, the core's and each part's, as its banner says them.
+        group: (group: Group) =>
+            [banner(group.head), ...group.parts.flatMap((each) => {
+                const words = (each.answer?.blocks.summary ?? []).map((span) => span.text).join("");
+                return words === "" ? [] : [words];
+            })].join(" · "),
+        item: (region: Region) => region.named,
         party: called,
     };
     const where = <Heading parts={heading(laidOut, Math.min(head, laidOut.text.length), commenting, written(draft), naming)} tally={tallied(items, draft, reviewed)} />;
@@ -1462,7 +1491,7 @@ export function Review({
     };
     // Each pinned header's fold, its letter in its column and its label, as the margin has them.
     const pinnedFolds = useMemo(() => {
-        const kinded = laidFor.folds.filter((each) => each.kind !== undefined && SCOPES.has(each.kind));
+        const kinded = laidFor.folds.filter((each) => each.kind !== undefined && each.scope === true);
         const deep = depths(laidFor.folds.filter((each) => each.kind !== undefined));
         return new Map(kinded.map((each) => [each.summary.from, { fold: each, depth: deep.get(each) ?? 0 }]));
     }, [laidFor.folds]);
@@ -1472,7 +1501,7 @@ export function Review({
         if (found === undefined || kind === undefined) {
             return null;
         }
-        const letter = FOLD_KINDS.find((each) => each.kind === kind)?.letter ?? "";
+        const letter = kindOf(kind)?.letter ?? "";
         return { kind, letter, depth: found.depth, label: narrow ? null : labelOf(kind, sticky.header.from) };
     };
     // What settles what a pinned header heads, so the operator knows what would validate the file they're in.

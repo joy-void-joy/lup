@@ -1,18 +1,14 @@
-// The code under an approval, a held change or a write that landed flagged: each
-// file it changes shown whole, what it was and what it becomes, its lines marked
-// added, removed (in place, where they were) or the same, each run of unchanged
-// lines away from the changes folded under a summary, a few lines of context
-// kept around each, so every change shows; and its text highlighted by
-// CodeMirror's own language packages, chosen by its name. The judge's reading of
-// the file says why it's open, in its header's last words, and which of its
-// lines matter, each saying what it triggered; a file that asks nothing, held or
-// flagged, is automatic, and folds whole under its header, as do a test and a
-// data file, by the reading's role, and each file of a first approval, which
-// trusts the repository as it is, each header saying why (`Folded`). Each function's and class's
-// body, read from the file's syntax, can fold under the line declaring it; a run
-// of lines never crosses a body's edge, so every fold sits whole inside another.
-// Pure: the review lays these rows into its text (`review.ts`), and its editor
-// paints the lines in view with them (`Review.tsx`).
+// A file under an item or in a drawer, as a view gives it, a `Diff` or a `Code` block (`docs/declaration.md`, *Views
+// and blocks*): shown whole, what it was and what it becomes, its lines marked added, removed (in place, where they
+// were) or the same, each run of unchanged lines away from the changes and the lines that matter folded under a
+// summary, a few lines of context kept around each, so every change shows; and its text highlighted by CodeMirror's
+// own language packages, chosen by its name. Its header says its path, what the change did to it, and what the view
+// says of it (`says`: why it's open, or why it folds whole); what matters in it is marked on its lines (`Mark`), each
+// saying what it triggered on its first, and one about the file whole makes its header matter. Each function's and
+// class's body, read from the file's syntax, can fold under the line declaring it; a run of lines never crosses a
+// body's edge, so every fold sits whole inside another. What the judge reads of a file, which says why it's open and
+// what matters, is the judge's (`views/judge.ts`). Pure: the review lays these rows into its text (`review.ts`), and
+// its editor paints the lines in view with them (`Review.tsx`).
 import { javascriptLanguage, jsxLanguage, tsxLanguage, typescriptLanguage } from "@codemirror/lang-javascript";
 import { jsonLanguage } from "@codemirror/lang-json";
 import { markdownLanguage } from "@codemirror/lang-markdown";
@@ -25,21 +21,20 @@ import { hunks, lineOf } from "./comments";
 import type { components } from "./generated/api";
 
 export type ChangedFile = components["schemas"]["ChangedFile"];
-type Content = components["schemas"]["Content"];
-export type Reading = components["schemas"]["Reading"];
-type Asked = components["schemas"]["Asked"];
-type ApiChanged = components["schemas"]["ApiChanged"];
+export type Diff = components["schemas"]["Diff"];
+export type Code = components["schemas"]["Code"];
+export type Mark = components["schemas"]["Mark"];
+type Content = components["schemas"]["FileContent"];
 /** How the declaration takes what a line triggered: held for the operator's answer, flagged for their review, or told to the agent alone. */
-export type Taken = components["schemas"]["Found"]["taken"];
+export type Taken = Mark["taken"];
+/** A file as a view shows it: its change, or the file as it stands. */
+export type Filed = Diff | Code;
 
 /** How many unchanged lines are kept in view on each side of a change. */
 export const CONTEXT = 3;
 
 /** The fewest lines a fold hides: one would take as much room as its summary. */
 const FEWEST = 2;
-
-/** The most changes to the public API a header names: the rest are on their lines. */
-const NAMED = 4;
 
 /** What a line of a file shows: one the change adds, one it removes, or one it leaves. */
 export type Change = "added" | "removed" | "same";
@@ -92,53 +87,45 @@ export interface Matter {
     notes: Note[];
 }
 
-/** One reason a file is open, or that it's automatic: its words in the header, and how a tally of an item's files counts it. */
-export interface Reason {
-    said: string;
-    one: string;
-    many: string;
-}
-
 /**
- * A changed file as the review shows it: its header line, its rows in order, the runs of them that fold and the bodies
- * of its functions and classes; why it's open, from the judge's reading of it, none where it wasn't read; whether it's
- * automatic, asking nothing held or flagged; why it folds whole under its header, where it does (`Folded`); whether
- * what it asks is about it whole, its header then a line that matters; and the rows that matter.
+ * A file as the review shows it: its header line, its rows in order, the runs of them that fold and the bodies of its
+ * functions and classes; whether it's automatic, asking nothing held or flagged; whether it's open under its header;
+ * whether what it asks is about it whole, its header then a line that matters; and the rows that matter.
  */
 export interface Shown {
     header: string;
     rows: Row[];
     runs: Run[];
     bodies: Body[];
-    reasons: Reason[];
     automatic: boolean;
-    folded: Folded | null;
+    open: boolean;
     whole: boolean;
     matters: Matter[];
 }
 
-/**
- * Why a file folds whole under its header, which says it where `automatic` would stand: a test, or a data file, by the
- * role the judge's reading gives it, whose lines the operator has little use for; or any file of a first approval,
- * which trusts the repository as it is rather than asking it read.
- */
-export type Folded = "test" | "data" | "first approval";
-
-/** What a file folded whole says in its header, and in a tally of an item's files. */
-export const FOLDED: Record<Folded, Reason> = {
-    test: { said: "test", one: "test", many: "tests" },
-    data: { said: "data", one: "data file", many: "data files" },
-    "first approval": { said: "first approval", one: "of a first approval", many: "of a first approval" },
-};
-
-/** Return why `file` folds whole under its header (`Folded`), where it's one of a first approval's (`first`) or by its role; none where it opens. */
-export function foldedOf(file: ChangedFile, first: boolean): Folded | null {
-    if (first) {
-        return "first approval";
-    }
-    const role = file.reading?.role;
-    return role === "test" || role === "data" ? role : null;
+/** A file's two sides, as a `Diff` gives them, or a `Code`'s text as what it becomes. */
+interface Sided {
+    path: string;
+    before?: Content | null;
+    after?: Content | null;
 }
+
+/** Return the sides of `file`: a `Diff`'s own, or a `Code`'s text as what it becomes, made once, so a file's syntax and highlighting are kept by it. */
+function sidesOf(file: Filed): Sided {
+    if (file.block === "diff") {
+        return file;
+    }
+    const found = coded.get(file);
+    if (found !== undefined) {
+        return found;
+    }
+    const made = { path: file.path, before: null, after: { kind: "text" as const, text: file.text } };
+    coded.set(file, made);
+    return made;
+}
+
+/** Each `Code`'s sides, once made. */
+const coded = new WeakMap<Code, Sided>();
 
 /** One line of a text, and where it starts in it. */
 interface Split {
@@ -182,8 +169,11 @@ function sized(content: Content | null | undefined): string {
     return content?.kind === "binary" ? `${content.size.toLocaleString("en")} bytes` : "none";
 }
 
-/** Say what happened to a file: created, deleted or changed, by how many lines, or that it's binary and isn't shown. */
-function told(file: ChangedFile, rows: Row[]): string {
+/** Say what happened to a file: created, deleted or changed, by how many lines, or that it's binary and isn't shown; a file as it stands, how many lines it has. */
+function told(file: Filed, rows: Row[]): string {
+    if (file.block === "code") {
+        return counted(rows.length, "line");
+    }
     const before = file.before ?? null;
     const after = file.after ?? null;
     const what = before === null ? "created" : after === null ? "deleted" : "changed";
@@ -202,16 +192,10 @@ function told(file: ChangedFile, rows: Row[]): string {
     return added + removed === 0 ? "changed · no line differs" : `changed · +${added} −${removed}`;
 }
 
-/**
- * Lay a changed file out as the review shows it: what it becomes, whole, each line it removes in place where it was,
- * before the lines that replace it; then each run of unchanged lines folded where it's `context` lines or more away
- * from every change and every line that matters, and hides two lines or more, so every change shows. Where it folds
- * whole (`foldedOf`, `first` where it's a first approval's), its header says why where `automatic` would stand. A
- * binary file shows its header alone.
- */
-export function shown(file: ChangedFile, first: boolean = false, context: number = CONTEXT): Shown {
-    const before = lines(textOf(file.before) ?? "");
-    const after = lines(textOf(file.after) ?? "");
+/** Return the rows of a file's change: what it becomes, whole, each line it removes in place where it was, before the lines that replace it. */
+function rowsOf(sided: Sided): Row[] {
+    const before = lines(textOf(sided.before) ?? "");
+    const after = lines(textOf(sided.after) ?? "");
     const rows: Row[] = [];
     const same = (i: number, j: number) => {
         const line = after[j];
@@ -247,80 +231,21 @@ export function shown(file: ChangedFile, first: boolean = false, context: number
         i = same(i, j);
         j += 1;
     }
-    const reading = file.reading ?? null;
-    const placed = mattering(reading, rows);
-    const read = reading === null ? [] : reasoned(reading);
-    const automatic = read[0]?.said === "automatic";
-    const folded = foldedOf(file, first);
-    const why = folded === null ? null : FOLDED[folded];
-    // A file folded whole says why where `automatic` stands, or after what it asks.
-    const reasons = why === null ? read : automatic ? [why, ...read.slice(1)] : [...read, why];
-    const header = [`${file.path} · ${told(file, rows)}`, ...reasons.map((each) => each.said)].join(" · ");
-    const kept = new Set(placed.matters.map((each) => each.row));
-    const found = bodiesOf(file, rows);
-    return {
-        header,
-        rows,
-        runs: runs(rows, context, kept, found),
-        bodies: found,
-        reasons,
-        automatic,
-        folded,
-        whole: placed.whole,
-        matters: placed.matters,
-    };
+    return rows;
 }
 
-/** Say what a change to the public API does, as a line that matters says it, in the judge's words (`ApiChange.describe`). */
-function api(change: ApiChanged): string {
-    const what = change.name.includes(".") ? "method" : "function";
-    switch (change.kind) {
-        case "export-added":
-            return `adds \`${change.name}\` to the package's root`;
-        case "export-removed":
-            return `removes \`${change.name}\` from the package's root`;
-        case "class-added":
-            return `adds the class \`${change.name}\``;
-        case "class-removed":
-            return `removes the class \`${change.name}\``;
-        case "function-added":
-            return `adds the ${what} \`${change.name}\``;
-        case "function-removed":
-            return `removes the ${what} \`${change.name}\``;
-        case "signature-changed":
-            return `changes the signature of \`${change.name}\``;
-    }
-}
-
-/** Mark a change to the public API in a header's few words: `+` a name added, `−` one removed, `~` a signature changed, which copies before found. */
-function signed(change: ApiChanged): string {
-    const sign = change.kind.endsWith("-removed") ? "−" : change.kind === "signature-changed" ? "~" : "+";
-    return `${sign}${change.name}`;
-}
-
-/** Say what one ask on a line triggered. */
-function triggered(asked: Asked): string {
-    if (asked.api != null) {
-        return `public API: ${api(asked.api)}`;
-    }
-    return asked.name === "ignore" ? "adds an ignore" : asked.name;
-}
-
-/** The rows that matter, and whether anything the file asks is about it whole, or on no row shown, so its header matters too. */
+/** The rows that matter, and whether anything the file's marks are on is about it whole, or on no row shown, so its header matters too. */
 interface Placed {
     matters: Matter[];
     whole: boolean;
 }
 
 /**
- * Place what the reading found on the rows it's on: each ask on its line, on the side it's in, and each finding on
- * every line it spans, what it triggered said on its first. An ask about the file whole, or on a line no row shows,
- * is the header's.
+ * Place a file's marks on the rows they're on: one of a single line on its line, on the side it's in, saying what it
+ * triggered, the header's where it's about the file whole or no row shows its line; one of a stretch on each of its
+ * lines shown, saying it on its first, and nowhere where none shows.
  */
-function mattering(reading: Reading | null, rows: Row[]): Placed {
-    if (reading === null) {
-        return { matters: [], whole: false };
-    }
+function mattering(marks: Mark[], rows: Row[]): Placed {
     const at = (side: Row["side"], number: number) =>
         rows.findIndex((row) => row.side === side && row.number === number && (side === "after" || row.change === "removed"));
     const notes = new Map<number, Note[]>();
@@ -328,20 +253,24 @@ function mattering(reading: Reading | null, rows: Row[]): Placed {
         notes.set(row, [...(notes.get(row) ?? []), ...(note === null ? [] : [note])]);
     };
     let whole = false;
-    for (const asked of reading.asks ?? []) {
-        const row = asked.line == null ? -1 : at(asked.side ?? "after", asked.line);
-        if (row < 0) {
-            whole = true;
-        } else {
-            mark(row, { taken: asked.taken, said: triggered(asked) });
+    for (const each of marks) {
+        const side = each.side ?? "after";
+        const first = each.first ?? null;
+        const last = each.last ?? null;
+        const note = { taken: each.taken, said: each.said };
+        if (last === null) {
+            const row = first === null ? -1 : at(side, first);
+            if (row < 0) {
+                whole = true;
+            } else {
+                mark(row, note);
+            }
+            continue;
         }
-    }
-    for (const found of reading.findings ?? []) {
-        const said = `${found.rule}: ${found.message.replaceAll("\n", " ")}`;
-        for (let line = found.start; line <= found.end; line += 1) {
-            const row = at("after", line);
+        for (let line = first ?? last; line <= last; line += 1) {
+            const row = at(side, line);
             if (row >= 0) {
-                mark(row, line === found.start ? { taken: found.taken, said } : null);
+                mark(row, line === first ? note : null);
             }
         }
     }
@@ -349,99 +278,43 @@ function mattering(reading: Reading | null, rows: Row[]): Placed {
     return { matters, whole };
 }
 
-/** One reason, said the same in a header and in a tally of an item's files. */
-function plainly(said: string, many: string = said): Reason {
-    return { said, one: said, many };
-}
-
 /**
- * Say why a file is open, from the judge's reading of it: what it asks, held first, each kind once, the changes to
- * its public API together (counted, for a new file; named, up to `NAMED`, for any other); the rules of the findings
- * held or flagged; else `automatic`, for one asking nothing held or flagged, production code among them. The
- * findings only told come last, which open nothing.
+ * Lay a file out as the review shows it: a `Diff`'s change, what it becomes, whole, each line it removes in place
+ * where it was, before the lines that replace it; a `Code`'s text as it stands; then each run of unchanged lines folded
+ * where it's `context` lines or more away from every change and every line that matters, and hides two lines or more,
+ * so every change shows. Its header says its path, what the change did to it, then what the view says of it. A binary
+ * file shows its header alone.
  */
-function reasoned(reading: Reading): Reason[] {
-    const asks = reading.asks ?? [];
-    const findings = reading.findings ?? [];
-    const ignores = asks.filter((each) => each.name === "ignore").length;
-    const changes = asks.flatMap((each) => (each.api == null ? [] : [signed(each.api)]));
-    const reason = (name: string): Reason => {
-        switch (name) {
-            case "protected":
-                return plainly("protected");
-            case "operator":
-                return plainly("operator's document", "operator's documents");
-            case "new-file":
-                return { said: "new file", one: "new file", many: "new files" };
-            case "whole-file":
-                return plainly("written whole");
-            case "ignore":
-                return {
-                    said: ignores === 1 ? "adds an ignore" : `adds ${ignores} ignores`,
-                    one: "with an ignore",
-                    many: "with ignores",
-                };
-            case "public-api": {
-                const named =
-                    changes.length <= NAMED
-                        ? changes.join(" ")
-                        : `${changes.slice(0, NAMED).join(" ")} and ${changes.length - NAMED} more`;
-                const created = asks.some((each) => each.name === "new-file");
-                const said = created ? counted(changes.length, "public name") : `public API: ${named}`;
-                return { said, one: "public API", many: "public API" };
-            }
-            default: {
-                const found = findings.filter((each) => each.rule === name).length;
-                return { said: found > 1 ? `${name} ×${found}` : name, one: name, many: name };
-            }
-        }
+export function shown(file: Filed, context: number = CONTEXT): Shown {
+    const sided = sidesOf(file);
+    const rows = rowsOf(sided);
+    const placed = mattering(file.marks ?? [], rows);
+    const header = [`${file.path} · ${told(file, rows)}`, ...(file.says ?? [])].join(" · ");
+    const kept = new Set(placed.matters.map((each) => each.row));
+    const found = bodiesOf(sided, rows);
+    return {
+        header,
+        rows,
+        runs: file.block === "code" ? [] : runs(rows, context, kept, found),
+        bodies: found,
+        automatic: file.block === "diff" && (file.automatic ?? false),
+        open: file.open ?? true,
+        whole: placed.whole,
+        matters: placed.matters,
     };
-    const ordered = (taken: Taken) => [
-        ...asks.filter((each) => each.taken === taken).map((each) => each.name),
-        ...findings.filter((each) => each.taken === taken).map((each) => each.rule),
-    ];
-    const asked = [...new Set([...ordered("held"), ...ordered("flagged")])].map(reason);
-    const told = [...new Set(ordered("told"))];
-    const informed =
-        told.length === 0
-            ? []
-            : [{ said: `told: ${told.join(", ")}`, one: "with findings told", many: "with findings told" }];
-    return [...(asked.length > 0 ? asked : [plainly("automatic")]), ...informed];
 }
 
-/**
- * Count an item's files by the first reason each is open, or folds whole, `first` where it's a first approval, the
- * most first: `3 automatic · 2 tests · 1 new file · 1 public API`; files the judge didn't read are `unread`; nothing
- * where it read none.
- */
-export function tally(files: ChangedFile[], first: boolean = false): string {
-    if (files.every((each) => each.reading == null)) {
-        return "";
-    }
-    const counts = new Map<string, { reason: Reason; count: number }>();
-    for (const file of files) {
-        const reason = (file.reading == null ? undefined : shownOnce(file, first).reasons[0]) ?? plainly("unread");
-        const kept = counts.get(reason.one);
-        counts.set(reason.one, { reason, count: (kept?.count ?? 0) + 1 });
-    }
-    return [...counts.values()]
-        .sort((a, b) => b.count - a.count)
-        .map(({ reason, count }) => `${count} ${count === 1 ? reason.one : reason.many}`)
-        .join(" · ");
-}
+/** Each file as shown, once laid out: the review is laid out again at each key typed in a comment, and a file's lines don't change. */
+const laidOut = new WeakMap<Filed, Shown>();
 
-/** Each file as shown, whether it's a first approval's, once laid out: the review is laid out again at each key typed in a comment, and a file's lines don't change. */
-const laidOut = new WeakMap<ChangedFile, Map<boolean, Shown>>();
-
-/** Return `file` as shown (`shown`), `first` where it's a first approval's, laid out once and kept. */
-export function shownOnce(file: ChangedFile, first: boolean): Shown {
-    const kept = laidOut.get(file) ?? new Map<boolean, Shown>();
-    const found = kept.get(first);
+/** Return `file` as shown (`shown`), laid out once and kept. */
+export function shownOnce(file: Filed): Shown {
+    const found = laidOut.get(file);
     if (found !== undefined) {
         return found;
     }
-    const made = shown(file, first);
-    laidOut.set(file, kept.set(first, made));
+    const made = shown(file);
+    laidOut.set(file, made);
     return made;
 }
 
@@ -540,7 +413,7 @@ type Node = Tree["topNode"];
  * it to its last, where that hides `FEWEST` rows or more; named by its declaration, an unnamed one by where it's
  * assigned or else by its first line, after the bodies it's in, a name given twice counted, so each names one body.
  */
-function bodiesOf(file: ChangedFile, rows: Row[]): Body[] {
+function bodiesOf(file: Sided, rows: Row[]): Body[] {
     const side: Row["side"] = file.after?.kind === "text" ? "after" : "before";
     const text = textOf(file[side]);
     const language = languageOf(file.path);
@@ -654,10 +527,10 @@ function tokensIn(tree: Tree): Token[] {
 }
 
 /** Each file's syntax trees, by side, once parsed: for its bodies as it's laid out, and its highlighting as its lines come into view. */
-const trees = new WeakMap<ChangedFile, { before?: Tree; after?: Tree }>();
+const trees = new WeakMap<Sided, { before?: Tree; after?: Tree }>();
 
 /** Return the syntax tree of one side of `file`, its `text` in `language`, parsed once and kept. */
-function treeOf(file: ChangedFile, side: Row["side"], text: string, language: Language): Tree {
+function treeOf(file: Sided, side: Row["side"], text: string, language: Language): Tree {
     const kept = trees.get(file) ?? {};
     const found = kept[side];
     if (found !== undefined) {
@@ -669,10 +542,11 @@ function treeOf(file: ChangedFile, side: Row["side"], text: string, language: La
 }
 
 /** Each file's tokens, by side, once highlighted: a file's text is highlighted once, the first time a line of it is in view. */
-const highlights = new WeakMap<ChangedFile, { before?: Token[]; after?: Token[] }>();
+const highlights = new WeakMap<Sided, { before?: Token[]; after?: Token[] }>();
 
-/** Return the tokens of one side of `file`, highlighted once and kept; none where its language isn't known or it isn't text. */
-export function tokensOf(file: ChangedFile, side: Row["side"]): Token[] {
+/** Return the tokens of one side of `shownFile`, highlighted once and kept; none where its language isn't known or it isn't text. */
+export function tokensOf(shownFile: Filed, side: Row["side"]): Token[] {
+    const file = sidesOf(shownFile);
     const kept = highlights.get(file) ?? {};
     const found = kept[side];
     if (found !== undefined) {

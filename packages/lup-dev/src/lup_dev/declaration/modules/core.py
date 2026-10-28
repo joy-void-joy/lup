@@ -6,6 +6,7 @@ from typing import Annotated
 
 from pydantic import Field
 
+from lup.blocks import SHELL_VERBS
 from lup_dev.catalog.paths import CorePaths
 from lup_dev.catalog.room import PackageAge, StandardMachine
 from lup_dev.declaration.kinds import (
@@ -16,8 +17,11 @@ from lup_dev.declaration.kinds import (
     Paths,
     Section,
     Session,
+    Verbs,
 )
+from lup_dev.declaration.looks import HOLD
 from lup_dev.declaration.module import Module
+from lup_dev.host.records import PAUSE
 
 
 def standard_machine() -> Packages:
@@ -63,6 +67,11 @@ class Core(Module):
     it into the user-level settings of each package manager the room's image
     holds, which a project's own setting outranks (`docs/launch.md`, *The
     package age gate*)."""
+    verbs: Verbs = Verbs.of(*SHELL_VERBS, HOLD, PAUSE)
+    """The verbs the review's keys say, Space and a key: the shell's, done,
+    decline, send to and comment, which apply to anything; the judge's, hold;
+    and the runtime adapters', pause, the core's until each is a module. A
+    person's layer gives one another key with `.replace`."""
     session: Session = Session()
     """How every session runs: the subagents' prompt cache, auto memory, idle
     compaction, the built-in tools removed from context and the account's

@@ -113,6 +113,7 @@ CALLS_KIND = FoldKind(
     one="the run of calls",
     level=2,
     colour="purple",
+    counts=False,
 )
 """A run of calls, under one line saying how many of which."""
 ITEMS_KIND = FoldKind(
@@ -122,6 +123,7 @@ ITEMS_KIND = FoldKind(
     one="the item's text",
     level=3,
     colour="cyan",
+    counts=False,
 )
 """An item of lup's inbox the conversation sent or was sent, its text under its
 line."""

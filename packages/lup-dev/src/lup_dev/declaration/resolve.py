@@ -39,7 +39,7 @@ from typing import Self
 
 from pydantic import model_validator
 
-from lup.blocks import SHELL_TONES
+from lup.blocks import SHELL_TONES, Banner, Drawer
 from lup.doors import served as methods
 from lup.types import Model
 from lup_dev.catalog.gate import Step
@@ -69,8 +69,10 @@ from lup_dev.declaration.kinds import (
     Session,
     TestRoots,
     Tones,
+    Verbs,
 )
 from lup_dev.declaration.load import load
+from lup_dev.declaration.looks import CORE_LOOKS
 from lup_dev.declaration.module import Module
 from lup_dev.declaration.modules.core import Core
 from lup_dev.declaration.modules.shipped import default, shipped
@@ -78,7 +80,7 @@ from lup_dev.declaration.project import Project
 from lup_dev.declaration.requirements import Needed
 from lup_dev.declaration.runner import Plain, Prefixed, Runner
 from lup_dev.declaration.serving import ModuleServing, made_with, requests, tools
-from lup_dev.host.protocol import Drawn, Limits, Looks
+from lup_dev.host.protocol import Bannered, Drawn, Limits, Looks
 
 
 class PathRoles(Model, extra="forbid"):
@@ -347,29 +349,69 @@ def served(modules: list[Module]) -> list[Served]:
 
 
 def looked(modules: list[Module], found: list[Served]) -> Looks:
-    """Return how the modules' views look: each module's fold kinds and tones, and the drawers its views are placed in.
+    """Return how the views look: the core's (`CORE_LOOKS`), then each module's fold kinds and tones, the drawers its views are placed in, the parts of the banner they are, and the verbs, `Core`'s first.
 
-    Raise `ProjectError` where two take one letter, a fold kind's or a drawer's;
-    where a tone takes a shell tone's name, takes the look of a tone that's
-    none of the shell's or the modules', or takes no look at all.
+    Raise `ProjectError` where two take one letter, a fold kind's or a drawer's,
+    or one name, a fold kind's, a drawer's or a tone's, a module clashing with
+    the core's among them; where two verbs take one name or one key, or a verb
+    takes `z`, which leads the fold keys after Space; where a tone takes a shell
+    tone's name, takes the look of a tone that's none of the shell's, the
+    core's or the modules', or takes no look at all.
     """
+    core = CORE_LOOKS
     folds = held(Folds(), parts(modules, Folds), "Fold kinds")
     tones = held(Tones(), parts(modules, Tones), "Tones")
-    drawers = [
-        Drawn(module=each.module.name, view=name, place=door.place)
+    verbs = held(Verbs(), parts(modules, Verbs), "Verbs")
+    distinct(
+        "Verb keys",
+        [
+            Owned(module="the core's fold keys", name="z"),
+            *(
+                Owned(module=each.module, name=each.entry.key)
+                for each in entries(modules, Verbs)
+            ),
+        ],
+    )
+    placed = [
+        (each.module.name, name, door.place)
         for each in found
         for name, method in methods(each.serving).items()
         if (door := method.viewing()) is not None and door.place is not None
     ]
+    drawers = [
+        Drawn(module=module, view=view, place=place)
+        for module, view, place in placed
+        if isinstance(place, Drawer)
+    ]
+    banners = [
+        Bannered(module=module, view=view)
+        for module, view, place in placed
+        if isinstance(place, Banner)
+    ]
+    kinds = entries(modules, Folds)
+    distinct(
+        "Fold kinds",
+        [
+            *(Owned(module="the core", name=fold.name) for fold in core.folds),
+            *(Owned(module=each.module, name=each.view) for each in core.drawers),
+            *(Owned(module=each.module, name=each.entry.name) for each in kinds),
+            *(Owned(module=each.module, name=each.view) for each in drawers),
+        ],
+    )
     distinct(
         "Fold keys",
         [
-            *(Owned(module="its fold kinds", name=fold.letter) for fold in folds),
+            *(Owned(module="the core", name=fold.letter) for fold in core.folds),
+            *(
+                Owned(module=each.module, name=each.place.letter)
+                for each in core.drawers
+            ),
+            *(Owned(module=each.module, name=each.entry.letter) for each in kinds),
             *(Owned(module=each.module, name=each.place.letter) for each in drawers),
         ],
     )
     shell = [tone.name for tone in SHELL_TONES]
-    known = [*shell, *(tone.name for tone in tones)]
+    known = [*(tone.name for tone in core.tones), *(tone.name for tone in tones)]
     wrong = [
         f"`{tone.name}` takes a name of the shell's tones, {', '.join(shell)}"
         if tone.name in shell
@@ -384,7 +426,23 @@ def looked(modules: list[Module], found: list[Served]) -> Looks:
     if wrong:
         message = f"Tones: {'; '.join(wrong)}"
         raise ProjectError(message)
-    return Looks(folds=folds, tones=tones, drawers=drawers)
+    distinct(
+        "Tones",
+        [
+            *(Owned(module="the core", name=tone.name) for tone in core.tones),
+            *(
+                Owned(module=each.module, name=each.entry.name)
+                for each in entries(modules, Tones)
+            ),
+        ],
+    )
+    return Looks(
+        folds=[*core.folds, *folds],
+        tones=[*core.tones, *tones],
+        drawers=[*core.drawers, *drawers],
+        banners=[*core.banners, *banners],
+        verbs=verbs,
+    )
 
 
 def held[E](

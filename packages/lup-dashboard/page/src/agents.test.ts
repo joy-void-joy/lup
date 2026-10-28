@@ -1,3 +1,4 @@
+import "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -45,6 +46,7 @@ describe("launches", () => {
             launches: [registered("one", "w"), registered("two", "x")],
             sessions: {},
             looks: {},
+            standing: { folds: [], tones: [], drawers: [], banners: [], verbs: [] },
             talkers: {
                 one: [
                     talker("w", null, 0),
@@ -79,6 +81,7 @@ describe("running", () => {
             launches: [registered("one", "w"), registered("two", "x"), registered("three", "y")],
             sessions: {},
             looks: {},
+            standing: { folds: [], tones: [], drawers: [], banners: [], verbs: [] },
             talkers: {
                 one: [
                     { ...talker("w", null, 0), activity: null },

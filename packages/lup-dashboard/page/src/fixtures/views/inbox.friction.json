@@ -1,0 +1,66 @@
+[
+  {
+    "name": "a friction",
+    "repository": "/r/lup.git",
+    "argument": {
+      "number": 57
+    },
+    "given": {
+      "items": [
+        {
+          "number": 57,
+          "reason": {
+            "reason": "friction",
+            "text": "The gate printed nothing for four minutes."
+          },
+          "sender": {
+            "party": "conversation",
+            "repository": "/r/lup.git",
+            "runtime": "claude",
+            "session": "s1",
+            "agent": "a1"
+          },
+          "recipient": {
+            "party": "operator"
+          },
+          "replies": [],
+          "citations": [],
+          "edits": [],
+          "quiet": false,
+          "made": "2026-10-27T09:00:00Z",
+          "state": {
+            "state": "waiting"
+          },
+          "rank": {
+            "name": "news",
+            "order": 1,
+            "notifies": false
+          }
+        }
+      ]
+    },
+    "module": "inbox",
+    "view": "friction",
+    "answer": {
+      "summary": [
+        {
+          "text": "friction",
+          "tone": "plain"
+        }
+      ],
+      "waiting": false,
+      "count": 0,
+      "offers": [],
+      "blocks": [
+        {
+          "block": "markdown",
+          "id": "text",
+          "version": null,
+          "offers": [],
+          "text": "The gate printed nothing for four minutes.",
+          "tone": "plain"
+        }
+      ]
+    }
+  }
+]

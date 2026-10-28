@@ -7,7 +7,8 @@
 // (`review.ts`, `code.ts`). Pure: the editor folds what these return
 // (`editor.ts`; `docs/dashboard.md`, *The keys*).
 import type { Folding } from "./comments";
-import { FOLD_KINDS, type FoldKind, type FoldKindKeys } from "./keys";
+import type { FoldKind } from "./keys";
+import { kindOf, type Kind } from "./looks";
 
 /** What these read of a fold: where its summary line is, what it hides, and its kind. */
 type Folded = Pick<Folding, "summary" | "from" | "to" | "kind">;
@@ -42,33 +43,33 @@ export function depths<F extends Pick<Folding, "summary" | "to">>(folds: readonl
     return found;
 }
 
-/** Return the level `zr` and `zm` open and close `fold` at, by its kind (`FOLD_KINDS`); a fold of no kind is at none. */
+/** Return the level `zr` and `zm` open and close `fold` at, by its kind, as the looks declare it (`looks.ts`); a fold of no kind known is at none. */
 export function levelOf(fold: Folded): number | undefined {
-    return FOLD_KINDS.find((each) => each.kind === fold.kind)?.level;
+    return kindOf(fold.kind)?.level;
 }
 
-/** Return whether `fold` is the one holding the rest of its item or drawer: the item's own, or a drawer's (`FoldKindKeys.own`). */
+/** Return whether `fold` is the one holding the rest of its item or drawer: the item's own, or a drawer's (`Kind.whole`). */
 export function isOwn(fold: Folded): boolean {
-    return FOLD_KINDS.find((each) => each.kind === fold.kind)?.own === true;
+    return kindOf(fold.kind)?.whole === true;
 }
 
-/** Return what `FOLD_KINDS` says of `fold`'s kind. */
-function keysOf(fold: Folded): FoldKindKeys | undefined {
-    return FOLD_KINDS.find((each) => each.kind === fold.kind);
+/** Return what the looks declare of `fold`'s kind. */
+function keysOf(fold: Folded): Kind | undefined {
+    return kindOf(fold.kind);
 }
 
 /**
  * Return the folds of one item or drawer, `folds`, that `zr` opens (`opening`) or `zm` closes, `closed` saying which
  * are folded: `zr` those folded at the first level any is folded at, the item's own or the drawer's first; `zm` those
  * open at the last level any is open at, never the own one, which `za` on its header folds. At a level whose kind
- * goes back (`FoldKindKeys.back`), as a conversation's earlier exchanges, one alone: `zr` the latest folded, so each
+ * goes back (`Kind.opens`, `back`), as a conversation's earlier exchanges, one alone: `zr` the latest folded, so each
  * reaches one step further back, `zm` the earliest open. With `all`, as `zR` and `zM`, every one of them: each folded
- * one, or each open one but the own one. Neither `zr` nor `zR` opens a deep fold (`FoldKindKeys.deep`), whose
- * content is read as it opens: its own keys do.
+ * one, or each open one but the own one. Neither `zr` nor `zR` opens a deep fold (`deep`), whose content is read as
+ * it opens: its own keys do.
  */
 export function levelled<F extends Folded>(folds: readonly F[], closed: (fold: F) => boolean, opening: boolean, all: boolean): F[] {
     const reached = opening
-        ? folds.filter((each) => closed(each) && keysOf(each)?.deep !== true)
+        ? folds.filter((each) => closed(each) && keysOf(each)?.opens !== "deep")
         : folds.filter((each) => !closed(each) && !isOwn(each));
     if (all) {
         return reached;
@@ -76,7 +77,7 @@ export function levelled<F extends Folded>(folds: readonly F[], closed: (fold: F
     const levels = reached.flatMap((each) => levelOf(each) ?? []);
     const level = opening ? Math.min(...levels) : Math.max(...levels);
     const atLevel = reached.filter((each) => levelOf(each) === level);
-    if (!atLevel.some((each) => keysOf(each)?.back === true)) {
+    if (!atLevel.some((each) => keysOf(each)?.opens === "back")) {
         return atLevel;
     }
     const ordered = [...atLevel].sort((a, b) => a.summary.from - b.summary.from);
