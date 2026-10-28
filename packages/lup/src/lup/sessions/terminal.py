@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, Self
 
 import tomlkit
 from pydantic import AfterValidator, JsonValue, TypeAdapter, model_validator
-from tomlkit.items import Table
+from tomlkit.items import InlineTable, Table
 
 from lup.errors import LupError
 from lup.events import SessionEvent
@@ -494,12 +494,12 @@ def updated(text: str, syntax: Syntax, settings: list[Setting]) -> str:
             document = tomlkit.parse(text)
             for each in settings:
                 *tables, last = each.preference.keys
-                holding: TOMLDocument | Table = document
+                holding: TOMLDocument | Table | InlineTable = document
                 for key in tables:
                     if key not in holding:
                         holding[key] = tomlkit.table()
                     inner = holding[key]
-                    if not isinstance(inner, Table):
+                    if not isinstance(inner, Table | InlineTable):
                         inner = tomlkit.table()
                         holding[key] = inner
                     holding = inner

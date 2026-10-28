@@ -6,6 +6,7 @@ is `Transcripts`' (`packages/lup-transcripts/tests/`).
 """
 
 import json
+import os
 from pathlib import Path, PurePosixPath
 
 from lup_dev.adapters.claude import ClaudeQueues, ClaudeRecords
@@ -296,3 +297,21 @@ def test_a_launched_codex_thread_s_rollout_is_read_from_its_room_s_home(
     assert records.conversation("t1", None) == rollout
     assert records.conversation("s", "t1") == rollout
     assert records.conversation("t2", None) is None
+
+
+def test_an_id_that_isn_t_a_plain_name_or_a_record_that_isn_t_a_file_finds_nothing(
+    tmp_path: Path,
+) -> None:
+    homes = HomesLayout(home=tmp_path / "homes")
+    room = homes.project(tmp_path / "work" / ".git", "claude")
+    folder = room / "projects" / "-work"
+    folder.mkdir(parents=True)
+    (folder / "s1.jsonl").write_text("{}\n")
+    os.mkfifo(folder / "s2.jsonl")
+    records = ClaudeRecords(directory=tmp_path / ".claude", homes=homes)
+    rollouts = CodexRecords(home=tmp_path / ".codex", homes=homes)
+
+    assert records.conversation("*", None) is None
+    assert records.conversation("s1", "../../s1") is None
+    assert records.conversation("s2", None) is None
+    assert rollouts.conversation("*", None) is None

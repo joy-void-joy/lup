@@ -248,7 +248,7 @@ import lup
 from lup import events
 from lup.adapters.codex.layout import CodexLayout
 from lup.adapters.codex.settings import CodexSettings
-from lup.rooms.homes import inside
+from lup.rooms.homes import inside, plain
 from lup.sessions.terminal import Cli, Hook
 from lup.types import JsonObject, Model, Settings
 from lup_dev.adapters import Adapter
@@ -1111,8 +1111,10 @@ class CodexRecords(Model, Records):
 
     @override
     def conversation(self, session: str, agent: str | None) -> Path | None:
-        """Return the rollout of one conversation: in a room's home first, where launched sessions keep theirs, then in the operator's home. A subagent is a thread of its own, its id its rollout's, as a session's is."""
+        """Return the rollout of one conversation: in a room's home first, where launched sessions keep theirs, then in the operator's home; none for an id that isn't a plain name, or for what isn't a file there. A subagent is a thread of its own, its id its rollout's, as a session's is."""
         thread = session if agent is None else agent
+        if not plain(thread):
+            return None
         rooms = [] if self.homes is None else self.homes.every(Codex().name())
 
         def found(home: Path) -> list[Path]:
@@ -1122,7 +1124,7 @@ class CodexRecords(Model, Records):
             return [
                 each
                 for each in sorted(sessions.rglob(f"rollout-*-{thread}.jsonl"))
-                if inside(home, each)
+                if inside(home, each) and each.is_file()
             ]
 
         return next(

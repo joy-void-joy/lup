@@ -259,7 +259,7 @@ from lup.adapters.claude.layout import ClaudeLayout
 from lup.adapters.claude.settings import ClaudeSettings
 from lup.adapters.claude.terminal import own_settings
 from lup.adapters.claude.windows import catalogued, reach
-from lup.rooms.homes import inside
+from lup.rooms.homes import inside, plain
 from lup.sessions.terminal import Cli, Hook, TerminalError
 from lup.tools.serving import Notice
 from lup.types import JsonObject, Model, MutableModel, Settings
@@ -1718,7 +1718,9 @@ class ClaudeRecords(Model, Records):
 
     @override
     def conversation(self, session: str, agent: str | None) -> Path | None:
-        """Return the record of one conversation: in a room's home first, where launched sessions keep theirs, then in the operator's directory."""
+        """Return the record of one conversation: in a room's home first, where launched sessions keep theirs, then in the operator's directory; none for an id that isn't a plain name, as a hook's payload, which a room writes, may give, or for what isn't a file there, a pipe among it, which a read would wait on."""
+        if not plain(session) or (agent is not None and not plain(agent)):
+            return None
         name = (
             f"{session}.jsonl"
             if agent is None
@@ -1733,7 +1735,7 @@ class ClaudeRecords(Model, Records):
             return [
                 each
                 for each in sorted(projects.glob(f"*/{name}"))
-                if inside(home, each)
+                if inside(home, each) and each.is_file()
             ]
 
         return next(

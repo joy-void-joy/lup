@@ -608,3 +608,27 @@ def test_a_later_layer_never_writes_through_a_link_an_earlier_one_copied(
     assert not (destination / "notes").is_symlink()
     assert (destination / "notes").read_text() == "the profile's notes"
     assert (destination / "tools" / "run.sh").read_text() == "the profile's tool"
+
+
+def test_a_pipe_a_room_left_at_a_file_s_landing_is_replaced_never_waited_on(
+    tmp_path: Path,
+) -> None:
+    at = tmp_path / "home"
+    at.mkdir()
+    os.mkfifo(at / "settings.json")
+
+    landed(at, {at / "settings.json": False})
+
+    assert (at / "settings.json").is_file()
+
+
+def test_a_toml_preference_keeps_the_rest_of_an_inline_table(tmp_path: Path) -> None:
+    carrying = preferences(tmp_path, "toml", tui__theme=None)
+    written(carrying.into, "tui = { vim = true }\n")
+    written(carrying.saved, '[tui]\ntheme = "light"\n')
+
+    carrying.carried()
+
+    assert tomllib.loads(carrying.into.read_text()) == {
+        "tui": {"vim": True, "theme": "light"}
+    }

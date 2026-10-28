@@ -94,7 +94,8 @@ def made(holding: int, name: str, *, directory: bool) -> None:
         except FileExistsError:
             return
         return
-    flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC
+    # Never waiting on a pipe a room swapped in meanwhile: opening one fails.
+    flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
     os.close(os.open(name, flags, 0o600, dir_fd=holding))
 
 
@@ -128,3 +129,14 @@ def inside(home: Path, path: Path) -> bool:
     (True, False)
     """
     return path.resolve().is_relative_to(home.resolve())
+
+
+def plain(name: str) -> bool:
+    """Say whether `name` is a plain name for a record by: letters, digits, `-` and `_`, as each runtime's ids for its sessions and subagents are; never a path or a pattern, which an id a room's hook gave could be.
+
+    >>> plain("8f2c-4b1e_a9"), plain("*"), plain("../x"), plain("")
+    (True, False, False, False)
+    """
+    return bool(name) and all(
+        char.isascii() and (char.isalnum() or char in "-_") for char in name
+    )
