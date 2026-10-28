@@ -36,7 +36,7 @@ Beyond the limits, an action is refused, saying that allowing it is the operator
 
 ## Deleting a branch that has landed
 
-A branch a session pushes, for its draft pull request, stays on the forge once it lands. `delete-merged`, allowed by default, deletes it, where nothing only the forge holds goes with it; `delete-ref` deletes any ref, whatever it holds (`Remotes.merged`, `remote/protocol.py`).
+A branch a session pushes, for their draft pull request, stays on the forge once it lands. `delete-merged`, allowed by default, deletes it, where nothing only the forge holds goes with it; `delete-ref` deletes any ref, whatever it holds (`Remotes.merged`, `remote/protocol.py`).
 - **A branch, `refs/heads/…`,** never a protected ref, and never a gated one: the gated refs are where branches land (`Core.credentials`), lup's integration branch by default, a project's own where it names another.
 - **Checked against the remote, never the room's refs,** since what a deletion loses is the remote's commits. The host lists the remote (`git ls-remote`), fetches the branch's tip and each gated branch's into the store, writing no ref, and deletes the branch only where its tip is in the history of one of them (`git merge-base --is-ancestor`). Where it isn't, the session is told that deleting the branch would lose its commits, and that deleting it anyway is `delete-ref`, the operator's call.
 - **No race:** the deletion is pushed with `--force-with-lease=<branch>:<the tip checked>`, so where the branch moved since the check, git refuses it as stale and nothing is deleted. That lease is the host's, so it doesn't make the deletion a forced push, as a room's lease makes an update one; a lease the room gave on the branch must name the same tip.

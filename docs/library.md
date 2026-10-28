@@ -39,7 +39,7 @@ async def forecast(question: str, agent: Agent = forecaster) -> Forecast | None:
     try:
         result = await agent.ask(question, Submit(Forecast, before=[cites_sources]))
     except BlockedError:
-        return None  # the agent called `blocked`: it says the question can't be answered
+        return None  # the agent called `blocked`: they say the question can't be answered
     return result.output  # a Forecast; result.notes, .rejected and .usage sit beside it
 ```
 
@@ -60,8 +60,8 @@ def test_a_forecast_must_cite_its_sources(fake_agents: FakeAgents) -> None:
     assert fake_agents.calls[0].prompt == "Will it rain in London tomorrow?"
 ```
 
-- **The answer is a tool call.** The ask serves `submit`, a tool whose input is `Forecast`: pydantic validates each call, then `cites_sources` reviews the typed value, and a refusal is the tool's answer, so the agent fixes its answer in the same turn. `ask(question, Forecast)` gives the plain `Submit(Forecast)`; `ask(prompt)` with no model returns the final message's text.
-- **`result` is a `TurnResult[Forecast]`:** `output`, `usage` (tokens, and `cost_usd` where the runtime reports it), `duration`, `session_id`, `rejected` (the refused submissions, oldest first), and what the agent said beside its answer: `notes`, `frictions` and `how_it_felt`.
+- **The answer is a tool call.** The ask serves `submit`, a tool whose input is `Forecast`: pydantic validates each call, then `cites_sources` reviews the typed value, and a refusal is the tool's answer, so the agent fixes their answer in the same turn. `ask(question, Forecast)` gives the plain `Submit(Forecast)`; `ask(prompt)` with no model returns the final message's text.
+- **`result` is a `TurnResult[Forecast]`:** `output`, `usage` (tokens, and `cost_usd` where the runtime reports it), `duration`, `session_id`, `rejected` (the refused submissions, oldest first), and what the agent said beside their answer: `notes`, `frictions` and `how_it_felt`.
 - **`Codex(model=…)` in place of `Claude(...)`** changes nothing else: both are an `Agent`, which is what code that shouldn't care holds.
 - **The test** runs the real ask, its layers, the tool and the hook; only the turn is scripted.
 
@@ -80,11 +80,11 @@ A field arrives with the piece that uses it, so a declaration holds nothing an a
 ## Typed answers: the output tool and its guard
 
 - **Validated, then reviewed.** `Submit` (`tools/submit.py`) is an ordinary lup tool: its arguments are validated as sent, then each `before` hook runs on the typed value, returning `Allow()` or `Deny(reason)`, so the answer keeps its type through review.
-- **A refusal answers the call:** every validation error at once, or the hook's reason. No new prompt is sent; the agent corrects itself with its own context. An accepted answer is told to end its turn.
-- **The guard.** A typed turn can't end until an answer is accepted, or the agent calls `blocked` or `stop`; trying, it's told which tools to call, the same on both runtimes. Claude Code hears it through a `Stop` hook, Codex as another turn on the same thread.
-- **Bounded.** `Submission.attempts` (3) counts rejected answers and refused endings together; past it, the ask raises `OutputMissingError` with every rejection. An agent that keeps submitting without trying to end is bounded only by a timeout, which has none by default.
+- **A refusal answers the call:** every validation error at once, or the hook's reason. No new prompt is sent; the agent corrects themselves with their own context. An agent whose answer is accepted is told to end their turn.
+- **The guard.** A typed turn can't end until an answer is accepted, or the agent calls `blocked` or `stop`; trying, they're told which tools to call, the same on both runtimes. Claude Code hears it through a `Stop` hook, Codex as another turn on the same thread.
+- **Bounded.** `Submission.attempts` (3) counts rejected answers and refused endings together; past it, the ask raises `OutputMissingError` with every rejection. An agent who keeps submitting without trying to end is bounded only by a timeout, which has none by default.
 
-It's one mechanism on both runtimes, and neither's native structured output: Codex's `outputSchema` shapes the final message, so nothing could refuse an answer inside the turn. A tool keeps hooks, and the guard keeps the agent in its turn, where a correction sent as a new prompt would start it over. Claude Code shows the tool as `mcp__lup__submit`, Codex as a dynamic tool `submit`, which a code-mode model calls from JavaScript.
+It's one mechanism on both runtimes, and neither's native structured output: Codex's `outputSchema` shapes the final message, so nothing could refuse an answer inside the turn. A tool keeps hooks, and the guard keeps the agent in their turn, where a correction sent as a new prompt would start it over. Claude Code shows the tool as `mcp__lup__submit`, Codex as a dynamic tool `submit`, which a code-mode model calls from JavaScript.
 
 ## The speaking tools
 
@@ -129,13 +129,13 @@ The errors lup raises descend from `LupError`, so one `except` catches them, tho
 | `UsageLimitReachedError` | The account's usage window is spent; `reset_at` where the runtime said | No |
 | `AuthMissingError` | No usable login, or the login refused | No |
 | `OutputMissingError` | No answer accepted within `submission.attempts`, with every rejection | No |
-| `BlockedError`, `StoppedError` | The agent called `blocked` or `stop`, with its words | No |
+| `BlockedError`, `StoppedError` | The agent called `blocked` or `stop`, with their words | No |
 | `ToolsPresentError` | The session loaded tools beyond lup's | No |
 | `TurnTimeoutError` | The timeout passed and the turn was interrupted; also a `TimeoutError` | No |
 | `RuntimeMissingError` | The runtime's extra isn't installed, or no Claude Code is found at all; a `LupError`, not a `TurnError` | No |
 | `RealCallInTestError` | A test reached a real agent (*Testing*); a `LupError` | No |
 
-**The call record.** With `layers.trace` set, every ask, answered or failed, appends one `CallRecord` (`observability/trace.py`): the runtime and model, when and how long, the prompts, the output or the error, the rejections, what the agent said beside its answer, and the usage, all in full. It's derived from the result or the error and the request, so the two can't disagree. Codex reports no cost.
+**The call record.** With `layers.trace` set, every ask, answered or failed, appends one `CallRecord` (`observability/trace.py`): the runtime and model, when and how long, the prompts, the output or the error, the rejections, what the agent said beside their answer, and the usage, all in full. It's derived from the result or the error and the request, so the two can't disagree. Codex reports no cost.
 
 ## Testing: the fake and the guard
 
