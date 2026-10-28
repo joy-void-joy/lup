@@ -4,7 +4,6 @@
 // own text out with these (`review.ts`, `conversation.ts`), and the editor they
 // share (`editor.ts`) lets the comments be written.
 import type { components } from "./generated/api";
-import type { FoldKind } from "./keys";
 
 export type Quote = components["schemas"]["Quote"];
 
@@ -19,9 +18,16 @@ export interface Line extends Span {
     own: number;
 }
 
-/** One comment, where its lines are shown: `comment` is its place in the draft. */
+/** One comment, where its lines are shown: `comment` is its id in the draft. */
 export interface Block extends Span {
-    comment: number;
+    comment: string;
+}
+
+/** A passage of a text: what it says, and where it starts and ends in that text. */
+export interface Offsets {
+    text: string;
+    start: number;
+    end: number;
 }
 
 /**
@@ -33,10 +39,12 @@ export interface Folding extends Span {
     summary: Span;
     /** Whether it's folded until the operator opens it. */
     closed: boolean;
-    /** What it holds, which its mark, its bar and the header show; none in a view whose folds have no kinds, as a conversation's. */
-    kind?: FoldKind;
+    /** What it holds, by its kind's name (`looks.ts`), which its mark, its bar and the header show; none in a view whose folds have no kinds. */
+    kind?: string;
     /** What the header calls it. */
     label?: string;
+    /** Whether it's a scope's, a group's, an item's, a drawer's or a file's, which the margin bars its full height and labels. */
+    scope?: boolean;
 }
 
 /** One row of a thing said: its text, where its words start in it, and where they start in the words kept. */
@@ -127,17 +135,17 @@ export function starts(lines: string[]): number[] {
 }
 
 /** Return the line, of those starting at `starts`, a comment's quote is shown under: the one its passage ends on; none for a comment on the whole. */
-export function under(starts: number[], quote: Quote | null | undefined): number | null {
+export function under(starts: number[], quote: Offsets | null | undefined): number | null {
     return quote == null ? null : lineOf(starts, Math.max(quote.end - 1, quote.start));
 }
 
 /** Return where in its text a passage's last character is, where the cursor goes back to once a comment on it ends, as reading carries on there; its start where it's empty. */
-export function lastOf(quote: Quote): number {
+export function lastOf(quote: Offsets): number {
     return Math.max(quote.end - 1, quote.start);
 }
 
 /** Return the passage `from` to `to` selects, from its first line to its last, counted in the text `own` they're lines of; a start before the first line's words counts from them. */
-export function passage(own: string, first: Line, last: Line, from: number, to: number): Quote {
+export function passage(own: string, first: Line, last: Line, from: number, to: number): Offsets {
     const start = first.own + Math.max(from - first.from, 0);
     const end = last.own + Math.max(Math.min(to, last.to) - last.from, 0);
     return { text: own.slice(start, end), start, end };
@@ -200,29 +208,8 @@ export function hunks(a: string[], b: string[]): Hunk[] {
     }));
 }
 
-/**
- * Return the changes that make `before` into `after`, line by line: each line both have kept where it is, what's
- * removed and added between them each a change of its own, in order (`hunks`). So the comments cleared above a
- * reader and the steps added below them leave the reader's lines untouched.
- */
-export function changes(before: string, after: string): Change[] {
-    if (before === after) {
-        return [];
-    }
-    const a = before === "" ? [] : before.split("\n");
-    const b = after === "" ? [] : after.split("\n");
-    const starts: number[] = [];
-    let at = 0;
-    for (const line of a) {
-        starts.push(at);
-        at += line.length + 1;
-    }
-    starts.push(at);
-    return hunks(a, b).map((each) => change(before, a.length, starts, each.from, each.to, b.slice(each.into, each.until)));
-}
-
-/** Return the change of `before`, of `count` lines starting at `starts`, that replaces its lines `from` to `to` with `lines`. */
-function change(before: string, count: number, starts: number[], from: number, to: number, lines: string[]): Change {
+/** Return the change of `before`, of `count` lines starting at `starts` (and one past its end), that replaces its lines `from` to `to` with `lines`. */
+export function lineChange(before: string, count: number, starts: readonly number[], from: number, to: number, lines: readonly string[]): Change {
     const start = starts[from] ?? before.length;
     const end = (starts[to] ?? before.length + 1) - 1;
     const insert = lines.join("\n");
@@ -318,35 +305,4 @@ function diff(a: string[], b: string[]): Hunk[] | null {
         }
     }
     return made;
-}
-
-/**
- * Return where the cursor is once `made` are made to `before`, as vim's cursor sits on a character: on the same one,
- * moved with the text; where the lines it was on are replaced, on the same line of what replaces them (their last,
- * where fewer replace them) at the same column (the line's last character, where it's shorter), as when a header's
- * wait is said anew; at a change's start where they're removed. Lines added where it is go before it, but at the
- * text's very end.
- */
-export function moved(head: number, made: Change[], before: string): number {
-    let shift = 0;
-    for (const each of made) {
-        if (head < each.from || (head === each.from && each.from === each.to && head >= before.length)) {
-            break;
-        }
-        if (head >= each.to) {
-            shift += each.insert.length - (each.to - each.from);
-            continue;
-        }
-        if (each.insert === "") {
-            return each.from + shift;
-        }
-        const was = before.slice(each.from, head).split("\n");
-        const column = (was.at(-1) ?? "").length;
-        const lines = each.insert.split("\n");
-        const row = Math.min(was.length - 1, lines.length - 1);
-        const line = lines[row] ?? "";
-        const start = lines.slice(0, row).reduce((at, text) => at + text.length + 1, 0);
-        return each.from + shift + start + Math.min(column, Math.max(line.length - 1, 0));
-    }
-    return head + shift;
 }

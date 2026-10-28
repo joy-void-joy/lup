@@ -1,41 +1,48 @@
 // The review: everything waiting for the operator laid out as one text to read
 // and move through, in groups, one per agent, every agent running having one,
 // empty or not; their comments in it, each under the line it's on, and their
-// messages to each agent under its banner. Under an approval or a held change,
-// each file it changes, whole (`code.ts`), its lines commented on as the item's
-// own are, the lines that matter in it, by the judge's reading, kept in order
-// for the keys to walk; under each item its context. Under each agent's
-// banner, before its items, its drawers (`docs/dashboard.md`, *The drawers*):
-// its task list, what its branch changed since they approved it, each file laid
-// out as an item's, and its whole conversation (`conversation.ts`), its latest
-// part open, each a fold of its own kind under a short label, one under the
-// other, folded until opened in place; a comment in the conversation or on the
-// changed files is a remark to the agent, the one on code recording the version
-// it was written on. A subagent's group under its parent's, each group folding
-// whole under its banner.
-// Its groups and items in the order they arrived, never sorted again, so what
-// the operator reads stays put as items come; their kind's rank, which the host
-// gives, says only which `]a` and `[a` stop at. Each fold has a kind: the item
-// whole, a file, a function's or a class's body, a run of unchanged lines, the
-// context, a drawer. What's folded by default: the context, each run of a file's
-// unchanged lines away from its changes and the lines that matter, so every
-// change shows, never a changed line among unchanged ones; a test and a data
-// file whole under its header, and each file of a first approval (`Folded`);
-// an item marked read or left for later, and each drawer but "since you
-// approved"; a body is open, but
-// a new module's in its drawer,
-// which shows its design. Each fold is named by what it hides, so an item or a
-// drawer laid out again keeps the folds the operator left; and where the cursor
-// is, said in the header over the review, is the group, the item or the drawer
-// and the folds it's in. Pure: the editor (`Review.tsx`) draws it, folds it and
-// lets what's written be edited, and the host keeps the draft
-// (`docs/dashboard.md`, *The review*). What it shares with a conversation's
-// text is in `comments.ts`.
+// messages to each agent under its banner. A tree (`laid`, `Laid.nodes`): the
+// core lays out the frame, the groups in the order they arrived, never sorted
+// again, each banner, each item's header and what's around its body (the
+// operator's words an answer answers, its edits, its citations' passages, the
+// replies kept from before, its context) and the comments; inside it, each
+// module's view (`views.ts`): an item's body is its kind's view of it, its text
+// and its files, each file whole (`code.ts`), its lines commented on as the
+// item's own are, the lines that matter in it, by the judge's reading
+// (`views/judge.ts`), kept in order for the keys to walk; under each agent's
+// banner, before its items, each drawer its repository's looks place
+// (`docs/dashboard.md`, *The drawers*), its task list, what its branch changed
+// since they approved it, each file laid out as an item's, and its whole
+// conversation (`conversation.ts`), each a fold of its own kind under a short
+// label, one under the other, folded until opened in place; a comment in the
+// conversation or on the changed files is a remark to the agent, the one on
+// code recording the version it was written on. Each comment goes under the
+// last line it quotes of the block it's on, followed there as the block
+// changes (`anchors.ts`). A subagent's group under its parent's, each group
+// folding whole under its banner. Each part keeps an id across layouts, and
+// each line is the innermost part's laid out on it, which the editor keeps the
+// buffer by (`reconcile.ts`). Their kind's rank, which the host gives, says only which
+// `]a` and `[a` stop at. Each fold has a kind: the item whole, a file, a
+// function's or a class's body, a run of unchanged lines, the context, a
+// drawer's, a module's own. What's folded by default: the context, each run of
+// a file's unchanged lines away from its changes and the lines that matter, so
+// every change shows, never a changed line among unchanged ones; a file its
+// view folds whole, as a test, a data file and each file of a first approval;
+// an item marked read or left for later, and each drawer; a body is open, but
+// a new module's in its drawer, which shows its design. Each fold is named by
+// what it hides, so an item or a drawer laid out again keeps the folds the
+// operator left; and where the cursor is, said in the header over the review,
+// is the group, the item or the drawer and the folds it's in. Pure: the editor
+// (`Review.tsx`) draws it, folds it and lets what's written be edited, and the
+// host keeps the draft (`docs/dashboard.md`, *The review*). What it shares
+// with a conversation's text is in `comments.ts`.
 import { since } from "./agents";
-import { FOLDED, foldedOf, shownOnce, type Body, type ChangedFile, type Folded, type Matter, type Row } from "./code";
+import { endInLast, keptId, linesOf, placed as placedOn, quoting, type Lines, type Placement } from "./anchors";
+import { shownOnce, type Body, type ChangedFile, type Filed, type Matter, type Row } from "./code";
 import {
     calls,
-    lastOf,
+    kept as keptLines,
+    lineOf,
     passage,
     saying,
     cited,
@@ -50,8 +57,9 @@ import {
 } from "./comments";
 import {
     UNEXCHANGED,
-    aboutAt as aboutTalk,
     laid as laidTalk,
+    linesOfWords,
+    passageAt,
     opened as openedTalk,
     quoted as quotedTalk,
     shifted,
@@ -59,14 +67,39 @@ import {
     type Entry,
     type Exchanged,
     type Laid as Talk,
+    type Passage,
+    type Remark as TalkRemark,
 } from "./conversation";
 import { SET_IN, above, citedOn, editedOf, markerEnd, passageOf, type Citation, type Row as Beside, type RowKind } from "./exchange";
 import { around } from "./folds";
 import type { components } from "./generated/api";
-import { DRAWERS, type DrawerKind, type FoldKind, type ReviewPlace } from "./keys";
-import { reviewedLine } from "./since";
+import type { DrawerKind, FoldKind, ReviewPlace } from "./keys";
+import { adopted, kindOf, type Merged } from "./looks";
+import {
+    blockId,
+    conversationOf,
+    instanceOf,
+    whose,
+    UNREAD,
+    type AgentDrawers,
+    type Answered,
+    type Block as ViewBlock,
+    type Drawers,
+    type Instance,
+    type Mounted,
+    type Offer,
+    type Remote,
+    type Running,
+    type Shown,
+    type Span as ViewSpan,
+} from "./views";
+import type { Run } from "./reconcile";
+import { kindView, mount, producerOf } from "./views/index";
+import { plain } from "./views/core";
+import { body } from "./views/inbox";
+import { sinceSummary } from "./views/judge";
 
-export { calls, type Block, type ChangedFile, type Line, type Span };
+export { body, calls, plain, sinceSummary, UNREAD, whose, type AgentDrawers, type Answered, type Block, type ChangedFile, type Drawers, type Line, type Span };
 
 export type Item = components["schemas"]["Item"];
 export type Draft = components["schemas"]["Draft"];
@@ -87,9 +120,6 @@ export type { Call, Entry, Exchanged };
 
 /** What the operator writes in the review, as its editor holds it: a comment on an item, a message to an agent, or a remark in one of its drawers. */
 export type Written = Comment | Letter | Remark;
-
-/** What the host answered, asked for more of an item than its own text: what it showed, or why it refused. */
-export type Answered<T> = { shown: T } | { refused: string };
 
 /**
  * What the review shows of each item beyond its own text, by the item's number, once the host has answered: its
@@ -186,26 +216,6 @@ export function threadsOf(answers: Item[], number: number): Thread {
 
 
 /**
- * What the page holds of one agent, for its banner and its drawers: its conversation's steps as read so far, each call
- * read whole once its fold was opened, by its id, its task list and what its context holds, the items it exchanged
- * where they were asked, and what its branch changed since the operator last saw it, as last read (`since`). None of
- * a drawer's before the host has answered.
- */
-export interface AgentDrawers {
-    entries: Entry[];
-    calls: ReadonlyMap<string, Answered<Call>>;
-    tasks: Task[];
-    usage: Usage | null;
-    exchanged: Exchanged | null;
-    since: Since | null;
-}
-
-/** Each agent's drawers' data, by `whose` its conversation is. */
-export type Drawers = Map<string, AgentDrawers>;
-
-export const UNREAD: AgentDrawers = { entries: [], calls: new Map(), tasks: [], usage: null, exchanged: null, since: null };
-
-/**
  * What a line under an item or in a drawer that isn't the operator's or the agent's own text shows: a fold's summary;
  * a step of a context or a conversation, the operator's words, the agent's, a run of calls, a call and a line of its
  * input and output, or the call that made the item; an item of the inbox in a conversation, and a line of its text; a
@@ -225,7 +235,14 @@ export type Kind =
     | "item-to"
     | "item-text"
     | "task"
-    | "reviewed";
+    | "reviewed"
+    | (string & {});
+
+/** A line of an item's or a drawer's own, which comments may be on: where it is, where it starts in its own text, and the block it's of (`blockId`), at its line there. */
+export interface OwnLine extends Line {
+    block: string;
+    line: number;
+}
 
 /** A line under an item that isn't its own text, so no comment is on it. */
 export interface Aside extends Span {
@@ -235,7 +252,7 @@ export interface Aside extends Span {
 
 /** A line of a changed file under an item or in a drawer, which comments may be on: the file's header, where `row` is none, or one of its rows, and what it triggered where it's a line that matters. */
 export interface Coded extends Span {
-    file: ChangedFile;
+    file: Filed;
     row: Row | null;
     matter: Matter | null;
 }
@@ -244,7 +261,7 @@ export interface Coded extends Span {
  * What folds in an item or a drawer, by its kind (`FoldKind`): the item whole under its header, folded where it's
  * marked read or left for later; a drawer under its summary line, folded until opened, but "since you approved", open;
  * each file it changes under its
- * header, folded where it's automatic, asking nothing held or flagged, a test, data, or a first approval's (`Folded`); a function's or a class's body under the
+ * header, folded where its view folds it whole, automatic, asking nothing held or flagged, a test, data, or a first approval's; a function's or a class's body under the
  * line declaring it, open but in a new module of a drawer; a run of a file's unchanged lines under a summary line,
  * folded; and its context, folded. Each sits whole inside another or beside it. It hides `from` to `to`, from the end
  * of its summary line to the end of its last; a file's and a body's from the end of the comments on their first line,
@@ -266,11 +283,13 @@ export interface Fold extends Span {
     /** Whether it's folded until the operator opens it. */
     closed: boolean;
     summary: Span;
+    /** Whether it's a scope's: a group's, an item's or a drawer's whole, or a file's. */
+    scope?: boolean;
 }
 
 /** Where a changed file is under its item or in its drawer: from its header to its last line and the comments under it. */
 export interface FileSpan extends Span {
-    file: ChangedFile;
+    file: Filed;
 }
 
 /** What names a group in its banner: its first item, or, for a group with none, the agent's conversation. */
@@ -283,6 +302,8 @@ export type Head = { item: Item } | { conversation: Conversation };
 export interface Group {
     /** The agent it's of; none for lup's approvals, which no message goes to. */
     conversation: Conversation | null;
+    /** The parts of its banner, each a view of its agent's, where it's running. */
+    parts: Mounted[];
     /** What its banner names it by. */
     head: Head;
     later: boolean;
@@ -297,9 +318,19 @@ export interface Group {
     fold: Fold | null;
 }
 
-/** How the review's groups are arranged beyond the order items came in: each subagent's group under its parent's, by `whose` each conversation is and its parent's. */
+/**
+ * How the review's groups are arranged beyond the order items came in: each subagent's group under its parent's, by
+ * `whose` each conversation is and its parent's; how the views look, which drawers and banner parts each repository's
+ * agents have (`looks.ts`); each conversation running, which has its banner's parts; and what the host answered of
+ * each view mounted that the page doesn't lay out itself (`views.ts`).
+ */
 export interface Arranging {
     parents?: ReadonlyMap<string, string> | null;
+    looks?: Merged;
+    running?: ReadonlyMap<string, Running>;
+    remote?: Remote;
+    /** The review as the page last laid it out, which each comment is followed from, through its block's change since (`placed`, `anchors.ts`); none as it's first laid out. */
+    previous?: Laid | null;
 }
 
 /**
@@ -310,7 +341,7 @@ export interface Scope {
     /** What names it among the review's folds' owners (`Fold.of`). */
     of: string;
     header: Span;
-    lines: Line[];
+    lines: OwnLine[];
     blocks: Block[];
     /** Its lines that are a file's, each with its file and row. */
     code: Coded[];
@@ -328,9 +359,11 @@ export interface SaidLine extends Span {
     own: number;
 }
 
-/** One item, where it's shown: with the lines of the operator's words it answers, shown above it, and where each line of its own an edit changed starts. */
+/** One item, where it's shown: its body, its kind's view of it; what its header names it by, `@51 question`; with the lines of the operator's words it answers, shown above it, and where each line of its own an edit changed starts. */
 export interface Region extends Scope {
     item: Item;
+    body: Mounted;
+    named: string;
     said: SaidLine[];
     changed: number[];
 }
@@ -339,6 +372,14 @@ export interface Region extends Scope {
 export interface Drawer extends Scope {
     kind: DrawerKind;
     conversation: Conversation;
+    /** The view it shows, of its agent. */
+    view: Mounted;
+    /** Each file it shows, by its path, as its view shows it. */
+    diffs: ReadonlyMap<string, Filed>;
+    /** Each of its folds read from another view as it opens, by the fold's name, and that view. */
+    loads: ReadonlyMap<string, Instance>;
+    /** Each span of a view its module answers, in the tone it names: what's drawn in its look. */
+    toned: (Span & { tone: string })[];
     talk: Talk | null;
     /** What its "since you approved" shows, by file, where it's that drawer. */
     files: SinceFile[];
@@ -357,20 +398,51 @@ export interface ReviewedLine extends Span {
     file: SinceFile;
 }
 
-/** The review's text, and where each group, each item and each drawer is in it. */
+/**
+ * One part of the review where it's laid out, by an id it keeps across layouts: a group, its banner, an item, its
+ * header, what the core lays out around its body, a view mounted in either, one of the view's blocks, and what the
+ * operator wrote; from its first line to its last, its first line its header, the parts within it in order.
+ */
+export interface Placed extends Span {
+    id: string;
+    kind: "group" | "banner" | "item" | "header" | "frame" | "view" | "block" | "written";
+    header: Span;
+    children: Placed[];
+    view?: Mounted;
+    block?: ViewBlock;
+}
+
+/** Where a comment is laid out on the block it's on (`anchors.ts`), and whether the lines under it aren't those it quotes. */
+export interface Seated extends Placement {
+    outdated: boolean;
+}
+
+/**
+ * The review's text, where each group, each item and each drawer is in it, and its tree, each part where it's laid
+ * out; whose each of its lines is, by the id of the innermost part laid out on it, what the editor keeps each part by
+ * as the review is laid out anew (`reconcile.ts`); where each comment is on its block, each block's lines a comment may
+ * be on, by the block's id, as they're laid out; and what's written, where some of it was drafted before it was
+ * anchored to a block or had an id and is so now, which the draft takes in once.
+ */
 export interface Laid {
     text: string;
     groups: Group[];
     regions: Region[];
     drawers: Drawer[];
+    nodes: Placed[];
+    owners: string[];
+    /** The runs of its lines of one part's each, in order, as the editor keeps them (`reconcile.ts`). */
+    runs: Run[];
+    seated: ReadonlyMap<string, Seated>;
+    lines: ReadonlyMap<string, Lines>;
+    /** What's written as it's laid out, each with its id, what was anchored or kept on what it's on whole as it was laid out among it. */
+    written: Written[];
+    converted: Written[] | null;
+    /** Each span drawn beside the text rather than written in it, where it goes (`isDrawn`). */
+    drawn: Drawn[];
 }
 
 export const EMPTY: Draft = { comments: [], letters: [], remarks: [], done: [], parked: [] };
-
-/** Return what names a conversation among others: its repository, runtime, session and subagent. */
-export function whose(conversation: Conversation): string {
-    return JSON.stringify([conversation.repository, conversation.runtime, conversation.session, conversation.agent ?? null]);
-}
 
 /** Return what names an item among the folds' owners: its number; a drawer: its kind and whose it is. */
 export function ownerOf(owner: { item: Item } | { drawer: DrawerKind; conversation: Conversation }): string {
@@ -399,47 +471,6 @@ export function isRemark(each: Written): each is Remark {
 
 function isComment(each: Written): each is Comment {
     return !("to" in each);
-}
-
-/**
- * Return an item's own text as the review shows it: a message's, a friction's or how the work went's words as written,
- * a question's with its decisions, an approval's question and summary; a subagent's end's last message, where lup
- * passed it on.
- */
-export function body(item: Item): string {
-    const reason = item.reason;
-    switch (reason.reason) {
-        case "message":
-        case "friction":
-        case "how it went":
-            return reason.text;
-        case "stop":
-            return reason.why;
-        case "ended":
-            return reason.said ?? "";
-        case "unresolved":
-            return reason.citations.map((each) => each.said).join("\n");
-        case "question": {
-            const decisions = reason.decisions.map(
-                (each, at) => `${at + 1}. ${each.text}\n   lean: ${each.lean}`,
-            );
-            return [reason.text, ...decisions].join("\n");
-        }
-        case "approval":
-            return `${reason.text}\n${plain(reason.summary)}`;
-        case "held":
-        case "flagged":
-            return `${reason.text}\n${reason.summary}`;
-        case "answer":
-            return reason.comment;
-        case "review":
-            return [...(reason.letters ?? []), ...reason.comments].map((each) => each.text).join("\n");
-    }
-}
-
-/** Return `text` without the terminal's colour codes git colours a diff with. */
-export function plain(text: string): string {
-    return text.replace(/\u001b\[[0-9;]*m/g, "");
 }
 
 /** One line under an item that isn't its own text, and what it shows. */
@@ -512,10 +543,10 @@ function beneath(item: Item, around: Around): Under | null {
  * One line of a changed file that comments may be on: its header, or one of its rows, the run of unchanged rows it
  * opens, if any, before it, and whether it ends one; what it triggered, where it's a line that matters, and whether
  * it's a stop, the first line of what triggered; the bodies it declares and those it ends; and, for a file with rows,
- * the fold its header opens, folded where the file folds whole (`Folded`) or is automatic, and its last row ends.
+ * the fold its header opens, folded where the file folds whole, and its last row ends.
  */
-interface Filed {
-    file: ChangedFile;
+interface FileLine {
+    file: Filed;
     row: Row | null;
     text: string;
     opens: { summary: string; name: string } | null;
@@ -526,7 +557,7 @@ interface Filed {
     finishes: Body[];
     folds: { closed: boolean } | null;
     ends: boolean;
-    /** Whether the bodies it declares fold until opened: a new module's in a drawer, which shows its design, but one holding a line that matters. */
+    /** Whether the bodies it declares fold until opened: a file's that shows its design, but one holding a line that matters. */
     designed: boolean;
 }
 
@@ -536,34 +567,18 @@ export function changing(item: Item): boolean {
     return reason === "approval" || reason === "held" || reason === "flagged";
 }
 
-/** Return whether `item` is a first approval, which trusts the repository as it is: the review folds each of its files under its header (`Folded`). */
-export function firstApproval(item: Item): boolean {
-    return item.reason.reason === "approval" && item.reason.first;
-}
+/** Each file's lines as laid out, once: the review is laid out again at each key typed in a comment, and a file's lines don't change (`shownOnce`). */
+const filedOut = new WeakMap<Filed, FileLine[]>();
 
-/**
- * Return the lines of `files`, each file's header, then its rows, its runs of unchanged ones folding, each body able
- * to fold under the row declaring it, and the whole of each file able to fold under its header, folded where it's
- * automatic, asking nothing held or flagged, a test, data, or, `first`, a first approval's (`Folded`). Where `design` says so of a file, a new module in a drawer,
- * its bodies fold until opened, but those holding a line that matters.
- */
-function filedOf(files: ChangedFile[], first: boolean, design: (file: ChangedFile) => boolean): Filed[] {
-    return files.flatMap((file) => filedOnce(file, first, design(file)));
-}
-
-/** Each file's lines as laid out, by whether it's a first approval's and whether its bodies fold as a design's, laid out once: the review is laid out again at each key typed in a comment, and a file's lines don't change (`shownOnce`). */
-const filedOut = new WeakMap<ChangedFile, Map<string, Filed[]>>();
-
-/** Return the lines of `file`, `first` where it's a first approval's, its bodies folding where `designed` (`filedOf`), laid out once and kept: its header, then its rows, each with the run it opens, the bodies it declares and those it ends, found by row. */
-function filedOnce(file: ChangedFile, first: boolean, designed: boolean): Filed[] {
-    const kept = filedOut.get(file) ?? new Map<string, Filed[]>();
-    const key = `${first ? "first" : "later"} ${designed ? "designed" : "shown"}`;
-    const found = kept.get(key);
+/** Return the lines of `file` as a view gives it, laid out once and kept: its header, then its rows, each with the run it opens, the bodies it declares and those it ends, found by row; its bodies folding where it shows its design, but those holding a line that matters. */
+function filedOnce(file: Filed): FileLine[] {
+    const found = filedOut.get(file);
     if (found !== undefined) {
         return found;
     }
-    const laidOut = shownOnce(file, first);
-    const header: Filed = {
+    const laidOut = shownOnce(file);
+    const designed = file.design ?? false;
+    const header: FileLine = {
         file,
         row: null,
         text: laidOut.header,
@@ -573,7 +588,7 @@ function filedOnce(file: ChangedFile, first: boolean, designed: boolean): Filed[
         stop: laidOut.whole,
         declares: [],
         finishes: [],
-        folds: laidOut.rows.length > 0 ? { closed: laidOut.folded !== null || laidOut.automatic } : null,
+        folds: laidOut.rows.length > 0 ? { closed: !laidOut.open } : null,
         ends: false,
         designed: false,
     };
@@ -591,7 +606,7 @@ function filedOnce(file: ChangedFile, first: boolean, designed: boolean): Filed[
     const finishes = byRow((body) => body.to);
     // A body holding a line that matters stays open in a design.
     const mattering = (body: Body) => laidOut.matters.some((each) => each.row > body.from && each.row <= body.to);
-    const rows = laidOut.rows.map((row, at): Filed => {
+    const rows = laidOut.rows.map((row, at): FileLine => {
         const run = opens.get(at);
         const matter = matters.get(at) ?? null;
         const declared = declares.get(at) ?? [];
@@ -611,17 +626,46 @@ function filedOnce(file: ChangedFile, first: boolean, designed: boolean): Filed[
         };
     });
     const made = [header, ...rows];
-    filedOut.set(file, kept.set(key, made));
+    filedOut.set(file, made);
     return made;
 }
 
-/** Return the lines of each file an item changes (`changing`), as the host answered them; none for any other item, or before the host has answered. */
-function filed(item: Item, around: Around): Filed[] {
-    const files = around.files.get(item.number);
-    if (!changing(item) || files === undefined || !("shown" in files)) {
-        return [];
+/** A scope's own lines, by the block each is of: each block's run of them, in order, so a line's block is found among a few. */
+class OfBlocks {
+    private runs: { block: string; first: number; count: number }[] = [];
+    length = 0;
+
+    /** Add `count` lines of `block`'s after the others. */
+    add(block: string, count: number): void {
+        this.runs.push({ block, first: this.length, count });
+        this.length += count;
     }
-    return filedOf(files.shown, firstApproval(item), () => false);
+
+    /** Return the block line `at` of the scope's own is of, and its line there; none past the last. */
+    at(at: number): { block: string; line: number } | undefined {
+        const run = this.runs.find((each) => at >= each.first && at < each.first + each.count);
+        return run === undefined ? undefined : { block: run.block, line: at - run.first };
+    }
+}
+
+/** Each file's lines as a comment counts them, and their version, once: laid out again at each key typed in a comment, a file's lines don't change. */
+const fileLinesKept = new WeakMap<FileLine[], Map<string | null, Lines>>();
+
+/** Return the lines of a file laid out as `lines`, and their version, the file's own `given` (`linesOf`), made once. */
+function fileLines(lines: FileLine[], given: string | null): Lines {
+    const kept = fileLinesKept.get(lines) ?? new Map<string | null, Lines>();
+    const found = kept.get(given);
+    if (found !== undefined) {
+        return found;
+    }
+    const made = linesOf(lines.map((each) => each.text), given);
+    fileLinesKept.set(lines, kept.set(given, made));
+    return made;
+}
+
+/** Return whether a view's block is a file, a change's or one as it stands. */
+function isFiled(block: ViewBlock): block is Filed {
+    return block.block === "diff" || block.block === "code";
 }
 
 /** A group as it's laid out: what names it among the others, the agent it's of, what its banner names it by, and its items. */
@@ -741,71 +785,138 @@ function counted(count: number, one: string): string {
     return `${count} ${one}${count === 1 ? "" : "s"}`;
 }
 
-/** The marks before a task, by its status: done, in progress, to do. */
-const TASK_MARKS = { completed: "✓", in_progress: "▶", pending: "·" } as const;
-
-/** Return the current entry of a task list: the one in progress, what it says while in progress, else the first to do; none where there's neither. */
-export function currentTask(tasks: Task[]): string | null {
-    const going = tasks.find((each) => each.status === "in_progress");
-    if (going !== undefined) {
-        return going.active ?? going.subject;
-    }
-    return tasks.find((each) => each.status === "pending")?.subject ?? null;
-}
-
 /**
- * Say a "since you approved" drawer's summary line: on which branch, how many files changed since the operator last saw
- * them are to review, how many have flagged writes waiting on them, which the branch's landing waits on, how many are
- * tests or data files, folded whole and left out of what's to review (`foldedOf`), and how many stand as they saw them,
- * reviewed: the agent's flags in one line, as the inbox lists them.
+ * The text being laid out, line by line: kept as its lines, joined once it's whole (`text`), since a string built by
+ * adding to it is copied whole each time it's read; and each line's text and end by where it starts, which is what's
+ * read of it as it's laid out.
  */
-export function sinceSummary(shown: Since | null): string {
-    if (shown === null) {
-        return "since you approved · not read yet";
+class Writer {
+    private chunks: string[] = [];
+    private starts: number[] = [];
+    // Each line written, in order: where it starts, and its text.
+    private lineStarts: number[] = [];
+    private lineTexts: string[] = [];
+    private length = 0;
+    /** Whose each line written is: the id of the innermost part laid out on it. */
+    owners: string[] = [];
+    /** The runs of lines of one part's each, in order (`reconcile.ts`). */
+    runs: Run[] = [];
+    /** Whose the next line is. */
+    owner = "";
+
+    /** Write `line` on a line of its own, `owner`'s or the writer's own, and return where it is. */
+    line(line: string, owner: string = this.owner): Span {
+        const from = this.length;
+        this.add(`${line}\n`);
+        this.own(from, line, owner);
+        return { from, to: from + line.length };
     }
-    const branch = shown.branch == null ? "" : ` on ${shown.branch}`;
-    const files = shown.files ?? [];
-    const changed = files.flatMap((each) => (each.file == null ? [] : [each.file]));
-    const folded = new Map<Folded, number>();
-    for (const each of changed) {
-        const why = foldedOf(each, false);
-        if (why !== null) {
-            folded.set(why, (folded.get(why) ?? 0) + 1);
+
+    /** Write `text`, lines laid out elsewhere, each `owned` as it says by its place among them, and a line break after it. */
+    lines(text: string, owned: (line: number) => string): void {
+        let at = this.length;
+        this.add(`${text}\n`);
+        text.split("\n").forEach((each, index) => {
+            this.own(at, each, owned(index));
+            at += each.length + 1;
+        });
+    }
+
+    private add(chunk: string): void {
+        this.chunks.push(chunk);
+        this.starts.push(this.length);
+        this.length += chunk.length;
+    }
+
+    /** Keep a line written at `from`, its text and whose it is, its run going on where it's the last's part's. */
+    private own(from: number, text: string, owner: string): void {
+        this.lineStarts.push(from);
+        this.lineTexts.push(text);
+        this.owners.push(owner);
+        const last = this.runs.at(-1);
+        if (last !== undefined && last.owner === owner && last.to === from - 1) {
+            last.to = from + text.length;
+        } else {
+            this.runs.push({ owner, from, to: from + text.length });
         }
     }
-    const open = changed.length - [...folded.values()].reduce((sum, each) => sum + each, 0);
-    // Reviewed, settled: those standing as the operator saw them with no flagged write waiting, which fold at the end.
-    const kept = files.filter((each) => each.file == null && (each.flags ?? []).length === 0).length;
-    const flagged = files.filter((each) => (each.flags ?? []).length > 0).length;
-    const said = [
-        ...(open === 0 ? [] : [`${open} to review`]),
-        ...(flagged === 0 ? [] : [`${flagged} flagged`]),
-        ...[...folded].map(([why, count]) => `${count} ${count === 1 ? FOLDED[why].one : FOLDED[why].many}`),
-        ...(kept === 0 ? [] : [`${kept} reviewed`]),
-    ];
-    return `since you approved${branch} · ${said.length === 0 ? "nothing" : said.join(" · ")}`;
-}
 
-/** The text being laid out, line by line. */
-class Writer {
-    text = "";
+    /** Lay out what `lay` writes as `owner`'s, then go on as before. */
+    as<T>(owner: string, lay: () => T): T {
+        const was = this.owner;
+        this.owner = owner;
+        try {
+            return lay();
+        } finally {
+            this.owner = was;
+        }
+    }
 
-    /** Write `line` on a line of its own, and return where it is. */
-    line(line: string): Span {
-        const from = this.text.length;
-        this.text += `${line}\n`;
-        return { from, to: from + line.length };
+    /** Take back everything written from `at`, the start of a line written. */
+    cut(at: number): void {
+        while ((this.starts.at(-1) ?? -1) >= at) {
+            const chunk = this.chunks.pop() ?? "";
+            this.starts.pop();
+            this.length -= chunk.length;
+        }
+        while ((this.lineStarts.at(-1) ?? -1) >= at) {
+            this.lineStarts.pop();
+            this.lineTexts.pop();
+            this.owners.pop();
+        }
+        while ((this.runs.at(-1)?.from ?? -1) >= at) {
+            this.runs.pop();
+        }
+        const last = this.runs.at(-1);
+        if (last !== undefined && last.to >= at) {
+            last.to = at - 1;
+        }
+    }
+
+    /** Return which line written starts at `from`, found by halving; none where none does. */
+    private lineAt(from: number): number | undefined {
+        let low = 0;
+        let high = this.lineStarts.length;
+        while (low < high) {
+            const middle = (low + high) >> 1;
+            if ((this.lineStarts[middle] ?? 0) < from) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        return this.lineStarts[low] === from ? low : undefined;
+    }
+
+    /** Return the end of the line written starting at `from`; the text's end where none does. */
+    endOf(from: number): number {
+        const at = this.lineAt(from);
+        return at === undefined ? this.length : from + (this.lineTexts[at] ?? "").length;
+    }
+
+    /** Return the line written starting at `from`, as it was written; none where none starts there. */
+    lineFrom(from: number): string {
+        const at = this.lineAt(from);
+        return at === undefined ? "" : (this.lineTexts[at] ?? "");
+    }
+
+    /** The text written, whole. */
+    get text(): string {
+        const whole = this.chunks.join("");
+        this.chunks = [whole];
+        this.starts = [0];
+        return whole;
     }
 
     /** Where the next line starts. */
     get at(): number {
-        return this.text.length;
+        return this.length;
     }
 }
 
 /** What's gathered of a scope as it's laid out. */
 interface Gathering {
-    lines: Line[];
+    lines: OwnLine[];
     blocks: Block[];
     code: Coded[];
     filed: FileSpan[];
@@ -820,26 +931,35 @@ function gathering(): Gathering {
 
 /**
  * Lay `files` into `w` as part of the scope `of`, gathered in `into`: each line written with its comments under it
- * (`writeBlocks`, by the line's place among the scope's own lines from `first`), its runs, bodies and files folding.
+ * (`writeBlocks`, by the line's place among the scope's own lines from `first`), its runs, bodies and files folding;
+ * each file's lines, the summaries of its runs among them, its block's (`owner`).
  */
-function layCode(w: Writer, into: Gathering, of: string, files: Filed[], first: number, starts: number[], writeBlocks: (line: number) => void): void {
+function layCode(w: Writer, into: Gathering, of: string, files: FileLine[], first: number, starts: number[], writeBlocks: (line: number) => void, owner: (file: Filed) => string): void {
     // What each fold opened is, until the line ending it: the run, with its summary line's words, the file, each body by its name.
     let run: { summary: Aside; name: string; said: string } | null = null;
     let whole: { summary: Span; from: number; closed: boolean } | null = null;
     const bodies = new Map<string, { summary: Span; from: number; closed: boolean }>();
     // A fold under a file's lines, named by the file's path and what it hides within it, hiding up to `to`.
     const fold = (kind: FoldKind, path: string, name: string, label: string, closed: boolean, summary: Span, from: number, to: number) =>
-        into.folds.push({ of, kind, name: name === "" ? path : `${path} ${name}`, label, closed, summary, from, to });
+        into.folds.push({ of, kind, name: name === "" ? path : `${path} ${name}`, label, closed, summary, from, to, ...(kind === "file" ? { scope: true } : {}) });
+    let inFile = 0;
+    // Whose a file's lines are, said once for each file.
+    let ownerOf: { file: Filed | null; whose: string } = { file: null, whose: "" };
     files.forEach((each, index) => {
         const path = each.file.path;
+        if (ownerOf.file !== each.file) {
+            ownerOf = { file: each.file, whose: owner(each.file) };
+        }
+        const whose = ownerOf.whose;
+        inFile = each.row === null ? 0 : inFile + 1;
         if (each.opens !== null) {
-            const aside = { kind: "summary" as const, ...w.line(each.opens.summary) };
+            const aside = { kind: "summary" as const, ...w.line(each.opens.summary, whose) };
             into.asides.push(aside);
             run = { summary: aside, name: each.opens.name, said: each.opens.summary };
         }
         const at = first + index;
-        const span = w.line(each.text);
-        into.lines.push({ ...span, own: starts[at] ?? 0 });
+        const span = w.line(each.text, whose);
+        into.lines.push({ ...span, own: starts[at] ?? 0, block: whose, line: inFile });
         into.code.push({ from: span.from, to: span.to, file: each.file, row: each.row, matter: each.matter });
         if (each.stop) {
             into.stops.push(span.from);
@@ -882,21 +1002,33 @@ function layCode(w: Writer, into: Gathering, of: string, files: Filed[], first: 
     });
 }
 
-/** What's written on a scope, with its place in the editor's list. */
-interface Placed {
-    comment: Written;
-    at: number;
+/** Return the id of what's written, which the editor keeps it by. */
+export function writtenId(each: Written): string {
+    return each.id ?? "";
 }
 
-/** The comments on one scope, by the line each is under, once: a comment on the whole under none. */
-function placedOn(comments: Placed[], starts: number[]): Map<number | null, Placed[]> {
-    const placed = new Map<number | null, Placed[]>();
-    for (const each of comments) {
-        const quote = "quote" in each.comment ? each.comment.quote : null;
-        const line = under(starts, quote);
-        placed.set(line, [...(placed.get(line) ?? []), each]);
-    }
-    return placed;
+/** Return the id of the part of the review what's written with `id` is laid out as, and whose its lines are. */
+export function writtenOwner(id: string): string {
+    return `written ${id}`;
+}
+
+/** Return `draft` with an id for each of what's written that has none, kept from before what's written had ids (`keptId`), and whether any had none. */
+function identified(draft: Draft): { draft: Draft; changed: boolean } {
+    let changed = false;
+    const named = <W extends Written>(list: W[] | undefined, kind: "comment" | "letter" | "remark"): W[] =>
+        (list ?? []).map((each, at) => {
+            if ((each.id ?? "") !== "") {
+                return each;
+            }
+            changed = true;
+            return { ...each, id: keptId(kind, at) };
+        });
+    return { draft: { ...draft, comments: named(draft.comments, "comment"), letters: named(draft.letters, "letter"), remarks: named(draft.remarks, "remark") }, changed };
+}
+
+/** Return the operator's words `text` after the passage `quote` they were on, set off as a mail quotes, where it's no longer laid out: so what it was on goes with them, kept on what it's on whole. */
+function unplaced(quote: string, text: string): string {
+    return `${quote.split("\n").map((line) => (line === "" ? ">" : `> ${line}`)).join("\n")}\n${text}`;
 }
 
 /**
@@ -937,42 +1069,88 @@ export function nested(groups: Grouping[], parents: ReadonlyMap<string, string> 
     return out;
 }
 
-/** Return a drawer's label under its banner, from what the host answered of its agent, and whether it holds what waits on the operator; none where it has nothing in it. */
-export function rowLabel(kind: DrawerKind, data: AgentDrawers): { text: string; waiting: boolean } | null {
-    switch (kind) {
-        case "tasks": {
-            if (data.tasks.length === 0) {
-                return null;
-            }
-            const done = data.tasks.filter((each) => each.status === "completed").length;
-            return { text: `tasks ${done}/${data.tasks.length}`, waiting: false };
+/** Say a line of spans as text. */
+function worded(spans: readonly { text: string }[]): string {
+    return spans.map((each) => each.text).join("");
+}
+
+/** A span of a view's that ticks or measures (`Ticking`, `Gauge`), where it's drawn beside the text, never written in it (`ticking.ts`). */
+export interface Drawn {
+    at: number;
+    span: ViewSpan;
+}
+
+/** Return whether a span is drawn rather than written: one that ticks, saying the time since a moment, or measures. */
+export function isDrawn(span: ViewSpan): boolean {
+    return span.ticking != null || span.gauge != null;
+}
+
+/** Say a line of spans as text, those drawn left out (`isDrawn`), and where in it each of those goes. */
+function wording(spans: readonly ViewSpan[]): { text: string; drawn: { offset: number; span: ViewSpan }[] } {
+    let text = "";
+    const drawn: { offset: number; span: ViewSpan }[] = [];
+    for (const span of spans) {
+        if (isDrawn(span)) {
+            drawn.push({ offset: text.length, span });
+        } else {
+            text += span.text;
         }
-        case "since": {
-            const files = data.since?.files ?? [];
-            if (files.length === 0) {
-                return null;
-            }
-            const [, ...counts] = sinceSummary(data.since).split(" · ");
-            const waiting = counts.some((each) => each.endsWith("to review") || each.endsWith("flagged"));
-            return { text: ["since you approved", ...counts].join(" · "), waiting };
-        }
-        case "conversation":
-            return data.entries.length === 0 ? null : { text: `conversation · ${counted(data.entries.length, "step")}`, waiting: false };
     }
+    return { text, drawn };
+}
+
+/** What a producer reads where there's nothing read: no item, nothing beyond any, no agent's data, no one running. */
+const NOTHING_SHOWN: Shown = {
+    items: new Map(),
+    beyond: { contexts: new Map(), files: new Map() },
+    drawers: new Map(),
+    running: new Map(),
+    called: (party) => party.agent ?? party.session,
+};
+
+/**
+ * Return a drawer's label under its banner, the drawer of `kind` as the looks declare it, from what the host answered
+ * of its agent, `data`, as its view says it (`views.ts`), and whether it holds what waits on the operator; none where
+ * it has nothing in it, or where the page doesn't lay its view out itself.
+ */
+export function rowLabel(kind: DrawerKind, data: AgentDrawers): { text: string; waiting: boolean } | null {
+    const drawn = adopted().drawers("").find((each) => each.view === kind);
+    const producer = drawn === undefined ? undefined : producerOf(drawn.module, drawn.view);
+    if (producer === undefined) {
+        return null;
+    }
+    const of = { runtime: "claude", session: "s", agent: null };
+    const shown = { ...NOTHING_SHOWN, drawers: new Map([[whose(conversationOf("", of)), data]]) };
+    const answer = producer.answer(of, shown, "");
+    return answer === null ? null : { text: worded(answer.blocks.summary ?? []), waiting: answer.blocks.waiting ?? false };
+}
+
+/** Return the text of a line of a view's, its spans drawn left out, where each of those goes, and the kind of line it's drawn as: its first span's tone. */
+function lineOfView(line: { spans?: ViewSpan[] }): { kind: Kind; text: string; drawn: { offset: number; span: ViewSpan }[] } {
+    const spans = line.spans ?? [];
+    return { kind: spans[0]?.tone ?? "plain", ...wording(spans) };
+}
+
+/** Return what of an item's kind's summary names it in the header over the review, after its number: its words up to the first ` · `, `question`, `message to explore-auth`. */
+function namedBy(summary: readonly { text: string }[]): string {
+    const first = summary.findIndex((each) => each.text.startsWith(" · "));
+    return worded(first < 0 ? summary : summary.slice(0, first));
 }
 
 /**
  * Lay `items` out as one text, in groups, one per agent, each under its banner, in the order they arrived: those with
  * items now first, each where its first item came (`grouped`); then a group for each agent of `agents` (those running,
  * in the tree's order) with none, and for each the draft writes to with none; then the parked items' groups, each
- * where its first item came. Under each banner but the parked ones', the draft's messages to its agent; then each
- * item, in the order they came, under a header naming it, each comment of the draft on it under the line it's on: a
- * comment on a passage under the passage's last line, one on the item whole under its header. Under each item's own
- * text, what the host has answered of it: each file it changes (`changing`), its header then its lines, each run of
- * unchanged ones folding under a summary line; then the item's context, a summary line with the lines that fold under
- * it. Where the host showed none, a line says why. Then, at the end of each agent's group but the parked ones, its
- * drawers, from `drawers` by its conversation (`layDrawer`), the draft's remarks in them each under its line, a
- * conversation among the items it exchanged called by `name`.
+ * where its first item came. Each banner says `banner`'s words of its agent, with the parts of it its banner views
+ * say, for an agent running (`parts`). Under each banner but the parked ones', the draft's messages to its agent; then
+ * each item, in the order they came, under a header naming it, `header`'s words around what its kind's view says of
+ * it, each comment of the draft on it under the line it's on: a comment on a passage under the passage's last line,
+ * one on the item whole under its header. Under its header, its body, its kind's view of it (`kindView`, `views/`): its
+ * text, then each file it changes, its header then its lines, each run of unchanged ones folding under a summary line,
+ * or a line saying why the host showed none; then the item's context, a summary line with the lines that fold under
+ * it. Then, at the end of each agent's group but the parked ones, its drawers, each a view of the agent's in the order
+ * its repository's looks list them (`layDrawer`), the draft's remarks in them each under its line, a conversation
+ * among the items it exchanged called by `name`.
  *
  * An agent's item that answers the operator's (`Message.answers`) is laid out as the exchange it is: under its header,
  * their words it answers, after `you` and what each item of theirs is, folding under that line, open (`above`), then
@@ -985,12 +1163,19 @@ export function rowLabel(kind: DrawerKind, data: AgentDrawers): { text: string; 
  * every page and across reloads (`ordered`): each among them keeps its place, items coming and going, and any other
  * comes after them, in the order above. So a group appears where its first item puts it, or after every group with
  * items as its conversation is first seen, and stays there for as long as it's laid out.
+ *
+ * Each part laid out is kept in the tree it returns (`Laid.nodes`), by an id it keeps across layouts: a group by whose
+ * it is (`group <place>`), an item by its number (`item <number>`), a view mounted by its instance (`views.ts`), each of
+ * its blocks by the instance and its own id, what the operator wrote by its own id; and each line of the text is the
+ * innermost part's laid out on it (`Laid.owners`). A comment or a remark goes under the last line it quotes of the
+ * block it's on, followed from where it was laid out last through the block's change (`arranging.previous`,
+ * `anchors.ts`); one drafted before it was anchored so is anchored as it's laid out (`Laid.converted`).
  */
 export function laid(
     items: Item[],
     agents: Conversation[],
-    banner: (head: Head, parked: boolean) => string,
-    header: (item: Item, parked: boolean) => string,
+    banner: (head: Head, parked: boolean, parts: string) => string,
+    header: (item: Item, parked: boolean, said: string) => string,
     draft: Draft,
     around: Around,
     places: readonly string[] = [],
@@ -1000,17 +1185,49 @@ export function laid(
 ): Laid {
     const parked = draft.parked ?? [];
     const done = draft.done ?? [];
-    const comments = draft.comments ?? [];
-    const letters = draft.letters ?? [];
-    const remarks = draft.remarks ?? [];
-    const wrote = written(draft);
-    const now = grouped(items.filter((each) => !parked.includes(each.number)), (item) => banner({ item }, false));
+    // What's written, each with its id; and, by its id, what of it is anchored to its block, or kept on what it's on
+    // whole, as it's laid out, having been drafted before it was.
+    const named = identified(draft);
+    const letters = named.draft.letters ?? [];
+    const remarks = named.draft.remarks ?? [];
+    const wrote = written(named.draft);
+    const converting = new Map<string, Written>();
+    const previous = arranging.previous ?? null;
+    const seated = new Map<string, Seated>();
+    const blockLines = new Map<string, Lines>();
+    // Each file a view shows, by its block's id.
+    const filedBy = new Map<string, Filed>();
+    // Each span drawn beside the text, where it goes; and `drawnIn` puts those of a line where its text is.
+    const drawnAt: Drawn[] = [];
+    const drawnIn = (from: number, drawn: readonly { offset: number; span: ViewSpan }[]) => {
+        for (const each of drawn) {
+            drawnAt.push({ at: from + each.offset, span: each.span });
+        }
+    };
+    // Where words written into a line by a callback are in it, which it writes as given: its first place or its last,
+    // as the callback puts them first or last, else the line's end.
+    const placedIn = (line: Span, words: string, last: boolean) => {
+        const shown = w.lineFrom(line.from);
+        const at = words === "" ? -1 : last ? shown.lastIndexOf(words) : shown.indexOf(words);
+        return at < 0 ? line.to : line.from + at;
+    };
+    const looks = arranging.looks ?? adopted();
+    const remote = arranging.remote ?? new Map();
+    const shown: Shown = {
+        items: new Map(items.map((each) => [each.number, each])),
+        beyond: { contexts: around.contexts, files: around.files },
+        drawers,
+        running: arranging.running ?? new Map(),
+        called: name,
+    };
+    const now = grouped(items.filter((each) => !parked.includes(each.number)), (item) => banner({ item }, false, ""));
     const empty = emptyGroups([...agents, ...letters.map((each) => each.to), ...remarks.map((each) => each.to)], now);
-    const later = grouped(items.filter((each) => parked.includes(each.number)), (item) => banner({ item }, true));
+    const later = grouped(items.filter((each) => parked.includes(each.number)), (item) => banner({ item }, true, ""));
     const w = new Writer();
     const groups: Group[] = [];
     const regions: Region[] = [];
     const laidDrawers: Drawer[] = [];
+    const nodes: Placed[] = [];
     for (const { group, depth } of nested(kept([...now, ...empty], false), arranging.parents ?? null)) {
         layGroup(group, false, depth);
     }
@@ -1021,20 +1238,27 @@ export function laid(
     {
         groups.forEach((group, at) => {
             const next = groups.findIndex((each, after) => after > at && each.depth <= group.depth);
-            const end = (next < 0 ? w.text.length : (groups[next]?.banner.from ?? w.text.length)) - 1;
+            const end = (next < 0 ? w.at : (groups[next]?.banner.from ?? w.at)) - 1;
             if (end > group.banner.to) {
-                const label = w.text.slice(group.banner.from, group.banner.to);
-                group.fold = { of: `group ${group.place}`, kind: "group", name: "", label, closed: false, summary: group.banner, from: group.banner.to, to: end };
+                const label = w.lineFrom(group.banner.from);
+                group.fold = { of: `group ${group.place}`, kind: "group", name: "", label, closed: false, summary: group.banner, from: group.banner.to, to: end, scope: true };
+            }
+            const node = nodes[at];
+            if (node !== undefined) {
+                node.to = Math.max(end, group.banner.to);
             }
         });
     }
     // A conversation laid in a drawer reads its lines from the whole text, once it's whole.
+    const text = w.text;
     for (const drawer of laidDrawers) {
         if (drawer.talk !== null) {
-            drawer.talk = { ...drawer.talk, text: w.text };
+            drawer.talk = { ...drawer.talk, text };
         }
     }
-    return { text: w.text, groups, regions, drawers: laidDrawers };
+    const asLaid = wrote.map((each) => converting.get(writtenId(each)) ?? each);
+    const converted = named.changed || converting.size > 0 ? asLaid : null;
+    return { text, groups, regions, drawers: laidDrawers, nodes: nestedNodes(nodes), owners: w.owners, runs: w.runs, seated, lines: blockLines, written: asLaid, converted, drawn: drawnAt };
 
     /** Return `section` with each group laid out before in its place, any other after them, in its own order. */
     function kept(section: Grouping[], isParked: boolean): Grouping[] {
@@ -1045,24 +1269,112 @@ export function laid(
         return [...section].sort((a, b) => rank(a) - rank(b));
     }
 
+    /** Return a part of the review laid out from `from` to `to`, its first line its header. */
+    function part(id: string, kind: Placed["kind"], from: number, to: number, extra: Partial<Placed> = {}): Placed {
+        return { id, kind, from, to, header: { from, to: Math.min(w.endOf(from), Math.max(to, from)) }, children: [], ...extra };
+    }
+
+    /** Return what the operator wrote, laid out at `block`, as a part of the review: by its id. */
+    function writtenPart(block: Block): Placed {
+        return part(writtenOwner(block.comment), "written", block.from, block.to);
+    }
+
+    /** Write what the operator wrote, `each`, on its lines, as its own, gathered in `blocks` and, as parts of the review, in `within`. */
+    function writeWritten(each: Written, blocks: Block[], within: Placed[]): void {
+        const id = writtenId(each);
+        const block = { comment: id, ...w.line(each.text, writtenOwner(id)) };
+        blocks.push(block);
+        within.push(writtenPart(block));
+    }
+
+    /** Return where `id`, a comment on block `block`, was laid out last, and the block's lines then; none where it wasn't laid out on it. */
+    function before(id: string, block: string): { placement: Placement; lines: Lines } | null {
+        const was = previous?.seated.get(id);
+        const lines = previous?.lines.get(block);
+        return was !== undefined && was.block === block && lines !== undefined ? { placement: was, lines } : null;
+    }
+
+    /**
+     * Return the line of `own`, a scope's lines, each of a block (`blocks`, with each block's first among them),
+     * `quote`, what `id` is on, is laid out under, on its block, and keep where it is (`seated`); none where its block
+     * isn't laid out here.
+     */
+    function seat(id: string, quote: Quote, blocks: ReadonlyMap<string, number>): number | null {
+        const block = quote.block ?? "";
+        const lines = blockLines.get(block);
+        const first = blocks.get(block);
+        if (lines === undefined || first === undefined) {
+            // Its block isn't laid out here: it's kept where what it's on whole is, said to be outdated.
+            seated.set(id, { block, version: "", first: 0, last: 0, outdated: true });
+            return null;
+        }
+        const at = placedOn(quote, lines, before(id, block));
+        seated.set(id, { block, version: lines.version, first: at.first, last: at.last, outdated: at.outdated });
+        return first + at.last;
+    }
+
+    /**
+     * Return the quote kept from before quotes named their block, `quote`, whose `start` and `end` are offsets into the
+     * scope's lines `own` joined (`starts`), each of a block (`ofLine`), anchored to the block of the line its passage
+     * ends on (`quoting`); none where it's past them.
+     */
+    function anchored(quote: Quote, starts: readonly number[], length: number, ofLine: OfBlocks): Quote | null {
+        if (ofLine.length === 0 || quote.start > length) {
+            return null;
+        }
+        const top = lineOf([...starts], quote.start);
+        const bottom = lineOf([...starts], Math.max(quote.end - 1, quote.start));
+        const last = ofLine.at(bottom);
+        const lines = last === undefined ? undefined : blockLines.get(last.block);
+        if (last === undefined || lines === undefined) {
+            return null;
+        }
+        // A passage running over blocks is anchored to the last, from its first line.
+        const first = ofLine.at(top)?.block === last.block ? top : bottom - last.line;
+        const start = Math.max(quote.start - (starts[first] ?? 0), 0);
+        const end = Math.max(quote.end - (starts[first] ?? 0), start);
+        return quoting(last.block, lines, ofLine.at(first)?.line ?? 0, last.line, start, end, quote.text);
+    }
+
     function layGroup(group: Grouping, isParked: boolean, depth: number): void {
-        const said = banner(group.head, isParked);
-        const opening = w.line(said);
         const conversation = group.conversation;
+        const repository = conversation?.repository ?? "";
+        const of = conversation === null ? null : { runtime: conversation.runtime, session: conversation.session, agent: conversation.agent ?? null };
+        // The parts of its banner, each a view of its agent's, where it's running.
+        const parts =
+            conversation !== null && of !== null && shown.running.has(group.key)
+                ? looks.banners(repository).map((each) => mount(repository, each.module, each.view, of, shown, remote))
+                : [];
+        // What each part says, its spans that tick or measure drawn beside the words rather than written.
+        const told = parts.flatMap((each) => {
+            const spoken = wording(each.answer?.blocks.summary ?? []);
+            return spoken.text === "" && spoken.drawn.length === 0 ? [] : [spoken];
+        });
+        const place = placeOf(group.key, isParked);
+        const id = `group ${place}`;
+        const partsSaid = told.map((each) => each.text).join(" · ");
+        const opening = w.line(banner(group.head, isParked, partsSaid), `${id} banner`);
+        let partAt = placedIn(opening, partsSaid, true);
+        for (const each of told) {
+            drawnIn(partAt, each.drawn);
+            partAt += each.text.length + " · ".length;
+        }
         const data = conversation !== null && !isParked ? drawers.get(group.key) : undefined;
         const blocks: Block[] = [];
+        const writtenParts: Placed[] = [];
         if (!isParked) {
-            letters.forEach((letter, at) => {
+            for (const letter of letters) {
                 if (whose(letter.to) === group.key) {
-                    blocks.push({ comment: comments.length + at, ...w.line(letter.text) });
+                    writeWritten(letter, blocks, writtenParts);
                 }
-            });
+            }
         }
         const made: Group = {
             conversation: group.conversation,
+            parts,
             head: group.head,
             later: isParked,
-            place: placeOf(group.key, isParked),
+            place,
             banner: opening,
             blocks,
             drawers: [],
@@ -1070,58 +1382,111 @@ export function laid(
             fold: null,
         };
         groups.push(made);
+        const node = part(id, "group", opening.from, opening.to);
+        nodes.push(node);
+        node.children.push(
+            part(`${id} banner`, "banner", opening.from, opening.to, { children: parts.map((each) => part(each.id, "view", opening.from, opening.to, { view: each })) }),
+            ...writtenParts,
+        );
         // Under the banner, before the items, one under the other: each drawer a label, folded until opened in place.
-        if (conversation !== null && data !== undefined) {
-            for (const kind of DRAWERS) {
-                const drawer = layDrawer(kind, conversation, data);
+        if (conversation !== null && of !== null && data !== undefined) {
+            for (const drawn of looks.drawers(repository)) {
+                const view = mount(repository, drawn.module, drawn.view, of, shown, remote);
+                const drawer = layDrawer(drawn.view, conversation, view);
                 if (drawer !== null) {
                     made.drawers.push(drawer);
                     laidDrawers.push(drawer);
+                    node.children.push(drawer.node);
                 }
             }
             if (made.drawers.length > 0) {
-                w.line("");
+                w.line("", `${id} drawers`);
             }
         }
         for (const item of group.items) {
-            layItem(item, isParked);
+            node.children.push(layItem(item, isParked));
         }
         if (group.items.length === 0 && made.drawers.length === 0 && blocks.length > 0) {
-            w.line("");
+            w.line("", `${id} end`);
         }
     }
 
-    function layItem(item: Item, isParked: boolean): void {
-        const files = filed(item, around);
-        // Its own lines, then its files': the text comments are placed in, by where each quote ends.
-        const ownLines = body(item).split("\n");
+    function layItem(item: Item, isParked: boolean): Placed {
+        const kind = kindView(item);
+        const repository =
+            item.sender.party === "conversation" ? item.sender.repository : item.reason.reason === "approval" ? item.reason.repository : "";
+        const view = mount(repository, kind.module, kind.view, { number: item.number }, shown, remote);
+        const answer = view.answer?.blocks;
+        const bodyBlocks = answer?.blocks ?? [];
+        const id = `item ${item.number}`;
+        const filedBlocks = bodyBlocks.filter(isFiled);
+        const files = filedBlocks.flatMap(filedOnce);
+        // Its own lines, its text's then its files', each of its block, at its line there: what comments are on.
+        const ofLine = new OfBlocks();
+        const firstOf = new Map<string, number>();
+        const ownLines: string[] = [];
+        const ownBlock = (block: ViewBlock, lines: Lines) => {
+            const bid = blockId(view.id, block.id);
+            firstOf.set(bid, ofLine.length);
+            ofLine.add(bid, lines.lines.length);
+            blockLines.set(bid, lines);
+        };
+        for (const block of bodyBlocks) {
+            if (block.block === "markdown") {
+                const lines = block.text.split("\n");
+                ownBlock(block, linesOf(lines, block.version ?? null));
+                ownLines.push(...lines);
+            }
+        }
+        for (const block of filedBlocks) {
+            ownBlock(block, fileLines(filedOnce(block), block.version ?? null));
+            filedBy.set(blockId(view.id, block.id), block);
+        }
         const own = [...ownLines, ...files.map((each) => each.text)];
         const starts = startsOf(own);
-        const ownCount = own.length - files.length;
-        // Each comment on the item, by the line it's under, once; one copies before kept on a reply, under the header.
-        const onItem: Placed[] = [];
-        wrote.forEach((comment, at) => {
-            if (isComment(comment) && comment.item === item.number) {
-                onItem.push({ comment: comment.on == null ? comment : { ...comment, quote: null }, at });
+        const ownCount = ownLines.length;
+        const ownLength = own.join("\n").length;
+        // Each comment on the item, by the line it's under, once: on the item whole under its header, as is one copies
+        // before kept on a reply; one drafted before quotes named their block anchored to it once its files are read.
+        const filesRead = !changing(item) || around.files.has(item.number);
+        const placed = new Map<number | null, Written[]>();
+        const under_ = (line: number | null, comment: Written) => placed.set(line, [...(placed.get(line) ?? []), comment]);
+        for (const each of wrote) {
+            if (!isComment(each) || each.item !== item.number) {
+                continue;
             }
-        });
-        const placed = placedOn(onItem, starts);
+            const cid = writtenId(each);
+            const quote = each.quote ?? null;
+            if (quote === null || each.on != null) {
+                under_(null, each);
+            } else if ((quote.block ?? "") !== "") {
+                under_(seat(cid, quote, firstOf), each);
+            } else if (!filesRead) {
+                under_(null, each);
+            } else {
+                const found = anchored(quote, starts, ownLength, ofLine);
+                const now: Comment = found === null ? { ...each, quote: null, text: unplaced(quote.text, each.text) } : { ...each, quote: found };
+                converting.set(cid, now);
+                under_(found === null ? null : seat(cid, found, firstOf), now);
+            }
+        }
         const into = gathering();
-        const said: SaidLine[] = [];
+        const said_: SaidLine[] = [];
         const changed: number[] = [];
         const of = ownerOf({ item });
+        const children: Placed[] = [];
         const writeBlocks = (line: number | null) => {
-            for (const { comment, at } of placed.get(line) ?? []) {
-                into.blocks.push({ comment: at, ...w.line(comment.text) });
+            for (const comment of placed.get(line) ?? []) {
+                writeWritten(comment, into.blocks, children);
             }
         };
         // Lines that aren't the item's own, the operator's words among them, each kept with its part where it's theirs.
-        const writeRows = (rows: Beside[]): Aside[] =>
+        const writeRows = (rows: Beside[], owner: string): Aside[] =>
             rows.map((row) => {
-                const aside = { kind: row.kind, ...w.line(row.text) };
+                const aside = { kind: row.kind, ...w.line(row.text, owner) };
                 into.asides.push(aside);
                 if (row.part !== null && row.kind === "you") {
-                    said.push({ from: aside.from, to: aside.to, part: row.part, own: row.own });
+                    said_.push({ from: aside.from, to: aside.to, part: row.part, own: row.own });
                 }
                 return aside;
             });
@@ -1131,64 +1496,110 @@ export function laid(
                 into.folds.push({ of, kind: "context", name, label, closed, summary: { from: summary.from, to: summary.to }, from: summary.to, to: last.to });
             }
         };
-        const head = header(item, isParked);
-        const headed = w.line(head);
+        // What the core lays out around the body, from `from` up to where the text's at now, as a part of the item's.
+        const frame = (name: string, from: number) => {
+            if (w.at > from) {
+                children.push(part(`${id} ${name}`, "frame", from, w.at - 1));
+            }
+        };
+        const summary = answer?.summary ?? [];
+        const spoken = wording(summary);
+        const head = header(item, isParked, spoken.text);
+        const headed = w.line(head, `${id} header`);
+        drawnIn(placedIn(headed, spoken.text, false), spoken.drawn);
+        children.push(part(`${id} header`, "header", headed.from, headed.to));
         writeBlocks(null);
         // The operator's words it answers, above its own, each after who wrote it.
         const theirs = above(item, around.answers, around.commented);
         const sender = item.sender.party === "conversation" ? item.sender : null;
+        const aboveFrom = w.at;
         if (theirs.length > 0 && sender !== null) {
-            const [first, ...rest] = writeRows(theirs);
+            const [first, ...rest] = writeRows(theirs, `${id} above`);
             if (first !== undefined) {
                 foldUnder("you", first.kind === "by" ? laidOut(theirs[0]) : "you", first, rest.at(-1), false);
             }
-            writeRows([{ kind: "by", text: `${name(sender)} · ${cited(item.number)}, its answer`, part: null, own: 0 }]);
+            writeRows([{ kind: "by", text: `${name(sender)} · ${cited(item.number)}, its answer`, part: null, own: 0 }], `${id} above`);
         }
+        frame("above", aboveFrom);
         // What its edits changed, folded under a summary line.
         const edited = editedOf(item, (at) => since(new Date(item.made), new Date(at)));
+        const editedFrom = w.at;
         if (edited !== null) {
-            const summary = { kind: "summary" as const, ...w.line(edited.summary) };
-            into.asides.push(summary);
-            foldUnder("edited", "edited", summary, writeRows(edited.rows).at(-1), true);
+            const line = { kind: "summary" as const, ...w.line(edited.summary, `${id} edited`) };
+            into.asides.push(line);
+            foldUnder("edited", "edited", line, writeRows(edited.rows, `${id} edited`).at(-1), true);
         }
-        // Each passage its citations cite, folded under the line the citation is on.
+        frame("edited", editedFrom);
+        // Its body, its kind's view of it: its text, each passage its citations cite folded under the line the citation
+        // is on; the replies kept from before after it; then its files, and what the host refused.
+        const bodyFrom = w.at;
+        const inBody: Placed[] = [];
         const citations = citedOn(item, ownLines);
+        const textFrom = w.at;
         own.slice(0, ownCount).forEach((line, at) => {
-            const span = w.line(line);
-            into.lines.push({ ...span, own: starts[at] ?? 0 });
+            const block = ofLine.at(at) ?? { block: `${id} text`, line: at };
+            const span = w.line(line, block.block);
+            into.lines.push({ ...span, own: starts[at] ?? 0, block: block.block, line: block.line });
             if (edited?.changed.includes(at) === true) {
                 changed.push(span.from);
             }
             writeBlocks(at);
             const passages = citations.filter((each) => each.line === at).flatMap((each) => passageOf(each.citation));
-            foldUnder(`cited ${at}`, "cited", span, writeRows(passages).at(-1), true);
+            foldUnder(`cited ${at}`, "cited", span, writeRows(passages, `${id} cited ${at}`).at(-1), true);
         });
+        const textBlock = bodyBlocks.find((each) => each.block === "markdown");
+        if (textBlock !== undefined) {
+            inBody.push(part(blockId(view.id, textBlock.id), "block", textFrom, w.at - 1, { block: textBlock }));
+        }
         // The operator's comments on it and the replies kept on them from before, after its own words.
-        writeRows(keptReplies(item));
-        layCode(w, into, of, files, ownCount, starts, writeBlocks);
-        const refused = around.files.get(item.number);
-        if (refused !== undefined && "refused" in refused) {
-            into.asides.push({ kind: "refused", ...w.line(`no files: ${refused.refused}`) });
+        const keptFrom = w.at;
+        writeRows(keptReplies(item), `${id} replies`);
+        if (w.at > keptFrom) {
+            inBody.push(part(`${id} replies`, "frame", keptFrom, w.at - 1));
+        }
+        const filedBefore = into.filed.length;
+        layCode(w, into, of, files, ownCount, starts, writeBlocks, (file) => blockId(view.id, file.id));
+        into.filed.slice(filedBefore).forEach((each, at) => {
+            const block = filedBlocks[at];
+            if (block !== undefined) {
+                inBody.push(part(blockId(view.id, block.id), "block", each.from, each.to, { block }));
+            }
+        });
+        for (const block of bodyBlocks) {
+            if (block.block === "line") {
+                const line = lineOfView(block);
+                const aside = { kind: line.kind, ...w.line(line.text, blockId(view.id, block.id)) };
+                into.asides.push(aside);
+                drawnIn(aside.from, line.drawn);
+                inBody.push(part(blockId(view.id, block.id), "block", aside.from, aside.to, { block }));
+            }
+        }
+        if (w.at > bodyFrom) {
+            children.push(part(view.id, "view", bodyFrom, w.at - 1, { view, children: inBody }));
         }
         const context = beneath(item, around);
+        const contextFrom = w.at;
         if (context !== null) {
-            const summary = { kind: context.summary.kind, ...w.line(context.summary.text) };
-            into.asides.push(summary);
-            const shown = context.lines.map((said) => {
-                const aside = { kind: said.kind, ...w.line(said.text) };
+            const line = { kind: context.summary.kind, ...w.line(context.summary.text, `${id} context`) };
+            into.asides.push(line);
+            const shownLines = context.lines.map((each) => {
+                const aside = { kind: each.kind, ...w.line(each.text, `${id} context`) };
                 into.asides.push(aside);
                 return aside;
             });
-            const last = shown.at(-1);
+            const last = shownLines.at(-1);
             if (last !== undefined) {
-                into.folds.push({ of, kind: "context", name: "", label: "context", closed: true, summary: { from: summary.from, to: summary.to }, from: summary.to, to: last.to });
+                into.folds.push({ of, kind: "context", name: "", label: "context", closed: true, summary: { from: line.from, to: line.to }, from: line.to, to: last.to });
             }
         }
+        frame("context", contextFrom);
         // The item whole folds under its header, what folds within it inside: folded once it's marked read, or left for later.
         const closed = isParked || done.includes(item.number);
-        into.folds.push({ of, kind: "item", name: "", label: head, closed, summary: headed, from: headed.to, to: w.at - 1 });
-        w.line("");
-        regions.push({ item, of, header: headed, said, changed, ...into });
+        into.folds.push({ of, kind: "item", name: "", label: head, closed, summary: headed, from: headed.to, to: w.at - 1, scope: true });
+        const placedItem = part(id, "item", headed.from, w.at - 1, { children });
+        w.line("", `${id} end`);
+        regions.push({ item, body: view, named: `${cited(item.number)} ${namedBy(summary)}`, of, header: headed, said: said_, changed, ...into });
+        return placedItem;
     }
 
     /** Return a row's text as its fold's label says it. */
@@ -1224,113 +1635,357 @@ export function laid(
     }
 
     /**
-     * Lay one of `conversation`'s drawers of `kind` from `data`, and return it; none where it has nothing under its
-     * label, as a task list none keeps, a branch with nothing since the operator approved it, or one not read yet; its
-     * label a short line saying what it holds (`rowLabel`), folded until the operator opens it.
+     * Lay `conversation`'s drawer of `kind`, the view `view` of it, and return it; none where its view answers nothing,
+     * or nothing under its label, as a task list none keeps, a branch with nothing since the operator approved it, or
+     * one not read yet; its label its view's summary line, folded until the operator opens it. The remarks to its agent
+     * on one of its blocks go under the line they're on; one drafted before quotes named their block, on the agent's
+     * words at a step or on a file's lines, is anchored to it once its drawer is laid out, else, where what it was on
+     * isn't there, kept as a message to the agent.
      */
-    function layDrawer(kind: DrawerKind, conversation: Conversation, data: AgentDrawers): Drawer | null {
+    function layDrawer(kind: DrawerKind, conversation: Conversation, view: Mounted): (Drawer & { node: Placed }) | null {
+        const answer = view.answer;
+        const labelled = wording(answer?.blocks.summary ?? []);
+        const label = labelled.text;
+        if (answer === null || label === "") {
+            return null;
+        }
         const of = ownerOf({ drawer: kind, conversation });
         const into = gathering();
         const key = whose(conversation);
-        const mine: Placed[] = wrote.flatMap((comment, at) => (isRemark(comment) && whose(comment.to) === key ? [{ comment, at }] : []));
+        const ours = `${view.id} `;
+        // The remarks to its agent this drawer shows, its own and those it takes from before quotes named their block.
+        const mine = (taking: (remark: Remark) => boolean): Remark[] =>
+            wrote.flatMap((each) => {
+                if (!isRemark(each) || whose(each.to) !== key) {
+                    return [];
+                }
+                const block = each.quote.block ?? "";
+                return (block === "" ? taking(each) : block.startsWith(ours)) ? [each] : [];
+            });
         let talk: Talk | null = null;
-        let files: SinceFile[] = [];
         const reviewed: ReviewedLine[] = [];
         let settled: Span | null = null;
-        const labelled = rowLabel(kind, data);
-        if (labelled === null) {
-            return null;
-        }
-        const said = labelled.text;
-        const summary = w.line(said);
-        switch (kind) {
-            case "tasks": {
-                for (const task of data.tasks) {
-                    const shown = task.status === "in_progress" ? (task.active ?? task.subject) : task.subject;
-                    into.asides.push({ kind: "task", ...w.line(`${TASK_MARKS[task.status]} ${shown}`) });
+        const diffs = new Map<string, Filed>();
+        const loads = new Map<string, Instance>();
+        const toned: (Span & { tone: string })[] = [];
+        // A view its module answers is drawn in its tones; the page's own views' lines in what the review draws them as.
+        const remotely = producerOf(view.module, view.view) === undefined;
+        const tones = (from: number, spans: readonly { text: string; tone?: string }[]) => {
+            let at = from;
+            for (const each of spans) {
+                if (remotely && each.text !== "") {
+                    toned.push({ from: at, to: at + each.text.length, tone: each.tone ?? "plain" });
                 }
-                break;
+                at += each.text.length;
             }
-            case "conversation": {
-                // Each remark on the agent's words, under the line it's on.
-                const steps = mine.flatMap(({ comment, at }) =>
-                    isRemark(comment) && comment.step != null ? [{ remark: { step: comment.step, quote: comment.quote, text: comment.text }, at }] : [],
-                );
-                const beside = { exchanged: data.exchanged ?? UNEXCHANGED, whose: { agent: conversation.agent ?? null, name }, calls: data.calls };
-                const laidOut = laidTalk(data.entries, beside, { comments: steps.map((each) => each.remark) });
-                talk = shifted(laidOut, w.at);
-                if (laidOut.text !== "") {
-                    w.text += `${laidOut.text}\n`;
-                }
-                into.lines.push(...talk.words.flatMap((words) => words.lines.map(({ from, to, own }) => ({ from, to, own }))));
-                into.blocks.push(...talk.blocks.map((block) => ({ ...block, comment: steps[block.comment]?.at ?? block.comment })));
-                into.asides.push(...talk.asides);
-                for (const fold of talk.folds) {
-                    into.folds.push({ of, kind: fold.kind ?? "context", name: fold.key, label: fold.label ?? "", closed: fold.closed, summary: fold.summary, from: fold.from, to: fold.to });
-                }
-                break;
+        };
+        const children: Placed[] = [];
+        const summary = w.line(label, `${view.id} summary`);
+        const drawnBefore = drawnAt.length;
+        drawnIn(summary.from, labelled.drawn);
+        if (answer.talk !== undefined) {
+            talk = layTalk(answer.talk, view, mine((remark) => remark.step != null), into, children, key, of);
+        } else {
+            const blocks = answer.blocks.blocks ?? [];
+            // A remark on a file's lines goes under the line it's on, each file's block its own.
+            const topFiles = blocks.filter(isFiled);
+            const ofLine = new OfBlocks();
+            const firstOf = new Map<string, number>();
+            const shownFiles: FileLine[] = [];
+            for (const block of topFiles) {
+                const bid = blockId(view.id, block.id);
+                const lines = filedOnce(block);
+                filedBy.set(bid, block);
+                firstOf.set(bid, ofLine.length);
+                ofLine.add(bid, lines.length);
+                blockLines.set(bid, fileLines(lines, block.version ?? null));
+                shownFiles.push(...lines);
             }
-            case "since": {
-                files = data.since?.files ?? [];
-                const changed = files.flatMap((each) => (each.file == null ? [] : [each.file]));
-                const shown = filedOf(changed, false, (file) => file.before == null);
-                const starts = startsOf(shown.map((each) => each.text));
-                const placed = placedOn(mine.filter(({ comment }) => isRemark(comment) && comment.code != null), starts);
-                const writeBlocks = (line: number | null) => {
-                    for (const { comment, at } of placed.get(line) ?? []) {
-                        into.blocks.push({ comment: at, ...w.line(comment.text) });
+            const starts = startsOf(shownFiles.map((each) => each.text));
+            const length = shownFiles.map((each) => each.text).join("\n").length;
+            const placed = new Map<number | null, Written[]>();
+            for (const remark of mine((each) => each.step == null && kind === "since")) {
+                const rid = writtenId(remark);
+                const quote = remark.quote;
+                if ((quote.block ?? "") !== "") {
+                    const line = seat(rid, quote, firstOf);
+                    placed.set(line, [...(placed.get(line) ?? []), remark]);
+                    continue;
+                }
+                const found = remark.code != null ? onCode(remark.code, view.id, quote) : anchored(quote, starts, length, ofLine);
+                if (found === null) {
+                    converting.set(rid, { id: rid, to: remark.to, text: unplaced(quote.text, remark.text) });
+                    continue;
+                }
+                const now: Remark = { ...remark, quote: found, step: null };
+                converting.set(rid, now);
+                const line = seat(rid, found, firstOf);
+                placed.set(line, [...(placed.get(line) ?? []), now]);
+            }
+            const writeBlocks = (line: number | null) => {
+                for (const comment of placed.get(line) ?? []) {
+                    writeWritten(comment, into.blocks, children);
+                }
+            };
+            // A remark on a file the drawer no longer shows whole goes under the file's line where it stands as the
+            // operator last saw it, else under the drawer's summary line.
+            const standing = new Set<string>();
+            const walk = (list: readonly ViewBlock[]) => {
+                for (const block of list) {
+                    if (block.block === "line") {
+                        standing.add(block.id);
+                    } else if (block.block === "fold" && Array.isArray(block.content)) {
+                        walk(block.content);
                     }
-                };
-                const seen = (each: SinceFile) => {
-                    const line = { kind: "reviewed" as const, ...w.line(reviewedLine(each)) };
-                    into.asides.push(line);
-                    reviewed.push({ from: line.from, to: line.to, file: each });
-                    return line;
-                };
-                // In the files' order, what's left to review: each file changed since the operator saw it, and in its place
-                // each standing as they saw it with flagged writes still waiting on it, a line of its own.
-                const done: SinceFile[] = [];
-                let first = 0;
-                for (const each of files) {
-                    if (each.file == null) {
-                        if ((each.flags ?? []).length > 0) {
-                            seen(each);
-                        } else {
-                            done.push(each);
+                }
+            };
+            walk(blocks);
+            const fileOf = (remark: Written) => ("quote" in remark ? (remark.quote?.block ?? "") : "").slice(`${view.id} file `.length);
+            const orphans = placed.get(null) ?? [];
+            const under = (path: string) => orphans.filter((each) => standing.has(`reviewed ${path}`) && fileOf(each) === path);
+            for (const comment of orphans.filter((each) => !standing.has(`reviewed ${fileOf(each)}`))) {
+                writeWritten(comment, into.blocks, children);
+            }
+            let first = 0;
+            const layBlocks = (list: readonly ViewBlock[], top: boolean, within: Placed[]) => {
+                for (const block of list) {
+                    const id = blockId(view.id, block.id);
+                    switch (block.block) {
+                        case "diff":
+                        case "code": {
+                            const lines = filedOnce(block);
+                            const before = into.filed.length;
+                            layCode(w, into, of, lines, first, starts, writeBlocks, () => id);
+                            first += top ? lines.length : 0;
+                            diffs.set(block.path, block);
+                            const span = into.filed[before];
+                            if (span !== undefined) {
+                                within.push(part(id, "block", span.from, span.to, { block }));
+                            }
+                            break;
                         }
-                        continue;
+                        case "line": {
+                            const line = lineOfView(block);
+                            const aside = { kind: line.kind, ...w.line(line.text, id) };
+                            into.asides.push(aside);
+                            drawnIn(aside.from, line.drawn);
+                            tones(aside.from, (block.spans ?? []).filter((each) => !isDrawn(each)));
+                            const file = answer.files?.get(block.id);
+                            if (file !== undefined) {
+                                reviewed.push({ from: aside.from, to: aside.to, file });
+                                for (const comment of under(file.path)) {
+                                    writeWritten(comment, into.blocks, children);
+                                }
+                            }
+                            within.push(part(id, "block", aside.from, aside.to, { block }));
+                            break;
+                        }
+                        case "markdown": {
+                            const from = w.at;
+                            for (const text of block.text.split("\n")) {
+                                into.asides.push({ kind: block.tone === "operator" ? "you" : "agent", ...w.line(text, id) });
+                            }
+                            within.push(part(id, "block", from, w.at - 1, { block }));
+                            break;
+                        }
+                        case "fold": {
+                            const line = lineOfView({ spans: block.summary });
+                            const head = { kind: line.kind, ...w.line(line.text, id) };
+                            into.asides.push(head);
+                            drawnIn(head.from, line.drawn);
+                            tones(head.from, block.summary.filter((each) => !isDrawn(each)));
+                            const inner: Placed[] = [];
+                            if (Array.isArray(block.content)) {
+                                layBlocks(block.content, false, inner);
+                            } else {
+                                // Read from another of its module's views as it opens: what the host answered of it, or a
+                                // line saying it's being read, which opening the fold asks for.
+                                const loaded: Instance = { repository: view.repository, module: view.module, view: block.content.view, argument: block.content.argument };
+                                loads.set(block.id, loaded);
+                                const read = remote.get(instanceOf(loaded.repository, loaded.module, loaded.view, loaded.argument));
+                                if (read === undefined) {
+                                    into.asides.push({ kind: "plain", ...w.line("reading…", `${id} reading`) });
+                                } else {
+                                    layBlocks(read.blocks ?? [], false, inner);
+                                }
+                            }
+                            const last = w.at - 1;
+                            if (top && block.kind === "lines") {
+                                settled = { from: head.from, to: head.to };
+                            }
+                            if (last > head.to) {
+                                into.folds.push({ of, kind: block.kind, name: block.id, label: line.text, closed: !(block.open ?? false), summary: { from: head.from, to: head.to }, from: head.to, to: last });
+                            }
+                            within.push(part(id, "block", head.from, last, { block, children: inner }));
+                            break;
+                        }
                     }
-                    const next = shown.findIndex((row, at) => at > first && row.row === null);
-                    const own = shown.slice(first, next < 0 ? shown.length : next);
-                    layCode(w, into, of, own, first, starts, writeBlocks);
-                    first += own.length;
                 }
-                // What's settled, at the drawer's end, folded under one line: out of the way of what's left.
-                if (done.length > 0) {
-                    const label = `${done.length} reviewed`;
-                    const line = { kind: "summary" as const, ...w.line(label) };
-                    into.asides.push(line);
-                    settled = { from: line.from, to: line.to };
-                    const last = done.map(seen).at(-1);
-                    if (last !== undefined) {
-                        into.folds.push({ of, kind: "lines", name: "reviewed", label, closed: true, summary: settled, from: line.to, to: last.to });
-                    }
-                }
-                break;
-            }
+            };
+            layBlocks(blocks, true, children);
         }
-        // Labelled by the words written, not sliced from the text being built, which copies it whole each time.
-        const label = said;
         const last = w.at - 1;
         // A drawer with nothing under its summary line isn't shown: it would say only that it's empty.
         if (last <= summary.to) {
-            w.text = w.text.slice(0, summary.from);
+            w.cut(summary.from);
+            drawnAt.length = drawnBefore;
             return null;
         }
         // Folded until opened, a line under the banner.
-        into.folds.push({ of, kind, name: "", label, closed: true, summary, from: summary.to, to: last });
-        return { kind, conversation, talk, files, reviewed, settled, worktree: data.since?.worktree ?? null, waiting: labelled.waiting, of, header: summary, ...into };
+        into.folds.push({ of, kind, name: "", label, closed: true, summary, from: summary.to, to: last, scope: true });
+        const node = part(view.id, "view", summary.from, last, { view, children });
+        const since = answer.since;
+        return {
+            kind,
+            conversation,
+            view,
+            diffs,
+            loads,
+            toned,
+            talk,
+            files: since?.files ?? [],
+            reviewed,
+            settled,
+            worktree: since?.worktree ?? null,
+            waiting: answer.blocks.waiting ?? false,
+            of,
+            header: summary,
+            node,
+            ...into,
+        };
     }
+
+    /**
+     * Return the quote of a remark on code drafted before quotes named their block, `quote`, on the lines `code` names
+     * of a file of the view `view`, anchored to that file's block: where the file shows them at the numbers they had,
+     * as they were, else where it shows them nearest, else at those numbers, outdated; none where the view shows no
+     * such file, or neither.
+     */
+    function onCode(code: NonNullable<Remark["code"]>, view: string, quote: Quote): Quote | null {
+        const block = blockId(view, `file ${code.path}`);
+        const lines = blockLines.get(block);
+        const file = filedBy.get(block);
+        if (lines === undefined || file === undefined) {
+            return null;
+        }
+        const at = filedOnce(file).findIndex((each) => each.row?.side === "after" && each.row.number === code.first);
+        const end = code.lines.join("\n").length;
+        const found = placedOn({ ...quote, block, line: Math.max(at, 0), lines: code.lines, start: 0, end }, lines, null);
+        if (found.outdated && at < 0) {
+            return null;
+        }
+        return { text: quote.text, block, version: code.version, line: found.first, lines: code.lines, start: 0, end };
+    }
+
+    /**
+     * Lay a conversation's text into its drawer, `talking` laying it out with the remarks on it, each under the line of
+     * the agent's words it's on: those whose quote names a block of its view's, a step's words, and those drafted
+     * before, by their step, anchored as they're laid out, else kept as messages to the agent (`key`'s).
+     */
+    function layTalk(talking: (remarks: TalkRemark[]) => Talk, view: Mounted, mine: Remark[], into: Gathering, children: Placed[], key: string, of: string): Talk {
+        const entries = drawers.get(key)?.entries ?? [];
+        const stepOf = (block: string): number | null => {
+            const step = Number(block.slice(`${view.id} step `.length));
+            return block.startsWith(`${view.id} step `) && Number.isInteger(step) ? step : null;
+        };
+        // The lines of the agent's words at a step, as a remark on them counts them; none at a step of no words of its.
+        const wordsAt = (step: number): string[] | null => {
+            const entry = entries[step];
+            return entry?.kind === "said" && entry.by !== "operator" ? keptLines(entry.text, true) : null;
+        };
+        const remarked: TalkRemark[] = [];
+        for (const remark of mine) {
+            const rid = writtenId(remark);
+            let quote = remark.quote;
+            if ((quote.block ?? "") === "") {
+                const lines = remark.step == null ? null : wordsAt(remark.step);
+                if (remark.step == null || lines === null) {
+                    converting.set(rid, { id: rid, to: remark.to, text: unplaced(quote.text, remark.text) });
+                    continue;
+                }
+                const starts = startsOf(lines);
+                const top = lineOf(starts, quote.start);
+                const bottom = lineOf(starts, Math.max(quote.end - 1, quote.start));
+                const start = quote.start - (starts[top] ?? 0);
+                quote = quoting(blockId(view.id, `step ${remark.step}`), linesOf(lines), top, bottom, start, Math.max(quote.end - (starts[top] ?? 0), start), quote.text);
+                converting.set(rid, { ...remark, quote, step: null });
+            }
+            const step = stepOf(quote.block ?? "");
+            const lines = step === null ? null : wordsAt(step);
+            if (step === null || lines === null) {
+                continue;
+            }
+            const block = blockId(view.id, `step ${step}`);
+            blockLines.set(block, linesOf(lines));
+            const line = seat(rid, quote, new Map([[block, 0]]));
+            remarked.push({ id: rid, step, line: line ?? 0, text: remark.text });
+        }
+        const laidOut = talking(remarked);
+        const talk = shifted(laidOut, w.at);
+        // Whose each of its lines is: a remark's its own, any other the conversation's.
+        const owned = new Map<number, string>();
+        const starts = startsOf(laidOut.text.split("\n"));
+        for (const block of laidOut.blocks) {
+            for (let line = lineOf(starts, block.from); line <= lineOf(starts, block.to); line += 1) {
+                owned.set(line, writtenOwner(block.comment));
+            }
+        }
+        if (laidOut.text !== "") {
+            w.lines(laidOut.text, (line) => owned.get(line) ?? `${view.id} talk`);
+        }
+        into.lines.push(
+            ...talk.words.flatMap((words) => {
+                const block = blockId(view.id, `step ${words.step}`);
+                const starts = startsOf(linesOfWords(words));
+                return words.lines.map(({ from, to, own }) => ({ from, to, own, block, line: lineOf(starts, own) }));
+            }),
+        );
+        into.blocks.push(...talk.blocks);
+        into.asides.push(...talk.asides);
+        for (const block of talk.blocks) {
+            children.push(writtenPart(block));
+        }
+        for (const fold of talk.folds) {
+            into.folds.push({ of, kind: fold.kind ?? "context", name: fold.key, label: fold.label ?? "", closed: fold.closed, summary: fold.summary, from: fold.from, to: fold.to });
+        }
+        return talk;
+    }
+}
+
+/** Return `groups`' parts, each subagent's inside its parent's, where its range is inside the parent's, as their folds nest. */
+function nestedNodes(groups: Placed[]): Placed[] {
+    const roots: Placed[] = [];
+    const holding: Placed[] = [];
+    for (const each of groups) {
+        while (holding.length > 0 && (holding.at(-1)?.to ?? 0) < each.from) {
+            holding.pop();
+        }
+        (holding.at(-1)?.children ?? roots).push(each);
+        holding.push(each);
+    }
+    return roots;
+}
+
+/** Return the first of `offers` answering `verb` that runs at once, as each the page's own views offers does until #247; none where none does. */
+export function offeredOf(offers: readonly Offer[], verb: string): Offer | undefined {
+    return offers.find((each) => each.verb === verb && each.runs === "once");
+}
+
+/** Return the innermost of a view's blocks laid out at `position`, as the review's tree has it; none where no block is. */
+export function viewBlockAt(laidOut: Laid, position: number): Placed | undefined {
+    let found: Placed | undefined;
+    const walk = (parts: readonly Placed[]) => {
+        for (const each of parts) {
+            if (position >= each.from && position <= each.to) {
+                if (each.kind === "block") {
+                    found = each;
+                }
+                walk(each.children);
+            }
+        }
+    };
+    walk(laidOut.nodes);
+    return found;
 }
 
 /** Return where going to an item lands: on its first line that matters, as the judge read its files, unless it's folded whole, marked read or left for later; else on its header. */
@@ -1452,59 +2107,6 @@ export function groupAround(laidOut: Laid, position: number): Group | undefined 
     return lastFrom(laidOut.groups, (each) => each.banner.from, position);
 }
 
-/** Return whether two of what's written are the same one, whatever it says: a comment on the same passage of the same item, or of the same reply, a message to the same agent, or a remark on the same passage to the same agent. */
-function same(a: Written, b: Written): boolean {
-    if (isLetter(a) || isLetter(b)) {
-        return isLetter(a) && isLetter(b) && whose(a.to) === whose(b.to);
-    }
-    if (isRemark(a) || isRemark(b)) {
-        return (
-            isRemark(a) &&
-            isRemark(b) &&
-            whose(a.to) === whose(b.to) &&
-            a.quote.start === b.quote.start &&
-            a.quote.end === b.quote.end &&
-            (a.step ?? null) === (b.step ?? null) &&
-            (a.code?.path ?? null) === (b.code?.path ?? null)
-        );
-    }
-    const onSame = (a.on == null && b.on == null) || sameId(a.on, b.on);
-    return a.item === b.item && onSame && a.quote?.start === b.quote?.start && a.quote?.end === b.quote?.end;
-}
-
-/**
- * Return where the cursor goes as the review is laid out again, from `before` and what was written in it to `after`
- * and what's written now, where what it was on at `head` is gone, as a reply sent takes what it covered: from a
- * comment, a message or a remark gone, back on what it was about (`aboutAt`), the last character of its passage, its
- * item's header, its drawer's summary line, its group's banner; from an item gone, or what it was about gone too, onto
- * its group's banner. None where what it was on is still there, or its group is gone too, where the text's changes
- * carry it.
- */
-export function stranded(before: Laid, wrote: Written[], after: Laid, writes: Written[], head: number): number | undefined {
-    const group = lastFrom(before.groups, (each) => each.banner.from, head);
-    const banner = after.groups.find((each) => each.place === group?.place)?.banner.from;
-    const block = blockAt(before, head);
-    const was = block === undefined ? undefined : wrote[block.comment];
-    if (was !== undefined) {
-        if (writes.some((each) => same(each, was))) {
-            return undefined;
-        }
-        if (isLetter(was)) {
-            return banner;
-        }
-        if (isRemark(was)) {
-            const drawer = drawerAt(before, head);
-            const now = drawer === undefined ? undefined : after.drawers.find((each) => each.of === drawer.of);
-            return now === undefined ? banner : (remarkedAt(now, was) ?? now.header.from);
-        }
-        const region = after.regions.find((each) => each.item.number === was.item);
-        return region === undefined ? banner : commentedAt(region, was);
-    }
-    const region = regionAt(before, head);
-    const gone = region !== undefined && !after.regions.some((each) => each.item.number === region.item.number);
-    return gone ? banner : undefined;
-}
-
 /** Return where the cursor at `head` is, outside insert mode, for the line of keys: what it's on, by what the keys there do. */
 export function placeAt(laidOut: Laid, head: number): Exclude<ReviewPlace, "insert"> {
     if (laidOut.text === "") {
@@ -1571,7 +2173,7 @@ export function heading(laidOut: Laid, head: number, writing: boolean, wrote: Wr
         return [];
     }
     const block = writing ? blockAt(laidOut, head) : undefined;
-    const being = block === undefined ? undefined : wrote[block.comment];
+    const being = block === undefined ? undefined : wrote.find((each) => writtenId(each) === block.comment);
     const goesTo = (written: Written): Conversation | null => {
         if (isLetter(written) || isRemark(written)) {
             return written.to;
@@ -1590,7 +2192,7 @@ export function heading(laidOut: Laid, head: number, writing: boolean, wrote: Wr
     }
     // A file's path: from its lines, or from its line in "since you approved" once it stands as the operator last saw it.
     const file = scope.filed.find((each) => head >= each.from && head <= each.to)?.file.path ?? (isDrawer(scope) ? reviewedAt(scope, head)?.file.path : undefined);
-    const inner = around(scope.folds, head).filter((each) => each.kind !== "file" && each.of !== scope.of || (each.kind !== "item" && each.kind !== "file" && !(DRAWERS as string[]).includes(each.kind)));
+    const inner = around(scope.folds, head).filter((each) => each.kind !== "file" && each.of !== scope.of || (each.kind !== "item" && each.kind !== "file" && kindOf(each.kind)?.drawer !== true));
     const named: Where = isRegion(scope) ? { kind: "item", text: naming.item(scope) } : { kind: (scope as Drawer).kind, text: (scope as Drawer).kind };
     return [
         ...going,
@@ -1613,11 +2215,11 @@ export function blockAt(laidOut: Laid, position: number): Block | undefined {
 
 /** Return a message to the agent `group` is of, as it's opened: empty; none for a group no message goes to. */
 function letterTo(group: Group): Letter | undefined {
-    return group.conversation === null ? undefined : { to: group.conversation, text: "" };
+    return group.conversation === null ? undefined : { id: "", to: group.conversation, text: "" };
 }
 
 /** Return the scope's own line shown at `position`, where it's on one. */
-export function lineAt(scope: Scope, position: number): Line | undefined {
+export function lineAt(scope: Scope, position: number): OwnLine | undefined {
     return scope.lines.find((each) => position >= each.from && position <= each.to);
 }
 
@@ -1669,7 +2271,7 @@ export function reviewedAt(drawer: Drawer, position: number): ReviewedLine | und
 export function sinceFileAt(drawer: Drawer, position: number): SinceFile | undefined {
     const coded = codeAt(drawer, position);
     if (coded !== undefined) {
-        return drawer.files.find((each) => each.file === coded.file);
+        return drawer.files.find((each) => each.file != null && each.path === coded.file.path);
     }
     return reviewedAt(drawer, position)?.file;
 }
@@ -1741,7 +2343,7 @@ function quotedCode(drawer: Drawer, lines: Line[]): NonNullable<Remark["code"]> 
         return found === undefined ? [] : [found];
     });
     const file = coded[0]?.file;
-    const shown = file === undefined ? undefined : drawer.files.find((each) => each.file === file);
+    const shown = file === undefined ? undefined : drawer.files.find((each) => each.file != null && each.path === file.path);
     const rows = coded.flatMap((each) => (each.file === file && each.row !== null && each.row.side === "after" ? [each.row] : []));
     const first = rows[0];
     if (shown === undefined || shown.version == null || drawer.worktree === null || first === undefined) {
@@ -1774,20 +2376,28 @@ export function opened(laidOut: Laid, position: number): Written | undefined {
     const line = lineAt(region, position);
     const shown = line === undefined ? "" : laidOut.text.slice(line.from, line.to);
     if (line === undefined || (shown === "" && codeAt(region, line.from) === undefined)) {
-        return { item: region.item.number, quote: null, text: "" };
+        return { id: "", item: region.item.number, quote: null, text: "" };
     }
-    return {
-        item: region.item.number,
-        quote: { text: said(laidOut.text, region, [line], line.from, line.to), start: line.own, end: line.own + shown.length },
-        text: "",
-    };
+    const quote = onLines(laidOut, line, line, 0, shown.length, said(laidOut.text, region, [line], line.from, line.to));
+    return { id: "", item: region.item.number, quote, text: "" };
+}
+
+/** Return the quote of the passage from `start` in line `first` to `end`, counted in lines `first` to `last` joined, of a scope's own lines, both of one block: anchored to that block (`quoting`), saying `text`; none where the block's lines aren't laid out. */
+function onLines(laidOut: Laid, first: OwnLine, last: OwnLine, start: number, end: number, text: string): Quote | null {
+    const lines = laidOut.lines.get(last.block);
+    return lines === undefined ? null : quoting(last.block, lines, first.line, last.line, start, end, text);
+}
+
+/** Return the quote of a passage of the agent's words in a conversation drawer, `found`, anchored to its step's block of the drawer's view. */
+function onWords(drawer: Drawer, found: Passage): Quote {
+    return quoting(blockId(drawer.view.id, `step ${found.step}`), linesOf(found.lines), found.first, found.last, found.start, found.end, found.text);
 }
 
 /** Return the remark opened on the line at `position` of `drawer`: on the agent's words, or on a line of a file; none on any other line. */
 function openedIn(laidOut: Laid, drawer: Drawer, position: number): Remark | undefined {
     if (drawer.talk !== null) {
         const found = openedTalk(drawer.talk, position);
-        return found === undefined ? undefined : { to: drawer.conversation, quote: found.quote, text: "", step: found.step };
+        return found === undefined ? undefined : { id: "", to: drawer.conversation, quote: onWords(drawer, found), text: "" };
     }
     if (drawer.kind !== "since") {
         return undefined;
@@ -1797,18 +2407,28 @@ function openedIn(laidOut: Laid, drawer: Drawer, position: number): Remark | und
         return undefined;
     }
     const shown = laidOut.text.slice(line.from, line.to);
-    return {
-        to: drawer.conversation,
-        quote: { text: said(laidOut.text, drawer, [line], line.from, line.to), start: line.own, end: line.own + shown.length },
-        text: "",
-        code: quotedCode(drawer, [line]),
-    };
+    const quote = onLines(laidOut, line, line, 0, shown.length, said(laidOut.text, drawer, [line], line.from, line.to));
+    return quote === null ? undefined : { id: "", to: drawer.conversation, quote, text: "", code: quotedCode(drawer, [line]) };
+}
+
+/**
+ * Return the lines of a scope's own from `first` to `last`, those of the block `last` is of: a passage running over
+ * blocks is anchored to its last, from the first of its lines the passage holds; and where the passage starts in them,
+ * from `start` in the scope's own text.
+ */
+function ofLastBlock(scope: Scope, first: OwnLine, last: OwnLine, start: number): { first: OwnLine; start: number } {
+    if (first.block === last.block) {
+        return { first, start: start - first.own };
+    }
+    const from = scope.lines.find((each) => each.block === last.block && each.from >= first.from) ?? last;
+    return { first: from, start: 0 };
 }
 
 /**
  * Return a comment on the passage `from` to `to` selects, counted in its item's text, its own and its files'; a
  * message to a group's agent where it's on its banner, which no comment quotes; a remark on a passage of a drawer's;
- * none where it isn't all inside one item's lines, one drawer's, or one group's.
+ * none where it isn't all inside one item's lines, one drawer's, or one group's. It's anchored to the block of the
+ * line it ends on, what it says the whole passage.
  */
 export function quoted(laidOut: Laid, from: number, to: number): Written | undefined {
     const group = groupAt(laidOut, from);
@@ -1829,19 +2449,19 @@ export function quoted(laidOut: Laid, from: number, to: number): Written | undef
         return undefined;
     }
     const own = region.lines.map((each) => laidOut.text.slice(each.from, each.to)).join("\n");
-    const quote = passage(own, first, last, from, to);
+    const offsets = passage(own, first, last, from, to);
     const lines = region.lines.slice(region.lines.indexOf(first), region.lines.indexOf(last) + 1);
-    if (lines.every((each) => codeAt(region, each.from) === undefined)) {
-        return { item: region.item.number, quote, text: "" };
-    }
-    return { item: region.item.number, quote: { ...quote, text: said(laidOut.text, region, lines, from, to) }, text: "" };
+    const text = lines.every((each) => codeAt(region, each.from) === undefined) ? offsets.text : said(laidOut.text, region, lines, from, to);
+    const top = ofLastBlock(region, first, last, offsets.start);
+    const quote = onLines(laidOut, top.first, last, top.start, offsets.end - top.first.own, text);
+    return quote === null ? undefined : { id: "", item: region.item.number, quote, text: "" };
 }
 
 /** Return the remark on the passage `from` to `to` selects in `drawer`; none where it isn't all inside its lines. */
 function quotedIn(laidOut: Laid, drawer: Drawer, from: number, to: number): Remark | undefined {
     if (drawer.talk !== null) {
         const found = quotedTalk(drawer.talk, from, to);
-        return found === undefined ? undefined : { to: drawer.conversation, quote: found.quote, text: "", step: found.step };
+        return found === undefined ? undefined : { id: "", to: drawer.conversation, quote: onWords(drawer, found), text: "" };
     }
     if (drawer !== drawerAt(laidOut, Math.max(to - 1, from)) || drawer.kind !== "since") {
         return undefined;
@@ -1852,20 +2472,24 @@ function quotedIn(laidOut: Laid, drawer: Drawer, from: number, to: number): Rema
         return undefined;
     }
     const own = drawer.lines.map((each) => laidOut.text.slice(each.from, each.to)).join("\n");
-    const quote = passage(own, first, last, from, to);
+    const offsets = passage(own, first, last, from, to);
     const lines = drawer.lines.slice(drawer.lines.indexOf(first), drawer.lines.indexOf(last) + 1);
-    return {
-        to: drawer.conversation,
-        quote: { ...quote, text: said(laidOut.text, drawer, lines, from, to) },
-        text: "",
-        code: quotedCode(drawer, lines),
-    };
+    const top = ofLastBlock(drawer, first, last, offsets.start);
+    const quote = onLines(laidOut, top.first, last, top.start, offsets.end - top.first.own, said(laidOut.text, drawer, lines, from, to));
+    return quote === null ? undefined : { id: "", to: drawer.conversation, quote, text: "", code: quotedCode(drawer, lines) };
 }
 
-/** Say an item's comments as one answer, as its agent reads them: each under the passage it quotes, set off as a mail quotes, in the order they were written; those on the whole after. */
+/** Say an item's comments as one answer, as its agent reads them: each under the passage it quotes, set off as a mail quotes, in the order of what they're on, each block's by its lines; those on the whole after. */
 export function answer(comments: Comment[]): string {
     const saying = comments.filter((each) => each.text.trim() !== "");
-    const quoted = saying.filter((each) => each.quote != null).sort((a, b) => (a.quote?.start ?? 0) - (b.quote?.start ?? 0));
+    const at = (each: Comment) => [each.quote?.block ?? "", each.quote?.line ?? 0, each.quote?.start ?? 0] as const;
+    const quoted = saying
+        .filter((each) => each.quote != null)
+        .sort((a, b) => {
+            const [blockA, lineA, startA] = at(a);
+            const [blockB, lineB, startB] = at(b);
+            return blockA < blockB ? -1 : blockA > blockB ? 1 : lineA - lineB || startA - startB;
+        });
     const whole = saying.filter((each) => each.quote == null);
     const parts = quoted.map((each) => {
         const lines = (each.quote?.text ?? "").split("\n").map((line) => (line === "" ? ">" : `> ${line}`));
@@ -1936,35 +2560,58 @@ export function shownAt(scope: Scope, offset: number): number {
 
 /**
  * Return where what's written, shown at `block`, is about, which Ctrl+Enter ending it goes back to: a message's
- * banner; the last character of the passage a comment or a remark quotes, where reading carries on, or its item's
- * header for one on the item whole.
+ * banner; the last character of the passage a comment or a remark quotes, where reading carries on, as it's laid out
+ * now (`quotedAt`), or its item's header for one on the item whole.
  */
 export function aboutAt(laidOut: Laid, written: Written, block: Block): number | undefined {
     if (isLetter(written)) {
         return groupAt(laidOut, block.from)?.banner.from;
     }
-    if (isRemark(written)) {
-        const drawer = drawerAt(laidOut, block.from);
-        return drawer === undefined ? undefined : remarkedAt(drawer, written);
+    const scope = scopeAt(laidOut, block.from);
+    if (scope === undefined) {
+        return undefined;
     }
-    const region = regionAt(laidOut, block.from);
-    return region === undefined ? undefined : commentedAt(region, written);
+    const shown = quotedAt(laidOut, scope, written);
+    if (shown !== null) {
+        return Math.max(shown.to - 1, shown.from);
+    }
+    return isRegion(scope) ? scope.header.from : undefined;
 }
 
-/** Return where a comment on `region`'s item is about: the last character of the passage it quotes, or the item's header for one on the item whole, or one copies before kept on a reply. */
-function commentedAt(region: Region, comment: Comment): number {
-    if (comment.quote == null || comment.on != null) {
-        return region.header.from;
+/**
+ * Return where the passage what's written quotes is in `scope`, as it's laid out now: from where it starts in the first
+ * of its lines it's seated on (`Laid.seated`), to where it ends in the last, each kept within its line; none for a
+ * message, what's on its item whole, one copies before kept on a reply, or one not seated in `scope`.
+ */
+export function quotedAt(laidOut: Laid, scope: Scope, written: Written): Span | null {
+    // As it's laid out, anchored there where it was drafted before it was.
+    const shown = laidOut.written.find((each) => writtenId(each) === writtenId(written)) ?? written;
+    if (isLetter(shown) || shown.quote == null || ("on" in shown && shown.on != null)) {
+        return null;
     }
-    return shownAt(region, lastOf(comment.quote));
+    const quote = shown.quote;
+    const seat = laidOut.seated.get(writtenId(shown));
+    if (seat === undefined) {
+        return null;
+    }
+    if (isDrawer(scope) && scope.talk !== null) {
+        const step = Number(seat.block.slice(seat.block.lastIndexOf(" ") + 1));
+        return passageAt(scope.talk, step, seat.first, quote.start, seat.first === seat.last ? quote.end : endInLast(quote) + startOfLine(scope.talk, step, seat.last, seat.first)) ?? null;
+    }
+    const first = scope.lines.find((each) => each.block === seat.block && each.line === seat.first);
+    const last = scope.lines.find((each) => each.block === seat.block && each.line === seat.last);
+    if (first === undefined || last === undefined) {
+        return null;
+    }
+    const within = (line: OwnLine, at: number) => Math.min(Math.max(line.from + at, line.from), line.to);
+    return { from: within(first, quote.start), to: within(last, seat.first === seat.last ? quote.end : endInLast(quote)) };
 }
 
-/** Return where a remark in `drawer` is about: the last character of the passage it quotes, in the agent's words or a file's lines; none where its passage isn't laid out. */
-function remarkedAt(drawer: Drawer, remark: Remark): number | undefined {
-    if (drawer.talk !== null) {
-        return remark.step == null ? undefined : aboutTalk(drawer.talk, { step: remark.step, quote: remark.quote, text: remark.text });
-    }
-    return drawer.lines.length === 0 ? undefined : shownAt(drawer, lastOf(remark.quote));
+/** Return how far into the lines of the words at `step` from line `first` on, joined, line `line` starts. */
+function startOfLine(talk: Talk, step: number, line: number, first: number): number {
+    const words = talk.words.find((each) => each.step === step);
+    const starts = words === undefined ? [] : startsOf(linesOfWords(words));
+    return (starts[line] ?? 0) - (starts[first] ?? 0);
 }
 
 /**

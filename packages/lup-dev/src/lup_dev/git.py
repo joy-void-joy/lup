@@ -39,7 +39,7 @@ from lup.types import Model
 from lup_dev.errors import LupDevError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
 
 class GitError(LupDevError):
@@ -92,6 +92,49 @@ def pinning(common: Path) -> list[str]:
     ['env', 'GIT_DIR=/r.git', 'GIT_COMMON_DIR=/r.git']
     """
     return ["env", f"GIT_DIR={common}", f"GIT_COMMON_DIR={common}"]
+
+
+def stray(objects: Path) -> list[Path]:
+    """List what has the object store at `objects` read objects from elsewhere: its alternates files, and every symbolic link in it.
+
+    One look covers every way measured: alternates absolute, relative or nested,
+    and a pack linked in from another repository with no alternates at all
+    (`docs/field-notes.md`, *Host-side git in a repository the room writes*).
+    Where a room writes the store, git the host runs there reads only what it
+    holds while this lists nothing. Each directory's listing tells a link
+    from its entries, so a store of 129k loose objects takes 0.05 s, where a
+    look at each took 0.68 s. A directory that can't be listed is passed over:
+    git can't read from it either.
+    """
+    if objects.is_symlink():
+        return [objects]
+    alternates = [
+        path
+        for path in [
+            objects / "info" / "alternates",
+            objects / "info" / "http-alternates",
+        ]
+        if path.exists() or path.is_symlink()
+    ]
+
+    def linked() -> Iterator[Path]:
+        pending = [objects]
+        while pending:
+            directory = pending.pop()
+            try:
+                # lup: ignore("os-file-ops", why="a listing's entries tell a link without a look at each, which `Path.walk` then `Path.is_symlink` take for each of a store's loose objects")
+                with os.scandir(directory) as listing:
+                    entries = list(listing)
+            except OSError:
+                continue
+            for entry in entries:
+                if entry.is_symlink():
+                    yield directory / entry.name
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    pending.append(directory / entry.name)
+
+    return [*alternates, *linked()]
 
 
 class Git(Model):
@@ -222,6 +265,23 @@ class Git(Model):
             return content
 
         return [read(each) for each in objects]
+
+    def blobs(self, objects: list[str]) -> list[str]:
+        """Return those of `objects`, by id and in order, that the repository's store holds as blobs, asked of one `git cat-file`.
+
+        Never fetched (`--no-lazy-fetch`): a partial clone would ask its
+        promisor remote for each object it left out, sending it the id.
+        """
+        if not objects:
+            return []
+        asked = "".join(f"{each}\n" for each in objects).encode()
+        answered = self.run(
+            "--no-lazy-fetch", "cat-file", "--batch-check=%(objecttype)", stdin=asked
+        )
+        kinds = answered.output.decode().splitlines()
+        return [
+            each for each, kind in zip(objects, kinds, strict=True) if kind == "blob"
+        ]
 
     def export(
         self,

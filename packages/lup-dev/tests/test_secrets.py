@@ -1,4 +1,4 @@
-"""Files that hold secrets, hidden from a room: which files are found, which a commit holds as they are, what's passed over, and what a launch says.
+"""Files that hold secrets, hidden from a room: which files are found, whose content their repository's store holds, what's passed over, and what a launch says.
 
 git runs for real on the test's repositories, with the operator's own git
 configuration kept out; no test runs podman, so the mounts are compared as data.
@@ -13,6 +13,7 @@ import pytest
 from lup.programs import run
 from lup.rooms.container import Mount
 from lup_dev.catalog.paths import CorePaths
+from lup_dev.git import Git
 from lup_dev.launch.hidden import Found
 from lup_dev.launch.secrets import (
     RoomSecrets,
@@ -50,55 +51,50 @@ def hidden(tree: Tree, search: Search = DEFAULTS) -> list[Path]:
     )
 
 
-def test_a_file_with_a_secret_s_name_is_hidden_unless_its_commit_holds_it_as_it_is(
+def test_a_file_with_a_secret_s_name_is_shown_where_its_repository_s_objects_hold_its_content(
     repo: Path,
 ) -> None:
     (repo / ".env.example").write_text("TOKEN=\n")
     (repo / "config").mkdir()
     (repo / "config" / "master.key").write_text("committed")
-    (repo / "same.pem").write_text("aaaa")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "templates")
-    # Changed since, to content of the same size; ignored; untracked; staged by
-    # force, as a room would to have git call it tracked; a link; another name.
+    # Changed since, to content of the same size; ignored; untracked. Staged by
+    # force, which writes its content to the store; a committed file's content
+    # under another name; a link; another name.
     (repo / "config" / "master.key").write_text("Committed")
     (repo / ".gitignore").write_text(".venv/\n.lup/\n.env.local\n")
     (repo / ".env.local").write_text("TOKEN=the operator's\n")
     (repo / ".env").write_text("TOKEN=forgotten\n")
     (repo / ".env.staged").write_text("TOKEN=staged\n")
     git(repo, "add", "-f", ".env.staged")
+    (repo / ".env.copy").write_text("TOKEN=\n")
     (repo / ".env.link").symlink_to(repo / ".env.local")
     (repo / "notes.txt").write_text("nothing secret\n")
 
     assert hidden(Tree(path=repo, git=git_directory(repo))) == [
         Path(".env"),
         Path(".env.local"),
-        Path(".env.staged"),
         Path("config/master.key"),
     ]
 
 
-def test_each_of_the_repository_s_worktrees_is_looked_in_and_what_s_outside_them_too(
-    bare: Path,
+def test_a_moved_repository_s_files_are_shown_though_git_lists_its_worktrees_where_they_were(
+    bare: Path, tmp_path: Path
 ) -> None:
     main = bare / "tree" / "main"
-    (main / ".env.example").write_text("TOKEN=\n")
+    (main / ".env").write_text("PORT=8000\n")
     git(main, "add", "-A")
-    git(main, "commit", "-q", "-m", "the example")
+    git(main, "commit", "-q", "-m", "the interface")
     git(bare, "worktree", "add", "-q", "-b", "feat", "tree/feat")
-    feat = bare / "tree" / "feat"
-    # A worktree whose example changed; one git no longer lists, its `.git`
-    # file gone; and a file beside the git directory's own.
-    (feat / ".env.example").write_text("TOKEN=a value\n")
-    stray = bare / "tree" / "unlisted"
-    stray.mkdir()
-    (stray / ".env").write_text("TOKEN=\n")
-    (bare / "id_ed25519").write_text("")
+    (bare / "tree" / "feat" / ".env.local").write_text("TOKEN=a value\n")
+    (tmp_path / "moved").mkdir()
+    moved = bare.rename(tmp_path / "moved" / "proj.git")
+    listed = run("git", "worktree", "list", "--porcelain", cwd=moved).output.decode()
+    assert listed.count("prunable") == 2
 
-    assert hidden(Tree(path=bare, git=git_directory(bare))) == [
-        Path("id_ed25519"),
-        Path("tree/feat/.env.example"),
-        Path("tree/unlisted/.env"),
+    assert hidden(Tree(path=moved, git=git_directory(moved))) == [
+        Path("tree/feat/.env.local")
     ]
 
 
@@ -106,8 +102,9 @@ def test_a_pattern_is_matched_from_the_root_of_the_worktree_holding_the_file(
     repo: Path,
 ) -> None:
     git(repo, "worktree", "add", "-q", "-b", "feat", ".git/tree/feat")
-    feat = repo / ".git" / "tree" / "feat"
-    for root in [repo, feat]:
+    # Moved by hand, so git lists it where it was: its `.git` marks its root.
+    moved = (repo / ".git" / "tree" / "feat").rename(repo / ".git" / "tree" / "moved")
+    for root in [repo, moved]:
         (root / "config").mkdir()
         (root / "config" / "a.key").write_text("")
         (root / "src" / "config").mkdir(parents=True)
@@ -117,17 +114,96 @@ def test_a_pattern_is_matched_from_the_root_of_the_worktree_holding_the_file(
         Tree(path=repo, git=git_directory(repo)), Search(patterns=["config/*.key"])
     )
 
-    assert found == [Path(".git/tree/feat/config/a.key"), Path("config/a.key")]
+    assert found == [Path(".git/tree/moved/config/a.key"), Path("config/a.key")]
 
 
-def test_a_repository_without_a_commit_holds_none_of_its_files(tmp_path: Path) -> None:
-    root = tmp_path / "new"
+def test_every_file_with_a_secret_s_name_in_a_repository_nested_in_the_tree_is_hidden(
+    repo: Path,
+) -> None:
+    (repo / ".env.example").write_text("TOKEN=\n")
+    (repo / ".gitignore").write_text(".venv/\n.lup/\ntmp/\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "the example")
+    scratch = repo / "tmp"
+    scratch.mkdir()
+    # A copy of the example; a clone; a bare clone with a worktree. Each holds
+    # the example as committed, which the tree's store holds.
+    (scratch / ".env.example").write_text("TOKEN=\n")
+    git(scratch, "clone", "-q", str(repo), "clone")
+    git(scratch, "clone", "-q", "--bare", str(repo), "copy.git")
+    git(scratch / "copy.git", "worktree", "add", "-q", "tree/main", "main")
+    # A `.git` directory that isn't a git directory nests nothing: a worktree
+    # of the tree's own under one is checked, as git would read it.
+    (repo / "tree" / ".git").mkdir(parents=True)
+    git(repo, "worktree", "add", "-q", "-b", "feat", "tree/feat")
+    assert (repo / "tree" / "feat" / ".env.example").exists()
+
+    assert hidden(Tree(path=repo, git=git_directory(repo))) == [
+        Path("tmp/clone/.env.example"),
+        Path("tmp/copy.git/tree/main/.env.example"),
+    ]
+
+
+def test_a_store_that_reads_objects_from_elsewhere_has_every_file_hidden(
+    repo: Path, tmp_path: Path
+) -> None:
+    (repo / ".env.example").write_text("TOKEN=\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "the example")
+    # A repository the room doesn't mount holds a real value, which the
+    # operator keeps in the tree too, untracked.
+    private = tmp_path / "private"
+    private.mkdir()
+    git(private, "init", "-q", "-b", "main")
+    (private / ".env").write_text("TOKEN=real\n")
+    git(private, "add", ".env")
+    (repo / ".env").write_text("TOKEN=real\n")
+    real = run("git", "hash-object", ".env", cwd=repo).output.decode().strip()
+    objects = repo / ".git" / "objects"
+    alternates = objects / "info" / "alternates"
+    alternates.write_text(f"{private / '.git' / 'objects'}\n")
+    # git asked there would answer from the other store.
+    assert Git.pinned(repo / ".git").blobs([real]) == [real]
+    tree = Tree(path=repo, git=git_directory(repo))
+
+    assert hidden(tree) == [Path(".env"), Path(".env.example")]
+    alternates.unlink()
+    (objects / "pack" / "theirs").symlink_to(private / ".git" / "objects" / "pack")
+    assert hidden(tree) == [Path(".env"), Path(".env.example")]
+
+
+def test_a_file_too_large_to_check_is_hidden_unread_and_said_so(
+    repo: Path, tmp_path: Path
+) -> None:
+    (repo / "bundle.pem").write_bytes(b"-" * (DEFAULTS.largest + 1))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "a large bundle")
+    # A terabyte, sparse, as a room could make one in an instant.
+    with (repo / "planted.key").open("wb") as planted:
+        planted.truncate(1 << 40)
+    tree = Tree(path=repo, git=git_directory(repo))
+    launch = Layout(state=tmp_path / "state").launch("0f3a")
+
+    made = RoomSecrets.of(DEFAULTS, tree, [], launch)
+
+    assert sorted(made.large) == [repo / "bundle.pem", repo / "planted.key"]
+    [said] = made.said()
+    assert f"\n  {repo / 'bundle.pem'} (too large to check, over 1 MiB)" in said
+    assert f"\n  {repo / 'planted.key'} (too large to check, over 1 MiB)" in said
+    # Raised, the bound has the committed bundle checked, and shown.
+    raised = DEFAULTS.model_copy(update={"largest": 2 << 20})
+    assert hidden(tree, raised) == [Path("planted.key")]
+
+
+def test_a_sha256_repository_s_store_is_asked_by_sha256_ids(tmp_path: Path) -> None:
+    root = tmp_path / "sha256"
     root.mkdir()
-    git(root, "init", "-q", "-b", "main")
+    git(root, "init", "-q", "-b", "main", "--object-format=sha256")
     (root / ".env.example").write_text("TOKEN=\n")
     git(root, "add", "-A")
+    (root / ".env").write_text("TOKEN=forgotten\n")
 
-    assert hidden(Tree(path=root, git=git_directory(root))) == [Path(".env.example")]
+    assert hidden(Tree(path=root, git=git_directory(root))) == [Path(".env")]
 
 
 def test_what_package_managers_install_and_what_s_hidden_already_aren_t_looked_in(
@@ -232,8 +308,8 @@ def test_a_launch_mounts_its_empty_file_over_each_says_them_and_says_what_appear
     assert made.said() == [
         (
             "Hidden from the room, each reading as an empty file: the files with a "
-            "secret's name no commit holds as they are (`docs/launch.md`, *Files "
-            f"with a secret's name*):\n  {repo / '.env.local'}\n"
+            "secret's name whose content their repository's git objects don't hold "
+            f"(`docs/launch.md`, *Files with a secret's name*):\n  {repo / '.env.local'}\n"
             f"  {notes / 'profile' / '.credentials.json'}"
         )
     ]

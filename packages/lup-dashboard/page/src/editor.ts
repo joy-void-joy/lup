@@ -58,10 +58,12 @@ import {
 import { Vim, getCM, vim, type CodeMirror, type CodeMirrorV } from "@replit/codemirror-vim";
 import { useEffect, useRef, type RefObject } from "react";
 
+import { newId } from "./anchors";
 import { defineClipboard, shownBelow } from "./clipboard";
 import { saying, type Block, type Folding, type Span } from "./comments";
 import { around, aroundOf, foldEdge, levelled, nextFold } from "./folds";
-import { FOLD_KINDS, type FoldKind } from "./keys";
+import type { FoldKind } from "./keys";
+import { lettered, type Kind } from "./looks";
 import { brokenLine, hiddenOn, markdown, openedLine, shifted, unindented } from "./markdown";
 import { placeheld, type Margined } from "./margin";
 
@@ -349,9 +351,8 @@ let speaking: Bound | null = null;
 
 /**
  * Each chord Space leads in the review, as vim's keymap writes its keys, and the action it does: Space `p` parks an
- * item, leaving it for later; Space `A` marks every file of a "since you approved" drawer reviewed; Space `z` `f` and a
- * letter, as vim's fold keys begin with `z`, opens every fold of its kind in the item or the drawer, Space `z` `F` and
- * the letter closing them. The list of keys (`keys.ts`) says each of them.
+ * item, leaving it for later; Space `A` marks every file of a "since you approved" drawer reviewed. The list of keys
+ * (`keys.ts`) says each of them, and those a kind's letter takes (`lettersOf`).
  */
 export const SPACED: readonly (readonly [keys: string, action: string])[] = [
     ["<Space>c", "lupCommentWhole"],
@@ -360,19 +361,80 @@ export const SPACED: readonly (readonly [keys: string, action: string])[] = [
     ["<Space>a", "lupApprove"],
     ["<Space>x", "lupDecline"],
     ["<Space>A", "lupApproveAll"],
-    ...FOLD_KINDS.filter((each) => each.chord).flatMap(({ kind, letter }) => [
-        [`<Space>zf${letter}`, `lupFoldOpen-${kind}`] as const,
-        [`<Space>zF${letter}`, `lupFoldClose-${kind}`] as const,
-    ]),
 ];
 
 /**
- * `zf` and each kind's letter, as vim's keymap writes them, and the action closing the fold of that kind the cursor is
- * in: vim's `zf` makes a fold, which nothing here needs, the folds being laid out.
+ * Return the keys each kind's letter takes, as vim's keymap writes them, and the action each does, of `kinds`, the
+ * kinds of fold known now (`looks.ts`): `zf` and the letter closing the fold of that kind the cursor is in, as vim's
+ * fold keys begin with `z` and its own `zf`, making a fold, has nothing to do where the folds are laid out; and, for a
+ * kind Space `z` `f` reaches, Space `z` `f` and the letter opening every fold of its kind in the item or the drawer,
+ * Space `z` `F` and the letter closing them. Each action finds its kind by the letter as it's pressed. A kind with no
+ * letter, another kind having taken it, takes none.
  */
-export const AROUND: readonly (readonly [keys: string, action: string])[] = FOLD_KINDS.map(
-    ({ kind, letter }) => [`zf${letter}`, `lupFoldAround-${kind}`] as const,
-);
+export function lettersOf(kinds: readonly Kind[]): (readonly [keys: string, action: string])[] {
+    return kinds.flatMap(({ letter, chord }) =>
+        letter === null
+            ? []
+            : [
+                  [`zf${letter}`, `lupFoldAround-${letter}`] as const,
+                  ...(chord
+                      ? [[`<Space>zf${letter}`, `lupFoldOpen-${letter}`] as const, [`<Space>zF${letter}`, `lupFoldClose-${letter}`] as const]
+                      : []),
+              ],
+    );
+}
+
+/** The keys a kind's letter took in vim's keymap as last mapped (`mapLetters`), and the action each does. */
+let letters = new Map<string, string>();
+
+/** Define `name` as a vim action doing `fn` with the actions of the editor the key is pressed in, where it's bound. */
+function action(name: string, fn: (actions: Actions, cm: CodeMirrorV) => void): void {
+    Vim.defineAction(name, (cm) => {
+        const actions = boundOf(cm.cm6.state).actions;
+        if (actions !== null) {
+            fn(actions, cm);
+        }
+    });
+}
+
+/** Define the actions the keys of `letter` do (`lettersOf`), each finding its kind by the letter as it's pressed. */
+function letterActions(letter: string): void {
+    const named = (act: (kind: FoldKind) => void) => {
+        const kind = lettered(letter)?.name;
+        if (kind !== undefined) {
+            act(kind);
+        }
+    };
+    action(`lupFoldOpen-${letter}`, (actions) => named((kind) => actions.foldKind(kind, false)));
+    action(`lupFoldClose-${letter}`, (actions) => named((kind) => actions.foldKind(kind, true)));
+    action(`lupFoldAround-${letter}`, (actions) => named((kind) => actions.foldAround(kind)));
+}
+
+/**
+ * Map the keys `kinds`' letters take (`lettersOf`) into vim's keymap, as the kinds known change, the keys no letter
+ * takes now unmapped, so a key never acts for a kind none declares.
+ */
+export function mapLetters(kinds: readonly Kind[]): void {
+    mapKeys();
+    const wanted = new Map(lettersOf(kinds));
+    const unmap = Vim.unmap as (keys: string, context?: string) => boolean;
+    for (const [keys, action] of letters) {
+        if (wanted.get(keys) !== action) {
+            unmap(keys, "normal");
+        }
+    }
+    for (const { letter } of kinds) {
+        if (letter !== null) {
+            letterActions(letter);
+        }
+    }
+    for (const [keys, named] of wanted) {
+        if (letters.get(keys) !== named) {
+            Vim.mapCommand(keys, "action", named, {}, { context: "normal" });
+        }
+    }
+    letters = wanted;
+}
 
 /**
  * Tab and Shift+Tab in insert mode, as vim's keymap writes them, and the keys of vim's they are: Ctrl+T and Ctrl+D,
@@ -402,13 +464,6 @@ function mapKeys(): void {
         clipboard: () => (window.isSecureContext && "clipboard" in navigator ? navigator.clipboard : null),
         tell: (text) => speaking?.actions?.say(text),
     });
-    const action = (name: string, fn: (actions: Actions, cm: CodeMirrorV) => void) =>
-        Vim.defineAction(name, (cm) => {
-            const actions = boundOf(cm.cm6.state).actions;
-            if (actions !== null) {
-                fn(actions, cm);
-            }
-        });
     action("lupCommentLine", (actions, cm) => actions.comment(cm, "line"));
     action("lupCommentAbove", (actions, cm) => actions.comment(cm, "above"));
     action("lupCommentWhole", (actions, cm) => actions.comment(cm, "whole"));
@@ -445,13 +500,7 @@ function mapKeys(): void {
     action("lupFoldCloseAll", (actions) => actions.foldLevel(false, true));
     action("lupFoldOpenLevel", (actions) => actions.foldLevel(true, false));
     action("lupFoldCloseLevel", (actions) => actions.foldLevel(false, false));
-    for (const { kind, chord } of FOLD_KINDS) {
-        if (chord) {
-            action(`lupFoldOpen-${kind}`, (actions) => actions.foldKind(kind, false));
-            action(`lupFoldClose-${kind}`, (actions) => actions.foldKind(kind, true));
-        }
-        action(`lupFoldAround-${kind}`, (actions) => actions.foldAround(kind));
-    }
+
     // `zj`, `zk`, `[z` and `]z` are motions, as in vim, so `v]z` selects to a fold's end.
     const motion = (name: string, how: "next" | "edge", forward: boolean) =>
         Vim.defineMotion(name, (cm, head) => {
@@ -484,9 +533,6 @@ function mapKeys(): void {
     map("zM", "lupFoldCloseAll", "normal");
     map("zr", "lupFoldOpenLevel", "normal");
     map("zm", "lupFoldCloseLevel", "normal");
-    for (const [keys, name] of AROUND) {
-        map(keys, name, "normal");
-    }
     // As `inoremap <Tab> <C-t>` would: vim's own Ctrl+T and Ctrl+D, whatever else is mapped.
     for (const [keys, as] of INDENTING) {
         Vim.noremap(keys, as, "insert");
@@ -1169,7 +1215,7 @@ export function uncovered(closed: Folding[], head: number): number {
  * Where the cursor goes once the text is laid out again: into a comment just opened, onto an item, to a place in the
  * text as it was, carried with the text's changes, or nowhere in particular.
  */
-export type Landing = { comment: number } | { item: number } | { at: number } | null;
+export type Landing = { comment: string } | { item: number } | { at: number } | null;
 
 /** What a view lays out for the editor: its text, the comments in it, and what folds. */
 export interface Shown {
@@ -1253,10 +1299,10 @@ export interface Editor<D, C> {
     kept: RefObject<Map<string, boolean>>;
     /** The draft as it was last rendered. */
     latest: RefObject<D>;
-    /** Whether a comment is being written. */
-    writing: () => boolean;
     /** Change the draft as one step `u` undoes. */
     record: (next: D) => void;
+    /** Change the draft as it stands, as what's written is anchored anew, in place of the state it's in: no step `u` undoes. */
+    rewrite: (next: D) => void;
     /** Draw the text: `decorations` replace those drawn before. */
     draw: (decorations: DecorationSet) => void;
     /** Go into the comment just opened, in insert mode, once the text holds it. */
@@ -1269,7 +1315,7 @@ export interface Editor<D, C> {
  * The editor a view draws into `parent`: made once, its keys bound at each render to what the view laid out. The
  * view lays its text into it itself, once it changes, keeping what it must of where the reader is.
  */
-export function useEditor<D, C extends { text: string }>(config: Config<D, C>): Editor<D, C> {
+export function useEditor<D, C extends { id: string; text: string }>(config: Config<D, C>): Editor<D, C> {
     const { shown, comments, withComments, change } = config;
     const parent = useRef<HTMLDivElement>(null);
     const view = useRef<EditorView | null>(null);
@@ -1423,10 +1469,11 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
         change(next);
     }
 
-    function added(comment: C) {
+    function added(opening: C) {
+        // Named as it's opened, which it's kept by from then on.
+        const comment = opening.id === "" ? { ...opening, id: newId() } : opening;
         const next = withComments(latest.current, [...comments(latest.current), comment]);
-        // Its place in the list the draft keeps, which may hold what's written in more lists than one.
-        landing.current = { comment: comments(next).indexOf(comment) };
+        landing.current = { comment: comment.id };
         opener.current = keyed.from;
         record(next);
         writing.current = true;
@@ -1497,7 +1544,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 const present = comments(latest.current);
                 const kept = saying(present);
                 const block = blockAt(head());
-                const written = block === undefined ? undefined : present[block.comment];
+                const written = block === undefined ? undefined : present.find((each) => each.id === block.comment);
                 if (block !== undefined && written !== undefined && !kept.includes(written)) {
                     const back = opener.current ?? own.about(written, block, null);
                     landing.current = back === undefined ? null : { at: back };
@@ -1511,7 +1558,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
             finish: (cm) => {
                 const editor = view.current;
                 const block = blockAt(head());
-                const comment = block === undefined ? undefined : comments(latest.current)[block.comment];
+                const comment = block === undefined ? undefined : comments(latest.current).find((each) => each.id === block.comment);
                 const back = block === undefined || comment === undefined ? undefined : own.about(comment, block, opener.current);
                 Vim.exitInsertMode(cm, true);
                 if (editor === null || back === undefined) {
@@ -1629,9 +1676,10 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                     const from = update.changes.mapPos(block.from, -1);
                     const to = update.changes.mapPos(block.to, 1);
                     const text = update.state.doc.sliceString(from, to);
-                    const before = next[block.comment];
+                    const at = next.findIndex((each) => each.id === block.comment);
+                    const before = next[at];
                     if (before !== undefined && before.text !== text) {
-                        next[block.comment] = { ...before, text };
+                        next[at] = { ...before, text };
                     }
                 }
                 record(withComments(latest.current, keyed.inserting ? next : saying(next)));
@@ -1646,8 +1694,11 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
         landing,
         kept,
         latest,
-        writing: () => keyed.inserting,
         record,
+        rewrite: (next) => {
+            history.current = rewritten(history.current, next);
+            change(next);
+        },
         draw: (decorations) => view.current?.dispatch({ effects: drawn.of(decorations) }),
         enter: () => {
             const editor = view.current;

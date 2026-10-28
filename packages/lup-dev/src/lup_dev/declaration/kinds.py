@@ -14,7 +14,7 @@ from typing import Self, override
 
 from pydantic import model_validator
 
-from lup.blocks import FoldKind, Tone
+from lup.blocks import FoldKind, Tone, Verb
 from lup.types import Model
 from lup_dev.catalog.credentials import CredentialDefaults, Withheld
 from lup_dev.catalog.gate import Step
@@ -78,9 +78,9 @@ class Paths(Layer, extra="forbid"):
     protected: Patterns = Patterns()
     """Every write to these asks the operator."""
     secret: Patterns = Patterns()
-    """Files that hold secrets: a room never reads one its worktree's commit
-    doesn't hold as it is, and every write to one asks, as a protected path's
-    does."""
+    """Files that hold secrets: a room never reads one whose content its
+    repository's git objects don't hold, and every write to one asks, as a
+    protected path's does."""
     operator_documents: Patterns = Patterns()
     """The operator's documents: changing one is a design decision, so it asks."""
     excluded: Patterns = Patterns()
@@ -566,6 +566,19 @@ class Folds(Named[FoldKind]):
 
     @override
     def named(self, entry: FoldKind) -> str:
+        return entry.name
+
+
+class Verbs(Named[Verb]):
+    """The verbs a module's views' blocks offer (`lup.Verb`), Space and a key, each named by its name.
+
+    A field of its module, so a person's layer gives one another key
+    (`Verbs.default().replace("hold", Verb(…))`); two of a repository's
+    modules naming one verb, or taking one key, fail the load (`resolve`).
+    """
+
+    @override
+    def named(self, entry: Verb) -> str:
         return entry.name
 
 

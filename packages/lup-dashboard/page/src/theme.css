@@ -31,19 +31,8 @@
     --flagged-bg: #201900;
     --told-bg: #191919;
 
-    /* Each kind of fold's colour, in its mark, its bar, its placeholder and the header. */
-    --fold-group: var(--cyan);
-    --fold-item: var(--orange);
-    --fold-file: var(--info);
-    --fold-body: var(--purple);
-    --fold-lines: var(--muted);
-    --fold-context: var(--cyan);
-    --fold-tasks: var(--link);
-    --fold-since: var(--warn);
-    --fold-conversation: var(--cyan);
-    --fold-earlier: var(--ok);
-    --fold-calls: var(--purple);
-    --fold-call: var(--orange);
+    /* Each kind of fold's colour, `--fold-<kind>`, in its mark, its bar, its placeholder and the header, is the
+       looks' (`looks.ts`, `styled`), as each kind's class is. */
     /* How many columns the review's margin has, one for each depth folds nest to,
        and how wide each is: a letter's width, and a little. */
     --columns: 6;
@@ -727,6 +716,26 @@ kbd {
     font-weight: 700;
 }
 
+/* A line a layout put in or changed as it arrived while the operator reads: a
+   moment's tint, fading, so what came is seen to come (`reconcile.ts`,
+   `arriving`); a bar at its end where motion is reduced. */
+.buffer .cm-line.arrived {
+    animation: arrived 1.5s ease-out;
+}
+
+@keyframes arrived {
+    from {
+        background-color: var(--selection);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .buffer .cm-line.arrived {
+        animation: none;
+        box-shadow: inset -3px 0 0 var(--info);
+    }
+}
+
 .buffer .cm-line.code-gap {
     border-top: 1px dashed var(--fold-since);
 }
@@ -734,55 +743,6 @@ kbd {
 .buffer .cm-line.aside-reviewed {
     color: var(--muted);
     border-top: 1px solid var(--border);
-}
-
-/* Each kind of fold in its colour: its mark, its bar, its placeholder, its part of the header. */
-.fold-group {
-    color: var(--fold-group);
-}
-
-.fold-item {
-    color: var(--fold-item);
-}
-
-.fold-file {
-    color: var(--fold-file);
-}
-
-.fold-body {
-    color: var(--fold-body);
-}
-
-.fold-lines {
-    color: var(--fold-lines);
-}
-
-.fold-context {
-    color: var(--fold-context);
-}
-
-.fold-tasks {
-    color: var(--fold-tasks);
-}
-
-.fold-since {
-    color: var(--fold-since);
-}
-
-.fold-conversation {
-    color: var(--fold-conversation);
-}
-
-.fold-earlier {
-    color: var(--fold-earlier);
-}
-
-.fold-calls {
-    color: var(--fold-calls);
-}
-
-.fold-call {
-    color: var(--fold-call);
 }
 
 /* The review's margin, its structure (`rails.ts`): a row a line, as tall as
@@ -907,54 +867,6 @@ kbd {
     border: 1px solid currentColor;
     padding: 0 0.5ch;
     color: inherit;
-}
-
-.buffer .cm-editor .cm-foldPlaceholder.fold-group {
-    color: var(--fold-group);
-}
-
-.buffer .cm-editor .cm-foldPlaceholder.fold-item {
-    color: var(--fold-item);
-}
-
-.buffer .cm-editor .cm-foldPlaceholder.fold-file {
-    color: var(--fold-file);
-}
-
-.buffer .cm-editor .cm-foldPlaceholder.fold-body {
-    color: var(--fold-body);
-}
-
-.buffer .cm-editor .cm-foldPlaceholder.fold-lines {
-    color: var(--fold-lines);
-}
-
-.buffer .cm-editor .cm-foldPlaceholder.fold-context {
-    color: var(--fold-context);
-}
-
-.buffer .cm-editor .cm-foldPlaceholder.fold-tasks {
-    color: var(--fold-tasks);
-}
-
-.buffer .cm-editor .cm-foldPlaceholder.fold-since {
-    color: var(--fold-since);
-}
-
-.buffer .cm-editor .cm-foldPlaceholder.fold-conversation {
-    color: var(--fold-conversation);
-}
-
-.buffer .cm-editor .cm-foldPlaceholder.fold-earlier {
-    color: var(--fold-earlier);
-}
-
-.buffer .cm-editor .cm-foldPlaceholder.fold-calls {
-    color: var(--fold-calls);
-}
-
-.buffer .cm-editor .cm-foldPlaceholder.fold-call {
-    color: var(--fold-call);
 }
 
 /* The header over the review: whom what's being written goes to and the group,

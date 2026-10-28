@@ -52,7 +52,7 @@ from typing import TYPE_CHECKING, override
 
 from pydantic import TypeAdapter, ValidationError
 
-from lup.blocks import SHELL_TONES, Blocks, OfAgent, Watch
+from lup.blocks import Blocks, OfAgent, Watch
 from lup.doors import served
 from lup.events import Event, Publishing, events
 from lup.publishing import Place, Published, Refusal
@@ -367,7 +367,7 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
         if not isinstance(blocks, Blocks):
             message = f"`{viewing.view}` answered {blocks!r}, not blocks"
             raise LupDevError(message)
-        known = [tone.name for tone in [*SHELL_TONES, *self.resolved.looks.tones]]
+        known = [tone.name for tone in self.resolved.looks.tones]
         unknown = [tone for tone in blocks.tones() if tone not in known]
         if unknown:
             message = (

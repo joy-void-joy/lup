@@ -1,0 +1,272 @@
+{
+  "folds": [
+    {
+      "name": "group",
+      "letter": "a",
+      "called": "agents' groups",
+      "one": "the agent's group",
+      "level": 0,
+      "opens": "together",
+      "colour": "cyan",
+      "chord": true,
+      "whole": true,
+      "counts": true
+    },
+    {
+      "name": "item",
+      "letter": "i",
+      "called": "the item",
+      "one": "the item",
+      "level": 0,
+      "opens": "together",
+      "colour": "orange",
+      "chord": false,
+      "whole": true,
+      "counts": true
+    },
+    {
+      "name": "file",
+      "letter": "f",
+      "called": "files",
+      "one": "the file",
+      "level": 1,
+      "opens": "together",
+      "colour": "info",
+      "chord": true,
+      "whole": false,
+      "counts": true
+    },
+    {
+      "name": "body",
+      "letter": "b",
+      "called": "bodies",
+      "one": "the body",
+      "level": 2,
+      "opens": "together",
+      "colour": "purple",
+      "chord": true,
+      "whole": false,
+      "counts": true
+    },
+    {
+      "name": "lines",
+      "letter": "u",
+      "called": "unchanged lines",
+      "one": "the unchanged lines",
+      "level": 2,
+      "opens": "together",
+      "colour": "muted",
+      "chord": true,
+      "whole": false,
+      "counts": false
+    },
+    {
+      "name": "context",
+      "letter": "c",
+      "called": "context",
+      "one": "the context",
+      "level": 3,
+      "opens": "together",
+      "colour": "cyan",
+      "chord": true,
+      "whole": false,
+      "counts": false
+    },
+    {
+      "name": "earlier",
+      "letter": "e",
+      "called": "earlier exchanges",
+      "one": "the earlier exchange",
+      "level": 1,
+      "opens": "back",
+      "colour": "ok",
+      "chord": true,
+      "whole": false,
+      "counts": true
+    },
+    {
+      "name": "calls",
+      "letter": "k",
+      "called": "runs of calls",
+      "one": "the run of calls",
+      "level": 2,
+      "opens": "together",
+      "colour": "purple",
+      "chord": true,
+      "whole": false,
+      "counts": false
+    },
+    {
+      "name": "items",
+      "letter": "m",
+      "called": "items' text",
+      "one": "the item's text",
+      "level": 3,
+      "opens": "together",
+      "colour": "cyan",
+      "chord": true,
+      "whole": false,
+      "counts": false
+    },
+    {
+      "name": "call",
+      "letter": "d",
+      "called": "calls' input and output",
+      "one": "the call's input and output",
+      "level": 4,
+      "opens": "deep",
+      "colour": "orange",
+      "chord": true,
+      "whole": false,
+      "counts": true
+    }
+  ],
+  "tones": [
+    {
+      "name": "plain",
+      "like": null,
+      "colour": "fg",
+      "weight": null
+    },
+    {
+      "name": "muted",
+      "like": null,
+      "colour": "muted",
+      "weight": null
+    },
+    {
+      "name": "strong",
+      "like": null,
+      "colour": "fg",
+      "weight": "bold"
+    },
+    {
+      "name": "operator",
+      "like": null,
+      "colour": "info",
+      "weight": null
+    },
+    {
+      "name": "summary",
+      "like": "muted",
+      "colour": null,
+      "weight": null
+    },
+    {
+      "name": "refused",
+      "like": "muted",
+      "colour": null,
+      "weight": null
+    },
+    {
+      "name": "task",
+      "like": "plain",
+      "colour": null,
+      "weight": null
+    },
+    {
+      "name": "reviewed",
+      "like": "muted",
+      "colour": null,
+      "weight": null
+    },
+    {
+      "name": "call",
+      "like": null,
+      "colour": "orange",
+      "weight": null
+    },
+    {
+      "name": "sent",
+      "like": "call",
+      "colour": null,
+      "weight": null
+    },
+    {
+      "name": "received",
+      "like": "operator",
+      "colour": null,
+      "weight": null
+    },
+    {
+      "name": "run",
+      "like": "muted",
+      "colour": null,
+      "weight": null
+    }
+  ],
+  "drawers": [
+    {
+      "module": "adapters",
+      "view": "tasks",
+      "place": {
+        "under": "agent",
+        "letter": "t",
+        "called": "the tasks",
+        "colour": "link"
+      }
+    },
+    {
+      "module": "judge",
+      "view": "since",
+      "place": {
+        "under": "agent",
+        "letter": "s",
+        "called": "since you approved",
+        "colour": "warn"
+      }
+    },
+    {
+      "module": "transcripts",
+      "view": "conversation",
+      "place": {
+        "under": "agent",
+        "letter": "v",
+        "called": "the conversation",
+        "colour": "cyan"
+      }
+    }
+  ],
+  "banners": [
+    {
+      "module": "adapters",
+      "view": "banner"
+    },
+    {
+      "module": "judge",
+      "view": "banner"
+    }
+  ],
+  "verbs": [
+    {
+      "name": "done",
+      "key": "d",
+      "called": "done"
+    },
+    {
+      "name": "decline",
+      "key": "x",
+      "called": "decline"
+    },
+    {
+      "name": "send",
+      "key": "s",
+      "called": "send to"
+    },
+    {
+      "name": "comment",
+      "key": "c",
+      "called": "comment"
+    },
+    {
+      "name": "hold",
+      "key": "h",
+      "called": "hold"
+    },
+    {
+      "name": "pause",
+      "key": "p",
+      "called": "pause"
+    }
+  ]
+}

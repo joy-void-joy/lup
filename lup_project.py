@@ -39,21 +39,21 @@ class LupDevelopment(Module):
       fail for reasons the change didn't cause. Its command is the tool alone, which
       the gate runs through the project's runner, and trust on launch runs the same
       step the same way to build the copy the operator approves
-      (`lup_dev/launch/trust.py`). npm, which installs its bundler, joins the
-      room's image as Arch's `npm`.
+      (`lup_dev/launch/trust.py`). pnpm installs its bundler, from the engine's
+      own lockfile, held to the package age its `pnpm-workspace.yaml` keeps, and
+      joins the room's image as Arch's `pnpm`.
     - pyright's source, which the engine is built from, is in the room's image,
       at the release the launch's worktree's `uv.lock` pins, so the room's build
       reads its own and the host's cache stays the host's: what a room wrote
       there would be bundled into the host's engine at the next approval
       (`lup_dev/pyright_source.py`). pnpm installs its dependencies, from
       pyright's own lockfile: pnpm 11, the first to read its package age from
-      `~/.config/pnpm/config.yaml` and check a frozen lockfile against it. It's
-      needed only to fetch a release no place keeps, so it's optional: a room
-      whose image predates it still runs the gate.
+      `~/.config/pnpm/config.yaml` and check a frozen lockfile against it.
     - The dashboard's page is built the same way, after the engine: its types
       generated from the API's description, type-checked, tested and bundled
-      (`packages/lup-dashboard/build.py`), again only when one of its sources,
-      the host's models the API describes among them, is newer than the page.
+      (`packages/lup-dashboard/build.py`), its packages installed by pnpm from
+      its own lockfile, again only when one of its sources, the host's models
+      the API describes among them, is newer than the page.
     - The data that sets lup's policy (`lup_dev.catalog`) is protected, so the
       operator reviews every change to it before it lands.
     - Working on lup is `AGENTS.md`, the project's own section of the guidance,
@@ -73,21 +73,14 @@ class LupDevelopment(Module):
     name = "lup-development"
     requirements = [
         Requirement(
-            tool="npm",
-            why="installs the engine's bundler",
-            install="it comes with Node",
-            package="npm",
-        ),
-        Requirement(
             tool="pnpm",
             version=">=11",
             probe=["pnpm", "--version"],
-            # lup: defer(issue=308, why="required once every room's image carries pnpm: optional while rooms launched before it joined the image still run the gate")
-            optional=True,
             why=(
-                "installs pyright's dependencies from its own lockfile, held to the "
-                "package age its settings keep, where the engine's build fetches a "
-                "release no place keeps"
+                "installs the engine's bundler, the dashboard page's packages, and "
+                "pyright's dependencies where the engine's build fetches a release "
+                "no place keeps, each from its own lockfile, held to the package "
+                "age its settings keep"
             ),
             install="https://pnpm.io/installation",
             package="pnpm",
@@ -122,7 +115,8 @@ class LupDevelopment(Module):
                 "packages/lup-dev/checker/src/**/*",
                 "packages/lup-dev/checker/build.py",
                 "packages/lup-dev/checker/package.json",
-                "packages/lup-dev/checker/package-lock.json",
+                "packages/lup-dev/checker/pnpm-lock.yaml",
+                "packages/lup-dev/checker/pnpm-workspace.yaml",
                 "packages/lup-dev/checker/tsconfig.json",
                 "packages/lup-dev/src/lup_dev/catalog/rules.ts",
                 "uv.lock",
@@ -136,7 +130,8 @@ class LupDevelopment(Module):
                 "packages/lup-dashboard/page/src/**/*",
                 "packages/lup-dashboard/page/index.html",
                 "packages/lup-dashboard/page/package.json",
-                "packages/lup-dashboard/page/package-lock.json",
+                "packages/lup-dashboard/page/pnpm-lock.yaml",
+                "packages/lup-dashboard/page/pnpm-workspace.yaml",
                 "packages/lup-dashboard/page/tsconfig.json",
                 "packages/lup-dashboard/page/vite.config.ts",
                 "packages/lup-dashboard/build.py",

@@ -2,9 +2,10 @@
 // those that apply where the cursor is (`barOf`); whole in the list `?` opens,
 // in parts; and, once a key leading a chord is pressed, as Space is, in a panel
 // listing the keys that may follow (`chords`; `Keys.tsx`). One table, so the
-// three never disagree; the kinds of fold and their letters are one table too,
-// read by the keys, the review's marks and its header, an agent's drawers among
-// them. Pure (`docs/dashboard.md`, *The review*, *The drawers*).
+// three never disagree, made from the kinds of fold the looks declare
+// (`looks.ts`), an agent's drawers among them, whose letters the fold keys take.
+// Pure (`docs/dashboard.md`, *The review*, *The drawers*).
+import type { Kind } from "./looks";
 
 /** One key, or a few doing alike: how it's pressed, what it does, and where the line of keys shows it. */
 export interface Key<P extends string> {
@@ -47,60 +48,11 @@ export type ReviewPlace =
     | "aside"
     | "nothing";
 
-/** The kinds of drawer under an agent's banner, in the order they come: its task list, what its branch changed since the operator approved it, and its whole conversation. */
-export type DrawerKind = "tasks" | "since" | "conversation";
+/** A kind of drawer under an agent's banner, by the name of the view it shows, which its fold's kind is named for: `tasks`, `since`, `conversation`. */
+export type DrawerKind = string;
 
-/**
- * A kind of fold in the review: an item whole, a file, a function's or a class's body, a run of unchanged lines, an
- * item's context or an item's text in a conversation, one of an agent's drawers; and in a conversation, each exchange
- * before the operator's last words, a run of calls, and a call's input and output.
- */
-export type FoldKind = "group" | "item" | "file" | "body" | "lines" | "context" | "earlier" | "calls" | "call" | DrawerKind;
-
-/**
- * One kind of fold: the letter naming it, what its folds are called together, and what the one the cursor is in is
- * called, which `zf` and the letter closes; whether Space `z` `f` and its letter open them, the level `zr` and `zm` open
- * and close them at, the item's own first, and whether it's the fold holding the rest, as the item's own and a
- * drawer's are, which `zm` never closes. `back` folds open one at a time, the latest first, so each `zr` reaches one
- * step further back, and close the earliest first; `deep` ones only by their own keys, `za` or Space `z` `f` and the
- * letter, never by `zr` or `zR`, since what they hold is read as they open.
- */
-export interface FoldKindKeys {
-    kind: FoldKind;
-    letter: string;
-    called: string;
-    one: string;
-    chord: boolean;
-    level: number;
-    own: boolean;
-    back?: boolean;
-    deep?: boolean;
-}
-
-/**
- * Each kind of fold, outermost first, by the letter naming it: the mark beside its summary line; the key after `zf`
- * that closes the fold of that kind the cursor is in, as vim's fold keys begin with `z`; and, but for an item's own,
- * which its header's `za` folds, the key after Space `z` `f` that opens every fold of that kind in the item or the
- * drawer, as after Space `z` `F` it closes them.
- */
-export const FOLD_KINDS: FoldKindKeys[] = [
-    // An agent's group whole under its banner, a subagent's inside its parent's.
-    { kind: "group", letter: "a", called: "agents' groups", one: "the agent's group", chord: true, level: 0, own: true },
-    { kind: "item", letter: "i", called: "the item", one: "the item", chord: false, level: 0, own: true },
-    { kind: "tasks", letter: "t", called: "the tasks", one: "the tasks", chord: true, level: 0, own: true },
-    { kind: "since", letter: "s", called: "since you approved", one: "since you approved", chord: true, level: 0, own: true },
-    { kind: "conversation", letter: "v", called: "the conversation", one: "the conversation", chord: true, level: 0, own: true },
-    { kind: "file", letter: "f", called: "files", one: "the file", chord: true, level: 1, own: false },
-    { kind: "earlier", letter: "e", called: "earlier exchanges", one: "the earlier exchange", chord: true, level: 1, own: false, back: true },
-    { kind: "body", letter: "b", called: "bodies", one: "the body", chord: true, level: 2, own: false },
-    { kind: "lines", letter: "u", called: "unchanged lines", one: "the unchanged lines", chord: true, level: 2, own: false },
-    { kind: "calls", letter: "k", called: "runs of calls", one: "the run of calls", chord: true, level: 2, own: false },
-    { kind: "context", letter: "c", called: "context", one: "the context", chord: true, level: 3, own: false },
-    { kind: "call", letter: "d", called: "calls' input and output", one: "the call's input and output", chord: true, level: 4, own: false, deep: true },
-];
-
-/** The drawers, in the order they come under a banner. */
-export const DRAWERS: DrawerKind[] = ["tasks", "since", "conversation"];
+/** A kind of fold in the review, by its name, as the looks declare it (`Kind`): `item`, `file`, `earlier`, a drawer's. */
+export type FoldKind = string;
 
 /** What the line of keys says where the cursor is, before its keys. */
 export const REVIEW_PLACES: Record<ReviewPlace, string> = {
@@ -180,8 +132,15 @@ const MARKS: Part<never>[] = [
 /** The keys of this list, which the line of keys says at its end, wherever the cursor is. */
 const LIST: Part<never>[] = [{ title: "This list", keys: [{ keys: "?", does: "open it; Esc, q or ? closes it", short: "all keys", at: [] }] }];
 
-/** The review's keys. */
-export const REVIEW_KEYS: Part<ReviewPlace>[] = [
+/**
+ * Return the review's keys, with the kinds of fold known now, outermost first (`kinds`, `looks.ts`): each kind's letter,
+ * after `zf` closing the one the cursor is in, and after Space `z` `f` or `F` opening or closing every one; each
+ * drawer's after `]` and `[`. A kind with no letter, another kind having taken it, is reached by the generic keys alone.
+ */
+export function reviewKeys(kinds: readonly Kind[]): Part<ReviewPlace>[] {
+    const lettered = kinds.flatMap((each) => (each.letter === null ? [] : [{ ...each, letter: each.letter }]));
+    const drawers = lettered.filter((each) => each.drawer);
+    return [
     ...WRITING,
     {
         title: "Answering",
@@ -305,12 +264,16 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
                 short: "item headers",
                 at: [],
             },
-            {
-                keys: "]t [t ]s [s ]v [v",
-                does: "next and previous drawer of a kind, by its letter: tasks, since you approved, the conversation; the view stays where it's in view, else it comes in a third of the view from the edge",
-                short: "drawers",
-                at: ["banner", "drawer"],
-            },
+            ...(drawers.length === 0
+                ? []
+                : [
+                      {
+                          keys: drawers.map((each) => `]${each.letter} [${each.letter}`).join(" "),
+                          does: `next and previous drawer of a kind, by its letter: ${drawers.map((each) => each.called).join(", ")}; the view stays where it's in view, else it comes in a third of the view from the edge`,
+                          short: "drawers",
+                          at: ["banner", "drawer"] as ReviewPlace[],
+                      },
+                  ]),
             { keys: "^k", does: "go to an agent's group", short: "go to", at: [] },
         ],
     },
@@ -344,7 +307,7 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
                 short: "close one",
                 at: ["file", "since", "reviewed", "aside"],
             },
-            ...FOLD_KINDS.map((each) => ({ keys: `zf${each.letter}`, does: `close ${each.one} the cursor is in`, short: each.one, at: [] })),
+            ...lettered.map((each) => ({ keys: `zf${each.letter}`, does: `close ${each.one} the cursor is in`, short: each.one, at: [] })),
             {
                 keys: "␣z",
                 does: "f or F, then a letter: open or close every fold of its kind in the item or the drawer the cursor is in",
@@ -363,7 +326,7 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
                 short: "close by kind",
                 at: [],
             },
-            ...FOLD_KINDS.filter((each) => each.chord).map((each) => ({
+            ...lettered.filter((each) => each.chord).map((each) => ({
                 keys: `␣zf${each.letter} ␣zF${each.letter}`,
                 does: `open or close ${each.called}`,
                 short: each.called,
@@ -386,7 +349,8 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
     ...MARKS,
     ...COPYING,
     ...LIST,
-];
+    ];
+}
 
 /** Return the keys the line of keys shows with the cursor at `place`, in the list's order: those that apply there. */
 export function barOf<P extends string>(parts: Part<P>[], place: P): Key<P>[] {

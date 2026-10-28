@@ -12,6 +12,7 @@ import { Vim } from "@replit/codemirror-vim";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import type { Following } from "./follow";
+import type { Kind } from "./looks";
 import { cursorRow, outlineOf, type DraftMark, type OutlineMark, type OutlineRow, type Reading } from "./outline";
 import type { Laid } from "./review";
 
@@ -44,40 +45,55 @@ export function mapOutlineKey(): void {
 
 /** What `]` or `[` and a scope's letter does in the review: go to the next or previous scope of that kind. */
 let scopeJump: ((kind: ScopeKey, forward: boolean) => void) | null = null;
-let scopesMapped = false;
 
-/** The scopes `]` and `[` go by, each by the fold letter it's marked with: an agent's group, an item, each kind of drawer. */
-export type ScopeKey = "group" | "item" | "tasks" | "since" | "conversation";
+/** The scopes `]` and `[` go by, each by the fold letter it's marked with: an agent's group, an item, each kind of drawer, by its fold's kind. */
+export type ScopeKey = "group" | "item" | (string & {});
 
-/** Each scope's key after `]` and `[`: its fold letter, but an agent's group's `g`, as `]a` goes to what's to answer. */
-export const SCOPE_KEYS: readonly (readonly [letter: string, kind: ScopeKey])[] = [
-    ["g", "group"],
-    ["i", "item"],
-    ["t", "tasks"],
-    ["s", "since"],
-    ["v", "conversation"],
-];
+/**
+ * Return each scope's key after `]` and `[`, with the kinds of fold known now (`looks.ts`): its fold letter, but an
+ * agent's group's `g`, as `]a` goes to what's to answer; an item's, then each drawer's, a kind with no letter none.
+ */
+export function scopeKeys(kinds: readonly Kind[]): (readonly [letter: string, kind: ScopeKey])[] {
+    const item = kinds.find((each) => each.name === "item")?.letter ?? null;
+    return [
+        ["g", "group"],
+        ...(item === null ? [] : [[item, "item"] as const]),
+        ...kinds.flatMap((each) => (each.drawer && each.letter !== null ? [[each.letter, each.name] as const] : [])),
+    ];
+}
+
+/** The keys `]` and `[` and a scope's letter took as last mapped, and the action each does. */
+let scopesMapped = new Map<string, string>();
 
 /** Set what `]` or `[` and a scope's letter does, with what's laid out now. */
 export function setScopeJump(jump: ((kind: ScopeKey, forward: boolean) => void) | null): void {
     scopeJump = jump;
 }
 
-/** Map `]` and `[` with each scope's letter in the review's vim, once: next or previous scope of that kind. */
-export function mapScopeKeys(): void {
-    if (scopesMapped) {
-        return;
-    }
-    scopesMapped = true;
-    for (const [letter, kind] of SCOPE_KEYS) {
+/** Map `]` and `[` with each scope's letter in the review's vim, as the kinds known change: next or previous scope of that kind. */
+export function mapScopeKeys(kinds: readonly Kind[]): void {
+    const wanted = new Map<string, string>();
+    for (const [letter, kind] of scopeKeys(kinds)) {
         for (const forward of [true, false]) {
             const name = `lupScope-${kind}-${forward ? "next" : "previous"}`;
             Vim.defineAction(name, () => {
                 scopeJump?.(kind, forward);
             });
-            Vim.mapCommand(`${forward ? "]" : "["}${letter}`, "action", name, {}, { context: "normal" });
+            wanted.set(`${forward ? "]" : "["}${letter}`, name);
         }
     }
+    const unmap = Vim.unmap as (keys: string, context?: string) => boolean;
+    for (const [keys, name] of scopesMapped) {
+        if (wanted.get(keys) !== name) {
+            unmap(keys, "normal");
+        }
+    }
+    for (const [keys, name] of wanted) {
+        if (scopesMapped.get(keys) !== name) {
+            Vim.mapCommand(keys, "action", name, {}, { context: "normal" });
+        }
+    }
+    scopesMapped = wanted;
 }
 
 /** The width under which the page is one column, as a phone's: the overview is an overlay there, and the stack two slots. */

@@ -6,7 +6,6 @@ import { describe, expect, it } from "vitest";
 
 import type { Folding } from "./comments";
 import {
-    AROUND,
     begun,
     chordOf,
     closedAs,
@@ -14,6 +13,7 @@ import {
     deadTyped,
     INDENTING,
     keptFolds,
+    lettersOf,
     nextWritten,
     openedSaid,
     ownOf,
@@ -33,7 +33,11 @@ import {
     type Pressed,
     type Typing,
 } from "./editor";
-import { FOLD_KINDS, REVIEW_KEYS } from "./keys";
+import { LOOKS } from "./fixtures/looks";
+import { reviewKeys } from "./keys";
+import { lettered } from "./looks";
+
+const REVIEW_KEYS = reviewKeys(LOOKS.kinds);
 import { markdown, source, sourced } from "./markdown";
 
 describe("vim's cursor and the marks the Markdown hides", () => {
@@ -386,17 +390,20 @@ describe("a chord begun", () => {
 });
 
 describe("the chords Space leads", () => {
-    const mapped = new Map(SPACED);
+    const LETTERS = lettersOf(LOOKS.kinds);
+    const mapped = new Map([...SPACED, ...LETTERS.filter(([keys]) => keys.startsWith("<Space>"))]);
+    // The kind of fold each letter's action finds as it's pressed.
+    const kindOfAction = (action: string | undefined) => (action === undefined ? undefined : `${action.split("-")[0]}-${lettered(action.split("-")[1] ?? "")?.name}`);
 
     it("opens the folds of a kind with Space z f and its letter, closing them with Space z F and the letter, as vim's fold keys begin with z", () => {
-        expect(["<Space>zff", "<Space>zfb", "<Space>zfu", "<Space>zfc", "<Space>zfs"].map((keys) => mapped.get(keys))).toEqual([
+        expect(["<Space>zff", "<Space>zfb", "<Space>zfu", "<Space>zfc", "<Space>zfs"].map((keys) => kindOfAction(mapped.get(keys)))).toEqual([
             "lupFoldOpen-file",
             "lupFoldOpen-body",
             "lupFoldOpen-lines",
             "lupFoldOpen-context",
             "lupFoldOpen-since",
         ]);
-        expect(["<Space>zFf", "<Space>zFb", "<Space>zFu", "<Space>zFc", "<Space>zFs"].map((keys) => mapped.get(keys))).toEqual([
+        expect(["<Space>zFf", "<Space>zFb", "<Space>zFu", "<Space>zFc", "<Space>zFs"].map((keys) => kindOfAction(mapped.get(keys)))).toEqual([
             "lupFoldClose-file",
             "lupFoldClose-body",
             "lupFoldClose-lines",
@@ -411,9 +418,9 @@ describe("the chords Space leads", () => {
     });
 
     it("closes the fold of a kind the cursor is in with z f and its letter, every kind's, the item's own among them", () => {
-        const around = new Map(AROUND);
-        expect([...around.keys()]).toEqual(FOLD_KINDS.map((each) => `zf${each.letter}`));
-        expect(["zfi", "zff", "zfu", "zfe", "zfk", "zfd"].map((keys) => around.get(keys))).toEqual([
+        const around = new Map(LETTERS.filter(([keys]) => keys.startsWith("zf")));
+        expect([...around.keys()]).toEqual(LOOKS.kinds.map((each) => `zf${each.letter}`));
+        expect(["zfi", "zff", "zfu", "zfe", "zfk", "zfd"].map((keys) => kindOfAction(around.get(keys)))).toEqual([
             "lupFoldAround-item",
             "lupFoldAround-file",
             "lupFoldAround-lines",

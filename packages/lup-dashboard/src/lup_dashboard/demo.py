@@ -726,6 +726,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 for launch, conversations in talkers.items()
             },
             looks={each.repository: self.views.looks() for each in launches},
+            standing=self.views.looks(),
         )
 
     def holds(self, talker: Talker) -> bool:

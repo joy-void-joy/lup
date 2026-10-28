@@ -1,5 +1,5 @@
 // The page's build: written into the dashboard's package, which its server serves
-// (`lup_dashboard/layout.py`), and which git ignores. `npm run dev` serves it with
+// (`lup_dashboard/layout.py`), and which git ignores. `pnpm exec vite` serves it with
 // reloading, the API passed on to a dashboard running on 8766.
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";

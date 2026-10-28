@@ -65,6 +65,7 @@ from lup_dev.confined import Confined
 from lup_dev.copies import removable
 from lup_dev.declaration.load import declared_profiles, load, person_layer
 from lup_dev.declaration.profiles import chosen
+from lup_dev.declaration.project import Project
 from lup_dev.declaration.requirements import Machine, Report, Tools
 from lup_dev.declaration.requirements import check as checked
 from lup_dev.declaration.resolve import Declaration, Selected, resolve
@@ -597,6 +598,7 @@ def host_serve(context: typer.Context) -> None:
         ],
         modules=workers,
         asking=asking,
+        standing=resolve(Project()).looks,
         say=typer.echo,
         refresh=lambda launch: refreshed(layout.launch(launch.launch)),
         podman=podman,
@@ -1788,11 +1790,11 @@ def launched(
     built where it's missing; the package age each package manager in its
     image keeps, said where one keeps none; the terminal settings; the
     repository's `config` checked for the room's git; the files with a secret's
-    name no commit holds as they are, in the project's tree and each related
-    repository mounted, found as late as can be and said
-    (`lup_dev.launch.secrets`), with a home not made yet, an account holding
-    no login for the runtime, and what of the configuration copied in was
-    left out where that changed; the sweep, and the
+    name whose content their repository's git objects don't hold, in the
+    project's tree and each related repository mounted, found as late as can be
+    and said (`lup_dev.launch.secrets`), with a home not made yet, an account
+    holding no login for the runtime, and what of the configuration copied in
+    was left out where that changed; the sweep, and the
     environments a launch that crashed left, then the launch registered, under
     its launcher's lock; the room's git configuration and helper, the
     clipboard's programs, the package managers' settings, the environments'

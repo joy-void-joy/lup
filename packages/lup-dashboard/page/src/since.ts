@@ -7,7 +7,7 @@
 // glance. Pure: the review lays the line out (`review.ts`), its editor paints
 // the marks on the lines in view (`Review.tsx`), and the page holds what's
 // being marked (`App.tsx`).
-import { shownOnce, type ChangedFile, type Row } from "./code";
+import { shownOnce, type Filed, type Row } from "./code";
 import { cited, hunks } from "./comments";
 import type { components } from "./generated/api";
 
@@ -44,7 +44,7 @@ export interface Fresh {
 const NOTHING: Fresh = { rows: new Set(), gaps: new Set() };
 
 /** Each pair of versions' marks, once worked out: they're painted again at each scroll. */
-const freshOnce = new WeakMap<ChangedFile, WeakMap<ChangedFile, Fresh>>();
+const freshOnce = new WeakMap<Filed, WeakMap<Filed, Fresh>>();
 
 /**
  * Return which rows of `file`, as the drawer shows it, changed since `looked`, the file as the operator last looked at
@@ -52,20 +52,20 @@ const freshOnce = new WeakMap<ChangedFile, WeakMap<ChangedFile, Fresh>>();
  * the row after each run of rows shown then that's gone. Where they never looked at it, as a file that came after the
  * drawer was first read or came back once reviewed, each line it changes.
  */
-export function freshRows(looked: ChangedFile | null, file: ChangedFile): Fresh {
+export function freshRows(looked: Filed | null, file: Filed): Fresh {
     if (looked === file) {
         return NOTHING;
     }
-    const now = shownOnce(file, false).rows;
+    const now = shownOnce(file).rows;
     if (looked === null) {
         return { rows: new Set(now.filter((row) => row.change !== "same")), gaps: new Set() };
     }
-    const kept = freshOnce.get(looked) ?? new WeakMap<ChangedFile, Fresh>();
+    const kept = freshOnce.get(looked) ?? new WeakMap<Filed, Fresh>();
     const found = kept.get(file);
     if (found !== undefined) {
         return found;
     }
-    const was = shownOnce(looked, false).rows;
+    const was = shownOnce(looked).rows;
     const said = (row: Row) => `${row.change} ${row.text}`;
     const changed = hunks(was.map(said), now.map(said));
     const rows = new Set(changed.flatMap((hunk) => now.slice(hunk.into, hunk.until)));

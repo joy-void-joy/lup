@@ -1,0 +1,79 @@
+[
+  {
+    "name": "an agent at work, its context measured",
+    "repository": "/r/lup.git",
+    "argument": {
+      "runtime": "claude",
+      "session": "s1",
+      "agent": "a1"
+    },
+    "given": {
+      "drawers": {
+        "[\"/r/lup.git\",\"claude\",\"s1\",\"a1\"]": {
+          "tasks": [
+            {
+              "id": "2",
+              "subject": "Write the reader",
+              "status": "in_progress",
+              "active": "Writing the reader"
+            }
+          ],
+          "usage": {
+            "used": 112000,
+            "window": 1000000,
+            "model": "opus"
+          }
+        }
+      }
+    },
+    "module": "adapters",
+    "view": "banner",
+    "answer": {
+      "summary": [
+        {
+          "text": "▶ Writing the reader",
+          "tone": "plain"
+        },
+        {
+          "text": " · ",
+          "tone": "plain"
+        },
+        {
+          "text": "○ 112k/1M",
+          "tone": "plain",
+          "gauge": {
+            "used": 112000,
+            "of": 1000000
+          }
+        }
+      ],
+      "waiting": false,
+      "count": 0,
+      "offers": [],
+      "blocks": []
+    }
+  },
+  {
+    "name": "an agent whose record says neither",
+    "repository": "/r/lup.git",
+    "argument": {
+      "runtime": "claude",
+      "session": "s1",
+      "agent": "a1"
+    },
+    "given": {
+      "drawers": {
+        "[\"/r/lup.git\",\"claude\",\"s1\",\"a1\"]": {}
+      }
+    },
+    "module": "adapters",
+    "view": "banner",
+    "answer": {
+      "summary": [],
+      "waiting": false,
+      "count": 0,
+      "offers": [],
+      "blocks": []
+    }
+  }
+]

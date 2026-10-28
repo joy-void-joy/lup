@@ -1,0 +1,543 @@
+[
+  {
+    "name": "an approval of a change, its files read",
+    "repository": "/r/lup.git",
+    "argument": {
+      "number": 54
+    },
+    "given": {
+      "items": [
+        {
+          "number": 54,
+          "reason": {
+            "reason": "approval",
+            "repository": "/r/lup.git",
+            "fingerprint": "4750cf6",
+            "text": "Approve the host zone of lup at 4750cf6?",
+            "summary": "\u001b[32m reader.py | 2 ++\u001b[m",
+            "first": false,
+            "typing": false
+          },
+          "sender": {
+            "party": "operator"
+          },
+          "recipient": {
+            "party": "operator"
+          },
+          "replies": [],
+          "citations": [],
+          "edits": [],
+          "quiet": false,
+          "made": "2026-10-27T09:00:00Z",
+          "state": {
+            "state": "waiting"
+          },
+          "rank": {
+            "name": "waiting on you",
+            "order": 0,
+            "notifies": true
+          }
+        }
+      ],
+      "files": {
+        "54": {
+          "shown": [
+            {
+              "path": "reader.py",
+              "before": {
+                "kind": "text",
+                "text": "import json\n\n\ndef read(path):\n    return path.read_text()\n"
+              },
+              "after": {
+                "kind": "text",
+                "text": "import json\n\n\ndef read(path):\n    # lup: ignore(\"x\", why=\"y\")\n    return path.read_text().split(\"\\n\")\n"
+              },
+              "reading": {
+                "role": "production",
+                "asks": [
+                  {
+                    "name": "ignore",
+                    "taken": "held",
+                    "line": 5,
+                    "side": "after"
+                  }
+                ],
+                "findings": [
+                  {
+                    "rule": "string-split",
+                    "message": "splits a string\nto parse it",
+                    "steer": "",
+                    "start": 6,
+                    "end": 6,
+                    "taken": "told"
+                  }
+                ]
+              }
+            },
+            {
+              "path": "test_reader.py",
+              "before": null,
+              "after": {
+                "kind": "text",
+                "text": "def test_read():\n    assert True\n"
+              },
+              "reading": {
+                "role": "test",
+                "asks": [],
+                "findings": []
+              }
+            },
+            {
+              "path": "logo.png",
+              "before": null,
+              "after": {
+                "kind": "binary",
+                "size": 1150
+              }
+            }
+          ]
+        }
+      }
+    },
+    "module": "core",
+    "view": "approval",
+    "answer": {
+      "summary": [
+        {
+          "text": "approval",
+          "tone": "plain"
+        },
+        {
+          "text": " · 1 with an ignore · 1 test · 1 unread",
+          "tone": "plain"
+        }
+      ],
+      "waiting": false,
+      "count": 0,
+      "offers": [
+        {
+          "action": "inbox-answer-approval",
+          "argument": {
+            "number": 54,
+            "approved": true
+          },
+          "verb": "done",
+          "chord": null,
+          "runs": "once",
+          "commented": false,
+          "says": "approve"
+        },
+        {
+          "action": "inbox-answer-approval",
+          "argument": {
+            "number": 54,
+            "approved": false
+          },
+          "verb": "decline",
+          "chord": null,
+          "runs": "once",
+          "commented": false,
+          "says": "decline"
+        }
+      ],
+      "blocks": [
+        {
+          "block": "markdown",
+          "id": "text",
+          "version": null,
+          "offers": [],
+          "text": "Approve the host zone of lup at 4750cf6?\n reader.py | 2 ++",
+          "tone": "plain"
+        },
+        {
+          "block": "diff",
+          "id": "file reader.py",
+          "version": null,
+          "offers": [],
+          "path": "reader.py",
+          "before": {
+            "kind": "text",
+            "text": "import json\n\n\ndef read(path):\n    return path.read_text()\n"
+          },
+          "after": {
+            "kind": "text",
+            "text": "import json\n\n\ndef read(path):\n    # lup: ignore(\"x\", why=\"y\")\n    return path.read_text().split(\"\\n\")\n"
+          },
+          "says": [
+            "adds an ignore",
+            "told: string-split"
+          ],
+          "marks": [
+            {
+              "taken": "held",
+              "said": "adds an ignore",
+              "side": "after",
+              "first": 5,
+              "last": null
+            },
+            {
+              "taken": "told",
+              "said": "string-split: splits a string to parse it",
+              "side": "after",
+              "first": 6,
+              "last": 6
+            }
+          ],
+          "open": true,
+          "automatic": false,
+          "design": false
+        },
+        {
+          "block": "diff",
+          "id": "file test_reader.py",
+          "version": null,
+          "offers": [],
+          "path": "test_reader.py",
+          "before": null,
+          "after": {
+            "kind": "text",
+            "text": "def test_read():\n    assert True\n"
+          },
+          "says": [
+            "test"
+          ],
+          "marks": [],
+          "open": false,
+          "automatic": true,
+          "design": false
+        },
+        {
+          "block": "diff",
+          "id": "file logo.png",
+          "version": null,
+          "offers": [],
+          "path": "logo.png",
+          "before": null,
+          "after": {
+            "kind": "binary",
+            "size": 1150
+          },
+          "says": [],
+          "marks": [],
+          "open": true,
+          "automatic": false,
+          "design": false
+        }
+      ]
+    }
+  },
+  {
+    "name": "a first approval, its files folded, its types still being read",
+    "repository": "/r/lup.git",
+    "argument": {
+      "number": 64
+    },
+    "given": {
+      "items": [
+        {
+          "number": 64,
+          "reason": {
+            "reason": "approval",
+            "repository": "/r/lup.git",
+            "fingerprint": "a1b2c3d",
+            "text": "Approve lup as it is?",
+            "summary": " 3 files",
+            "first": true,
+            "typing": true
+          },
+          "sender": {
+            "party": "operator"
+          },
+          "recipient": {
+            "party": "operator"
+          },
+          "replies": [],
+          "citations": [],
+          "edits": [],
+          "quiet": false,
+          "made": "2026-10-27T09:00:00Z",
+          "state": {
+            "state": "waiting"
+          },
+          "rank": {
+            "name": "waiting on you",
+            "order": 0,
+            "notifies": true
+          }
+        }
+      ],
+      "files": {
+        "64": {
+          "shown": [
+            {
+              "path": "reader.py",
+              "before": {
+                "kind": "text",
+                "text": "import json\n\n\ndef read(path):\n    return path.read_text()\n"
+              },
+              "after": {
+                "kind": "text",
+                "text": "import json\n\n\ndef read(path):\n    # lup: ignore(\"x\", why=\"y\")\n    return path.read_text().split(\"\\n\")\n"
+              },
+              "reading": {
+                "role": "production",
+                "asks": [
+                  {
+                    "name": "ignore",
+                    "taken": "held",
+                    "line": 5,
+                    "side": "after"
+                  }
+                ],
+                "findings": [
+                  {
+                    "rule": "string-split",
+                    "message": "splits a string\nto parse it",
+                    "steer": "",
+                    "start": 6,
+                    "end": 6,
+                    "taken": "told"
+                  }
+                ]
+              }
+            },
+            {
+              "path": "test_reader.py",
+              "before": null,
+              "after": {
+                "kind": "text",
+                "text": "def test_read():\n    assert True\n"
+              },
+              "reading": {
+                "role": "test",
+                "asks": [],
+                "findings": []
+              }
+            }
+          ]
+        }
+      }
+    },
+    "module": "core",
+    "view": "approval",
+    "answer": {
+      "summary": [
+        {
+          "text": "approval",
+          "tone": "plain"
+        },
+        {
+          "text": " · 1 with an ignore · 1 of a first approval",
+          "tone": "plain"
+        },
+        {
+          "text": " · reading types",
+          "tone": "plain"
+        }
+      ],
+      "waiting": false,
+      "count": 0,
+      "offers": [
+        {
+          "action": "inbox-answer-approval",
+          "argument": {
+            "number": 64,
+            "approved": true
+          },
+          "verb": "done",
+          "chord": null,
+          "runs": "once",
+          "commented": false,
+          "says": "approve"
+        },
+        {
+          "action": "inbox-answer-approval",
+          "argument": {
+            "number": 64,
+            "approved": false
+          },
+          "verb": "decline",
+          "chord": null,
+          "runs": "once",
+          "commented": false,
+          "says": "decline"
+        }
+      ],
+      "blocks": [
+        {
+          "block": "markdown",
+          "id": "text",
+          "version": null,
+          "offers": [],
+          "text": "Approve lup as it is?\n 3 files",
+          "tone": "plain"
+        },
+        {
+          "block": "diff",
+          "id": "file reader.py",
+          "version": null,
+          "offers": [],
+          "path": "reader.py",
+          "before": {
+            "kind": "text",
+            "text": "import json\n\n\ndef read(path):\n    return path.read_text()\n"
+          },
+          "after": {
+            "kind": "text",
+            "text": "import json\n\n\ndef read(path):\n    # lup: ignore(\"x\", why=\"y\")\n    return path.read_text().split(\"\\n\")\n"
+          },
+          "says": [
+            "adds an ignore",
+            "told: string-split",
+            "first approval"
+          ],
+          "marks": [
+            {
+              "taken": "held",
+              "said": "adds an ignore",
+              "side": "after",
+              "first": 5,
+              "last": null
+            },
+            {
+              "taken": "told",
+              "said": "string-split: splits a string to parse it",
+              "side": "after",
+              "first": 6,
+              "last": 6
+            }
+          ],
+          "open": false,
+          "automatic": false,
+          "design": false
+        },
+        {
+          "block": "diff",
+          "id": "file test_reader.py",
+          "version": null,
+          "offers": [],
+          "path": "test_reader.py",
+          "before": null,
+          "after": {
+            "kind": "text",
+            "text": "def test_read():\n    assert True\n"
+          },
+          "says": [
+            "first approval"
+          ],
+          "marks": [],
+          "open": false,
+          "automatic": true,
+          "design": false
+        }
+      ]
+    }
+  },
+  {
+    "name": "an approval whose files the host refused",
+    "repository": "/r/lup.git",
+    "argument": {
+      "number": 54
+    },
+    "given": {
+      "items": [
+        {
+          "number": 54,
+          "reason": {
+            "reason": "approval",
+            "repository": "/r/lup.git",
+            "fingerprint": "4750cf6",
+            "text": "Approve the host zone of lup at 4750cf6?",
+            "summary": "\u001b[32m reader.py | 2 ++\u001b[m",
+            "first": false,
+            "typing": false
+          },
+          "sender": {
+            "party": "operator"
+          },
+          "recipient": {
+            "party": "operator"
+          },
+          "replies": [],
+          "citations": [],
+          "edits": [],
+          "quiet": false,
+          "made": "2026-10-27T09:00:00Z",
+          "state": {
+            "state": "waiting"
+          },
+          "rank": {
+            "name": "waiting on you",
+            "order": 0,
+            "notifies": true
+          }
+        }
+      ],
+      "files": {
+        "54": {
+          "refused": "the copy is gone"
+        }
+      }
+    },
+    "module": "core",
+    "view": "approval",
+    "answer": {
+      "summary": [
+        {
+          "text": "approval",
+          "tone": "plain"
+        }
+      ],
+      "waiting": false,
+      "count": 0,
+      "offers": [
+        {
+          "action": "inbox-answer-approval",
+          "argument": {
+            "number": 54,
+            "approved": true
+          },
+          "verb": "done",
+          "chord": null,
+          "runs": "once",
+          "commented": false,
+          "says": "approve"
+        },
+        {
+          "action": "inbox-answer-approval",
+          "argument": {
+            "number": 54,
+            "approved": false
+          },
+          "verb": "decline",
+          "chord": null,
+          "runs": "once",
+          "commented": false,
+          "says": "decline"
+        }
+      ],
+      "blocks": [
+        {
+          "block": "markdown",
+          "id": "text",
+          "version": null,
+          "offers": [],
+          "text": "Approve the host zone of lup at 4750cf6?\n reader.py | 2 ++",
+          "tone": "plain"
+        },
+        {
+          "block": "line",
+          "id": "refused",
+          "version": null,
+          "offers": [],
+          "spans": [
+            {
+              "text": "no files: the copy is gone",
+              "tone": "refused"
+            }
+          ]
+        }
+      ]
+    }
+  }
+]

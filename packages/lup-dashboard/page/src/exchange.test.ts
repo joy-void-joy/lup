@@ -1,3 +1,4 @@
+import "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
 import { citedOn, editedOf, markerEnd, outdated, passageOf, unfound, type Citation } from "./exchange";

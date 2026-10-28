@@ -53,7 +53,7 @@ from typing import Concatenate, Self, get_args, overload
 
 from pydantic import BaseModel
 
-from lup.blocks import Blocks, Drawer, OfAgent, Watch
+from lup.blocks import Banner, Blocks, Drawer, OfAgent, Watch
 from lup.errors import LupError
 from lup.events import Event, Observed, Publishing, events
 from lup.publishing import Refusal
@@ -324,9 +324,10 @@ class ViewDoor(Model):
     method it decorates.
     """
 
-    place: Drawer | None = None
-    """Where the dashboard shows it; none for a view a fold reads as it opens
-    (`Load`), or only its command prints."""
+    place: Drawer | Banner | None = None
+    """Where the dashboard shows it, under each agent: in a drawer, or as a part
+    of its banner; none for a view a fold reads as it opens (`Load`), or only
+    its command prints."""
     watch: Watch = Watch()
     """When a view the page shows is answered again."""
 
@@ -348,8 +349,8 @@ class ViewDoor(Model):
             raise DoorError(message)
         if self.place is not None and not issubclass(model, OfAgent):
             message = (
-                f"the view `{taken.name}` is placed in a drawer under an agent, so "
-                f"it takes the agent it's of, an `OfAgent`, not `{model.__name__}`"
+                f"the view `{taken.name}` is placed under an agent, so it takes "
+                f"the agent it's of, an `OfAgent`, not `{model.__name__}`"
             )
             raise DoorError(message)
         returned = taken.returned
@@ -662,19 +663,22 @@ def view[S, I: BaseModel, **P](
     method: Callable[Concatenate[S, I, P], Awaitable[Blocks]], /
 ) -> Served[S, Concatenate[I, P], Awaitable[Blocks]]: ...
 @overload
-def view(*, place: Drawer | None = None, watch: Watch | None = None) -> ViewDoor: ...
+def view(
+    *, place: Drawer | Banner | None = None, watch: Watch | None = None
+) -> ViewDoor: ...
 def view(
     method: Callable[..., Awaitable[Blocks]] | None = None,
     /,
     *,
-    place: Drawer | None = None,
+    place: Drawer | Banner | None = None,
     watch: Watch | None = None,
 ) -> Method | ViewDoor:
     """Make a method a view: the dashboard shows what it answers, kept live, and its command prints it as text; given no method, the door, placed and watched, to put on one.
 
     It takes one model, what's viewed, and returns `Blocks`; its docstring is
-    its command's help. Placed in a drawer under an agent (`Drawer`), it takes
-    the agent it's of (`OfAgent`), and the page answers it again at the events
+    its command's help. Placed under an agent, in a drawer (`Drawer`) or on its
+    banner (`Banner`), it takes the agent it's of (`OfAgent`), and the page
+    answers it again at the events
     of that agent `watch` names, and that long apart at most (`Watch`). With no
     place, a fold reads it as it opens (`Load`), or its command prints it.
     """

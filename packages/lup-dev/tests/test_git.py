@@ -145,3 +145,32 @@ def test_a_revision_naming_no_commit_is_none(repo: Path, shell: Shell) -> None:
     git = Git(cwd=repo)
     assert git.commit("HEAD") == shell.git(repo, "rev-parse", "HEAD")
     assert git.commit("refs/heads/nowhere") is None
+
+
+def test_the_store_says_which_objects_it_holds_as_blobs(
+    repo: Path, shell: Shell
+) -> None:
+    readme = shell.git(repo, "rev-parse", "HEAD:README.md")
+    tree = shell.git(repo, "rev-parse", "HEAD^{tree}")
+    git = Git.pinned(repo / ".git")
+    assert git.blobs(["0" * 40, readme, tree]) == [readme]
+    assert git.blobs([]) == []
+
+
+def test_a_partial_clone_is_never_asked_for_what_it_left_out(
+    repo: Path, tmp_path: Path, shell: Shell
+) -> None:
+    (repo / "README.md").write_text("# Work, again\n")
+    shell.commit(repo, "again")
+    first = shell.git(repo, "rev-parse", "HEAD~1:README.md")
+    shell.git(repo, "config", "uploadpack.allowFilter", "true")
+    clone = tmp_path / "partial"
+    shell.git(
+        tmp_path, "clone", "-q", "--filter=blob:none", f"file://{repo}", str(clone)
+    )
+    git = Git.pinned(clone / ".git")
+
+    assert git.blobs([first]) == []
+    # Asked as git is by default, the clone fetches it from its remote.
+    assert shell.git(clone, "cat-file", "-t", first) == "blob"
+    assert git.blobs([first]) == [first]

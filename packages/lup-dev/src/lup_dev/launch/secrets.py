@@ -1,19 +1,32 @@
-"""Files that hold secrets, hidden from a room: each with a secret's name that no commit holds as it is, wherever a room mounts a repository.
+"""Files that hold secrets, hidden from a room: each with a secret's name whose exact content its repository's git objects don't hold, wherever a room mounts a repository.
 
 `docs/launch.md`, *Files with a secret's name*. The names are the declaration's
 `secret` role (`CorePaths.secret`), patterns from a worktree's root. A launch
 looks in what its room mounts whole: the project's tree, its git directory with
 every worktree, and each related repository mounted. A file matching is hidden
-unless its worktree's commit holds it with exactly its content: a tracked
-`.env.example` unchanged is the repository's history already, and stays.
-Ignored, untracked, or changed since, it's mounted over, read-only, by the
-launch's empty file (`launch/hidden.py`), as `.venv` is; one outside every
-worktree, which no commit holds, too.
+unless the object store of the repository it sits in holds its exact content:
+it's hashed as git hashes a blob, and the store is asked for that id (`shown`).
+The room mounts that store and can read every object in it, so hiding a file
+whose content is there protects nothing. A real value added locally is content
+git doesn't hold, and a room can't put an object with a secret's content in the
+store without knowing that content. A file that's ignored, untracked, or changed
+to content git never held is mounted over, read-only, by the launch's empty file
+(`launch/hidden.py`), as `.venv` is.
 
-The commit rather than what git ignores: a room writes the `.gitignore` files,
-`info/exclude` and the index git decides that from, so `git add -f .env` in one
-launch would leave the next one's `.env` in view; a commit holding a file's
-content can't be made by a room that never read it.
+The store rather than a worktree's commit or what git ignores. Which worktree
+holds a file comes from git's record of where each worktree is, which a move of
+the repository leaves stale. What git ignores is decided from the `.gitignore`
+files, `info/exclude` and the index, which a room writes, so `git add -f .env`
+in one launch would leave the next one's `.env` in view.
+
+A pattern is matched from the nearest directory holding a `.git`, else from the
+tree: a worktree's root, wherever it's been moved. Every file with a secret's
+name is hidden in a repository nested in the tree's own, such as a clone under a
+worktree's `tmp/`: checking it would mean host git reading a git directory the
+room wrote whole, its `config` among it. The store is asked only while it's
+self-contained (`stray`): through `objects/info/alternates`, or a link under
+`objects/`, git would answer from another repository's store, which the room
+can't read, so every file is hidden instead.
 
 Not looked in: what package managers install (`Search.installed`), whose keys
 and certificates are packages' own, such as `certifi`'s CA bundle in every
@@ -35,13 +48,13 @@ import hashlib
 import os
 import stat
 from contextlib import ExitStack
-from itertools import batched, groupby, takewhile
+from itertools import groupby, takewhile
 from pathlib import Path, PurePath, PurePosixPath
 from typing import TYPE_CHECKING
 
 from lup.types import Model
-from lup_dev.git import Git, GitError, nul_separated
-from lup_dev.launch.hidden import Found, covering, made, walked
+from lup_dev.git import Git, GitError, stray
+from lup_dev.launch.hidden import Found, covering, made, status, walked
 from lup_dev.layout import LaunchLayout
 
 if TYPE_CHECKING:
@@ -123,6 +136,11 @@ class Searched(Model):
     """What a walk of one tree found: the files with a secret's name, and the directories it couldn't list."""
 
     files: list[Path] = []
+    nested: list[Path] = []
+    """Those of `files` in a repository nested in the tree's own, hidden whatever
+    they hold."""
+    large: list[Path] = []
+    """Those of `files` holding more than `Search.largest` bytes, hidden unread."""
     unlisted: list[Path] = []
 
 
@@ -138,9 +156,20 @@ class Search(Model):
     the operator's repositories' environments was `certifi`'s."""
     hidden: list[Path] = []
     """Paths hidden already, not looked in: each worktree's `.venv`."""
+    largest: int = 1 << 20
+    """The most bytes a file with a secret's name holds to be read and checked,
+    1 MiB; one holding more is hidden unread, and said so. The files these names
+    give are small, the largest of the 86 in view on the operator's machine 6 KB,
+    and a room could plant a sparse one of a terabyte, in an instant, for the next
+    launch to hash."""
 
-    def found(self, tree: Path, roots: list[Path]) -> Searched:
-        """Walk `tree` for each file whose path from its worktree's root, the nearest of `roots` holding it, else from `tree`, matches a pattern; and each directory that couldn't be listed.
+    def found(self, tree: Path, git: Path | None) -> Searched:
+        """Walk `tree`, holding the repository whose common git directory is `git`, for each file whose path from its worktree's root (`Listing.root`) matches a pattern, and those of them in a repository nested in it; and each directory that couldn't be listed.
+
+        A nested repository is a git directory other than `git` (`Listing.git`),
+        with what's under it, and the directory holding it where it's that
+        directory's `.git`: a clone's worktree. A `.git` directory that isn't a
+        git directory, which git wouldn't read either, nests nothing.
 
         A directory's names are tested first, all at once in C, for the text
         each pattern's last part holds (`Pattern.part`), so the millions of files
@@ -149,33 +178,54 @@ class Search(Model):
         patterns alone.
         """
         patterns = [Pattern.of(each) for each in self.patterns]
-        nearest = sorted(roots, key=lambda root: len(root.parts), reverse=True)
         unlisted: list[Path] = []
-
-        def matching(path: Path) -> bool:
-            root = next((each for each in nearest if path.is_relative_to(each)), tree)
-            relative = PurePath(path.relative_to(root))
-            return any(relative.full_match(each.pattern) for each in patterns)
+        repositories: list[Path] = []
 
         def files() -> Iterator[Path]:
             for listing in listed(tree, self.installed, self.hidden, unlisted):
+                if listing.git and listing.directory != git:
+                    directory = listing.directory
+                    repositories.append(
+                        directory.parent if directory.name == ".git" else directory
+                    )
                 joined = "\0".join(listing.names)
                 present = [each for each in patterns if each.part in joined]
                 for name in listing.names if present else []:
                     if not any(each.named(name) for each in present):
                         continue
-                    if matching(path := listing.directory / name):
+                    path = listing.directory / name
+                    relative = PurePath(path.relative_to(listing.root))
+                    if any(relative.full_match(each.pattern) for each in patterns):
                         yield path
 
-        return Searched(files=list(files()), unlisted=unlisted)
+        matched = list(files())
+        holding = dict.fromkeys(repositories)
+        nested = [
+            path for path in matched if any(each in holding for each in path.parents)
+        ]
+        large = [
+            path
+            for path in matched
+            if path not in nested
+            and (seen := status(tree, path)) is not None
+            and seen.st_size > self.largest
+        ]
+        return Searched(files=matched, nested=nested, large=large, unlisted=unlisted)
 
 
 class Listing(Model):
-    """A directory being walked: the regular files in it, its descriptor, held while what's under it is walked, and the directories in it still to walk."""
+    """A directory being walked: the regular files in it, the root of the worktree it's in, whether it's a git directory, its descriptor, held while what's under it is walked, and the directories in it still to walk."""
 
     directory: Path
     names: list[str]
     """The names of the regular files in it."""
+    root: Path
+    """The root of the worktree it's in, which patterns are matched from: the
+    nearest directory at or above it holding a `.git` file or directory, else
+    the tree walked."""
+    git: bool
+    """Whether it's a git directory: a `HEAD` file, and `objects/` and `refs/`,
+    in it."""
     descriptor: int
     inside: list[str]
     """The names of the directories in it still to walk, taken as each is."""
@@ -186,20 +236,23 @@ def listed(
 ) -> Iterator[Listing]:
     """Yield each directory under `tree`, itself among them, with the names of the regular files in it, never following a link; passing over a directory named among `installed` or at one of `hidden`, and adding to `unlisted` each one that couldn't be listed.
 
-    Depth first, holding a descriptor for each directory on the way down
-    alone, so a directory holding thousands never runs out of them. Each
-    listing is built without validation (`model_construct`): a tree may hold a
-    hundred thousand directories, and what's built is the walk's own.
+    Each says the root of the worktree it's in (`Listing.root`), from its
+    entries and its parent's: never from what a `.git` file says, which in a
+    moved worktree names where it was. Depth first, holding a descriptor for
+    each directory on the way down alone, so a directory holding thousands
+    never runs out of them. Each listing is built without validation
+    (`model_construct`): a tree may hold a hundred thousand directories, and
+    what's built is the walk's own.
     """
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
     hiding = [each.name for each in hidden]
 
-    def entered(directory: Path, name: str, holding: int | None) -> Listing | None:
+    def entered(directory: Path, name: str, above: Listing | None) -> Listing | None:
         try:
             descriptor = (
                 os.open(tree, flags)
-                if holding is None
-                else os.open(name, flags, dir_fd=holding)
+                if above is None
+                else os.open(name, flags, dir_fd=above.descriptor)
             )
         except OSError:
             unlisted.append(directory)
@@ -212,18 +265,25 @@ def listed(
             os.close(descriptor)
             unlisted.append(directory)
             return None
+        names = [each.name for each in entries if each.is_file(follow_symlinks=False)]
+        directories = [
+            each.name for each in entries if each.is_dir(follow_symlinks=False)
+        ]
         return Listing.model_construct(
             directory=directory,
-            names=[
-                each.name for each in entries if each.is_file(follow_symlinks=False)
-            ],
+            names=names,
+            root=(
+                directory
+                if above is None or ".git" in names or ".git" in directories
+                else above.root
+            ),
+            git="objects" in directories and "refs" in directories and "HEAD" in names,
             descriptor=descriptor,
             inside=[
-                each.name
-                for each in entries
-                if each.is_dir(follow_symlinks=False)
-                and each.name not in installed
-                and (each.name not in hiding or directory / each.name not in hidden)
+                each
+                for each in directories
+                if each not in installed
+                and (each not in hiding or directory / each not in hidden)
             ],
         )
 
@@ -237,7 +297,7 @@ def listed(
                 os.close(walking.pop().descriptor)
                 continue
             name = current.inside.pop()
-            below = entered(current.directory / name, name, current.descriptor)
+            below = entered(current.directory / name, name, current)
             if below is not None:
                 walking.append(below)
                 yield below
@@ -246,41 +306,8 @@ def listed(
             os.close(each.descriptor)
 
 
-class Checkout(Model):
-    """One of a repository's worktrees as git lists it from the common directory, and the commit it's at."""
-
-    root: Path
-    commit: str | None
-    """The commit its `HEAD` is at; none on a branch with no commit yet, and for
-    a bare repository's own directory, which holds no commit's files."""
-
-
-def checkouts(common: Path) -> list[Checkout]:
-    """Return each worktree of the repository whose common git directory is `common`, as `git worktree list` gives them there, pinned (`Git.pinned`)."""
-    listed = Git.pinned(common).run("worktree", "list", "--porcelain", "-z").output
-    fields = nul_separated(listed)
-    starts = [at for at, field in enumerate(fields) if field.startswith("worktree ")]
-    records = [
-        fields[start:end]
-        for start, end in zip(starts, [*starts[1:], len(fields)], strict=True)
-    ]
-
-    def commit(record: list[str]) -> str | None:
-        heads = [
-            each.removeprefix("HEAD ") for each in record if each.startswith("HEAD ")
-        ]
-        return next(
-            (each for each in heads if any(digit != "0" for digit in each)), None
-        )
-
-    return [
-        Checkout(root=Path(record[0].removeprefix("worktree ")), commit=commit(record))
-        for record in records
-    ]
-
-
 def git_directory(path: Path) -> Path | None:
-    """Return the common git directory of the repository a room mounts at `path`, without running git there: a clone's `.git` directory, or a bare repository's own; none for anything else, in which no commit holds a file.
+    """Return the common git directory of the repository a room mounts at `path`, without running git there: a clone's `.git` directory, or a bare repository's own; none for anything else, whose files no store is asked about.
 
     git found from `path` would follow a `.git` file or a `commondir` file,
     either of which a room writes in a repository it works in; pinned there, it
@@ -293,96 +320,47 @@ def git_directory(path: Path) -> Path | None:
     return path if bare else None
 
 
-class Blob(Model):
-    """A file as a commit holds it: its object's id and size."""
+def blob(tree: Path, path: Path, hashing: str, largest: int) -> str | None:
+    """Return the id git would give the regular file at `path`, inside `tree`, as a blob hashed with `hashing` (`sha1` or `sha256`); none where it isn't one, or holds more than `largest` bytes. Read through the directory holding it, never following a link.
 
-    object: str
-    size: int
-
-
-def committed(git: Git, commit: str, paths: list[Path]) -> dict[PurePosixPath, Blob]:
-    """Return each of `paths`, from the worktree's root, that `commit` holds as a file, with its blob; none where git can't read the commit."""
-    shape = "%(objecttype)%x00%(objectname)%x00%(objectsize)%x00%(path)"
-
-    def listed(asked: list[str]) -> list[str]:
-        arguments = ["-r", "-z", "--full-tree", f"--format={shape}", commit, "--"]
-        found = git.run("--literal-pathspecs", "ls-tree", *arguments, *asked)
-        return nul_separated(found.output)
-
-    try:
-        fields = [
-            field
-            for some in batched(paths, 256, strict=False)
-            for field in listed([str(each) for each in some])
-        ]
-    except GitError:
-        return {}
-    return {
-        PurePosixPath(path): Blob(object=name, size=int(size))
-        for kind, name, size, path in batched(fields, 4, strict=True)
-        if kind == "blob"
-    }
-
-
-def same(tree: Path, path: Path, blob: Blob, hashing: str) -> bool:
-    """Say whether the regular file at `path`, inside `tree`, holds exactly `blob`'s content, hashed as git hashes a blob with `hashing` (`sha1` or `sha256`); read through the directory holding it, never following a link."""
+    A file that changes size as it's read gets an id no object has.
+    """
     with ExitStack() as stack:
         holding = walked(tree, path, stack)
         if holding is None:
-            return False
+            return None
         flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
         try:
             reading = os.open(path.name, flags, dir_fd=holding)
         except OSError:
-            return False
+            return None
         stack.callback(os.close, reading)
         seen = os.fstat(reading)
-        if not stat.S_ISREG(seen.st_mode) or seen.st_size != blob.size:
-            return False
-        digest = hashlib.new(hashing, f"blob {blob.size}\0".encode())
+        if not stat.S_ISREG(seen.st_mode) or seen.st_size > largest:
+            return None
+        digest = hashlib.new(hashing, f"blob {seen.st_size}\0".encode())
         for chunk in iter(lambda: os.read(reading, 1 << 20), b""):
             digest.update(chunk)
-        return digest.hexdigest() == blob.object
+        return digest.hexdigest()
 
 
-def unheld(
-    tree: Path, git: Path | None, at: list[Checkout], files: list[Path]
-) -> list[Path]:
-    """Return each of `files`, inside `tree`, that its worktree's commit doesn't hold with exactly its content, in the repository whose common git directory is `git`, whose worktrees are `at`: all of them where there's none."""
-    if git is None or not files:
-        return files
+def shown(tree: Path, git: Path | None, files: list[Path], largest: int) -> list[Path]:
+    """Return those of `files`, inside `tree`, whose exact content the object store of the repository whose common git directory is `git` holds, asked of git pinned there; none of those holding more than `largest` bytes, which aren't read.
+
+    None where there's no repository, git can't say, or the store reads objects
+    from outside itself (`stray`), from a store the room can't read.
+    """
+    if git is None or not files or stray(git / "objects"):
+        return []
     pinned = Git.pinned(git)
     try:
         hashing = pinned.text("rev-parse", "--show-object-format")
+        hashed = {path: blob(tree, path, hashing, largest) for path in files}
+        ids = [each for each in hashed.values() if each is not None]
+        held = pinned.blobs(list(dict.fromkeys(ids)))
     except GitError:
-        return files
-    nearest = sorted(at, key=lambda each: len(each.root.parts), reverse=True)
-    holding = {
-        path: next((each for each in nearest if path.is_relative_to(each.root)), None)
-        for path in files
-    }
-    blobs = {
-        each.root: committed(
-            pinned,
-            each.commit,
-            [
-                path.relative_to(each.root)
-                for path, held in holding.items()
-                if held == each
-            ],
-        )
-        for each in nearest
-        if each.commit is not None and each in holding.values()
-    }
-
-    def held(path: Path) -> bool:
-        checkout = holding[path]
-        if checkout is None or checkout.commit is None:
-            return False
-        blob = blobs[checkout.root].get(PurePosixPath(path.relative_to(checkout.root)))
-        return blob is not None and same(tree, path, blob, hashing)
-
-    return [path for path in files if not held(path)]
+        return []
+    return [path for path, each in hashed.items() if each in held]
 
 
 class Tree(Model):
@@ -393,19 +371,13 @@ class Tree(Model):
 
 
 def hiding(search: Search, tree: Tree) -> Searched:
-    """Return what to hide in `tree`: each file with a secret's name its worktree's commit doesn't hold as it is, and each directory that couldn't be listed.
-
-    Where git can't list the repository's worktrees, no commit holds a file.
-    """
-    try:
-        at = [] if tree.git is None else checkouts(tree.git)
-    except GitError:
-        tree = tree.model_copy(update={"git": None})
-        at = []
-    searched = search.found(tree.path, [each.root for each in at])
-    return Searched(
-        files=unheld(tree.path, tree.git, at, searched.files),
-        unlisted=searched.unlisted,
+    """Return what to hide in `tree`: each file with a secret's name whose exact content its repository's object store doesn't hold, each in a repository nested in the tree's own, and each directory that couldn't be listed."""
+    searched = search.found(tree.path, tree.git)
+    unread = [*searched.nested, *searched.large]
+    asked = [each for each in searched.files if each not in unread]
+    held = shown(tree.path, tree.git, asked, search.largest)
+    return searched.model_copy(
+        update={"files": [each for each in searched.files if each not in held]}
     )
 
 
@@ -418,23 +390,24 @@ class RoomSecrets(Model):
     """The project's tree, looked in again at the launch's end."""
     found: list[Found] = []
     """Each path hidden, as it was found."""
+    large: list[Path] = []
+    """Each file among `found` hidden unread, holding more than `Search.largest`
+    bytes."""
 
     @classmethod
     def of(
         cls, search: Search, own: Tree, related: list[Tree], launch: LaunchLayout
     ) -> RoomSecrets:
         """Look in the project's tree `own` and each of the `related` repositories mounted, as the room is about to start."""
-
-        def hidden(tree: Tree) -> list[Found]:
-            searched = hiding(search, tree)
-            return [
-                seen
-                for path in [*searched.files, *searched.unlisted]
-                if (seen := Found.at(tree.path, path)) is not None
-            ]
-
-        found = [seen for tree in [own, *related] for seen in hidden(tree)]
-        return cls(launch=launch, search=search, own=own, found=found)
+        searched = [(tree, hiding(search, tree)) for tree in [own, *related]]
+        found = [
+            seen
+            for tree, each in searched
+            for path in [*each.files, *each.unlisted]
+            if (seen := Found.at(tree.path, path)) is not None
+        ]
+        large = [path for _, each in searched for path in each.large]
+        return cls(launch=launch, search=search, own=own, found=found, large=large)
 
     @property
     def mounts(self) -> list[Mount]:
@@ -448,10 +421,16 @@ class RoomSecrets(Model):
     def said(self) -> list[str]:
         """Return what the launch says of what it hides, where it hides anything."""
         files = [each.path for each in self.found if not each.directory]
-        listed = "\n".join(f"  {each}" for each in files)
+        bound = f"over {self.search.largest / (1 << 20):g} MiB"
+        listed = "\n".join(
+            f"  {each} (too large to check, {bound})"
+            if each in self.large
+            else f"  {each}"
+            for each in files
+        )
         named = (
             "Hidden from the room, each reading as an empty file: the files with a "
-            "secret's name no commit holds as they are "
+            "secret's name whose content their repository's git objects don't hold "
             "(`docs/launch.md`, *Files with a secret's name*):\n"
             f"{listed}"
         )

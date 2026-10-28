@@ -29,30 +29,38 @@
 // written, whom it goes to; at its end, how many items are to answer and how
 // many are new; under it, the stack pins the headers the top of the view is in
 // (`Stack.tsx`); beside the review, the overview (`Outline.tsx`). As what
-// it shows changes, the cursor's line stays where it is on screen, so nothing
-// arriving above moves what the operator reads. An agent's answer shows the
+// it shows changes, the buffer is changed by the fewest changes that keep each
+// part's lines its own (`reconcile.ts`), the cursor, a selection and the folds
+// carried through them, each line that came flashing, and the cursor's line
+// stays where it is on screen, so nothing arriving above moves what the
+// operator reads; what ticks or measures is drawn beside the text
+// (`ticking.ts`). An agent's answer shows the
 // operator's words it answers above it, each of its citations of them as its
 // id, the passage it cites folded under its line, opened by a click on the id,
 // and the passage it answers marked among the operator's words, a click there
 // going to it (`exchange.ts`; `docs/dashboard.md`, *The review*, *The
 // drawers*).
 import { foldedRanges } from "@codemirror/language";
-import { Compartment, RangeSetBuilder, StateEffect, type Range } from "@codemirror/state";
+import { Compartment, RangeSetBuilder, StateEffect, type ChangeSet, type Range } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { shownOnce, tally, tokensOf, within, type ChangedFile, type Matter, type Taken } from "./code";
-import { changes, cited, moved, shownIn, type Block, type Change, type Folding, type Span } from "./comments";
-import { closedAs, folding, hiddenAt, isFolded, reached, reaching, rebuilt, refold, scrollAfterKey, uncovered, useEditor, type Landing } from "./editor";
+import { tokensOf, within, type Filed, type Matter, type Taken } from "./code";
+import { cited, type Block, type Folding, type Span } from "./comments";
+import { closedAs, folding, hiddenAt, isFolded, mapLetters, reached, reaching, rebuilt, refold, scrollAfterKey, uncovered, useEditor, vimOf, type Landing } from "./editor";
+import { arrivedLines, arriving, owned, owning, ownersOf, reconcile, settling } from "./reconcile";
+import { clock, ticked, ticking, type Tick } from "./ticking";
+import { doing, since, type Activity } from "./agents";
 import { Following } from "./follow";
 import { mapOutlineKey, mapScopeKeys, Outline, setOutlineFocus, setOutlineToggle, setScopeJump, useNarrow, type ScopeKey } from "./Outline";
 import { Stack, type Mark as StackMark } from "./Stack";
-import { redrawn, SCOPES, structureMargin, type Labelled, type Structured } from "./rails";
+import { redrawn, structureMargin, type Labelled, type Structured } from "./rails";
 import { itemStanding } from "./outline";
 import { DRAFTED, GLYPHS } from "./Outline";
 import { linesOver, stickies, type Sticky } from "./stack";
 import { depths, levelled, ofKind } from "./folds";
-import { FOLD_KINDS, type DrawerKind, type FoldKind, type ReviewPlace } from "./keys";
+import type { DrawerKind, FoldKind, ReviewPlace } from "./keys";
+import { kindOf, type Merged } from "./looks";
 import { markerEnd, outdated, unfound } from "./exchange";
 import { source, sourced, without, type Source } from "./markdown";
 import {
@@ -68,7 +76,6 @@ import {
     codeFrom,
     drawerAt,
     fileHeads,
-    firstApproval,
     foldKey,
     foldsOf,
     fresh,
@@ -79,11 +86,13 @@ import {
     isRegion,
     isRemark,
     laid,
+    offeredOf,
     news,
     opened,
     ordered,
     placeAt,
     quoted,
+    quotedAt,
     recipient,
     regionAt,
     sameId,
@@ -91,14 +100,15 @@ import {
     shownAt,
     sinceFileAt,
     stepped,
-    stranded,
     tallied,
     toggled,
     toKeep,
+    viewBlockAt,
     waited,
     whose,
     withWritten,
     written,
+    writtenId,
     type Around,
     type Aside,
     type Cited,
@@ -113,12 +123,12 @@ import {
     type Laid,
     type Region,
     type Scope,
-    type SinceFile,
     type Viewed,
     type Where,
     type Written,
 } from "./review";
 import { freshRows, type Fresh } from "./since";
+import type { Instance, Offer, Remote, Running, Span as ViewSpan } from "./views";
 
 /** Where the page asks the review to go: an agent's group, by its conversation, numbered so the same one asked twice goes twice. */
 export interface Jump {
@@ -166,8 +176,8 @@ interface Props {
     list: () => void;
     /** When the operator last settled an item of theirs: what came after is new to them. */
     reviewed: string | null;
-    /** The time, to the minute, which each item's wait is told from. */
-    now: Date;
+    /** What each conversation running is doing, by `whose` it is, drawn on its banner as the time passes (`ticking.ts`). */
+    activities: ReadonlyMap<string, Activity | null>;
     /** Each conversation's parent, by `whose` each is: what nests a subagent's group under its parent's. */
     parents: ReadonlyMap<string, string>;
     /** What each conversation running is doing, by `whose` it is, for the overview's marks. */
@@ -182,6 +192,14 @@ interface Props {
     order: readonly string[] | null;
     /** Tell the host where the groups go once the review is laid out: what's laid out, and what's gone from it; none where what the page shows isn't all the host's answers, as where it refused one. */
     keepOrder: ((keeping: Keeping) => void) | null;
+    /** How the views look, every repository's merged (`looks.ts`): the kinds of fold the keys take, and each repository's drawers. */
+    looks: Merged;
+    /** Each conversation running, by `whose` it is: its banner's parts, and what holding its writes asks. */
+    running: ReadonlyMap<string, Running>;
+    /** What the host answered of each view the page doesn't lay out itself, by its instance's id (`views.ts`). */
+    remote: Remote;
+    /** Told each view a fold reads as it opens, its module's, as the operator opens it, so the page asks it of the host. */
+    load: (view: Instance) => void;
 }
 
 /** Return the classes a line under an item or in a drawer is drawn with: what it shows, and whether it's set in under a summary or a file's header, as a file's reviewed line isn't. */
@@ -234,7 +252,7 @@ function scopesOf(laidOut: Laid): Scope[] {
 }
 
 /** Which lines of a file in `scope` changed since the operator last looked at it; none outside "since you approved". */
-type Freshness = (scope: Scope, file: ChangedFile) => Fresh | null;
+type Freshness = (scope: Scope, file: Filed) => Fresh | null;
 
 /** Paint the changed files' lines from `from` to `to`: each row numbered and marked added, removed or the same, its text highlighted in its file's language, each that matters barred, saying what it triggered, and each changed since the operator last looked at its file (`fresh`) marked. */
 function painted(laidOut: Laid, from: number, to: number, fresh: Freshness): Range<Decoration>[] {
@@ -337,30 +355,6 @@ function remarks(laidOut: Laid, block: Block): { from: number; to: number; value
     return marks;
 }
 
-/** Return where a remark's quote is shown in `drawer`: in the agent's words at its step, or in the file's lines; none where it isn't laid out. */
-function quotedIn(drawer: Drawer, written: Written): Span | null {
-    if (!isRemark(written) || written.quote.end <= written.quote.start) {
-        return null;
-    }
-    const quote = written.quote;
-    if (drawer.talk !== null) {
-        const words = drawer.talk.words.find((each) => each.step === written.step);
-        if (words === undefined) {
-            return null;
-        }
-        return { from: shownIn(words.lines, quote.start, 0), to: shownIn(words.lines, quote.end, 0) };
-    }
-    return drawer.lines.length === 0 ? null : { from: shownAt(drawer, quote.start), to: shownAt(drawer, quote.end) };
-}
-
-/** Return where a comment on `region`'s item quotes in the item's text; none for a remark, a comment on the whole, one copies before kept on a reply, or an empty passage. */
-function quotedUnder(region: Region, written: Written): Span | null {
-    if (isRemark(written) || isLetter(written) || written.quote == null || written.on != null || written.quote.end <= written.quote.start) {
-        return null;
-    }
-    return { from: shownAt(region, written.quote.start), to: shownAt(region, written.quote.end) };
-}
-
 /**
  * Return what the citations of the operator's words in agents' answers draw (`citationsOf`): each that found its
  * passage, its id marked as a citation, saying the passage on hover, and the passage among the operator's words above
@@ -443,9 +437,9 @@ function decorations(
     ends: Ends = () => "",
 ): DecorationSet {
     const marks: { from: number; to: number; value: Decoration }[] = [...endings(laidOut, ends)];
-    const comments = written(draft);
+    const comments = new Map(laidOut.written.map((each) => [writtenId(each), each]));
     const reaching = (block: Block) => {
-        const comment = comments[block.comment];
+        const comment = comments.get(block.comment);
         if (to !== null && comment !== undefined) {
             marks.push({ from: block.from, to: block.from, value: Decoration.line({ class: "remark-to", attributes: { "data-to": to(comment) } }) });
         }
@@ -458,6 +452,10 @@ function decorations(
     for (const scope of scopesOf(laidOut)) {
         if (isDrawer(scope)) {
             marks.push({ from: scope.header.from, to: scope.header.from, value: Decoration.line({ class: drawerClasses(scope) }) });
+            // A view its module answers, each span in the look of its tone (`looks.ts`).
+            for (const span of scope.toned) {
+                marks.push({ from: span.from, to: span.to, value: marked(`tone-${span.tone}`) });
+            }
         } else {
             const region = scope as Region;
             const number = region.item.number;
@@ -478,8 +476,7 @@ function decorations(
         const stops = new Set(scope.stops);
         for (const coded of scope.code) {
             if (coded.row === null) {
-                const first = !isDrawer(scope) && firstApproval((scope as Region).item);
-                const automatic = shownOnce(coded.file, first).automatic ? " code-automatic" : "";
+                const automatic = coded.file.block === "diff" && coded.file.automatic ? " code-automatic" : "";
                 const whole = stops.has(coded.from) ? " code-matters" : "";
                 marks.push({
                     from: coded.from,
@@ -497,15 +494,18 @@ function decorations(
         for (const block of scope.blocks) {
             marks.push(...remarks(laidOut, block));
             reaching(block);
-            const comment = comments[block.comment];
+            const comment = comments.get(block.comment);
             if (comment === undefined || isLetter(comment)) {
                 continue;
             }
-            // A comment on a passage an edit changed since it was written is said to be outdated.
-            if (!isRemark(comment) && isRegion(scope) && outdated(scope.item, comment.quote)) {
-                marks.push({ from: block.from, to: block.from, value: Decoration.line({ class: "outdated", attributes: { "data-said": "outdated: the passage changed" } }) });
+            // A comment on lines that aren't what it quotes any more is said to be outdated: an edit of its item changed
+            // them, or what its block shows did.
+            const seat = laidOut.seated.get(block.comment);
+            const edited = !isRemark(comment) && isRegion(scope) && outdated(scope.item, comment.quote);
+            if (edited || seat?.outdated === true) {
+                marks.push({ from: block.from, to: block.from, value: Decoration.line({ class: "outdated", attributes: { "data-said": edited ? "outdated: the passage changed" : "outdated: the lines it quotes changed" } }) });
             }
-            const span = isDrawer(scope) ? quotedIn(scope, comment) : quotedUnder(scope as Region, comment);
+            const span = quotedAt(laidOut, scope, comment);
             if (span !== null && span.to > span.from) {
                 marks.push({ from: span.from, to: span.to, value: Decoration.mark({ class: "commented" }) });
             }
@@ -520,30 +520,17 @@ function decorations(
     return builder.finish();
 }
 
-/**
- * Say what an item is in its header: a message by its kind, or as a turn's end; a held change, or one holding a
- * landing; a stop by choice; or the reason's own name.
- */
-function what(item: Item): string {
-    const reason = item.reason;
-    switch (reason.reason) {
-        case "message":
-            return reason.ending === true ? "turn ended" : reason.kind;
-        case "held":
-            return reason.landing == null ? "held change" : "holds a landing";
-        case "stop":
-            return "stopped";
-        case "flagged":
-            return "landed, flagged";
-        default:
-            return reason.reason;
+/** Say a span that ticks as of `now`: what it says for its first minute where it says other, else its words with the time since its moment; a gauge as it was answered. */
+function spanSaid(span: ViewSpan, now: Date): string {
+    const ticking = span.ticking;
+    if (ticking == null) {
+        return span.text;
     }
-}
-
-/** Say whom the operator's copy of a message between conversations was sent to, after what it is in its header (` to explore-auth`); nothing for any other item. */
-function sentTo(item: Item, called: (party: Conversation) => string): string {
-    const reason = item.reason;
-    return reason.reason === "message" && reason.to != null ? ` to ${called(reason.to)}` : "";
+    const at = new Date(ticking.since);
+    if (ticking.first != null && now.getTime() - at.getTime() < 60_000) {
+        return ticking.first;
+    }
+    return (ticking.said ?? "{}").replace("{}", since(at, now));
 }
 
 /** How an item's header says when it came: made once, since `toLocaleString` makes one at each call, and the review is laid out again at each key typed in a comment. */
@@ -553,15 +540,9 @@ function when(made: string): string {
     return WHEN.format(new Date(made));
 }
 
-/** Return what names an item in the header over the review: the first part of its header, before its first ` · `, without the rule around it. */
-function itemNamed(header: string): string {
-    const inner = header.slice("── ".length, header.length - " ──".length);
-    return inner.split(" · ")[0] ?? inner;
-}
-
 /** The header over the review: where the cursor is, each part marked by its kind, and whom what's being written goes to; at its end, what waits below (`tallied`). */
 function Heading({ parts, tally }: { parts: Where[]; tally: string }) {
-    const letter = (kind: Where["kind"]) => FOLD_KINDS.find((each) => each.kind === kind)?.letter ?? null;
+    const letter = (kind: Where["kind"]) => kindOf(kind)?.letter ?? null;
     // A body around another, which a narrow screen leaves out for the innermost.
     const inner = parts.findLast((each) => each.kind === "body");
     const shown = (part: Where) => (
@@ -597,51 +578,53 @@ function lookedAt(of: string, path: string): string {
     return `${of}\n${path}`;
 }
 
-/** Return a file of a "since you approved" drawer as marking it reviewed names it: its path, and the version shown. */
-function viewed(file: SinceFile): Viewed {
-    return { path: file.path, version: file.version ?? null };
+/** Return how far below the top of the view the start of the line at `head` is, as the editor's heights measure it, whether or not it's in view. */
+function offsetOf(view: EditorView, head: number): number {
+    const line = view.lineBlockAt(view.state.doc.lineAt(Math.min(head, view.state.doc.length)).from);
+    return view.documentTop + line.top - view.scrollDOM.getBoundingClientRect().top;
 }
 
-/** Return how far below the top of the view the start of the line at `head` is, as a scroll to it measures it, where it's in view; none where it isn't. */
+/** Return how far below the top of the view the start of the line at `head` is, where it's in view; none where it isn't. */
 function screenOffset(view: EditorView, head: number): number | null {
-    const start = view.coordsAtPos(view.state.doc.lineAt(head).from);
-    const top = start === null ? -1 : start.top - view.scrollDOM.getBoundingClientRect().top;
+    const top = offsetOf(view, head);
     return top >= 0 && top < view.scrollDOM.clientHeight ? top : null;
 }
 
-/** Return where the cursor goes in the comment or message being written at `head` once the text is laid out again: as far into the same one as it was, wherever an item arriving moved it; none where it isn't in one. */
-function writtenAt(before: Laid | null, after: Laid, head: number): number | undefined {
-    const was = before === null ? undefined : blockAt(before, head);
-    if (was === undefined) {
-        return undefined;
+/**
+ * Return where the cursor goes as the review is laid out, where the operator's own act says it (`landing`): into the
+ * comment just opened, onto an item's header, or to a place in the text as it was, carried by the layout's changes
+ * `made`; none where it's to be carried by them alone.
+ */
+function landed(after: Laid, made: ChangeSet, landing: Landing): number | null {
+    if (landing === null) {
+        return null;
     }
-    const now = blocksOf(after).find((each) => each.comment === was.comment);
-    return now === undefined ? undefined : Math.min(now.from + (head - was.from), now.to);
+    if ("at" in landing) {
+        return Math.min(made.mapPos(landing.at), after.text.length);
+    }
+    if ("comment" in landing) {
+        return blocksOf(after).find((each) => each.comment === landing.comment)?.from ?? null;
+    }
+    return after.regions.find((each) => each.item.number === landing.item)?.header.from ?? null;
 }
 
-/**
- * Return where the cursor goes once the text is laid out again: into the comment, onto the item or to the place
- * `landing` names, the place carried by the changes `made` to the text `doc`; else on the same item or drawer, as far
- * into it as it was; at the same place where its item is gone.
- */
-function followed(before: Laid | null, after: Laid, head: number, made: Change[], doc: string, landing: Landing): number {
-    const clamped = Math.min(head, after.text.length);
-    if (landing !== null && "at" in landing) {
-        return moved(landing.at, made, doc);
+/** Return where vim's visual selection is, by its anchor and head as offsets in the text; none outside visual mode. */
+function visualOf(view: EditorView): { anchor: number; head: number } | null {
+    const cm = vimOf(view);
+    const vim = cm?.state.vim;
+    if (cm === null || vim === undefined || !vim.visualMode || vim.sel === undefined) {
+        return null;
     }
-    if (landing !== null && "comment" in landing) {
-        const block = blocksOf(after).find((each) => each.comment === landing.comment);
-        return block?.from ?? clamped;
+    return { anchor: cm.indexFromPos(vim.sel.anchor), head: cm.indexFromPos(vim.sel.head) };
+}
+
+/** Carry vim's visual selection, `was` before the changes `made`, through them, as CodeMirror carries its own: vim keeps it apart, by line and column, and goes on from it at its next key. */
+function revisualized(view: EditorView, was: { anchor: number; head: number } | null, made: ChangeSet): void {
+    const cm = vimOf(view);
+    if (was === null || cm === null || !cm.state.vim.visualMode) {
+        return;
     }
-    if (landing !== null) {
-        return after.regions.find((each) => each.item.number === landing.item)?.header.from ?? clamped;
-    }
-    const was = before === null ? undefined : scopeAt(before, head);
-    const now = was === undefined ? undefined : scopesOf(after).find((each) => each.of === was.of);
-    if (was === undefined || now === undefined) {
-        return clamped;
-    }
-    return Math.max(Math.min(now.header.from + (head - was.header.from), after.text.length), 0);
+    cm.state.vim.sel = { anchor: cm.posFromIndex(made.mapPos(was.anchor)), head: cm.posFromIndex(made.mapPos(was.head)) };
 }
 
 export function Review({
@@ -667,13 +650,17 @@ export function Review({
     pending,
     list,
     reviewed,
-    now,
+    activities,
     parents,
     states,
     overview,
     setOverview,
     order,
     keepOrder,
+    looks,
+    running,
+    remote,
+    load,
 }: Props) {
     // Where the cursor is, and whether a comment is being written: what the header says.
     const [head, setHead] = useState(0);
@@ -684,25 +671,22 @@ export function Review({
     const places = useRef<string[]>([]);
     const toldOrder = useRef<string[] | null>(null);
     const narrow = useNarrow();
-    const arranging = useMemo(() => ({ parents }), [parents]);
+    const arranging = useMemo(() => ({ parents, looks, running, remote }), [parents, looks, running, remote]);
+    // The review as it was last laid out into the editor, which each comment is followed from (`Arranging.previous`).
+    const before = useRef<Laid | null>(null);
     const laidOut = useMemo(
         () =>
             laid(
                 items,
                 agents,
-                (head, later) => `━━ ${banner(head)}${later ? " · later" : ""} ━━`,
-                (item, later) => {
-                    const files = around.files.get(item.number);
-                    const counted = files !== undefined && "shown" in files ? tally(files.shown, firstApproval(item)) : "";
-                    const typing = item.reason.reason === "approval" && item.reason.typing;
+                (head, later, parts) => `━━ ${banner(head)}${parts === "" ? "" : ` · ${parts}`}${later ? " · later" : ""} ━━`,
+                // What the item's kind says of it, then what the core says of how it stands.
+                (item, later, said) => {
                     const told = [
-                        `${cited(item.number)} ${what(item)}${sentTo(item, called)}`,
-                        ...(counted === "" ? [] : [counted]),
-                        ...(typing ? ["reading types"] : []),
+                        `${cited(item.number)} ${said}`,
                         ...((item.edits ?? []).length > 0 ? ["edited"] : []),
                         ...(fresh(item, reviewed) ? ["new"] : []),
                         when(item.made),
-                        waited(item.made, now),
                         ...(later ? ["later"] : []),
                     ];
                     return `── ${told.join(" · ")} ──`;
@@ -712,12 +696,12 @@ export function Review({
                 ordered(places.current, order ?? []),
                 drawers,
                 called,
-                arranging,
+                { ...arranging, previous: before.current },
             ),
-        [items, agents, banner, called, draft, around, drawers, reviewed, now, arranging, order],
+        [items, agents, banner, called, draft, around, drawers, reviewed, arranging, order],
     );
     // The scopes the header stack pins the headers of.
-    const roots = useMemo(() => stickies(laidOut, laidOut.groups.map((each) => each.depth)), [laidOut]);
+    const roots = useMemo(() => stickies(laidOut), [laidOut]);
     const laidFor = useMemo(
         () => ({
             text: laidOut.text,
@@ -758,6 +742,14 @@ export function Review({
             if (drawer !== undefined) {
                 told(drawer.conversation, drawer.kind);
             }
+            // A fold of a module's view's, read from another of its views as it opens.
+            for (const each of laidOut.drawers) {
+                for (const [name, view] of each.loads) {
+                    if (each.folds.some((own) => own.name === name && foldKey(own) === fold.key)) {
+                        load(view);
+                    }
+                }
+            }
             // A call's input and output, read as its fold opens.
             for (const each of laidOut.drawers) {
                 const call = each.talk?.calls.find((shown) => foldKey({ of: each.of, kind: "call", name: shown.fold.key }) === fold.key);
@@ -768,7 +760,6 @@ export function Review({
         },
     });
     const { view, landing, kept } = editor;
-    const before = useRef<Laid | null>(null);
 
     // What follows the view, the header stack and the overview, told as it moves.
     const follower = useMemo(() => new Following(), []);
@@ -787,10 +778,16 @@ export function Review({
         }
         follower.attach(current);
         mapOutlineKey();
-        mapScopeKeys();
         current.dispatch({
             effects: StateEffect.appendConfig.of([
                 gutters.of([]),
+                // Whose each line is, and what arrived, carried through every change (`reconcile.ts`); and what's drawn
+                // beside the text, said again as the time passes (`ticking.ts`).
+                owning,
+                arriving,
+                settling,
+                ticking,
+                clock,
                 // What a scroll is to: the stack pinned over its line is kept clear.
                 EditorView.scrollHandler.of((_, range) => {
                     scrollingTo.current = range.head;
@@ -806,6 +803,11 @@ export function Review({
         // Made once, with the editor.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+    // The keys each kind's letter takes, after `zf`, Space `z` `f` and `]`, as the kinds known change.
+    useEffect(() => {
+        mapLetters(looks.kinds);
+        mapScopeKeys(looks.kinds);
+    }, [looks]);
     // What's laid out now, which a click on a citation, or on the passage of the operator's words it answers, reads.
     const laidNow = useRef(laidOut);
     laidNow.current = laidOut;
@@ -851,12 +853,9 @@ export function Review({
     // What the operator last looked at of each file of a "since you approved" drawer (`lookedAt`): the version shown
     // as the cursor last left it, or as the drawer was first read; none for a file they never looked at, as one that
     // came later or came back once reviewed. And the file the cursor is in, which it's looked at once the cursor leaves.
-    const looked = useRef(new Map<string, ChangedFile>());
+    const looked = useRef(new Map<string, Filed>());
     const firstRead = useRef(new Set<string>());
     const inFile = useRef<{ of: string; path: string } | null>(null);
-    // The file Space `a` marked reviewed, and what its drawer showed then, so the cursor goes onto its line once the
-    // drawer reads it as reviewed.
-    const reviewing = useRef<{ of: string; path: string; files: SinceFile[] } | null>(null);
     const freshOf: Freshness = (scope, file) =>
         isDrawer(scope) && scope.kind === "since" ? freshRows(looked.current.get(lookedAt(scope.of, file.path)) ?? null, file) : null;
 
@@ -889,10 +888,11 @@ export function Review({
             firstRead.current.add(drawer.of);
             for (const each of drawer.files) {
                 const key = lookedAt(drawer.of, each.path);
-                if (each.file == null) {
+                const shownFile = each.file == null ? undefined : drawer.diffs.get(each.path);
+                if (shownFile === undefined) {
                     looked.current.delete(key);
                 } else if (first) {
-                    looked.current.set(key, each.file);
+                    looked.current.set(key, shownFile);
                 }
             }
         }
@@ -908,16 +908,17 @@ export function Review({
         if (was === null || (now !== null && now.of === was.of && now.path === was.path)) {
             return;
         }
-        const standing = laidOut.drawers.find((each) => each.of === was.of)?.files.find((each) => each.path === was.path)?.file;
-        if (standing == null) {
+        const drawerWas = laidOut.drawers.find((each) => each.of === was.of);
+        const standing = drawerWas?.files.find((each) => each.path === was.path)?.file == null ? undefined : drawerWas?.diffs.get(was.path);
+        if (standing === undefined) {
             return;
         }
         looked.current.set(lookedAt(was.of, was.path), standing);
         // Drawn once the cursor's move is done, which this is told of while CodeMirror is still telling it.
         queueMicrotask(() => editor.draw(decorations(laidOut, draft, reviewed, reachesOf, ends)));
     }
-    // What was written as it was last laid out.
-    const wrote = useRef<Written[]>([]);
+    // Which comments each fold held as the review was last laid out, by its key: one that comes to hold another opens.
+    const held = useRef(new Map<string, Set<string>>());
 
     useEffect(() => {
         const current = view.current;
@@ -925,66 +926,92 @@ export function Review({
             return;
         }
         const arriving = landing.current;
-        const doc = current.state.doc.toString();
-        if (doc !== laidOut.text) {
-            // Changed line by line, so what the operator reads stays where it is as items come and go
-            // above it: the cursor moves with its text, and the view only follows a landing of their own.
-            const head = current.state.selection.main.head;
-            const made = changes(doc, laidOut.text);
-            // A comment being written keeps the cursor, as far into it as it was, wherever what arrived moved it;
-            // one just opened takes it, though vim moved it into another under the same line, as `S` does.
-            const writing = arriving === null && editor.writing() ? writtenAt(before.current, laidOut, head) : undefined;
-            // What it was on gone, as a reply sent takes what it covered, it goes back to what that was about.
-            const away =
-                arriving === null && writing === undefined && before.current !== null
-                    ? stranded(before.current, wrote.current, laidOut, written(draft), head)
-                    : undefined;
-            const onReviewed = arriving === null && writing === undefined ? reviewedLine(laidOut) : undefined;
-            const anchor =
-                writing ??
-                away ??
-                onReviewed ??
-                (arriving === null ? moved(head, made, doc) : followed(before.current, laidOut, head, made, doc, arriving));
-            const landed = arriving !== null || away !== undefined;
-            // Where the cursor's line is on screen, where it's in view: kept there, whatever arrives above it.
-            const onScreen = landed ? null : screenOffset(current, head);
-            const closed = laidFor.folds.filter((each) => closedAs(each, kept.current));
-            // Where the view is, anchored to the text at its top and mapped through the changes.
-            const changing = current.state.changes(made);
-            const scrolled = current.scrollSnapshot().map(changing);
-            // What's written in Markdown goes with the text, which is read by it in this transaction.
-            current.dispatch({
-                changes: changing,
-                selection: { anchor: uncovered(closed, anchor) },
-                scrollIntoView: landed,
-                annotations: rebuilt.of(true),
-                effects: sourced.of(laidFor.sources),
+        const state = current.state;
+        const head = state.selection.main.head;
+        // Where the cursor's line is on screen, where it's in view: kept there, whatever arrives above it.
+        const onScreen = arriving === null ? screenOffset(current, head) : null;
+        // The layout made from what's in the editor by the fewest changes that keep each part's lines its own, the
+        // comment the cursor is in kept before anything else, then every other comment.
+        const runs = state.field(owning);
+        const writingIn = runs.find((each) => each.owner.startsWith("written ") && head >= each.from && head <= each.to)?.owner;
+        const weight = (owner: string) => (owner === writingIn ? 1e9 : owner.startsWith("written ") ? 1e6 : 1);
+        // Nothing to change where the editor holds the text already, as at each key typed in a comment.
+        const same = state.doc.length === laidOut.text.length && state.sliceDoc() === laidOut.text;
+        const made = same ? { changes: [], arrived: [] } : reconcile(state.doc, ownersOf(state.doc, runs), laidOut.text, laidOut.owners, weight);
+        const changing = state.changes(made.changes);
+        const visual = visualOf(current);
+        const anchor = landed(laidOut, changing, arriving);
+        // What's written in Markdown goes with the text, which is read by it in this transaction; and whose each line
+        // is; and, but as the review is first laid out, what arrived flashes.
+        current.dispatch({
+            changes: changing,
+            selection: anchor === null ? undefined : { anchor },
+            scrollIntoView: anchor !== null,
+            annotations: rebuilt.of(true),
+            effects: [sourced.of(laidFor.sources), owned.of(laidOut.runs), ...(before.current === null ? [] : [arrivedLines.of(made.arrived)])],
+        });
+        if (current.state.doc.length !== laidOut.text.length || current.state.sliceDoc() !== laidOut.text) {
+            // The changes always make the text laid out; were they ever not to, it's laid out whole, and said.
+            console.error("lup: the review's changes didn't make its layout; laid out whole");
+            current.dispatch({ changes: { from: 0, to: current.state.doc.length, insert: laidOut.text }, annotations: rebuilt.of(true), effects: owned.of(laidOut.runs) });
+        }
+        revisualized(current, visual, changing);
+        // A fold never closes over the operator's words: one coming to hold a comment it didn't, or holding the one
+        // being written, opens, as the operator would open it to write there.
+        const at = current.state.selection.main.head;
+        const writing = blocksOf(laidOut).find((each) => at >= each.from && at <= each.to)?.comment;
+        const holding = new Map<string, Set<string>>();
+        for (const block of blocksOf(laidOut)) {
+            for (const fold of laidFor.folds) {
+                if (block.from > fold.from && block.from <= fold.to) {
+                    holding.set(fold.key, (holding.get(fold.key) ?? new Set()).add(block.comment));
+                }
+            }
+        }
+        for (const fold of laidFor.folds) {
+            const holds = holding.get(fold.key);
+            const was = held.current.get(fold.key);
+            const came = holds !== undefined && [...holds].some((each) => each === writing || was === undefined || !was.has(each));
+            if (came && closedAs(fold, kept.current)) {
+                kept.current.set(fold.key, false);
+            }
+        }
+        held.current = holding;
+        refold(current, laidFor.folds, kept.current);
+        // Where a fold closed over the cursor, as an item marked read folds, it goes to the fold's summary line.
+        const closed = laidFor.folds.filter((each) => isFolded(current.state, each));
+        const seen = uncovered(closed, current.state.selection.main.head);
+        if (seen !== current.state.selection.main.head) {
+            current.dispatch({ selection: { anchor: seen }, annotations: rebuilt.of(true) });
+        }
+        // A comment opened where a closed fold hides it opens the folds over it, as a jump does, saying so, so the
+        // cursor goes into it.
+        const opens = anchor !== null && arriving !== null && "comment" in arriving ? reaching(current.state, anchor) : [];
+        if (anchor !== null && opens.length > 0) {
+            current.dispatch({ effects: opens, selection: { anchor }, scrollIntoView: true, annotations: reached.of(opens.length) });
+        }
+        // The cursor's line kept where it was on screen, once the heights of what changed above it are measured: the
+        // view's own scroll, written as it's measured rather than asked as a scroll, which a key in the same frame
+        // would replace.
+        if (onScreen !== null) {
+            const kept = current.state.selection.main.head;
+            current.requestMeasure({
+                key: "lup-keep-cursor",
+                read: (measured) => offsetOf(measured, kept),
+                write: (offset, measured) => {
+                    if (Math.abs(offset - onScreen) > 1) {
+                        measured.scrollDOM.scrollTop += offset - onScreen;
+                    }
+                },
             });
-            refold(current, laidFor.folds, kept.current);
-            // A comment opened where a closed fold hides it, as on the header of an item marked read, opens the folds
-            // over it, as a jump does, saying so, so the cursor goes into it.
-            const opens = arriving !== null && "comment" in arriving ? reaching(current.state, anchor) : [];
-            if (opens.length > 0) {
-                current.dispatch({ effects: opens, selection: { anchor }, scrollIntoView: true, annotations: reached.of(opens.length) });
-            }
-            // Restored after the folds, whose heights it takes in: the cursor's line where it was on screen, or, where
-            // it was out of view, the text at the view's top. Either keeps a comment being written where it is on
-            // screen too, as only what arrives above moves it; a scroll to the cursor after it would replace it, since
-            // CodeMirror keeps the last scroll asked of it alone.
-            if (onScreen !== null) {
-                const line = current.state.doc.lineAt(current.state.selection.main.head).from;
-                // Where the stack is on, a scroll keeps clear what it pins over the line, which it takes off here.
-                current.dispatch({ effects: EditorView.scrollIntoView(line, { y: "start", yMargin: onScreen - over.current(current.state.selection.main.head) }) });
-            } else if (!landed && scrolled !== undefined) {
-                current.dispatch({ effects: scrolled });
-            }
-        } else {
-            // What folds can change with the text the same, as an item marked read folds.
-            refold(current, laidFor.folds, kept.current);
         }
         read(laidOut);
         before.current = laidOut;
-        wrote.current = written(draft);
+        // What was drafted before it was anchored to its block, or had an id, is taken into the draft as it's laid out
+        // now, once, as no step `u` undoes.
+        if (laidOut.converted !== null) {
+            editor.rewrite(withWritten(editor.latest.current, laidOut.converted));
+        }
         // The host keeps where the groups go, once the page has what the review is laid out from: what's laid out,
         // and what's gone from it since the page last told it, the host's places it doesn't lay out the first time.
         if (order !== null) {
@@ -1007,6 +1034,34 @@ export function Review({
             editor.enter();
         }
     }, [laidOut, draft, reviewed]);
+
+    // What's drawn beside the text, as it's laid out now and as each agent is doing: how long each item has waited,
+    // after when it came; what each agent is doing and for how long, after the core's words on its banner; and each
+    // span of a view's that ticks or measures, where it goes. Said again by the clock, not laid out.
+    useEffect(() => {
+        const current = view.current;
+        if (current === null) {
+            return;
+        }
+        const ticks: Tick[] = [
+            ...laidOut.drawn.map((each) => ({ at: each.at, said: (at: Date) => spanSaid(each.span, at), look: each.span.gauge != null ? "drawn-gauge" : "drawn-ticking" })),
+            ...laidOut.regions.map((region) => {
+                const line = laidOut.text.slice(region.header.from, region.header.to);
+                const came = when(region.item.made);
+                const at = line.indexOf(came);
+                return { at: region.header.from + (at < 0 ? line.length : at + came.length), said: (now: Date) => ` · ${waited(region.item.made, now)}`, look: "drawn-wait" };
+            }),
+            ...laidOut.groups.flatMap((group) => {
+                const key = group.conversation === null ? null : whose(group.conversation);
+                if (key === null || !activities.has(key)) {
+                    return [];
+                }
+                const activity = activities.get(key) ?? null;
+                return [{ at: group.banner.from + "━━ ".length + banner(group.head).length, said: (now: Date) => ` · ${doing(activity, now)}`, look: "drawn-doing" }];
+            }),
+        ];
+        current.dispatch({ effects: ticked.of(ticks) });
+    }, [laidOut, activities, banner, view]);
 
     // Asked to go to an agent's group, as from the palette: onto its banner.
     const jumped = useRef<number>(0);
@@ -1093,31 +1148,6 @@ export function Review({
         }
     }
 
-    /**
-     * Return where the cursor goes once the file Space `a` marked reviewed is, as its drawer is read anew and shows it
-     * so: onto what's left after it, the next file to review or one with flagged writes waiting, else the line its
-     * settled files fold under, where it went; none else, or before.
-     */
-    function reviewedLine(laid: Laid): number | undefined {
-        const asked = reviewing.current;
-        const drawer = asked === null ? undefined : laid.drawers.find((each) => each.of === asked.of);
-        if (asked === null || drawer === undefined || drawer.files === asked.files) {
-            return undefined;
-        }
-        reviewing.current = null;
-        const settled = drawer.settled?.from ?? Infinity;
-        const at = (file: SinceFile): number | undefined =>
-            drawer.filed.find((each) => each.file === file.file)?.from ?? drawer.reviewed.find((each) => each.file === file && each.from < settled)?.from;
-        const after = drawer.files.slice(drawer.files.findIndex((each) => each.path === asked.path) + 1);
-        for (const file of after) {
-            const found = at(file);
-            if (found !== undefined) {
-                return found;
-            }
-        }
-        return drawer.settled?.from ?? drawer.header.from;
-    }
-
     /** Return the "since you approved" drawer the cursor is in, where it's in one. */
     function sinceHere(): Drawer | undefined {
         const drawer = drawerAt(laidOut, editor.head());
@@ -1157,7 +1187,6 @@ export function Review({
      */
     const labelOf = (kind: FoldKind | Sticky["kind"], from: number): Labelled | null => {
         const plain = (text: string): Labelled => ({ text, state: null, draft: null, fresh: false });
-        const header = laidOut.text.slice(from, laidOut.text.indexOf("\n", from));
         switch (kind) {
             case "group": {
                 const group = laidOut.groups.find((each) => each.banner.from === from);
@@ -1183,26 +1212,27 @@ export function Review({
                     fresh: standing.fresh,
                 };
             }
-            case "drawer":
-            case "tasks":
-            case "since":
-            case "conversation": {
+            case "drawer": {
+                // A drawer by its view's name, the conversation's shorter, marked where it holds what waits on the operator, as its view says.
                 const drawer = laidOut.drawers.find((each) => each.header.from === from);
-                const which = drawer?.kind ?? "since";
-                const waiting = which === "since" && / to review| flagged/.test(header);
-                return { ...plain(which === "conversation" ? "talk" : which), state: waiting ? { glyph: "◇", mark: "to-review" } : null };
+                const which = drawer?.kind ?? "";
+                return { ...plain(which === "conversation" ? "talk" : which), state: drawer?.waiting === true ? { glyph: "◇", mark: "to-review" } : null };
             }
             case "file": {
-                const path = header.split(" · ")[0] ?? "";
+                // A file by its name, flagged where a line in it matters, folded where its view folds it whole, else to review.
                 const scope = scopeAt(laidOut, from);
                 const filed = scope?.filed.find((each) => each.from === from);
-                const matters = filed !== undefined && scope !== undefined && scope.stops.some((each) => each >= filed.from && each <= filed.to);
-                const automatic = /· (automatic|test|data|first approval)/.test(header);
-                const state = matters ? { glyph: "⚑", mark: "flagged" } : automatic ? { glyph: "·", mark: "folded" } : { glyph: "◇", mark: "to-review" };
+                if (filed === undefined || scope === undefined) {
+                    return null;
+                }
+                const path = filed.file.path;
+                const matters = scope.stops.some((each) => each >= filed.from && each <= filed.to);
+                const folded = !(filed.file.open ?? true);
+                const state = matters ? { glyph: "⚑", mark: "flagged" } : folded ? { glyph: "·", mark: "folded" } : { glyph: "◇", mark: "to-review" };
                 return { ...plain(path.split("/").at(-1) ?? path), state };
             }
             default:
-                return null;
+                return kindOf(kind)?.drawer === true ? labelOf("drawer", from) : null;
         }
     };
     /** Go to the next or previous scope of `kind`, as `]` or `[` and its letter does: onto its header, a closed fold hiding it counting as its summary line, brought into view where it isn't (`bring`). */
@@ -1241,7 +1271,7 @@ export function Review({
     const structured = useRef<Structured>({ folds: [], label: () => null, jump: jumpTo, toggle: () => undefined });
     structured.current = {
         folds: laidFor.folds,
-        label: (fold) => (fold.kind !== undefined && SCOPES.has(fold.kind) ? labelOf(fold.kind, fold.summary.from) : null),
+        label: (fold) => (fold.kind !== undefined && fold.scope === true ? labelOf(fold.kind, fold.summary.from) : null),
         jump: jumpTo,
         toggle: (fold) => {
             const current = view.current;
@@ -1261,7 +1291,7 @@ export function Review({
                 return opened(laidOut, position);
             }
             const region = regionAt(laidOut, position);
-            return region === undefined ? undefined : { item: region.item.number, quote: null, text: "" };
+            return region === undefined ? undefined : { id: "", item: region.item.number, quote: null, text: "" };
         },
         opened: (position) => opened(laidOut, position),
         quoted: (from, to) => quoted(laidOut, from, to),
@@ -1291,7 +1321,7 @@ export function Review({
             const walked = scopesOf(laidOut).filter(
                 (scope) =>
                     !laidFor.folds.some(
-                        (fold) => fold.of === scope.of && FOLD_KINDS.some((each) => each.kind === fold.kind && each.own) && isFolded(current.state, fold),
+                        (fold) => fold.of === scope.of && kindOf(fold.kind)?.whole === true && isFolded(current.state, fold),
                     ),
             );
             const target = stepped(
@@ -1356,46 +1386,53 @@ export function Review({
             const effects = reaching(current.state, target);
             current.dispatch({ selection: { anchor: target }, effects, scrollIntoView: true, annotations: reached.of(effects.length) });
         },
+        // Space a and Space x do what the block under the cursor offers for done and decline, the innermost: a file's
+        // line or its reviewed line in "since you approved", an item's kind's view of it anywhere in the item.
         approve: (approved) => {
+            const verb = approved ? "done" : "decline";
             const drawer = sinceHere();
             if (drawer !== undefined) {
                 const file = sinceFileAt(drawer, editor.head());
+                const offer = file === undefined ? undefined : offeredOf(viewBlockAt(laidOut, editor.head())?.block?.offers ?? [], verb);
                 if (file === undefined) {
                     say("Space a marks a file reviewed: put the cursor on one of its lines.");
-                } else if (!approved) {
+                } else if (offer === undefined) {
                     say("A file is marked reviewed or commented on, never declined.");
                 } else {
-                    reviewing.current = { of: drawer.of, path: file.path, files: drawer.files };
-                    reviewSince(drawer.conversation, [viewed(file)]);
+                    act(offer, drawer.conversation);
                 }
                 return;
             }
             const region = here();
-            if (region === undefined) {
-                return;
-            }
-            if (answering(region.item).kind === "answer") {
-                approve(region.item.number, approved);
+            const offer = region === undefined ? undefined : offeredOf(region.body.answer?.blocks.offers ?? [], verb);
+            if (region !== undefined && offer !== undefined) {
+                act(offer, region.item.sender.party === "conversation" ? region.item.sender : null);
             }
         },
+        // Space A does what the drawer under the cursor offers for done as a whole: every file it shows marked reviewed.
         approveAll: () => {
             const drawer = sinceHere();
             if (drawer === undefined) {
                 say('Space A marks every file of a "since you approved" drawer reviewed: put the cursor in one.');
                 return;
             }
-            if (drawer.files.length === 0) {
+            const offer = offeredOf(drawer.view.answer?.blocks.offers ?? [], "done");
+            if (drawer.files.length === 0 || offer === undefined) {
                 say("Nothing in this drawer to mark reviewed.");
                 return;
             }
-            reviewSince(drawer.conversation, drawer.files.map(viewed));
+            act(offer, drawer.conversation);
         },
+        // `h` on a banner does what a part of it offers for hold.
         hold: () => {
             const group = groupAt(laidOut, editor.head());
             if (group === undefined || group.conversation === null) {
                 return false;
             }
-            hold(group.conversation);
+            const offer = group.parts.flatMap((each) => each.answer?.blocks.offers ?? []).find((each) => each.verb === "hold");
+            if (offer !== undefined) {
+                act(offer, group.conversation);
+            }
             return true;
         },
         send,
@@ -1416,6 +1453,30 @@ export function Review({
         },
     });
 
+    /**
+     * Do what `offer` offers at once, on what's of `conversation`: until each view's actions are its module's (#247),
+     * each the request it names, as the page sent it before: an approval or a held change answered, the files of
+     * "since you approved" marked reviewed, an agent's flagged writes held.
+     */
+    function act(offer: Offer, conversation: Conversation | null) {
+        const argument = offer.argument as Record<string, unknown>;
+        switch (offer.action) {
+            case "inbox-answer-approval":
+                approve(argument["number"] as number, argument["approved"] as boolean);
+                return;
+            case "policy-review-since":
+                reviewSince(argument["conversation"] as Conversation, argument["files"] as Viewed[]);
+                return;
+            case "set-holding":
+                if (conversation !== null) {
+                    hold(conversation);
+                }
+                return;
+            default:
+                say(`Nothing here does ${offer.says} yet.`);
+        }
+    }
+
     /** Return the folds of the item or the drawer `position` is in, as the editor holds them: those the fold keys reach. */
     function scopeFolds(position: number): Folding[] {
         const keys = new Set(foldsOf(laidOut, position).map(foldKey));
@@ -1427,11 +1488,16 @@ export function Review({
     const focusing = useCallback((focus: (() => void) | null) => setOutlineFocus(focus), []);
 
     const naming = {
-        group: (group: Group) => banner(group.head),
-        item: (region: Region) => itemNamed(laidOut.text.slice(region.header.from, region.header.to)),
+        // A group by its banner's words, the core's and each part's, as its banner says them.
+        group: (group: Group) =>
+            [banner(group.head), ...group.parts.flatMap((each) => {
+                const words = (each.answer?.blocks.summary ?? []).map((span) => span.text).join("");
+                return words === "" ? [] : [words];
+            })].join(" · "),
+        item: (region: Region) => region.named,
         party: called,
     };
-    const where = <Heading parts={heading(laidOut, Math.min(head, laidOut.text.length), commenting, written(draft), naming)} tally={tallied(items, draft, reviewed)} />;
+    const where = <Heading parts={heading(laidOut, Math.min(head, laidOut.text.length), commenting, laidOut.written, naming)} tally={tallied(items, draft, reviewed)} />;
     // Each header pinned is drawn as the buffer draws its line.
     const classesOf = (sticky: Sticky): string => {
         switch (sticky.kind) {
@@ -1462,7 +1528,7 @@ export function Review({
     };
     // Each pinned header's fold, its letter in its column and its label, as the margin has them.
     const pinnedFolds = useMemo(() => {
-        const kinded = laidFor.folds.filter((each) => each.kind !== undefined && SCOPES.has(each.kind));
+        const kinded = laidFor.folds.filter((each) => each.kind !== undefined && each.scope === true);
         const deep = depths(laidFor.folds.filter((each) => each.kind !== undefined));
         return new Map(kinded.map((each) => [each.summary.from, { fold: each, depth: deep.get(each) ?? 0 }]));
     }, [laidFor.folds]);
@@ -1472,7 +1538,7 @@ export function Review({
         if (found === undefined || kind === undefined) {
             return null;
         }
-        const letter = FOLD_KINDS.find((each) => each.kind === kind)?.letter ?? "";
+        const letter = kindOf(kind)?.letter ?? "";
         return { kind, letter, depth: found.depth, label: narrow ? null : labelOf(kind, sticky.header.from) };
     };
     // What settles what a pinned header heads, so the operator knows what would validate the file they're in.

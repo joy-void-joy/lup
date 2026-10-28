@@ -1,3 +1,4 @@
+import "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
 import type { Folding } from "./comments";
