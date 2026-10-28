@@ -108,6 +108,7 @@ from lup_dev.declaration.load import (
     read_by_import,
 )
 from lup_dev.declaration.project import Project
+from lup_dev.declaration.requirements import Machine, Tools, check
 from lup_dev.declaration.resolve import Declaration, resolve
 from lup_dev.errors import LupDevError
 from lup_dev.gate import invoked
@@ -897,7 +898,7 @@ def building(resolved: Resolved) -> list[Step]:
     return steps
 
 
-class UvToolchain(Model, Toolchain):
+class UvToolchain(Model, Toolchain, arbitrary_types_allowed=True):
     """uv: the engine built as the gate builds it, and each copy installed as a uv tool.
 
     Each of the repository's copies is a uv tool of its own, in its own
@@ -906,6 +907,9 @@ class UvToolchain(Model, Toolchain):
     """
 
     executable: str = "uv"
+    tools: Tools = Field(default_factory=Machine)
+    """Where the declaration's requirements are looked for before its builds
+    run: the host's programs."""
 
     @override
     def install(
@@ -951,9 +955,14 @@ class UvToolchain(Model, Toolchain):
 
         The steps are read from the tree's declaration and run through its runner,
         unless they say not, so the gate and trust build the engine, and the
-        dashboard's page, one way.
+        dashboard's page, one way. The declaration's requirements are checked
+        first, as the gate checks them, since this is where its builds run on
+        the host, where no gate runs: lup's own needs Node, uv, and pnpm 11 or
+        later, which installs the engine's and the page's packages. A required
+        one missing raises `RequirementError`, naming each, before any runs.
         """
         resolved = resolve(load(tree).project)
+        check(resolved.requirements, self.tools).require()
         for step in building(resolved):
             program, *arguments = invoked(step, resolved.runner)
             run(program, *arguments, cwd=tree, shown=True)

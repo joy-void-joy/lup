@@ -14,7 +14,7 @@ import threading
 from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
 from rich.text import Text
@@ -27,6 +27,11 @@ from lup_dev.codescan.contract import Checker, FileReport, Parser, Rule, Source
 from lup_dev.codescan.engine import EngineError
 from lup_dev.copies import Copies
 from lup_dev.declaration.load import load
+from lup_dev.declaration.requirements import (
+    Printed,
+    RequirementError,
+    Tools,
+)
 from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import Detached, HostClient, Starter
 from lup_dev.host.protocol import HostError, Register, Stop
@@ -1757,6 +1762,21 @@ def fake_uv(tmp_path: Path) -> tuple[Path, Path]:
     return fake, log
 
 
+class Host(Tools):
+    """The host's programs, as a test has them: each one listed, at the version given."""
+
+    def __init__(self, versions: dict[str, str]) -> None:
+        self.versions = versions
+
+    @override
+    def found(self, program: str) -> bool:
+        return program in self.versions
+
+    @override
+    def run(self, command: list[str]) -> Printed:
+        return Printed(code=0, output=self.versions[command[0]] + "\n")
+
+
 @pytest.mark.parametrize(
     ("inside", "built"), [(True, "marking"), (False, "as written")]
 )
@@ -1791,7 +1811,10 @@ def test_uv_builds_and_installs_the_commits_copy_held_to_its_lock(
         beside=[Path("packages/lup-dashboard")],
     )
     copy = CopyLayout(home=tmp_path / "judges" / "lup" / "copies" / "a1")
-    UvToolchain(executable=str(fake)).install(tool, lup, head, copy, users=True)
+    host = Host({"node": "26.7.0", "uv": "0.12.5"})
+    UvToolchain(executable=str(fake), tools=host).install(
+        tool, lup, head, copy, users=True
+    )
     how, _, source = mark.read_text().partition(": ")
     ran, _, where = how.partition(" in ")
     assert ran == built
@@ -1813,6 +1836,66 @@ def test_uv_builds_and_installs_the_commits_copy_held_to_its_lock(
         f"--with {where}/packages/lup-dashboard {where}/packages/lup-dev"
     )
     assert constraints == again == "pydantic==2.12.0"
+
+
+REQUIRING = BUILDING.replace(
+    """    name = "building"
+""",
+    """    name = "building"
+    requirements = [
+        Requirement(
+            tool="pnpm",
+            version=">=11",
+            probe=["pnpm", "--version"],
+            why="installs the engine's packages",
+            install="https://pnpm.io/installation",
+        )
+    ]
+""",
+).replace("Project, Python,", "Project, Python, Requirement,")
+"""The declaration building the engine, its module requiring pnpm 11 or later."""
+
+
+@pytest.mark.parametrize(
+    "versions",
+    [
+        pytest.param({"node": "26.7.0"}, id="missing"),
+        pytest.param({"node": "26.7.0", "pnpm": "10.33.0"}, id="too-old"),
+    ],
+)
+def test_uv_builds_nothing_where_the_host_lacks_what_the_declaration_requires(
+    lup: Path,
+    tmp_path: Path,
+    shell: Shell,
+    monkeypatch: pytest.MonkeyPatch,
+    versions: dict[str, str],
+) -> None:
+    command = [sys.executable, "packages/lup-dev/checker/build.py"]
+    head = changed(
+        lup,
+        {
+            "packages/lup-dev/checker/build.py": MARKED,
+            "lup_project.py": REQUIRING.format(command=command, inside=True),
+        },
+        shell,
+    )
+    mark = tmp_path / "mark"
+    monkeypatch.setenv("LUP_MARK", str(mark))
+    fake, log = fake_uv(tmp_path)
+    tool = WorkspaceTool(
+        name="lup-dev",
+        package=Path("packages/lup-dev"),
+        members=[Path("packages/lup-dev"), Path("packages/lup")],
+    )
+    copy = CopyLayout(home=tmp_path / "judges" / "lup" / "copies" / "a1")
+    toolchain = UvToolchain(executable=str(fake), tools=Host(versions))
+    with pytest.raises(
+        RequirementError,
+        match=r"`pnpm`, for `building` \(installs the engine's packages\)",
+    ):
+        toolchain.install(tool, lup, head, copy, users=False)
+    assert not mark.exists()
+    assert not log.exists()
 
 
 def test_uv_installs_a_release_from_its_index_held_to_its_pins(
