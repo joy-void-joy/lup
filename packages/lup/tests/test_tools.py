@@ -264,7 +264,7 @@ def test_frictions_and_how_it_felt_are_kept_as_written_and_end_nothing() -> None
     labelled = asyncio.run(toolbox.call("friction", {"got_in_the_way": "No city."}))
     empty = asyncio.run(toolbox.call("how_it_felt", {}))
     assert not taken.error
-    assert "Carry on" in taken.text
+    assert "You can carry on." in taken.text
     assert labelled.error
     assert empty.error
     assert "text" in empty.text

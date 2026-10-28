@@ -38,7 +38,7 @@ class Rejection(Model):
 
 
 class Friction(Model):
-    """What got in the agent's way, at the moment it did, in its own words."""
+    """What got in your way, at the moment it did, in your own words."""
 
     text: str = Field(description="In your own words.")
 

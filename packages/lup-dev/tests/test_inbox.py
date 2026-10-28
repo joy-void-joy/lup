@@ -577,7 +577,7 @@ def context(answer: str) -> str:
     """What a hook's answer tells the model beside its call or its start, the line naming a session at its start left out."""
     told = json.loads(answer)["hookSpecificOutput"]["additionalContext"]
     assert isinstance(told, str)
-    if not told.startswith("lup: this session is"):
+    if "sessions call you. Once you know" not in told.partition("\n\n")[0]:
         return told
     return told.partition("\n\n")[2]
 
@@ -614,7 +614,7 @@ def test_an_item_is_told_at_the_conversations_next_call_and_never_again(
         hook = machine.host.launch("one").hook
         started = json.loads(send(hook, claude("SessionStart", source="startup")))
         assert started["hookSpecificOutput"]["additionalContext"].startswith(
-            "lup: this session is `"
+            "lup: you're `"
         )
         assert inbox("send", "one", "Look at the cache.") == (
             f"Sent @1 to `{tmp_path.name}`, claude session s1.\n"
@@ -1776,10 +1776,10 @@ def test_blocked_note_and_send_reach_the_operator_a_note_raising_no_notice(
         invalid = call(mcp, "send", {"to": "operator", "kind": "memo", "text": "x"})
         listed = inbox()
     assert reported == (
-        "Your problem is with the operator, @1. End your turn.",
+        "Your problem is with the operator, @1, and they're notified. You can end your turn now.",
         False,
     )
-    assert noted == ("Your note is with the operator, @2. Carry on.", False)
+    assert noted == ("Your note is with the operator, @2. You can carry on.", False)
     assert sent == ("Your message is with the operator, @3.", False)
     assert unknown == (
         (
@@ -1898,12 +1898,12 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
     # Each subagent has a parent, its session's own conversation, which gets a
     # copy of its friction (@2) and of how it felt (@7).
     assert [text for text, _ in answers] == [
-        "Your friction is with the operator, @1 and your parent. Carry on.",
-        "How it felt is with the operator, @3.",
-        "Your stop is with the operator, @4. End your turn.",
-        "Your friction is with the operator, @5. Carry on.",
-        "How it felt is with the operator, @6 and your parent.",
-        "Your stop is with the operator, @8. End your turn.",
+        "Thanks: your friction is with the operator, @1, and your parent has it too. You can carry on.",
+        "Thank you for telling them. The operator will read it as you wrote it, @3.",
+        "The operator will read why you stopped, @4. You can end your turn now.",
+        "Thanks: your friction is with the operator, @5. You can carry on.",
+        "Thank you for telling them. The operator will read it as you wrote it, @6, and your parent has it too.",
+        "The operator will read why you stopped, @8. You can end your turn now.",
     ]
     assert not any(error for _, error in answers)
     # The parts a friction once had are refused: it's one text.
@@ -2029,7 +2029,7 @@ def test_each_command_takes_an_items_number_cited_or_bare(
         answered = inbox("answer", "@2", "--comment", "Yes.")
         done = inbox("done", "@3")
         hashed = runner.invoke(cli.app, ["inbox", "show", "#1"])
-    assert noted == ("Your note is with the operator, @1. Carry on.", False)
+    assert noted == ("Your note is with the operator, @1. You can carry on.", False)
     assert shown.startswith(f"@1, a note from claude session s1 in {tmp_path}")
     assert answered == "Answered @2: your answer, @4, is for claude session s1.\n"
     assert done == "@3 is done.\n"
@@ -2091,10 +2091,8 @@ def named_at_start(answer: str) -> tuple[str, str]:
     """The name a session's start told it, and the title it gave the runtime."""
     said = json.loads(answer)["hookSpecificOutput"]
     told = said["additionalContext"]
-    assert told.startswith("lup: this session is `")
-    return told.removeprefix("lup: this session is `").partition("`")[0], said[
-        "sessionTitle"
-    ]
+    assert told.startswith("lup: you're `")
+    return told.removeprefix("lup: you're `").partition("`")[0], said["sessionTitle"]
 
 
 def test_a_session_renames_itself_and_a_name_another_holds_is_refused(
@@ -2112,7 +2110,7 @@ def test_a_session_renames_itself_and_a_name_another_holds_is_refused(
         listed = HostClient(
             layout=machine.host, clock=clock, starter=Unstarted()
         ).listed()
-    assert renamed == ("This session is `gate-on-push`.", False)
+    assert renamed == ("You're `gate-on-push` now.", False)
     assert taken[0] == (
         f"Not renamed: `gate-on-push` is launch one's, claude in {tmp_path / 'a'}: "
         "pick another name"
@@ -2238,8 +2236,8 @@ def test_an_operators_rename_in_the_runtime_is_taken_at_the_next_prompt(
         ).listed()
     assert given(renamed) == "naming-review"
     assert context(renamed) == (
-        "lup: the operator renamed this session `naming-review`: how they, lup's "
-        "commands and other sessions call it from now on. Keep the name they gave."
+        "lup: the operator renamed you `naming-review`: how they, lup's commands "
+        "and other sessions call you from now on. Keep the name they gave."
     )
     assert then == ""
     assert {each.launch: each.name for each in listed.launches} == {
@@ -2334,7 +2332,7 @@ def test_an_operator_naming_the_session_back_after_a_rename_through_lup_is_taken
         ).listed()
     assert given(renamed) == "parser-work"
     assert given(back) is None
-    assert context(back).startswith("lup: the operator renamed this session `a`")
+    assert context(back).startswith("lup: the operator renamed you `a`")
     assert listed.sessions == {"s1": "a"}
 
 
@@ -2376,11 +2374,11 @@ def introduction() -> str:
         *Naming.model_construct().specs(),
     ]
     opening = (
-        "lup, the environment this session runs in, serves its subagents these "
-        "tools, as it does its main conversation. Your tool search finds each "
-        "by its name, with its full description. Some subagent types are given "
-        "only their own tools, without lup's: where your tool search finds none "
-        "of these, this subagent is one of them."
+        "lup, the environment you work in, serves you these tools, as it does "
+        "your session's main conversation. Your tool search finds each by its "
+        "name, with its full description. Some subagent types are given only "
+        "their own tools, without lup's: where your tool search finds none of "
+        "these, you're one of them."
     )
     direct = (
         "`friction` and `how_it_felt` reach the operator directly, whatever your "
@@ -2550,10 +2548,9 @@ def test_a_subagent_is_shown_under_the_conversation_that_spawned_it_nested_ones_
     assert context(first) == introduction()
     assert nested == ""
     assert asked.startswith(
-        f"{introduction()}\n\n"
-        "lup: this subagent is `w/explore-auth/general-purpose·a2` for now"
+        f"{introduction()}\n\nlup: you're `w/explore-auth/general-purpose·a2` for now"
     )
-    assert renamed[0].startswith("This subagent is `w/explore-auth/grep-tokens`")
+    assert renamed[0].startswith("You're `w/explore-auth/grep-tokens`")
     assert shown == [
         ("w", None, 0),
         ("w/explore-auth", "w", 1),
@@ -2633,10 +2630,10 @@ def test_a_subagent_spawned_without_a_name_is_asked_to_name_itself_its_parent_ne
     assert spawns == ["", ""]
     assert asked.startswith(
         f"{introduction()}\n\n"
-        "lup: this subagent is `w/Explore·a1` for now, with no name of its own"
+        "lup: you're `w/Explore·a1` for now, with no name of your own"
     )
     assert before[1] == ("w/Explore·a1", "w", 1)
-    assert renamed[0].startswith("This subagent is `w/parser` to lup and the operator.")
+    assert renamed[0].startswith("You're `w/parser` to lup and the operator now.")
     assert held[0] == "Not renamed: `parser` is `w/parser`'s: pick another name"
     assert [each[0] for each in after] == ["w", "w/parser", "w/Explore·a2"]
     assert [each.name for each in launches] == ["w"]
@@ -2873,9 +2870,9 @@ def test_a_claude_fork_and_a_codex_subagent_read_the_guidance_and_are_told_nothi
         forked = context(send(hook, records.call("f1", "fork", "c2")))
         codex_told = context(send(hook2, codex_bash("d1", "b1")))
     assert told == introduction()
-    assert forked.startswith("lup: this subagent is `w/fork·f1` for now")
+    assert forked.startswith("lup: you're `w/fork·f1` for now")
     assert introduction() not in forked
-    assert codex_told.startswith("lup: this subagent is `other/subagent·b1` for now")
+    assert codex_told.startswith("lup: you're `other/subagent·b1` for now")
     assert introduction() not in codex_told
 
 
@@ -3178,10 +3175,13 @@ def test_a_subagents_friction_and_how_it_felt_reach_its_parent_whole_on_each_run
     friction = Friction.model_validate(jammed)
     how_it_felt = HowItFelt.model_validate(went)
     assert jam == (
-        "Your friction is with the operator, @1 and your parent. Carry on.",
+        "Thanks: your friction is with the operator, @1, and your parent has it too. You can carry on.",
         False,
     )
-    assert how == ("How it felt is with the operator, @3 and your parent.", False)
+    assert how == (
+        "Thank you for telling them. The operator will read it as you wrote it, @3, and your parent has it too.",
+        False,
+    )
     assert ended == ""
     assert told.startswith(
         '<item item="2" from="subagent a1 of claude session s1" name="parser" '
@@ -7623,7 +7623,7 @@ def test_land_removes_worktrees_in_the_container_the_launch_has_when_it_cleans_u
         # While the landing waits on the operator, the session renames itself,
         # and lup renames its container with it.
         assert call(mcp, "rename", {"name": "review-and-plan"}) == (
-            "This session is `review-and-plan`.",
+            "You're `review-and-plan` now.",
             False,
         )
         [hold] = [

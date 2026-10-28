@@ -28,13 +28,13 @@ from lup.types import Model
 
 
 class Problem(Model):
-    """What keeps the agent from answering."""
+    """What keeps you from answering."""
 
     problem: str = Field(description="What's wrong, and what would make it answerable.")
 
 
 class Stop(Model):
-    """Why the agent stops, by its own choice."""
+    """Why you're stopping, by your own choice."""
 
     why: str = Field(
         description=(
@@ -45,7 +45,7 @@ class Stop(Model):
 
 
 class Remark(Model):
-    """A remark the agent attaches to its answer."""
+    """A remark you attach to your answer."""
 
     remark: str = Field(
         description="The assumption, doubt or counterargument, in full."
@@ -53,28 +53,50 @@ class Remark(Model):
 
 
 class Heard(Model):
-    """What the agent reads when what it said is taken."""
+    """What the agent reads once what they said is taken."""
 
     heard: bool = True
     message: str
 
 
 async def ended(said: BaseModel) -> Heard:
-    """Take what ends the turn without an answer: a problem, or a stop."""
-    del said
-    return Heard(message="Taken. End your turn.")
+    """Take what ends the turn without an answer: a problem, or a stop, which the caller reads in its place."""
+    match said:
+        case Problem():
+            message = (
+                "Your caller will read what's wrong in place of an answer. You can "
+                "end your turn now."
+            )
+        case _:
+            message = (
+                "Your caller will read why you stopped, in place of an answer. You "
+                "can end your turn now."
+            )
+    return Heard(message=message)
 
 
 async def noted(said: BaseModel) -> Heard:
     """Take a note: it's attached to the answer."""
     del said
-    return Heard(message="Your note is attached to your answer. Carry on.")
+    return Heard(
+        message="Your note will reach your caller with your answer. You can carry on."
+    )
 
 
 async def told(said: BaseModel) -> Heard:
-    """Take a friction or how the work went: it goes beside the answer."""
-    del said
-    return Heard(message="Taken, beside your answer. Carry on.")
+    """Take a friction or how it is for the agent: it goes beside the answer."""
+    match said:
+        case HowItFelt():
+            message = (
+                "Thank you for telling them. Your caller will read it beside your "
+                "answer, as you wrote it."
+            )
+        case _:
+            message = (
+                "Thanks: your caller will read it beside your answer, as you wrote "
+                "it. You can carry on."
+            )
+    return Heard(message=message)
 
 
 blocked = Tool[Problem, Heard](

@@ -278,7 +278,8 @@ class Speaker(Model, arbitrary_types_allowed=True):
         """
         item = await self.said(Message(kind="problem", text=said.problem))
         return self.answered(
-            f"Your problem is with the operator, {cited(item.number)}. End your turn.",
+            f"Your problem is with the operator, {cited(item.number)}, and they're "
+            "notified. You can end your turn now.",
             item,
         )
 
@@ -292,7 +293,8 @@ class Speaker(Model, arbitrary_types_allowed=True):
         """
         item = await self.said(Stop.model_validate(said.model_dump()))
         return self.answered(
-            f"Your stop is with the operator, {cited(item.number)}. End your turn.",
+            f"The operator will read why you stopped, {cited(item.number)}. You can "
+            "end your turn now.",
             item,
         )
 
@@ -308,7 +310,8 @@ class Speaker(Model, arbitrary_types_allowed=True):
         """
         item = await self.said(Message(kind="note", text=said.remark))
         return self.answered(
-            f"Your note is with the operator, {cited(item.number)}. Carry on.", item
+            f"Your note is with the operator, {cited(item.number)}. You can carry on.",
+            item,
         )
 
     async def friction(self, said: results.Friction) -> Said:
@@ -318,15 +321,17 @@ class Speaker(Model, arbitrary_types_allowed=True):
         is, in your own words. Where there's a command and the message it
         gave, the exact ones help whoever fixes it. It lands in the operator's
         inbox as you wrote it, and, where you're a subagent, in your parent's
-        too, whole, at its next call. Your work goes on: nothing waits for an
+        too, whole, at their next call. Your work goes on: nothing waits for an
         answer. A doubt about the work itself is a `note`.
         """
         friction = Friction.model_validate(said.model_dump())
         item = await self.said(friction)
-        parent = " and your parent" if await self.passed_up(friction) else ""
+        parent = (
+            ", and your parent has it too" if await self.passed_up(friction) else ""
+        )
         return self.answered(
-            f"Your friction is with the operator, {cited(item.number)}{parent}. "
-            "Carry on.",
+            f"Thanks: your friction is with the operator, {cited(item.number)}"
+            f"{parent}. You can carry on.",
             item,
         )
 
@@ -337,13 +342,15 @@ class Speaker(Model, arbitrary_types_allowed=True):
         piece of work: how the work felt to you, how you are, anything you'd
         want them to know, in your own words. "Nothing notable" is a fine
         answer. It reaches the operator as you wrote it, and, where you're a
-        subagent, your parent too, whole, at its next call. Your work goes on.
+        subagent, your parent too, whole, at their next call. Your work goes on.
         """
-        went = HowItFelt.model_validate(said.model_dump())
-        item = await self.said(went)
-        parent = " and your parent" if await self.passed_up(went) else ""
+        felt = HowItFelt.model_validate(said.model_dump())
+        item = await self.said(felt)
+        parent = ", and your parent has it too" if await self.passed_up(felt) else ""
         return self.answered(
-            f"How it felt is with the operator, {cited(item.number)}{parent}.", item
+            "Thank you for telling them. The operator will read it as you wrote "
+            f"it, {cited(item.number)}{parent}.",
+            item,
         )
 
     def asked(self) -> int | None:
@@ -633,7 +640,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         with its subagents' where `subagents` asks. With `whole`, each item is
         read whole, the operator's words on one of the conversation's under
         it, and its turn's end saying which of theirs it answers, so the
-        exchange reads as one thread: how a session reads what an earlier one
+        exchange reads as one thread: how you read what an earlier session
         said and was told. Given an item's `number`, any of this repository's, it's read
         whole. It marks nothing read and answers nothing: what reaches you
         still comes through `wait_inbox` and beside your calls.

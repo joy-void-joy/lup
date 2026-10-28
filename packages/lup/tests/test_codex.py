@@ -448,7 +448,7 @@ def test_a_tool_call_reaches_the_toolbox_and_its_answer_goes_back(
     assert answer["contentItems"] == [
         {
             "type": "inputText",
-            "text": '{"accepted":true,"message":"Your answer is accepted. End your turn."}',
+            "text": '{"accepted":true,"message":"Your answer is accepted. You can end your turn now."}',
         }
     ]
     assert raw.text == "Done."

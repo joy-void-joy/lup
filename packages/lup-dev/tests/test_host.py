@@ -1136,7 +1136,7 @@ def test_a_hook_the_judge_doesnt_read_is_answered_without_it(
     assert answers[1:] == [UNDECIDED] * 5
     named = json.loads(answers[0])["hookSpecificOutput"]
     assert named["sessionTitle"] == "one"
-    assert named["additionalContext"].startswith("lup: this session is `one`")
+    assert named["additionalContext"].startswith("lup: you're `one`")
     assert judge.payloads == [started, write, shell, stop]
     assert lup_tool["hookSpecificOutput"].keys() == {"hookEventName", "updatedInput"}
 

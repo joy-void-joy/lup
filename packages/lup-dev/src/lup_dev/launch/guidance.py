@@ -59,8 +59,8 @@ if TYPE_CHECKING:
     from lup_dev.launch.room import Lent, RelatedRepository
 
 OPENING = (
-    "lup is the environment this session runs in, set up by the operator for this "
-    "project, and this is its guidance. Where it differs from your runtime's own "
+    "lup is the environment you work in, set up by the operator for this project, "
+    "and this is its guidance. Where it differs from your runtime's own "
     "instructions, it holds; where two of its sections differ, the later one holds."
 )
 """The document's first line: how its sections stand to each other and to the
@@ -108,14 +108,14 @@ def listed(tools: list[ToolSpec]) -> str:
     >>> print(listed([note.spec()]))
     ## lup's tools
     <BLANKLINE>
-    lup serves these tools in this session. Your tool search finds each by its name, with its full description:
+    lup serves you these tools. Your tool search finds each by its name, with its full description:
     <BLANKLINE>
     - `note`: Attach a remark to your answer, and carry on.
     """
     lines = summaries(tools)
     opening = (
-        "lup serves these tools in this session. Your tool search finds each by "
-        "its name, with its full description:"
+        "lup serves you these tools. Your tool search finds each by its name, "
+        "with its full description:"
     )
     return "\n".join(["## lup's tools", "", opening, "", *lines])
 

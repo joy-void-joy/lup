@@ -15,10 +15,10 @@ from lup.types import Model
 
 
 class Receipt(Model):
-    """What the agent reads when its answer is accepted."""
+    """What the agent reads once their answer is accepted."""
 
     accepted: bool = True
-    message: str = "Your answer is accepted. End your turn."
+    message: str = "Your answer is accepted. You can end your turn now."
 
 
 async def receipt(answer: BaseModel) -> Receipt:
