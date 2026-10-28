@@ -9,6 +9,9 @@ The fake engine reads a file the way the real one reports it, from markers:
 The fake linter reads `# RUFF <code>` as one of ruff's findings, and `# FIXABLE
 <code>` as one ruff fixes safely. The real engine and ruff run through uv, which
 `offline_uv` keeps off the network and out of the operator's uv state.
+
+No test reaches lup's real directories (`Guard`): a path a test's Python opens,
+lists, makes, moves, removes, binds or connects to there fails it.
 """
 
 import ast
@@ -17,8 +20,9 @@ import os
 import sys
 import time
 import tokenize
+from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePath, PurePosixPath
 from typing import TYPE_CHECKING, Literal
 
 import pytest
@@ -78,6 +82,7 @@ from lup_dev.policy.importers import Spawner
 from lup_dev.policy.runtime import Runtime
 from lup_dev.policy.tools import judge_call
 from lup_dev.private.withheld import Facts, Machine
+from lup_dev.settings import LupDevSettings
 from lup_dev.worker import RepositoryModules
 
 if TYPE_CHECKING:
@@ -463,6 +468,170 @@ def utc() -> Iterator[None]:
         else:
             os.environ["TZ"] = before
         time.tzset()
+
+
+class Place(Model):
+    """One of lup's real directories, and what lup keeps there."""
+
+    path: Path
+    keeps: str
+
+    def holds(self, path: str) -> bool:
+        """Say whether `path`, absolute and normalised, is this directory or inside it.
+
+        Compared as strings, since a check runs at each file a test opens.
+        """
+        directory = str(self.path)
+        return path == directory or path.startswith(f"{directory}{os.sep}")
+
+
+def kept(layout: Layout) -> list[Place]:
+    """Return the directories `layout` places lup's own in."""
+    return [
+        Place(path=layout.state, keeps="state"),
+        Place(
+            path=layout.runtime,
+            keeps="runtime directory, the live host service's sockets and launches",
+        ),
+        Place(path=layout.data, keeps="data"),
+        Place(path=layout.config, keeps="configuration"),
+        Place(path=layout.cache, keeps="cache"),
+    ]
+
+
+def real() -> list[Place]:
+    """Return lup's directories on this machine: where its settings place them, and where `Layout`'s defaults do, which a test's `Layout` falls back to for each field it doesn't name; each as named and with its links followed."""
+    configured = Layout.of(LupDevSettings())
+    places = kept(configured) + kept(Layout(state=configured.state))
+    resolved = [
+        place.model_copy(update={"path": place.path.resolve()}) for place in places
+    ]
+    return list(dict.fromkeys(places + resolved))
+
+
+TOUCHING: dict[str, list[int]] = {
+    **{
+        event: [0]
+        for event in [
+            "open",
+            "os.listdir",
+            "os.scandir",
+            "os.mkdir",
+            "os.rmdir",
+            "os.remove",
+            "os.chmod",
+            "os.chown",
+            "os.truncate",
+            "os.utime",
+            "os.chdir",
+            "shutil.rmtree",
+            "sqlite3.connect",
+        ]
+    },
+    **{
+        event: [0, 1]
+        for event in [
+            "os.rename",
+            "os.link",
+            "os.symlink",
+            "shutil.copyfile",
+            "shutil.copymode",
+            "shutil.copystat",
+            "shutil.copytree",
+            "shutil.move",
+        ]
+    },
+    "socket.bind": [1],
+    "socket.connect": [1],
+    "subprocess.Popen": [2],
+}
+"""Each audit event that reads or writes a path, with the positions of its
+arguments naming one, as CPython's table of audit events gives them: a
+program's directory among `subprocess.Popen`'s, a link's target among
+`os.symlink`'s."""
+
+
+def absolute(given: object) -> str | None:
+    """Return the path `given` names, absolute and normalised: none for a file descriptor, an address on the network, or a socket in Linux's abstract namespace."""
+    match given:
+        case str() | bytes() | PurePath():
+            path = os.fsdecode(given)
+        case _:
+            return None
+    if not path or path.startswith("\0"):
+        return None
+    return os.path.abspath(path)
+
+
+class Guard:
+    """Fails each step a test's Python takes into one of lup's real directories, and keeps it, so a test whose code catches the failure, or whose thread meets it, fails all the same (`pytest_runtest_makereport`).
+
+    A test reaching one reads or writes beside the live host service, and
+    beside every other test the suite's workers run at that moment: a `Layout`
+    leaving a field at its default is the usual way in. A path is checked as
+    it's named, not through its links, which would cost a call to the disk
+    for each of its parts at every file opened: a link into a real directory
+    is caught where a test makes it. A program a test runs is checked for the
+    directory it starts in alone: what it opens is its own, placed by the
+    variables its test gives it, as `state` gives them.
+    """
+
+    def __init__(self, places: list[Place], allowed: list[Place]) -> None:
+        self.places = places
+        self.allowed = allowed
+        """What the suite runs from inside a real directory, read as it
+        imports: its environment, which a room keeps in lup's data."""
+        self.reached: list[str] = []
+        self.reported = 0
+        """How many of `reached` a test's report has taken."""
+
+    def unreported(self) -> list[str]:
+        """Return what was reached since a test's report last took it, and take it."""
+        reached = self.reached[self.reported :]
+        self.reported = len(self.reached)
+        return reached
+
+    def __call__(self, event: str, arguments: tuple[object, ...]) -> None:
+        """Check the paths an audit event touches, failing the test at one in a real directory."""
+        for position in TOUCHING.get(event, []):
+            path = absolute(arguments[position])
+            if path is None or any(each.holds(path) for each in self.allowed):
+                continue
+            for place in self.places:
+                if place.holds(path):
+                    reached = (
+                        f"{path} is in {place.path}, lup's real {place.keeps}: give "
+                        "the test's `Layout`, and the XDG variables `Layout.of` "
+                        "reads, directories of the test's own under `tmp_path`, "
+                        "as the `state` fixture does"
+                    )
+                    self.reached.append(reached)
+                    pytest.fail(reached)
+
+
+GUARD = Guard(
+    places=real(),
+    allowed=[
+        Place(path=Path(sys.prefix), keeps="the suite's environment"),
+        Place(path=Path(sys.prefix).resolve(), keeps="the suite's environment"),
+    ],
+)
+"""Installed for the whole process as its conftest is imported, so it guards
+every package's tests a run collects beside these, and what's imported."""
+sys.addaudithook(GUARD)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(
+    item: pytest.Item, call: pytest.CallInfo[None]
+) -> Generator[None, pytest.TestReport, pytest.TestReport]:
+    """Fail a test's setup, call or teardown that passed though it reached one of lup's real directories, its code having caught the failure or a thread of its having met it (`Guard`)."""
+    report = yield
+    reached = GUARD.unreported()
+    if reached and report.passed:
+        report.outcome = "failed"
+        report.longrepr = "\n".join(reached)
+    return report
 
 
 class FakeSpawner(Spawner):
