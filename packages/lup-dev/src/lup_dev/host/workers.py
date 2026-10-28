@@ -213,6 +213,12 @@ class JudgeHook(Request, reads=False):
     environments: Path | None = None
     """The launch's own environments, where its room has them
     (`Register.environments`): the judge reads each worktree's there."""
+    launch: Register | None = None
+    """The launch whose room ran the hook, as the service heard it on its
+    socket: a path the payload names is read only inside that launch's own
+    runtime directory, in the home it registered
+    (`lup_dev.host.homes.translated`). None from a service from before hooks
+    carried it, which has no such path read."""
 
 
 class HookJudged(Reply):
@@ -295,6 +301,7 @@ class WorkerJudge(Model, LaunchJudge, arbitrary_types_allowed=True):
             runtime=launch.runtime,
             payload=payload,
             environments=launch.environments,
+            launch=launch,
         )
         reply = await self.modules.ask(launch, hook)
         match reply:

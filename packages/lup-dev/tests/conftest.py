@@ -856,6 +856,12 @@ class Kit:
         """Register launch `launch` of `runtime` on a home in the kit's layout (`registered`), by default its own runtime directory."""
         return registered(self.layout, runtime, launch, own=own)
 
+    def launch(
+        self, runtime: str = "claude", launch: str = "l1", *, own: bool = True
+    ) -> Register:
+        """Return launch `launch` of `runtime` as `registered` registers it in the kit's layout, without registering it: the launch whose room runs a hook the test answers in a room (`Bench.launch`)."""
+        return registration(self.layout, runtime, launch, own=own)
+
     def __init__(
         self,
         state: Path,
@@ -1149,19 +1155,21 @@ class Registered(Model):
 
     named: Path
     kept: Path
+    launch: Register
+    """The launch, as the host service serves it: the one asking, for a hook
+    of its room's (`lup_dev.host.homes.translated`)."""
 
     def record(self, relative: str) -> tuple[Path, Path]:
         """Return a record's path as a hook names it, and where it's kept, by its place in the home."""
         return self.named / relative, self.kept / relative
 
 
-def registered(
+def registration(
     layout: Layout, runtime: str = "claude", launch: str = "l1", *, own: bool = False
-) -> Registered:
-    """Register launch `launch` of `runtime` on a home, as the host service records a launch's registration, and return where its hooks name records and where they're kept: the one every project shares, or, `own`, the launch's own runtime directory, so the two are one place for a test that reads nothing else of it."""
+) -> Register:
+    """Return launch `launch` of `runtime` on a home, as the host service records its registration: the home every project shares, or, `own`, the launch's own runtime directory."""
     home = layout.launch(launch).runtime_home if own else layout.homes.shared(runtime)
-    home.mkdir(parents=True, exist_ok=True)
-    record = Register(
+    return Register(
         launch=launch,
         runtime=runtime,
         worktree=Path("/w"),
@@ -1172,9 +1180,20 @@ def registered(
         home=home,
         own=layout.launch(launch).runtime_home,
     )
+
+
+def registered(
+    layout: Layout, runtime: str = "claude", launch: str = "l1", *, own: bool = False
+) -> Registered:
+    """Register launch `launch` of `runtime` on a home (`registration`), as the host service records a launch's registration, and return where its hooks name records and where they're kept: the one every project shares, or, `own`, the launch's own runtime directory, so the two are one place for a test that reads nothing else of it."""
+    record = registration(layout, runtime, launch, own=own)
+    assert record.home is not None
+    record.home.mkdir(parents=True, exist_ok=True)
     layout.host.record(launch).parent.mkdir(parents=True, exist_ok=True)
     layout.host.record(launch).write_text(record.model_dump_json())
-    return Registered(named=layout.launch(launch).runtime_home, kept=home)
+    return Registered(
+        named=layout.launch(launch).runtime_home, kept=record.home, launch=record
+    )
 
 
 class Homes(Model):

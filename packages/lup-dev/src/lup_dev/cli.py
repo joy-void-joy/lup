@@ -119,7 +119,7 @@ from lup_dev.host.rooms import OwnLaunch, OwnLaunches, RoomRoute, ShowOwnLaunch
 from lup_dev.host.service import Answerer, Companion, HostService, Naming, Route
 from lup_dev.host.views import ModuleViews
 from lup_dev.host.watch import Changes
-from lup_dev.host.workers import WorkerJudge, Workers, WorkersAsking
+from lup_dev.host.workers import JudgeHook, WorkerJudge, Workers, WorkersAsking
 from lup_dev.inbox.bearings import RepositoryBearings
 from lup_dev.inbox.citations import plainly
 from lup_dev.inbox.delivery import (
@@ -339,8 +339,14 @@ class Adapters(Model, Answerer):
         [adapter] = chosen
         return adapter
 
-    def answer(self, runtime: str, payload: str, services: Services) -> str:
-        """Answer one of `runtime`'s hooks, judging with `services`.
+    def answer(
+        self,
+        runtime: str,
+        payload: str,
+        services: Services,
+        launch: Register | None = None,
+    ) -> str:
+        """Answer one of `runtime`'s hooks, judging with `services`, of `launch`'s room where one ran it (`Bench.launch`).
 
         What the hook prints is its adapter's output on a line, or nothing. A
         hold its call waits on gives up where the host service marks the hook
@@ -348,14 +354,18 @@ class Adapters(Model, Answerer):
         """
         adapter = self.named(runtime)
         ended = services.layout.host.ended(payload)
-        bench = Bench(runtime=adapter.runtime, services=services, ended=ended)
+        bench = Bench(
+            runtime=adapter.runtime, services=services, ended=ended, launch=launch
+        )
         output = adapter.hook(payload, bench)
         return f"{output}\n" if output else ""
 
     async def called(self, calling: JudgeCalling, services: Services) -> serving.Answer:
         """Run a call to one of the judge's own tools that asks the engine, for a conversation of `calling`'s launch, judging with `services` as that launch's runtime's hooks are."""
         bench = Bench(
-            runtime=self.named(calling.launch.runtime).runtime, services=services
+            runtime=self.named(calling.launch.runtime).runtime,
+            services=services,
+            launch=calling.launch,
         )
         return await judge_call(bench, calling)
 
@@ -366,14 +376,13 @@ class Adapters(Model, Answerer):
 
 
 class SpawnRecords(Model, Spawns):
-    """How every runtime lup knows recorded its subagents' spawns, as its adapter reads them, in the home each launch registered (`lup_dev.host.homes.translated`)."""
+    """How every runtime lup knows recorded its subagents' spawns, as its adapter reads them, in the home the launch whose hook it is registered (`lup_dev.host.homes.translated`)."""
 
     adapters: Adapters
-    layout: Layout
 
     @override
-    def spawned(self, runtime: str, payload: str) -> Spawned | None:
-        return self.adapters.named(runtime).spawned(payload, self.layout)
+    def spawned(self, launch: Register, payload: str) -> Spawned | None:
+        return self.adapters.named(launch.runtime).spawned(payload, launch)
 
 
 class Couriers(Model, Courier):
@@ -584,7 +593,7 @@ def host_serve(context: typer.Context) -> None:
         answerer=known,
         courier=couriers,
         judge=WorkerJudge(modules=workers),
-        spawns=SpawnRecords(adapters=known, layout=layout),
+        spawns=SpawnRecords(adapters=known),
         operators={name: each.records for name, each in recorded().items()},
         post=delivery,
         bearings=RepositoryBearings(
@@ -731,12 +740,15 @@ def worker(
     Their hooks are answered as `hook` answers them, and the judge's own tools
     that ask the engine run, with this machine's services made for each: none of
     them keeps state of its own, and each reads the environments of the launch
-    asking, where its room has its own.
+    asking, where its room has its own, and a path a hook names in that
+    launch's home alone (`Bench.launch`).
     """
     known = Adapters(known=adapters())
 
-    def judged(runtime: str, payload: str, environments: Path | None) -> str:
-        return known.answer(runtime, payload, services(environments))
+    def judged(hook: JudgeHook) -> str:
+        return known.answer(
+            hook.runtime, hook.payload, services(hook.environments), hook.launch
+        )
 
     async def called(calling: JudgeCalling) -> serving.Answer:
         return await known.called(calling, services(calling.launch.environments))

@@ -62,6 +62,7 @@ from lup_dev.declaration.project import Project
 from lup_dev.declaration.resolve import Declaration, resolve
 from lup_dev.errors import LupDevError
 from lup_dev.git import Git
+from lup_dev.host.protocol import Register
 from lup_dev.inbox import ends
 from lup_dev.inbox.store import ChangedFile
 from lup_dev.layout import CheckoutLayout, GitDirectoryLayout, Layout
@@ -152,6 +153,12 @@ class Bench(Model, arbitrary_types_allowed=True):
     """Where the host service marks the hook ended, its runtime having ended it
     before its answer, as when the operator interrupts its call
     (`HostLayout.ended`); none where nothing marks it, as for `lup-dev hook`."""
+    launch: Register | None = None
+    """The launch whose room ran the hook, as the host service heard it: a
+    path its payload names is read only inside that launch's own runtime
+    directory, in the home it registered (`lup_dev.host.homes.translated`).
+    None for a hook no launch's room ran, as for `lup-dev hook`, which has
+    no such path read."""
 
     reserve: int = 2_500
     """What the judge's answer leaves of what a hook tells whole, for the

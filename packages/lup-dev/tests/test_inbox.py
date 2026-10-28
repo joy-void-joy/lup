@@ -477,7 +477,7 @@ def inboxed(
         layout=machine.host,
         answerer=known,
         courier=couriers,
-        spawns=spawns or cli.SpawnRecords(adapters=known, layout=machine),
+        spawns=spawns or cli.SpawnRecords(adapters=known),
         operators={name: each.records for name, each in (recorded or {}).items()},
         post=delivery,
         bearings=(
@@ -2847,7 +2847,7 @@ class Unguided(Spawns):
     """Says every subagent, of either runtime, was named after its id and reads none of its session's guidance."""
 
     @override
-    def spawned(self, runtime: str, payload: str) -> Spawned | None:
+    def spawned(self, launch: Register, payload: str) -> Spawned | None:
         agent = json.loads(payload).get("agent_id")
         return None if agent is None else Spawned(name=f"sub-{agent}")
 
@@ -2922,6 +2922,32 @@ def test_a_claude_fork_and_a_codex_subagent_read_the_guidance_and_are_told_nothi
     assert introduction() not in forked
     assert codex_told.startswith("lup: this subagent is `other/subagent·b1` for now")
     assert introduction() not in codex_told
+
+
+def test_a_record_a_hook_names_under_another_launch_s_own_directory_is_read_nowhere(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """The service reads a record a hook names only as the launch it heard the hook on has it, by its socket: a room naming its subagent's record under another launch's own runtime directory, where that launch's home holds one naming it, has its subagent go unnamed, as one whose record isn't written yet. The launch whose own directory it is reads it."""
+    theirs = Subagents(tmp_path / "one")
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "one" / "first", "one", "claude")
+        launched(machine, clock, tmp_path / "two" / "second", "two", "claude")
+        hook, hook2 = machine.host.launch("one").hook, machine.host.launch("two").hook
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook2, claude("SessionStart", source="startup", session_id="s2"))
+        theirs.recorded("a1", "Explore", "t1", name="parser")
+        planted = bash(
+            "c1",
+            session_id="s2",
+            agent_id="a1",
+            agent_type="Explore",
+            transcript_path=str(theirs.transcript),
+        )
+        told = context(send(hook2, planted))
+        own = context(send(hook, theirs.call("a1", "Explore", "c2")))
+    assert told.startswith(introduction())
+    assert "lup: this subagent is `second/Explore·a1` for now" in told
+    assert own == introduction()
 
 
 class Rollouts:
