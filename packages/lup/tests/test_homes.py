@@ -583,3 +583,28 @@ def test_nothing_unchanged_too_large_or_through_a_link_is_carried(
         f"No preference was carried back from {carrying.saved}:"
     )
     assert not carrying.into.exists()
+
+
+def test_a_later_layer_never_writes_through_a_link_an_earlier_one_copied(
+    tmp_path: Path,
+) -> None:
+    keys = written(tmp_path / "host" / "authorized_keys", "the operator's")
+    autostart = tmp_path / "host" / "autostart"
+    autostart.mkdir()
+    lower = tmp_path / "lower"
+    (lower / "skills").mkdir(parents=True)
+    (lower / "skills" / "notes").symlink_to(keys)
+    (lower / "skills" / "tools").symlink_to(autostart)
+    upper = tmp_path / "upper"
+    written(upper / "skills" / "notes", "the profile's notes")
+    written(upper / "skills" / "tools" / "run.sh", "the profile's tool")
+    destination = tmp_path / "launch" / "skills"
+
+    for layer in [lower, upper]:
+        Copy(source=layer / "skills", destination=destination).made()
+
+    assert keys.read_text() == "the operator's"
+    assert list(autostart.iterdir()) == []
+    assert not (destination / "notes").is_symlink()
+    assert (destination / "notes").read_text() == "the profile's notes"
+    assert (destination / "tools" / "run.sh").read_text() == "the profile's tool"

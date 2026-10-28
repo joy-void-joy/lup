@@ -298,33 +298,47 @@ class Copy(Model):
     """Names directly inside a directory left out of its copy."""
 
     def made(self) -> None:
-        """Copy the source to the destination, over what an earlier copy put there, links as links."""
-        try:
-            seen = self.source.lstat()
-        except FileNotFoundError:
-            return
+        """Copy the source to the destination, over what an earlier copy put there, links as links.
 
-        def ignored(directory: str, names: list[str]) -> list[str]:
-            top = self.leaving if Path(directory) == self.source else []
+        Nothing in the destination is written through: where an earlier
+        layer's copy left a link, or an entry of another kind, where this one
+        puts something, it's removed first, since that link came from a
+        directory a room may once have written.
+        """
+        if not self.source.is_symlink():
+            copied(self.source, self.destination, self.leaving)
 
-            def kept(name: str) -> bool:
-                mode = (Path(directory) / name).lstat().st_mode
-                return stat.S_ISREG(mode) or stat.S_ISDIR(mode) or stat.S_ISLNK(mode)
 
-            return [name for name in names if name in top or not kept(name)]
-
-        self.destination.parent.mkdir(parents=True, exist_ok=True)
-        if stat.S_ISDIR(seen.st_mode):
-            shutil.copytree(
-                self.source,
-                self.destination,
-                symlinks=True,
-                ignore=ignored,
-                dirs_exist_ok=True,
-            )
-            return
-        if stat.S_ISREG(seen.st_mode):
-            shutil.copy2(self.source, self.destination, follow_symlinks=False)
+def copied(source: Path, destination: Path, leaving: list[str]) -> None:
+    """Copy what's at `source` to `destination`, links as links, what isn't a file, a directory or a link left out, as are `leaving`'s names directly inside a directory; nothing where nothing is there."""
+    try:
+        seen = source.lstat()
+    except FileNotFoundError:
+        return
+    if not (
+        stat.S_ISDIR(seen.st_mode)
+        or stat.S_ISREG(seen.st_mode)
+        or stat.S_ISLNK(seen.st_mode)
+    ):
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    there = destination.is_symlink() or destination.exists()
+    keeps = there and not destination.is_symlink() and destination.is_dir()
+    if there and not (keeps and stat.S_ISDIR(seen.st_mode)):
+        if destination.is_dir() and not destination.is_symlink():
+            shutil.rmtree(destination)
+        else:
+            destination.unlink()
+    if stat.S_ISLNK(seen.st_mode):
+        destination.symlink_to(source.readlink())
+        return
+    if stat.S_ISREG(seen.st_mode):
+        shutil.copy2(source, destination, follow_symlinks=False)
+        return
+    destination.mkdir(exist_ok=True)
+    for each in sorted(source.iterdir()):
+        if each.name not in leaving:
+            copied(each, destination / each.name, [])
 
 
 type Syntax = Literal["json", "toml"]
