@@ -1,13 +1,15 @@
 """An item of lup's inbox cited by its number, `@1505` or a part's `@1505.3`, in text read where lup isn't: found where Markdown reads text.
 
-`docs/inbox.md`, *Parties and items*. Sessions cite an item to the operator by
-its number; on GitHub, `@1505` mentions a user, and the number means nothing to
-a reader there. Each is read by an inline rule of markdown-it, as a citation of
-the operator's words is (`inbox/citations.py`), so none is read in code, a span
-or a block, nor after a backslash; nor where its `@` follows a letter, a digit,
-an `@` or a `_`, as an address's does (`name@1505.example`); nor where the
-number runs on into a word (`@2x`) or a version (`@1.2.3`). A mention
-(`@name`) and a decorator (`@dataclass`) have no number.
+`docs/private.md`, *An item's number*. Sessions cite an item to the operator by
+its number (`docs/inbox.md`, *Parties and items*); on GitHub, `@1505` mentions
+a user, and the number means nothing to a reader there, so `Private` withholds
+it from a commit's message and a post. Each is read by an inline rule of
+markdown-it, as a citation of the operator's words is (`inbox/citations.py`),
+so none is read in code, a span or a block, nor after a backslash; nor where
+its `@` follows a letter, a digit, an `@` or a `_`, as an address's does
+(`name@1505.example`); nor where the number runs on into a word (`@2x`) or a
+version (`@1.2.3`). A mention (`@name`) and a decorator (`@dataclass`) have no
+number.
 """
 
 from bisect import bisect_right

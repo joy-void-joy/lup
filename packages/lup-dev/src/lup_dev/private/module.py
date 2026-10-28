@@ -22,17 +22,18 @@ from lup_dev.private.withheld import DETAILS, Detail
 
 
 class Details(Named[str]):
-    """The details lup reads on the host, never published, each by its name.
+    """The details lup withholds, never published, each by its name.
 
     `home`, `user`, `hostname`, `alias`, `repository-path` and
-    `private-repository` (`lup_dev.private.withheld`). `Details.all()` is every
-    one; a name that isn't one is refused where it's written, naming those that
-    are.
+    `private-repository`, read on the host, and `item-number`, an item of lup's
+    inbox cited by its number in a commit's message or a post
+    (`lup_dev.private.withheld`). `Details.all()` is every one; a name that
+    isn't one is refused where it's written, naming those that are.
 
     >>> Details().drop("hostnme")
     Traceback (most recent call last):
     ...
-    lup_dev.declaration.errors.ProjectError: `Details` has no detail `hostnme`; its details are `home`, `user`, `hostname`, `alias`, `repository-path` and `private-repository`
+    lup_dev.declaration.errors.ProjectError: `Details` has no detail `hostnme`; its details are `home`, `user`, `hostname`, `alias`, `repository-path`, `private-repository` and `item-number`
     """
 
     @model_validator(mode="after")
@@ -76,13 +77,13 @@ class Values(Named[str]):
 
 
 class Private(Module):
-    """What never leaves under the operator's name: the details lup reads on the host, and the person's own values."""
+    """What never leaves under the operator's name: the details lup reads on the host, an inbox item's number, and the person's own values."""
 
     name = "private"
 
     details: Details = Details.all()
-    """The details read on the host: every one, unless the project or the person
-    drops one, with why (a hostname that's an ordinary word)."""
+    """The details withheld: every one, unless the project or the person drops
+    one, with why (a hostname that's an ordinary word)."""
     values: Values = Values()
     """The person's own values: none, unless their own layer,
     `lup_project.local.py`, adds them."""
@@ -99,7 +100,7 @@ class Private(Module):
     operator's machine goes with it."""
 
     def chosen_details(self) -> list[Detail]:
-        """Return the details read on the host, every layer applied, in lup's order."""
+        """Return the details withheld, every layer applied, in lup's order."""
         named = [each.entry for each in self.details.resolve([*DETAILS], [*DETAILS])]
         return [detail for detail in DETAILS if detail in named]
 

@@ -1,6 +1,6 @@
 # Private: nothing of the operator's machine leaves under their name
 
-A room mounts everything at the host's real paths (`docs/launch.md`, *The mounts*), so every session sees the operator's home path, user name and directory layout, and those details have reached commits, docs and GitHub issues of public repositories. `Private`, one of lup's default modules, keeps a list of what never leaves (the details lup reads on the host, and the person's own values) and checks what's about to: a push or a post carrying one is refused, a write carrying one is told and flagged, and the gate fails on one. The code is `packages/lup-dev/src/lup_dev/private/`.
+A room mounts everything at the host's real paths (`docs/launch.md`, *The mounts*), so every session sees the operator's home path, user name and directory layout, and those details have reached commits, docs and GitHub issues of public repositories. `Private`, one of lup's default modules, keeps a list of what never leaves (the details lup reads on the host, and the person's own values; an inbox item's number besides, in a commit's message or a post) and checks what's about to: a push or a post carrying one is refused, a write carrying one is told and flagged, and the gate fails on one. The code is `packages/lup-dev/src/lup_dev/private/`.
 
 ## What's on the list
 
@@ -14,10 +14,13 @@ Built on the host by each launch, from the declaration at the approved commit (`
 | `alias` | each host in the URLs of the repository's remotes (`git url-parse -c host`) that `ssh -G` resolves to another name |
 | `repository-path` | the project's own repository (its git directory and each worktree's root) and each related repository, each also as `~/…` |
 | `private-repository` | each related repository GitHub says is private or internal (`gh repo view --json visibility`), or that has no copy there, by its name, `owner/name` and GitHub name |
+| `item-number` | nothing: an item of lup's inbox cited by its number, `@1505` or a part's `@1505.3`, found by its shape in prose alone (*An item's number*) |
 
 GitHub is asked at each launch; where it can't answer, its answer at the last launch stands, and a repository it never answered for is left out, the launch saying so. The project's own name is never on the list: a private project names itself.
 
 **Values are found** literally, ignoring case, never inside a longer word (a user name `op` is found in `op@host` and `-home-op-src-`, not in `operator`), the longest of overlapping ones (`found.py`). A value escaped, encoded or split across lines isn't found.
+
+**An item's number** is found by its shape, not as a value: `@` and digits, and a part's after a dot, where Markdown reads text (`lup_dev/inbox/numbers.py`), so never in code, after a backslash, after a letter or digit (an address), or running on into a word or a version (`@2x`, `@1.2.3`). Sessions cite items so to the operator; on GitHub `@1505` mentions a user, and the number means nothing there. It's looked for in prose alone, a commit's message and a post's parts (`in_prose`, `found.py`), never in a file or a path, where the notation is at home (a test's, a doc's in code), nor at a write. The list a launch keeps says whether it's withheld (`Withheld.numbers`), so a project or a person drops it as any detail; a list kept before it was a detail withholds it. A refusal names the number, unlike a value's: it's no secret, the room having written it, and it's what to look for on the line its place names.
 
 ## How a project and a person use it
 
@@ -46,7 +49,7 @@ A value written in the committed `lup_project.py` would be published by its comm
 
 ## What a room is told
 
-A kind and a place, never the value: the room never sees the list, so a value of the person's own stays out of the agent's screen and transcript. A path naming a value is shown masked. A push's refusal, on git's standard error:
+A kind and a place, never the value: the room never sees the list, so a value of the person's own stays out of the agent's screen and transcript. An item's number alone is named (*An item's number*). A path naming a value is shown masked. A push's refusal, on git's standard error:
 
 ```
 lup refused to publish this push to `refs/heads/feat`: a module's check at `Publishing` found what isn't published, at each place below.

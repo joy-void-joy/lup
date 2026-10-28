@@ -1647,6 +1647,51 @@ def test_a_message_a_path_and_a_ref_s_name_carrying_a_value_are_each_refused(
     ) in said
 
 
+def test_a_message_citing_an_item_is_refused_naming_it_and_a_file_citing_one_isn_t(
+    world: World, clock: FakeClock, guarded: InProcess
+) -> None:
+    world.wrote("docs/inbox.md", "An item is cited @12.\n", "docs: as `@270` reads")
+    cited = world.wrote(
+        "docs/more.md", "More.\n", "fix: what @1505 found\n\nAnd @1477.2, too."
+    )
+
+    with world.served(clock, modules=guarded):
+        pushed = world.room_git("push", "origin", "HEAD:refs/heads/feat")
+
+    assert pushed.exit_code != 0
+    assert world.on_forge("refs/heads/feat") is None
+    said = told(pushed)
+    steer = (
+        "      steer: on GitHub `@` mentions a user, and the number means nothing "
+        "there: say in words what the item was about, or cite the issue it "
+        "concerns as `#123`; where you mean the notation itself, write it as code\n"
+    )
+    assert (
+        f"  {cited}'s message:1:11 - an inbox item's number, `@1505`\n{steer}"
+        f"  {cited}'s message:3:5 - an inbox item's number, `@1477.2`\n{steer}"
+        "A push sends every commit the remote lacks, so rewrite the commit that "
+        "carries it (amend it, or rebase) and push again"
+    ) in said
+    assert "@12" not in said
+    assert "@270" not in said
+
+
+def test_a_message_citing_an_item_goes_where_the_declaration_drops_the_detail(
+    world: World, clock: FakeClock, guarded: InProcess, tmp_path: Path
+) -> None:
+    layout = Layout(state=tmp_path / "lup-state", data=tmp_path / "lup-data")
+    write_model(
+        kept(layout.module_data("private", world.project)),
+        PRIVATE.model_copy(update={"numbers": False}),
+    )
+    world.commit("fix: what @1505 found")
+
+    with world.served(clock, modules=guarded):
+        pushed = world.room_git("push", "origin", "HEAD:refs/heads/feat")
+
+    assert pushed.exit_code == 0, stderr(pushed)
+
+
 def test_a_file_that_isnt_text_and_a_link_are_read_for_what_they_add(
     world: World, clock: FakeClock, guarded: InProcess
 ) -> None:

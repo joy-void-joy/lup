@@ -5,7 +5,8 @@ host listed them; what a push publishes is every commit its updates reach
 beyond that (`Git.walked`, so an object the store lacks, as a stale listing
 may name, is skipped and more is checked, never less), and the name of each
 ref it updates. In each new commit:
-- its message;
+- its message, read as prose, where an item's number is found too
+  (`in_prose`);
 - the path of each file it adds or changes against every parent, since a
   file's name is published;
 - the lines it adds to each such file, found with `difflib` against each
@@ -28,7 +29,14 @@ from typing import TYPE_CHECKING
 
 from lup.publishing import Place, Updating
 from lup.types import Model
-from lup_dev.private.found import added_lines, counted, found, masked, textual
+from lup_dev.private.found import (
+    added_lines,
+    counted,
+    found,
+    in_prose,
+    masked,
+    textual,
+)
 from lup_dev.private.withheld import Held, Withheld
 
 if TYPE_CHECKING:
@@ -141,7 +149,7 @@ def in_commit(
                 within=f"{read.short}'s message", line=each.line, column=each.column
             ),
         )
-        for each in found(read.message, held)
+        for each in in_prose(read.message, held)
     ]
     named = [
         Spot(
