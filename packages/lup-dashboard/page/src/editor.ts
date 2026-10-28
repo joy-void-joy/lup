@@ -1299,8 +1299,6 @@ export interface Editor<D, C> {
     kept: RefObject<Map<string, boolean>>;
     /** The draft as it was last rendered. */
     latest: RefObject<D>;
-    /** Whether a comment is being written: the cursor in one, in any mode of vim's. */
-    writing: () => boolean;
     /** Change the draft as one step `u` undoes. */
     record: (next: D) => void;
     /** Change the draft as it stands, as what's written is anchored anew, in place of the state it's in: no step `u` undoes. */
@@ -1696,7 +1694,6 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
         landing,
         kept,
         latest,
-        writing: () => keyed.inserting || blockAt(head()) !== undefined,
         record,
         rewrite: (next) => {
             history.current = rewritten(history.current, next);

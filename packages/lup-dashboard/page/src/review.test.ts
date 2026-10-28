@@ -1594,6 +1594,15 @@ describe("the drawers under each agent's banner", () => {
         }
     });
 
+    it("keeps a remark on a file the drawer no longer shows whole under the file's line as the operator last saw it, outdated", () => {
+        const remark = { ...(opened(out, at("        b = 2")) as Remark), id: "b", text: "Rename b." };
+        const settled: Since = { ...SINCE, files: [{ ...SINCE.files![0]!, file: null, flags: [] }] };
+        const wrote = laid([QUESTION, NOTE], [S1], banner, header, { ...EMPTY, remarks: [remark] }, NOTHING, [], new Map([[whose(S1), { ...DATA, since: settled }]]));
+        const line = wrote.drawers.find((each) => each.kind === "since")!.reviewed[0]!;
+        expect(wrote.text.slice(line.to + 1)).toMatch(/^Rename b\.\n/);
+        expect(wrote.seated.get("b")?.outdated).toBe(true);
+    });
+
     it("anchors a remark drafted before quotes named their block, by the lines its code names, or keeps it as a message where they're gone", () => {
         const kept: Remark = { id: "", to: S1, quote: keptQuote("reader.py:7\n+        b = 2", 999, 1010), text: "Rename b.", code: { worktree: "/w/feat", path: "reader.py", version: "b0", first: 7, lines: ["        b = 2"] } };
         const gone: Remark = { id: "", to: S1, quote: keptQuote("old.py:1\n+x", 0, 3), text: "And this?", code: { worktree: "/w/feat", path: "old.py", version: "o0", first: 1, lines: ["x"] } };

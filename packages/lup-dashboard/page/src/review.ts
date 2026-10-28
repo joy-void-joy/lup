@@ -1304,6 +1304,8 @@ export function laid(
         const lines = blockLines.get(block);
         const first = blocks.get(block);
         if (lines === undefined || first === undefined) {
+            // Its block isn't laid out here: it's kept where what it's on whole is, said to be outdated.
+            seated.set(id, { block, version: "", first: 0, last: 0, outdated: true });
             return null;
         }
         const at = placedOn(quote, lines, before(id, block));
@@ -1725,6 +1727,25 @@ export function laid(
                     writeWritten(comment, into.blocks, children);
                 }
             };
+            // A remark on a file the drawer no longer shows whole goes under the file's line where it stands as the
+            // operator last saw it, else under the drawer's summary line.
+            const standing = new Set<string>();
+            const walk = (list: readonly ViewBlock[]) => {
+                for (const block of list) {
+                    if (block.block === "line") {
+                        standing.add(block.id);
+                    } else if (block.block === "fold" && Array.isArray(block.content)) {
+                        walk(block.content);
+                    }
+                }
+            };
+            walk(blocks);
+            const fileOf = (remark: Written) => ("quote" in remark ? (remark.quote?.block ?? "") : "").slice(`${view.id} file `.length);
+            const orphans = placed.get(null) ?? [];
+            const under = (path: string) => orphans.filter((each) => standing.has(`reviewed ${path}`) && fileOf(each) === path);
+            for (const comment of orphans.filter((each) => !standing.has(`reviewed ${fileOf(each)}`))) {
+                writeWritten(comment, into.blocks, children);
+            }
             let first = 0;
             const layBlocks = (list: readonly ViewBlock[], top: boolean, within: Placed[]) => {
                 for (const block of list) {
@@ -1752,6 +1773,9 @@ export function laid(
                             const file = answer.files?.get(block.id);
                             if (file !== undefined) {
                                 reviewed.push({ from: aside.from, to: aside.to, file });
+                                for (const comment of under(file.path)) {
+                                    writeWritten(comment, into.blocks, children);
+                                }
                             }
                             within.push(part(id, "block", aside.from, aside.to, { block }));
                             break;
