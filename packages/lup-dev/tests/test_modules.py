@@ -18,6 +18,7 @@ from pydantic import Field
 from typer.testing import CliRunner
 
 import lup
+from lup.blocks import SHELL_FOLDS
 from lup.programs import run
 from lup.publishing import Part, Place, Post, Refusal
 from lup.types import Model
@@ -918,13 +919,16 @@ def test_a_view_placed_in_a_drawer_resolves_with_its_letter_after_the_core_s(
         *(tone.name for tone in CORE_LOOKS.tones),
         "warm",
     ]
-    assert looks.folds == CORE_LOOKS.folds
+    assert looks.folds == SHELL_FOLDS
 
 
 def test_the_core_s_looks_are_the_shell_s_the_runtime_adapters_and_the_judge_s() -> (
     None
 ):
-    assert [fold.name for fold in CORE_LOOKS.folds] == [
+    # The shell's fold kinds are `Core`'s, first among the modules'.
+    looks = resolve(Project(modules=Modules.only(Core()))).looks
+    assert CORE_LOOKS.folds == []
+    assert [fold.name for fold in looks.folds] == [
         "group",
         "item",
         "file",
@@ -1037,7 +1041,7 @@ def test_two_modules_taking_one_fold_letter_fail_the_load() -> None:
 
 @pytest.mark.parametrize(
     ("letter", "whose"),
-    [("f", "the core"), ("s", "judge"), ("t", "adapters")],
+    [("f", "core"), ("s", "judge"), ("t", "adapters")],
 )
 def test_a_module_taking_a_letter_of_the_core_s_fails_the_load(
     letter: str, whose: str
@@ -1056,6 +1060,22 @@ def test_a_module_taking_a_letter_of_the_core_s_fails_the_load(
     )
     with pytest.raises(ProjectError, match=rf"Fold keys: .*`{letter}` from `{whose}`"):
         resolve(Project(modules=Modules.only(Core(), clashing)))
+
+
+def test_a_person_s_layer_changes_how_a_shell_s_fold_kind_starts_and_whether_zr_reaches_it() -> (
+    None
+):
+    lines = next(each for each in SHELL_FOLDS if each.name == "lines")
+    kept = lines.model_copy(update={"by_all": False, "starts_open": False})
+    project = Project(
+        modules=Modules.only(Core()).edit(Core(folds=Folds().replace("lines", kept)))
+    )
+    looks = resolve(project).looks
+    [changed] = [each for each in looks.folds if each.name == "lines"]
+    assert (changed.by_all, changed.starts_open, changed.letter) == (False, False, "u")
+    # Every other kind as the shell declares it: starting as its view lays it out, reached by zR.
+    others = [each for each in looks.folds if each.name != "lines"]
+    assert all(each.by_all and each.starts_open is None for each in others)
 
 
 def test_a_module_naming_a_fold_kind_or_a_tone_as_the_core_does_fails_the_load() -> (

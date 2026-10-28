@@ -81,15 +81,16 @@ function keysOf(fold: Folded): Kind | undefined {
  * open at the last level any is open at, never the own one, which `za` on its header folds. At a level whose kind
  * goes back (`Kind.opens`, `back`), as a conversation's earlier exchanges, one alone: `zr` the latest folded, so each
  * reaches one step further back, `zm` the earliest open. With `all`, as `zR` and `zM`, every one of them: each folded
- * one, or each open one but the own one. Neither `zr` nor `zR` opens a deep fold (`deep`), whose content is read as
- * it opens: its own keys do.
+ * one, or each open one but the own one, but those of a kind `zR` and `zM` don't reach (`Kind.byAll`), as a person's
+ * layer may keep runs of unchanged lines. Neither `zr` nor `zR` opens a deep fold (`deep`), whose content is read as it
+ * opens: its own keys do.
  */
 export function levelled<F extends Folded>(folds: readonly F[], closed: (fold: F) => boolean, opening: boolean, all: boolean): F[] {
     const reached = opening
         ? folds.filter((each) => closed(each) && keysOf(each)?.opens !== "deep")
         : folds.filter((each) => !closed(each) && !isOwn(each));
     if (all) {
-        return reached;
+        return reached.filter((each) => keysOf(each)?.byAll !== false);
     }
     const levels = reached.flatMap((each) => levelOf(each) ?? []);
     const level = opening ? Math.min(...levels) : Math.max(...levels);

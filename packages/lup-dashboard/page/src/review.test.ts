@@ -1,4 +1,5 @@
-import { LOOKS } from "./fixtures/looks";
+import { LOOKS, STANDING } from "./fixtures/looks";
+import { adopt, merged, type Looks } from "./looks";
 import { ANSWERED, DRAWER_ONLY } from "./fixtures/conversation";
 import { ChangeSet, Text } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
@@ -1693,6 +1694,26 @@ describe("the drawers under each agent's banner", () => {
         const remark: Remark = { id: "r", to: S1, quote: { text: "a = 1", block: marked.marks![0]!.block, version: "b1", line: 5, lines: ["        a = 1"], start: 0, end: 13 }, text: "Name it." };
         const writing = laid([QUESTION, NOTE], [S1], banner, header, { ...marked, remarks: [remark] }, NOTHING, [], drawers, undefined, { remote });
         expect(writing.drawers.find((each) => each.kind === "since")?.folds.find((each) => each.kind === "file")?.closed).toBe(false);
+    });
+
+    it("starts each fold as its kind says where a person's layer says it, but one a mark folded", () => {
+        const opened: Looks = { ...STANDING, folds: (STANDING.folds ?? []).map((each) => (each.name === "body" || each.name === "item" ? { ...each, starts_open: true } : each)) };
+        adopt(merged({}, opened));
+        try {
+            const read = laid([QUESTION, NOTE], [S1], banner, header, { ...EMPTY, done: [52] }, NOTHING, [], drawers, undefined, { remote });
+            const since = read.drawers.find((each) => each.kind === "since")!;
+            // The new module's bodies, which its view folds to show its design: open, as the kind says.
+            const bodies = since.folds.filter((each) => each.kind === "body");
+            expect(bodies.length).toBeGreaterThan(0);
+            expect(bodies.every((each) => !each.closed)).toBe(true);
+            // Every item open, as the kind says, but the one marked done, which a mark folds.
+            expect(read.regions.map((each) => [each.item.number, each.folds.find((fold) => fold.kind === "item")?.closed])).toEqual([
+                [51, false],
+                [52, true],
+            ]);
+        } finally {
+            adopt(LOOKS);
+        }
     });
 
     it("marks an agent's own items and drawers done from its banner, its subagents' left as they are", () => {

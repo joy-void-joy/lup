@@ -20,8 +20,8 @@ type Declared = components["schemas"]["FoldKind"];
  * One kind of fold as the page's keys know it: its name, the letter `zf` and Space `z` `f` take after them (none where
  * another kind took it first), what its folds are called together and the one the cursor is in, the level `zr` and
  * `zm` open and close it at, how it opens, its colour, whether Space `z` `f` reaches it, whether it holds its scope
- * whole, whether one folded says how many lines it hides, and whether it's a drawer's, which `]` and `[` and its letter
- * go to.
+ * whole, whether one folded says how many lines it hides, whether it's a drawer's, which `]` and `[` and its letter
+ * go to, whether its folds start open, none where each view says, and whether `zR` and `zM` reach it.
  */
 export interface Kind {
     name: string;
@@ -35,6 +35,8 @@ export interface Kind {
     whole: boolean;
     counts: boolean;
     drawer: boolean;
+    startsOpen: boolean | null;
+    byAll: boolean;
 }
 
 /** The looks merged: every kind, every tone, every verb, each repository's drawers and banner parts, and what was refused, each said once. */
@@ -55,7 +57,7 @@ export const UNLOOKED: Merged = { kinds: [], tones: [], verbs: [], drawers: () =
 /** Return the kind of fold a drawer is, named for its view: folded under its summary line under the banner, its scope whole. */
 function drawerKind(drawn: Drawn): Declared {
     const place = drawn.place;
-    return { name: drawn.view, letter: place.letter, called: place.called, one: place.called, level: 0, opens: "together", colour: place.colour, chord: true, whole: true, counts: true };
+    return { name: drawn.view, letter: place.letter, called: place.called, one: place.called, level: 0, opens: "together", colour: place.colour, chord: true, whole: true, counts: true, by_all: true };
 }
 
 /** Return the last part of a path: a repository's name, as the page says it. */
@@ -106,6 +108,8 @@ export function merged(looks: Readonly<Record<string, Looks>>, standing: Looks):
             whole: declared.whole,
             counts: declared.counts,
             drawer,
+            startsOpen: declared.starts_open ?? null,
+            byAll: declared.by_all ?? true,
         });
     };
     const read = (each: Looks, whose: string | null) => {

@@ -698,6 +698,17 @@ class FoldKind(Model):
     of the agent's words in a conversation, so a long one's view stays small
     however long it runs. A person's layer changes it as any field of the
     module's; none keeps everything open."""
+    starts_open: bool | None = None
+    """Whether its folds start open, until the operator opens or closes one:
+    none, as each one's view lays it out, a test file folded whole, a run of
+    unchanged lines folded, a body open; true or false, every one of its kind,
+    whatever its view says. Marking something done still folds it. A person's
+    layer changes it as any field of the module's."""
+    by_all: bool = True
+    """Whether `zR` and `zM`, which open and close every fold of the item or
+    the drawer the cursor is in, reach it: one they don't, as runs of
+    unchanged lines a person keeps closed, is opened by `zr`, `za` and its own
+    keys still."""
 
 
 class Kept[T](Model):
@@ -783,7 +794,9 @@ SHELL_FOLDS = [
 """The fold kinds of the shell, which every repository's looks carry and no
 module's letter may take: an agent's group whole under its banner, an item
 whole under its header, and an item's context, the core's; a file, a body and a
-run of unchanged lines, which `Diff` and `Code` fold under."""
+run of unchanged lines, which `Diff` and `Code` fold under. `Core` declares
+them (`Core.folds`), so a person's layer changes how each starts and whether
+`zR` and `zM` reach it."""
 
 
 class Drawer(Model):

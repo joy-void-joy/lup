@@ -1,9 +1,10 @@
-import "./fixtures/looks";
+import { LOOKS, STANDING } from "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
 import type { Folding } from "./comments";
 import { around, aroundOf, depths, foldEdge, levelled, nextFold, ofKind, recursive } from "./folds";
 import type { FoldKind } from "./keys";
+import { adopt, merged, type Looks } from "./looks";
 
 // A text of lines two characters long, line `n` starting at `3n`.
 const start = (line: number) => line * 3;
@@ -125,6 +126,17 @@ describe("opening and closing one item's folds", () => {
         expect(levelled(READ, closed, true, true).map((each) => each.key)).toEqual(["item", "file", "lines", "context"]);
         const open = () => false;
         expect(levelled(READ, open, false, true).map((each) => each.key)).toEqual(["file", "body", "lines", "context"]);
+    });
+
+    it("leaves with `zR` and `zM` the folds of a kind a person's layer says they don't reach, as `zr` still opens them", () => {
+        const kept: Looks = { ...STANDING, folds: (STANDING.folds ?? []).map((each) => (each.name === "lines" ? { ...each, by_all: false } : each)) };
+        adopt(merged({}, kept));
+        try {
+            expect(levelled(READ, closed, true, true).map((each) => each.key)).toEqual(["item", "file", "context"]);
+            expect(levelled(READ, () => false, false, true).map((each) => each.key)).toEqual(["file", "body", "context"]);
+        } finally {
+            adopt(LOOKS);
+        }
     });
 
     it("finds the innermost fold of a kind the cursor is in, from its summary line, for z f and the kind's letter", () => {

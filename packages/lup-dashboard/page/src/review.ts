@@ -1166,6 +1166,8 @@ export function laid(
     // Marked done or declined, an item folds; and a block marked done, as a file marked reviewed (`grammar.ts`).
     const settling = [...(draft.done ?? []), ...(draft.declined ?? [])];
     const markedDone = new Set((draft.marks ?? []).filter((each) => each.verb === "done").map((each) => each.block));
+    // The folds a mark or what's left for later folds, which start so whatever their kind says.
+    const byMarks = new Set<Fold>();
     // What's written, each with its id; and, by its id, what of it is anchored to its block, or kept on what it's on
     // whole, as it's laid out, having been drafted before it was.
     const named = identified(draft);
@@ -1229,6 +1231,14 @@ export function laid(
                 node.to = Math.max(end, group.banner.to);
             }
         });
+    }
+    // Each fold starts as its kind says where it says (`Kind.startsOpen`, a person's layer's), else as its view laid it
+    // out; one a mark folded stays folded.
+    for (const fold of [...regions, ...laidDrawers].flatMap((each) => each.folds).concat(groups.flatMap((each) => (each.fold === null ? [] : [each.fold])))) {
+        const starts = kindOf(fold.kind)?.startsOpen ?? null;
+        if (starts !== null && !byMarks.has(fold)) {
+            fold.closed = !starts;
+        }
     }
     const text = w.text;
     const asLaid = wrote.map((each) => converting.get(writtenId(each)) ?? each);
@@ -1571,7 +1581,11 @@ export function laid(
         // The item whole folds under its header, what folds within it inside: folded once it's left for later, or marked
         // done or declined, but where it holds what the operator wrote, which stays in view until it's sent.
         const closed = isParked || (settling.includes(item.number) && into.blocks.length === 0);
-        into.folds.push({ of, kind: "item", name: "", label: head, closed, summary: headed, from: headed.to, to: w.at - 1, scope: true });
+        const whole: Fold = { of, kind: "item", name: "", label: head, closed, summary: headed, from: headed.to, to: w.at - 1, scope: true };
+        into.folds.push(whole);
+        if (closed) {
+            byMarks.add(whole);
+        }
         const placedItem = part(id, "item", headed.from, w.at - 1, { children });
         w.line("", `${id} end`);
         regions.push({ item, body: view, named: `${cited(item.number)} ${namedBy(summary)}`, of, header: headed, said: said_, changed, ...into });
@@ -1798,6 +1812,7 @@ export function laid(
                             const own = into.folds.find((each) => each.kind === "file" && each.summary.from === span.from);
                             if (own !== undefined && markedDone.has(id) && !writes) {
                                 own.closed = true;
+                                byMarks.add(own);
                             }
                         }
                         break;
