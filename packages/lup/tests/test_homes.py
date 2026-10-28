@@ -603,6 +603,12 @@ def test_nothing_unchanged_too_large_or_through_a_link_is_carried(
         f"No preference was carried back from {carrying.saved}:"
     )
     assert not carrying.into.exists()
+    # A pipe a room left where its settings were is never waited on.
+    carrying.saved.unlink()
+    os.mkfifo(carrying.saved)
+    assert carrying.carried()[0].startswith(
+        f"No preference was carried back from {carrying.saved}:"
+    )
 
 
 def test_a_later_layer_never_writes_through_a_link_an_earlier_one_copied(
