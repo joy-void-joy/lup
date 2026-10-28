@@ -7,7 +7,6 @@
 // view no producer answers is its module's own, asked of the host (`module-view`) and kept live at its own triggers.
 // Every view instance has an id that stays across layouts, its module, view and argument with its repository, and
 // each of its blocks the instance's id and the block's own: what the review is kept by (`review.ts`). Pure.
-import type { Laid as Talk, Remark as TalkComment } from "./conversation";
 import type { components } from "./generated/api";
 
 export type Blocks = components["schemas"]["Blocks"];
@@ -26,31 +25,26 @@ type Since = components["schemas"]["Since"];
 type SinceFile = components["schemas"]["SinceFile"];
 type Task = components["schemas"]["Task"];
 type Usage = components["schemas"]["Usage"];
-type Call = components["schemas"]["Call"];
-type Entry = components["schemas"]["Entry"];
-type Exchange = components["schemas"]["Exchange"];
 
 /** What the host answered, asked for more of an item than its own text: what it showed, or why it refused. */
 export type Answered<T> = { shown: T } | { refused: string };
 
 /**
- * What one agent's views read of it, by its conversation (`whose`): its conversation's steps as read so far, each call
- * read whole once its fold was opened, its task list and what its context holds, the items it exchanged, and what its
- * branch changed since the operator last saw it. None of a view's before the host has answered.
+ * What one agent's views the page lays out itself read of it, by its conversation (`whose`): its task list and what
+ * its context holds, read with its runtime's record (`inbox-show-conversation`), and what its branch changed since the
+ * operator last saw it. None of a view's before the host has answered. Its conversation is `Transcripts`' own view,
+ * asked of the host.
  */
 export interface AgentDrawers {
-    entries: Entry[];
-    calls: ReadonlyMap<string, Answered<Call>>;
     tasks: Task[];
     usage: Usage | null;
-    exchanged: { sent: Exchange[]; received: Exchange[] } | null;
     since: Since | null;
 }
 
 /** Each agent's data, by `whose` its conversation is. */
 export type Drawers = Map<string, AgentDrawers>;
 
-export const UNREAD: AgentDrawers = { entries: [], calls: new Map(), tasks: [], usage: null, exchanged: null, since: null };
+export const UNREAD: AgentDrawers = { tasks: [], usage: null, since: null };
 
 /** What the host has answered of each item beyond its own text, by its number: its context, and each file it changes. */
 export interface Beyond {
@@ -82,8 +76,6 @@ export interface Answer {
     /** For "since you approved": each file a block shows, by the block's id, and what the host answered of the drawer. */
     files?: ReadonlyMap<string, SinceFile>;
     since?: Since;
-    /** For the conversation, which the page's own `conversation.ts` lays out until it's `Transcripts`' own view: its text, with the operator's remarks on it. */
-    talk?: (remarks: TalkComment[]) => Talk;
 }
 
 /** A view the page lays out itself: whose module's it is, which view, and its answer of what it's given, from what the page has read of `repository`. */

@@ -64,6 +64,7 @@ import { kindOf, type Merged } from "./looks";
 import { markerEnd, outdated, unfound } from "./exchange";
 import { source, sourced, without, type Source } from "./markdown";
 import {
+    barsOf,
     aboutAt,
     answerAfter,
     citationsOf,
@@ -158,8 +159,6 @@ interface Props {
     hold: (conversation: Conversation) => void;
     /** Told each drawer the operator opens, so the page reads what it shows. */
     opened: (conversation: Conversation, kind: DrawerKind) => void;
-    /** Told the calls whose input and output the operator opens in an agent's conversation, so the page reads them whole. */
-    details: (conversation: Conversation, ids: string[]) => void;
     /** Where the page asks the review to go, as the palette does: an agent's group. */
     jump: Jump | null;
     /** Say something on the page's line of messages, as why a key did nothing. */
@@ -286,8 +285,9 @@ function painted(laidOut: Laid, from: number, to: number, fresh: Freshness): Ran
 
 /**
  * Return what of the review is written in Markdown (`markdown.ts`): each item's own text, its lines whole and the
- * comments under them left out; the agent's words in a context and in a conversation, each run of them one,
- * the remarks under them left out; and each comment, message and remark.
+ * comments under them left out; the agent's words in a context, each run of them one; each Markdown block of a
+ * drawer's, as the agent's words in its conversation, the remarks under them left out; and each comment, message and
+ * remark.
  */
 function sourcesOf(laidOut: Laid): Source[] {
     const found: Source[] = [];
@@ -326,16 +326,8 @@ function sourcesOf(laidOut: Laid): Source[] {
         }
     }
     for (const drawer of laidOut.drawers) {
-        const talk = drawer.talk;
-        if (talk !== null) {
-            for (const words of talk.words) {
-                const first = words.lines[0];
-                const last = words.lines.at(-1);
-                if (first !== undefined && last !== undefined) {
-                    const span = { from: first.start, to: whole(last).to };
-                    add(source("text", without(span, words.blocks.map(whole))));
-                }
-            }
+        for (const span of drawer.texts) {
+            add(source("text", without(whole(span), drawer.blocks.map(whole))));
         }
         for (const block of drawer.blocks) {
             add(source("comment", [block]));
@@ -452,9 +444,13 @@ function decorations(
     for (const scope of scopesOf(laidOut)) {
         if (isDrawer(scope)) {
             marks.push({ from: scope.header.from, to: scope.header.from, value: Decoration.line({ class: drawerClasses(scope) }) });
-            // A view its module answers, each span in the look of its tone (`looks.ts`).
+            // A view its module answers, each span in the look of its tone (`looks.ts`); what a fold of its sets off,
+            // set in by how many such folds it's in, the innermost's bar beside it.
             for (const span of scope.toned) {
                 marks.push({ from: span.from, to: span.to, value: marked(`tone-${span.tone}`) });
+            }
+            for (const [from, classes] of barsOf(laidOut.text, scope.bars)) {
+                marks.push({ from, to: from, value: Decoration.line({ class: classes }) });
             }
         } else {
             const region = scope as Region;
@@ -641,7 +637,6 @@ export function Review({
     reviewSince,
     hold,
     opened: told,
-    details,
     jump,
     say,
     inserting,
@@ -748,13 +743,6 @@ export function Review({
                     if (each.folds.some((own) => own.name === name && foldKey(own) === fold.key)) {
                         load(view);
                     }
-                }
-            }
-            // A call's input and output, read as its fold opens.
-            for (const each of laidOut.drawers) {
-                const call = each.talk?.calls.find((shown) => foldKey({ of: each.of, kind: "call", name: shown.fold.key }) === fold.key);
-                if (call !== undefined) {
-                    details(each.conversation, [call.id]);
                 }
             }
         },

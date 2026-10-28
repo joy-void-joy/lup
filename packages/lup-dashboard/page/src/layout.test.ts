@@ -2,11 +2,11 @@ import "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
 import { cursorRow, itemStanding, outlineOf, type Reading } from "./outline";
-import { EMPTY, laid, nested, ownerOf, rowLabel, whose, UNREAD, type AgentDrawers, type Around, type Conversation, type Head, type Item, type Placed } from "./review";
+import { EMPTY, barsOf, laid, nested, ownerOf, rowLabel, whose, UNREAD, type AgentDrawers, type Around, type Conversation, type Head, type Item, type Placed } from "./review";
 import { around, linesOver, pinned, stickies, type Geometry } from "./stack";
 import { STANDING } from "./fixtures/looks";
 import { merged } from "./looks";
-import { blockId, instanceOf, type Blocks } from "./views";
+import { blockId, instanceOf, type Blocks, type Remote } from "./views";
 
 const AT = "2026-10-17T12:00:00Z";
 const WAITING: Item["rank"] = { name: "waiting on you", order: 0, notifies: true };
@@ -54,24 +54,36 @@ const TASKED: AgentDrawers = {
         { id: "1", subject: "Read", status: "completed", active: null },
         { id: "2", subject: "Write", status: "in_progress", active: "Writing" },
     ],
-    entries: [
-        { kind: "said", by: "operator", text: "Go.", at: AT },
-        { kind: "said", by: "agent", text: "Going.", at: AT },
-    ],
 };
+/** The parent's conversation, as `Transcripts` answers it: the operator's words, and the agent's. */
+const TALKED: Remote = new Map([
+    [
+        instanceOf("/r/lup.git", "transcripts", "conversation", { runtime: "claude", session: "s1", agent: null }),
+        {
+            summary: [{ text: "conversation · 2 steps", tone: "plain" }],
+            waiting: false,
+            count: 0,
+            offers: [],
+            blocks: [
+                { block: "line", id: "step 0", version: null, offers: [], spans: [{ text: "you: Go.", tone: "operator" }] },
+                { block: "markdown", id: "step 1", version: null, offers: [], text: "Going.", tone: "plain" },
+            ],
+        },
+    ],
+]);
 
 describe("subagents nested under their parent", () => {
     it("lays each subagent's group under its nearest forebear with a group, after its items and drawers, set in by how deep it is", () => {
         const items = [note(1, CHILD), note(2, OTHER), note(3, GRANDCHILD), note(4, PARENT)];
         const drawers = new Map([[whose(PARENT), TASKED]]);
-        const plain = laid(items, [PARENT], banner, header, EMPTY, NOTHING, [], drawers);
+        const plain = laid(items, [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { remote: TALKED });
         expect(plain.groups.map((each) => [banner(each.head), each.depth])).toEqual([
             ["━━ a1 ━━", 0],
             ["━━ s2 ━━", 0],
             ["━━ a2 ━━", 0],
             ["━━ s1 ━━", 0],
         ]);
-        const out = laid(items, [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { parents: PARENTS });
+        const out = laid(items, [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { parents: PARENTS, remote: TALKED });
         expect(out.groups.map((each) => [banner(each.head), each.depth])).toEqual([
             ["━━ s2 ━━", 0],
             ["━━ s1 ━━", 0],
@@ -116,7 +128,7 @@ describe("groups folding whole", () => {
 describe("the review's tree", () => {
     it("keeps each part laid out by an id that stays across layouts: a group, its banner, a drawer, an item, a view of either, its blocks", () => {
         const drawers = new Map([[whose(PARENT), TASKED]]);
-        const out = laid([note(4, PARENT), note(1, CHILD)], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { parents: PARENTS });
+        const out = laid([note(4, PARENT), note(1, CHILD)], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { parents: PARENTS, remote: TALKED });
         const ids = (parts: Placed[]): unknown[] => parts.map((each) => (each.children.length === 0 ? `${each.kind} ${each.id}` : [`${each.kind} ${each.id}`, ids(each.children)]));
         const tasks = instanceOf("/r/lup.git", "adapters", "tasks", { runtime: "claude", session: "s1", agent: null });
         const conversation = instanceOf("/r/lup.git", "transcripts", "conversation", { runtime: "claude", session: "s1", agent: null });
@@ -128,7 +140,7 @@ describe("the review's tree", () => {
                 [
                     `banner group now ${whose(PARENT)} banner`,
                     [`view ${tasks}`, [`block ${blockId(tasks, "task 1")}`, `block ${blockId(tasks, "task 2")}`]],
-                    `view ${conversation}`,
+                    [`view ${conversation}`, [`block ${blockId(conversation, "step 0")}`, `block ${blockId(conversation, "step 1")}`]],
                     [`item item 4`, [`header item 4 header`, [`view ${body(4)}`, [`block ${blockId(body(4), "text")}`]]]],
                     [`group group now ${whose(CHILD)}`, [`banner group now ${whose(CHILD)} banner`, [`item item 1`, [`header item 1 header`, [`view ${body(1)}`, [`block ${blockId(body(1), "text")}`]]]]]],
                 ],
@@ -140,7 +152,7 @@ describe("the review's tree", () => {
         expect(out.text.slice(item.header.from, item.header.to)).toBe("── @4 note ──");
         expect(out.text.slice(item.from, item.to + 1)).toBe("── @4 note ──\nNote 4.\nSecond line.\n");
         // Laid out again, as a comment's key is typed, each part keeps its id.
-        const again = laid([note(4, PARENT), note(1, CHILD)], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { parents: PARENTS });
+        const again = laid([note(4, PARENT), note(1, CHILD)], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { parents: PARENTS, remote: TALKED });
         expect(ids(again.nodes)).toEqual(ids(out.nodes));
     });
 });
@@ -165,7 +177,7 @@ describe("a drawer its module answers itself", () => {
     const drawers = new Map([[whose(PARENT), TASKED]]);
 
     it("is drawn from what the host answered of it, its spans in their tones, a fold read as it opens saying so until it is", () => {
-        const out = laid([], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { looks, remote: new Map([[id, answer]]) });
+        const out = laid([], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { looks, remote: new Map([...TALKED, [id, answer]]) });
         const drawer = out.drawers.find((each) => each.kind === "notes")!;
         expect(out.text.slice(drawer.header.from)).toBe("notes · 2\nwarm words\nolder notes\nreading…\n\n");
         expect(drawer.waiting).toBe(true);
@@ -175,9 +187,9 @@ describe("a drawer its module answers itself", () => {
             ["older notes", "muted"],
         ]);
         expect([...drawer.loads]).toEqual([["older", { repository: "/r/lup.git", module: "notes", view: "older", argument: more }]]);
-        expect(drawer.folds.map((each) => [each.kind, each.name, each.closed])).toEqual([
-            ["notes", "older", true],
-            ["notes", "", true],
+        expect(drawer.folds.map((each) => [each.kind, each.name, each.closed, each.unread ?? false])).toEqual([
+            ["notes", "older", true, true],
+            ["notes", "", true, false],
         ]);
         // Read, the fold holds what its view answered.
         const older: Blocks = { summary: [], waiting: false, count: 0, offers: [], blocks: [{ block: "line", id: "o1", version: null, offers: [], spans: [{ text: "an old note", tone: "plain" }] }] };
@@ -189,9 +201,54 @@ describe("a drawer its module answers itself", () => {
             ]),
         });
         expect(read.text).toContain("older notes\nan old note\n");
-        // Not answered yet, it isn't shown; nor where the page lays it out itself, as its own drawers' toned spans aren't marked.
-        expect(laid([], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { looks }).drawers.map((each) => each.kind)).toEqual(["tasks", "conversation"]);
+        // Not answered yet, it isn't shown, the conversation among them; where the page lays it out itself, its own drawers'
+        // toned spans aren't marked.
+        expect(laid([], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { looks }).drawers.map((each) => each.kind)).toEqual(["tasks"]);
         expect(out.drawers.find((each) => each.kind === "tasks")?.toned).toEqual([]);
+    });
+});
+
+describe("what a fold of a module's view sets off", () => {
+    it("is set in under its summary line by how many such folds it's in, the innermost's bar beside it", () => {
+        const id = instanceOf("/r/lup.git", "transcripts", "conversation", { runtime: "claude", session: "s1", agent: null });
+        const line = (key: string, text: string) => ({ block: "line" as const, id: key, version: null, offers: [], spans: [{ text, tone: "plain" }] });
+        const talked: Blocks = {
+            summary: [{ text: "conversation · 3 steps", tone: "plain" }],
+            waiting: false,
+            count: 0,
+            offers: [],
+            blocks: [
+                {
+                    block: "fold",
+                    id: "calls 1",
+                    version: null,
+                    offers: [],
+                    kind: "calls",
+                    summary: [{ text: "· called Bash x2", tone: "run" }],
+                    open: true,
+                    barred: true,
+                    content: [
+                        { block: "fold", id: "call b1", version: null, offers: [], kind: "call", summary: [{ text: "· Bash", tone: "call" }], open: true, barred: true, content: [line("input b1", "input:")] },
+                        line("step 2", "· Bash"),
+                    ],
+                },
+                line("step 3", "Done."),
+            ],
+        };
+        const out = laid([], [PARENT], banner, header, EMPTY, NOTHING, [], new Map([[whose(PARENT), TASKED]]), undefined, { remote: new Map([[id, talked]]) });
+        const drawer = out.drawers.find((each) => each.kind === "conversation")!;
+        expect(drawer.bars.map((each) => [out.text.slice(each.from, each.to), each.kind])).toEqual([
+            ["input:", "call"],
+            ["· Bash\ninput:\n· Bash", "calls"],
+        ]);
+        const classes = barsOf(out.text, drawer.bars);
+        const at = (text: string, from = 0) => out.text.indexOf(text, from);
+        expect([...classes].map(([from, each]) => [out.text.slice(from, out.text.indexOf("\n", from)), each])).toEqual([
+            ["· Bash", "bar-1 barred-calls"],
+            ["input:", "bar-2 barred-call"],
+            ["· Bash", "bar-1 barred-calls"],
+        ]);
+        expect(classes.has(at("Done."))).toBe(false);
     });
 });
 
@@ -200,7 +257,7 @@ describe("the drawers under the banner", () => {
     const tasks = ownerOf({ drawer: "tasks", conversation: PARENT });
 
     it("lays each drawer under the banner, one under the other, a short label folding what it holds, the items after them", () => {
-        const out = laid([note(4, PARENT)], [PARENT], banner, header, EMPTY, NOTHING, [], drawers);
+        const out = laid([note(4, PARENT)], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { remote: TALKED });
         expect(out.text.split("\n").slice(0, 4)).toEqual(["━━ s1 ━━", "tasks 1/2", "✓ Read", "▶ Writing"]);
         // No line between them, one after the last.
         expect(out.text).toContain("▶ Writing\nconversation · 2 steps\n");
@@ -218,7 +275,8 @@ describe("the drawers under the banner", () => {
 
     it("says each label short, what waits in \"since you approved\" marking it, none for a drawer with nothing in it", () => {
         expect(rowLabel("tasks", UNREAD)).toBeNull();
-        expect(rowLabel("conversation", TASKED)).toEqual({ text: "conversation · 2 steps", waiting: false });
+        // A drawer its module answers says its own label: the page has none of its.
+        expect(rowLabel("conversation", TASKED)).toBeNull();
         const since: AgentDrawers = {
             ...UNREAD,
             since: { kind: "policy-since", worktree: "/w", branch: "feat", version: "v", same: false, files: [{ path: "a.py", version: "a1", flags: [], reviewed: AT }] },
@@ -307,7 +365,7 @@ describe("the overview", () => {
         rows.map((each) => `${"  ".repeat(each.depth)}${each.text} [${each.marks.join(",")}]${each.draft.length === 0 ? "" : ` {${each.draft.join(",")}}`}`);
 
     it("lists each agent and its items in the review's own order, nested as the review nests them, each marked", () => {
-        const out = laid(items, [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { parents: PARENTS });
+        const out = laid(items, [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { parents: PARENTS, remote: TALKED });
         const rows = outlineOf(out, reading);
         // How each stands, then, apart, what the draft does with it on the next Ctrl+Enter.
         expect(said(rows)).toEqual([
@@ -328,7 +386,7 @@ describe("the overview", () => {
     });
 
     it("follows the review where it doesn't nest, a subagent's group where its first item put it", () => {
-        const out = laid(items, [PARENT], banner, header, EMPTY, NOTHING, [], drawers);
+        const out = laid(items, [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { remote: TALKED });
         expect(said(outlineOf(out, reading))).toEqual([
             "lup []",
             "  s1/a1 [ended]",

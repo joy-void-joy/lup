@@ -364,6 +364,10 @@ def test_a_call_is_a_line_saying_what_it_did_a_run_of_them_under_one_line_its_in
     assert block(view.blocks, "step 6") == Line.of("step 6", "· Bash", "call")
     # Its line, in the call's tone, isn't the agent's words.
     assert [span.tone for span in call.summary] == ["call"]
+    # A run's calls are set off under its line, as each call's input and output is under its.
+    run = block(view.blocks, "calls 3")
+    assert isinstance(run, Fold)
+    assert run.barred
 
 
 def test_a_call_s_view_shows_each_argument_after_its_name_what_it_returned_or_that_it_s_still_running() -> (

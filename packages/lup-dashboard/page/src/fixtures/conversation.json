@@ -1,0 +1,209 @@
+{
+  "repository": "/r/.git",
+  "of": {
+    "runtime": "claude",
+    "session": "s1",
+    "agent": "a1"
+  },
+  "entries": [
+    {
+      "kind": "said",
+      "by": "operator",
+      "text": "Build the reader.",
+      "at": "2026-10-17T11:50:00Z"
+    },
+    {
+      "kind": "said",
+      "by": "agent",
+      "text": "Reading the records.",
+      "at": "2026-10-17T11:51:00Z"
+    },
+    {
+      "kind": "called",
+      "tool": "Bash",
+      "gist": null,
+      "id": null,
+      "at": "2026-10-17T11:52:00Z"
+    },
+    {
+      "kind": "called",
+      "tool": "Read",
+      "gist": null,
+      "id": null,
+      "at": "2026-10-17T11:52:00Z"
+    },
+    {
+      "kind": "said",
+      "by": "operator",
+      "text": "Ask me first.",
+      "at": "2026-10-17T11:55:00Z"
+    },
+    {
+      "kind": "said",
+      "by": "agent",
+      "text": "Twenty kinds of line.\n\nFour carry what was said.",
+      "at": "2026-10-17T11:56:00Z"
+    },
+    {
+      "kind": "called",
+      "tool": "Grep",
+      "gist": null,
+      "id": null,
+      "at": "2026-10-17T11:57:00Z"
+    }
+  ],
+  "answers": [
+    {
+      "view": "conversation",
+      "argument": {
+        "runtime": "claude",
+        "session": "s1",
+        "agent": "a1"
+      },
+      "answer": {
+        "blocks": [
+          {
+            "block": "fold",
+            "id": "exchange 0",
+            "version": null,
+            "offers": [],
+            "kind": "earlier",
+            "summary": [
+              {
+                "text": "you: Build the reader.",
+                "tone": "operator",
+                "conversation": null,
+                "item": null,
+                "ticking": null,
+                "gauge": null
+              }
+            ],
+            "open": false,
+            "barred": false,
+            "content": {
+              "view": "exchange",
+              "argument": {
+                "runtime": "claude",
+                "session": "s1",
+                "agent": "a1",
+                "step": 0,
+                "until_last": null
+              }
+            }
+          },
+          {
+            "block": "line",
+            "id": "step 4",
+            "version": null,
+            "offers": [],
+            "spans": [
+              {
+                "text": "you: Ask me first.",
+                "tone": "operator",
+                "conversation": null,
+                "item": null,
+                "ticking": null,
+                "gauge": null
+              }
+            ]
+          },
+          {
+            "block": "markdown",
+            "id": "step 5",
+            "version": null,
+            "offers": [],
+            "text": "Twenty kinds of line.\n\nFour carry what was said.",
+            "tone": "plain"
+          },
+          {
+            "block": "line",
+            "id": "step 6",
+            "version": null,
+            "offers": [],
+            "spans": [
+              {
+                "text": "· Grep",
+                "tone": "call",
+                "conversation": null,
+                "item": null,
+                "ticking": null,
+                "gauge": null
+              }
+            ]
+          }
+        ],
+        "summary": [
+          {
+            "text": "conversation · 7 steps",
+            "tone": "plain",
+            "conversation": null,
+            "item": null,
+            "ticking": null,
+            "gauge": null
+          }
+        ],
+        "waiting": false,
+        "count": 0,
+        "offers": []
+      }
+    },
+    {
+      "view": "exchange",
+      "argument": {
+        "runtime": "claude",
+        "session": "s1",
+        "agent": "a1",
+        "step": 0,
+        "until_last": null
+      },
+      "answer": {
+        "blocks": [
+          {
+            "block": "markdown",
+            "id": "step 1",
+            "version": null,
+            "offers": [],
+            "text": "Reading the records.",
+            "tone": "plain"
+          },
+          {
+            "block": "line",
+            "id": "step 2",
+            "version": null,
+            "offers": [],
+            "spans": [
+              {
+                "text": "· Bash",
+                "tone": "call",
+                "conversation": null,
+                "item": null,
+                "ticking": null,
+                "gauge": null
+              }
+            ]
+          },
+          {
+            "block": "line",
+            "id": "step 3",
+            "version": null,
+            "offers": [],
+            "spans": [
+              {
+                "text": "· Read",
+                "tone": "call",
+                "conversation": null,
+                "item": null,
+                "ticking": null,
+                "gauge": null
+              }
+            ]
+          }
+        ],
+        "summary": [],
+        "waiting": false,
+        "count": 0,
+        "offers": []
+      }
+    }
+  ]
+}

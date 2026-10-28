@@ -622,6 +622,21 @@ kbd {
     border-left: 2px solid var(--muted);
 }
 
+/* What a fold of a module's view sets off under its summary line
+   (`Fold.barred`): set in by how many such folds it's in, its bar beside it in
+   the innermost's colour (`barred-<kind>`, written with the looks). */
+.buffer .cm-line.bar-1 {
+    padding-left: calc(6px + 4ch);
+}
+
+.buffer .cm-line.bar-2 {
+    padding-left: calc(6px + 6ch);
+}
+
+.buffer .cm-line.bar-3 {
+    padding-left: calc(6px + 8ch);
+}
+
 /* A changed file under an approval or a held change: its header, then its
    lines, each numbered in a gutter of its own (`data-gutter`), what it adds on
    the blue of good and what it removes on the red of bad, the runs of

@@ -40,6 +40,7 @@ describe("the looks, merged across repositories", () => {
         const css = styled(merged({}, STANDING));
         expect(css).toContain("--fold-since: var(--warn);");
         expect(css).toContain(".fold-item, .buffer .cm-editor .cm-foldPlaceholder.fold-item { color: var(--fold-item); }");
+        expect(css).toContain(".buffer .cm-line.barred-items { border-left: 2px solid var(--fold-items); }");
         expect(css).toContain(".tone-strong { color: var(--fg); font-weight: 700; }");
         // `received` takes `operator`'s look, which is the operator's blue.
         expect(css).toContain(".tone-received { color: var(--info); }");

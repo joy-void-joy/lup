@@ -104,7 +104,7 @@ CALLS_KIND = FoldKind(
     colour="purple",
     counts=False,
 )
-"""A run of calls, under one line saying how many of which."""
+"""A run of calls, under one line saying how many of which, set off under it."""
 ITEMS_KIND = FoldKind(
     name="items",
     letter="m",
@@ -435,7 +435,7 @@ def called(call: Called) -> str:
 
 
 def turned(turns: list[Turn], of: OfAgent, view: Method, run: int = 3) -> list[Block]:
-    """Lay `turns` out in blocks, in order: the operator's words, the agent's, each call a line saying what it did, each run of `run` calls or more folded under one line saying how many of which, and each item a line with its text folded under it.
+    """Lay `turns` out in blocks, in order: the operator's words, the agent's, each call a line saying what it did, each run of `run` calls or more folded under one line saying how many of which, and each item a line with its text folded under it; what each run, call and item folds set off by a bar (`Fold.barred`).
 
     A call whose record gives it an id folds its input and output under its
     line, read from `view`, one call read whole, as it opens.
@@ -493,6 +493,7 @@ def turned(turns: list[Turn], of: OfAgent, view: Method, run: int = 3) -> list[B
                 id=f"calls {calls[0].step}",
                 kind=CALLS_KIND.name,
                 summary=[Span(text=tools, tone=RUN_TONE.name)],
+                barred=True,
                 content=[call(each) for each in calls],
             )
         ]
