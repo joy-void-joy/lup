@@ -44,7 +44,7 @@ class Friction(Model):
 
 
 class HowItFelt(Model):
-    """How a piece of work went as a whole, and how it felt, in the agent's own words."""
+    """How it is for you, in your own words."""
 
     text: str = Field(description="In your own words.")
 
@@ -67,4 +67,4 @@ class TurnResult[T](Model):
     frictions: list[Friction] = []
     """What got in the agent's way, each when it did, oldest first."""
     how_it_felt: HowItFelt | None = None
-    """How the agent said the work went, where it said; the last, if it said twice."""
+    """How the agent said it was for them, where they said; the last, if they said it more than once."""

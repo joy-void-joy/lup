@@ -38,7 +38,7 @@ class CallRecord(Model):
     frictions: list[Friction] = []
     """What got in the agent's way, whether it answered or not."""
     how_it_felt: HowItFelt | None = None
-    """How the agent said the work went, where it said."""
+    """How the agent said it was for them, where they said."""
     usage: Usage | None = None
     """None where the ask failed before the runtime reported any."""
 

@@ -127,7 +127,7 @@ def test_every_tool_of_lup_s_has_a_summary() -> None:
         "Stop by your own choice, saying why.",
         "Attach a remark to your answer, and carry on.",
         "Say what got in your way, and carry on.",
-        "Say how the work went and felt, once.",
+        "Tell your caller how it is for you.",
     ]
 
 

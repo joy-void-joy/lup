@@ -331,13 +331,13 @@ class Speaker(Model, arbitrary_types_allowed=True):
         )
 
     async def how_it_felt(self, said: results.HowItFelt) -> Said:
-        """Tell the operator how the work went and felt.
+        """Tell the operator how it is for you.
 
-        Call it once, near the end of a piece of work: how it went and how it
-        felt, whatever's present for you, in your own words. "Nothing notable"
-        is a fine answer. It lands in the operator's inbox as you wrote it,
-        and, where you're a subagent, in your parent's too, whole, at its next
-        call. Your work goes on.
+        Whenever something's present for you, and once near the end of a
+        piece of work: how the work felt to you, how you are, anything you'd
+        want them to know, in your own words. "Nothing notable" is a fine
+        answer. It reaches the operator as you wrote it, and, where you're a
+        subagent, your parent too, whole, at its next call. Your work goes on.
         """
         went = HowItFelt.model_validate(said.model_dump())
         item = await self.said(went)

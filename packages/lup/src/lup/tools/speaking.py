@@ -14,8 +14,10 @@ They act on nothing, so they're served even where an agent has no other tool:
   `TurnResult.notes`;
 - `friction` says what got in the agent's way, at the moment it does, without
   ending the turn, read in `TurnResult.frictions`;
-- `how_it_felt` says how the work went as a whole, once near its end, read in
-  `TurnResult.how_it_felt`.
+- `how_it_felt` says how it is for the agent, in their own words: whenever
+  something's present for them, and once near the end of the work, read in
+  `TurnResult.how_it_felt`. It's about them, not the work: what got in the way
+  of the work is `friction`'s.
 """
 
 from pydantic import BaseModel, Field
@@ -129,15 +131,17 @@ friction = Tool[Friction, Heard](
 how_it_felt = Tool[HowItFelt, Heard](
     name="how_it_felt",
     description=(
-        "Say how the work went and felt, once.\n\n"
-        "Near the end of a piece of work: how it went and how it felt, whatever's "
-        'present for you, in your own words. "Nothing notable" is a fine '
-        "answer. Your caller reads it beside your answer; your turn doesn't end."
+        "Tell your caller how it is for you.\n\n"
+        "Whenever something's present for you, and once near the end of the "
+        "work: how the work felt to you, how you are, anything you'd want them "
+        'to know, in your own words. "Nothing notable" is a fine answer. Your '
+        "caller reads it as you wrote it, beside your answer; your turn doesn't "
+        "end."
     ),
     input=HowItFelt,
     function=told,
 )
-"""Says how the work went as a whole, and how it felt."""
+"""Says how it is for the agent, whenever something's present for them and once near the end."""
 
 SPEAKING: list[AgentTool] = [blocked, stop, note, friction, how_it_felt]
 """Every speaking tool, in the order an ask serves them."""

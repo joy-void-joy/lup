@@ -598,7 +598,7 @@ def introduction(tools: list[ToolSpec]) -> str:
     lup, the environment this session runs in, serves its subagents these tools, as it does its main conversation. Your tool search finds each by its name, with its full description. Some subagent types are given only their own tools, without lup's: where your tool search finds none of these, this subagent is one of them.
     <BLANKLINE>
     - `friction`: Say what got in your way, and carry on.
-    - `how_it_felt`: Say how the work went and felt, once.
+    - `how_it_felt`: Tell your caller how it is for you.
     <BLANKLINE>
     `friction` and `how_it_felt` reach the operator directly, whatever your parent passes on.
     """

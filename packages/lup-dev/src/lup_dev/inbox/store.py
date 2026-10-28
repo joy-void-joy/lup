@@ -211,7 +211,7 @@ class Friction(results.Friction):
 
 
 class HowItFelt(results.HowItFelt):
-    """How a piece of work went as a whole, and how it felt, as a conversation told the operator once near its end (`how_it_felt`), in its own words: news to read."""
+    """How it is for a conversation's agent, as they told the operator (`how_it_felt`), whenever something was present for them or near the end of a piece of work, in their own words: news to read."""
 
     reason: Literal["how it felt"] = "how it felt"
 

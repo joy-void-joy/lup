@@ -3997,7 +3997,7 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
         "End your work by your own choice, saying why.",
         "Tell the operator a doubt, and carry on.",
         "Say what got in your way, and carry on.",
-        "Tell the operator how the work went and felt.",
+        "Tell the operator how it is for you.",
         "Ask the operator, with numbered decisions.",
         "Send a message to a party's inbox.",
         "Wait until something reaches you.",

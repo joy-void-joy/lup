@@ -134,7 +134,7 @@ class Toolbox(MutableModel, Toolset, arbitrary_types_allowed=True):
         ]
 
     def how_it_felt(self) -> HowItFelt | None:
-        """Return how the agent said the work went, its last if it said twice; none where it didn't."""
+        """Return how the agent said it was for them, the last if they said it more than once; none where they didn't."""
         said = [
             taken
             for taken in self.taken(how_it_felt.name)
