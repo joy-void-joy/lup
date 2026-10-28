@@ -1817,6 +1817,30 @@ def session_at(place: PurePosixPath) -> str | None:
             return None
 
 
+def resumed(arguments: list[str]) -> str | None:
+    """Return the session Claude Code's arguments resume, `--resume <id>`, `-r <id>` or `--resume=<id>`: the value given, which it takes as a session's id, or as what its picker searches for where no session has that id; none where they resume none, or open the picker bare.
+
+    Read in its 2.1.311 help: `-r, --resume [value]`, "Resume a conversation by
+    session ID, or open interactive picker with optional search term".
+
+    >>> resumed(["--resume", "8f2c"]), resumed(["-p", "-r", "8f2c"]), resumed(["--resume=8f2c"])
+    ('8f2c', '8f2c', '8f2c')
+    >>> resumed(["--resume"]), resumed(["--resume", "--model", "opus"]), resumed([])
+    (None, None, None)
+    """
+    for index, each in enumerate(arguments):
+        if each.startswith("--resume="):
+            return each.removeprefix("--resume=") or None
+        following = arguments[index + 1 : index + 2]
+        if (
+            each in ["--resume", "-r"]
+            and following
+            and not following[0].startswith("-")
+        ):
+            return following[0]
+    return None
+
+
 def kept_in(home: Home, under: list[Path]) -> list[Record]:
     """Return the records in one of Claude Code's homes of the sessions that ran under `under`: each folder of `projects/` they ran in, named for the directory its sessions say (`filed`), and each of their sessions' `file-history/`."""
     directory = home.directory
@@ -3381,6 +3405,7 @@ def adapter() -> Adapter:
         directory=layout.directory,
         written=ClaudeWritten(directory=layout.directory).checked,
         recorded=session_at,
+        resumed=resumed,
         reader=ClaudeTranscripts(settings=layout.settings, layout=machine),
         queues=ClaudeQueues(records=records),
     )

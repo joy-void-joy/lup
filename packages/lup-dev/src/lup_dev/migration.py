@@ -575,19 +575,22 @@ class Walked(Model):
         return any(each.files or each.links for each in self.moved)
 
     def amount(self) -> str:
-        """Say how much moved, or would, in a few words: its sessions, else its records, and their size.
+        """Say how much of the repository's moved, or would, in a few words: its sessions, else its records, and their size.
 
         >>> from pathlib import Path, PurePosixPath
         >>> moved = [Moved(place=PurePosixPath("projects", "-w"), files=3, size=2048)]
         >>> Walked(runtime="agent", home=Path("/h"), moved=moved, sessions=["a", "b"]).amount()
-        '2 sessions, 2.0 KiB'
+        '2 sessions of this repository, 2.0 KiB'
         >>> Walked(runtime="agent", home=Path("/h"), moved=moved, sessions=[]).amount()
-        '1 record of its sessions, 2.0 KiB'
+        "1 record of this repository's sessions, 2.0 KiB"
         """
         counting = (
-            counted(len(self.sessions), "session", "sessions")
+            f"{counted(len(self.sessions), 'session', 'sessions')} of this repository"
             if self.sessions
-            else f"{counted(len(self.moved), 'record', 'records')} of its sessions"
+            else (
+                f"{counted(len(self.moved), 'record', 'records')} of this "
+                "repository's sessions"
+            )
         )
         return f"{counting}, {sized(self.size)}"
 

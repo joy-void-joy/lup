@@ -1190,6 +1190,21 @@ def session_at(place: PurePosixPath) -> str | None:
     return thread if stem.endswith(f"-{thread}") else None
 
 
+def resumed(arguments: list[str]) -> str | None:
+    """Return the thread Codex's arguments resume, `resume <id>`, its subcommand first among a launch's own arguments, since lup's go before them; none where they resume none, or resume with `--last` or the picker.
+
+    >>> resumed(["resume", "019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b"])
+    '019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b'
+    >>> resumed(["resume"]), resumed(["resume", "--last"]), resumed(["exec", "resume"])
+    (None, None, None)
+    """
+    match arguments:
+        case ["resume", thread, *_] if not thread.startswith("-"):
+            return thread
+        case _:
+            return None
+
+
 def kept_in(home: Home, under: list[Path]) -> list[Record]:
     """Return the rollouts in one of Codex's homes of the sessions that ran under `under`, each by its path under `sessions/`.
 
@@ -1977,6 +1992,7 @@ def adapter() -> Adapter:
         directory=home,
         written=CodexWritten(home=home).checked,
         recorded=session_at,
+        resumed=resumed,
         reader=CodexTranscripts(),
         queues=None,
     )

@@ -181,6 +181,7 @@ from lup_dev.launch.clis import CliCache
 from lup_dev.launch.hidden import removed
 from lup_dev.launch.homes import LaunchHome
 from lup_dev.launch.images import build
+from lup_dev.launch.moving import MovingOver
 from lup_dev.launch.room import (
     QRENCODE,
     Lent,
@@ -1578,6 +1579,21 @@ class Launcher(Model, arbitrary_types_allowed=True):
     rules: Callable[[list[Selected]], list[Rule]]
     """Lists the rules a project's selection runs, which the engine resolves,
     raising `EngineError` where it refuses the selection or can't run."""
+    ask: Callable[[str], str | None] | None = None
+    """Asks the operator a question in their terminal, returning the line they
+    answer, none at the end of its input; none where the launch runs in no
+    terminal to ask in."""
+
+
+def host_runtime(adapter: Adapter) -> HostRuntime:
+    """Return a runtime as the migration takes it, from its adapter."""
+    return HostRuntime(
+        name=adapter.runtime.name(),
+        directory=adapter.directory,
+        records=adapter.records,
+        written=adapter.written,
+        recorded=adapter.recorded,
+    )
 
 
 def withheld_at_launch(launcher: Launcher, resolved: Resolved, worktree: Path) -> None:
@@ -1761,8 +1777,11 @@ def launched(
     layer approved beside it; the launch's profile, `profile` or else the one
     the person's layer chooses, and its runtime's account, `account` or else
     the profile's, from the person's profiles approved with it, said where
-    either isn't `default` (`chosen`); the home of the rooms' own the runtime
-    runs on, the profile's choice of one, with the account's login and the
+    either isn't `default` (`chosen`); the offer to move the runtime's records
+    of the repository from the operator's own directory into the home the
+    profile chooses, where something would move, asked on a terminal and moved
+    on a yes, before anything registers (`lup_dev.launch.moving`); the home of
+    the rooms' own the runtime runs on, the profile's choice of one, with the account's login and the
     profile's configuration over the operator's (`LaunchHome`); the rules its selection runs, which the
     engine resolves for the guidance; the host's requirements, each optional
     one off said; the repository named on GitHub, or why not said; the host
@@ -1822,6 +1841,19 @@ def launched(
         said = choice.said()
         if said is not None:
             launcher.say(said)
+        MovingOver(
+            migrating=Migrating(
+                layout=launcher.layout,
+                repository=repository,
+                runtimes=[host_runtime(adapter)],
+                home=Path.home(),
+                shared=choice.profile.rooms_home == "global",
+            ),
+            runtime=host_runtime(adapter),
+            resumed=adapter.resumed(arguments),
+            say=launcher.say,
+            ask=launcher.ask,
+        ).walked()
         running = launcher.rules(declared.resolved.rules)
         needs = checked(host_needs(), launcher.tools).require()
         for off in needs.off:
@@ -2066,6 +2098,11 @@ def launching(say: Callable[[str], None]) -> Launcher:
     def github(repository: Path) -> GitHubRepository:
         return asyncio.run(named(repository))
 
+    def asked(question: str) -> str | None:
+        typer.echo(question, nl=False)
+        said = sys.stdin.readline()
+        return said.strip() if said else None
+
     return Launcher(
         layout=layout,
         trust=trust,
@@ -2078,6 +2115,7 @@ def launching(say: Callable[[str], None]) -> Launcher:
         github=github,
         facts=HostFacts(),
         rules=engine().rules,
+        ask=asked if sys.stdin.isatty() and sys.stdout.isatty() else None,
     )
 
 
@@ -2259,7 +2297,9 @@ def account_migrate(
     homes of their own, so every record of the repository's directories
     moves, whoever wrote it, and the rest stay. It then says what a host
     session acts on there that a room could have written, and how to replace
-    your host login, which every room could read.
+    your host login, which every room could read. A launch offers the same
+    move for its runtime before its room starts, until one is made; this moves
+    whatever's there whenever it's run.
     """
     inside = [each.name() for each in runtimes() if each.inside()]
     if inside:
@@ -2283,16 +2323,7 @@ def account_migrate(
     migrating = Migrating(
         layout=layout,
         repository=repository,
-        runtimes=[
-            HostRuntime(
-                name=each.runtime.name(),
-                directory=each.directory,
-                records=each.records,
-                written=each.written,
-                recorded=each.recorded,
-            )
-            for each in adapters()
-        ],
+        runtimes=[host_runtime(each) for each in adapters()],
         home=Path.home(),
         shared=shared,
     )

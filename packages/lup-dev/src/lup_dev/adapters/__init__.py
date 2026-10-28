@@ -87,6 +87,9 @@ class Adapter(Model, arbitrary_types_allowed=True):
     thing there that runs, loads or acts without asking on the host, what of it
     looks planted, and what to do, and how to replace its login apart
     (`lup_dev.host.written`)."""
+    resumed: Callable[[list[str]], str | None]
+    """Says which session a launch's arguments for its CLI resume, by its id;
+    none where they resume none, or open its picker."""
     recorded: Callable[[PurePosixPath], str | None]
     """Says whose own record is at a place in one of its homes: the session's
     id, by the name it files the record under there, as `records` finds it;
