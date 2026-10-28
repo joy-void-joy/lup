@@ -1789,8 +1789,9 @@ def launched(
     built where it's missing; the package age each package manager in its
     image keeps, said where one keeps none; the terminal settings; the
     repository's `config` checked for the room's git; the files with a secret's
-    name no commit holds as they are, in the project's tree and each related
-    repository mounted, found as late as can be and said
+    name whose content their repository's git objects don't hold, in the
+    project's tree and each related repository mounted, found as late as can be
+    and said
     (`lup_dev.launch.secrets`); the sweep, and the
     environments a launch that crashed left, then the launch registered, under
     its launcher's lock; the room's git configuration and helper, the
