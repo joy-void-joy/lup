@@ -263,8 +263,8 @@ def test_the_operator_s_typed_words_are_queued_for_the_session_s_own_conversatio
     append(session, queued_line("enqueue", "Stop the gate, it hangs."))
     append(session.with_suffix("") / "subagents" / "agent-a1.jsonl", {"type": "user"})
     queues = ClaudeQueues(records=ClaudeRecords(directory=home))
-    main = queues.queued("s1", None)
-    worker = queues.queued("s1", "a1")
+    main = queues.queued("s1", None, queues.records.directory)
+    worker = queues.queued("s1", "a1", queues.records.directory)
     assert main == [Queued(id="0", kind="typed")]
     assert worker == []
 
@@ -286,7 +286,7 @@ def test_what_was_absorbed_handed_or_taken_back_to_edit_is_no_longer_queued(
         queued_line("popAll", "Words to edit."),
     )
     queues = ClaudeQueues(records=ClaudeRecords(directory=home))
-    assert queues.queued("s1", None) == []
+    assert queues.queued("s1", None, queues.records.directory) == []
 
 
 def test_a_task_is_queued_for_the_conversation_whose_call_started_it(
@@ -311,8 +311,8 @@ def test_a_task_is_queued_for_the_conversation_whose_call_started_it(
         queued_line("enqueue", notified("x1", "Another's", "c9")),
     )
     queues = ClaudeQueues(records=ClaudeRecords(directory=home))
-    main = queues.queued("s1", None)
-    theirs = queues.queued("s1", "a1")
+    main = queues.queued("s1", None, queues.records.directory)
+    theirs = queues.queued("s1", "a1", queues.records.directory)
     assert [(each.kind, each.summary) for each in main] == [
         ("task", watched),
         ("subagent", 'Agent "worker" finished'),
@@ -342,12 +342,12 @@ def test_a_subagent_s_report_and_another_session_s_message_are_the_session_s_own
         ),
     )
     queues = ClaudeQueues(records=ClaudeRecords(directory=home))
-    main = queues.queued("s1", None)
+    main = queues.queued("s1", None, queues.records.directory)
     assert [(each.kind, each.summary) for each in main] == [
         ("subagent", None),
         ("message", "from main-09"),
     ]
-    assert queues.queued("s1", "a1") == []
+    assert queues.queued("s1", "a1", queues.records.directory) == []
 
 
 def test_each_look_reads_what_the_record_gained_and_a_line_once_it_s_whole(
@@ -357,14 +357,14 @@ def test_each_look_reads_what_the_record_gained_and_a_line_once_it_s_whole(
     session = home / "projects" / "-w" / "s1.jsonl"
     append(session, {"type": "user"})
     queues = ClaudeQueues(records=ClaudeRecords(directory=home))
-    before = queues.queued("s1", None)
+    before = queues.queued("s1", None, queues.records.directory)
     line = json.dumps(queued_line("enqueue", "Hello."))
     with session.open("a") as written:
         written.write(line[:20])
-    partway = queues.queued("s1", None)
+    partway = queues.queued("s1", None, queues.records.directory)
     with session.open("a") as written:
         written.write(f"{line[20:]}\n")
-    whole = queues.queued("s1", None)
+    whole = queues.queued("s1", None, queues.records.directory)
     assert before == []
     assert partway == []
     assert [each.kind for each in whole] == ["typed"]
@@ -374,7 +374,7 @@ def test_nothing_is_queued_for_a_session_whose_record_isn_t_here(
     tmp_path: Path,
 ) -> None:
     queues = ClaudeQueues(records=ClaudeRecords(directory=tmp_path / "absent"))
-    assert queues.queued("s1", None) == []
+    assert queues.queued("s1", None, queues.records.directory) == []
 
 
 def test_a_record_gone_from_where_it_was_found_is_looked_for_again(
@@ -384,12 +384,12 @@ def test_a_record_gone_from_where_it_was_found_is_looked_for_again(
     first = home / "projects" / "-w" / "s1.jsonl"
     append(first, {"type": "user"})
     queues = ClaudeQueues(records=ClaudeRecords(directory=home))
-    before = queues.queued("s1", None)
+    before = queues.queued("s1", None, queues.records.directory)
     moved = home / "projects" / "-x" / "s1.jsonl"
     moved.parent.mkdir(parents=True)
     first.rename(moved)
     append(moved, queued_line("enqueue", "Still here?"))
-    after = queues.queued("s1", None)
+    after = queues.queued("s1", None, queues.records.directory)
     assert before == []
     assert [each.kind for each in after] == ["typed"]
 
@@ -489,6 +489,6 @@ def test_a_line_too_long_to_hold_is_read_past_and_what_follows_is_queued(
     append(session, queued_line("enqueue", "Hello."))
     queues = ClaudeQueues(records=ClaudeRecords(directory=home), largest=1024)
 
-    queued = queues.queued("s1", None)
+    queued = queues.queued("s1", None, queues.records.directory)
 
     assert queued == [Queued(id=str(len(long) + 1), kind="typed")]

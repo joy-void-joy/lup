@@ -1366,7 +1366,9 @@ class Lander(Model, arbitrary_types_allowed=True):
                 isinstance(inbox.item(each.number).state, Waiting) for each in holds
             )
 
-        told = await self.delivery.held(self.party, answered, on=[])
+        told = await self.delivery.held(
+            self.party, answered, on=[], home=self.launch.home
+        )
         return Waited(
             told=told,
             outcomes=[outcome(each, inbox.item(each.number)) for each in holds],
