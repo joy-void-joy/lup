@@ -1164,6 +1164,32 @@ def test_an_item_told_after_the_mark_stays_open_one_told_before_folds_with_what_
     ]
 
 
+def test_what_was_read_of_items_alone_folds_named_by_the_step_read_and_opens_to_them() -> (
+    None
+):
+    entries: list[Entry] = [
+        Said(by="operator", text="Go.", at=at(0)),
+        Said(by="agent", text="Done.", at=at(5)),
+    ]
+    told = item(50, note("On it."), 1)
+    beside = listed((told, "On it."))
+    view = drawer(entries, beside, mark=marked(0, minute=2))
+    assert view.text().splitlines()[1:4] == [
+        "you: Go.",
+        "▸ 1 earlier item  [exchange step=0 through=0]",
+        "Done.",
+    ]
+    page = exchange_blocks(
+        OfExchange(runtime="claude", session="s1", step=0, through=0),
+        entries,
+        beside,
+        exchange=Viewing.exchange,
+        call=Viewing.call,
+        mark=marked(0, minute=2),
+    )
+    assert [each.id for each in page.blocks] == ["item 50"]
+
+
 # What the layouts declare, and the ids they keep
 
 

@@ -610,15 +610,16 @@ def capped(
     )
     said = ", ".join(
         [
-            counted(steps, "earlier step"),
-            *([counted(items, "item")] if items else []),
+            *([counted(steps, "earlier step")] if steps else []),
+            *([counted(items, "item" if steps else "earlier item")] if items else []),
             *([f"{new} new"] if new else []),
         ]
     )
     only_read = marking is not None and len(kept.folded) == kept.reviewed
+    # What was read is named by the last step it holds; where it holds items alone, by the step they'd read.
     last = next(
         (each.step for each in reversed(kept.folded) if not isinstance(each, Inboxed)),
-        None,
+        None if marking is None else marking.step,
     )
     if only_read and last is not None:
         key = f"{part.key()} through {last}"
