@@ -88,6 +88,7 @@ import {
     type Remote,
     type Running,
     type Shown,
+    type Span as ViewSpan,
 } from "./views";
 import { kindView, mount, producerOf } from "./views/index";
 import { plain } from "./views/core";
@@ -431,6 +432,8 @@ export interface Laid {
     /** What's written as it's laid out, each with its id, what was anchored or kept on what it's on whole as it was laid out among it. */
     written: Written[];
     converted: Written[] | null;
+    /** Each span drawn beside the text rather than written in it, where it goes (`isDrawn`). */
+    drawn: Drawn[];
 }
 
 export const EMPTY: Draft = { comments: [], letters: [], remarks: [], done: [], parked: [] };
@@ -944,6 +947,31 @@ function worded(spans: readonly { text: string }[]): string {
     return spans.map((each) => each.text).join("");
 }
 
+/** A span of a view's that ticks or measures (`Ticking`, `Gauge`), where it's drawn beside the text, never written in it (`ticking.ts`). */
+export interface Drawn {
+    at: number;
+    span: ViewSpan;
+}
+
+/** Return whether a span is drawn rather than written: one that ticks, saying the time since a moment, or measures. */
+export function isDrawn(span: ViewSpan): boolean {
+    return span.ticking != null || span.gauge != null;
+}
+
+/** Say a line of spans as text, those drawn left out (`isDrawn`), and where in it each of those goes. */
+function wording(spans: readonly ViewSpan[]): { text: string; drawn: { offset: number; span: ViewSpan }[] } {
+    let text = "";
+    const drawn: { offset: number; span: ViewSpan }[] = [];
+    for (const span of spans) {
+        if (isDrawn(span)) {
+            drawn.push({ offset: text.length, span });
+        } else {
+            text += span.text;
+        }
+    }
+    return { text, drawn };
+}
+
 /** What a producer reads where there's nothing read: no item, nothing beyond any, no agent's data, no one running. */
 const NOTHING_SHOWN: Shown = {
     items: new Map(),
@@ -970,10 +998,10 @@ export function rowLabel(kind: DrawerKind, data: AgentDrawers): { text: string; 
     return answer === null ? null : { text: worded(answer.blocks.summary ?? []), waiting: answer.blocks.waiting ?? false };
 }
 
-/** Return the text of a line of a view's, and the kind of line it's drawn as: its first span's tone. */
-function lineOfView(line: { spans?: { text: string; tone?: string }[] }): { kind: Kind; text: string } {
+/** Return the text of a line of a view's, its spans drawn left out, where each of those goes, and the kind of line it's drawn as: its first span's tone. */
+function lineOfView(line: { spans?: ViewSpan[] }): { kind: Kind; text: string; drawn: { offset: number; span: ViewSpan }[] } {
     const spans = line.spans ?? [];
-    return { kind: spans[0]?.tone ?? "plain", text: worded(spans) };
+    return { kind: spans[0]?.tone ?? "plain", ...wording(spans) };
 }
 
 /** Return what of an item's kind's summary names it in the header over the review, after its number: its words up to the first ` · `, `question`, `message to explore-auth`. */
@@ -1042,6 +1070,20 @@ export function laid(
     const blockLines = new Map<string, Lines>();
     // Each file a view shows, by its block's id.
     const filedBy = new Map<string, Filed>();
+    // Each span drawn beside the text, where it goes; and `drawnIn` puts those of a line where its text is.
+    const drawnAt: Drawn[] = [];
+    const drawnIn = (from: number, drawn: readonly { offset: number; span: ViewSpan }[]) => {
+        for (const each of drawn) {
+            drawnAt.push({ at: from + each.offset, span: each.span });
+        }
+    };
+    // Where words written into a line by a callback are in it, which it writes as given: its first place or its last,
+    // as the callback puts them first or last, else the line's end.
+    const placedIn = (line: Span, words: string, last: boolean) => {
+        const shown = w.text.slice(line.from, line.to);
+        const at = words === "" ? -1 : last ? shown.lastIndexOf(words) : shown.indexOf(words);
+        return at < 0 ? line.to : line.from + at;
+    };
     const looks = arranging.looks ?? adopted();
     const remote = arranging.remote ?? new Map();
     const shown: Shown = {
@@ -1088,7 +1130,7 @@ export function laid(
     }
     const asLaid = wrote.map((each) => converting.get(writtenId(each)) ?? each);
     const converted = named.changed || converting.size > 0 ? asLaid : null;
-    return { text: w.text, groups, regions, drawers: laidDrawers, nodes: nestedNodes(nodes), owners: w.owners, seated, lines: blockLines, written: asLaid, converted };
+    return { text: w.text, groups, regions, drawers: laidDrawers, nodes: nestedNodes(nodes), owners: w.owners, seated, lines: blockLines, written: asLaid, converted, drawn: drawnAt };
 
     /** Return `section` with each group laid out before in its place, any other after them, in its own order. */
     function kept(section: Grouping[], isParked: boolean): Grouping[] {
@@ -1174,13 +1216,20 @@ export function laid(
             conversation !== null && of !== null && shown.running.has(group.key)
                 ? looks.banners(repository).map((each) => mount(repository, each.module, each.view, of, shown, remote))
                 : [];
+        // What each part says, its spans that tick or measure drawn beside the words rather than written.
         const told = parts.flatMap((each) => {
-            const text = worded(each.answer?.blocks.summary ?? []);
-            return text === "" ? [] : [text];
+            const spoken = wording(each.answer?.blocks.summary ?? []);
+            return spoken.text === "" && spoken.drawn.length === 0 ? [] : [spoken];
         });
         const place = placeOf(group.key, isParked);
         const id = `group ${place}`;
-        const opening = w.line(banner(group.head, isParked, told.join(" · ")), `${id} banner`);
+        const partsSaid = told.map((each) => each.text).join(" · ");
+        const opening = w.line(banner(group.head, isParked, partsSaid), `${id} banner`);
+        let partAt = placedIn(opening, partsSaid, true);
+        for (const each of told) {
+            drawnIn(partAt, each.drawn);
+            partAt += each.text.length + " · ".length;
+        }
         const data = conversation !== null && !isParked ? drawers.get(group.key) : undefined;
         const blocks: Block[] = [];
         const writtenParts: Placed[] = [];
@@ -1325,8 +1374,10 @@ export function laid(
             }
         };
         const summary = answer?.summary ?? [];
-        const head = header(item, isParked, worded(summary));
+        const spoken = wording(summary);
+        const head = header(item, isParked, spoken.text);
         const headed = w.line(head, `${id} header`);
+        drawnIn(placedIn(headed, spoken.text, false), spoken.drawn);
         children.push(part(`${id} header`, "header", headed.from, headed.to));
         writeBlocks(null);
         // The operator's words it answers, above its own, each after who wrote it.
@@ -1390,6 +1441,7 @@ export function laid(
                 const line = lineOfView(block);
                 const aside = { kind: line.kind, ...w.line(line.text, blockId(view.id, block.id)) };
                 into.asides.push(aside);
+                drawnIn(aside.from, line.drawn);
                 inBody.push(part(blockId(view.id, block.id), "block", aside.from, aside.to, { block }));
             }
         }
@@ -1463,7 +1515,8 @@ export function laid(
      */
     function layDrawer(kind: DrawerKind, conversation: Conversation, view: Mounted): (Drawer & { node: Placed }) | null {
         const answer = view.answer;
-        const label = worded(answer?.blocks.summary ?? []);
+        const labelled = wording(answer?.blocks.summary ?? []);
+        const label = labelled.text;
         if (answer === null || label === "") {
             return null;
         }
@@ -1499,6 +1552,8 @@ export function laid(
         };
         const children: Placed[] = [];
         const summary = w.line(label, `${view.id} summary`);
+        const drawnBefore = drawnAt.length;
+        drawnIn(summary.from, labelled.drawn);
         if (answer.talk !== undefined) {
             talk = layTalk(answer.talk, view, mine((remark) => remark.step != null), into, children, key, of);
         } else {
@@ -1565,7 +1620,8 @@ export function laid(
                             const line = lineOfView(block);
                             const aside = { kind: line.kind, ...w.line(line.text, id) };
                             into.asides.push(aside);
-                            tones(aside.from, block.spans ?? []);
+                            drawnIn(aside.from, line.drawn);
+                            tones(aside.from, (block.spans ?? []).filter((each) => !isDrawn(each)));
                             const file = answer.files?.get(block.id);
                             if (file !== undefined) {
                                 reviewed.push({ from: aside.from, to: aside.to, file });
@@ -1585,7 +1641,8 @@ export function laid(
                             const line = lineOfView({ spans: block.summary });
                             const head = { kind: line.kind, ...w.line(line.text, id) };
                             into.asides.push(head);
-                            tones(head.from, block.summary);
+                            drawnIn(head.from, line.drawn);
+                            tones(head.from, block.summary.filter((each) => !isDrawn(each)));
                             const inner: Placed[] = [];
                             if (Array.isArray(block.content)) {
                                 layBlocks(block.content, false, inner);
@@ -1620,6 +1677,7 @@ export function laid(
         // A drawer with nothing under its summary line isn't shown: it would say only that it's empty.
         if (last <= summary.to) {
             w.cut(summary.from);
+            drawnAt.length = drawnBefore;
             return null;
         }
         // Folded until opened, a line under the banner.

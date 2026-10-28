@@ -1603,6 +1603,17 @@ describe("the drawers under each agent's banner", () => {
         expect(laid([QUESTION, NOTE], [S1], banner, header, withWritten(EMPTY, converted), NOTHING, [], drawers).converted).toBeNull();
     });
 
+    it("draws what measures on a banner beside its words, never writing it in the text, where it goes among its parts", () => {
+        const running = new Map([[whose(S1), { launch: "l1", holding: false }]]);
+        const withParts = (head: Head, parked: boolean, parts: string) => `━━ ${"item" in head ? "?" : head.conversation.session}${parts === "" ? "" : ` · ${parts}`} ━━`;
+        const out = laid([], [S1], withParts, header, EMPTY, NOTHING, [], drawers, undefined, { running });
+        const [group] = out.groups;
+        expect(out.text.slice(group!.banner.from, group!.banner.to)).toBe("━━ s1 · ▶ Writing the models ·  ━━");
+        expect(out.drawn.map((each) => [out.text.slice(group!.banner.from, each.at), each.span.text, each.span.gauge])).toEqual([
+            ["━━ s1 · ▶ Writing the models · ", "○ 112k/1M", { used: 112_000, of: 1_000_000 }],
+        ]);
+    });
+
     it("says where the cursor is in a drawer for the line of keys", () => {
         expect(placeAt(out, at("tasks 1/3"))).toBe("drawer");
         expect(placeAt(out, at("✓ Write"))).toBe("drawer");

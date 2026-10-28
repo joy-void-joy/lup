@@ -45,6 +45,8 @@ import { tokensOf, within, type Filed, type Matter, type Taken } from "./code";
 import { cited, type Block, type Folding, type Span } from "./comments";
 import { closedAs, folding, hiddenAt, isFolded, mapLetters, reached, reaching, rebuilt, refold, scrollAfterKey, uncovered, useEditor, vimOf, type Landing } from "./editor";
 import { arrivedLines, arriving, owned, owning, ownersOf, reconcile, runsOf, settling } from "./reconcile";
+import { clock, ticked, ticking, type Tick } from "./ticking";
+import { doing, since, type Activity } from "./agents";
 import { Following } from "./follow";
 import { mapOutlineKey, mapScopeKeys, Outline, setOutlineFocus, setOutlineToggle, setScopeJump, useNarrow, type ScopeKey } from "./Outline";
 import { Stack, type Mark as StackMark } from "./Stack";
@@ -122,7 +124,7 @@ import {
     type Written,
 } from "./review";
 import { freshRows, type Fresh } from "./since";
-import type { Instance, Offer, Remote, Running } from "./views";
+import type { Instance, Offer, Remote, Running, Span as ViewSpan } from "./views";
 
 /** Where the page asks the review to go: an agent's group, by its conversation, numbered so the same one asked twice goes twice. */
 export interface Jump {
@@ -170,8 +172,8 @@ interface Props {
     list: () => void;
     /** When the operator last settled an item of theirs: what came after is new to them. */
     reviewed: string | null;
-    /** The time, to the minute, which each item's wait is told from. */
-    now: Date;
+    /** What each conversation running is doing, by `whose` it is, drawn on its banner as the time passes (`ticking.ts`). */
+    activities: ReadonlyMap<string, Activity | null>;
     /** Each conversation's parent, by `whose` each is: what nests a subagent's group under its parent's. */
     parents: ReadonlyMap<string, string>;
     /** What each conversation running is doing, by `whose` it is, for the overview's marks. */
@@ -514,6 +516,19 @@ function decorations(
     return builder.finish();
 }
 
+/** Say a span that ticks as of `now`: what it says for its first minute where it says other, else its words with the time since its moment; a gauge as it was answered. */
+function spanSaid(span: ViewSpan, now: Date): string {
+    const ticking = span.ticking;
+    if (ticking == null) {
+        return span.text;
+    }
+    const at = new Date(ticking.since);
+    if (ticking.first != null && now.getTime() - at.getTime() < 60_000) {
+        return ticking.first;
+    }
+    return (ticking.said ?? "{}").replace("{}", since(at, now));
+}
+
 /** How an item's header says when it came: made once, since `toLocaleString` makes one at each call, and the review is laid out again at each key typed in a comment. */
 const WHEN = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
@@ -631,7 +646,7 @@ export function Review({
     pending,
     list,
     reviewed,
-    now,
+    activities,
     parents,
     states,
     overview,
@@ -668,7 +683,6 @@ export function Review({
                         ...((item.edits ?? []).length > 0 ? ["edited"] : []),
                         ...(fresh(item, reviewed) ? ["new"] : []),
                         when(item.made),
-                        waited(item.made, now),
                         ...(later ? ["later"] : []),
                     ];
                     return `── ${told.join(" · ")} ──`;
@@ -680,7 +694,7 @@ export function Review({
                 called,
                 { ...arranging, previous: before.current },
             ),
-        [items, agents, banner, called, draft, around, drawers, reviewed, now, arranging, order],
+        [items, agents, banner, called, draft, around, drawers, reviewed, arranging, order],
     );
     // The scopes the header stack pins the headers of.
     const roots = useMemo(() => stickies(laidOut), [laidOut]);
@@ -763,10 +777,13 @@ export function Review({
         current.dispatch({
             effects: StateEffect.appendConfig.of([
                 gutters.of([]),
-                // Whose each line is, and what arrived, carried through every change (`reconcile.ts`).
+                // Whose each line is, and what arrived, carried through every change (`reconcile.ts`); and what's drawn
+                // beside the text, said again as the time passes (`ticking.ts`).
                 owning,
                 arriving,
                 settling,
+                ticking,
+                clock,
                 // What a scroll is to: the stack pinned over its line is kept clear.
                 EditorView.scrollHandler.of((_, range) => {
                     scrollingTo.current = range.head;
@@ -1011,6 +1028,34 @@ export function Review({
             editor.enter();
         }
     }, [laidOut, draft, reviewed]);
+
+    // What's drawn beside the text, as it's laid out now and as each agent is doing: how long each item has waited,
+    // after when it came; what each agent is doing and for how long, after the core's words on its banner; and each
+    // span of a view's that ticks or measures, where it goes. Said again by the clock, not laid out.
+    useEffect(() => {
+        const current = view.current;
+        if (current === null) {
+            return;
+        }
+        const ticks: Tick[] = [
+            ...laidOut.drawn.map((each) => ({ at: each.at, said: (at: Date) => spanSaid(each.span, at), look: each.span.gauge != null ? "drawn-gauge" : "drawn-ticking" })),
+            ...laidOut.regions.map((region) => {
+                const line = laidOut.text.slice(region.header.from, region.header.to);
+                const came = when(region.item.made);
+                const at = line.indexOf(came);
+                return { at: region.header.from + (at < 0 ? line.length : at + came.length), said: (now: Date) => ` · ${waited(region.item.made, now)}`, look: "drawn-wait" };
+            }),
+            ...laidOut.groups.flatMap((group) => {
+                const key = group.conversation === null ? null : whose(group.conversation);
+                if (key === null || !activities.has(key)) {
+                    return [];
+                }
+                const activity = activities.get(key) ?? null;
+                return [{ at: group.banner.from + "━━ ".length + banner(group.head).length, said: (now: Date) => ` · ${doing(activity, now)}`, look: "drawn-doing" }];
+            }),
+        ];
+        current.dispatch({ effects: ticked.of(ticks) });
+    }, [laidOut, activities, banner, view]);
 
     // Asked to go to an agent's group, as from the palette: onto its banner.
     const jumped = useRef<number>(0);
