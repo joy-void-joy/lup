@@ -103,12 +103,14 @@ runtime-evaluated-base-classes = [
 ]
 # FastAPI reads a route's parameter and return types at runtime: a stream's
 # items, its body's union. Moved under `TYPE_CHECKING`, a stream is read as a
-# plain object and described as none.
+# plain object and described as none. pluggy reads a pytest hook's signature as
+# it registers it, which on Python 3.14 evaluates its annotations.
 runtime-evaluated-decorators = [
     "fastapi.APIRouter.get",
     "fastapi.APIRouter.post",
     "fastapi.FastAPI.get",
     "fastapi.FastAPI.post",
+    "pytest.hookimpl",
 ]
 
 [tool.ruff.lint.per-file-ignores]
