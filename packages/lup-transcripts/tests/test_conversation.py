@@ -13,7 +13,17 @@ import pytest
 from pydantic import BaseModel, JsonValue
 
 import lup
-from lup.blocks import SHELL_TONES, Block, Blocks, Fold, Line, Load, Markdown, OfAgent
+from lup.blocks import (
+    SHELL_TONES,
+    Block,
+    Blocks,
+    Fold,
+    FoldKind,
+    Line,
+    Load,
+    Markdown,
+    OfAgent,
+)
 from lup_dev.host.records import Call, Called, Entry, Said
 from lup_dev.inbox.protocol import Exchanged, Pathed, exchanged
 from lup_dev.inbox.store import (
@@ -36,6 +46,7 @@ from lup_dev.inbox.store import (
     Waiting,
 )
 from lup_transcripts.environment.conversation import (
+    EARLIER_KIND,
     FOLD_KINDS,
     TONES,
     ConversationError,
@@ -81,9 +92,19 @@ ALONE = Exchanged(sent=[], received=[])
 """A conversation with nothing exchanged through lup."""
 
 
-def drawer(entries: list[Entry], beside: Exchanged = ALONE, of: OfAgent = OF) -> Blocks:
+def drawer(
+    entries: list[Entry],
+    beside: Exchanged = ALONE,
+    of: OfAgent = OF,
+    earlier: FoldKind = EARLIER_KIND,
+) -> Blocks:
     return conversation_blocks(
-        of, entries, beside, exchange=Viewing.exchange, call=Viewing.call
+        of,
+        entries,
+        beside,
+        exchange=Viewing.exchange,
+        call=Viewing.call,
+        earlier=earlier,
     )
 
 
@@ -93,7 +114,9 @@ def exchange(
     asked = OfExchange(
         runtime=of.runtime, session=of.session, agent=of.agent, step=step
     )
-    return exchange_blocks(asked, entries, beside, call=Viewing.call)
+    return exchange_blocks(
+        asked, entries, beside, exchange=Viewing.exchange, call=Viewing.call
+    )
 
 
 def opened(blocks: list[Block]) -> list[Block]:
@@ -827,6 +850,162 @@ def test_an_item_with_no_text_is_a_line_with_nothing_folded_under_it() -> None:
         "← @64 from lup: 2 citations of your words in @57 named no one passage",
         "received",
     )
+
+
+# What stays open: at most the agent's last words, its calls not counted
+
+
+def talking(words: int, start: int = 0) -> list[Entry]:
+    """The agent's words, `words` of them from `start` on, each after a call, as a session driven from the dashboard reads: none of the operator's typed words."""
+    return [
+        entry
+        for each in range(start, start + words)
+        for entry in [
+            Called(tool="Bash", at=at(each % 60)),
+            Said(by="agent", text=f"Word {each}.", at=at(each % 60)),
+        ]
+    ]
+
+
+KEEPING_TWO = EARLIER_KIND.model_copy(update={"keeps_open": 2})
+"""What came earlier as a person's layer might keep it: two of the agent's words open."""
+
+
+def test_at_most_the_agent_s_last_twenty_words_stay_open_what_came_before_under_one_line() -> (
+    None
+):
+    view = drawer(talking(25))
+    # The last 20 of its words, each after its call: the calls don't count.
+    shown = [each for each in view.blocks if isinstance(each, Markdown)]
+    assert [each.text for each in shown] == [f"Word {each}." for each in range(5, 25)]
+    first = view.blocks[0]
+    assert isinstance(first, Fold)
+    assert (first.id, first.kind, first.open) == (
+        "exchange before until last 20",
+        "earlier",
+        False,
+    )
+    assert first.content == Load.of(
+        Viewing.exchange,
+        OfExchange(runtime="claude", session="s1", step=None, until_last=20),
+    )
+    # It says how many steps it holds, its text form the view and what it gives it.
+    assert view.text().splitlines()[:3] == [
+        "conversation · 50 steps",
+        "▸ 11 earlier steps  [exchange until_last=20]",
+        "Word 5.",
+    ]
+    # Twenty or fewer, nothing folds.
+    assert folds(drawer(talking(20)).blocks) == []
+
+
+def test_the_fold_of_what_came_earlier_reads_twenty_more_of_the_agent_s_words_and_folds_the_rest_the_same_way() -> (
+    None
+):
+    entries = talking(45)
+    page = exchange_blocks(
+        OfExchange(runtime="claude", session="s1", until_last=20),
+        entries,
+        ALONE,
+        exchange=Viewing.exchange,
+        call=Viewing.call,
+    )
+    shown = [each.text for each in page.blocks if isinstance(each, Markdown)]
+    assert shown == [f"Word {each}." for each in range(5, 25)]
+    deeper = page.blocks[0]
+    assert isinstance(deeper, Fold)
+    assert deeper.id == "exchange before until last 40"
+    assert isinstance(deeper.content, Load)
+    assert deeper.content.argument["until_last"] == 40
+    last = exchange_blocks(
+        OfExchange(runtime="claude", session="s1", until_last=40),
+        entries,
+        ALONE,
+        exchange=Viewing.exchange,
+        call=Viewing.call,
+    )
+    assert [each.text for each in last.blocks if isinstance(each, Markdown)] == [
+        f"Word {each}." for each in range(5)
+    ]
+    assert folds(last.blocks) == []
+    # Asked for more than the agent said, there's nothing before it.
+    assert (
+        exchange_blocks(
+            OfExchange(runtime="claude", session="s1", until_last=60),
+            entries,
+            ALONE,
+            exchange=Viewing.exchange,
+            call=Viewing.call,
+        ).blocks
+        == []
+    )
+
+
+def test_as_the_agent_speaks_the_fold_keeps_its_id_and_the_word_it_passed_goes_under_it() -> (
+    None
+):
+    before = drawer(talking(25))
+    after = drawer([*talking(25), *talking(1, start=25)])
+    assert before.blocks[0].id == after.blocks[0].id == "exchange before until last 20"
+    assert "step 11" in ids(before.blocks)
+    assert "step 11" not in ids(after.blocks)
+    # The fold's own view shows it now, its id the same: a comment on it stays on it.
+    page = exchange_blocks(
+        OfExchange(runtime="claude", session="s1", until_last=20),
+        [*talking(25), *talking(1, start=25)],
+        ALONE,
+        exchange=Viewing.exchange,
+        call=Viewing.call,
+    )
+    assert block(page.blocks, "step 11") == block(before.blocks, "step 11")
+
+
+def test_in_an_exchange_the_operator_s_words_open_it_and_the_fold_comes_after_them() -> (
+    None
+):
+    entries: list[Entry] = [
+        Said(by="operator", text="Read them all.\nEvery record.", at=at(0)),
+        *talking(4),
+    ]
+    view = drawer(entries, earlier=KEEPING_TWO)
+    assert view.text().splitlines() == [
+        "conversation · 9 steps",
+        "you: Read them all.",
+        "     Every record.",
+        "▸ 5 earlier steps  [exchange step=0 until_last=2]",
+        "Word 2.",
+        "· Bash",
+        "Word 3.",
+    ]
+    # An earlier exchange opened is kept the same way, the operator's further lines first.
+    spoke = drawer(
+        [*entries, Said(by="operator", text="Good.", at=at(9))], earlier=KEEPING_TWO
+    )
+    assert folds(spoke.blocks) == [["exchange 0", "earlier", "you: Read them all."]]
+    opened = exchange_blocks(
+        OfExchange(runtime="claude", session="s1", step=0),
+        entries,
+        ALONE,
+        exchange=Viewing.exchange,
+        call=Viewing.call,
+        earlier=KEEPING_TWO,
+    )
+    assert opened.text().splitlines()[:2] == [
+        "     Every record.",
+        "▸ 5 earlier steps  [exchange step=0 until_last=2]",
+    ]
+
+
+def test_items_count_in_the_fold_and_a_person_s_layer_keeps_more_or_everything_open() -> (
+    None
+):
+    noted = item(50, note("Early."), 0)
+    view = drawer(talking(4), listed((noted, "Early.")), earlier=KEEPING_TWO)
+    assert view.text().splitlines()[1] == (
+        "▸ 5 earlier steps, 1 item  [exchange until_last=2]"
+    )
+    everything = EARLIER_KIND.model_copy(update={"keeps_open": None})
+    assert folds(drawer(talking(30), earlier=everything).blocks) == []
 
 
 # What the layouts declare, and the ids they keep

@@ -52,6 +52,7 @@ from lup.blocks import (
     Fold,
     FoldKind,
     Gauge,
+    Kept,
     Line,
     Load,
     Mark,
@@ -63,6 +64,7 @@ from lup.blocks import (
     Tone,
     Verb,
     Watch,
+    kept_open,
 )
 from lup.doors import command, on, request, tool, view
 from lup.errors import LupError
@@ -118,6 +120,7 @@ __all__ = [
     "Friction",
     "Gauge",
     "HowItWent",
+    "Kept",
     "Launched",
     "Line",
     "Load",
@@ -156,6 +159,7 @@ __all__ = [
     "Verb",
     "Watch",
     "command",
+    "kept_open",
     "on",
     "request",
     "tool",
