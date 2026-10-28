@@ -53,8 +53,9 @@ class LupDevelopment(Module):
       nothing it builds is stale.
     - The dashboard's page is built the same way, after the engine: its types
       generated from the API's description, type-checked, tested and bundled
-      (`packages/lup-dashboard/build.py`), again only when one of its sources,
-      the host's models the API describes among them, is newer than the page.
+      (`packages/lup-dashboard/build.py`), its packages installed by pnpm from
+      its own lockfile, again only when one of its sources, the host's models
+      the API describes among them, is newer than the page.
     - The data that sets lup's policy (`lup_dev.catalog`) is protected, so the
       operator reviews every change to it before it lands.
     - Working on lup is `AGENTS.md`, the project's own section of the guidance,
@@ -74,21 +75,16 @@ class LupDevelopment(Module):
     name = "lup-development"
     requirements = [
         Requirement(
-            tool="npm",
-            why="installs the dashboard page's packages",
-            install="it comes with Node",
-            package="npm",
-        ),
-        Requirement(
             tool="pnpm",
             version=">=11",
             probe=["pnpm", "--version"],
             # lup: defer(issue=308, why="required once every room's image carries pnpm: optional while rooms launched before it joined the image still run the gate")
             optional=True,
             why=(
-                "installs the engine's bundler, and pyright's dependencies where the "
-                "engine's build fetches a release no place keeps, each from its own "
-                "lockfile, held to the package age its settings keep"
+                "installs the engine's bundler, the dashboard page's packages, and "
+                "pyright's dependencies where the engine's build fetches a release "
+                "no place keeps, each from its own lockfile, held to the package "
+                "age its settings keep"
             ),
             install="https://pnpm.io/installation",
             package="pnpm",
@@ -138,7 +134,8 @@ class LupDevelopment(Module):
                 "packages/lup-dashboard/page/src/**/*",
                 "packages/lup-dashboard/page/index.html",
                 "packages/lup-dashboard/page/package.json",
-                "packages/lup-dashboard/page/package-lock.json",
+                "packages/lup-dashboard/page/pnpm-lock.yaml",
+                "packages/lup-dashboard/page/pnpm-workspace.yaml",
                 "packages/lup-dashboard/page/tsconfig.json",
                 "packages/lup-dashboard/page/vite.config.ts",
                 "packages/lup-dashboard/build.py",

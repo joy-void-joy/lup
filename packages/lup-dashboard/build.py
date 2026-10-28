@@ -1,6 +1,7 @@
 """Build the dashboard's page: `uv run packages/lup-dashboard/build.py`, in lup.
 
-1. Install the page's packages from its lockfile, where they're missing or older.
+1. Install the page's packages with pnpm, from its lockfile, where they're missing
+   or older than it or its settings.
 2. Describe the API from the server itself (`lup_dashboard.server`), and generate
    the page's types from that description, so the page and the host's models
    can't disagree.
@@ -18,11 +19,12 @@ import logging
 import shutil
 from pathlib import Path
 
-from lup.programs import ProgramFailedError, run
+from lup.programs import ProgramFailedError, ProgramMissingError, run
 from lup.types import Model
 from lup_dashboard.host import Sockets
 from lup_dashboard.layout import DashboardLayout
 from lup_dashboard.server import Access, application
+from lup_dev.declaration.package_managers.pnpm import PnpmManager
 from lup_dev.layout import Layout
 from lup_dev.settings import LupDevSettings
 
@@ -53,13 +55,18 @@ class Places(Model):
 
 
 def install(places: Places) -> None:
-    """Install the page's packages from its lockfile, where they're missing or older than it."""
-    lock = places.project / "package-lock.json"
-    installed = places.project / "node_modules" / ".package-lock.json"
-    if installed.is_file() and installed.stat().st_mtime >= lock.stat().st_mtime:
+    """Install the page's packages from its lockfile, where they're missing or older than it or its settings.
+
+    From scratch, its packages removed first (`PnpmManager.stale`): pnpm leaves
+    in place what it didn't install, another package manager's say, which would
+    resolve an import its lockfile doesn't hold.
+    """
+    pnpm = PnpmManager()
+    if not pnpm.stale(places.project):
         return
     log.info("installing the page's packages")
-    run("npm", "ci", "--no-audit", "--no-fund", cwd=places.project)
+    shutil.rmtree(places.project / pnpm.modules, ignore_errors=True)
+    run(*pnpm.install(), cwd=places.project)
 
 
 def describe(places: Places) -> None:
@@ -109,6 +116,9 @@ def main() -> None:
         install(places)
         describe(places)
         build(places)
+    except ProgramMissingError as missing:
+        message = f"build: {missing}"
+        raise SystemExit(message) from missing
     except ProgramFailedError as failure:
         ran = failure.ran
         output = ran.output.decode(errors="replace") + ran.error.decode(
