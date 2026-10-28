@@ -541,28 +541,28 @@ class Noted(Model):
 
 
 def unnamed(path: str) -> str:
-    """Ask a subagent spawned without a name to name itself: it knows its task."""
+    """Ask a subagent spawned without a name to name themselves: they know their task."""
     return (
-        f"lup: this subagent is `{path}` for now, with no name of its own: name "
-        "yourself after your task with lup's `rename` tool (`explore-auth`), so "
-        "the operator and other sessions can tell you apart."
+        f"lup: you're `{path}` for now, with no name of your own: name yourself "
+        "after your task with lup's `rename` tool (`explore-auth`), so the "
+        "operator and other sessions can tell you apart."
     )
 
 
 def named_here(name: str) -> str:
     """Tell a session starting its launch's name."""
     return (
-        f"lup: this session is `{name}`: how the operator, lup's commands and "
-        "other sessions call it. Once you know your task, name it after it with "
-        "lup's `rename` tool, unless the operator named it."
+        f"lup: you're `{name}`: how the operator, lup's commands and other "
+        "sessions call you. Once you know your task, name yourself after it with "
+        "lup's `rename` tool, unless the operator named you."
     )
 
 
 def renamed_there(name: str) -> str:
     """Tell a session the operator renamed it in its runtime, which lup took as its launch's name."""
     return (
-        f"lup: the operator renamed this session `{name}`: how they, lup's "
-        "commands and other sessions call it from now on. Keep the name they gave."
+        f"lup: the operator renamed you `{name}`: how they, lup's commands and "
+        "other sessions call you from now on. Keep the name they gave."
     )
 
 
@@ -593,24 +593,24 @@ def introduction(tools: list[ToolSpec]) -> str:
     name doesn't fix them (a project's agent of the same name replaces a
     built-in one), so it's told some types go without lup's.
 
-    >>> from lup.tools.speaking import friction, how_it_went
-    >>> print(introduction([friction.spec(), how_it_went.spec()]))
-    lup, the environment this session runs in, serves its subagents these tools, as it does its main conversation. Your tool search finds each by its name, with its full description. Some subagent types are given only their own tools, without lup's: where your tool search finds none of these, this subagent is one of them.
+    >>> from lup.tools.speaking import friction, how_it_felt
+    >>> print(introduction([friction.spec(), how_it_felt.spec()]))
+    lup, the environment you work in, serves you these tools, as it does your session's main conversation. Your tool search finds each by its name, with its full description. Some subagent types are given only their own tools, without lup's: where your tool search finds none of these, you're one of them.
     <BLANKLINE>
     - `friction`: Say what got in your way, and carry on.
-    - `how_it_went`: Say how the work went and felt, once.
+    - `how_it_felt`: Tell your caller how it is for you.
     <BLANKLINE>
-    `friction` and `how_it_went` reach the operator directly, whatever your parent passes on.
+    `friction` and `how_it_felt` reach the operator directly, whatever your parent passes on.
     """
     opening = (
-        "lup, the environment this session runs in, serves its subagents these "
-        "tools, as it does its main conversation. Your tool search finds each by "
-        "its name, with its full description. Some subagent types are given only "
+        "lup, the environment you work in, serves you these tools, as it does "
+        "your session's main conversation. Your tool search finds each by its "
+        "name, with its full description. Some subagent types are given only "
         "their own tools, without lup's: where your tool search finds none of "
-        "these, this subagent is one of them."
+        "these, you're one of them."
     )
     direct = (
-        f"`{speaking.friction.name}` and `{speaking.how_it_went.name}` reach the "
+        f"`{speaking.friction.name}` and `{speaking.how_it_felt.name}` reach the "
         "operator directly, whatever your parent passes on."
     )
     return "\n".join([opening, "", *summaries(tools), "", direct])
@@ -1614,12 +1614,12 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
 
 
 class NewName(Model):
-    """The name a session takes."""
+    """The name you take."""
 
     name: str = Field(
         description=(
-            "This session's name from now on: letters, digits, `-`, `_` and `.`, "
-            "after its task, such as `gate-on-push`."
+            "Your name from now on: letters, digits, `-`, `_` and `.`, after your "
+            "task, such as `gate-on-push`."
         )
     )
 
@@ -1633,13 +1633,13 @@ class Namer(Model, arbitrary_types_allowed=True):
     """lup's id for the conversation calling."""
 
     async def rename(self, new: NewName) -> str:
-        """Name this session or subagent after its task.
+        """Name yourself after your task.
 
-        Its name is how the operator, lup's commands and other sessions call
-        it, and what the operator's inbox says items come from. Call it once
-        you know your task, unless the operator or your parent named you; call
-        it again when the task changes. From a subagent it names that subagent
-        alone, never its session. A name another holds is refused, saying
+        Your name is how the operator, lup's commands and other sessions call
+        you, and what the operator's inbox says your items come from. Call it
+        once you know your task, unless the operator or your parent named you;
+        call it again when the task changes. From a subagent it names you
+        alone, never your session. A name another holds is refused, saying
         whose; pick another.
         """
         try:
@@ -1649,14 +1649,14 @@ class Namer(Model, arbitrary_types_allowed=True):
             if caller is not None and caller.agent is not None:
                 path = self.launches.subagent_renamed(self.launch, caller, wanted)
                 return (
-                    f"This subagent is `{path}` to lup and the operator. The name "
-                    "your runtime gave you at your spawn, which your parent's own "
-                    "tools use, stays as it was."
+                    f"You're `{path}` to lup and the operator now. The name your "
+                    "runtime gave you at your spawn, which your parent's own tools "
+                    "use, stays as it was."
                 )
             named = await self.launches.renamed(self.launch, wanted)
         except (HostError, ValueError) as refused:
             return f"Not renamed: {refused}"
-        return f"This session is `{named.name}`."
+        return f"You're `{named.name}` now."
 
     def tools(self) -> list[AgentTool]:
         """Return the naming tool, bound to this launch."""

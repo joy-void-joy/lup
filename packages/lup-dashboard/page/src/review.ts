@@ -671,7 +671,7 @@ export interface Grouping {
 
 /**
  * Whether an item is news, to read and mark read rather than answer, as its kind's rank says (`Item.rank`, which the
- * host gives each item): a note, a turn's last words among them, a friction, how the work went, or a stop by choice.
+ * host gives each item): a note, a turn's last words among them, a friction, how it felt, or a stop by choice.
  */
 export function news(item: Item): boolean {
     return item.rank.name === "news";

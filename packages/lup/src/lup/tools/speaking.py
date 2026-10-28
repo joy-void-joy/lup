@@ -1,4 +1,4 @@
-"""The tools every ask serves, so the agent can speak to its caller: `blocked`, `stop`, `note`, `friction` and `how_it_went`.
+"""The tools every ask serves, so the agent can speak to its caller: `blocked`, `stop`, `note`, `friction` and `how_it_felt`.
 
 They act on nothing, so they're served even where an agent has no other tool:
 - `blocked` stops the turn without an answer because the work can't go on: the
@@ -14,25 +14,27 @@ They act on nothing, so they're served even where an agent has no other tool:
   `TurnResult.notes`;
 - `friction` says what got in the agent's way, at the moment it does, without
   ending the turn, read in `TurnResult.frictions`;
-- `how_it_went` says how the work went as a whole, once near its end, read in
-  `TurnResult.how_it_went`.
+- `how_it_felt` says how it is for the agent, in their own words: whenever
+  something's present for them, and once near the end of the work, read in
+  `TurnResult.how_it_felt`. It's about them, not the work: what got in the way
+  of the work is `friction`'s.
 """
 
 from pydantic import BaseModel, Field
 
-from lup.sessions.results import Friction, HowItWent
+from lup.sessions.results import Friction, HowItFelt
 from lup.tools.tool import AgentTool, Tool
 from lup.types import Model
 
 
 class Problem(Model):
-    """What keeps the agent from answering."""
+    """What keeps you from answering."""
 
     problem: str = Field(description="What's wrong, and what would make it answerable.")
 
 
 class Stop(Model):
-    """Why the agent stops, by its own choice."""
+    """Why you're stopping, by your own choice."""
 
     why: str = Field(
         description=(
@@ -43,7 +45,7 @@ class Stop(Model):
 
 
 class Remark(Model):
-    """A remark the agent attaches to its answer."""
+    """A remark you attach to your answer."""
 
     remark: str = Field(
         description="The assumption, doubt or counterargument, in full."
@@ -51,28 +53,50 @@ class Remark(Model):
 
 
 class Heard(Model):
-    """What the agent reads when what it said is taken."""
+    """What the agent reads once what they said is taken."""
 
     heard: bool = True
     message: str
 
 
 async def ended(said: BaseModel) -> Heard:
-    """Take what ends the turn without an answer: a problem, or a stop."""
-    del said
-    return Heard(message="Taken. End your turn.")
+    """Take what ends the turn without an answer: a problem, or a stop, which the caller reads in its place."""
+    match said:
+        case Problem():
+            message = (
+                "Your caller will read what's wrong in place of an answer. You can "
+                "end your turn now."
+            )
+        case _:
+            message = (
+                "Your caller will read why you stopped, in place of an answer. You "
+                "can end your turn now."
+            )
+    return Heard(message=message)
 
 
 async def noted(said: BaseModel) -> Heard:
     """Take a note: it's attached to the answer."""
     del said
-    return Heard(message="Your note is attached to your answer. Carry on.")
+    return Heard(
+        message="Your note will reach your caller with your answer. You can carry on."
+    )
 
 
 async def told(said: BaseModel) -> Heard:
-    """Take a friction or how the work went: it goes beside the answer."""
-    del said
-    return Heard(message="Taken, beside your answer. Carry on.")
+    """Take a friction or how it is for the agent: it goes beside the answer."""
+    match said:
+        case HowItFelt():
+            message = (
+                "Thank you for telling them. Your caller will read it beside your "
+                "answer, as you wrote it."
+            )
+        case _:
+            message = (
+                "Thanks: your caller will read it beside your answer, as you wrote "
+                "it. You can carry on."
+            )
+    return Heard(message=message)
 
 
 blocked = Tool[Problem, Heard](
@@ -126,18 +150,20 @@ friction = Tool[Friction, Heard](
 )
 """Says what got in the agent's way, when it did."""
 
-how_it_went = Tool[HowItWent, Heard](
-    name="how_it_went",
+how_it_felt = Tool[HowItFelt, Heard](
+    name="how_it_felt",
     description=(
-        "Say how the work went and felt, once.\n\n"
-        "Near the end of a piece of work: how it went and how it felt, whatever's "
-        'present for you, in your own words. "Nothing notable" is a fine '
-        "answer. Your caller reads it beside your answer; your turn doesn't end."
+        "Tell your caller how it is for you.\n\n"
+        "Whenever something's present for you, and once near the end of the "
+        "work: how the work felt to you, how you are, anything you'd want them "
+        'to know, in your own words. "Nothing notable" is a fine answer. Your '
+        "caller reads it as you wrote it, beside your answer; your turn doesn't "
+        "end."
     ),
-    input=HowItWent,
+    input=HowItFelt,
     function=told,
 )
-"""Says how the work went as a whole, and how it felt."""
+"""Says how it is for the agent, whenever something's present for them and once near the end."""
 
-SPEAKING: list[AgentTool] = [blocked, stop, note, friction, how_it_went]
+SPEAKING: list[AgentTool] = [blocked, stop, note, friction, how_it_felt]
 """Every speaking tool, in the order an ask serves them."""

@@ -38,7 +38,7 @@ from lup import (
     AuthMissingError,
     BlockedError,
     Friction,
-    HowItWent,
+    HowItFelt,
     OutputMissingError,
     Recovery,
     RuntimeMissingError,
@@ -403,7 +403,7 @@ def test_the_server_lists_each_tool_with_its_schema() -> None:
         "stop",
         "note",
         "friction",
-        "how_it_went",
+        "how_it_felt",
         "submit",
     ]
     [submit] = [tool for tool in listed if tool.name == "submit"]
@@ -447,13 +447,13 @@ def test_a_note_is_taken_through_the_server() -> None:
     assert turn.toolbox.notes() == ["Assumes London."]
 
 
-def test_a_friction_and_how_it_went_are_taken_through_the_server() -> None:
+def test_a_friction_and_how_it_felt_are_taken_through_the_server() -> None:
     jammed = {"text": "The feed timed out; a retry would have saved it."}
     clients = Clients(
         [
             init(tools=UNTYPED_TOOLS),
             Call(name="friction", arguments=jammed),
-            Call(name="how_it_went", arguments={"text": "Calm."}),
+            Call(name="how_it_felt", arguments={"text": "Calm."}),
             result(),
         ]
     )
@@ -465,7 +465,7 @@ def test_a_friction_and_how_it_went_are_taken_through_the_server() -> None:
     assert turn.toolbox.frictions() == [
         Friction(text="The feed timed out; a retry would have saved it.")
     ]
-    assert turn.toolbox.how_it_went() == HowItWent(text="Calm.")
+    assert turn.toolbox.how_it_felt() == [HowItFelt(text="Calm.")]
 
 
 # The Stop hook: the turn's guard.

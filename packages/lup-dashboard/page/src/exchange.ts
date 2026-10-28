@@ -161,14 +161,14 @@ function theirs(item: Item): string {
     }
 }
 
-/** Return the text an agent's item holds of its own words, which an edit changes: a message's, a question's, a friction's, how it went's, a stop's; none of any other. */
+/** Return the text an agent's item holds of its own words, which an edit changes: a message's, a question's, a friction's, how it felt's, a stop's; none of any other. */
 export function ownText(item: Item): string | null {
     const reason = item.reason;
     switch (reason.reason) {
         case "message":
         case "question":
         case "friction":
-        case "how it went":
+        case "how it felt":
             return reason.text;
         case "stop":
             return reason.why;

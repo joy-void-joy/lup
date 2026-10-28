@@ -81,7 +81,7 @@ from lup_dev.inbox.store import (
     Found,
     Friction,
     HeldChange,
-    HowItWent,
+    HowItFelt,
     Item,
     Letter,
     Message,
@@ -815,7 +815,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         )
 
     def items(self) -> Items:
-        """Return what waits for the operator: a subagent's question of numbered decisions, a session's note, another's problem, an approval of a host zone, a session's write held for them, another's last words of a turn answering the operator's review, citing it, one citation edited and one naming no passage, the note that review was on, edited since, a friction and how the work went, and two writes that landed flagged, the subagent's new module gathering three; each group seen up to its last item made 3 minutes before the demo began, so those since are new (`seen`)."""
+        """Return what waits for the operator: a subagent's question of numbered decisions, a session's note, another's problem, an approval of a host zone, a session's write held for them, another's last words of a turn answering the operator's review, citing it, one citation edited and one naming no passage, the note that review was on, edited since, a friction and how it felt, and two writes that landed flagged, the subagent's new module gathering three; each group seen up to its last item made 3 minutes before the demo began, so those since are new (`seen`)."""
         every = self.every()
         waiting = [
             each
@@ -857,6 +857,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     for answer in answers
                 )
             ],
+            paths=self.paths(),
         )
 
     def sending(self, sending: SendItem) -> Shown | Refused:
@@ -1172,7 +1173,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             ),
             Item(
                 number=58,
-                reason=HowItWent(
+                reason=HowItFelt(
                     text=(
                         "Steady. The brief named every file I needed; the judge "
                         "repeating the file's findings after each edit wore a little."
@@ -1564,7 +1565,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 operator("Keep going on the guidance rewrite.", 30),
                 agent("The voice section is done, and the gate passes.", 1.6),
                 called(
-                    "mcp__lup__how_it_went",
+                    "mcp__lup__how_it_felt",
                     1.4,
                     "The rewrite went smoothly once the voice was settled.",
                     {"text": "The rewrite went smoothly once the voice was settled."},

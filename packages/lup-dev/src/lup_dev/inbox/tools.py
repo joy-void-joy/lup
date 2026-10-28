@@ -2,14 +2,15 @@
 
 `docs/inbox.md`, *lup's tools*. Each is a function of the conversation
 calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
-- `blocked`, `stop`, `note`, `friction` and `how_it_went` are the library's
+- `blocked`, `stop`, `note`, `friction` and `how_it_felt` are the library's
   speaking tools (`lup.tools.speaking`), their names and input models taken
   from them, so an agent's habit carries between an ask from code and a
   launched session; their functions and descriptions are the inbox's, since
   in a launched session whoever asked is the operator, and each lands in their
-  inbox, a subagent's too; a subagent's `friction` and `how_it_went` reach its
-  parent as well, whole and quiet (`Item.quiet`), so it can file what got in
-  the way, or learn its brief misled;
+  inbox, a subagent's too; a subagent's `friction` reaches their parent as
+  well, whole and quiet (`Item.quiet`), so the parent can file what got in the
+  way, or learn their brief misled, and their `how_it_felt` the operator
+  alone, unless `Speaker.how_it_felt_reaches` passes it on too;
 - `ask` puts a question to the operator, its decisions numbered, each with the
   agent's lean; with `wait` it holds until they answer, or until other news of
   theirs reaches the agent, their words typed in its terminal among it;
@@ -45,7 +46,7 @@ runtime's tool search finds. Each answers in words, as `content`.
 
 import inspect
 from datetime import timedelta
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Literal, override
 
 from pydantic import Field, JsonValue
 
@@ -55,7 +56,6 @@ from lup.tools import speaking
 from lup.tools.serving import Answer
 from lup.tools.tool import Accepted, AgentTool, Refused, ToolSpec
 from lup.types import Model
-from lup_dev.host.names import Names
 from lup_dev.host.protocol import Register
 from lup_dev.host.rooms import RoomTools
 from lup_dev.inbox.citations import unresolved
@@ -66,7 +66,6 @@ from lup_dev.inbox.delivery import (
     clocked,
     standing,
     what,
-    who,
     whose,
 )
 from lup_dev.inbox.parts import PartId
@@ -76,7 +75,7 @@ from lup_dev.inbox.store import (
     Conversation,
     Decision,
     Friction,
-    HowItWent,
+    HowItFelt,
     InboxError,
     Item,
     Kind,
@@ -229,6 +228,28 @@ class Withdrawing(Model):
     )
 
 
+type Reach = Literal["operator", "operator and parent"]
+"""Who reads what a conversation says with `how_it_felt`: the operator alone,
+or the operator and, where it's a subagent, the conversation that spawned it
+(`Speaker.how_it_felt_reaches`)."""
+
+
+def reaching(reach: Reach) -> str:
+    """Say whom `how_it_felt` reaches, as its description's last line tells the agent calling it.
+
+    >>> reaching("operator")
+    'It reaches the operator alone, as you wrote it.'
+    """
+    match reach:
+        case "operator":
+            return "It reaches the operator alone, as you wrote it."
+        case "operator and parent":
+            return (
+                "It reaches the operator as you wrote it, and, where you're a "
+                "subagent, your parent too, whole, at their next call."
+            )
+
+
 class Speaker(Model, arbitrary_types_allowed=True):
     """One conversation of a launch, speaking through lup's inbox: each tool's function, bound to it."""
 
@@ -237,9 +258,20 @@ class Speaker(Model, arbitrary_types_allowed=True):
     party: Conversation
     call: str | None = None
     """The runtime's id for the call speaking, which each item it makes keeps."""
+    how_it_felt_reaches: Reach = "operator"
+    """Who reads what the conversation says with `how_it_felt`: the operator
+    alone; or, `"operator and parent"`, where it's a subagent, the conversation
+    that spawned it too, whole and quiet, as its `friction` always does.
+
+    A parent reading how the work was for their workers can adapt their briefs
+    to it, and become more expressive in their own. Read by the operator alone,
+    it's said to them rather than reported to a lead, as a worker's reads when
+    its parent reads it too. It's the one place every launch's `how_it_felt`
+    reads, its description and its answer among it: changed here, it reaches
+    every launch once the operator trusts the copy that holds it."""
 
     async def said(
-        self, reason: Message | Friction | HowItWent | Stop | Question
+        self, reason: Message | Friction | HowItFelt | Stop | Question
     ) -> Item:
         """Put `reason` in the operator's inbox, from this conversation, and return it as kept, its citations of their words read (`Delivery.cited`)."""
         return await self.delivery.posted(
@@ -252,7 +284,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         told = unresolved(item.citations, item.number)
         return Said(text=text if not told else f"{text}\n\n{inside(told)}")
 
-    async def passed_up(self, reason: Friction | HowItWent) -> bool:
+    async def passed_up(self, reason: Friction | HowItFelt) -> bool:
         """Put a copy of `reason` in the inbox of the conversation that spawned this one, quietly (`Item.quiet`), and say whether there's one."""
         parent = self.delivery.parent(self.party)
         if parent is None:
@@ -278,7 +310,8 @@ class Speaker(Model, arbitrary_types_allowed=True):
         """
         item = await self.said(Message(kind="problem", text=said.problem))
         return self.answered(
-            f"Your problem is with the operator, {cited(item.number)}. End your turn.",
+            f"Your problem is with the operator, {cited(item.number)}, and they're "
+            "notified. You can end your turn now.",
             item,
         )
 
@@ -292,7 +325,8 @@ class Speaker(Model, arbitrary_types_allowed=True):
         """
         item = await self.said(Stop.model_validate(said.model_dump()))
         return self.answered(
-            f"Your stop is with the operator, {cited(item.number)}. End your turn.",
+            f"The operator will read why you stopped, {cited(item.number)}. You can "
+            "end your turn now.",
             item,
         )
 
@@ -308,7 +342,8 @@ class Speaker(Model, arbitrary_types_allowed=True):
         """
         item = await self.said(Message(kind="note", text=said.remark))
         return self.answered(
-            f"Your note is with the operator, {cited(item.number)}. Carry on.", item
+            f"Your note is with the operator, {cited(item.number)}. You can carry on.",
+            item,
         )
 
     async def friction(self, said: results.Friction) -> Said:
@@ -318,32 +353,42 @@ class Speaker(Model, arbitrary_types_allowed=True):
         is, in your own words. Where there's a command and the message it
         gave, the exact ones help whoever fixes it. It lands in the operator's
         inbox as you wrote it, and, where you're a subagent, in your parent's
-        too, whole, at its next call. Your work goes on: nothing waits for an
+        too, whole, at their next call. Your work goes on: nothing waits for an
         answer. A doubt about the work itself is a `note`.
         """
         friction = Friction.model_validate(said.model_dump())
         item = await self.said(friction)
-        parent = " and your parent" if await self.passed_up(friction) else ""
+        parent = (
+            ", and your parent has it too" if await self.passed_up(friction) else ""
+        )
         return self.answered(
-            f"Your friction is with the operator, {cited(item.number)}{parent}. "
-            "Carry on.",
+            f"Thanks: your friction is with the operator, {cited(item.number)}"
+            f"{parent}. You can carry on.",
             item,
         )
 
-    async def how_it_went(self, said: results.HowItWent) -> Said:
-        """Tell the operator how the work went and felt.
+    async def how_it_felt(self, said: results.HowItFelt) -> Said:
+        """Tell the operator how it is for you.
 
-        Call it once, near the end of a piece of work: how it went and how it
-        felt, whatever's present for you, in your own words. "Nothing notable"
-        is a fine answer. It lands in the operator's inbox as you wrote it,
-        and, where you're a subagent, in your parent's too, whole, at its next
-        call. Your work goes on.
+        Whenever something's present for you, and once near the end of a
+        piece of work: how the work felt to you, how you are, anything you'd
+        want them to know, in your own words. "Nothing notable" is a fine
+        answer. Your work goes on.
         """
-        went = HowItWent.model_validate(said.model_dump())
-        item = await self.said(went)
-        parent = " and your parent" if await self.passed_up(went) else ""
+        felt = HowItFelt.model_validate(said.model_dump())
+        item = await self.said(felt)
+        passed = self.how_it_felt_reaches == "operator and parent" and (
+            await self.passed_up(felt)
+        )
+        whom = (
+            "the operator, and your parent has it too"
+            if passed
+            else "the operator alone"
+        )
         return self.answered(
-            f"How it went is with the operator, {cited(item.number)}{parent}.", item
+            f"Thank you for telling them. It's with {whom}, as you wrote it, "
+            f"{cited(item.number)}.",
+            item,
         )
 
     def asked(self) -> int | None:
@@ -498,27 +543,14 @@ class Speaker(Model, arbitrary_types_allowed=True):
                 return self.reachable(found, "your subagent")
 
     def calls(self, conversation: Conversation) -> list[str]:
-        """Return what `send` takes a subagent by: its own name and its path, as `inbox` reads them (`Reader`), and its runtime's id."""
-        reader = Reader(
-            delivery=self.delivery,
-            reader=self.party,
-            names=Names(path=self.delivery.layout.names).all(),
-        )
-        items = self.delivery.inbox.about(self.party.repository)
-        said = [
-            reader.own(conversation, items),
-            reader.path(conversation, items),
-            conversation.agent,
-        ]
+        """Return what `send` takes a subagent by: its own name and its path, as `inbox` reads them (`Roster`), and its runtime's id."""
+        roster = self.delivery.roster()
+        said = [roster.own(conversation), roster.path(conversation), conversation.agent]
         return [each for each in said if each is not None]
 
-    def called(self, conversation: Conversation) -> str:
-        """Name `conversation` for this one, in an answer of `send`'s: by the name lup calls it by, a subagent with none by its runtime's id."""
-        return (
-            self.delivery.called(conversation)
-            or conversation.agent
-            or who(conversation)
-        )
+    def called(self, party: Party) -> str:
+        """Name `party` for this one, in an answer, as lup calls it (`Roster.who`)."""
+        return self.delivery.roster().who(party)
 
     def reachable(self, conversation: Conversation, whose: str) -> Conversation:
         """Return `conversation`, `whose` it is to this one, where a call of its can still read its inbox; raise `InboxError` where it ended, saying when."""
@@ -526,7 +558,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         if place is None or place.ended is None:
             return conversation
         message = (
-            f"{whose} `{self.called(conversation)}` "
+            f"{whose} {self.called(conversation)} "
             f"ended at {clocked(place.ended)}, so nothing reads its inbox: once its "
             "runtime resumes it, lup hears it again and it can be sent to"
         )
@@ -554,7 +586,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
             else "your subagent"
         )
         return (
-            f"Your message is in the inbox of {whose} `{self.called(recipient)}`, "
+            f"Your message is in the inbox of {whose} {self.called(recipient)}, "
             f"{cited(number)}, "
             f"and the operator has a copy, {cited(copy)}. It's told at its next "
             "call, its turn's end or its `wait_inbox`, whichever comes first"
@@ -585,8 +617,9 @@ class Speaker(Model, arbitrary_types_allowed=True):
           words typed in your terminal;
         - `agents`: a message your parent or one of your subagents sent you;
           one of your own subagents ending its turn, stopped, or failed on an
-          error from the model's API, which names it; a subagent's `friction`
-          or `how_it_went`; another session's message;
+          error from the model's API, which names it; a subagent's `friction`,
+          and its `how_it_felt` where lup passes that on; another session's
+          message;
         - `tasks`: a command you run in the background ending, or a Monitor's
           event.
 
@@ -635,7 +668,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         with its subagents' where `subagents` asks. With `whole`, each item is
         read whole, the operator's words on one of the conversation's under
         it, and its turn's end saying which of theirs it answers, so the
-        exchange reads as one thread: how a session reads what an earlier one
+        exchange reads as one thread: how you read what an earlier session
         said and was told. Given an item's `number`, any of this repository's, it's read
         whole. It marks nothing read and answers nothing: what reaches you
         still comes through `wait_inbox` and beside your calls.
@@ -652,7 +685,6 @@ class Speaker(Model, arbitrary_types_allowed=True):
         reader = Reader(
             delivery=self.delivery,
             reader=self.party,
-            names=Names(path=self.delivery.layout.names).all(),
             where=" about this repository",
         )
         return Said(text=reader.read(items, reading).text)
@@ -685,9 +717,9 @@ class Speaker(Model, arbitrary_types_allowed=True):
         if self.party in (item.recipient, item.addressed):
             return f"{self.delivery.said(item)}\n\nIt's {standing(item)}."
         sent = (
-            f"you sent to {who(item.recipient)}"
+            f"you sent to {self.called(item.recipient)}"
             if item.sender == self.party
-            else f"from {who(item.sender)} to {who(item.recipient)}"
+            else f"from {self.called(item.sender)} to {self.called(item.recipient)}"
         )
         match item.sender:
             case Conversation():
@@ -725,7 +757,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
             where = (
                 {"on": str(anchor.item)}
                 if anchor.item is not None
-                else {"to": who(anchor.to)}
+                else {"to": self.delivery.roster().called(anchor.to)}
                 if anchor.to is not None
                 else {}
             )
@@ -750,7 +782,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         """Edit what you sent the operator.
 
         A message, a note, your turn's last words, a question's text, a
-        friction, how it went or a stop: one you sent the operator, by its
+        friction, how it felt or a stop: one you sent the operator, by its
         number. Give `old`, a passage of its text exactly as it stands, found
         there once, and `new`, what replaces it, as a file's edit does; or
         `new` alone, its text whole. They see it marked edited, with what
@@ -770,18 +802,29 @@ class Speaker(Model, arbitrary_types_allowed=True):
         )
 
     def tools(self) -> list[AgentTool]:
-        """Return the inbox's tools, each calling this conversation's function: the speaking tools, as the library serves them, then the inbox's own, as declared (`bound`)."""
+        """Return the inbox's tools, each calling this conversation's function: the speaking tools, as the library serves them, then the inbox's own, as declared (`bound`).
+
+        A speaking tool's description is its function's docstring; `how_it_felt`'s
+        ends saying whom it reaches, as `how_it_felt_reaches` says (`reaching`).
+        """
         functions = {
             speaking.blocked.name: self.blocked,
             speaking.stop.name: self.stop,
             speaking.note.name: self.note,
             speaking.friction.name: self.friction,
-            speaking.how_it_went.name: self.how_it_went,
+            speaking.how_it_felt.name: self.how_it_felt,
         }
+        descriptions = {
+            name: inspect.getdoc(function) or "" for name, function in functions.items()
+        }
+        felt = speaking.how_it_felt.name
+        descriptions[felt] = (
+            f"{descriptions[felt]}\n\n{reaching(self.how_it_felt_reaches)}"
+        )
         speaking_tools = [
             tool.model_copy(
                 update={
-                    "description": inspect.getdoc(functions[tool.name]),
+                    "description": descriptions[tool.name],
                     "function": functions[tool.name],
                 }
             )
@@ -790,7 +833,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
                 speaking.stop,
                 speaking.note,
                 speaking.friction,
-                speaking.how_it_went,
+                speaking.how_it_felt,
             ]
         ]
         return [*speaking_tools, *bound(self)]

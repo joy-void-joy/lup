@@ -302,7 +302,7 @@ describe("laid", () => {
         const went: Item = {
             ...NOTE,
             number: 62,
-            reason: { reason: "how it went", text: "Good." },
+            reason: { reason: "how it felt", text: "Good." },
             rank: NEWS,
         };
         const out = laid([flagged(50, from("s2")), flagged(71, from("s4")), went, NOTE, ended], [], banner, header, EMPTY, NOTHING);
@@ -395,7 +395,7 @@ describe("laid", () => {
         expect(tallied([], EMPTY, UNSEEN)).toBe("");
     });
 
-    it("shows a friction, how the work went and a stop as written", () => {
+    it("shows a friction, how it felt and a stop as written", () => {
         const friction: Item = {
             ...NOTE,
             number: 62,
@@ -404,7 +404,7 @@ describe("laid", () => {
         const went: Item = {
             ...NOTE,
             number: 63,
-            reason: { reason: "how it went", text: "The brief was clear, and it felt good." },
+            reason: { reason: "how it felt", text: "The brief was clear, and it felt good." },
         };
         const stopped: Item = { ...NOTE, number: 65, reason: { reason: "stop", why: "Nothing more is worth doing." } };
         expect(body(friction)).toBe("`uv run lup-dev check` printed: engine stale\nI was running the gate.");
@@ -1412,7 +1412,7 @@ describe("waited and fresh", () => {
             recipient: from("s2"),
             reason: { reason: "review", comments: [{ item: 52, text: "Why?", quote: null }], message: "", rulings: [] } as unknown as Item["reason"],
         };
-        const seeing = seeingOf({ kind: "inbox-items", items: [NOTE], seen: [{ conversation: from("s1", "a1"), item: 51, at: "2026-10-17T12:00:00Z" }], answers: [review], commented: [] });
+        const seeing = seeingOf({ kind: "inbox-items", items: [NOTE], seen: [{ conversation: from("s1", "a1"), item: 51, at: "2026-10-17T12:00:00Z" }], answers: [review], commented: [], paths: [] });
         expect(seeing.groups.get(whose(from("s1", "a1")))).toBe(51);
         expect([...seeing.commented]).toEqual([52]);
         expect(seeingOf(null)).toBe(UNSEEN);

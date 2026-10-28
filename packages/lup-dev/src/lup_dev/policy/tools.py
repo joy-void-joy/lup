@@ -382,7 +382,7 @@ def stands(hold: Hold, *, waited: bool) -> str:
 
 
 class Quieting(Model):
-    """Which findings to hold back after the conversation's calls."""
+    """Which findings to hold back after your calls."""
 
     kinds: list[Kind] = Field(
         description=(

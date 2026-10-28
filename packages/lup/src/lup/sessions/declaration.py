@@ -140,7 +140,7 @@ class Asking(Model, arbitrary_types_allowed=True):
                 rejected=rejected,
                 notes=toolbox.notes(),
                 frictions=toolbox.frictions(),
-                how_it_went=toolbox.how_it_went(),
+                how_it_felt=toolbox.how_it_felt(),
             )
         attempts = len(rejected) + toolbox.refused_endings
         message = f"no answer was accepted after {attempts} attempts"
@@ -149,7 +149,7 @@ class Asking(Model, arbitrary_types_allowed=True):
             rejected=rejected,
             notes=toolbox.notes(),
             frictions=toolbox.frictions(),
-            how_it_went=toolbox.how_it_went(),
+            how_it_felt=toolbox.how_it_felt(),
             usage=ran.raw.usage,
         )
 
@@ -163,7 +163,7 @@ class Asking(Model, arbitrary_types_allowed=True):
             session_id=ran.raw.session_id,
             notes=ran.toolbox.notes(),
             frictions=ran.toolbox.frictions(),
-            how_it_went=ran.toolbox.how_it_went(),
+            how_it_felt=ran.toolbox.how_it_felt(),
         )
 
     async def run[T: BaseModel](self, prompt: str, submit: Submit[T] | None) -> Ran:
@@ -214,7 +214,7 @@ class Asking(Model, arbitrary_types_allowed=True):
                     problem,
                     notes=toolbox.notes(),
                     frictions=toolbox.frictions(),
-                    how_it_went=toolbox.how_it_went(),
+                    how_it_felt=toolbox.how_it_felt(),
                     usage=ran.raw.usage,
                 )
             case Stop(why=why):
@@ -222,7 +222,7 @@ class Asking(Model, arbitrary_types_allowed=True):
                     why,
                     notes=toolbox.notes(),
                     frictions=toolbox.frictions(),
-                    how_it_went=toolbox.how_it_went(),
+                    how_it_felt=toolbox.how_it_felt(),
                     usage=ran.raw.usage,
                 )
             case None:

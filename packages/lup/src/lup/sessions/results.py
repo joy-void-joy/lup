@@ -1,6 +1,6 @@
 """What an ask returns: the answer, what it cost, the attempts refused before it, and what the agent said beside it.
 
-`Friction` and `HowItWent` are the inputs of the `friction` and `how_it_went`
+`Friction` and `HowItFelt` are the inputs of the `friction` and `how_it_felt`
 tools (`lup.tools.speaking`) as much as part of the result, so the caller reads
 them as the agent wrote them; they live here because the tools' module builds on
 this one. Each is one text in the agent's own words, never a form of labelled
@@ -38,13 +38,13 @@ class Rejection(Model):
 
 
 class Friction(Model):
-    """What got in the agent's way, at the moment it did, in its own words."""
+    """What got in your way, at the moment it did, in your own words."""
 
     text: str = Field(description="In your own words.")
 
 
-class HowItWent(Model):
-    """How a piece of work went as a whole, and how it felt, in the agent's own words."""
+class HowItFelt(Model):
+    """How it is for you, in your own words."""
 
     text: str = Field(description="In your own words.")
 
@@ -66,5 +66,5 @@ class TurnResult[T](Model):
     """The remarks the agent attached to its answer, oldest first."""
     frictions: list[Friction] = []
     """What got in the agent's way, each when it did, oldest first."""
-    how_it_went: HowItWent | None = None
-    """How the agent said the work went, where it said; the last, if it said twice."""
+    how_it_felt: list[HowItFelt] = []
+    """Each time the agent said how it was for them, oldest first."""

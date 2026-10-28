@@ -1,4 +1,4 @@
-"""What a new main session is told, once, as it starts, of where its repository stands: the branches not landed, what waits for the operator, and what landed since the last main session started, each line saying where to read more.
+"""What a new main session is told, once, as it starts, of where its repository stands, as far as it's the session's to act on: the branches not landed, and what landed since the last main session started, each line saying where to read more.
 
 `docs/inbox.md`, *A new main session's bearings*. A long main session ends
 heavy, and the next one rebuilt what was open from raw records and days of the
@@ -13,13 +13,12 @@ again after.
 - **Running beside it:** where more than one other main conversation of the
   repository runs, each by its name, since several sessions may work on one
   repository at once, and one's open threads aren't abandoned.
-- **Waiting for the operator:** the last main session's items and its
-  subagents' first, then the rest. What waits on the operator is a line each;
-  news is counted by kind, and flagged writes are an entry for each agent, its
-  files and the branches whose landings they hold (`Flags`, `inbox/reading.py`).
 - **Landed** on the remote's integration branch since the last main session
   started, its first-parent history, with whether that session still runs or
   when it was last heard, and how its exchange with the operator is read.
+
+What waits for the operator isn't told: it's theirs to answer, and the
+session starting can't act on it.
 
 It lives beside the inbox rather than with the judge (`policy/`): it reads the
 inbox's items, names and whereabouts as `inbox/reading.py` does, and lists
@@ -35,17 +34,12 @@ from typing import TYPE_CHECKING, override
 
 from lup.types import Model
 from lup_dev.git import Git, GitError, nul_separated
-from lup_dev.host.names import Names
 from lup_dev.host.service import Bearings, Running
-from lup_dev.inbox.delivery import Delivery, clocked, kind, opening, what
-from lup_dev.inbox.reading import Flags, Reader, by_agent
+from lup_dev.inbox.delivery import Delivery, clocked
+from lup_dev.inbox.reading import Reader
 from lup_dev.inbox.store import (
     Conversation,
     Item,
-    Operator,
-    Waiting,
-    cited,
-    ranked,
 )
 from lup_dev.listing import many
 
@@ -155,6 +149,11 @@ def read_repository(
     )
 
 
+def starting(reader: Reader) -> list[Conversation]:
+    """Return the conversation `reader` reads for, the session starting, as one that may share a name lup hasn't heard yet; none for the operator."""
+    return [reader.reader] if isinstance(reader.reader, Conversation) else []
+
+
 class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
     """A new main session's bearings, from the inbox `delivery` keeps and the repository's git."""
 
@@ -208,12 +207,11 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
         found: Repository,
         running: list[Running],
     ) -> str:
-        """Say the bearings: what's not landed, the main sessions running beside it where more than one does, what waits for the operator, and what landed since `last` started."""
+        """Say the bearings: what's not landed, the main sessions running beside it where more than one does, and what landed since `last` started."""
         items = self.delivery.inbox.about(starting.repository)
         reader = Reader(
             delivery=self.delivery,
             reader=starting,
-            names=Names(path=self.delivery.layout.names).all(),
         )
         beside = [
             each
@@ -229,12 +227,16 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
                 )
             ],
             self.unlanded(found),
-            self.beside(beside) if len(beside) > 1 else [],
-            self.waiting(items, last, reader),
+            self.beside(beside, reader) if len(beside) > 1 else [],
             # lup: defer(issue=262, why="the last handoff's note is told here, after what landed, once `handoff` writes one: it waits for spawn (#117)")
             self.landed(found, last, beside, reader, items),
         ]
         return "\n\n".join("\n".join(each) for each in sections if each)
+
+    @staticmethod
+    def named(last: Conversation, reader: Reader) -> str:
+        """Name `last` for the session starting, which reads: by its name, its runtime's ids beside it where another shares it, the session starting among them, which lup hasn't heard yet."""
+        return reader.roster.who(last, starting(reader))
 
     def unlanded(self, found: Repository) -> list[str]:
         """Say each branch not landed: its worktree, its commits on no remote and the last, and its uncommitted changes; or why git couldn't be read."""
@@ -273,91 +275,16 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
             *(said(each) for each in found.unlanded),
         ]
 
-    def beside(self, beside: list[Running]) -> list[str]:
-        """Say each main session of the repository running beside the one starting, by its name, its runtime's id and its worktree."""
+    def beside(self, beside: list[Running], reader: Reader) -> list[str]:
+        """Say each main session of the repository running beside the one starting, by its name, its runtime's ids beside it where another shares it (`Reader.called`), and its worktree."""
         return [
             "Main sessions of this repository running beside you:",
             *(
-                f"- `{each.name}` ({each.launch.runtime} session {each.session}), "
+                f"- {reader.called(Conversation(repository=each.launch.repository, runtime=each.launch.runtime, session=each.session))}, "
                 f"in {each.launch.worktree}."
                 for each in beside
             ),
         ]
-
-    def waiting(
-        self, items: list[Item], last: Conversation | None, reader: Reader
-    ) -> list[str]:
-        """Say what waits for the operator: the last main session's items and its subagents' first, then the rest; each item waiting on them a line, news counted by kind, flagged writes an entry for each agent."""
-        waiting = [
-            item
-            for item in items
-            if item.recipient == Operator() and isinstance(item.state, Waiting)
-        ]
-        if not waiting:
-            return ["Nothing waits for the operator."]
-
-        def ours(item: Item) -> bool:
-            sender = item.sender
-            return isinstance(sender, Conversation) and sender.main() == last
-
-        first = [item for item in waiting if ours(item)]
-        rest = [item for item in waiting if not ours(item)]
-        whose = (
-            ""
-            if last is None or not first
-            else (
-                f", {'all' if not rest else len(first)} from "
-                f"{reader.titled(last, items)} and its subagents"
-                f"{', listed first' if rest else ''}"
-            )
-        )
-        return [
-            (
-                f"Waiting for the operator: {many(len(waiting), 'item')}{whose} "
-                "(`inbox` lists them; with `number`, one whole):"
-            ),
-            *self.grouped(first, reader, items),
-            *self.grouped(rest, reader, items),
-        ]
-
-    def grouped(
-        self, items: list[Item], reader: Reader, known: list[Item]
-    ) -> list[str]:
-        """Say `items`: each waiting on the operator a line, then news counted by kind, then flagged writes, an entry for each agent saying its files and the branches whose landings they hold."""
-        asking = [
-            f"- {cited(item.number)} {what(item)} from "
-            f"{reader.called(item.sender, known, naming='paths')}: {opening(item)}"
-            for item in items
-            if ranked(item.reason).name == "waiting on you"
-        ]
-        news = [item for item in items if ranked(item.reason).name == "news"]
-        kinds = list(dict.fromkeys(kind(item) for item in news))
-        counted = ", ".join(
-            f"{len([item for item in news if kind(item) == each])} `{each}`"
-            for each in kinds
-        )
-        told = (
-            [f"- News, by kind: {counted} (`inbox` with those `kinds` lists them)."]
-            if news
-            else []
-        )
-        agents = [each for each in by_agent(items) if isinstance(each, Flags)]
-        flagged = (
-            [
-                (
-                    "- Flagged writes, holding their branches' landings: "
-                    + "; ".join(
-                        f"{reader.called(each.sender, known, naming='paths')}, "
-                        f"{each.said()} ({each.cited(', ')})"
-                        for each in agents
-                    )
-                    + "."
-                )
-            ]
-            if agents
-            else []
-        )
-        return [*asking, *told, *flagged]
 
     def landed(
         self,
@@ -376,7 +303,7 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
             if running
             else f"last heard at {clocked(reader.heard(last, items))}"
         )
-        title = reader.titled(last, items)
+        title = self.named(last, reader)
         started = clocked(self.started(last))
         landed = (
             [f"- {each.commit} {each.subject}" for each in found.landed]
@@ -393,6 +320,7 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
             *landed,
             (
                 f"What {title} and the operator said to each other: `inbox` with "
-                f'`conversation` "{last.session}", `every` and `whole`.'
+                f'`conversation` "{reader.roster.handle(last, starting(reader))}", '
+                "`every` and `whole`."
             ),
         ]

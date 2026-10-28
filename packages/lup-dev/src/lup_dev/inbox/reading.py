@@ -31,7 +31,7 @@ entry counts as one against a `limit`, and says how many files, on which
 branches, and where they stand; read whole, each under it names its file.
 """
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from pydantic import Field, PositiveInt
 
@@ -45,16 +45,15 @@ from lup_dev.inbox.delivery import (
     remarked,
     standing,
     what,
-    who,
     written,
 )
 from lup_dev.inbox.parts import PartId
+from lup_dev.inbox.roster import Roster, ids
 from lup_dev.inbox.store import (
     Answer,
     Conversation,
     Decided,
     Done,
-    Ended,
     Flagged,
     Item,
     Message,
@@ -71,13 +70,6 @@ from lup_dev.listing import Span, latest, many, unlisted
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
-
-
-type Naming = Literal["ids", "paths", "paths and ids"]
-"""How a reading names conversations: by their runtime's ids alone, as `inbox`
-lists every party's items; by their paths, under a heading saying the ids of
-the one whose exchange is read; or by both, as the operator's own exchange is
-listed, where names repeat over time."""
 
 
 class Narrowing(Span):
@@ -263,9 +255,6 @@ class Reader(Model, arbitrary_types_allowed=True):
     delivery: Delivery
     reader: Party
     """Who reads, named "you" where an item is theirs."""
-    names: dict[str, str]
-    """Each session's name, by its runtime's id for it: its launch's, as lup
-    last kept it (`Names.all`)."""
     where: str = ""
     """What the items read are, said after "Nothing" where none is listed, as
     " about this repository" for a repository's items alone; nothing for the
@@ -277,6 +266,11 @@ class Reader(Model, arbitrary_types_allowed=True):
     whomever it's for."""
     spelling: Spelling = Spelling()
 
+    @property
+    def roster(self) -> Roster:
+        """The conversations the inbox knows, each by the name lup calls it (`Delivery.roster`)."""
+        return self.delivery.roster()
+
     def read(self, items: list[Item], wanted: Narrowing) -> Read:
         """Return `items`, oldest first, as `wanted` narrows them: a line each, or each whole, then what was left out and what reads it."""
         conversation = wanted.conversation
@@ -286,7 +280,7 @@ class Reader(Model, arbitrary_types_allowed=True):
             if not self.mine or self.reader in [item.sender, item.recipient]
         ]
         if conversation is None:
-            return self.listed(readable, items, wanted, None)
+            return self.listed(readable, wanted, None)
         matched = self.matching(conversation, items)
         if not matched:
             return Read(
@@ -310,19 +304,18 @@ class Reader(Model, arbitrary_types_allowed=True):
         heading = "\n".join(
             [
                 *self.alike(conversation, found, others, items),
-                self.heading(found, below, wanted, items),
+                self.heading(found, below, wanted),
             ]
         )
-        return self.listed(pool, items, wanted, heading)
+        return self.listed(pool, wanted, heading)
 
     def listed(
         self,
         pool: list[Item],
-        items: list[Item],
         wanted: Narrowing,
         heading: str | None,
     ) -> Read:
-        """Return the items of `pool` that `wanted` narrows to, under `heading` where one names the exchange: a line each or each whole, then what was left out; `items` are those the reader may read, which name its conversations."""
+        """Return the items of `pool` that `wanted` narrows to, under `heading` where one names the exchange: a line each or each whole, then what was left out."""
         window = wanted.window(self.delivery.clock.now())
         kinds = wanted.kinds
         timely = [
@@ -358,20 +351,15 @@ class Reader(Model, arbitrary_types_allowed=True):
             return Read(text="\n".join([*head, nothing, *settled]))
         entries = by_agent(chosen)
         shown = latest(entries, lambda each: each.made, wanted.most())
-        naming: Naming = (
-            "paths" if heading is not None else "paths and ids" if self.mine else "ids"
-        )
         if wanted.whole:
             placed = [
                 item.number
                 for each in shown
                 for item in (each.items if isinstance(each, Flags) else [each])
             ]
-            said = "\n\n".join(
-                self.whole(each, placed, items, naming=naming) for each in shown
-            )
+            said = "\n\n".join(self.whole(each, placed) for each in shown)
         else:
-            said = "\n".join(self.line(each, items, naming=naming) for each in shown)
+            said = "\n".join(self.line(each) for each in shown)
         left = unlisted(
             len(chosen) - counted(shown),
             "earlier item",
@@ -390,54 +378,43 @@ class Reader(Model, arbitrary_types_allowed=True):
         waiting = isinstance(item.state, Waiting)
         return waiting and (not self.mine or item.recipient == self.reader)
 
-    def line(self, entry: Item | Flags, items: list[Item], *, naming: Naming) -> str:
+    def line(self, entry: Item | Flags) -> str:
         """Say an item in a line: its number, when it was made, what it is, from whom to whom, where it stands, and its first line; a conversation's flagged writes, the files they flag."""
         if isinstance(entry, Flags):
-            return f"{self.headed(entry, items, naming=naming)}: {entry.said()}"
-        return f"{self.headed(entry, items, naming=naming)}: {opening(entry)}"
+            return f"{self.headed(entry)}: {entry.said()}"
+        return f"{self.headed(entry)}: {opening(entry)}"
 
-    def headed(self, entry: Item | Flags, items: list[Item], *, naming: Naming) -> str:
-        """Say an item's heading: its number, when it was made, what it is, from whom to whom, and where it stands; each conversation as `naming` says, and the operator's copy of a message between conversations to whom it was sent. A conversation's flagged writes are headed as one: each number, the latest's time, and how many."""
+    def headed(self, entry: Item | Flags) -> str:
+        """Say an item's heading: its number, when it was made, what it is, from whom to whom, and where it stands; each conversation by its name (`called`), and the operator's copy of a message between conversations to whom it was sent. A conversation's flagged writes are headed as one: each number, the latest's time, and how many."""
         if isinstance(entry, Flags):
             latest = entry.items[-1]
             return (
                 f"{entry.cited()}  {clocked(entry.made)}  "
                 f"{many(len(entry.items), 'flagged write')} from "
-                f"{self.called(entry.sender, items, naming=naming)} to "
-                f"{self.called(latest.recipient, items, naming=naming)}, "
+                f"{self.called(entry.sender)} to "
+                f"{self.called(latest.recipient)}, "
                 f"{entry.standing()}"
             )
         item = entry
         match item.reason:
             case Message(to=Conversation() as to):
-                recipient = (
-                    f"{self.called(to, items, naming=naming)}, the operator's copy"
-                )
+                recipient = f"{self.called(to)}, the operator's copy"
             case _:
-                recipient = self.called(item.recipient, items, naming=naming)
+                recipient = self.called(item.recipient)
         return (
             f"{cited_at(item)}  {what(item)} from "
-            f"{self.called(item.sender, items, naming=naming)} to {recipient}, "
+            f"{self.called(item.sender)} to {recipient}, "
             f"{standing(item)}"
         )
 
-    def whole(
-        self,
-        entry: Item | Flags,
-        placed: list[int],
-        items: list[Item],
-        *,
-        naming: Naming,
-    ) -> str:
+    def whole(self, entry: Item | Flags, placed: list[int]) -> str:
         """Say an item whole under its heading: a conversation's as it wrote it, saying which of the operator's items a turn's end answers, the operator's words on it under it, with any reply copies before kept on them; any other's as it was told to whom it was for, what it says on the items `placed` told under them, and a review's context left out. A conversation's flagged writes under one heading, each whole."""
-        heading = self.headed(entry, items, naming=naming)
+        heading = self.headed(entry)
         each = entry.items if isinstance(entry, Flags) else [entry]
-        tags = [self.tagged(item, placed, items, naming=naming) for item in each]
+        tags = [self.tagged(item, placed) for item in each]
         return f"{heading}:\n" + "\n".join(tags)
 
-    def tagged(
-        self, item: Item, placed: list[int], items: list[Item], *, naming: Naming
-    ) -> str:
+    def tagged(self, item: Item, placed: list[int]) -> str:
         """Say an item whole, as `whole` does under its heading."""
         match item.sender:
             case Conversation() as sender:
@@ -451,26 +428,24 @@ class Reader(Model, arbitrary_types_allowed=True):
                     attributes={
                         "item": str(item.number),
                         "kind": kind(item),
-                        "from": self.attributed(sender, items, naming=naming),
+                        "from": self.attributed(sender),
                         **answering,
                     },
                     parts=[
                         written(item),
-                        *self.thread(item, sender, items, naming=naming),
+                        *self.thread(item, sender),
                     ],
                 )
             case Operator():
                 tag = self.delivery.tagged(item, under=placed, context=False)
         return tag.written()
 
-    def thread(
-        self, item: Item, sender: Conversation, items: list[Item], *, naming: Naming
-    ) -> list[Tag | str]:
+    def thread(self, item: Item, sender: Conversation) -> list[Tag | str]:
         """Return the operator's words on `item`, `sender`'s, in the order they came: under each of their items addressed to `sender` that's on it, what it says there, then each reply `sender` made to it."""
         inbox = self.delivery.inbox
         ordered = [inbox.items[number] for number in sorted(inbox.items)]
         return [
-            self.said_on(each, item, sender, on, items, naming=naming)
+            self.said_on(each, item, sender, on)
             for each in ordered
             if addressed_to(each, sender)
             and (
@@ -484,9 +459,6 @@ class Reader(Model, arbitrary_types_allowed=True):
         item: Item,
         sender: Conversation,
         on: list[Anchor],
-        items: list[Item],
-        *,
-        naming: Naming,
     ) -> Tag:
         """Tag what the operator's item `theirs` says on `item`, its parts `on`, as it told them to `sender`, each with its id; then each reply of `sender`'s to them copies before kept."""
         match theirs.reason:
@@ -514,19 +486,19 @@ class Reader(Model, arbitrary_types_allowed=True):
             case _:
                 parts = []
                 name = "item"
-        ids = [anchor.id for anchor in on]
+        parted = [anchor.id for anchor in on]
         replies = [
             Tag(
                 name="reply",
                 attributes={
                     "id": PartId(item=theirs.number, part=reply.number).said(),
                     "to": reply.to.said(),
-                    "from": self.attributed(sender, items, naming=naming),
+                    "from": self.attributed(sender),
                 },
                 parts=[reply.text],
             )
             for reply in theirs.replies
-            if reply.to in ids
+            if reply.to in parted
         ]
         return Tag(
             name=name,
@@ -543,18 +515,17 @@ class Reader(Model, arbitrary_types_allowed=True):
         found: Conversation,
         below: list[Conversation],
         wanted: Narrowing,
-        items: list[Item],
     ) -> str:
         """Say whose exchange is read, the conversation by its path and its runtime's ids, and what of it."""
         subagents = f" and its {many(len(below), 'subagent')}" if below else ""
         state = "every item" if wanted.every else "what still waits"
         window = wanted.window(self.delivery.clock.now()).said()
-        return f"The exchange of {self.titled(found, items)}{subagents}: {state}{window}, oldest first."
+        return f"The exchange of {self.titled(found)}{subagents}: {state}{window}, oldest first."
 
-    def titled(self, conversation: Conversation, items: list[Item]) -> str:
-        """Name a conversation by its path, where lup knows it, then by its runtime's ids."""
-        path = self.path(conversation, items)
-        return who(conversation) if path is None else f"`{path}` ({who(conversation)})"
+    def titled(self, conversation: Conversation) -> str:
+        """Name a conversation by its path, where lup knows it, then by its runtime's ids, which read it whatever it's named since."""
+        path = self.roster.path(conversation)
+        return ids(conversation) if path is None else f"`{path}` ({ids(conversation)})"
 
     def alike(
         self,
@@ -571,39 +542,27 @@ class Reader(Model, arbitrary_types_allowed=True):
         if not others:
             return []
         each = "; ".join(
-            f"{who(other)}, last heard {clocked(self.heard(other, items))}"
+            f"{ids(other)}, last heard {clocked(self.heard(other, items))}"
             for other in others
         )
         return [
             (
                 f"`{wanted}` names {len(others) + 1} conversations; this reads the "
-                f"one last heard, {who(found)}, at "
+                f"one last heard, {ids(found)}, at "
                 f"{clocked(self.heard(found, items))}. The others, which "
                 f"`{self.spelling.conversation}` reads by id: {each}."
             )
         ]
 
-    def called(self, party: Party, items: list[Item], *, naming: Naming) -> str:
-        """Name a party for the reader: "you" for the reader, the operator, or a conversation as `naming` says, by its runtime's ids where lup knows no path for it."""
+    def called(self, party: Party) -> str:
+        """Name a party for the reader: "you" for the reader, else as lup calls it (`Roster.who`): the operator, or a conversation by its name, with its runtime's ids where another shares it or it has none."""
         if party == self.reader:
             return "you"
-        match party:
-            case Operator():
-                return "the operator"
-            case Conversation():
-                path = None if naming == "ids" else self.path(party, items)
-                if path is None:
-                    return who(party)
-                if naming == "paths":
-                    return f"`{path}`"
-                return f"`{path}` ({who(party)})"
+        return self.roster.who(party)
 
-    def attributed(
-        self, party: Conversation, items: list[Item], *, naming: Naming
-    ) -> str:
-        """Name a conversation as a tag's attribute says it: by its path where `naming` names paths and lup knows it, else by its runtime's ids, which the item's heading says."""
-        path = None if naming == "ids" else self.path(party, items)
-        return who(party) if path is None else path
+    def attributed(self, party: Conversation) -> str:
+        """Name a conversation as a tag's attribute says it (`Roster.called`)."""
+        return self.roster.called(party)
 
     def conversations(self, items: list[Item]) -> list[Conversation]:
         """Return each conversation `items` are from, to or for, and each whose whereabouts the inbox keeps among them, once each."""
@@ -631,8 +590,8 @@ class Reader(Model, arbitrary_types_allowed=True):
                 else conversation.agent
             )
             return wanted in [
-                self.path(conversation, items),
-                self.own(conversation, items),
+                self.roster.path(conversation),
+                self.roster.own(conversation),
             ] or own.startswith(wanted)
 
         found = [each for each in self.conversations(items) if named(each)]
@@ -649,7 +608,7 @@ class Reader(Model, arbitrary_types_allowed=True):
                 for each in known
                 if each.agent is not None and each.main() == conversation
             ]
-        children = [each for each in known if self.parent(each) == conversation]
+        children = [each for each in known if self.roster.parent(each) == conversation]
         return [
             found for child in children for found in [child, *self.below(child, items)]
         ]
@@ -664,39 +623,6 @@ class Reader(Model, arbitrary_types_allowed=True):
         place = self.delivery.inbox.whereabouts.get(conversation.key())
         since = [] if place is None else [place.since]
         return max([*made, *since])
-
-    def parent(self, conversation: Conversation) -> Conversation | None:
-        """Return the conversation that spawned a subagent, as its whereabouts keep it; none for a session's own, or one whose parent isn't known."""
-        place = self.delivery.inbox.whereabouts.get(conversation.key())
-        return None if place is None else place.parent
-
-    def own(self, conversation: Conversation, items: list[Item]) -> str | None:
-        """Return a conversation's own name: a session's as lup last kept it; a subagent's as its whereabouts last heard it, or else as its end was told; none where lup knows none."""
-        if conversation.agent is None:
-            return self.names.get(conversation.session)
-        place = self.delivery.inbox.whereabouts.get(conversation.key())
-        if place is not None and place.name is not None:
-            return place.name
-        ended = [
-            item.reason.name
-            for item in items
-            if item.sender == conversation and isinstance(item.reason, Ended)
-        ]
-        return ended[-1] if ended else None
-
-    def path(
-        self, conversation: Conversation, items: list[Item], depth: int = 0
-    ) -> str | None:
-        """Return a conversation's path as lup's commands call it: its session's name, then each subagent's name down to it, an unnamed one by its runtime's id; none where its session's name isn't known."""
-        if conversation.agent is None:
-            return self.own(conversation, items)
-        above = self.parent(conversation) or conversation.main()
-        if depth > len(self.delivery.inbox.whereabouts):
-            return None
-        root = self.path(above, items, depth + 1)
-        if root is None:
-            return None
-        return f"{root}/{self.own(conversation, items) or conversation.agent}"
 
 
 def cited_at(item: Item) -> str:
