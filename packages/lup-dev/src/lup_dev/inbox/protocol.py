@@ -560,6 +560,23 @@ def owned(item: Item, repository: Path) -> Item:
     return item
 
 
+async def ran_in(transcript: Transcript, repository: Path) -> None:
+    """Refuse a record, as to a room of `repository`, unless it says it ran in the repository's git directory or one of its worktrees, as lup keeps a repository's sessions (`lup_transcripts`), saying nothing of it.
+
+    A room's hook names whatever session it likes, so its conversation, and
+    every item it makes, can be one a host session or another project's room
+    ran: the record found under that session's id is read only where it ran
+    in the asker's repository.
+    """
+    under = await asyncio.to_thread(
+        lambda: [repository, *Git.pinned(repository).worktrees()]
+    )
+    ran = transcript.directory
+    if ran is None or not within(ran, under):
+        message = "the conversation isn't one of this repository's"
+        raise InboxError(message)
+
+
 class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
     """Answers `ListInbox`: the items waiting for the operator, and how far they've seen each group they're in."""
 
@@ -925,13 +942,20 @@ class ContextShowing(Model, Reading[ShowContext], arbitrary_types_allowed=True):
 
     @override
     async def scoped(self, request: ShowContext, repository: Path) -> Reply:
-        return await self.moment(
-            owned(self.delivery.inbox.item(request.number), repository)
-        )
+        """Answer only where the item is the repository's, and its sender's record says it ran in the repository (`ran_in`): checked before the call is looked for, so a refusal says nothing of the record."""
+        item = owned(self.delivery.inbox.item(request.number), repository)
+        read = await asyncio.to_thread(context.sent, item, self.recorded)
+        await ran_in(read.transcript, repository)
+        return self.anchored(item, read)
 
     async def moment(self, item: Item) -> Context:
         """Read `item`'s moment from its sender's record, off the event loop."""
-        found = await asyncio.to_thread(context.read, item, self.recorded)
+        read = await asyncio.to_thread(context.sent, item, self.recorded)
+        return self.anchored(item, read)
+
+    def anchored(self, item: Item, read: context.Read) -> Context:
+        """Return `item`'s moment in its sender's record `read`."""
+        found = context.anchored(item, read)
         return Context(number=item.number, entries=found.entries, anchor=found.anchor)
 
 
@@ -1002,15 +1026,9 @@ class ConversationShowing(
 
     @override
     async def scoped(self, request: ShowConversation, repository: Path) -> Reply:
-        """Answer only where the record says it ran in the repository's git directory or one of its worktrees, as lup keeps a repository's sessions (`lup_transcripts`)."""
+        """Answer only where the record says it ran in the repository's git directory or one of its worktrees (`ran_in`)."""
         read = await self.read(request)
-        under = await asyncio.to_thread(
-            lambda: [repository, *Git.pinned(repository).worktrees()]
-        )
-        ran = read.transcript.directory
-        if ran is None or not within(ran, under):
-            message = "the conversation isn't one of this repository's"
-            raise InboxError(message)
+        await ran_in(read.transcript, repository)
         return self.conversed(read.transcript, request.since)
 
     async def read(self, request: ShowConversation) -> context.Read:

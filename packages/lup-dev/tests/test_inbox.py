@@ -3864,6 +3864,59 @@ def test_a_room_reads_its_repositorys_conversations_alone_and_never_the_operator
     ]
 
 
+def test_a_room_reads_no_moment_of_a_session_it_claims_from_another_repository(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    repo: Path,
+    *,
+    tmp_path: Path,
+) -> None:
+    """A room's hook names whatever session it likes, so its items can claim a host session's or another project's room's: the moment of each is read only where its record ran in the asker's repository."""
+    operators = tmp_path / "claude"
+    elsewhere = tmp_path / "elsewhere"
+    theirs = tmp_path / "b" / "other"
+    theirs.mkdir(parents=True)
+    recording(repo.parent, "s1", repo, "n1")
+    recording(operators, "s9", elsewhere, "n9")
+    recording(theirs.parent, "s8", theirs, "n8")
+    recorded = {
+        "claude": Recorded(
+            records=ClaudeRecords(directory=operators, host=machine.host),
+            reader=ClaudeTranscripts(),
+        )
+    }
+    with inboxed(machine, clock, notices, said, recorded):
+        launched(machine, clock, repo, "one", "claude")
+        launched(machine, clock, theirs, "two", "claude")
+        hook = machine.host.launch("one").hook
+        send(machine.host.launch("two").hook, claude("SessionStart", session_id="s8"))
+        for session, key in [("s1", "n1"), ("s9", "n9"), ("s8", "n8")]:
+            send(hook, claude("SessionStart", source="startup", session_id=session))
+            stamped = json.loads(
+                send(hook, lup_call("note", {"remark": key}, key, session_id=session))
+            )["hookSpecificOutput"]["updatedInput"]
+            call(machine.host.launch("one").mcp, "note", stamped)
+        room = RoomClient(socket=machine.host.launch("one").request)
+        mine = room.ask(ShowContext(number=1), Context)
+        refusals: list[str] = []
+        for number in [2, 3]:
+            with pytest.raises(HostError) as refusal:
+                room.ask(ShowContext(number=number), Context)
+            refusals.append(str(refusal.value))
+        host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
+        operator = [host.ask(ShowContext(number=number), Context) for number in [2, 3]]
+    assert [each.text for each in mine.entries if isinstance(each, Said)] == [
+        "Note it."
+    ]
+    assert refusals == [
+        "the conversation isn't one of this repository's",
+        "the conversation isn't one of this repository's",
+    ]
+    assert [each.anchor for each in operator] == [1, 1]
+
+
 def test_a_room_is_told_how_far_the_operator_has_seen_its_repositorys_groups_alone(
     machine: Layout,
     clock: FakeClock,
