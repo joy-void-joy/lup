@@ -41,7 +41,6 @@ from lup_dev.inbox.protocol import (
     Context,
     Conversed,
     Drafted,
-    Exchange,
     Exchanged,
     Files,
     Items,
@@ -64,6 +63,7 @@ from lup_dev.inbox.protocol import (
     ShowOrder,
     ShowTalk,
     Talked,
+    exchanged,
 )
 from lup_dev.inbox.store import (
     ApiChanged,
@@ -824,28 +824,15 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             if conversation in (each.sender, each.recipient, each.addressed)
         ]
 
-        # lup's word on a conversation's citations is its own item, and told to it, as the host lists it.
-        def told(item: Item) -> bool:
-            return item.sender != conversation or isinstance(item.reason, Unresolved)
-
-        return Exchanged(
-            sent=[
-                Exchange(item=each, text=written(each))
-                for each in items
-                if not told(each)
-            ],
-            received=[
-                Exchange(item=each, text=body(each)) for each in items if told(each)
-            ],
-            paths=[
-                each
-                for each in self.paths()
-                if any(
-                    each.conversation in (item.sender, item.recipient, item.addressed)
-                    for item in items
-                )
-            ],
-        )
+        paths = [
+            each
+            for each in self.paths()
+            if any(
+                each.conversation in (item.sender, item.recipient, item.addressed)
+                for item in items
+            )
+        ]
+        return exchanged(conversation, items, written=written, told=body, paths=paths)
 
     def paths(self) -> list[Pathed]:
         """Return each stand-in conversation the listing has, with its path."""

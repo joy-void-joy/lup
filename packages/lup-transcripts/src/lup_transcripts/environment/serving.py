@@ -40,7 +40,6 @@ from lup_dev.host.protocol import HostError
 from lup_dev.inbox.context import Recording
 from lup_transcripts.environment import views
 from lup_transcripts.environment.conversation import (
-    Beside,
     OfCall,
     OfExchange,
     call_blocks,
@@ -52,8 +51,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from lup_dev.host.records import Record, Transcript
-    from lup_dev.inbox.protocol import Exchanged
-    from lup_dev.inbox.store import Conversation
     from lup_transcripts.environment.module import Transcripts
 
 
@@ -186,18 +183,6 @@ class TranscriptsServing(ModuleServing):
         sessions = await asyncio.to_thread(self.kept)
         return views.found(sessions, asked.words, whole=asked.whole)
 
-    def beside(self, exchanged: Exchanged) -> Beside:
-        """Return what a conversation shows beside its steps: the items of lup's inbox it exchanged, each conversation among their parties called by its path as the core gives it, else by its runtime's ids."""
-
-        def named(party: Conversation) -> str:
-            path = exchanged.path(party)
-            if path is not None:
-                return path
-            own = f"{party.runtime} {party.session}"
-            return own if party.agent is None else f"{own} / {party.agent}"
-
-        return Beside(exchanged=exchanged, named=named)
-
     @lup.view(
         place=lup.Drawer(letter="v", called="the conversation", colour="cyan"),
         watch=lup.Watch(
@@ -223,7 +208,7 @@ class TranscriptsServing(ModuleServing):
         return conversation_blocks(
             viewed,
             read.transcript.entries,
-            self.beside(exchanged),
+            exchanged,
             exchange=TranscriptsServing.exchange,
             call=TranscriptsServing.call,
         )
@@ -242,7 +227,7 @@ class TranscriptsServing(ModuleServing):
         return exchange_blocks(
             viewed,
             read.transcript.entries,
-            self.beside(exchanged),
+            exchanged,
             call=TranscriptsServing.call,
         )
 

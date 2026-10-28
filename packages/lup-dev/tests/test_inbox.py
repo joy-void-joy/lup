@@ -7045,7 +7045,15 @@ def test_a_conversations_items_are_listed_in_every_state_as_it_wrote_and_was_tol
         (4, "It was stopped before it ended its turn."),
     ]
     assert theirs.sent[0].item.state == Done(at=clock.now())
-    assert theirs.received == mains.received[2:]
+    passed = [(each.item, each.text) for each in mains.received[2:]]
+    assert [(each.item, each.text) for each in theirs.received] == passed
+    # Each says it as its own view does: whose it was, or where it went on to.
+    said = [
+        "".join(span.text for span in each.line)
+        for each in [mains.received[2], theirs.received[0]]
+    ]
+    assert said[0].endswith(", which had ended")
+    assert ", this one having ended" in said[1]
 
 
 def test_a_sent_draft_approves_what_it_marks_read_and_held_changes_commented_on(

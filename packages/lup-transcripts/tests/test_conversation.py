@@ -15,7 +15,7 @@ from pydantic import BaseModel, JsonValue
 import lup
 from lup.blocks import SHELL_TONES, Block, Blocks, Fold, Line, Load, Markdown, OfAgent
 from lup_dev.host.records import Call, Called, Entry, Said
-from lup_dev.inbox.protocol import Exchange, Exchanged
+from lup_dev.inbox.protocol import Exchanged, Pathed, exchanged
 from lup_dev.inbox.store import (
     Answer,
     Answered,
@@ -24,25 +24,20 @@ from lup_dev.inbox.store import (
     Decided,
     Decision,
     Done,
-    Flagged,
     HeldChange,
     Item,
-    Letter,
     Message,
     Operator,
     Question,
     Reason,
-    Review,
     Ruling,
     Told,
     Unresolved,
     Waiting,
-    Withdrawn,
 )
 from lup_transcripts.environment.conversation import (
     FOLD_KINDS,
     TONES,
-    Beside,
     ConversationError,
     OfCall,
     OfExchange,
@@ -82,23 +77,18 @@ def at(minute: int) -> datetime:
 OF = OfAgent(runtime="claude", session="s1")
 
 
-def named(party: Conversation) -> str:
-    """The session's own conversation, its subagents called by their kind."""
-    return "lup-impl" if party.agent is None else f"lup-impl/{party.agent}"
-
-
-ALONE = Beside(named=named)
+ALONE = Exchanged(sent=[], received=[])
 """A conversation with nothing exchanged through lup."""
 
 
-def drawer(entries: list[Entry], beside: Beside = ALONE, of: OfAgent = OF) -> Blocks:
+def drawer(entries: list[Entry], beside: Exchanged = ALONE, of: OfAgent = OF) -> Blocks:
     return conversation_blocks(
         of, entries, beside, exchange=Viewing.exchange, call=Viewing.call
     )
 
 
 def exchange(
-    entries: list[Entry], step: int | None, beside: Beside = ALONE, of: OfAgent = OF
+    entries: list[Entry], step: int | None, beside: Exchanged = ALONE, of: OfAgent = OF
 ) -> Blocks:
     asked = OfExchange(
         runtime=of.runtime, session=of.session, agent=of.agent, step=step
@@ -501,6 +491,23 @@ def test_the_last_exchange_folds_once_the_operator_speaks_again_and_a_run_once_i
 SESSION = Conversation(repository=Path("/r.git"), runtime="claude", session="s1")
 SURVEY = SESSION.model_copy(update={"agent": "a04"})
 OPERATOR = Operator()
+PATHS = [
+    Pathed(conversation=SESSION, path="lup-impl"),
+    Pathed(conversation=SURVEY, path="lup-impl/a04"),
+]
+"""How the core names the session's own conversation, and its subagent."""
+
+
+def listed(*texts: tuple[Item, str], party: Conversation = SESSION) -> Exchanged:
+    """Return what `party` exchanged as the core lists it: each item with its text, sent or received, and its line."""
+    told = {item.number: text for item, text in texts}
+    return exchanged(
+        party,
+        [item for item, _ in texts],
+        written=lambda item: told[item.number],
+        told=lambda item: told[item.number],
+        paths=PATHS,
+    )
 
 
 def note(text: str, *, of: int | None = None, ending: bool = False) -> Message:
@@ -551,21 +558,14 @@ ANSWERED = item(
 )
 REPLIED = item(54, note("Good.", of=52), 9, sender=OPERATOR, recipient=SESSION)
 
-EXCHANGED = Beside(
-    named=named,
-    exchanged=Exchanged(
-        sent=[
-            Exchange(item=ASKED, text="Which parser?\n1. A model per kind (lean: yes)"),
-            Exchange(item=NOTED, text="I assumed UTF-8."),
-        ],
-        received=[
-            Exchange(
-                item=ANSWERED,
-                text="Asked: Which parser?\n1. A model per kind (lean: yes): leaning: they go with the lean.",
-            ),
-            Exchange(item=REPLIED, text="Good."),
-        ],
+EXCHANGED = listed(
+    (ASKED, "Which parser?\n1. A model per kind (lean: yes)"),
+    (NOTED, "I assumed UTF-8."),
+    (
+        ANSWERED,
+        "Asked: Which parser?\n1. A model per kind (lean: yes): leaning: they go with the lean.",
     ),
+    (REPLIED, "Good."),
 )
 
 
@@ -638,17 +638,12 @@ def test_a_turn_s_last_words_lup_made_a_note_are_left_out_being_the_agent_s_word
     None
 ):
     ended = item(55, note("Reading the second runtime's.", ending=True), 8)
-    beside = EXCHANGED.model_copy(
-        update={
-            "exchanged": EXCHANGED.exchanged.model_copy(
-                update={
-                    "sent": [
-                        *EXCHANGED.exchanged.sent,
-                        Exchange(item=ended, text="Reading the second runtime's."),
-                    ]
-                }
-            )
-        }
+    beside = listed(
+        (ASKED, "Which parser?"),
+        (NOTED, "I assumed UTF-8."),
+        (ANSWERED, "Asked."),
+        (REPLIED, "Good."),
+        (ended, "Reading the second runtime's."),
     )
     view = drawer(CALLED, beside)
     assert [each[0] for each in folds(view.blocks) if each[1] == "items"] == [
@@ -660,7 +655,7 @@ def test_a_turn_s_last_words_lup_made_a_note_are_left_out_being_the_agent_s_word
     assert "@55" not in whole(view)
 
 
-def test_each_item_sent_says_where_it_stands() -> None:
+def test_the_operator_s_comment_on_deciding_an_item_is_under_its_text() -> None:
     held = item(
         55,
         HeldChange(
@@ -672,55 +667,19 @@ def test_each_item_sent_says_where_it_stands() -> None:
         12,
         state=Decided(at=at(13), approved=False, comment="Not this file."),
     )
-    flagged = Flagged(
-        text="a.py landed, flagged.",
-        summary="a.py is a new production file",
-        worktree=Path("/w"),
-        path=Path("a.py"),
+    text = whole(
+        drawer(STEPS, listed((held, "Let the change land?\nAGENTS.md: the operator's")))
     )
-    sent = [
-        item(56, Message(kind="problem", text="Stuck."), 12),
-        item(57, note("Done."), 12, state=Done(at=at(13))),
-        item(
-            58, Question(text="Which?"), 12, state=Withdrawn(at=at(13), why="Found it.")
-        ),
-        # A flag and news wait on no one, as the review ranks them: unread, never waiting on you.
-        item(59, flagged, 12),
-        item(60, note("Assumed UTF-8."), 12),
-    ]
-    beside = Beside(
-        named=named,
-        exchanged=Exchanged(
-            sent=[
-                Exchange(
-                    item=held, text="Let the change land?\nAGENTS.md: the operator's"
-                ),
-                *(Exchange(item=each, text="…") for each in sent),
-            ],
-            received=[],
-        ),
-    )
-    text = whole(drawer(STEPS, beside))
     assert text[text.index("▾ → @55") :] == said(
         "▾ → @55 held change to you · declined",
         "  Let the change land?",
         "  AGENTS.md: the operator's",
         "",
         "  your comment: Not this file.",
-        "▾ → @56 problem to you · waiting on you",
-        "  …",
-        "▾ → @57 note to you · read",
-        "  …",
-        "▾ → @58 question to you · withdrawn: Found it.",
-        "  …",
-        "▾ → @59 flagged write to you · unread",
-        "  …",
-        "▾ → @60 note to you · unread",
-        "  …",
     )
 
 
-def test_one_passed_on_from_an_ended_subagent_says_whose_it_was_in_its_session_and_where_it_went_in_the_subagent() -> (
+def test_one_passed_on_from_an_ended_subagent_is_in_both_its_session_s_view_and_the_subagent_s() -> (
     None
 ):
     noted = item(44, note("No cache."), 2, sender=SURVEY, state=Done(at=at(3)))
@@ -733,24 +692,10 @@ def test_one_passed_on_from_an_ended_subagent_says_whose_it_was_in_its_session_a
         addressed=SURVEY,
         state=Told(at=at(4), how="call"),
     )
-    session = drawer(
-        STEPS[:3],
-        Beside(
-            named=named,
-            exchanged=Exchanged(
-                sent=[], received=[Exchange(item=reply, text="Right.")]
-            ),
-        ),
-    )
+    session = drawer(STEPS[:3], listed((reply, "Right.")))
     subagent = drawer(
         STEPS[:3],
-        Beside(
-            named=named,
-            exchanged=Exchanged(
-                sent=[Exchange(item=noted, text="No cache.")],
-                received=[Exchange(item=reply, text="Right.")],
-            ),
-        ),
+        listed((noted, "No cache."), (reply, "Right."), party=SURVEY),
         OfAgent(runtime="claude", session="s1", agent="a04"),
     )
     assert lines(session, "←", "→") == [
@@ -762,7 +707,7 @@ def test_one_passed_on_from_an_ended_subagent_says_whose_it_was_in_its_session_a
     ]
 
 
-def test_a_conversation_an_item_s_line_names_is_said_as_it_s_called_and_refers_to_it_by_its_runtime_s_ids() -> (
+def test_a_conversation_an_item_s_line_names_keeps_its_span_referring_to_it_in_the_line_s_tone() -> (
     None
 ):
     reply = item(
@@ -775,16 +720,7 @@ def test_a_conversation_an_item_s_line_names_is_said_as_it_s_called_and_refers_t
         state=Told(at=at(4), how="call"),
     )
     asked = item(51, Question(text="Which?", decisions=[]), 2, recipient=SURVEY)
-    view = drawer(
-        STEPS[:3],
-        Beside(
-            named=named,
-            exchanged=Exchanged(
-                sent=[Exchange(item=asked, text="Which?")],
-                received=[Exchange(item=reply, text="Right.")],
-            ),
-        ),
-    )
+    view = drawer(STEPS[:3], listed((asked, "Which?"), (reply, "Right.")))
     survey = OfAgent(runtime="claude", session="s1", agent="a04")
     passed = block(view.blocks, "item 46")
     assert isinstance(passed, Fold)
@@ -814,16 +750,7 @@ def test_a_step_with_no_time_takes_the_last_before_it_and_in_a_record_with_no_ti
     ]
     early = item(60, note("Early."), 4)
     late = item(61, note("Late."), 6)
-    beside = Beside(
-        named=named,
-        exchanged=Exchanged(
-            sent=[
-                Exchange(item=late, text="Late."),
-                Exchange(item=early, text="Early."),
-            ],
-            received=[],
-        ),
-    )
+    beside = listed((late, "Late."), (early, "Early."))
     assert drawer(untimed, beside).text().splitlines()[1:] == [
         "you: Go.",
         "· Bash",
@@ -849,25 +776,15 @@ def test_an_item_before_the_operator_s_last_words_folds_in_its_exchange_one_befo
     None
 ):
     before = item(50, note("Early."), 4)
-    beside = Beside(
-        named=named,
-        exchanged=Exchanged(sent=[Exchange(item=before, text="Early.")], received=[]),
-    )
-    assert "@50" not in drawer(STEPS, beside).text()
-    assert [each[0] for each in folds(exchange(STEPS, 0, beside).blocks)] == [
+    assert "@50" not in drawer(STEPS, listed((before, "Early."))).text()
+    assert [
+        each[0] for each in folds(exchange(STEPS, 0, listed((before, "Early."))).blocks)
+    ] == [
         "calls 2",
         "item 50",
     ]
     first = item(49, note("Earliest."), 0)
-    early = drawer(
-        STEPS[1:],
-        Beside(
-            named=named,
-            exchanged=Exchanged(
-                sent=[Exchange(item=first, text="Earliest.")], received=[]
-            ),
-        ),
-    )
+    early = drawer(STEPS[1:], listed((first, "Earliest.")))
     assert (
         early.text().splitlines()[1]
         == "▸ earlier · 4 steps, 1 item, from 9m before your first words  [exchange]"
@@ -878,19 +795,8 @@ def test_an_item_arriving_is_added_and_its_question_s_line_changes_as_its_answer
     None
 ):
     waiting = ASKED.model_copy(update={"state": Waiting()})
-    asked = Beside(
-        named=named,
-        exchanged=Exchanged(
-            sent=[Exchange(item=waiting, text="Which parser?")], received=[]
-        ),
-    )
-    answered = Beside(
-        named=named,
-        exchanged=Exchanged(
-            sent=[Exchange(item=ASKED, text="Which parser?")],
-            received=[Exchange(item=ANSWERED, text="Asked.")],
-        ),
-    )
+    asked = listed((waiting, "Which parser?"))
+    answered = listed((ASKED, "Which parser?"), (ANSWERED, "Asked."))
     before, after = drawer(CALLED, asked), drawer(CALLED, answered)
     assert "▸ → @51 question to you · waiting on you" in before.text()
     assert whole(after).endswith(
@@ -911,64 +817,11 @@ def test_an_item_arriving_is_added_and_its_question_s_line_changes_as_its_answer
     ] == kept
 
 
-def test_a_review_it_was_sent_says_what_it_answers_or_that_it_s_the_operator_s_message_from_the_review() -> (
-    None
-):
-    told = {
-        "state": Told(at=at(9), how="call"),
-        "sender": OPERATOR,
-        "recipient": SESSION,
-    }
-    written = item(
-        60,
-        Review(covers=[], letters=[Letter(to=SESSION, text="Rename it.")]),
-        9,
-        **told,
-    )
-    reviewed = item(61, Review(covers=[52]), 9, **told)
-    beside = Beside(
-        named=named,
-        exchanged=Exchanged(
-            sent=[],
-            received=[
-                Exchange(
-                    item=written, text="The operator's message to you:\nRename it."
-                ),
-                Exchange(item=reviewed, text="Fine."),
-            ],
-        ),
-    )
-    text = whole(drawer(CALLED, beside))
-    assert (
-        "▾ ← @60 your message, from the review\n  The operator's message to you:\n  Rename it."
-        in text
-    )
-    assert "▾ ← @61 your review of @52\n  Fine." in text
-
-
-def test_lup_s_word_on_citations_says_it_s_lup_s_and_how_many_in_which_item_named_no_passage() -> (
-    None
-):
+def test_an_item_with_no_text_is_a_line_with_nothing_folded_under_it() -> None:
     missed = Citation(said="@50[the tone]", start=0, end=13, item=50, words="the tone")
     told = {"state": Told(at=at(9), how="turn's end"), "recipient": SESSION}
-    one = item(63, Unresolved(of=56, citations=[missed]), 9, **told)
     two = item(64, Unresolved(of=57, citations=[missed, missed]), 9, **told)
-    beside = Beside(
-        named=named,
-        exchanged=Exchanged(
-            sent=[],
-            received=[
-                Exchange(item=one, text="A citation in @56 doesn't name one passage."),
-                Exchange(item=two, text=""),
-            ],
-        ),
-    )
-    view = drawer(CALLED, beside)
-    assert (
-        "▾ ← @63 from lup: a citation of your words in @56 named no one passage\n"
-        "  A citation in @56 doesn't name one passage."
-    ) in whole(view)
-    # One with no text is a line with nothing folded under it.
+    view = drawer(CALLED, listed((two, "")))
     assert block(view.blocks, "item 64 line") == Line.of(
         "item 64 line",
         "← @64 from lup: 2 citations of your words in @57 named no one passage",
