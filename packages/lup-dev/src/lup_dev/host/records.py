@@ -140,7 +140,7 @@ class Records(ABC):
 
     @abstractmethod
     def conversation(self, session: str, agent: str | None) -> Found | None:
-        """Return the record of one conversation as the runtime keeps it, growing while it runs, session `session`'s own or its subagent `agent`'s, with the directory it's read inside; none where there's none.
+        """Return the record of one conversation as the runtime keeps it, growing while it runs, session `session`'s own or their subagent `agent`'s, with the directory it's read inside; none where there's none.
 
         A launched session's is in the home its launch registered alone, and
         any other's in the operator's own directory alone (`lup_dev.host.homes`).
@@ -161,7 +161,7 @@ class Said(Model):
 
 
 class Called(Model):
-    """A tool the agent called, by its runtime's name for it, and what the call did, in a line."""
+    """A tool the agent called, by their runtime's name for it, and what the call did, in a line."""
 
     kind: Literal["called"] = "called"
     tool: str
@@ -198,7 +198,7 @@ type Entry = Annotated[Said | Called, Field(discriminator="kind")]
 
 
 class Usage(Model):
-    """What a conversation's context holds, as its runtime last recorded a reply: the tokens in use, and the window they're in where it's known."""
+    """What a conversation's context holds, as their runtime last recorded a reply: the tokens in use, and the window they're in where it's known."""
 
     used: int
     """The tokens in the context at the last reply: its input, the cached part
@@ -230,7 +230,7 @@ so."""
 
 
 class Task(Model):
-    """One entry of a conversation's task list, as its runtime keeps it."""
+    """One entry of a conversation's task list, as their runtime keeps it."""
 
     id: str
     subject: str
@@ -241,15 +241,15 @@ class Task(Model):
 
 
 TASKS_DRAWER = Drawer(letter="t", called="the tasks", colour="link")
-"""Where the dashboard shows an agent's task list, as its runtime keeps it: a
+"""Where the dashboard shows an agent's task list, as their runtime keeps it: a
 drawer of the runtime adapters', under each agent's banner, its view `tasks`.
 Its view is the page's own until the adapters are a module of their own (#113,
 step 4); the core's looks place it (`lup_dev.declaration.looks`)."""
 TASK_TONE = Tone(name="task", like="plain")
-"""A line of an agent's task list in its drawer, each entry marked done, in
+"""A line of an agent's task list in their drawer, each entry marked done, in
 progress or to do."""
 PAUSE = Verb(name="pause", key="p", called="pause")
-"""The runtime adapters' verb: pausing an agent, which its banner will offer
+"""The runtime adapters' verb: pausing an agent, which their banner will offer
 once its host side is designed (#157). `Core` declares it until the adapters
 are a module (#113, step 4), so a person's layer may give it another key."""
 
@@ -327,15 +327,15 @@ class Recorded(Model, arbitrary_types_allowed=True):
 
 
 type Queuing = Literal["typed", "task", "subagent", "message"]
-"""What a runtime holds for a conversation while its call runs: the operator's
-words typed in its terminal, and anything the record doesn't say is another's,
+"""What a runtime holds for a conversation while their call runs: the operator's
+words typed in their terminal, and anything the record doesn't say is another's,
 so it's never taken for less; a task the conversation started in the
-background, a command ending or a Monitor's event; a subagent it started ending,
-or its report; another session's message."""
+background, a command ending or a Monitor's event; a subagent they started
+ending, or reporting; another session's message."""
 
 
 class Queued(Model):
-    """Something a runtime holds for one conversation of a session, which it hands the agent once its running call returns, as the session's record says while it runs."""
+    """Something a runtime holds for one conversation of a session, which it hands the agent once their running call returns, as the session's record says while it runs."""
 
     id: str
     """Which it is, as the runtime's record places it, so it's told once."""
@@ -353,7 +353,7 @@ class Queues(ABC):
     def queued(
         self, session: str, agent: str | None, home: Path | None
     ) -> list[Queued]:
-        """Return what the runtime holds for session `session`'s own conversation, or for its subagent `agent`, to hand it once its running call returns, oldest first; none where nothing is, or the session's record isn't on this machine, or isn't in `home`.
+        """Return what the runtime holds for session `session`'s own conversation, or for their subagent `agent`, to hand them once their running call returns, oldest first; none where nothing is, or the session's record isn't on this machine, or isn't in `home`.
 
         `home` is the one the asking conversation's launch registered
         (`Register.home`), where its runtime keeps its own sessions' records:
