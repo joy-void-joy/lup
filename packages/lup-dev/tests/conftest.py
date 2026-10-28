@@ -915,6 +915,12 @@ def runtimes() -> list[FakeRuntime]:
 
 
 @pytest.fixture
+def parser() -> FakeParser:
+    """The engine's reading of a file's parse alone, scripted from the same markers as the fake engine's, with each request it was sent."""
+    return FakeParser()
+
+
+@pytest.fixture
 def kit(tmp_path: Path) -> Kit:
     """A bench for a runtime whose file tools say what they'll write before they write it, each hold approved as it's put before the operator."""
     return Kit(tmp_path / "state", FakeRuntime("asking"), Response(approved=True))
