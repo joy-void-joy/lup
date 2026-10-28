@@ -172,6 +172,29 @@ def test_a_store_that_reads_objects_from_elsewhere_has_every_file_hidden(
     assert hidden(tree) == [Path(".env"), Path(".env.example")]
 
 
+def test_a_file_too_large_to_check_is_hidden_unread_and_said_so(
+    repo: Path, tmp_path: Path
+) -> None:
+    (repo / "bundle.pem").write_bytes(b"-" * (DEFAULTS.largest + 1))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "a large bundle")
+    # A terabyte, sparse, as a room could make one in an instant.
+    with (repo / "planted.key").open("wb") as planted:
+        planted.truncate(1 << 40)
+    tree = Tree(path=repo, git=git_directory(repo))
+    launch = Layout(state=tmp_path / "state").launch("0f3a")
+
+    made = RoomSecrets.of(DEFAULTS, tree, [], launch)
+
+    assert sorted(made.large) == [repo / "bundle.pem", repo / "planted.key"]
+    [said] = made.said()
+    assert f"\n  {repo / 'bundle.pem'} (too large to check, over 1 MiB)" in said
+    assert f"\n  {repo / 'planted.key'} (too large to check, over 1 MiB)" in said
+    # Raised, the bound has the committed bundle checked, and shown.
+    raised = DEFAULTS.model_copy(update={"largest": 2 << 20})
+    assert hidden(tree, raised) == [Path("planted.key")]
+
+
 def test_a_sha256_repository_s_store_is_asked_by_sha256_ids(tmp_path: Path) -> None:
     root = tmp_path / "sha256"
     root.mkdir()

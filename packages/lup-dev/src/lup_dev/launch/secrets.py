@@ -54,7 +54,7 @@ from typing import TYPE_CHECKING
 
 from lup.types import Model
 from lup_dev.git import Git, GitError, stray
-from lup_dev.launch.hidden import Found, covering, made, walked
+from lup_dev.launch.hidden import Found, covering, made, status, walked
 from lup_dev.layout import LaunchLayout
 
 if TYPE_CHECKING:
@@ -139,6 +139,8 @@ class Searched(Model):
     nested: list[Path] = []
     """Those of `files` in a repository nested in the tree's own, hidden whatever
     they hold."""
+    large: list[Path] = []
+    """Those of `files` holding more than `Search.largest` bytes, hidden unread."""
     unlisted: list[Path] = []
 
 
@@ -154,6 +156,12 @@ class Search(Model):
     the operator's repositories' environments was `certifi`'s."""
     hidden: list[Path] = []
     """Paths hidden already, not looked in: each worktree's `.venv`."""
+    largest: int = 1 << 20
+    """The most bytes a file with a secret's name holds to be read and checked,
+    1 MiB; one holding more is hidden unread, and said so. The files these names
+    give are small, the largest of the 86 in view on the operator's machine 6 KB,
+    and a room could plant a sparse one of a terabyte, in an instant, for the next
+    launch to hash."""
 
     def found(self, tree: Path, git: Path | None) -> Searched:
         """Walk `tree`, holding the repository whose common git directory is `git`, for each file whose path from its worktree's root (`Listing.root`) matches a pattern, and those of them in a repository nested in it; and each directory that couldn't be listed.
@@ -195,7 +203,14 @@ class Search(Model):
         nested = [
             path for path in matched if any(each in holding for each in path.parents)
         ]
-        return Searched(files=matched, nested=nested, unlisted=unlisted)
+        large = [
+            path
+            for path in matched
+            if path not in nested
+            and (seen := status(tree, path)) is not None
+            and seen.st_size > self.largest
+        ]
+        return Searched(files=matched, nested=nested, large=large, unlisted=unlisted)
 
 
 class Listing(Model):
@@ -223,10 +238,11 @@ def listed(
 
     Each says the root of the worktree it's in (`Listing.root`), from its
     entries and its parent's: never from what a `.git` file says, which in a
-    moved worktree names where it was. Depth first, holding a descriptor for each directory on the way
-    down alone, so a directory holding thousands never runs out of them. Each
-    listing is built without validation (`model_construct`): a tree may hold a
-    hundred thousand directories, and what's built is the walk's own.
+    moved worktree names where it was. Depth first, holding a descriptor for
+    each directory on the way down alone, so a directory holding thousands
+    never runs out of them. Each listing is built without validation
+    (`model_construct`): a tree may hold a hundred thousand directories, and
+    what's built is the walk's own.
     """
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
     hiding = [each.name for each in hidden]
@@ -304,8 +320,8 @@ def git_directory(path: Path) -> Path | None:
     return path if bare else None
 
 
-def blob(tree: Path, path: Path, hashing: str) -> str | None:
-    """Return the id git would give the regular file at `path`, inside `tree`, as a blob hashed with `hashing` (`sha1` or `sha256`); none where it isn't one. Read through the directory holding it, never following a link.
+def blob(tree: Path, path: Path, hashing: str, largest: int) -> str | None:
+    """Return the id git would give the regular file at `path`, inside `tree`, as a blob hashed with `hashing` (`sha1` or `sha256`); none where it isn't one, or holds more than `largest` bytes. Read through the directory holding it, never following a link.
 
     A file that changes size as it's read gets an id no object has.
     """
@@ -320,7 +336,7 @@ def blob(tree: Path, path: Path, hashing: str) -> str | None:
             return None
         stack.callback(os.close, reading)
         seen = os.fstat(reading)
-        if not stat.S_ISREG(seen.st_mode):
+        if not stat.S_ISREG(seen.st_mode) or seen.st_size > largest:
             return None
         digest = hashlib.new(hashing, f"blob {seen.st_size}\0".encode())
         for chunk in iter(lambda: os.read(reading, 1 << 20), b""):
@@ -328,8 +344,8 @@ def blob(tree: Path, path: Path, hashing: str) -> str | None:
         return digest.hexdigest()
 
 
-def shown(tree: Path, git: Path | None, files: list[Path]) -> list[Path]:
-    """Return those of `files`, inside `tree`, whose exact content the object store of the repository whose common git directory is `git` holds, asked of git pinned there.
+def shown(tree: Path, git: Path | None, files: list[Path], largest: int) -> list[Path]:
+    """Return those of `files`, inside `tree`, whose exact content the object store of the repository whose common git directory is `git` holds, asked of git pinned there; none of those holding more than `largest` bytes, which aren't read.
 
     None where there's no repository, git can't say, or the store reads objects
     from outside itself (`stray`), from a store the room can't read.
@@ -339,7 +355,7 @@ def shown(tree: Path, git: Path | None, files: list[Path]) -> list[Path]:
     pinned = Git.pinned(git)
     try:
         hashing = pinned.text("rev-parse", "--show-object-format")
-        hashed = {path: blob(tree, path, hashing) for path in files}
+        hashed = {path: blob(tree, path, hashing, largest) for path in files}
         ids = [each for each in hashed.values() if each is not None]
         held = pinned.blobs(list(dict.fromkeys(ids)))
     except GitError:
@@ -357,8 +373,9 @@ class Tree(Model):
 def hiding(search: Search, tree: Tree) -> Searched:
     """Return what to hide in `tree`: each file with a secret's name whose exact content its repository's object store doesn't hold, each in a repository nested in the tree's own, and each directory that couldn't be listed."""
     searched = search.found(tree.path, tree.git)
-    asked = [each for each in searched.files if each not in searched.nested]
-    held = shown(tree.path, tree.git, asked)
+    unread = [*searched.nested, *searched.large]
+    asked = [each for each in searched.files if each not in unread]
+    held = shown(tree.path, tree.git, asked, search.largest)
     return searched.model_copy(
         update={"files": [each for each in searched.files if each not in held]}
     )
@@ -373,23 +390,24 @@ class RoomSecrets(Model):
     """The project's tree, looked in again at the launch's end."""
     found: list[Found] = []
     """Each path hidden, as it was found."""
+    large: list[Path] = []
+    """Each file among `found` hidden unread, holding more than `Search.largest`
+    bytes."""
 
     @classmethod
     def of(
         cls, search: Search, own: Tree, related: list[Tree], launch: LaunchLayout
     ) -> RoomSecrets:
         """Look in the project's tree `own` and each of the `related` repositories mounted, as the room is about to start."""
-
-        def hidden(tree: Tree) -> list[Found]:
-            searched = hiding(search, tree)
-            return [
-                seen
-                for path in [*searched.files, *searched.unlisted]
-                if (seen := Found.at(tree.path, path)) is not None
-            ]
-
-        found = [seen for tree in [own, *related] for seen in hidden(tree)]
-        return cls(launch=launch, search=search, own=own, found=found)
+        searched = [(tree, hiding(search, tree)) for tree in [own, *related]]
+        found = [
+            seen
+            for tree, each in searched
+            for path in [*each.files, *each.unlisted]
+            if (seen := Found.at(tree.path, path)) is not None
+        ]
+        large = [path for _, each in searched for path in each.large]
+        return cls(launch=launch, search=search, own=own, found=found, large=large)
 
     @property
     def mounts(self) -> list[Mount]:
@@ -403,7 +421,13 @@ class RoomSecrets(Model):
     def said(self) -> list[str]:
         """Return what the launch says of what it hides, where it hides anything."""
         files = [each.path for each in self.found if not each.directory]
-        listed = "\n".join(f"  {each}" for each in files)
+        bound = f"over {self.search.largest / (1 << 20):g} MiB"
+        listed = "\n".join(
+            f"  {each} (too large to check, {bound})"
+            if each in self.large
+            else f"  {each}"
+            for each in files
+        )
         named = (
             "Hidden from the room, each reading as an empty file: the files with a "
             "secret's name whose content their repository's git objects don't hold "
