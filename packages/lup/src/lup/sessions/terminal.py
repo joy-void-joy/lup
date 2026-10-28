@@ -9,18 +9,29 @@ socket goes. A room then runs the result in its container (`lup.rooms`).
 """
 
 import inspect
+import json
+import os
+import shutil
+import stat
+import tomllib
 from collections import Counter
 from datetime import timedelta
 from pathlib import Path
-from typing import Annotated, Self
+from typing import TYPE_CHECKING, Annotated, Literal, Self
 
-from pydantic import AfterValidator, model_validator
+import tomlkit
+from pydantic import AfterValidator, JsonValue, TypeAdapter, model_validator
+from tomlkit.items import Table
 
 from lup.errors import LupError
 from lup.events import SessionEvent
 from lup.rooms.container import AbsolutePath, Mount
+from lup.rooms.homes import landed, landings
 from lup.sessions import bridge
-from lup.types import Model
+from lup.types import JsonObject, Model
+
+if TYPE_CHECKING:
+    from tomlkit import TOMLDocument
 
 
 class TerminalError(LupError):
@@ -140,12 +151,48 @@ class SessionSettings(Model):
     with its login, whose tools reach their mail and files."""
 
 
+class RuntimeHome(Model):
+    """A home of the rooms' own for the runtime of a terminal session, in place of the operator's own directory (`docs/launch.md`, *A home of the rooms' own*).
+
+    The runtime keeps its history and state there, which every room given the
+    home reads and writes. Its configuration there is read-only, each item the
+    launch's copy of the layers below or empty, so no room leaves another
+    configuration to load; what it saves as it runs is the launch's own, and
+    so is what it runs before a command, so no room changes what another
+    running room runs. Each runtime's adapter names the items. It logs in with
+    `login`, an account's file.
+    """
+
+    directory: AbsolutePath
+    """The home, mounted read-write at its path, which the runtime's variable
+    names. It must sit under no directory a room writes: a mount point can't be
+    moved from inside a room, but a directory above one can, with a link left
+    in its place for the host to follow as it mounts the home."""
+    login: AbsolutePath
+    """The account's login, the file the runtime's sign-in writes, mounted
+    read-write alone where the runtime reads its login in the home, so a
+    sign-in in one room is every room's on the account. It must be there, a
+    file: an empty one is no login, which the runtime's sign-in fills. The
+    same rule holds for it as for `directory`."""
+    operators: bool = True
+    """Whether the operator's own configuration is the lowest layer, what
+    credentials it holds left out."""
+    own: AbsolutePath | None = None
+    """A layer of configuration over the operator's, laid out as the runtime's
+    own directory: a profile's. None for none, as is a directory that isn't
+    there."""
+
+
 class TerminalSettings(Model):
     """What lup adds to a terminal session of a declaration's runtime."""
 
     directory: AbsolutePath
     """The launch's own directory, where the compiled files are written; it's
     mounted read-only into the room at its path."""
+    home: RuntimeHome | None = None
+    """The home of the rooms' own the runtime keeps its history, state,
+    configuration and login in; none gives it the room's own home, its state
+    gone with the launch, with nothing of the operator's."""
     cli: Cli | None = None
     """The runtime's CLI, mounted read-only into the room; none for the one its SDK bundles."""
     hooks: list[Hook] = []
@@ -233,10 +280,225 @@ class TerminalSettings(Model):
         return SessionSettings.model_validate({**defaulted, **imposed})
 
 
+class Copy(Model):
+    """Configuration a launch copies into its own directory before the command runs, for the room to read there.
+
+    A link is copied as the link, never followed on the host: a room that
+    once wrote where it's copied from could have aimed one at the operator's
+    keys, and in the room it reaches only what the room has at its path.
+    What isn't a file, a directory or a link is left out, a pipe among it,
+    which a read would wait on.
+    """
+
+    source: AbsolutePath
+    """A file, or a directory copied whole; nothing is copied where it isn't
+    there, or is a link."""
+    destination: AbsolutePath
+    leaving: list[str] = []
+    """Names directly inside a directory left out of its copy."""
+
+    def made(self) -> None:
+        """Copy the source to the destination, over what an earlier copy put there, links as links."""
+        try:
+            seen = self.source.lstat()
+        except FileNotFoundError:
+            return
+
+        def ignored(directory: str, names: list[str]) -> list[str]:
+            top = self.leaving if Path(directory) == self.source else []
+
+            def kept(name: str) -> bool:
+                mode = (Path(directory) / name).lstat().st_mode
+                return stat.S_ISREG(mode) or stat.S_ISDIR(mode) or stat.S_ISLNK(mode)
+
+            return [name for name in names if name in top or not kept(name)]
+
+        self.destination.parent.mkdir(parents=True, exist_ok=True)
+        if stat.S_ISDIR(seen.st_mode):
+            shutil.copytree(
+                self.source,
+                self.destination,
+                symlinks=True,
+                ignore=ignored,
+                dirs_exist_ok=True,
+            )
+            return
+        if stat.S_ISREG(seen.st_mode):
+            shutil.copy2(self.source, self.destination, follow_symlinks=False)
+
+
+type Syntax = Literal["json", "toml"]
+"""How a runtime writes its settings file."""
+
+
+class Preference(Model):
+    """One preference a runtime saves in its settings file, by the keys leading to it, a table's before its own."""
+
+    keys: list[str]
+
+    @property
+    def name(self) -> str:
+        """Its keys, dotted, as the runtime's docs name it.
+
+        >>> Preference(keys=["tui", "theme"]).name
+        'tui.theme'
+        """
+        return ".".join(self.keys)
+
+    def held(self, table: JsonObject) -> JsonValue:
+        """Return its value in `table`; none where it isn't there.
+
+        >>> Preference(keys=["tui", "theme"]).held({"tui": {"theme": "dark"}})
+        'dark'
+        """
+        current: JsonValue = table
+        for key in self.keys:
+            if not isinstance(current, dict) or key not in current:
+                return None
+            current = current[key]
+        return current
+
+
+class Setting(Model):
+    """A preference with the value it's set to."""
+
+    preference: Preference
+    value: JsonValue
+
+
+class Preferences(Model):
+    """What a runtime saves as it runs that a launch carries back at its end: each preference of an allowlist that changed, into a layer of the person's own over the operator's (`carried`), never into the operator's own configuration."""
+
+    saved: AbsolutePath
+    """The launch's own settings file, which the runtime writes as it runs."""
+    into: AbsolutePath
+    """Where they're carried: a layer's file over the operator's, a profile's."""
+    syntax: Syntax
+    written: list[Setting]
+    """Each preference of the allowlist, with its value as the launch wrote
+    it, none where it left it unset."""
+    largest: int = 4096
+    """The most bytes a value carried may take as JSON: the room wrote it, and
+    every later room on the layer reads it."""
+
+    def carried(self) -> list[str]:
+        """Carry each preference the runtime saved that differs from what the launch wrote into `into`, keeping the rest of that file, and say each carried, or why none was.
+
+        `saved` is read without following a link; where it isn't there, as
+        where the launch ended before the runtime started, nothing is carried
+        or said. A value past `largest` is left, and said.
+        """
+        try:
+            final = parsed(read(self.saved), self.syntax)
+        except FileNotFoundError:
+            return []
+        except (OSError, ValueError) as failed:
+            return [f"No preference was carried back from {self.saved}: {failed}"]
+        changed = [
+            Setting(preference=each.preference, value=value)
+            for each in self.written
+            if (value := each.preference.held(final)) is not None
+            and value != each.value
+        ]
+        large = [each for each in changed if len(json.dumps(each.value)) > self.largest]
+        kept = [each for each in changed if each not in large]
+        said = [
+            f"Left `{each.preference.name}` as it was: what the session saved there "
+            f"is more than {self.largest:,} bytes."
+            for each in large
+        ]
+        if not kept:
+            return said
+        self.into.parent.mkdir(parents=True, exist_ok=True)
+        before = self.into.read_text() if self.into.is_file() else ""
+        self.into.write_text(updated(before, self.syntax, kept))
+        return [
+            *said,
+            *(
+                f"Kept `{each.preference.name}` = {json.dumps(each.value)} in "
+                f"{self.into}, as the session saved it."
+                for each in kept
+            ),
+        ]
+
+
+def read(path: Path) -> str:
+    """Read `path`'s text, never through a link."""
+    handle = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    with os.fdopen(handle, encoding="utf-8") as opened:
+        return opened.read()
+
+
+def parsed(text: str, syntax: Syntax) -> JsonObject:
+    """Read a settings file's text as its syntax writes it, an empty file as empty. Raise `ValueError` where it doesn't parse into a table."""
+    if not text.strip():
+        return {}
+    match syntax:
+        case "json":
+            loaded = TypeAdapter[JsonValue](JsonValue).validate_json(text)
+        case "toml":
+            loaded = TypeAdapter[JsonValue](JsonValue).validate_python(
+                tomllib.loads(text)
+            )
+    match loaded:
+        case dict():
+            return loaded
+        case _:
+            message = "it holds no table"
+            raise ValueError(message)
+
+
+def placed(table: JsonObject, keys: list[str], value: JsonValue) -> JsonObject:
+    """Return `table` with `value` set at the end of `keys`, each table on the way made where it isn't one.
+
+    >>> placed({"tui": {"vim": True}}, ["tui", "theme"], "dark")
+    {'tui': {'vim': True, 'theme': 'dark'}}
+    """
+    first, *rest = keys
+    if not rest:
+        return {**table, first: value}
+    inner = table.get(first)
+    below: JsonObject = inner if isinstance(inner, dict) else {}
+    return {**table, first: placed(below, rest, value)}
+
+
+def updated(text: str, syntax: Syntax, settings: list[Setting]) -> str:
+    """Return a settings file's `text` with each of `settings` set, the rest of it kept as written, a TOML file's comments among it.
+
+    >>> theme = Preference(keys=["tui", "theme"])
+    >>> print(updated("", "toml", [Setting(preference=theme, value="light")]), end="")
+    [tui]
+    theme = "light"
+    """
+    match syntax:
+        case "json":
+            table = parsed(text, syntax)
+            for each in settings:
+                table = placed(table, each.preference.keys, each.value)
+            return json.dumps(table, indent=2) + "\n"
+        case "toml":
+            document = tomlkit.parse(text)
+            for each in settings:
+                *tables, last = each.preference.keys
+                holding: TOMLDocument | Table = document
+                for key in tables:
+                    if key not in holding:
+                        holding[key] = tomlkit.table()
+                    inner = holding[key]
+                    if not isinstance(inner, Table):
+                        inner = tomlkit.table()
+                        holding[key] = inner
+                    holding = inner
+                holding[last] = each.value
+            return tomlkit.dumps(document)
+
+
 class Terminal(Model):
     """A declaration compiled for a terminal: how to start its runtime's CLI.
 
-    The files are written before the command runs; the mounts are what the CLI
+    Before the command runs, the files are written, the directories made and
+    the copies copied, each into the launch's own directory, and each mount
+    inside `home` gets what it lands on there; the mounts are what the CLI
     needs in the room, beside the room's own.
     """
 
@@ -245,4 +507,31 @@ class Terminal(Model):
     env: dict[str, str] = {}
     files: dict[Path, str] = {}
     """Each file's path on the host, and its text."""
+    directories: list[Path] = []
+    """Each directory made empty, for a mount of the launch's own."""
+    copies: list[Copy] = []
+    """Each copied, in order, a later one over an earlier at the same place."""
     mounts: list[Mount] = []
+    home: AbsolutePath | None = None
+    """The runtime's home of the rooms' own, which rooms write: what each mount
+    inside it lands on is made there first, never through a link
+    (`lup.rooms.homes`); none where the runtime has none."""
+    left_out: list[str] = []
+    """What of the configuration copied in was left out, each with where it
+    was: a credential, a helper fetching one, a link; for the launch to say."""
+    preferences: Preferences | None = None
+    """What the runtime saves as it runs that the launch carries back at its
+    end; none where nothing is."""
+
+    def prepare(self) -> None:
+        """Write the files, make the directories, copy the copies, and make the home and what each mount inside it lands on, as the command needs them before it runs."""
+        for path, text in self.files.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        for directory in self.directories:
+            directory.mkdir(parents=True, exist_ok=True)
+        for copy in self.copies:
+            copy.made()
+        if self.home is not None:
+            self.home.mkdir(mode=0o700, parents=True, exist_ok=True)
+            landed(self.home, landings(self.home, list(self.mounts)))

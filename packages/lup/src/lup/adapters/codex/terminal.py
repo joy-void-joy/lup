@@ -1,9 +1,9 @@
 """Codex in a terminal: the command line and requirements a launched session starts with.
 
-lup's settings reach the session as flags, `-c` overrides on the operator's own
-home, and a requirements file of the launch's own, never written into the
-operator's home or the repository (`docs/launch.md`, *The settings compiled for
-each runtime*):
+lup's settings reach the session as flags, `-c` overrides on the configuration
+of the home it runs on, and a requirements file of the launch's own, never
+written into the operator's home or the repository (`docs/launch.md`, *The
+settings compiled for each runtime*):
 - `--no-daemon`, apart from the host's daemon on the same home, and
   `--dangerously-bypass-approvals-and-sandbox`: the room is the wall;
 - the model with `--model` and the effort as `model_reasoning_effort`, each only
@@ -15,10 +15,7 @@ each runtime*):
   key at every `.`, which breaks a path like `lup.git`;
 - the session settings (below); `check_for_update_on_startup = false`;
   `features.plugins = false`, which also stops a sync from GitHub at each start;
-  each of the operator's own MCP servers, read from their `config.toml`, off by
-  name, since they're set up for the host;
-- lup's tool servers, in the same `mcp_servers` table that turns theirs off
-  (below);
+- lup's tool servers, the `mcp_servers` table (below);
 - `project_doc_max_bytes = 0`, so the repository's `AGENTS.md` isn't loaded
   beside the guidance;
 - lup's hooks as managed hooks, in a requirements file mounted at
@@ -26,8 +23,38 @@ each runtime*):
   runs **(leaning)**: managed hooks need no review, where hooks from any other
   source run only once trusted;
 - the guidance as `additional_developer_instructions` in the same file (below);
-- `CODEX_HOME`, the operator's home, mounted read-write at its path for their
-  login, settings and history.
+- on a home of the rooms' own (`TerminalSettings.home`, `at_home`), `CODEX_HOME`
+  naming it and `cli_auth_credentials_store = "file"`, so the login is the
+  account's `auth.json`, never a keyring the room lacks; with none, the room's
+  own home, gone with the launch.
+
+**The home**: a directory of the rooms' own, mounted read-write at its path,
+where Codex keeps its history and state; nothing of the operator's home is
+mounted. Inside it, each item of configuration `CodexHome` names is mounted
+read-only, the launch's copy of the layers holding it, the operator's home's
+and then the home's own, or empty; `config.toml` is the launch's own, the
+layers' merged with what would hand the room a credential left out
+(`blocked`, `lup.sessions.configuration`), the operator's MCP servers among
+it; each of Codex's own profiles, `<name>.config.toml`, is layered the same
+way and mounted read-only, so `--profile` after `--` finds it; the
+operator's `~/.agents/skills` is copied read-only into the room's home;
+`shell_snapshots/`, `skills/` and `tmp/` are the launch's own, since Codex
+runs a snapshot before each command, puts its `tmp/arg0/` helpers first on its
+commands' `PATH`, and writes its own skills at each start; and `auth.json`
+is the account's login, mounted alone, read-write. Codex 0.162.0 saves its
+login in place, keeping the file and its mode, so a sign-in in a room reaches
+the account's file through the mount; it reads an empty file as unreadable
+rather than as no login, and `{}` as signed in, so a login made for an account
+starts empty (measured in a room, `docs/field-notes.md`, *A home of the rooms'
+own*).
+
+**A declared gap:** Codex 0.162.0 saves its configuration by writing a new
+file over `config.toml` (its inode changed, measured in a room), which a
+single file mounted can't take ("Device or resource busy"), so a preference a
+session saves there, `/model`'s choice among them, holds for that session
+alone and isn't carried back; Codex says "Failed to save default model" (its
+binary's text). The launch's copy marks `tui.screen_reader_detection_done`, so
+the save Codex makes at each start isn't one of them.
 
 | lup's event | Codex's hook event |
 |---|---|
@@ -42,10 +69,10 @@ each runtime*):
 An event Codex has no hook for registers none, and its adapter declares the gap
 (`lup_dev.adapters.codex`).
 
-**The session settings** are `-c` overrides, which outrank the operator's
+**The session settings** are `-c` overrides, which outrank the home's
 `config.toml`: each one the settings impose (`TerminalSettings.session`), and
-each of lup's defaults their configuration doesn't set (`OperatorConfig.sets`,
-read once at launch), so theirs outrank lup's defaults. Auto memory switches
+each of lup's defaults the layered configuration doesn't set
+(`OperatorConfig.sets`, read once at launch), so theirs outrank lup's defaults. Auto memory switches
 the `memories` feature, and the account's connectors the `apps` feature, which
 is what Codex calls them. Each is spelled `features.<key>`, and also by each
 older key their `[features]` table sets for it (`memory_tool`, `connectors`):
@@ -58,13 +85,11 @@ socket (`lup.sessions.bridge`, written into the launch's directory and mounted
 read-only at its path), which carries the session across the server's
 restarts, with the server's timeout as `tool_timeout_sec`
 where it gives one (Codex's own is 300 s) and `default_tools_approval_mode =
-"approve"`, so no call asks. They go in one `mcp_servers` table with the
-operator's turned off, since a later `-c` of the same key replaces an earlier
-one. Codex merges that table into theirs key by key, so a server of theirs
-named as one of lup's would lend lup's its other keys (`enabled_tools`, `env`,
-`url`, which Codex then refuses beside `command`): such a configuration is
-refused, naming the server. Their tools stay behind Codex's tool search where
-the model has it: no `omit_tools_from`.
+"approve"`, so no call asks. They're the whole `mcp_servers` table: the
+operator's are left out of the home's configuration, so none of theirs lends
+lup's its keys, as Codex would merge a table of one name key by key. Their
+tools stay behind Codex's tool search where the model has it: no
+`omit_tools_from`.
 
 **The guidance** is Codex's managed developer instructions, which it keeps in a
 thread's state by their hash and, at a resume where they changed, sends again
@@ -143,12 +168,12 @@ What this relies on, read in Codex's source at `rust-v0.162.1` (paths under
 - the `[features]` table's switches are a `BTreeMap`, applied in the order of
   their keys (`features/src/lib.rs`, `apply_map`), and `memory_tool` and
   `connectors` are older keys for `memories` and `apps` (`features/src/legacy.rs`);
-- a `profile` key in `config.toml` is refused, and a profile's own file is read
-  only with `--profile` (`core/src/config/mod.rs`), which a launch doesn't pass,
-  so their `config.toml` is all of the operator's configuration a launch reads.
+- a `profile` key in `config.toml` is refused, and a profile's own file,
+  `$CODEX_HOME/<name>.config.toml`, is read only with `--profile`
+  (`core/src/config/mod.rs`; the `config-advanced` docs), which lup doesn't
+  pass and the operator may, after `--`.
 """
 
-import tomllib
 from datetime import timedelta
 from math import ceil
 from shlex import join
@@ -158,7 +183,12 @@ import tomlkit
 from pydantic import JsonValue, ValidationError
 from tomlkit.exceptions import ConvertError
 
-from lup.adapters.codex.layout import MANAGED_REQUIREMENTS, CodexLaunch, CodexLayout
+from lup.adapters.codex.layout import (
+    MANAGED_REQUIREMENTS,
+    CodexHome,
+    CodexLaunch,
+    CodexLayout,
+)
 from lup.events import (
     CallFinished,
     CallStarted,
@@ -169,15 +199,26 @@ from lup.events import (
     WorktreeAsked,
 )
 from lup.rooms.container import Mount
-from lup.sessions.terminal import Cli, Terminal, TerminalError
+from lup.sessions.configuration import Homed, configured, fits, layered, merged
+from lup.sessions.terminal import (
+    Cli,
+    Copy,
+    Preferences,
+    Setting,
+    Terminal,
+    TerminalError,
+)
 from lup.types import JsonObject, Model
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from lup.adapters.codex import Effort
     from lup.events import SessionEvent
-    from lup.sessions.terminal import Hook, TerminalSettings, ToolServer
+    from lup.sessions.terminal import (
+        Hook,
+        RuntimeHome,
+        TerminalSettings,
+        ToolServer,
+    )
 
 
 def toml(value: JsonValue) -> str:
@@ -211,10 +252,9 @@ APPS = Feature(key="apps", older=["connectors"])
 
 
 class OperatorConfig(Model):
-    """The part of the operator's Codex configuration a terminal session reads: the features they switch, the servers a room turns off."""
+    """The part of the configuration a terminal session reads as its own that lup reads: the features it switches."""
 
     features: dict[str, JsonValue] = {}
-    mcp_servers: dict[str, JsonObject] = {}
 
     def keys(self, feature: Feature) -> list[str]:
         """Return the keys their `[features]` table switches `feature` by."""
@@ -226,24 +266,145 @@ class OperatorConfig(Model):
         return [field for field, feature in switched.items() if self.keys(feature)]
 
 
-def operator(config: Path) -> OperatorConfig:
-    """Read the operator's Codex configuration at `config`; an empty one where they have none."""
-    if not config.is_file():
-        return OperatorConfig()
+def blocked(path: list[str]) -> bool:
+    """Say whether a key of Codex's configuration, by its path, is left out of a room's copy beside any named like a credential.
+
+    The operator's MCP servers, set up for the host, whose `env` often holds a
+    credential named otherwise; the variables `shell_environment_policy` sets
+    in every command's environment; and the headers of any `otel` exporter,
+    which carry its key whatever they're named.
+
+    >>> [blocked(path) for path in [["mcp_servers"], ["otel", "exporter", "otlp-http", "headers"], ["model"]]]
+    [True, True, False]
+    """
+    match path:
+        case ["mcp_servers"] | ["shell_environment_policy", "set"]:
+            return True
+        case ["otel", *_, "headers"]:
+            return True
+        case _:
+            return False
+
+
+class AtHome(Model):
+    """What a terminal session of Codex gets on a home of the rooms' own: how its configuration and login reach the home, its own configuration there, and the operator's as lup reads it."""
+
+    homed: Homed
+    theirs: OperatorConfig
+    preferences: Preferences | None
+
+
+def at_home(home: RuntimeHome, layout: CodexLayout, launch: CodexLaunch) -> AtHome:
+    """Return what a session of Codex gets on the home `home`, its layers below it the operator's Codex home where `home` keeps it, then `home`'s own.
+
+    The configuration, layered with what `blocked` names and any key named
+    like a credential left out of each, is the launch's own `config.toml`,
+    mounted writable where Codex reads it; each of Codex's own profiles a
+    layer holds, `<name>.config.toml`, is layered the same way and mounted
+    read-only. The operator's `~/.agents/skills`, where `home` keeps their
+    layer, is copied and mounted read-only where Codex reads it in the room's
+    home. Raise `TerminalError` where a layer's configuration doesn't read.
+    """
+    room = CodexHome(directory=home.directory)
+    layers = [
+        *([layout.operator_home] if home.operators else []),
+        *([] if home.own is None else [home.own]),
+    ]
+    config = layered(layers, "config.toml", "toml", blocked)
     try:
-        read = tomllib.loads(config.read_text())
-    except tomllib.TOMLDecodeError as failed:
-        message = (
-            f"the operator's Codex configuration, {config}, isn't valid TOML: {failed}"
-        )
-        raise TerminalError(message) from failed
-    try:
-        return OperatorConfig.model_validate(read)
+        theirs = OperatorConfig.model_validate(config.table)
     except ValidationError as failed:
-        message = (
-            f"the operator's Codex configuration, {config}, doesn't read: {failed}"
-        )
+        message = f"the configuration layered for the room doesn't read: {failed}"
         raise TerminalError(message) from failed
+    detected: JsonObject = {"tui": {"screen_reader_detection_done": True}}
+    written = merged(detected, config.table)
+    names = dict.fromkeys(
+        each.name
+        for layer in layers
+        for each in sorted(layer.glob("*.config.toml"))
+        if fits(each, directory=False)
+    )
+    profiles = {name: layered(layers, name, "toml", blocked) for name in names}
+    placed = configured(room.configuration, layers, room.directory, launch.home)
+    skills = layout.user_skills if home.operators else None
+    copied = skills is not None and fits(skills, directory=True)
+    own = [launch.home.own(name) for name in room.own]
+    return AtHome(
+        homed=Homed(
+            copies=[
+                *placed.copies,
+                *(
+                    [
+                        Copy(
+                            source=skills,
+                            destination=launch.home.copied(".agents-skills"),
+                        )
+                    ]
+                    if copied and skills is not None
+                    else []
+                ),
+            ],
+            directories=[*placed.directories, *own],
+            files={
+                **placed.files,
+                launch.home_config: tomlkit.dumps(written),
+                **{
+                    launch.home.copied(name): tomlkit.dumps(each.table)
+                    for name, each in profiles.items()
+                },
+            },
+            mounts=[
+                Mount(source=launch.home_config, target=room.config),
+                Mount(source=home.login, target=room.login),
+                *(
+                    Mount(source=launch.home.own(name), target=room.directory / name)
+                    for name in room.own
+                ),
+                *placed.mounts,
+                *(
+                    Mount(
+                        source=launch.home.copied(name),
+                        target=room.profile(name),
+                        read_only=True,
+                    )
+                    for name in profiles
+                ),
+                *(
+                    [
+                        Mount(
+                            source=launch.home.copied(".agents-skills"),
+                            target=skills,
+                            read_only=True,
+                        )
+                    ]
+                    if copied and skills is not None
+                    else []
+                ),
+            ],
+            left=[
+                *config.left,
+                *(left for each in profiles.values() for left in each.left),
+                *placed.left,
+                *(
+                    [f"{skills}, which is a link lup doesn't follow"]
+                    if skills is not None and skills.is_symlink()
+                    else []
+                ),
+            ],
+        ),
+        theirs=theirs,
+        preferences=None
+        if home.own is None
+        else Preferences(
+            saved=launch.home_config,
+            into=home.own / "config.toml",
+            syntax="toml",
+            written=[
+                Setting(preference=each, value=each.held(written))
+                for each in room.preferences
+            ],
+        ),
+    )
 
 
 class Override(Model):
@@ -357,32 +518,14 @@ def bridged(server: ToolServer, settings: TerminalSettings) -> StdioServer:
     )
 
 
-def served(
-    settings: TerminalSettings, theirs: OperatorConfig, config: Path
-) -> JsonObject:
-    """Return the `mcp_servers` table: each of the operator's servers turned off, and lup's.
-
-    Raise `TerminalError` where a server of theirs, in `config`, is named as one
-    of lup's, which Codex would merge into lup's rather than replace.
-    """
-    shared = [
-        server.name for server in settings.servers if server.name in theirs.mcp_servers
-    ]
-    if shared:
-        message = (
-            f"the operator's Codex configuration, {config}, names an MCP server "
-            f"{', '.join(shared)}, as lup's own is: Codex would merge lup's server "
-            "into theirs key by key rather than replace it, so rename theirs"
-        )
-        raise TerminalError(message)
-    off: JsonObject = {name: {"enabled": False} for name in theirs.mcp_servers}
-    lups: JsonObject = {
+def served(settings: TerminalSettings) -> JsonObject:
+    """Return the `mcp_servers` table: lup's servers, the only ones, since the operator's are left out of a room's configuration (`blocked`)."""
+    return {
         server.name: bridged(server, settings).model_dump(
             mode="json", exclude_none=True
         )
         for server in settings.servers
     }
-    return {**off, **lups}
 
 
 def spelled(event: type[SessionEvent]) -> str | None:
@@ -408,14 +551,15 @@ def compiled(
 ) -> Terminal:
     """Return the terminal session of Codex for a declaration's fields, with lup's settings."""
     launch = CodexLaunch(directory=settings.directory)
-    theirs = operator(layout.operator_config)
+    home = None if settings.home is None else at_home(settings.home, layout, launch)
+    theirs = OperatorConfig() if home is None else home.theirs
     session = settings.passed(theirs.sets())
     cli = (
         Cli(program=layout.bundled_cli, directory=layout.bundled)
         if settings.cli is None
         else settings.cli
     )
-    servers = served(settings, theirs, layout.operator_config)
+    servers = served(settings)
 
     def group(hook: Hook) -> HookGroup:
         timeout = None if hook.timeout is None else int(hook.timeout.total_seconds())
@@ -467,7 +611,13 @@ def compiled(
         Override(key="features.plugins", value=False),
         *([Override(key="mcp_servers", value=servers)] if servers else []),
         Override(key="project_doc_max_bytes", value=0),
+        *(
+            []
+            if home is None
+            else [Override(key="cli_auth_credentials_store", value="file")]
+        ),
     ]
+    homed = Homed() if home is None else home.homed
     return Terminal(
         command=[
             str(cli.program),
@@ -480,10 +630,14 @@ def compiled(
                 for argument in ["-c", override.argument()]
             ),
         ],
-        env={"CODEX_HOME": str(layout.operator_home)},
-        files={launch.requirements: written, **settings.bridges()},
+        env={}
+        if settings.home is None
+        else {"CODEX_HOME": str(settings.home.directory)},
+        files={launch.requirements: written, **settings.bridges(), **homed.files},
+        directories=homed.directories,
+        copies=homed.copies,
         mounts=[
-            Mount(source=layout.operator_home),
+            *([] if settings.home is None else [Mount(source=settings.home.directory)]),
             cli.mount,
             Mount(
                 source=launch.requirements,
@@ -491,5 +645,9 @@ def compiled(
                 read_only=True,
             ),
             *(Mount(source=path, read_only=True) for path in settings.bridges()),
+            *homed.mounts,
         ],
+        home=None if settings.home is None else settings.home.directory,
+        left_out=homed.left,
+        preferences=None if home is None else home.preferences,
     )

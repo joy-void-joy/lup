@@ -29,6 +29,7 @@ from lup.sessions.errors import RuntimeMissingError
 from lup.sessions.terminal import (
     Cli,
     Hook,
+    RuntimeHome,
     SessionSettings,
     Terminal,
     TerminalError,
@@ -102,6 +103,15 @@ IMPOSED = SessionSettings(
     account_connectors=False,
 )
 """A project's declaration imposing what lup's defaults hold."""
+
+
+def homed(tmp_path: Path, runtime: str) -> RuntimeHome:
+    """Return a home of the rooms' own for `runtime`, the operator's configuration its lowest layer."""
+    return RuntimeHome(
+        directory=tmp_path / "homes" / runtime,
+        login=tmp_path / "accounts" / "default" / runtime / "login",
+        own=tmp_path / "profile" / runtime,
+    )
 
 
 def nothing(name: str) -> None:
@@ -199,12 +209,15 @@ def test_claude_compiles_its_flags_settings_state_and_mounts(
         launch / "mcp-bridge.py": inspect.getsource(bridge),
         launch / "guidance.md": GUIDANCE,
     }
+    # Without a home, nothing of the operator's directory is read or mounted:
+    # the state is the room's own home's, gone with the launch.
     assert terminal.mounts == [
-        Mount(source=home / ".claude"),
         Mount(source=Path("/opt/clis/claude"), read_only=True),
         Mount(source=launch, read_only=True),
         Mount(source=launch / "claude.json", target=home / ".claude.json"),
     ]
+    assert terminal.home is None
+    assert terminal.preferences is None
 
 
 def test_claude_runs_a_turns_end_hook_at_stopfailure_too_once_whoever_failed(
@@ -384,9 +397,14 @@ def test_claude_passes_lup_s_defaults_only_where_the_operator_sets_none(
     own(home, THEIRS)
     launch = tmp_path / "launch"
 
-    written = lup_settings(Claude().terminal(settings(launch, CLAUDE_CLI)), launch)
+    written = lup_settings(
+        Claude().terminal(settings(launch, CLAUDE_CLI, home=homed(tmp_path, "claude"))),
+        launch,
+    )
 
-    assert written["env"] == {}
+    # Their `env` is left out of the room's settings, so the cache it set is
+    # lup's to set.
+    assert written["env"] == {"CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL": "1h"}
     assert "idleCompaction" not in written
     assert "disableClaudeAiConnectors" not in written
     assert written["permissions"] == {"deny": ["Artifact", "SendFeedback"]}
@@ -399,7 +417,12 @@ def test_claude_imposes_what_the_declaration_sets_over_the_operator_s_own(
     launch = tmp_path / "launch"
 
     written = lup_settings(
-        Claude().terminal(settings(launch, CLAUDE_CLI, session=IMPOSED)), launch
+        Claude().terminal(
+            settings(
+                launch, CLAUDE_CLI, session=IMPOSED, home=homed(tmp_path, "claude")
+            )
+        ),
+        launch,
     )
 
     assert written["env"] == {
@@ -416,7 +439,11 @@ def test_claude_turns_idle_compaction_off_and_an_imposed_on_outranks_the_operato
     launch = tmp_path / "launch"
 
     def compacting(session: SessionSettings) -> JsonValue:
-        terminal = Claude().terminal(settings(launch, CLAUDE_CLI, session=session))
+        terminal = Claude().terminal(
+            settings(
+                launch, CLAUDE_CLI, session=session, home=homed(tmp_path, "claude")
+            )
+        )
         return lup_settings(terminal, launch).get("idleCompaction")
 
     assert compacting(SessionSettings()) is False
@@ -426,7 +453,7 @@ def test_claude_turns_idle_compaction_off_and_an_imposed_on_outranks_the_operato
     assert compacting(SessionSettings()) is None
 
 
-def test_claude_counts_a_variable_in_the_operator_s_env_as_their_setting(
+def test_claude_leaves_the_operator_s_env_to_lup_s_defaults_since_it_reaches_no_room(
     tmp_path: Path, home: Path
 ) -> None:
     own(
@@ -441,10 +468,14 @@ def test_claude_counts_a_variable_in_the_operator_s_env_as_their_setting(
     )
     launch = tmp_path / "launch"
 
-    written = lup_settings(Claude().terminal(settings(launch, CLAUDE_CLI)), launch)
+    written = lup_settings(
+        Claude().terminal(settings(launch, CLAUDE_CLI, home=homed(tmp_path, "claude"))),
+        launch,
+    )
 
-    assert written["env"] == {}
-    assert "disableClaudeAiConnectors" not in written
+    # Their key sets the cache; the variables in their `env` set nothing.
+    assert written["env"] == {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
+    assert written["disableClaudeAiConnectors"] is True
 
 
 def test_claude_refuses_operator_settings_that_dont_read(
@@ -454,27 +485,33 @@ def test_claude_refuses_operator_settings_that_dont_read(
     moved.mkdir()
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(moved))
     (moved / "settings.json").write_text(json.dumps({"autoMemoryEnabled": "maybe"}))
+    homing = settings(tmp_path / "launch", CLAUDE_CLI, home=homed(tmp_path, "claude"))
 
-    with pytest.raises(TerminalError, match="don't read"):
-        Claude().terminal(settings(tmp_path / "launch", CLAUDE_CLI))
+    with pytest.raises(TerminalError, match="layered for the room don't read"):
+        Claude().terminal(homing)
     (moved / "settings.json").write_text("{")
-    with pytest.raises(TerminalError, match="don't read"):
-        Claude().terminal(settings(tmp_path / "launch", CLAUDE_CLI))
+    with pytest.raises(TerminalError, match="doesn't read as json"):
+        Claude().terminal(homing)
 
 
-def test_claude_follows_a_moved_config_directory(
+def test_claude_copies_from_a_moved_config_directory_and_names_the_home_in_its_place(
     tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     moved = tmp_path / "claude-work"
+    (moved / "skills").mkdir(parents=True)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(moved))
     launch = tmp_path / "launch"
+    room = homed(tmp_path, "claude")
 
-    terminal = Claude(model="opus").terminal(settings(launch, CLAUDE_CLI))
+    terminal = Claude(model="opus").terminal(settings(launch, CLAUDE_CLI, home=room))
+    bare = Claude(model="opus").terminal(settings(launch, CLAUDE_CLI))
 
-    assert terminal.env["CLAUDE_CONFIG_DIR"] == str(moved)
-    assert terminal.mounts[0] == Mount(source=moved)
-    assert terminal.mounts[-1] == Mount(
-        source=launch / "claude.json", target=moved / ".claude.json"
+    assert terminal.env["CLAUDE_CONFIG_DIR"] == str(room.directory)
+    assert [each.source for each in terminal.copies] == [moved / "skills"]
+    assert Mount(source=moved) not in terminal.mounts
+    assert "CLAUDE_CONFIG_DIR" not in bare.env
+    assert bare.mounts[-1] == Mount(
+        source=launch / "claude.json", target=home / ".claude.json"
     )
 
 
@@ -507,7 +544,9 @@ def test_claude_with_no_model_leaves_the_operator_s_to_claude_code(
     (home / ".claude").mkdir()
     (home / ".claude" / "settings.json").write_text(json.dumps({"model": "opus[1m]"}))
 
-    terminal = Claude(effort="high").terminal(settings(tmp_path / "launch", CLAUDE_CLI))
+    terminal = Claude(effort="high").terminal(
+        settings(tmp_path / "launch", CLAUDE_CLI, home=homed(tmp_path, "claude"))
+    )
 
     assert "--model" not in terminal.command
     assert terminal.command[terminal.command.index("--effort") + 1] == "high"
@@ -539,6 +578,9 @@ def test_codex_compiles_its_flags_overrides_requirements_and_mounts(
         settings(launch, CODEX_CLI)
     )
 
+    # Without a home, nothing of the operator's Codex home is read or mounted:
+    # their servers aren't there to turn off.
+
     assert terminal.command == [
         "/opt/clis/codex/0.162.1/bin/codex",
         "--no-daemon",
@@ -562,15 +604,14 @@ def test_codex_compiles_its_flags_overrides_requirements_and_mounts(
         "features.plugins=false",
         "-c",
         (
-            'mcp_servers={node_repl = {enabled = false},"docs.search" = {enabled = false},'
-            f'lup = {{command = "python3",args = ["-I", "{launch / "mcp-bridge.py"}", '
+            f'mcp_servers={{lup = {{command = "python3",args = ["-I", "{launch / "mcp-bridge.py"}", '
             '"/run/lup/mcp.sock"],'
             'tool_timeout_sec = 90000,default_tools_approval_mode = "approve"}}'
         ),
         "-c",
         "project_doc_max_bytes=0",
     ]
-    assert terminal.env == {"CODEX_HOME": str(codex_home)}
+    assert terminal.env == {}
     command = {"type": "command", "command": HOOK_LINE}
     timed = {**command, "timeout": 36000}
     assert decoded(terminal.files) == {
@@ -586,7 +627,6 @@ def test_codex_compiles_its_flags_overrides_requirements_and_mounts(
         launch / "mcp-bridge.py": inspect.getsource(bridge),
     }
     assert terminal.mounts == [
-        Mount(source=codex_home),
         Mount(source=CODEX_PACKAGE, read_only=True),
         Mount(
             source=launch / "requirements.toml",
@@ -602,7 +642,7 @@ def test_every_codex_override_parses_as_toml_rather_than_falling_back_to_text(
 ) -> None:
     (codex_home / "config.toml").write_text('[mcp_servers.node_repl]\ncommand = "x"\n')
     terminal = Codex(model="gpt-6.1-sol", system_prompt="You narrate.").terminal(
-        settings(tmp_path / "launch", CODEX_CLI)
+        settings(tmp_path / "launch", CODEX_CLI, home=homed(tmp_path, "codex"))
     )
 
     overrides = [
@@ -626,7 +666,6 @@ def test_every_codex_override_parses_as_toml_rather_than_falling_back_to_text(
         "features.apps": False,
         "features.plugins": False,
         "mcp_servers": {
-            "node_repl": {"enabled": False},
             "lup": {
                 "command": "python3",
                 "args": [
@@ -639,6 +678,7 @@ def test_every_codex_override_parses_as_toml_rather_than_falling_back_to_text(
             },
         },
         "project_doc_max_bytes": 0,
+        "cli_auth_credentials_store": "file",
     }
 
 
@@ -686,15 +726,26 @@ def test_codex_has_no_way_for_a_server_to_push_and_loads_it_as_any_other(
     )
 
 
-def test_codex_refuses_a_server_of_the_operator_s_named_as_lup_s(
+def test_codex_leaves_the_operator_s_servers_out_lup_s_namesake_among_them(
     tmp_path: Path, codex_home: Path
 ) -> None:
     (codex_home / "config.toml").write_text(
         '[mcp_servers.lup]\nurl = "https://lup.example/mcp"\n'
     )
+    launch = tmp_path / "launch"
 
-    with pytest.raises(TerminalError, match="names an MCP server lup, as lup's own"):
-        Codex().terminal(settings(tmp_path / "launch", CODEX_CLI))
+    terminal = Codex().terminal(
+        settings(launch, CODEX_CLI, home=homed(tmp_path, "codex"))
+    )
+
+    served = [each for each in terminal.command if each.startswith("mcp_servers=")]
+    assert len(served) == 1
+    assert "url" not in served[0]
+    written = tomllib.loads(
+        terminal.files[launch / "runtime" / "launch" / "config.toml"]
+    )
+    assert "mcp_servers" not in written
+    assert terminal.left_out == [f"`mcp_servers` in {codex_home / 'config.toml'}"]
 
 
 CODEX_MARKERS = len(
@@ -800,7 +851,9 @@ def test_codex_passes_lup_s_defaults_only_where_the_operator_sets_none(
         "[features]\nmemories = true\nconnectors = true\n"
     )
 
-    terminal = Codex().terminal(settings(tmp_path / "launch", CODEX_CLI))
+    terminal = Codex().terminal(
+        settings(tmp_path / "launch", CODEX_CLI, home=homed(tmp_path, "codex"))
+    )
 
     assert features(terminal) == []
 
@@ -813,7 +866,12 @@ def test_codex_imposes_what_the_declaration_sets_by_every_key_the_operator_uses(
     )
 
     terminal = Codex().terminal(
-        settings(tmp_path / "launch", CODEX_CLI, session=IMPOSED)
+        settings(
+            tmp_path / "launch",
+            CODEX_CLI,
+            session=IMPOSED,
+            home=homed(tmp_path, "codex"),
+        )
     )
 
     assert features(terminal) == [
@@ -838,13 +896,23 @@ def test_codex_has_no_idle_compaction_to_turn_off(
         )
 
 
-def test_codex_uses_the_operators_default_home(tmp_path: Path, home: Path) -> None:
+def test_codex_reads_the_operator_s_default_home_as_its_lowest_layer(
+    tmp_path: Path, home: Path
+) -> None:
+    (home / ".codex" / "rules").mkdir(parents=True)
+    room = homed(tmp_path, "codex")
+
     terminal = Codex(model="gpt-6.1-sol").terminal(
+        TerminalSettings(directory=tmp_path / "launch", cli=CODEX_CLI, home=room)
+    )
+    bare = Codex(model="gpt-6.1-sol").terminal(
         TerminalSettings(directory=tmp_path / "launch", cli=CODEX_CLI)
     )
 
-    assert terminal.env == {"CODEX_HOME": str(home / ".codex")}
-    assert terminal.mounts[0] == Mount(source=home / ".codex")
+    assert terminal.env == {"CODEX_HOME": str(room.directory)}
+    assert [each.source for each in terminal.copies] == [home / ".codex" / "rules"]
+    assert Mount(source=home / ".codex") not in [*terminal.mounts, *bare.mounts]
+    assert bare.env == {}
 
 
 def test_codex_runs_the_cli_its_sdk_pins_without_one_given(
@@ -860,7 +928,7 @@ def test_codex_runs_the_cli_its_sdk_pins_without_one_given(
     )
 
     assert terminal.command[0] == str(package / "bin" / "codex")
-    assert terminal.mounts[1] == Mount(source=package, read_only=True)
+    assert terminal.mounts[0] == Mount(source=package, read_only=True)
 
 
 def test_codex_given_one_file_mounts_it_alone(tmp_path: Path, codex_home: Path) -> None:
@@ -871,7 +939,7 @@ def test_codex_given_one_file_mounts_it_alone(tmp_path: Path, codex_home: Path) 
     )
 
     assert terminal.command[0] == "/opt/clis/codex-alone"
-    assert terminal.mounts[1] == Mount(
+    assert terminal.mounts[0] == Mount(
         source=Path("/opt/clis/codex-alone"), read_only=True
     )
 
@@ -892,9 +960,13 @@ def test_codex_refuses_an_operator_config_that_isnt_toml(
 ) -> None:
     (codex_home / "config.toml").write_text("[mcp_servers\n")
 
-    with pytest.raises(TerminalError, match="isn't valid TOML"):
+    with pytest.raises(TerminalError, match="doesn't read as toml"):
         Codex(model="gpt-6.1-sol").terminal(
-            TerminalSettings(directory=tmp_path / "launch", cli=CODEX_CLI)
+            TerminalSettings(
+                directory=tmp_path / "launch",
+                cli=CODEX_CLI,
+                home=homed(tmp_path, "codex"),
+            )
         )
 
 
@@ -906,7 +978,9 @@ def test_codex_with_no_model_leaves_the_operator_s_to_codex(
     )
 
     terminal = Codex().terminal(
-        TerminalSettings(directory=tmp_path / "launch", cli=CODEX_CLI)
+        TerminalSettings(
+            directory=tmp_path / "launch", cli=CODEX_CLI, home=homed(tmp_path, "codex")
+        )
     )
 
     assert "--model" not in terminal.command
@@ -916,10 +990,16 @@ def test_codex_with_no_model_leaves_the_operator_s_to_codex(
 def test_codex_refuses_an_operator_config_that_doesnt_read(
     tmp_path: Path, codex_home: Path
 ) -> None:
-    (codex_home / "config.toml").write_text("mcp_servers = 6\n")
+    (codex_home / "config.toml").write_text("features = 6\n")
 
-    with pytest.raises(TerminalError, match="doesn't read"):
-        Codex().terminal(TerminalSettings(directory=tmp_path / "launch", cli=CODEX_CLI))
+    with pytest.raises(TerminalError, match="layered for the room doesn't read"):
+        Codex().terminal(
+            TerminalSettings(
+                directory=tmp_path / "launch",
+                cli=CODEX_CLI,
+                home=homed(tmp_path, "codex"),
+            )
+        )
 
 
 def without(monkeypatch: pytest.MonkeyPatch, sdk: str, runtime: str) -> None:
