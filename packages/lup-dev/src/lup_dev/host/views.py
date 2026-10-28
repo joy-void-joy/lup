@@ -9,8 +9,8 @@ its module's command, in its own process, from the worktree's declaration.
 
 Watched, a view is answered at once, then again only at its triggers, which
 its answer carries (`Watching`): at the events of the agent it's of that its
-door names, at an item of the inbox that agent sent or was sent changing, and
-`longest` apart at most. Each answer asks the repository's process, so a view
+door names, at an item of the inbox that agent sent or was sent changing, at a
+review mark it read moving, and `longest` apart at most. Each answer asks the repository's process, so a view
 isn't answered again at every change anywhere, as the service's own kinds are.
 Its answer goes out whole, and only where it differs from the one sent last
 (`Dispatcher.watching`); each one past `large` bytes or `slow` is said in the
@@ -30,7 +30,7 @@ from lup.types import Model
 from lup_dev.clock import Clock, SystemClock
 from lup_dev.host.protocol import HostError, Reply
 from lup_dev.host.service import Reading
-from lup_dev.host.watch import Changes, Touched
+from lup_dev.host.watch import Changes, Remarked, Touched
 from lup_dev.host.workers import RepositoryAsking, Viewed, Viewing, Watching
 
 if TYPE_CHECKING:
@@ -109,9 +109,9 @@ class ModuleViews(Model, Reading[Viewing], arbitrary_types_allowed=True):
                 await self.triggered(request.repository, reply.watch, seen)
 
     async def triggered(self, repository: Path, watch: Watching, seen: int) -> None:
-        """Wait for the first of a view's triggers since the count `seen`: a change touching the agent it's of, at one of the events it names or by an item; or `longest` gone by. A view of no agent and no `longest` waits for ever."""
+        """Wait for the first of a view's triggers since the count `seen`: a change touching the agent it's of, at one of the events it names or by an item; a review mark it read moving; or `longest` gone by. A view of no agent, no mark and no `longest` waits for ever."""
         of = watch.of
-        wanted = (
+        touched: list[Touched | Remarked] = (
             []
             if of is None
             else [
@@ -125,6 +125,7 @@ class ModuleViews(Model, Reading[Viewing], arbitrary_types_allowed=True):
                 for by in ["item", *watch.on]
             ]
         )
+        wanted = [*touched, *watch.marks]
         waits: list[asyncio.Task[int | None]] = [
             asyncio.ensure_future(self.changes.touching(wanted, seen))
         ]

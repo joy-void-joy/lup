@@ -277,14 +277,14 @@ export function changed(item: Item, what: string, text: string, shown: Shown, fi
     return { blocks };
 }
 
-/** Return what approving and declining an item offers, as Space a and Space x do today, at once, a comment on it implying approval where `commented`. */
+/** Return what approving and declining an item offers, Space d and Space x, as the reply is sent, a comment on it implying approval where `commented`. */
 export function answering(item: Item, commented: boolean): Offer[] {
     const answer = (approved: boolean): Offer => ({
         action: "inbox-answer-approval",
         argument: { number: item.number, approved },
         verb: approved ? "done" : "decline",
         chord: null,
-        runs: "once",
+        runs: "send",
         commented: approved && commented,
         says: approved ? "approve" : "decline",
     });
@@ -357,14 +357,14 @@ function sinceCounts(shown: Since): { parts: string[]; open: number; waiting: bo
     return { parts: said, open, waiting: open > 0 || flagged > 0 };
 }
 
-/** Return what marking `files` of the agent `conversation` names reviewed at the versions shown offers, as Space a does a file and Space A every file, at once. */
+/** Return what marking `files` of the agent `conversation` names reviewed at the versions shown offers, Space d on a file or on the drawer, as the reply is sent. */
 function reviewing(conversation: components["schemas"]["Conversation"], files: SinceFile[], says: string): Offer {
     return {
         action: "policy-review-since",
         argument: { conversation, files: files.map((each) => ({ path: each.path, version: each.version ?? null })) },
         verb: "done",
         chord: null,
-        runs: "once",
+        runs: "send",
         commented: true,
         says,
     };
@@ -391,10 +391,13 @@ export const SINCE: View<OfAgent> = {
         // The drawer's line leaves out the branch its summary names: the banner over it says where the agent works.
         const label = ["since you approved", ...(parts.length === 0 ? ["nothing"] : parts)].join(" · ");
         const each = new Map<string, SinceFile>();
+        // A file standing as the operator last saw it offers marking it reviewed only while flagged writes wait on it,
+        // which marking it approves: one settled is reviewed already.
         const line = (file: SinceFile): Line => {
             const id = `reviewed ${file.path}`;
             each.set(id, file);
-            return { block: "line", id, version: file.version ?? null, offers: [reviewing(conversation, [file], "mark it reviewed")], spans: [{ text: reviewedLine(file), tone: "reviewed" }] };
+            const offers = (file.flags ?? []).length > 0 ? [reviewing(conversation, [file], "mark it reviewed")] : [];
+            return { block: "line", id, version: file.version ?? null, offers, spans: [{ text: reviewedLine(file), tone: "reviewed" }] };
         };
         const left = files.flatMap((file): Blocks["blocks"] => {
             if (file.file == null) {
@@ -422,12 +425,14 @@ export const SINCE: View<OfAgent> = {
                           content: settled.map(line),
                       },
                   ];
+        // On the drawer as a whole, every file to review or with flagged writes waiting, those settled left out.
+        const reviewable = files.filter((file) => file.file != null || (file.flags ?? []).length > 0);
         return {
             blocks: {
                 summary: [{ text: label, tone: "plain" }],
                 waiting,
                 count: open,
-                offers: [reviewing(conversation, files, "mark every file reviewed")],
+                offers: reviewable.length === 0 ? [] : [reviewing(conversation, reviewable, "mark every file reviewed")],
                 blocks: [...left, ...done],
             },
             files: each,
@@ -452,7 +457,7 @@ function withOffers(diff: Diff, offers: Offer[]): Diff {
     return made;
 }
 
-/** The judge's part of an agent's banner: `holding` where the operator holds each of its flagged writes, and holding or letting them land again, as `h` does, at once. */
+/** The judge's part of an agent's banner: `holding` where the operator holds each of its flagged writes, and holding or letting them land again, Space h, as the reply is sent. */
 export const BANNER: View<OfAgent> = {
     module: "judge",
     view: "banner",
@@ -466,7 +471,7 @@ export const BANNER: View<OfAgent> = {
             argument: { launch: running.launch, session: of.session, agent: of.agent ?? null, on: !running.holding },
             verb: "hold",
             chord: null,
-            runs: "once",
+            runs: "send",
             commented: false,
             says: running.holding ? "let its flagged writes land" : "hold its flagged writes",
         };

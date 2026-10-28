@@ -114,16 +114,12 @@
               {
                 "path": "clock.py",
                 "version": "b3"
-              },
-              {
-                "path": "notes.md",
-                "version": "b4"
               }
             ]
           },
           "verb": "done",
           "chord": null,
-          "runs": "once",
+          "runs": "send",
           "commented": true,
           "says": "mark every file reviewed"
         }
@@ -153,7 +149,7 @@
               },
               "verb": "done",
               "chord": null,
-              "runs": "once",
+              "runs": "send",
               "commented": true,
               "says": "mark it reviewed"
             }
@@ -204,7 +200,7 @@
               },
               "verb": "done",
               "chord": null,
-              "runs": "once",
+              "runs": "send",
               "commented": true,
               "says": "mark it reviewed"
             }
@@ -247,7 +243,7 @@
               },
               "verb": "done",
               "chord": null,
-              "runs": "once",
+              "runs": "send",
               "commented": true,
               "says": "mark it reviewed"
             }
@@ -278,31 +274,7 @@
               "block": "line",
               "id": "reviewed notes.md",
               "version": "b4",
-              "offers": [
-                {
-                  "action": "policy-review-since",
-                  "argument": {
-                    "conversation": {
-                      "party": "conversation",
-                      "repository": "/r/lup.git",
-                      "runtime": "claude",
-                      "session": "s1",
-                      "agent": "a1"
-                    },
-                    "files": [
-                      {
-                        "path": "notes.md",
-                        "version": "b4"
-                      }
-                    ]
-                  },
-                  "verb": "done",
-                  "chord": null,
-                  "runs": "once",
-                  "commented": true,
-                  "says": "mark it reviewed"
-                }
-              ],
+              "offers": [],
               "spans": [
                 {
                   "text": "notes.md · reviewed at b4",

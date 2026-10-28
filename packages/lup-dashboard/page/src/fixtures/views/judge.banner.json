@@ -37,7 +37,7 @@
           },
           "verb": "hold",
           "chord": null,
-          "runs": "once",
+          "runs": "send",
           "commented": false,
           "says": "let its flagged writes land"
         }
@@ -78,7 +78,7 @@
           },
           "verb": "hold",
           "chord": null,
-          "runs": "once",
+          "runs": "send",
           "commented": false,
           "says": "hold its flagged writes"
         }

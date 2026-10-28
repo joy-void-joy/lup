@@ -1,7 +1,7 @@
 // The core's views of its own party's items, lup's approvals (#113, step 4; `views.ts`): an approval of a repository's
 // copy, its summary what it is and how its files read, its body its question and the summary of what changed, then
 // each file it changes, whole, each of a first approval folded under its header, since a first approval trusts the
-// repository as it is; approving or declining it, as Space a and Space x do, at once. Pure.
+// repository as it is; approving or declining it, Space d and Space x, as the reply is sent. Pure.
 import { answering, changed, type OfItem } from "./judge";
 import type { View } from "../views";
 

@@ -18,7 +18,7 @@ type Since = components["schemas"]["Since"];
 interface Given {
     items?: Item[];
     files?: Record<string, Answered<ChangedFile[]>>;
-    drawers?: Record<string, Partial<Omit<AgentDrawers, "calls">>>;
+    drawers?: Record<string, Partial<AgentDrawers>>;
     running?: Record<string, Running>;
     paths?: Record<string, string>;
 }
@@ -40,7 +40,7 @@ function shownOf(given: Given): Shown {
         drawers: new Map(
             Object.entries(given.drawers ?? {}).map(([key, each]) => [
                 key,
-                { entries: [], tasks: [], usage: null, exchanged: null, since: null, ...each, calls: new Map() },
+                { tasks: [], usage: null, since: null, ...each },
             ]),
         ),
         running: new Map(Object.entries(given.running ?? {})),
@@ -205,21 +205,24 @@ describe("the views the page lays out itself", () => {
         expect((approval?.summary ?? []).map((each) => each.text).join("")).toBe("approval · 1 with an ignore · 1 test · 1 unread");
         expect(approval?.blocks.map((each) => each.id)).toEqual(["text", "file reader.py", "file test_reader.py", "file logo.png"]);
         expect(approval?.offers.map((each) => [each.verb, each.action, each.runs])).toEqual([
-            ["done", "inbox-answer-approval", "once"],
-            ["decline", "inbox-answer-approval", "once"],
+            ["done", "inbox-answer-approval", "send"],
+            ["decline", "inbox-answer-approval", "send"],
         ]);
         const refused = producerOf("core", "approval")?.answer({ number: 54 } as never, shownOf(CASES["core approval"]![2]!.given), REPOSITORY)?.blocks;
         expect(refused?.blocks.at(-1)).toMatchObject({ id: "refused", spans: [{ text: "no files: the copy is gone", tone: "refused" }] });
     });
 
-    it("offers each file of \"since you approved\" to be marked reviewed at its version, and every file as the drawer's own", () => {
+    it("offers each file of \"since you approved\" to be marked reviewed at its version, and every one not settled as the drawer's own", () => {
         const since = producerOf("judge", "since")?.answer(AGENT as never, shownOf(CASES["judge since"]![0]!.given), REPOSITORY);
         const blocks = since?.blocks;
         expect(blocks?.blocks.map((each) => each.id)).toEqual(["file reader.py", "file test_reader.py", "reviewed clock.py", "reviewed"]);
         expect(blocks?.count).toBe(1);
         expect(blocks?.waiting).toBe(true);
         expect(blocks?.blocks[0]?.offers[0]?.argument).toEqual({ conversation: PARSER, files: [{ path: "reader.py", version: "b1" }] });
-        expect(blocks?.offers[0]?.argument).toMatchObject({ files: [{ path: "reader.py" }, { path: "test_reader.py" }, { path: "clock.py" }, { path: "notes.md" }] });
+        // A file reviewed already, settled under the drawer's last fold, offers nothing, and the drawer whole leaves it out.
+        expect(blocks?.offers[0]?.argument).toMatchObject({ files: [{ path: "reader.py" }, { path: "test_reader.py" }, { path: "clock.py" }] });
+        const settled = blocks?.blocks.at(-1);
+        expect(settled?.block === "fold" && Array.isArray(settled.content) ? settled.content.map((each) => each.offers) : null).toEqual([[]]);
         expect([...(since?.files?.keys() ?? [])]).toEqual(["file reader.py", "file test_reader.py", "reviewed clock.py", "reviewed notes.md"]);
     });
 });

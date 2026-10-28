@@ -245,6 +245,34 @@ kbd {
     background: var(--float-bg);
 }
 
+/* The palette of every key, `?`: each key beside what it does, wrapped, the key's column its own. */
+.keys-palette {
+    width: min(110ch, 96vw);
+}
+
+.keys-palette [cmdk-list] {
+    max-height: 70vh;
+}
+
+.keys-palette .keys-entry {
+    display: grid;
+    grid-template-columns: 16ch 1fr;
+    gap: 2ch;
+    white-space: normal;
+}
+
+.keys-palette kbd {
+    color: var(--fg);
+}
+
+.keys-palette .keys-does {
+    color: var(--muted);
+}
+
+.keys-palette [cmdk-item][data-selected="true"] .keys-does {
+    color: var(--fg);
+}
+
 .palette [cmdk-empty] {
     color: var(--muted);
     padding: 0 1ch;
@@ -307,6 +335,16 @@ kbd {
 
 /* The selection is drawn over the lines, lightening what's under it, so it shows on lines with a background of their
    own, a comment's and a changed file's, which hide what's drawn under them. */
+/* A fold-wise selection: the folds it selects drawn as a selection is, every line of each, the lines between them
+   not; the generic selection left undrawn while it's one (`chosenFolds`, `editor.ts`). */
+.buffer .cm-editor.is-choosing .cm-selectionLayer .cm-selectionBackground {
+    background: none !important;
+}
+
+.buffer .cm-line.fold-chosen {
+    background: var(--selection);
+}
+
 .buffer .cm-selectionLayer {
     z-index: 1 !important;
     mix-blend-mode: lighten;
@@ -348,6 +386,26 @@ kbd {
 
 .review-header.is-parked {
     color: var(--muted);
+}
+
+/* Declined: struck through in the error colour, until it's sent. */
+.review-header.is-declined {
+    color: var(--err);
+    text-decoration: line-through;
+}
+
+/* What else the draft marks, on the first line of what it marks: done struck through, as an item marked read is; each
+   mark saying, in the draft's colour, what the next Ctrl+Enter does with it. */
+.buffer .cm-line.is-marked.mark-done {
+    text-decoration: line-through;
+    text-decoration-color: var(--muted);
+}
+
+.buffer .cm-line.is-marked[data-mark]::after {
+    content: "  ⏎ " attr(data-mark);
+    color: var(--warn);
+    text-decoration: none;
+    display: inline-block;
 }
 
 .commented {
@@ -475,6 +533,11 @@ kbd {
 }
 
 .keys-place {
+    color: var(--info);
+}
+
+/* What a verb acts on where it isn't what the cursor is on, as the agent from one of its items. */
+.keys-on {
     color: var(--info);
 }
 
@@ -620,6 +683,21 @@ kbd {
 
 .aside-item-text {
     border-left: 2px solid var(--muted);
+}
+
+/* What a fold of a module's view sets off under its summary line
+   (`Fold.barred`): set in by how many such folds it's in, its bar beside it in
+   the innermost's colour (`barred-<kind>`, written with the looks). */
+.buffer .cm-line.bar-1 {
+    padding-left: calc(6px + 4ch);
+}
+
+.buffer .cm-line.bar-2 {
+    padding-left: calc(6px + 6ch);
+}
+
+.buffer .cm-line.bar-3 {
+    padding-left: calc(6px + 8ch);
 }
 
 /* A changed file under an approval or a held change: its header, then its

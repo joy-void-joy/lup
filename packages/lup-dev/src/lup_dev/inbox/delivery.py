@@ -717,12 +717,20 @@ def rewritten(reason: Reason, text: str) -> Reason:
 
 
 class Dispatched(Model):
-    """What sending the operator's draft did: the reviews it was sent as, what it approved, and what it did with comments on approvals and holds at landing it left unapproved."""
+    """What sending the operator's draft did: the reviews it was sent as, the items it took off the list read, what it approved and declined, and what it did with comments on approvals and holds at landing it left unapproved."""
 
     reviews: list[Item] = []
     """One to each conversation with a comment on its messages or questions, a question among them, or a message to it."""
+    read: list[int] = []
+    """The messages it took off the list marked read with no comment of their
+    own, which tells their senders nothing, by number."""
     approved: list[Item] = []
-    """The approvals and held changes it approved: each marked read alone, and each held change commented on, with the comments, but for a hold at landing."""
+    """The approvals and held changes it approved: each marked done, with the
+    comments under it, each marked read alone, and each held change commented
+    on, with the comments, but for a hold at landing."""
+    declined: list[Item] = []
+    """The approvals and held changes it declined: each marked declined, with
+    the comments under it."""
     noted: list[Item] = []
     """The notes it left with each session whose push asked an approval the operator commented on, which stays unanswered, and with each conversation whose landing a hold commented on held back."""
     kept: list[int] = []
@@ -1558,22 +1566,41 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         sender nothing, nor wakes it: it's taken off the list, and told as read
         only to a conversation the reply reaches anyway.
 
-        An approval or a held change marked read alone is approved. A held
-        change commented on is approved with the comments, which its agent
-        reads with the answer: "yes, but…" rather than a refusal; but a hold
-        at landing commented on isn't approved, since a comment usually asks
-        for a change: it's done, the comments going as a note to the
+        An approval or a held change marked done is approved, the comments
+        under it going with the yes, and one marked declined is declined, with
+        them. Unmarked, one only read is approved; a held change commented on
+        is approved with the comments, which its agent reads with the answer:
+        "yes, but…" rather than a refusal, since a comment never declines; but
+        a hold at landing commented on isn't approved, since a comment usually
+        asks for a change: it's done, the comments going as a note to the
         conversation landing, whose landing goes no further (`held_back`). An
         approval commented on stays unanswered, the comments going as a note to
         the session whose push asked it, whose next push supersedes it; where
-        no known session pushed, they stay drafted (`Dispatched`). Refused where
-        the draft covers no item and writes to no agent, covers a message or
-        question no conversation sent, or writes to a conversation lup's inbox
-        has never heard of.
+        no known session pushed, they stay drafted (`Dispatched`). The draft's
+        other marks stay drafted, for the page to apply (`Draft.kept`). Refused
+        where the draft covers no item and writes to no agent, declines what
+        isn't an approval or a held change, covers a message or question no
+        conversation sent, or writes to a conversation lup's inbox has never
+        heard of.
         """
         draft = self.inbox.draft()
         self.heard(draft)
         covered = [self.inbox.item(each) for each in draft.covered()]
+        undeclinable = [
+            item
+            for item in covered
+            if item.number in draft.declined
+            and not isinstance(item.reason, Approval | HeldChange)
+        ]
+        if undeclinable:
+            named = ", ".join(
+                f"{cited(each.number)}, {what(each)}" for each in undeclinable
+            )
+            message = (
+                f"the draft declines {named}: only an approval or a held change is "
+                "declined, anything else marked done or commented on"
+            )
+            raise InboxError(message)
         if not covered and not draft.written() and not draft.remarked():
             message = (
                 "the draft answers no item and writes to no agent: comment on an "
@@ -1586,7 +1613,16 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         messages = [item for item in covered if item not in asked]
         for item in messages:
             reviewable(item)
-        dispatched = Dispatched(reviews=self.reviews(draft, messages))
+        commented = [each.item for each in draft.comments if each.text.strip()]
+        dispatched = Dispatched(
+            reviews=self.reviews(draft, messages),
+            read=[
+                item.number
+                for item in messages
+                if item.number not in commented
+                and not isinstance(item.reason, Question)
+            ],
+        )
         for item in asked:
             dispatched = await self.answered_in(draft, item, dispatched)
         left = draft.kept()
@@ -1655,8 +1691,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 if each.item == item.number and each.text.strip()
             )
         )
+        if item.number in draft.declined:
+            declined = await self.decided(item.number, approved=False, comment=comments)
+            return dispatched.model_copy(
+                update={"declined": [*dispatched.declined, declined]}
+            )
+        marked = item.number in draft.done
         match item.reason:
-            case HeldChange(landing=AtLanding()) if comments:
+            case HeldChange(landing=AtLanding()) if comments and not marked:
                 note = await self.held_back(item, comments)
                 return dispatched.model_copy(
                     update={"noted": [*dispatched.noted, note]}
@@ -1668,8 +1710,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 return dispatched.model_copy(
                     update={"approved": [*dispatched.approved, approved]}
                 )
-            case Approval() if not comments:
-                approved = await self.decided(item.number, approved=True)
+            case Approval() if marked or not comments:
+                approved = await self.decided(
+                    item.number, approved=True, comment=comments
+                )
                 return dispatched.model_copy(
                     update={"approved": [*dispatched.approved, approved]}
                 )

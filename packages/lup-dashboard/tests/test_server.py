@@ -20,9 +20,7 @@ from lup_dev.host.protocol import HostError, Listed, ListLaunches, Refused
 from lup_dev.host.records import Called
 from lup_dev.host.workers import Viewed, Viewing
 from lup_dev.inbox.protocol import (
-    Calls,
     Conversed,
-    Exchanged,
     Files,
     Items,
     ListInbox,
@@ -30,7 +28,6 @@ from lup_dev.inbox.protocol import (
     Reviewed,
     SendItem,
     Settled,
-    ShowCalls,
     ShowConversation,
 )
 from lup_dev.inbox.store import (
@@ -165,7 +162,7 @@ def test_the_socket_sends_a_watchs_replies_under_its_number_then_its_end(
             "reply": {
                 "kind": "inbox-items",
                 "items": [],
-                "reviewed": None,
+                "seen": [],
                 "answers": [],
                 "commented": [],
             },
@@ -217,7 +214,7 @@ def test_one_socket_carries_every_watch_and_a_stopped_one_says_no_more(
         "reply": {
             "kind": "inbox-items",
             "items": [],
-            "reviewed": None,
+            "seen": [],
             "answers": [],
             "commented": [],
         },
@@ -483,20 +480,30 @@ def test_the_demo_answers_a_module_s_view_with_the_module_s_own_layout_over_its_
     assert "has a view `nowhere`" in refused.error
 
 
-def test_the_demo_lists_a_conversations_items_a_message_sent_from_the_page_among_them(
+def test_the_demo_weaves_a_conversations_items_into_its_view_a_message_sent_from_the_page_among_them(
     page: Path,
 ) -> None:
-    served = client(Demo(clock=Fixed()), page)
+    demo = Demo(clock=Fixed())
+    served = client(demo, page)
     parser = Conversation(
         repository=Path("/home/op/lup.git"), runtime="claude", session="s1", agent="a02"
     )
     sending = SendItem(launch="a1f0", text="Go on.", agent="a02")
     sent = served.post("/api/ask", json=sending.model_dump(), headers=bearing())
-    asked = ListItems(conversation=parser).model_dump(mode="json")
-    listed = served.post("/api/ask", json=asked, headers=bearing())
+    asked = Viewing(
+        repository=parser.repository,
+        module="transcripts",
+        view="conversation",
+        argument={"runtime": "claude", "session": "s1", "agent": "a02"},
+    )
+    viewed = Viewed.model_validate(
+        served.post(
+            "/api/ask", json=asked.model_dump(mode="json"), headers=bearing()
+        ).json()
+    )
     elsewhere = SendItem(launch="d4c3", text="Hello?")
     unsent = served.post("/api/ask", json=elsewhere.model_dump(), headers=bearing())
-    found = Exchanged.model_validate(listed.json())
+    found = demo.exchanged(parser)
     assert sent.json()["item"]["number"] == 101
     assert [each.item.number for each in found.sent] == [47, 51, 57, 59]
     assert found.sent[0].item.call == "call-47"
@@ -504,13 +511,24 @@ def test_the_demo_lists_a_conversations_items_a_message_sent_from_the_page_among
         (48, "Good: keep the two readers apart."),
         (101, "Go on."),
     ]
+    # Each a line where it happened in the conversation's view, as the core words it.
+    lines = viewed.blocks.text().splitlines()
+    assert "▸ ← @101 your message" in lines
+    assert "▸ → @51 question to you · waiting on you" in lines
+    # The page reads a conversation's items only through that view.
+    listed = served.post(
+        "/api/ask",
+        json=ListItems(conversation=parser).model_dump(mode="json"),
+        headers=bearing(),
+    )
+    assert listed.status_code == 422
     assert unsent.json() == {
         "kind": "refused",
         "error": "no session of launch `d4c3` has started",
     }
 
 
-def test_the_demo_reads_a_conversations_calls_each_a_line_and_whole_on_asking(
+def test_the_demo_reads_a_conversations_steps_each_call_a_line_saying_what_it_did(
     page: Path,
 ) -> None:
     served = client(Demo(clock=Fixed()), page)
@@ -519,21 +537,8 @@ def test_the_demo_reads_a_conversations_calls_each_a_line_and_whole_on_asking(
         served.post("/api/ask", json=asked.model_dump(), headers=bearing()).json()
     )
     called = [each for each in read.entries if isinstance(each, Called)]
-    ids = [each.id for each in called if each.id is not None]
-    whole = served.post(
-        "/api/ask",
-        json=ShowCalls(
-            runtime="claude", session="s1", agent="a02", calls=[*ids, "none"]
-        ).model_dump(),
-        headers=bearing(),
-    )
-    found = Calls.model_validate(whole.json())
+    assert called
     assert all(each.gist is not None for each in called)
-    assert [each.id for each in found.calls] == ids
-    assert found.calls[0].input == {
-        "command": "ls /home/op/records/projects/-home-op-lup-git-tree-dev | head -4",
-        "description": "List the session records",
-    }
 
 
 def test_the_demo_keeps_a_draft_and_sends_it_taking_what_it_covers_off_the_list_but_whats_parked(
@@ -567,7 +572,9 @@ def test_the_demo_keeps_a_draft_and_sends_it_taking_what_it_covers_off_the_list_
     assert sent.json() == {
         "kind": "inbox-reviewed",
         "items": [],
+        "read": [52],
         "approved": [],
+        "declined": [],
         "noted": [],
         "kept": [],
     }
@@ -578,7 +585,9 @@ def test_the_demo_keeps_a_draft_and_sends_it_taking_what_it_covers_off_the_list_
         "letters": [],
         "remarks": [],
         "done": [],
+        "declined": [],
         "parked": [53],
+        "marks": [],
     }
 
 

@@ -8,8 +8,8 @@ const OTHER: Looks = {
     ...STANDING,
     folds: [
         ...(STANDING.folds ?? []),
-        { name: "episodes", letter: "e", called: "episodes", one: "the episode", level: 1, opens: "together", colour: "ok", chord: true, whole: false, counts: true },
-        { name: "scenes", letter: "q", called: "scenes", one: "the scene", level: 2, opens: "together", colour: "purple", chord: true, whole: false, counts: true },
+        { name: "episodes", letter: "e", called: "episodes", one: "the episode", level: 1, opens: "together", colour: "ok", chord: true, whole: false, counts: true, by_all: true },
+        { name: "scenes", letter: "q", called: "scenes", one: "the scene", level: 2, opens: "together", colour: "purple", chord: true, whole: false, counts: true, by_all: true },
     ],
     drawers: [...(STANDING.drawers ?? []), { module: "reels", view: "reel", place: { under: "agent", letter: "r", called: "the reel", colour: "cyan" } }],
 };
@@ -40,6 +40,7 @@ describe("the looks, merged across repositories", () => {
         const css = styled(merged({}, STANDING));
         expect(css).toContain("--fold-since: var(--warn);");
         expect(css).toContain(".fold-item, .buffer .cm-editor .cm-foldPlaceholder.fold-item { color: var(--fold-item); }");
+        expect(css).toContain(".buffer .cm-line.barred-items { border-left: 2px solid var(--fold-items); }");
         expect(css).toContain(".tone-strong { color: var(--fg); font-weight: 700; }");
         // `received` takes `operator`'s look, which is the operator's blue.
         expect(css).toContain(".tone-received { color: var(--info); }");

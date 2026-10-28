@@ -6,11 +6,13 @@ kind's, an agent's task list, what its branch changed since the operator
 approved it, and the parts of its banner. Each is declared here as its owner's,
 so the page holds no fold kind, drawer or tone of its own, and a module taking
 one of their letters or names fails the load (`resolve.looked`):
-- the shell's fold kinds, an agent's group, an item, its context, and a
-  file's, a body's and a run of unchanged lines', which `Diff` and `Code` fold
-  under (`lup.SHELL_FOLDS`); the shell's tones, which every module's spans may
-  name (`lup.SHELL_TONES`); and the tones of what the shell's views say beside
-  their text: a fold's summary line, and what the host refused;
+- the shell's tones, which every module's spans may name
+  (`lup.SHELL_TONES`), and the tones of what the shell's views say beside
+  their text: a fold's summary line, and what the host refused; the shell's
+  fold kinds, an agent's group, an item, its context, and a file's, a body's
+  and a run of unchanged lines', which `Diff` and `Code` fold under, are
+  `Core`'s field (`Core.folds`, `lup.SHELL_FOLDS`), so a person's layer
+  changes them;
 - the runtime adapters': an agent's task list, a drawer (`TASKS_DRAWER`, beside
   `Task` in `host/records.py`), and its banner's part, what it's working on
   and how full its context is;
@@ -20,12 +22,13 @@ one of their letters or names fails the load (`resolve.looked`):
   judge's code sits above the declaration in `lup_dev`'s layers, so its parts
   are declared here.
 
-The verbs are fields of `Core` (`verbs`), the shell's, the judge's and the
-runtime adapters' alike, so a person's layer gives one another key; the rest is
-the core's own until each moves into its module.
+The verbs and the shell's fold kinds are fields of `Core` (`verbs`, `folds`),
+the shell's, the judge's and the runtime adapters' verbs alike, so a person's
+layer gives one another key; the rest is the core's own until each moves into
+its module.
 """
 
-from lup.blocks import SHELL_FOLDS, SHELL_TONES, Drawer, Tone, Verb
+from lup.blocks import SHELL_TONES, Drawer, Tone, Verb
 from lup_dev.host.protocol import Bannered, Drawn, Looks
 from lup_dev.host.records import TASK_TONE, TASKS_DRAWER
 
@@ -62,10 +65,10 @@ the judge is a module (#113, step 4), so a person's layer may give it another
 key."""
 
 CORE_LOOKS = Looks(
-    folds=SHELL_FOLDS,
     tones=[*SHELL_TONES, SUMMARY_TONE, REFUSED_TONE, TASK_TONE, REVIEWED_TONE],
     drawers=[TASKS, SINCE],
     banners=[WORKING, HOLDING],
 )
 """The core's looks, the shell's, the runtime adapters' and the judge's, in the
-order the page lays them out: before each repository's modules'."""
+order the page lays them out: before each repository's modules'. The shell's
+fold kinds are `Core`'s, first among the modules'."""

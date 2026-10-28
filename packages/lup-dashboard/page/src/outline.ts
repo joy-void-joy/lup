@@ -9,6 +9,7 @@
 import type { Span } from "./comments";
 import {
     fresh,
+    type Seeing,
     news,
     toAnswer,
     whose,
@@ -31,9 +32,10 @@ export type OutlineMark = "waiting" | "news" | "parked" | "to-review" | "flagged
 
 /**
  * What the draft does with an item on the next Ctrl+Enter, all in the draft's colour: comments on it go, it's marked
- * read, or it's approved, an approval marked read alone or a held change marked read or commented on.
+ * read, it's approved, an approval or a held change marked done or read alone, or a held change commented on, or it's
+ * declined.
  */
-export type DraftMark = "comment" | "read" | "approve";
+export type DraftMark = "comment" | "read" | "approve" | "decline";
 
 /** One entry: what it is, how deep it's set in, what it says, how it stands, what the draft does with it, where it is in the review, and where going to it lands. */
 export interface OutlineRow extends Span {
@@ -44,7 +46,7 @@ export interface OutlineRow extends Span {
     title: string;
     marks: OutlineMark[];
     draft: DraftMark[];
-    /** Whether it's new to the operator since they last sent. */
+    /** Whether it's new to the operator: its group not seen since it came, nor commented on in a reply sent. */
     fresh: boolean;
     at: number;
     /** What waits beside it: an agent's files to review in its "since you approved", `◇3`; none else. */
@@ -54,7 +56,7 @@ export interface OutlineRow extends Span {
 /** What the overview reads beside the review as laid out. */
 export interface Reading {
     draft: Draft;
-    reviewed: string | null;
+    seeing: Seeing;
     /** What each conversation running is doing, by `whose` it is. */
     states: ReadonlyMap<string, string | null>;
     called: (party: Conversation) => string;
@@ -91,17 +93,20 @@ export interface Standing {
  * approval marked read alone, one commented on left unanswered, a held change marked read or commented on approved;
  * and whether it's new.
  */
-export function itemStanding(region: Region, draft: Draft, reviewed: string | null): Standing {
+export function itemStanding(region: Region, draft: Draft, seeing: Seeing): Standing {
     const item = region.item;
     const number = item.number;
     const commented = (draft.comments ?? []).some((each) => each.item === number && each.text.trim() !== "");
     const done = (draft.done ?? []).includes(number);
+    const declined = (draft.declined ?? []).includes(number);
     const parked = (draft.parked ?? []).includes(number);
     const reason = item.reason.reason;
-    const approved = (reason === "approval" && done && !commented) || (reason === "held" && (done || commented));
-    const drafted: DraftMark[] = parked ? [] : [...(commented ? ["comment" as const] : []), ...(approved ? ["approve" as const] : done && reason !== "approval" ? ["read" as const] : [])];
+    // Marked done, an approval or a held change is approved, its comments going with the yes; a held change commented on is too.
+    const approved = !declined && ((reason === "approval" && done) || (reason === "held" && (done || commented)));
+    const answered: DraftMark[] = declined ? ["decline"] : approved ? ["approve"] : done && reason !== "approval" ? ["read"] : [];
+    const drafted: DraftMark[] = parked ? [] : [...(commented ? ["comment" as const] : []), ...answered];
     const marks: OutlineMark[] = parked ? ["parked"] : toAnswer(item, draft) ? ["waiting"] : news(item) && !done ? ["news"] : [];
-    return { marks, draft: drafted, fresh: fresh(item, reviewed) };
+    return { marks, draft: drafted, fresh: fresh(item, seeing) };
 }
 
 
@@ -121,7 +126,7 @@ function toReview(group: Group): number {
  * what's left for later after a line saying so.
  */
 export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
-    const { draft, reviewed, states, called } = reading;
+    const { draft, seeing, states, called } = reading;
     const text = laidOut.text;
     const ends = ownEnds(laidOut);
     const rows: OutlineRow[] = [];
@@ -178,7 +183,7 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
                 depth: depth + 1,
                 text: region.named,
                 title: text.slice(region.header.from, region.header.to),
-                ...itemStanding(region, draft, reviewed),
+                ...itemStanding(region, draft, seeing),
                 from: region.header.from,
                 to: Math.min((own[index + 1]?.header.from ?? to + 1) - 1, to),
                 at: region.header.from,

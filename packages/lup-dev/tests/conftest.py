@@ -68,6 +68,7 @@ from lup_dev.host.workers import (
     Sent,
 )
 from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.marks import StoredMarks
 from lup_dev.inbox.protocol import AskFlag, Exchanged, Gathering, ShowGathering
 from lup_dev.layout import Layout
 from lup_dev.policy.checkpoint import Bench, Services
@@ -846,6 +847,7 @@ class InProcess(MutableModel, LaunchModules, arbitrary_types_allowed=True):
             },
             layout=self.layout,
             exchanges=Exchanging(),
+            marks=StoredMarks(layout=self.layout),
         )
 
     async def open(self, launch: Register) -> Offered:

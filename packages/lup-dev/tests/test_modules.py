@@ -18,6 +18,7 @@ from pydantic import Field
 from typer.testing import CliRunner
 
 import lup
+from lup.blocks import SHELL_FOLDS
 from lup.programs import run
 from lup.publishing import Part, Place, Post, Refusal
 from lup.types import Model
@@ -46,6 +47,7 @@ from lup_dev.host.protocol import Limits, Register, Reply, Request
 from lup_dev.host.records import Call as RecordedCall
 from lup_dev.host.records import Reader as RecordsReader
 from lup_dev.host.records import Record, Recorded, Records, Transcript
+from lup_dev.host.watch import Remarked
 from lup_dev.host.workers import (
     Called,
     Calling,
@@ -56,13 +58,14 @@ from lup_dev.host.workers import (
     Workers,
 )
 from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.marks import MarkStore, ReviewMark, StoredMarks
 from lup_dev.inbox.protocol import Exchanged
 from lup_dev.layout import HostLayout, Layout
 from lup_dev.stored import write_model
 from lup_dev.worker import RepositoryModules
 
 if TYPE_CHECKING:
-    from conftest import Kit
+    from conftest import FakeClock, Kit
 
     from lup.blocks import OfAgent
     from lup_dev.host.homes import Found
@@ -243,6 +246,7 @@ def serving(tmp_path: Path, volume: int = 1) -> RepositoryModules:
         recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path),
         exchanges=Unexchanged(),
+        marks=StoredMarks(layout=Layout(state=tmp_path, data=tmp_path)),
     )
 
 
@@ -608,6 +612,7 @@ def listening(tmp_path: Path) -> RepositoryModules:
         recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
         exchanges=Unexchanged(),
+        marks=StoredMarks(layout=Layout(state=tmp_path, data=tmp_path / "data")),
     )
 
 
@@ -677,6 +682,7 @@ def test_each_launch_s_hooks_read_its_own_runtime_s_records(tmp_path: Path) -> N
         },
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
         exchanges=Unexchanged(),
+        marks=StoredMarks(layout=Layout(state=tmp_path, data=tmp_path / "data")),
     )
     one = launch(tmp_path)
     two = one.model_copy(update={"launch": "two", "runtime": "codex"})
@@ -759,6 +765,7 @@ def guarding(tmp_path: Path) -> RepositoryModules:
         recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
         exchanges=Unexchanged(),
+        marks=StoredMarks(layout=Layout(state=tmp_path, data=tmp_path / "data")),
     )
 
 
@@ -875,6 +882,17 @@ class ViewerServing(ModuleServing):
         """Show what it's given, of no agent."""
         return lup.Blocks(blocks=[lup.Line.of("1", viewed.what)])
 
+    @lup.view
+    async def remembered(self, viewed: lup.OfAgent) -> lup.Blocks:
+        """Say how far the operator read the agent, by its review mark, and offer reading it all."""
+        key = {"session": viewed.session}
+        mark = await self.marks.mark(key)
+        said = "nothing read" if mark is None else f"read to {mark.up_to}"
+        return lup.Blocks(
+            blocks=[lup.Line.of("1", said)],
+            offers=[self.marks.offer(key, "9", "mark it read")],
+        )
+
     @lup.view(place=lup.Banner())
     async def mood(self, viewed: lup.OfAgent) -> lup.Blocks:
         """Say the agent's mood on its banner."""
@@ -909,6 +927,7 @@ def viewing(tmp_path: Path) -> RepositoryModules:
         recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path),
         exchanges=Unexchanged(),
+        marks=StoredMarks(layout=Layout(state=tmp_path, data=tmp_path)),
     )
 
 
@@ -924,13 +943,16 @@ def test_a_view_placed_in_a_drawer_resolves_with_its_letter_after_the_core_s(
         *(tone.name for tone in CORE_LOOKS.tones),
         "warm",
     ]
-    assert looks.folds == CORE_LOOKS.folds
+    assert looks.folds == SHELL_FOLDS
 
 
 def test_the_core_s_looks_are_the_shell_s_the_runtime_adapters_and_the_judge_s() -> (
     None
 ):
-    assert [fold.name for fold in CORE_LOOKS.folds] == [
+    # The shell's fold kinds are `Core`'s, first among the modules'.
+    looks = resolve(Project(modules=Modules.only(Core()))).looks
+    assert CORE_LOOKS.folds == []
+    assert [fold.name for fold in looks.folds] == [
         "group",
         "item",
         "file",
@@ -984,6 +1006,35 @@ def test_the_repository_s_process_answers_a_view_for_the_operator_with_when_it_s
         on=["turn-ended"],
         longest=timedelta(minutes=1),
     )
+
+
+def test_a_view_reads_its_module_s_review_marks_watched_as_each_it_read_moves(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    repository = tmp_path / ".git"
+    asked = Viewing(
+        repository=repository,
+        module="viewer",
+        view="remembered",
+        argument={"runtime": "r", "session": "s1"},
+    )
+    unread = asyncio.run(viewing(tmp_path).view(asked))
+    assert unread.blocks.text() == "nothing read"
+    read = Remarked(repository=repository, module="viewer", key='{"session":"s1"}')
+    assert unread.watch.marks == [read]
+    [offer] = unread.blocks.offers
+    assert (offer.action, offer.argument["module"], offer.argument["up_to"]) == (
+        "review-mark",
+        "viewer",
+        "9",
+    )
+    marks = MarkStore(layout=Layout(state=tmp_path, data=tmp_path).marks(repository))
+    marks.moved(
+        "viewer", [ReviewMark(key={"session": "s1"}, up_to="4", at=clock.now())]
+    )
+    # Another module's mark of the same key is its own.
+    marks.moved("other", [ReviewMark(key={"session": "s1"}, up_to="8", at=clock.now())])
+    assert asyncio.run(viewing(tmp_path).view(asked)).blocks.text() == "read to 4"
 
 
 def test_a_view_of_no_agent_is_watched_at_nothing_of_one(tmp_path: Path) -> None:
@@ -1043,7 +1094,7 @@ def test_two_modules_taking_one_fold_letter_fail_the_load() -> None:
 
 @pytest.mark.parametrize(
     ("letter", "whose"),
-    [("f", "the core"), ("s", "judge"), ("t", "adapters")],
+    [("f", "core"), ("s", "judge"), ("t", "adapters")],
 )
 def test_a_module_taking_a_letter_of_the_core_s_fails_the_load(
     letter: str, whose: str
@@ -1062,6 +1113,22 @@ def test_a_module_taking_a_letter_of_the_core_s_fails_the_load(
     )
     with pytest.raises(ProjectError, match=rf"Fold keys: .*`{letter}` from `{whose}`"):
         resolve(Project(modules=Modules.only(Core(), clashing)))
+
+
+def test_a_person_s_layer_changes_how_a_shell_s_fold_kind_starts_and_whether_zr_reaches_it() -> (
+    None
+):
+    lines = next(each for each in SHELL_FOLDS if each.name == "lines")
+    kept = lines.model_copy(update={"by_all": False, "starts_open": False})
+    project = Project(
+        modules=Modules.only(Core()).edit(Core(folds=Folds().replace("lines", kept)))
+    )
+    looks = resolve(project).looks
+    [changed] = [each for each in looks.folds if each.name == "lines"]
+    assert (changed.by_all, changed.starts_open, changed.letter) == (False, False, "u")
+    # Every other kind as the shell declares it: starting as its view lays it out, reached by zR.
+    others = [each for each in looks.folds if each.name != "lines"]
+    assert all(each.by_all and each.starts_open is None for each in others)
 
 
 def test_a_module_naming_a_fold_kind_or_a_tone_as_the_core_does_fails_the_load() -> (
@@ -1173,7 +1240,7 @@ def test_the_verbs_are_the_core_s_the_judge_s_and_the_runtime_s_then_each_module
     [
         (lup.Verb(name="tag", key="d", called="tag"), r"Verb keys: .*`d` from `core`"),
         (lup.Verb(name="hold", key="q", called="hold"), r"Verbs: .*`hold`"),
-        (lup.Verb(name="zoom", key="z", called="zoom"), r"Verb keys: .*`z`"),
+        (lup.Verb(name="find", key="f", called="find"), r"Verb keys: .*`f`"),
     ],
 )
 def test_a_verb_taking_a_key_or_a_name_another_has_fails_the_load(

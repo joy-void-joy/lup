@@ -13,7 +13,10 @@ same blocks (`Blocks.text`), so an agent reads what the operator saw.
 - `Markdown`: text the page shows as Markdown, in a tone.
 - `Fold`: a summary line and what folds under it, of one of the module's fold
   kinds (`FoldKind`), open or closed: its content given, or read as it opens
-  from another of the module's views (`Load`).
+  from another of the module's views (`Load`). What came before the operator's
+  review mark on what a view shows folds under one of them, and a fold kind may
+  cap how much stays open after it, so one left unreviewed for long doesn't
+  fill the screen (`kept_open`, `FoldKind.keeps_open`).
 - `Diff`: a file's change, whole, what matters in it marked (`Mark`); `Code`: a
   file as it stands. The page lays out their lines, folds the runs of unchanged
   ones and each function's and class's body by the file's syntax, and
@@ -40,7 +43,7 @@ from lup.events import Event
 from lup.types import Model
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from lup.doors import Method
 
@@ -666,9 +669,9 @@ class FoldKind(Model):
 
     name: str
     letter: str
-    """The key after `zf` closing the one the cursor is in, and after Space `z`
-    `f` opening every one: two kinds of a repository's modules taking one
-    letter fail the load."""
+    """The key after `zf` toggling the one the cursor is in, and after Space
+    `f` selecting every one, fold-wise: two kinds of a repository's modules
+    taking one letter fail the load."""
     called: str
     """What its folds are called together: `earlier exchanges`."""
     one: str
@@ -681,15 +684,80 @@ class FoldKind(Model):
     its own keys, since what it holds is read as it opens."""
     colour: Colour
     chord: bool = True
-    """Whether Space `z` `f` and its letter open every one of them in the scope
-    the cursor is in, Space `z` `F` and the letter closing them: an item's own
-    fold is folded by `za` on its header alone."""
+    """Whether Space `f` and its letter select every one of them in the scope
+    the cursor is in, fold-wise, Space `F` and the letter in the whole review:
+    an item's own fold is folded by `za` on its header, and marked from it,
+    alone."""
     whole: bool = False
     """Whether it's the fold holding its scope whole, as an item's or a group's
     does under its header: `zm` and `zM` never close it."""
     counts: bool = True
     """Whether one folded says how many lines it hides after its summary line:
     one whose summary says what it hides doesn't (`6 unchanged lines`)."""
+    keeps_open: int | None = Field(default=None, ge=1)
+    """How many of what its module counts stay open after its folds at most,
+    what came before them folded under one of them (`kept_open`): the last 20
+    of the agent's words in a conversation, so a long one's view stays small
+    however long it runs. A person's layer changes it as any field of the
+    module's; none keeps everything open."""
+    starts_open: bool | None = None
+    """Whether its folds start open, until the operator opens or closes one:
+    none, as each one's view lays it out, a test file folded whole, a run of
+    unchanged lines folded, a body open; true or false, every one of its kind,
+    whatever its view says. Marking something done still folds it. A person's
+    layer changes it as any field of the module's."""
+    by_all: bool = True
+    """Whether `zR` and `zM`, which open and close every fold of the item or
+    the drawer the cursor is in, reach it: one they don't, as runs of
+    unchanged lines a person keeps closed, is opened by `zr`, `za` and its own
+    keys still."""
+
+
+class Kept[T](Model):
+    """A run of things split where what's kept open starts: those folded under one line before, the first of them those the operator had reviewed, and those shown."""
+
+    folded: list[T]
+    shown: list[T]
+    reviewed: int = 0
+    """How many of `folded`, from the first, came before the operator's review
+    mark: those after them, up to `shown`, are new to them, folded only to keep
+    the view small."""
+
+
+def kept_open[T](
+    things: list[T], counted: Callable[[T], bool], most: int | None, reviewed: int = 0
+) -> Kept[T]:
+    """Split `things`, in order, where what's kept open starts: the first `reviewed`, those before the operator's review mark, folded whatever comes after; and of the rest, the last `most` that `counted` counts, from the earliest of them on, and everything after it, shown, what came before folded too. Nothing more is folded where `most` is none, or no more are counted.
+
+    What a view keeps open of a long run: what came after the operator last
+    reviewed it, open and new to them, but at most as much as its fold kind
+    keeps open (`FoldKind.keeps_open`), so one left unreviewed for long doesn't
+    fill the screen; and what came before, folded under one line saying how
+    much, read as it opens. Every module folds what came before its marks
+    through it, so a view's text form, which its command prints and agents
+    read, folds where the operator's page does.
+
+    >>> kept = kept_open(["you", "a", "call", "b", "call", "c"], lambda each: len(each) == 1, 2)
+    >>> kept.folded, kept.shown
+    (['you', 'a', 'call'], ['b', 'call', 'c'])
+    >>> kept_open(["a", "b"], lambda each: True, 2).folded
+    []
+    >>> read = kept_open(["a", "b", "c", "d"], lambda each: True, 5, reviewed=2)
+    >>> read.folded, read.shown, read.reviewed
+    (['a', 'b'], ['c', 'd'], 2)
+    >>> kept_open(["a", "b", "c", "d"], lambda each: True, 1, reviewed=2).folded
+    ['a', 'b', 'c']
+    """
+    before = min(max(reviewed, 0), len(things))
+    after = things[before:]
+    at = [index for index, each in enumerate(after) if counted(each)]
+    if most is None or len(at) <= most:
+        cut = 0
+    else:
+        cut = at[len(at) - most] if most > 0 else len(after)
+    return Kept(
+        folded=things[: before + cut], shown=things[before + cut :], reviewed=before
+    )
 
 
 SHELL_FOLDS = [
@@ -745,7 +813,9 @@ SHELL_FOLDS = [
 """The fold kinds of the shell, which every repository's looks carry and no
 module's letter may take: an agent's group whole under its banner, an item
 whole under its header, and an item's context, the core's; a file, a body and a
-run of unchanged lines, which `Diff` and `Code` fold under."""
+run of unchanged lines, which `Diff` and `Code` fold under. `Core` declares
+them (`Core.folds`), so a person's layer changes how each starts and whether
+`zR` and `zM` reach it."""
 
 
 class Drawer(Model):

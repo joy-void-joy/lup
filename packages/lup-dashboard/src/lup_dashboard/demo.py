@@ -33,15 +33,15 @@ from lup_dev.host.protocol import (
 )
 from lup_dev.host.records import Call, Called, Entry, Said, Task, Transcript, Usage
 from lup_dev.host.workers import Viewed, Viewing
+from lup_dev.inbox import marks
 from lup_dev.inbox.citations import resolved
 from lup_dev.inbox.delivery import body, written
+from lup_dev.inbox.marks import CORE, MarksMoved, MarkStore, MoveMarks, ReviewMark
 from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.protocol import (
-    Calls,
     Context,
     Conversed,
     Drafted,
-    Exchange,
     Exchanged,
     Files,
     Items,
@@ -49,13 +49,12 @@ from lup_dev.inbox.protocol import (
     KeepOrder,
     KeepTalk,
     ListInbox,
-    ListItems,
     Ordered,
     Pathed,
     Reviewed,
+    Seen,
     SendDraft,
     SendItem,
-    ShowCalls,
     ShowContext,
     ShowConversation,
     ShowDraft,
@@ -64,6 +63,7 @@ from lup_dev.inbox.protocol import (
     ShowOrder,
     ShowTalk,
     Talked,
+    exchanged,
 )
 from lup_dev.inbox.store import (
     ApiChanged,
@@ -234,6 +234,9 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     isn't lup's, whose end the page reads its drawer at."""
     grew: bool = False
     """Whether the two writes came."""
+    seeded: bool = False
+    """Whether each group has been marked seen up to its last item made 3
+    minutes before the demo began (`seen`), as the first listing does."""
 
     @override
     async def ask(self, request: Asked) -> Replied:
@@ -266,11 +269,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 self.draft = draft
                 return Drafted(draft=draft)
             case SendDraft():
-                self.covered = [*self.covered, *self.draft.covered()]
-                self.draft = self.draft.kept()
-                self.changed.set()
-                self.changed = asyncio.Event()
-                return Reviewed(items=[])
+                return self.send()
             case ShowOrder():
                 return Ordered(order=self.order)
             case KeepOrder(places=places, gone=gone):
@@ -307,10 +306,6 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     usage=standing.usage,
                     tasks=standing.tasks,
                 )
-            case ShowCalls(session=session, agent=agent, calls=ids):
-                return self.calls(session, agent, ids)
-            case ListItems(conversation=conversation):
-                return self.exchanged(conversation)
             case ShowSince(conversation=conversation, seen=seen):
                 if self.growth is None:
                     self.growth = asyncio.get_running_loop().call_later(
@@ -319,6 +314,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 return self.since(conversation, seen)
             case ReviewSince(conversation=conversation, files=viewed, seen=seen):
                 return self.reviewed(conversation, viewed, seen)
+            case MoveMarks() as moving:
+                return self.moved(moving)
             case Viewing() as viewing:
                 return await self.viewed(viewing)
             case _:
@@ -371,6 +368,50 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             return await self.views.view(viewing)
         except LupDevError as refused:
             return Refused(error=str(refused))
+
+    def marked(self, repository: Path) -> MarkStore:
+        """Return the review marks of `repository`, kept as the host keeps them in the demo's own directory, which its modules' views read."""
+        return MarkStore(layout=self.views.layout.marks(repository))
+
+    def moved(self, moving: MoveMarks) -> MarksMoved:
+        """Move the review marks `moving` names at the demo's time, as the host does (`lup_dev.inbox.marks`); each watch answers again, a view that read one among them."""
+        at = self.clock.now()
+        marks = [
+            ReviewMark(key=each.key, up_to=each.up_to, at=at) for each in moving.marks
+        ]
+        self.marked(moving.repository).moved(moving.module, marks)
+        self.changed.set()
+        self.changed = asyncio.Event()
+        return MarksMoved(marks=marks)
+
+    def seen(self, items: list[Item]) -> list[Seen]:
+        """Return how far the operator has seen each group among `items`' senders, by the core's review mark on it, as the host reads it: each group first marked seen up to its last item made 3 minutes before the demo began, so those since are new."""
+        senders = list(
+            dict.fromkeys(
+                each.sender for each in items if isinstance(each.sender, Conversation)
+            )
+        )
+        if not self.seeded:
+            self.seeded = True
+            for sender in senders:
+                before = [
+                    each.number
+                    for each in items
+                    if each.sender == sender and each.made <= self.ago(3)
+                ]
+                if before:
+                    mark = ReviewMark(
+                        key=marks.seen(sender), up_to=str(max(before)), at=self.ago(3)
+                    )
+                    self.marked(sender.repository).moved(CORE, [mark])
+
+        def of(sender: Conversation) -> Seen | None:
+            mark = self.marked(sender.repository).of(CORE, marks.seen(sender))
+            if mark is None or mark.up_to is None:
+                return None
+            return Seen(conversation=sender, item=int(mark.up_to), at=mark.at)
+
+        return [found for each in senders if (found := of(each)) is not None]
 
     def typed(self) -> None:
         """End the reading of the approval's types: its files carry their whole reading, and each watch answers again."""
@@ -729,6 +770,43 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             standing=self.views.looks(),
         )
 
+    def send(self) -> Reviewed:
+        """Send the draft as the host does, telling no agent: each item it covers taken off the list, the marks left drafted for the page to apply; saying what it read, approved and declined, as the host's reply does (`Delivery.reviewed`)."""
+        draft = self.draft
+        covered = draft.covered()
+        by_number = {each.number: each for each in self.every()}
+        commented = [each.item for each in draft.comments if each.text.strip()]
+        asked = [
+            by_number[each]
+            for each in covered
+            if each in by_number
+            and isinstance(by_number[each].reason, Approval | HeldChange)
+        ]
+        declined = [each for each in asked if each.number in draft.declined]
+        approved = [
+            each
+            for each in asked
+            if each not in declined
+            and (
+                each.number in draft.done
+                or each.number not in commented
+                or isinstance(each.reason, HeldChange)
+            )
+        ]
+        read = [
+            each
+            for each in covered
+            if each in by_number
+            and by_number[each] not in asked
+            and each not in commented
+            and not isinstance(by_number[each].reason, Question)
+        ]
+        self.covered = [*self.covered, *covered]
+        self.draft = draft.kept()
+        self.changed.set()
+        self.changed = asyncio.Event()
+        return Reviewed(items=[], read=read, approved=approved, declined=declined)
+
     def holds(self, talker: Talker) -> bool:
         """Say whether the operator holds each flagged write of `talker`."""
         return any(
@@ -737,7 +815,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         )
 
     def items(self) -> Items:
-        """Return what waits for the operator: a subagent's question of numbered decisions, a session's note, another's problem, an approval of a host zone, a session's write held for them, another's last words of a turn answering the operator's review, citing it, one citation edited and one naming no passage, the note that review was on, edited since, a friction and how the work went, and two writes that landed flagged, the subagent's new module gathering three; the operator last settled an item 3 minutes ago, so those since are new."""
+        """Return what waits for the operator: a subagent's question of numbered decisions, a session's note, another's problem, an approval of a host zone, a session's write held for them, another's last words of a turn answering the operator's review, citing it, one citation edited and one naming no passage, the note that review was on, edited since, a friction and how the work went, and two writes that landed flagged, the subagent's new module gathering three; each group seen up to its last item made 3 minutes before the demo began, so those since are new (`seen`)."""
         every = self.every()
         waiting = [
             each
@@ -765,7 +843,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         ]
         return Items(
             items=waiting,
-            reviewed=self.ago(3),
+            seen=self.seen(waiting),
             answers=answers,
             commented=[
                 each
@@ -824,28 +902,15 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             if conversation in (each.sender, each.recipient, each.addressed)
         ]
 
-        # lup's word on a conversation's citations is its own item, and told to it, as the host lists it.
-        def told(item: Item) -> bool:
-            return item.sender != conversation or isinstance(item.reason, Unresolved)
-
-        return Exchanged(
-            sent=[
-                Exchange(item=each, text=written(each))
-                for each in items
-                if not told(each)
-            ],
-            received=[
-                Exchange(item=each, text=body(each)) for each in items if told(each)
-            ],
-            paths=[
-                each
-                for each in self.paths()
-                if any(
-                    each.conversation in (item.sender, item.recipient, item.addressed)
-                    for item in items
-                )
-            ],
-        )
+        paths = [
+            each
+            for each in self.paths()
+            if any(
+                each.conversation in (item.sender, item.recipient, item.addressed)
+                for item in items
+            )
+        ]
+        return exchanged(conversation, items, written=written, told=body, paths=paths)
 
     def paths(self) -> list[Pathed]:
         """Return each stand-in conversation the listing has, with its path."""
@@ -1588,15 +1653,6 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         """Return a stand-in conversation's steps (`recorded`)."""
         return steps(self.recorded(session, agent))
 
-    def calls(self, session: str, agent: str | None, ids: list[str]) -> Calls:
-        """Return the calls of a stand-in conversation asked for, read whole, in the order asked: those it holds."""
-        wholes = {
-            each.whole.id: each.whole
-            for each in self.recorded(session, agent)
-            if isinstance(each, StandIn)
-        }
-        return Calls(calls=[wholes[each] for each in ids if each in wholes])
-
     def recorded(self, session: str, agent: str | None) -> list[Said | StandIn]:
         """Return a stand-in conversation, each call with what reading it whole answers: for the parser subagent, the call that sent @47, then its moment around @51 with what led to it, then what it read since the demo began; for the first worker, a day's work (`long_conversation`); for the second runtime's session and its subagent, a render that broke; for any other, a short exchange."""
         tree = "/home/op/lup.git/tree/dev"
@@ -1974,7 +2030,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         return Context(number=number, entries=entries, anchor=5)
 
     def long_conversation(self, length: int = 300) -> list[Said | StandIn]:
-        """Return the first worker's conversation, `length` steps after its brief, as a day's work reads: what it's on, then a run of calls reading a module, changing a function, running its tests and reading them, in turn; the operator's word every hundred steps, from the fiftieth."""
+        """Return the first worker's conversation, `length` steps after its brief, as a day's work reads: what it's on, then a run of calls reading a module, changing a function, running its tests and reading them, in turn. A subagent never has the operator's typed words after its brief, so its whole run is one exchange, its drawer keeping only the agent's last words open (`EARLIER_KIND.keeps_open`)."""
         tree = worker_worktree(1)
 
         def step(at: int) -> Said | StandIn:
@@ -1982,12 +2038,6 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             module = f"packages/lup/src/lup/worker1/step_{k}.py"
             tests = f"packages/lup/tests/test_step_{k}.py"
             when = self.ago(400 - at)
-            if at % 100 == 50:
-                return Said(
-                    by="operator",
-                    text=f"Good. Carry on from step {k}.",
-                    at=when,
-                )
             match at % 5:
                 case 0:
                     return Said(
@@ -2291,7 +2341,7 @@ AGENTS_MD_BEFORE = """3. **Write with your file tools.** The judge runs before a
 """
 AGENTS_MD_AFTER = """3. **Write with your file tools.** The judge runs before an Edit or Write lands,
    and a protected path's change waits in its hook for the operator's answer.
-4. **A held change is answered in the review:** Space `a` or `x`, the comments
+4. **A held change is answered in the review:** Space `d` or `x`, the comments
    under it going to the agent with the answer.
 """
 AGENTS_MD_TAIL = """

@@ -10,7 +10,10 @@
       "colour": "cyan",
       "chord": true,
       "whole": true,
-      "counts": true
+      "counts": true,
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
     },
     {
       "name": "item",
@@ -22,7 +25,10 @@
       "colour": "orange",
       "chord": false,
       "whole": true,
-      "counts": true
+      "counts": true,
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
     },
     {
       "name": "file",
@@ -34,7 +40,10 @@
       "colour": "info",
       "chord": true,
       "whole": false,
-      "counts": true
+      "counts": true,
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
     },
     {
       "name": "body",
@@ -46,7 +55,10 @@
       "colour": "purple",
       "chord": true,
       "whole": false,
-      "counts": true
+      "counts": true,
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
     },
     {
       "name": "lines",
@@ -58,7 +70,10 @@
       "colour": "muted",
       "chord": true,
       "whole": false,
-      "counts": false
+      "counts": false,
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
     },
     {
       "name": "context",
@@ -70,19 +85,25 @@
       "colour": "cyan",
       "chord": true,
       "whole": false,
-      "counts": false
+      "counts": false,
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
     },
     {
       "name": "earlier",
       "letter": "e",
-      "called": "earlier exchanges",
-      "one": "the earlier exchange",
+      "called": "earlier exchanges and steps",
+      "one": "what came earlier",
       "level": 1,
       "opens": "back",
       "colour": "ok",
       "chord": true,
       "whole": false,
-      "counts": true
+      "counts": true,
+      "keeps_open": 20,
+      "starts_open": null,
+      "by_all": true
     },
     {
       "name": "calls",
@@ -94,7 +115,10 @@
       "colour": "purple",
       "chord": true,
       "whole": false,
-      "counts": false
+      "counts": false,
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
     },
     {
       "name": "items",
@@ -106,7 +130,10 @@
       "colour": "cyan",
       "chord": true,
       "whole": false,
-      "counts": false
+      "counts": false,
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
     },
     {
       "name": "call",
@@ -118,7 +145,10 @@
       "colour": "orange",
       "chord": true,
       "whole": false,
-      "counts": true
+      "counts": true,
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
     }
   ],
   "tones": [

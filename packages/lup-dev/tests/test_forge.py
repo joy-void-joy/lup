@@ -50,6 +50,7 @@ from lup_dev.host.records import Record, Recorded, Records, Transcript
 from lup_dev.host.service import Answerer, HostService
 from lup_dev.host.workers import Calling, LaunchJudge
 from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.marks import StoredMarks
 from lup_dev.inbox.protocol import Exchanged
 from lup_dev.layout import HostLayout, Layout
 from lup_dev.private import serving as private_serving
@@ -248,6 +249,7 @@ def called(
         recorded={registered.runtime: Recorded(records=Nothing(), reader=Unread())},
         layout=layout,
         exchanges=Unexchanged(),
+        marks=StoredMarks(layout=layout),
     )
     calling = Calling(launch=registered, name=name, arguments=arguments, caller=CALLER)
     return asyncio.run(serving.call(calling))
