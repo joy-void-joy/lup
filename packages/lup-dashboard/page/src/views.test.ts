@@ -286,7 +286,7 @@ describe("the views the page lays out itself", () => {
     it("holds a file a landing waits on: marked reviewed to let it land, declined, a comment implying that; each place a fold, its files named by it", () => {
         const since = producerOf("judge", "since")?.answer(AGENT as never, shownOf(CASES["judge since"]![2]!.given), REPOSITORY);
         const blocks = since?.blocks;
-        expect((blocks?.summary ?? []).map((each) => each.text).join("")).toBe("since you approved · 1 held at landing · 1 to review · 2 flagged");
+        expect((blocks?.summary ?? []).map((each) => each.text).join("")).toBe("since you approved · 1 held at landing · 1 to review · 2 flagged · 0 of 4 reviewed");
         expect([blocks?.count, blocks?.waiting]).toEqual([2, true]);
         expect(blocks?.blocks.map((each) => [each.id, each.block === "fold" ? each.kind : each.block])).toEqual([
             ["place", "branch"],

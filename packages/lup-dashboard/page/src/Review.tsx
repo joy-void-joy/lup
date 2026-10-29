@@ -79,6 +79,8 @@ import {
     codeFrom,
     drawerAt,
     fileHeads,
+    nextToReview,
+    pageUnits,
     foldKey,
     foldsOf,
     fresh,
@@ -791,6 +793,7 @@ export function Review({
     );
     // The start of each file's header line: where `]f` and `[f` go, and where a key held down or a page scroll stops.
     const heads = useMemo(() => fileHeads(laidOut), [laidOut]);
+    const units = useMemo(() => pageUnits(laidOut), [laidOut]);
     const editor = useEditor<Draft, Written>({
         shown: laidFor,
         draft,
@@ -1207,6 +1210,12 @@ export function Review({
             const after = laidOut.regions.slice(at + 1).find((each) => !(next.parked ?? []).includes(each.item.number));
             landing.current = after === undefined ? null : { item: after.item.number };
         }
+        // A file of "since you approved" marked reviewed, the cursor goes on to the next one to review there.
+        const marks = reach.acts.flatMap((each) => (each.kind === "mark" && !isMarked(now, each, name) ? [each.block] : []));
+        const onward = name === "done" && marks.length > 0 ? nextToReview(laidOut, marks, next) : undefined;
+        if (onward !== undefined) {
+            landing.current = { at: editor.fromLaid(onward) };
+        }
         editor.record(next);
     }
 
@@ -1601,6 +1610,9 @@ export function Review({
             bring(current, target);
         },
         stops: () => heads,
+        units: () => units.map((each) => ({ from: editor.fromLaid(each.from), to: editor.fromLaid(each.to) })),
+        // The stack over the buffer's top, as it's drawn now.
+        pinned: () => editor.parent.current?.parentElement?.querySelector(".stack")?.getBoundingClientRect().height ?? 0,
         cite: (forward) => {
             const current = view.current;
             if (current === null) {
