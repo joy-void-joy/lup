@@ -47,7 +47,6 @@ export interface Dashboard extends AsyncDisposable {
  * has loaded: the demo's (`demo.ts`), or any other a room can reach.
  */
 export async function open(url: string, options: OpenOptions = {}): Promise<Dashboard> {
-    // lup: defer(issue=349, why="the operator's own dashboard opens here the same way once a room has a read-only token of its own to put in its address")
     const viewport = options.viewport ?? { width: 1600, height: 1000 };
     const screen = options.windowed === undefined ? null : await display({ ...viewport, layout: options.windowed });
     let browser: Browser;

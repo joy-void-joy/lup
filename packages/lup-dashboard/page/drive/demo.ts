@@ -28,6 +28,7 @@ export interface DemoOptions {
     approvalLines?: number;
     /** How many stand-in hook calls a minute the workers make, each answering every watch again, as the host service does. */
     hooks?: number;
+    // lup: defer(issue=349, why="a copy of the operator's real dashboard state, which the demo serves in place of its stand-ins, is an option here once the demo can take one")
 }
 
 /** A demo running, until it's closed. */
