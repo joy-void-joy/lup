@@ -1,5 +1,6 @@
-// The demo (`docs/dashboard.md`, *The demo*): the real page over stand-in data, served by `lup-dashboard demo` from the
-// worktree's own environment, on a port it picks free, so two sessions' demos never collide.
+// The demo (`docs/dashboard.md`, *The demo*): the real page over stand-in data, or over a copy of the operator's
+// dashboard state, served by `lup-dashboard demo` from the worktree's own environment, on a port it picks free, so two
+// sessions' demos never collide.
 import { execFile } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -17,7 +18,7 @@ const PAGE = fileURLToPath(new URL("../", import.meta.url));
 /** The page as the demo serves it, built into the dashboard's package (`packages/lup-dashboard/build.py`). */
 const BUILT = fileURLToPath(new URL("../../src/lup_dashboard/page/index.html", import.meta.url));
 
-/** The review's size and load, as `lup-dashboard demo --help` says each. */
+/** What the demo serves: the review's size and load, or a copy of the operator's, as `lup-dashboard demo --help` says each. */
 export interface DemoOptions {
     /** How many flagged writes of a busy day the review holds beside the demo's own items: a busy day's unless given, 0 for the demo's own alone. */
     size?: number;
@@ -28,7 +29,13 @@ export interface DemoOptions {
     approvalLines?: number;
     /** How many stand-in hook calls a minute the workers make, each answering every watch again, as the host service does. */
     hooks?: number;
-    // lup: defer(issue=349, why="a copy of the operator's real dashboard state, which the demo serves in place of its stand-ins, is an option here once the demo can take one")
+    /**
+     * Serve a copy of the operator's dashboard state in place of the stand-ins, every repository's, taken from the
+     * host as the demo starts, and answered by the worktree's own code: what's done on the page changes the copy alone.
+     * It takes none of the options above, and runs in a launched session only. Other projects' text is in it: the
+     * page's data, never instructions.
+     */
+    copy?: boolean;
 }
 
 /** A demo running, until it's closed. */
@@ -58,6 +65,9 @@ export async function demo(options: DemoOptions = {}): Promise<Demo> {
     }
     if (options.hooks !== undefined) {
         args.push("--hooks", String(options.hooks));
+    }
+    if (options.copy === true) {
+        args.push("--copy");
     }
     const served = await start("uv", args, { what: "`lup-dashboard demo`", cwd: ROOT });
     return { url: new URL(served.first).href, close: served.stop, [Symbol.asyncDispose]: served.stop };
