@@ -1072,6 +1072,17 @@ class Whereabouts(Model):
     launch has ended, so `inbox` reads them by their name then, and `send`
     reaches them by it; none while they have none, and for a session's own
     conversation, named as their launch (`SessionNames`, `host/names.py`)."""
+    thread: int | None = None
+    """The thread they work in, by its number, which what they send lands in
+    where they name none: the one they joined, hold or were handed, else the
+    one they started on; none for their session's root thread
+    (`inbox/concerns.py`)."""
+    started: int | None = None
+    """The thread they started on, which what they say with `how_it_felt` lands
+    in: their parent's, for a subagent; none for their session's root thread."""
+    root: int | None = None
+    """For a session's own conversation, their root thread, once it's opened or
+    taken; none before, and for a subagent."""
 
 
 class TalkComment(Model):
@@ -1286,6 +1297,14 @@ class ItemNode(Node):
             made=self.made,
             state=state,
         )
+
+    @override
+    def waiting(self, drawn: list[Edge]) -> bool:
+        """Say whether it waits on the operator, given the edges drawn to it: theirs, of a kind that waits on them (`ranked`), and standing nowhere yet, or put back to wait, as the latest `Stands` says."""
+        if self.recipient != Operator() or ranked(self.reason).name != "waiting on you":
+            return False
+        states = [each for each in drawn if isinstance(each, Stands)]
+        return not states or isinstance(states[-1], StandsWaiting)
 
     def links(self, reading: int) -> list[Answers | Replies | Cites]:
         """Return the edges its fields say, from it, as it's written: what it answers, an answer its question and a turn's last words the operator's items they answer; the message it replies to; and each item it cites, of reading `reading` of its citations."""
@@ -1527,7 +1546,7 @@ ORDER = "inbox:order"
 """The name of the review's order among the ledger's plain records."""
 
 
-# lup: defer(issue=345, why="a conversation's whereabouts are a plain record, unnumbered, until threads need a conversation as a node (piece 3), which makes them one then, once threads move the numbers anyway")
+# lup: defer(issue=353, why="a conversation's whereabouts are a plain record, unnumbered, so each subagent heard skips no number in the sequence the operator reads: rethink once threads are in use")
 HEARD = "inbox:conversation:"
 """What the name of each conversation's whereabouts starts with among the ledger's plain records."""
 
@@ -1806,6 +1825,27 @@ class Inbox(MutableModel, arbitrary_types_allowed=True):
                 and item.reason.repository == repository
             )
         ]
+
+    def running(self, launch: str) -> Conversation | None:
+        """Return the main conversation of the session `launch` runs, the latest heard there and not ended; none where no session of it has reached lup, or its last has ended."""
+        found = [
+            place
+            for place in self.whereabouts.values()
+            if place.launch == launch and place.conversation.agent is None
+        ]
+        latest = max(found, key=lambda place: place.since, default=None)
+        if latest is None or latest.ended is not None:
+            return None
+        return latest.conversation
+
+    def live(self, conversation: Conversation) -> bool:
+        """Say whether `conversation` goes on: heard, not ended, and, for a session's own, the latest heard in their launch, which another session cleared in it isn't."""
+        place = self.whereabouts.get(conversation.key())
+        if place is None or place.ended is not None:
+            return False
+        return (
+            conversation.agent is not None or self.running(place.launch) == conversation
+        )
 
     def exchanged(self, conversation: Conversation) -> list[Item]:
         """Return the items `conversation` sent or was sent, oldest first, in every state, including those for them passed on to their session's main conversation once they ended."""

@@ -146,7 +146,8 @@ from lup_dev.host.courier import Failure, Heard, Post, Posted, Waker
 from lup_dev.host.names import Names
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Queued, Queues, Queuing
-from lup_dev.inbox.citations import failing, plainly, resolved, unresolved
+from lup_dev.inbox.citations import failing, resolved, unresolved
+from lup_dev.inbox.concerns import Concerns
 from lup_dev.inbox.edits import replaced
 from lup_dev.inbox.ends import holding
 from lup_dev.inbox.notices import Notices
@@ -190,6 +191,7 @@ from lup_dev.inbox.store import (
     cited,
 )
 from lup_dev.inbox.tags import Tag, inside
+from lup_dev.inbox.texts import body, kind, opening, what
 from lup_dev.inbox.threads import (
     Anchor,
     addressed_to,
@@ -207,109 +209,10 @@ if TYPE_CHECKING:
 
     from lup_dev.host.courier import Conversation as Caller
     from lup_dev.host.protocol import Register
+    from lup_ledger.threads import Thread
 
 SEPARATOR = "\n\n"
 """What each adapter puts between two things it tells in one field."""
-
-
-def what(item: Item) -> str:
-    """Say what an item is, in a few words."""
-    match item.reason:
-        case Message(ending=True):
-            return "the end of a turn"
-        case Message(kind="question"):
-            return "a question, as a message"
-        case Message(kind=kind):
-            return f"a {kind}"
-        case Friction():
-            return "a friction"
-        case HowItFelt():
-            return "how it felt"
-        case Stop():
-            return "a stop by choice"
-        case Ended(stopped=True):
-            return "a subagent stopped"
-        case Ended():
-            return "the end of a subagent's turn"
-        case Unresolved():
-            return "lup's word on citations that didn't resolve"
-        case Question():
-            return "a question"
-        case Answer():
-            return "an answer"
-        case Approval():
-            return "an approval"
-        case HeldChange():
-            return "a held change"
-        case Flagged():
-            return "a flagged write"
-        case Review():
-            return "a review"
-
-
-def opening(item: Item) -> str:
-    """Return an item's first line: its text's, a message with no words of its own its first reply's, an answer's comment's, or a review's first message's or comment's."""
-    match item.reason:
-        case Message(text="", passages=[first, *_]):
-            said = first.text
-        case (
-            Message(text=text)
-            | Friction(text=text)
-            | HowItFelt(text=text)
-            | Stop(text=text)
-            | Ended(text=text)
-            | Question(text=text)
-            | Approval(text=text)
-            | HeldChange(text=text)
-            | Flagged(text=text)
-        ):
-            said = text
-        case Unresolved(of=of, citations=citations):
-            said = plainly(citations, of)
-        case Answer(comment=comment):
-            said = comment
-        case Review(letters=letters, comments=comments):
-            said = next((each.text for each in [*letters, *comments]), "")
-    return next(iter(said.splitlines()), "")
-
-
-def body(item: Item) -> str:
-    """Return an item's text whole, as its sender wrote it: a question's with each decision numbered, its lean on the line under it, as the dashboard lays it out (`page/src/review.ts`), so a passage quoted there is found here by its offsets (`located`); a review's messages, then its comments."""
-    match item.reason:
-        case Question(text=text, decisions=decisions):
-            numbered = [
-                f"{at}. {each.text}\n   lean: {each.lean}"
-                for at, each in enumerate(decisions, start=1)
-            ]
-            return "\n".join([text, *numbered])
-        case (
-            Message(text=text)
-            | Friction(text=text)
-            | HowItFelt(text=text)
-            | Stop(text=text)
-            | Ended(text=text)
-            | Approval(text=text)
-            | HeldChange(text=text)
-            | Flagged(text=text)
-        ):
-            return text
-        case Unresolved(of=of, citations=citations):
-            return plainly(citations, of)
-        case Answer(comment=comment):
-            return comment
-        case Review(letters=letters, comments=comments):
-            return "\n".join(each.text for each in [*letters, *comments])
-
-
-def written(item: Item) -> str:
-    """Return the text of an item a conversation sent, whole: as they wrote it, a question with its decisions and leans; a change held from them, with what's held and why, or one that landed flagged, with what's flagged."""
-    match item.reason:
-        case (
-            HeldChange(text=text, summary=summary) | Flagged(text=text, summary=summary)
-        ):
-            return f"{text}\n{summary}"
-        case _:
-            return body(item)
 
 
 def spelled(duration: timedelta) -> str:
@@ -347,69 +250,6 @@ def standing(item: Item) -> str:
             return f"withdrawn at {clocked(at)} by lup: {why}"
         case Withdrawn(at=at, why=why):
             return f"withdrawn at {clocked(at)} by its sender: {why}"
-
-
-type ItemKind = Literal[
-    "turn's end",
-    "note",
-    "problem",
-    "disagreement",
-    "question as a message",
-    "friction",
-    "how it felt",
-    "stop",
-    "ended",
-    "unresolved",
-    "question",
-    "answer",
-    "approval",
-    "held change",
-    "flagged write",
-    "review",
-]
-"""An item's kind as a tag's `kind` names it (`kind`), and as `inbox` narrows
-to: a message by its own kind, a turn's last words told apart from a note,
-else what the item is."""
-
-
-def kind(item: Item) -> ItemKind:
-    """Name an item's kind as a tag's `kind` says it: a message's own kind, else what the item is.
-
-    >>> from datetime import UTC, datetime
-    >>> item = Item(number=7, reason=Message(kind="problem", text="It hangs."),
-    ...     sender=Operator(), recipient=Operator(), made=datetime(2026, 1, 1, tzinfo=UTC))
-    >>> kind(item)
-    'problem'
-    """
-    match item.reason:
-        case Message(ending=True):
-            return "turn's end"
-        case Message(kind="question"):
-            return "question as a message"
-        case Message(kind=said):
-            return said
-        case Friction():
-            return "friction"
-        case HowItFelt():
-            return "how it felt"
-        case Stop():
-            return "stop"
-        case Ended():
-            return "ended"
-        case Unresolved():
-            return "unresolved"
-        case Question():
-            return "question"
-        case Answer():
-            return "answer"
-        case Approval():
-            return "approval"
-        case HeldChange():
-            return "held change"
-        case Flagged():
-            return "flagged write"
-        case Review():
-            return "review"
 
 
 def on(item: Item, attributes: dict[str, str], parts: list[Tag | str]) -> Tag:
@@ -1169,7 +1009,13 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         parent: Conversation | None,
         name: str | None = None,
     ) -> None:
-        """Note that `party` is heard in `launch`: where they run, that they go on, the conversation that spawned them, `parent`, and a subagent's own `name`, which `inbox` reads them by once their launch has ended."""
+        """Note that `party` is heard in `launch`: where they run, that they go on, the conversation that spawned them, `parent`, and a subagent's own `name`, which `inbox` reads them by once their launch has ended.
+
+        Heard again in another launch, or after they ended, as a session
+        resumed, they keep the threads they work in, started on and hold as
+        their root. A subagent heard the first time starts on the thread their
+        parent works in (`Whereabouts.thread`).
+        """
         place = self.inbox.whereabouts.get(party.key())
         if place is not None and place.launch == launch.launch and place.ended is None:
             if place.parent != parent or place.name != name:
@@ -1177,6 +1023,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     place.model_copy(update={"parent": parent, "name": name})
                 )
             return
+        above = None if parent is None else self.inbox.whereabouts.get(parent.key())
+        starting = None if above is None else above.thread
         self.inbox.placed(
             Whereabouts(
                 conversation=party,
@@ -1187,6 +1035,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 name=name,
                 words=[] if place is None else place.words,
                 felt_asked=place is not None and place.felt_asked,
+                thread=starting if place is None else place.thread,
+                started=starting if place is None else place.started,
+                root=None if place is None else place.root,
             )
         )
 
@@ -1252,11 +1103,17 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
     def worded(self, party: Conversation, posted: Posted) -> Posted:
         """Return what `posted` tells `party`, after lup's words left for them, which are taken: told once."""
+        return posted.model_copy(
+            update={"items": [*self.taken_words(party), *posted.items]}
+        )
+
+    def taken_words(self, party: Conversation) -> list[str]:
+        """Return lup's words left for `party`, oldest first, taken so they're told once; none where none are left."""
         place = self.inbox.whereabouts.get(party.key())
         if place is None or not place.words:
-            return posted
+            return []
         self.inbox.placed(place.model_copy(update={"words": []}))
-        return posted.model_copy(update={"items": [*place.words, *posted.items]})
+        return place.words
 
     def held_saying(self, party: Conversation, said: str | None) -> None:
         """Keep what subagent `party` said at an end of their turn held to tell them what waited, for their parent with their end (`Ended.held`): their runtime hands their parent only the words of the end it lets through, and nothing else would hand these on."""
@@ -1910,7 +1767,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             )
         held = await self.queued(party, home)
         presence.queued = [*presence.queued, *(each.id for each in held)]
-        told = [self.whole(party, "held call"), *([queue(held)] if held else [])]
+        told = [
+            *self.taken_words(party),
+            self.whole(party, "held call"),
+            *([queue(held)] if held else []),
+        ]
         said = SEPARATOR.join(each for each in told if each)
         if said or within is None:
             return said
@@ -1944,8 +1805,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         *,
         call: str | None = None,
         quiet: bool = False,
+        thread: Thread | None = None,
     ) -> Item:
-        """Make an item, its citations of the operator's words read where it's a conversation's own words to them (`cited`), and deliver it (`delivered`); `call` is the runtime's id for the agent's call that made it, where one did, and `quiet` says it waits for a call (`Item.quiet`)."""
+        """Make an item, its citations of the operator's words read where it's a conversation's own words to them (`cited`), put it in a thread where it's a conversation's to the operator (`landed`), and deliver it (`delivered`); `call` is the runtime's id for the agent's call that made it, where one did, `quiet` says it waits for a call (`Item.quiet`), and `thread` is the thread its call named, where it named one."""
         made = self.inbox.made(
             reason,
             sender,
@@ -1956,8 +1818,25 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             quiet=quiet,
         )
         item = self.cited(made)
+        self.landed(item, thread)
         await self.delivered(item)
         return item
+
+    def concerns(self) -> Concerns:
+        """Return the threads as agents work in them, read from the inbox as it stands (`inbox/concerns.py`)."""
+        return Concerns(
+            inbox=self.inbox,
+            roster=self.roster(),
+            clock=self.clock,
+            served=lambda launch: self.layout.record(launch).is_file(),
+        )
+
+    def landed(self, item: Item, thread: Thread | None = None) -> None:
+        """Put `item` in `thread`, else where its sender works, and tell who's on it (`Concerns.landed`), where it's a conversation's to the operator: what lands in a thread; nothing else."""
+        if isinstance(item.sender, Conversation) and isinstance(
+            item.recipient, Operator
+        ):
+            self.concerns().landed(item, thread)
 
     async def delivered(self, item: Item) -> None:
         """Tell the recipient that `item` reached their inbox: the operator through a desktop notice, a conversation through their held calls, or by waking them where the item isn't quiet: the operator's own, or a message another conversation sent them."""
@@ -2105,15 +1984,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         self.say(f"{place.launch}: woke {self.roster().who(party)} for {numbers}")
 
     def running(self, launch: str) -> Conversation | None:
-        """Return the main conversation of the session `launch` runs, the latest heard there; none where no session of it has reached lup."""
-        found = [
-            place
-            for place in self.inbox.whereabouts.values()
-            if place.launch == launch and place.conversation.agent is None
-        ]
-        if not found:
-            return None
-        return max(found, key=lambda place: place.since).conversation
+        """Return the main conversation of the session `launch` runs, the latest heard there; none where no session of it has reached lup, or its last has ended (`Inbox.running`)."""
+        return self.inbox.running(launch)
 
     def main_of(self, launch: str) -> Conversation:
         """Return the main conversation of the session `launch` runs, the latest heard there, or say there's none."""
@@ -2562,6 +2434,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             change, sender, Operator(), change.worktree, self.clock.now(), call=call
         )
         self.inbox.attached(item.number, diff, files)
+        self.landed(item)
         await self.noticed(item)
         return item
 
@@ -2601,6 +2474,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             flagged, sender, Operator(), flagged.worktree, self.clock.now(), call=call
         )
         self.inbox.attached(item.number, diff, [file])
+        self.landed(item)
         await self.delivered(item)
         return item
 

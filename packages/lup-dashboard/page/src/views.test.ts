@@ -234,7 +234,7 @@ const CASES: Record<string, Case[]> = {
             given: { items: [item(51, { reason: "question", text: "Which parser?", decisions: [{ text: "pydantic", lean: "yes" }, { text: "by hand", lean: "no" }] }, WAITING)] },
         },
     ],
-    "inbox friction": [{ name: "a friction", repository: REPOSITORY, argument: { number: 57 }, given: { items: [item(57, { reason: "friction", text: "The gate printed nothing for four minutes." })] } }],
+    "inbox friction": [{ name: "a friction", repository: REPOSITORY, argument: { number: 57 }, given: { items: [item(57, { reason: "friction", text: "The gate printed nothing for four minutes.", title: "" })] } }],
     "inbox how_it_felt": [{ name: "how it felt", repository: REPOSITORY, argument: { number: 58 }, given: { items: [item(58, { reason: "how it felt", text: "Steady." })] } }],
     "inbox stop": [{ name: "a stop by choice", repository: REPOSITORY, argument: { number: 67 }, given: { items: [item(67, { reason: "stop", why: "Nothing more is worth doing." })] } }],
     "adapters tasks": [

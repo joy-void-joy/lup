@@ -125,17 +125,16 @@ from lup_dev.inbox.citations import plainly
 from lup_dev.inbox.conversion import converted, rehearsed
 from lup_dev.inbox.delivery import (
     Delivery,
-    ItemKind,
     clocked,
-    opening,
     standing,
-    what,
 )
 from lup_dev.inbox.marks import routes as marks_routes
 from lup_dev.inbox.notices import NotifySend
 from lup_dev.inbox.protocol import (
     AnswerApproval,
+    AnswerCheck,
     AnswerItem,
+    CheckShown,
     Context,
     FinishItem,
     Items,
@@ -145,6 +144,7 @@ from lup_dev.inbox.protocol import (
     Readout,
     SendItem,
     Settled,
+    ShowCheck,
     ShowContext,
     ShowDiff,
     ShowItem,
@@ -153,6 +153,7 @@ from lup_dev.inbox.protocol import (
 )
 from lup_dev.inbox.protocol import routes as inbox_routes
 from lup_dev.inbox.reading import Flags, by_agent, counted, landed
+from lup_dev.inbox.roots import RootNames
 from lup_dev.inbox.roster import ids
 from lup_dev.inbox.store import (
     KINDS,
@@ -177,6 +178,11 @@ from lup_dev.inbox.store import (
     Verdict,
     cited,
     item_number,
+)
+from lup_dev.inbox.texts import (
+    ItemKind,
+    opening,
+    what,
 )
 from lup_dev.inbox.tools import InboxTools
 from lup_dev.inbox.typed import TypeReader
@@ -624,6 +630,7 @@ def host_serve(context: typer.Context) -> None:
         bearings=RepositoryBearings(
             delivery=delivery, integration=settings.lup_integration_branch
         ),
+        roots=RootNames(delivery=delivery),
         routes=control_routes(
             delivery,
             recorded(),
@@ -1212,6 +1219,15 @@ def inbox_list(
             help="Every item, answered, done or told too, not those waiting alone.",
         ),
     ] = False,
+    thread: Annotated[
+        str | None,
+        typer.Option(
+            help=(
+                "One thread, by its name or number, read whole: where it stands, "
+                "the threads under it, then what's in it, each whole."
+            )
+        ),
+    ] = None,
 ) -> None:
     """List what waits for you from your agents, oldest first; or read the inbox as the agents' `inbox` tool does.
 
@@ -1225,8 +1241,8 @@ def inbox_list(
     rather than the one above (`@12  2026-10-23 14:00  a note from `w` to
     you, waiting: …`): what waits for you unless `--every`, your exchange with
     one conversation with `--conversation`, and each item whole, your words
-    on a conversation's item under it, with `--whole`. Listing and `show`
-    only read, so an agent's
+    on a conversation's item under it, with `--whole`; one thread whole, with
+    `--thread`. Listing and `show` only read, so an agent's
     session runs them too: on the host, over the whole inbox; in a room, over
     its repository's items alone. Answering is the operator's, in their own
     terminal.
@@ -1242,7 +1258,7 @@ def inbox_list(
         )
         raise typer.BadParameter(message) from unread
     client = reading()
-    if conversation is not None or kinds or whole or every:
+    if conversation is not None or kinds or whole or every or thread is not None:
         try:
             kinded = (
                 TypeAdapter[list[ItemKind]](list[ItemKind]).validate_python(kinds)
@@ -1262,6 +1278,7 @@ def inbox_list(
             kinds=kinded,
             whole=whole,
             every=every,
+            thread=thread,
         )
         typer.echo(client.ask(narrowed, Readout).text)
         return
@@ -1427,8 +1444,16 @@ def inbox_answer(
     A write that landed flagged takes your reply in words, as a message does,
     for the agent who made it: the write has landed, and your reply comes to
     them as "yes, but".
+
+    A check, which an agent's question put in a thread for you to try, takes
+    what you saw, or nothing for a tick; `--comment` gives it without asking.
+    The agent who asked it is told.
     """
     client = answering()
+    check = client.ask(ShowCheck(number=number), CheckShown)
+    if check.check is not None:
+        check_answered(client, check, comment)
+        return
     approvals = InboxApprovals(host=client)
     seen = client.ask(ShowItem(number=number), Shown)
     item = seen.item
@@ -1478,6 +1503,26 @@ def inbox_answer(
         f"{done} {cited(number)}: your {noun}, {cited(answer.number)}, is for "
         f"{called(answer.recipient, answered.paths)}."
     )
+
+
+def check_answered(client: HostClient, shown: CheckShown, comment: str | None) -> None:
+    """Answer the check `shown` with what the operator saw: `comment` where given, else asked at this terminal after it, nothing for a tick."""
+    check = shown.check
+    if check is None:
+        return
+    if not shown.waiting:
+        message = f"{cited(check.number)} is answered already"
+        raise InboxError(message)
+    if comment is None:
+        where = "" if shown.thread is None else f" in @{shown.thread}"
+        typer.echo(f"{cited(check.number)}, a check{where}:\n{check.text}")
+    said: str = (
+        typer.prompt("What you saw (empty for a tick)", default="", show_default=False)
+        if comment is None
+        else comment
+    )
+    client.ask(AnswerCheck(number=check.number, text=said), CheckShown)
+    typer.echo(f"Answered {cited(check.number)}: whoever asked it is told.")
 
 
 def held_answer(
