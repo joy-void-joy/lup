@@ -49,7 +49,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tokensOf, within, type Filed, type Matter, type Taken } from "./code";
 import { cited, type Block, type Folding, type Span } from "./comments";
 import { BARE, chosenKind, closedAs, folding, hiddenAt, isFolded, mapLetters, mapVerbs, reached, reaching, rebuilt, refold, scrollAfterKey, uncovered, useEditor, vimOf, type Landing } from "./editor";
-import { arrivedLines, arriving, owned, owning, ownersOf, reconcile, settling } from "./reconcile";
+import { arrivedLines, arriving, owned, owning, ownersOf, readBy, reconcile, settling, type Reading } from "./reconcile";
 import { clock, ticked, ticking, type Tick } from "./ticking";
 import { doing, since, type Activity } from "./agents";
 import { Following } from "./follow";
@@ -922,6 +922,8 @@ export function Review({
     }
     // Which comments each fold held as the review was last laid out, by its key: one that comes to hold another opens.
     const held = useRef(new Map<string, Set<string>>());
+    // How the review is being first read: when it was first laid out from what it's laid out from, and laid out last.
+    const loading = useRef<Reading>({ since: null, last: 0, read: false });
 
     useEffect(() => {
         const current = view.current;
@@ -944,14 +946,16 @@ export function Review({
         const changing = state.changes(made.changes);
         const visual = visualOf(current);
         const anchor = landed(laidOut, changing, arriving);
+        const now = Date.now();
+        const flashing = readBy(loading.current, order !== null, now);
         // What's written in Markdown goes with the text, which is read by it in this transaction; and whose each line
-        // is; and, but as the review is first laid out, what arrived flashes.
+        // is; and, once the review has been read (`readBy`), what arrived flashes.
         current.dispatch({
             changes: changing,
             selection: anchor === null ? undefined : { anchor },
             scrollIntoView: anchor !== null,
             annotations: rebuilt.of(true),
-            effects: [sourced.of(laidFor.sources), owned.of(laidOut.runs), ...(before.current === null ? [] : [arrivedLines.of(made.arrived)])],
+            effects: [sourced.of(laidFor.sources), owned.of(laidOut.runs), ...(flashing ? [arrivedLines.of({ lines: made.arrived, at: now })] : [])],
         });
         if (current.state.doc.length !== laidOut.text.length || current.state.sliceDoc() !== laidOut.text) {
             // The changes always make the text laid out; were they ever not to, it's laid out whole, and said.

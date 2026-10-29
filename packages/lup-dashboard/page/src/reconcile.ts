@@ -339,29 +339,91 @@ function shifted(hunk: Hunk, old: number, now: number): Hunk {
     return { from: hunk.from + old, to: hunk.to + old, into: hunk.into + now, until: hunk.until + now };
 }
 
-/** Marks the lines a layout put in or changed, which flash as they arrive, so what came while the operator reads is seen to come. */
-export const arrivedLines = StateEffect.define<readonly { from: number; to: number }[]>();
+/** How long the review goes laid out anew no more than this apart, as it's first read, before it's read: what's read after flashes as it arrives. */
+const READ_QUIET = 1000;
 
-/** Takes the marks of what arrived away, once their flash is over. */
-const settled = StateEffect.define<null>();
+/** How long after the review is first laid out from what it's laid out from it's read, however often it's laid out anew. */
+const READ_AT_MOST = 5000;
+
+/** How the review is being first read: when it was first laid out from all it's laid out from, when it was laid out last, and whether it's read. */
+export interface Reading {
+    since: number | null;
+    last: number;
+    read: boolean;
+}
+
+/**
+ * Return whether what a layout at `now` puts in flashes, `reading` taking it in: once the review has been read. As the
+ * page loads, the review is laid out empty, then again as each thing it reads answers, the items' contexts and files,
+ * the agents' records and drawers, their views, in the first second or so; none of that is what came while the
+ * operator reads, which is what flashes. So the review is read once it has gone `READ_QUIET` with no layout since it
+ * was first laid out from what it's laid out from (`all`, the inbox, the agents running, the draft and the order),
+ * or `READ_AT_MOST` after, as under the hooks of agents at work.
+ */
+export function readBy(reading: Reading, all: boolean, now: number): boolean {
+    if (!reading.read && all) {
+        if (reading.since === null) {
+            reading.since = now;
+        } else if (now - reading.last >= READ_QUIET || now - reading.since >= READ_AT_MOST) {
+            reading.read = true;
+        }
+        reading.last = now;
+    }
+    return reading.read;
+}
+
+/** What a layout put in or changed, but the operator's own words, and when it arrived: each line flashes once, from then. */
+export interface Arrival {
+    lines: readonly { from: number; to: number }[];
+    /** When it arrived, in the milliseconds `Date.now` counts. */
+    at: number;
+}
+
+/** Marks the lines a layout put in or changed, which flash as they arrive, so what came while the operator reads is seen to come. */
+export const arrivedLines = StateEffect.define<Arrival>();
+
+/** Takes away the marks of what arrived up to a time, in the milliseconds `Date.now` counts: their flash is over. */
+export const settled = StateEffect.define<number>();
 
 /** How long a line that arrived is marked: its flash, and a little after. */
-const FLASH = 1600;
+export const FLASH = 1600;
 
-const ARRIVED = Decoration.line({ class: "arrived" });
+/** A line's mark that it arrived, and when: drawn alike whenever it came (`LineDecoration.eq` reads its class alone), so a mark kept never draws its line anew. */
+function arrivedAt(at: number): Decoration {
+    return Decoration.line({ class: "arrived", at });
+}
 
-/** The lines that arrived and still flash, carried with the text; drawn apart from what's drawn of each layout, so drawing anew never flashes a line again. */
+/** When a mark of `arriving` was made. */
+function markedAt(mark: Decoration): number {
+    return (mark.spec as { at: number }).at;
+}
+
+/**
+ * The lines that arrived and still flash, carried with the text; drawn apart from what's drawn of each layout, so
+ * drawing anew never flashes a line again. Each is marked once, as it first arrives, and only for its own flash: a
+ * line that arrives again while it flashes keeps its mark, and what arrives later never keeps an earlier mark, so
+ * what's marked is what came in the last moments, never the review whole, and a line CodeMirror draws anew, as it
+ * scrolls into view, flashes only while what came on it is new (#341).
+ */
 export const arriving = StateField.define<DecorationSet>({
     create: () => Decoration.none,
     update: (marks, transaction) => {
         let next = marks.map(transaction.changes);
         for (const effect of transaction.effects) {
             if (effect.is(settled)) {
-                next = Decoration.none;
-            } else if (effect.is(arrivedLines)) {
+                const until = effect.value;
+                next = next.update({ filter: (_from, _to, mark) => markedAt(mark) > until });
+            } else if (effect.is(arrivedLines) && effect.value.lines.length > 0) {
                 const doc = transaction.state.doc;
-                const starts = [...new Set(effect.value.map((each) => doc.lineAt(Math.min(each.from, doc.length)).from))].sort((a, b) => a - b);
-                next = next.update({ add: starts.map((from) => ARRIVED.range(from)), sort: true });
+                const marked = new Set<number>();
+                next.between(0, doc.length, (from) => {
+                    marked.add(from);
+                });
+                const starts = [...new Set(effect.value.lines.map((each) => doc.lineAt(Math.min(each.from, doc.length)).from))]
+                    .filter((from) => !marked.has(from))
+                    .sort((a, b) => a - b);
+                const mark = arrivedAt(effect.value.at);
+                next = next.update({ add: starts.map((from) => mark.range(from)), sort: true });
             }
         }
         return next;
@@ -369,7 +431,7 @@ export const arriving = StateField.define<DecorationSet>({
     provide: (field) => EditorView.decorations.from(field),
 });
 
-/** Takes the marks of what arrived away once the last has flashed. */
+/** Takes the marks of what arrived away as each one's flash ends: the earliest first, then the next. */
 export const settling = ViewPlugin.fromClass(
     class {
         timer: ReturnType<typeof setTimeout> | null = null;
@@ -377,16 +439,28 @@ export const settling = ViewPlugin.fromClass(
         constructor(readonly view: EditorView) {}
 
         update(update: ViewUpdate) {
-            if (!update.transactions.some((each) => each.effects.some((effect) => effect.is(arrivedLines)))) {
+            if (this.timer === null && update.transactions.some((each) => each.effects.some((effect) => effect.is(arrivedLines) && effect.value.lines.length > 0))) {
+                this.settleNext();
+            }
+        }
+
+        /** Wait for the earliest mark's flash to end, then take away every mark whose flash has, and wait for the next. */
+        settleNext() {
+            let first = Infinity;
+            this.view.state.field(arriving).between(0, this.view.state.doc.length, (_from, _to, mark) => {
+                first = Math.min(first, markedAt(mark));
+            });
+            if (first === Infinity) {
                 return;
             }
-            if (this.timer !== null) {
-                clearTimeout(this.timer);
-            }
-            this.timer = setTimeout(() => {
-                this.timer = null;
-                this.view.dispatch({ effects: settled.of(null) });
-            }, FLASH);
+            this.timer = setTimeout(
+                () => {
+                    this.timer = null;
+                    this.view.dispatch({ effects: settled.of(Date.now() - FLASH) });
+                    this.settleNext();
+                },
+                Math.max(0, first + FLASH - Date.now()),
+            );
         }
 
         destroy() {
