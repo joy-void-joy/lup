@@ -1,4 +1,4 @@
-"""The inbox's files of an earlier lup, converted once onto the ledger, and the check of a conversion the operator runs on the host.
+"""The inbox's files and the review marks' files of an earlier lup, each converted once onto the ledger, and the check of a conversion the operator runs on the host.
 
 `docs/inbox.md`, *Kept on the ledger*. Before the ledger, the inbox kept one JSON
 file per item, per conversation's whereabouts, per diff and per changed files,
@@ -12,22 +12,35 @@ was made or last edited, its links drawn from its fields as every version's
 are (`Inbox.linked`), and where it stands an edge. The files are left as they
 were, a backup.
 
-`rehearsed` runs the same conversion into a scratch ledger and compares it with
-the files, item by item and field by field, timing the conversion and a hook's
-lookups on it. It says counts, times and what differs by item number and field,
-never what an item says, so the operator can run it on their own store and pass
-on what it says.
+The review marks were a file of each module's per repository
+(`MarksLayout`), each module's latest mark of each key. The host service
+converts them the first time it starts on a ledger holding no mark
+(`marks_converted`), in one transaction, each mark an edge the operator drew at
+the time it says (`lup_dev.inbox.marks`), where its repository is one lup knows
+by its git directory; the judge's marks of each branch from before the files
+held them carried in first, where its file says it never carried them
+(`Carrying`). A file of a repository lup knows no name of, whose directory is
+named by its digest, is left where it is, and said.
+
+`rehearsed` runs the inbox's conversion into a scratch ledger and compares it
+with the files, item by item and field by field, timing the conversion and a
+hook's lookups on it; `marks_rehearsed` does the same for the review marks. Each
+says counts, times and what differs by item number, or by repository, module
+and mark, and field, never what an item says or what a mark is on, so the
+operator can run it on their own store and pass on what it says.
 """
 
 import statistics
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
 from lup.types import Model
+from lup_dev.inbox.marks import MarksFile, MarkStore, ReviewMark, keyed
 from lup_dev.inbox.store import (
     KINDS,
     ORDER,
@@ -54,10 +67,10 @@ from lup_ledger.environment.store import Ledger
 from lup_ledger.records import Edge
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Collection
     from datetime import datetime
 
-    from lup_dev.layout import InboxLayout
+    from lup_dev.layout import InboxLayout, Layout
 
 
 def read[M: Model](path: Path, model: type[M]) -> M:
@@ -174,7 +187,7 @@ def conversion(ledger: Ledger, files: Files) -> Converted:
     and the plain records: each conversation's whereabouts, the draft, the
     order and each talk.
     """
-    inbox = Inbox(ledger=ledger)
+    inbox = Inbox(ledger=ledger, marks=MarkStore(ledger=ledger))
 
     def attachments(item: Item) -> dict[str, str]:
         diff = files.diffs.get(item.number)
@@ -510,6 +523,300 @@ def rehearsed(layout: InboxLayout, scratch: Path | None = None) -> Rehearsal:
             edited_file=timings.edited_file,
             edited_ledger=timings.edited_ledger,
             unlinked=unlinked(ledger),
+            differs=differs,
+        )
+    finally:
+        ledger.close()
+
+
+class Carrying(Model):
+    """An older store of one module's marks, which its marks file carries in once, where the file says it never did (`MarksFile.carried`): the judge's marks of each branch from before the files held them."""
+
+    module: str
+    name: str
+    """As `MarksFile.carried` records it."""
+    read: Callable[[Path], list[ReviewMark]]
+    """Its marks of a repository, by the repository's git directory."""
+
+
+class MarkFiles(Model):
+    """The review marks' files of an earlier lup, read: what a conversion keeps on the ledger."""
+
+    kept: dict[Path, list[MarksFile]]
+    """Each module's file of each repository lup knows, by its git directory,
+    with the older stores each carries in."""
+    carried: int
+    """How many marks of an older store were carried in."""
+    unnamed: list[Path]
+    """Each file of a repository lup knows no name of, left as it is."""
+
+    @classmethod
+    def read(
+        cls, layout: Layout, repositories: Collection[Path], carrying: list[Carrying]
+    ) -> MarkFiles:
+        """Read the marks' files lup's state at `layout` keeps of each of `repositories`, each older store of `carrying` carried in where its module's file never did; and list those of any other repository.
+
+        Raise `InboxError` naming a file that doesn't read.
+        """
+
+        def carried(repository: Path, files: list[MarksFile]) -> list[MarksFile]:
+            def one(file: MarksFile, carry: Carrying) -> MarksFile:
+                if file.module != carry.module or carry.name in file.carried:
+                    return file
+                ours = {keyed(each.key): each for each in file.marks}
+                theirs = [
+                    each
+                    for each in carry.read(repository)
+                    if keyed(each.key) not in ours
+                ]
+                return MarksFile(
+                    module=file.module,
+                    marks=[*theirs, *file.marks],
+                    carried=[*file.carried, carry.name],
+                )
+
+            modules = [each.module for each in files]
+            missing = {
+                each.module: MarksFile(module=each.module)
+                for each in carrying
+                if each.module not in modules
+            }
+            found = [*files, *missing.values()]
+            for carry in carrying:
+                found = [one(each, carry) for each in found]
+            return [each for each in found if each.marks]
+
+        named = {layout.marks(each).home: each for each in repositories}
+        read_files = {
+            repository: [
+                read(path, MarksFile) for path in layout.marks(repository).modules()
+            ]
+            for repository in repositories
+        }
+        kept = {
+            repository: carried(repository, files)
+            for repository, files in read_files.items()
+        }
+        before = sum(len(each.marks) for files in read_files.values() for each in files)
+        after = sum(len(each.marks) for files in kept.values() for each in files)
+        return cls(
+            kept={repository: files for repository, files in kept.items() if files},
+            carried=after - before,
+            unnamed=[
+                path
+                for marks in layout.every_marks()
+                if marks.home not in named
+                for path in marks.modules()
+            ],
+        )
+
+
+class MarksConverted(Model):
+    """What a conversion of the review marks kept on the ledger: how many of each."""
+
+    repositories: int
+    modules: int
+    marks: int
+    carried: int
+    """Marks carried in from an older store, among `marks`."""
+    unnamed: int
+    """Files of a repository lup knows no name of, left as they are."""
+
+    def said(self) -> str:
+        """Say it in a line, as the host service tells the operator.
+
+        >>> print(MarksConverted(repositories=1, modules=2, marks=3, carried=0, unnamed=1).said())
+        3 marks of 2 modules in 1 repository; 1 file of a repository lup knows no name of left as it is
+        """
+        unnamed = (
+            ""
+            if not self.unnamed
+            else f"; {many(self.unnamed, 'file')} of a repository lup knows no "
+            f"name of left as {'it is' if self.unnamed == 1 else 'they are'}"
+        )
+        carried = (
+            ""
+            if not self.carried
+            else f", {self.carried} of them carried in from the judge's older store,"
+        )
+        repositories = (
+            "1 repository"
+            if self.repositories == 1
+            else f"{self.repositories} repositories"
+        )
+        return (
+            f"{many(self.marks, 'mark')}{carried} of {many(self.modules, 'module')} "
+            f"in {repositories}{unnamed}"
+        )
+
+
+def marks_converted(store: MarkStore, files: MarkFiles) -> MarksConverted | None:
+    """Keep the marks `files` read on the ledger `store` holds, where it keeps no mark, and say what it kept; none where it keeps marks already, so it runs once.
+
+    One transaction: where the ledger refuses a mark, nothing is kept, and
+    `HostError` says why. The files are left as they were.
+    """
+    if store.held or store.anchors:
+        return None
+    with store.ledger.writing():
+        for repository, kept in files.kept.items():
+            for each in kept:
+                store.moved(repository, each.module, each.marks)
+    return MarksConverted(
+        repositories=len(files.kept),
+        modules=sum(len(each) for each in files.kept.values()),
+        marks=sum(len(each.marks) for kept in files.kept.values() for each in kept),
+        carried=files.carried,
+        unnamed=len(files.unnamed),
+    )
+
+
+class MarksRehearsal(Model):
+    """What a check of the review marks' conversion found: what it read and kept, how long each part took, and what differs."""
+
+    read: float
+    """Reading the files, in seconds."""
+    converted: MarksConverted
+    conversion: float
+    """Converting them onto the scratch ledger, in seconds."""
+    opened: float
+    """Reading every mark back from the ledger, in seconds: what the host service does at its start."""
+    lookup: Timing
+    """A module's mark on one key, as a view reads it."""
+    moved_file: Timing
+    """A mark moved, its module's file read and written whole, as an earlier lup did."""
+    moved_ledger: Timing
+    """A mark moved, an edge drawn on the ledger."""
+    differs: list[Differs]
+
+    def said(self) -> list[str]:
+        """Say it, a line each: counts, times and what differs by repository, module, mark's place and field, never what a mark is on."""
+        differs = (
+            ["Every mark read back alike: what it's on, how far, and when."]
+            if not self.differs
+            else [
+                f"{many(len(self.differs), 'difference')}:",
+                *(f"  {each.of}: {each.field}" for each in self.differs),
+            ]
+        )
+        return [
+            f"Read the review marks' files in {self.read:.2f}s.",
+            f"Converted them in {self.conversion:.2f}s: {self.converted.said()}.",
+            f"Read every mark back from the ledger in {self.opened:.2f}s.",
+            f"A module's mark on one key: {self.lookup.said()}.",
+            f"A mark moved: {self.moved_ledger.said()} on the ledger, {self.moved_file.said()} as a file.",
+            *differs,
+        ]
+
+
+def marks_compared(store: MarkStore, files: MarkFiles) -> list[Differs]:
+    """Return what differs between the marks `store` holds and those `files` read: each mark of each module of each repository, in order, by its place, and any the store holds that the files don't."""
+
+    def module(repository: Path, file: MarksFile) -> list[Differs]:
+        held = store.kept(repository, file.module).marks
+        where = f"{repository} {file.module}"
+        return [
+            *(
+                Differs(of=f"{where} mark {at}", field=field)
+                for at, (wanted, found) in enumerate(
+                    zip(file.marks, held, strict=False), start=1
+                )
+                for field in ReviewMark.model_fields
+                if (keyed(found.key) if field == "key" else getattr(found, field))
+                != (keyed(wanted.key) if field == "key" else getattr(wanted, field))
+            ),
+            *(
+                [Differs(of=where, field=f"{len(held)} marks, not {len(file.marks)}")]
+                if len(held) != len(file.marks)
+                else []
+            ),
+        ]
+
+    wanted = {
+        repository: [each.module for each in kept]
+        for repository, kept in files.kept.items()
+    }
+    extra = [
+        Differs(of=f"{repository} {module}", field="extra")
+        for repository, modules in store.held.items()
+        for module in modules
+        if module not in wanted.get(repository, [])
+    ]
+    return [
+        *(
+            each
+            for repository, kept in files.kept.items()
+            for file in kept
+            for each in module(repository, file)
+        ),
+        *extra,
+    ]
+
+
+def marks_rehearsed(
+    layout: Layout,
+    repositories: Collection[Path],
+    carrying: list[Carrying],
+    scratch: Path | None = None,
+) -> MarksRehearsal:
+    """Convert the review marks' files lup's state at `layout` keeps of `repositories`, read alone, onto a scratch ledger at `scratch`, or a temporary directory removed after, and compare them with what reads back; time the conversion, reading it back, a lookup, and a move each way.
+
+    The moves are timed on the scratch ledger and on a copy of a file under it,
+    never on the files at `layout`. Raise `InboxError` where no repository
+    keeps a mark to time them on.
+    """
+    if scratch is None:
+        with tempfile.TemporaryDirectory() as temporary:
+            return marks_rehearsed(layout, repositories, carrying, Path(temporary))
+    started = time.perf_counter()
+    files = MarkFiles.read(layout, repositories, carrying)
+    reading = time.perf_counter() - started
+    marked = [
+        (repository, each)
+        for repository, kept in files.kept.items()
+        for each in kept
+        if each.marks
+    ]
+    if not marked:
+        message = f"no repository's review marks are kept under {layout.state}"
+        raise InboxError(message)
+    ledger = Ledger.opened(LedgerLayout(home=scratch / "ledger"), KINDS)
+    try:
+        started = time.perf_counter()
+        converted = marks_converted(MarkStore(ledger=ledger), files)
+        converting = time.perf_counter() - started
+        if converted is None:
+            message = "the scratch ledger held marks before the conversion"
+            raise InboxError(message)
+        started = time.perf_counter()
+        store = MarkStore.opened(ledger)
+        opening = time.perf_counter() - started
+        differs = marks_compared(store, files)
+        [(repository, file), *_] = marked
+        keys = [each.key for each in file.marks]
+        turns = iter(range(1_000_000))
+        lookup = timed(
+            lambda: store.of(repository, file.module, keys[next(turns) % len(keys)]),
+            200,
+        )
+        copy = scratch / "files" / f"{file.module}.json"
+        write_model(copy, file)
+        last = file.marks[-1]
+
+        def moved_file() -> None:
+            kept = read_model(copy, MarksFile) or file
+            write_model(copy, kept.with_marks([last]))
+
+        return MarksRehearsal(
+            read=reading,
+            converted=converted,
+            conversion=converting,
+            opened=opening,
+            lookup=lookup,
+            moved_file=timed(moved_file, 100),
+            moved_ledger=timed(
+                lambda: store.moved(repository, file.module, [last]), 100
+            ),
             differs=differs,
         )
     finally:

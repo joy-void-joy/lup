@@ -50,7 +50,7 @@ from lup_dev.inbox import context, lines, marks
 from lup_dev.inbox.delivery import (
     Delivery,
 )
-from lup_dev.inbox.marks import CORE, MarkStore
+from lup_dev.inbox.marks import CORE
 from lup_dev.inbox.reading import Narrowing, Reader, Spelling
 from lup_dev.inbox.roster import Roster, ids
 from lup_dev.inbox.store import (
@@ -74,7 +74,6 @@ from lup_dev.inbox.store import (
 from lup_dev.inbox.texts import (
     written,
 )
-from lup_dev.layout import Layout
 from lup_dev.listing import Span
 from lup_ledger.parties import Conversation, Operator
 from lup_ledger.records import Edge
@@ -670,8 +669,6 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
     """Answers `ListInbox`: the items waiting for the operator, and how far they've seen each group they're in."""
 
     delivery: Delivery
-    layout: Layout
-    """lup's state on the host, where each repository's review marks are kept."""
 
     @override
     def request(self) -> type[ListInbox]:
@@ -711,8 +708,9 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
                 each.sender for each in items if isinstance(each.sender, Conversation)
             )
         )
+        store = self.delivery.inbox.marks
         kept = {
-            repository: MarkStore(layout=self.layout.marks(repository)).kept(CORE)
+            repository: store.kept(repository, CORE)
             for repository in dict.fromkeys(each.repository for each in senders)
         }
 
@@ -1346,13 +1344,11 @@ class DraftSending(Model, Handler[SendDraft], arbitrary_types_allowed=True):
         )
 
 
-def routes(
-    delivery: Delivery, recorded: dict[str, Recorded], layout: Layout
-) -> list[Route]:
-    """Route each of the inbox's kinds to its handler, over one delivery; an item's moment, a conversation and its calls read from the records `recorded`, a conversation's record read again only once it changed; how far the operator has seen each group, from the review marks kept in lup's state at `layout`."""
+def routes(delivery: Delivery, recorded: dict[str, Recorded]) -> list[Route]:
+    """Route each of the inbox's kinds to its handler, over one delivery, which holds the review marks how far the operator has seen each group is read from; an item's moment, a conversation and its calls read from the records `recorded`, a conversation's record read again only once it changed."""
     recording = context.Recording()
     return [
-        Route.reading(Listing(delivery=delivery, layout=layout)),
+        Route.reading(Listing(delivery=delivery)),
         Route.reading(InboxReading(delivery=delivery)),
         Route.reading(Showing(delivery=delivery)),
         Route.to(Answering(delivery=delivery)),

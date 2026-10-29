@@ -39,7 +39,7 @@ from lup.errors import LupError
 from lup.rooms import ContainerError, Mount, Podman, Room
 from lup.rooms.engine import stopped
 from lup.types import JsonObject, Model, MutableModel
-from lup_dev import commanding
+from lup_dev import commanding, conversions
 from lup_dev.accounts import AccountError, Accounts, Login, RuntimeLogin
 
 # lup: ignore("runtime-mention", why="the one place listing the adapters")
@@ -64,6 +64,7 @@ from lup_dev.codescan.reference import reference
 from lup_dev.codescan.ruff import Ruff
 from lup_dev.commanding import RoomExchanges, RoomMarks
 from lup_dev.confined import Confined
+from lup_dev.conversions import inbox_opened
 from lup_dev.copies import removable
 from lup_dev.declaration.load import declared_profiles, load, person_layer
 from lup_dev.declaration.profiles import chosen
@@ -123,7 +124,6 @@ from lup_dev.host.watch import Changes
 from lup_dev.host.workers import JudgeHook, WorkerJudge, Workers, WorkersAsking
 from lup_dev.inbox.bearings import RepositoryBearings
 from lup_dev.inbox.citations import plainly
-from lup_dev.inbox.conversion import converted, rehearsed
 from lup_dev.inbox.delivery import (
     Delivery,
     clocked,
@@ -157,7 +157,6 @@ from lup_dev.inbox.reading import Flags, by_agent, counted, landed
 from lup_dev.inbox.roots import RootNames
 from lup_dev.inbox.roster import ids
 from lup_dev.inbox.store import (
-    KINDS,
     Answer,
     Approval,
     ChangedFile,
@@ -167,7 +166,6 @@ from lup_dev.inbox.store import (
     Friction,
     HeldChange,
     HowItFelt,
-    Inbox,
     InboxError,
     Item,
     Message,
@@ -269,8 +267,6 @@ from lup_dev.settings import LupDevSettings, TerminalVariables
 from lup_dev.staging import Changed, Lines, StagingError
 from lup_dev.stored import read_model, write_model
 from lup_dev.worker import RepositoryModules, worked
-from lup_ledger.environment.layout import LedgerLayout
-from lup_ledger.environment.store import Ledger
 from lup_ledger.parties import Conversation as InboxConversation
 from lup_ledger.parties import Party
 from lup_transcripts.environment import views
@@ -539,27 +535,15 @@ def control_routes(
     *,
     waits: Waits,
 ) -> list[Route]:
-    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; the dashboard's, `dashboard`'s address; the drawer's, what a branch changed since the operator approved it, read from lup's state at `layout`, each file a landing waits on in `waits` held there; the landings waiting; the review marks, kept there; and a module's view the dashboard shows, through `views`, watched at its own triggers, where it's given."""
+    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; the dashboard's, `dashboard`'s address; the drawer's, what a branch changed since the operator approved it, read from lup's state at `layout`, each file a landing waits on in `waits` held there; the landings waiting; the review marks, as `delivery`'s inbox holds them; and a module's view the dashboard shows, through `views`, watched at its own triggers, where it's given."""
     return [
-        *inbox_routes(delivery, recorded, layout),
+        *inbox_routes(delivery, recorded),
         Route.to(dashboard_shown(dashboard)),
         *since_routes(delivery, layout, LupDevSettings().lup_integration_branch, waits),
         *waits_routes(waits),
-        *marks_routes(layout, delivery.clock, delivery.inbox.changes),
+        *marks_routes(delivery.inbox.marks, delivery.clock, delivery.inbox.changes),
         *([] if views is None else [Route.reading(views, watch=views.watched)]),
     ]
-
-
-def ledger_opened(layout: Layout) -> Ledger:
-    """Open the ledger in lup's state at `layout`, the inbox's kinds among those it reads, converting the inbox's files of an earlier lup onto it where it keeps no item yet (`lup_dev.inbox.conversion`), and saying so."""
-    ledger = Ledger.opened(LedgerLayout.of(layout), KINDS)
-    kept = converted(ledger, layout.inbox)
-    if kept is not None and kept.items:
-        typer.echo(
-            f"lup: the inbox's files at {layout.inbox.home} are on the ledger at "
-            f"{ledger.layout.database}: {kept.said()}. The files stay as they were."
-        )
-    return ledger
 
 
 @host.callback(invoke_without_command=True)
@@ -583,7 +567,7 @@ def host_serve(context: typer.Context) -> None:
     pushes = Pushes()
     dashboard = installed_dashboard(settings, layout.host)
     delivery = Delivery(
-        inbox=Inbox.opened(ledger_opened(layout), changes),
+        inbox=inbox_opened(layout, changes, typer.echo),
         waker=wakers,
         pushes=pushes,
         layout=layout.host,
@@ -1588,22 +1572,26 @@ def inbox_check_conversion(
         ),
     ] = None,
 ) -> None:
-    """Rehearse converting the inbox's files onto the ledger, in a scratch directory removed after, and compare them.
+    """Rehearse each conversion lup runs as its host service starts, in a scratch directory removed after, and compare what it keeps with what it converts.
 
-    It reads the files alone, and writes only in the scratch directory: the
-    ledger lup's host service keeps, and the files, are left as they are. It
-    says how many of each it converted, how long the conversion, the inbox's
-    opening, a hook's lookup and a write each way took, and what differs, by
-    item number and field, never what an item says. It exits with 1 where
-    something differs.
+    The inbox's files onto the ledger; the review marks' files onto it, the
+    judge's older marks of each branch carried in. It reads lup's files alone,
+    and the ledger the host service keeps through a connection that only reads
+    it, writing only in the scratch directory: lup's state is left as it is.
+    For each, it says how many of each it converted, how long it took, and
+    what differs, by item number, or by repository, module and mark, and
+    field, never what an item says or what a mark is on. It exits with 1
+    where something differs.
     """
     layout = Layout.of(LupDevSettings())
-    rehearsal = rehearsed(
-        layout.inbox if files is None else InboxLayout(home=files.resolve())
+    checks = conversions.checked(
+        layout, layout.inbox if files is None else InboxLayout(home=files.resolve())
     )
-    for line in rehearsal.said():
-        typer.echo(line)
-    if rehearsal.differs:
+    for check in checks:
+        typer.echo(f"{check.of}:")
+        for line in check.said:
+            typer.echo(f"  {line}")
+    if any(each.differs for each in checks):
         raise typer.Exit(1)
 
 

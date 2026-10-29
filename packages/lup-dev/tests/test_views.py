@@ -353,7 +353,7 @@ from lup.tools.serving import Answer
 from lup_dev import Core, Module, Modules, ModuleServing, Project, Serving
 from lup_dev.declaration.resolve import resolve
 from lup_dev.inbox.exchanges import Exchanges
-from lup_dev.inbox.marks import StoredMarks
+from lup_dev.inbox.marks import MarkStore, StoredMarks
 from lup_dev.inbox.protocol import Exchanged
 from lup_dev.layout import Layout
 from lup_dev.worker import RepositoryModules, routes, serve
@@ -404,7 +404,7 @@ modules = RepositoryModules(
     recorded={{}},
     layout=Layout(state=Path({data!r}), data=Path({data!r})),
     exchanges=Unexchanged(),
-    marks=StoredMarks(layout=Layout(state=Path({data!r}), data=Path({data!r}))),
+    marks=StoredMarks(store=MarkStore.kept_in(Layout(state=Path({data!r}), data=Path({data!r})))),
 )
 asyncio.run(
     serve(routes(modules, judge, called), Path(sys.argv[2]), Path(sys.argv[3]), said)

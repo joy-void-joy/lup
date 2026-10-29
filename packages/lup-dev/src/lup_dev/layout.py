@@ -282,20 +282,20 @@ class ReviewedLayout(Model):
 
 
 class MarksLayout(Model):
-    """Where one repository's review marks are kept (`lup_dev.inbox.marks`): one file of each module's, and the lock each is written under."""
+    """Where an earlier lup kept one repository's review marks, before they were on the ledger: one file of each module's (`MarksFile`, `lup_dev.inbox.marks`), converted once onto it and left as a backup, and the lock each was written under."""
 
     home: Path
 
     def module(self, module: str) -> Path:
-        """Say where module `module`'s marks are kept, one file for all of them."""
+        """Say where module `module`'s marks were kept, one file for all of them."""
         return self.home / f"{module}.json"
 
     def lock(self, module: str) -> Path:
-        """Say where the lock module `module`'s marks are written under is held, so two writers never lose one's mark."""
+        """Say where the lock module `module`'s marks were written under is held, so two writers never lost one's mark."""
         return self.home / f"{module}.lock"
 
     def modules(self) -> list[Path]:
-        """List each module's marks kept here, the file of each (`module`), its lock left out."""
+        """List each module's marks file here (`module`), its lock left out."""
         return sorted(self.home.glob("*.json")) if self.home.is_dir() else []
 
 
@@ -1068,7 +1068,7 @@ class Layout(Model):
         return ReviewedLayout(home=self.repository(repository) / "reviewed")
 
     def marks(self, repository: Path) -> MarksLayout:
-        """Say where a repository's review marks are kept, by its git directory."""
+        """Say where an earlier lup kept a repository's review marks, by its git directory."""
         return self.marks_in(self.repository(repository))
 
     def marks_in(self, kept: Path) -> MarksLayout:
@@ -1076,7 +1076,7 @@ class Layout(Model):
         return MarksLayout(home=kept / "marks")
 
     def every_marks(self) -> list[MarksLayout]:
-        """Return where each repository lup keeps something of keeps its review marks, by the directory of lup's each has (`repositories`)."""
+        """Return where an earlier lup kept the review marks of each repository lup keeps something of, by the directory of lup's each has (`repositories`)."""
         kept = self.repositories
         found = (
             sorted(each for each in kept.iterdir() if each.is_dir())

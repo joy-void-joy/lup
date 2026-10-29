@@ -57,6 +57,8 @@ from lup.tools import speaking
 from lup.types import Model, MutableModel
 from lup_dev.host.protocol import HostError
 from lup_dev.host.watch import Changes, Touched
+from lup_dev.inbox.marks import KINDS as MARKS
+from lup_dev.inbox.marks import MarkStore
 from lup_dev.inbox.parts import PartId
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
@@ -1574,9 +1576,10 @@ def talked_on(key: str) -> str:
 
 
 KINDS = Kinds(
-    nodes=[*THREADS.nodes, ItemNode],
+    nodes=[*THREADS.nodes, *MARKS.nodes, ItemNode],
     edges=[
         *THREADS.edges,
+        *MARKS.edges,
         StandsTold,
         StandsWaiting,
         StandsAnswered,
@@ -1589,7 +1592,7 @@ KINDS = Kinds(
         Cites,
     ],
 )
-"""The kinds the host service's ledger reads: the ledger's own, threads, and the inbox's."""
+"""The kinds the host service's ledger reads: the ledger's own, threads, review marks, and the inbox's."""
 
 
 class Inbox(MutableModel, arbitrary_types_allowed=True):
@@ -1607,6 +1610,9 @@ class Inbox(MutableModel, arbitrary_types_allowed=True):
     """By number."""
     whereabouts: dict[str, Whereabouts] = {}
     """By conversation's key."""
+    marks: MarkStore
+    """Every repository's review marks, each module's latest held, on the same
+    ledger (`lup_dev.inbox.marks`)."""
     changes: Changes | None = None
     """Told each time an item is written, so the host service's watches see it
     (`host/watch.py`); none tells nothing."""
@@ -1617,7 +1623,7 @@ class Inbox(MutableModel, arbitrary_types_allowed=True):
 
     @classmethod
     def opened(cls, ledger: Ledger, changes: Changes | None = None) -> Inbox:
-        """Read the inbox `ledger` holds, telling `changes` of each item written; one holding no item is empty.
+        """Read the inbox `ledger` holds, and the review marks beside it, telling `changes` of each item written; one holding no item is empty.
 
         Raise `InboxError` where a record doesn't read.
         """
@@ -1625,7 +1631,8 @@ class Inbox(MutableModel, arbitrary_types_allowed=True):
             nodes = ledger.every(ItemNode)
             states = {each.target: each.state for each in ledger.drawn_of(Stands)}
             places = ledger.plains(HEARD, Whereabouts)
-        except LupLedgerError as unread:
+            marks = MarkStore.opened(ledger)
+        except (LupLedgerError, HostError) as unread:
             message = f"the inbox on the ledger doesn't read: {unread}"
             raise InboxError(message) from unread
         return cls(
@@ -1635,6 +1642,7 @@ class Inbox(MutableModel, arbitrary_types_allowed=True):
                 for each in nodes
             },
             whereabouts={each.conversation.key(): each for each in places.values()},
+            marks=marks,
             changes=changes,
         )
 

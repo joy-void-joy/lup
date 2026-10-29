@@ -246,7 +246,9 @@ def serving(tmp_path: Path, volume: int = 1) -> RepositoryModules:
         recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path),
         exchanges=Unexchanged(),
-        marks=StoredMarks(layout=Layout(state=tmp_path, data=tmp_path)),
+        marks=StoredMarks(
+            store=MarkStore.kept_in(Layout(state=tmp_path, data=tmp_path))
+        ),
     )
 
 
@@ -612,7 +614,9 @@ def listening(tmp_path: Path) -> RepositoryModules:
         recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
         exchanges=Unexchanged(),
-        marks=StoredMarks(layout=Layout(state=tmp_path, data=tmp_path / "data")),
+        marks=StoredMarks(
+            store=MarkStore.kept_in(Layout(state=tmp_path, data=tmp_path / "data"))
+        ),
     )
 
 
@@ -682,7 +686,9 @@ def test_each_launch_s_hooks_read_its_own_runtime_s_records(tmp_path: Path) -> N
         },
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
         exchanges=Unexchanged(),
-        marks=StoredMarks(layout=Layout(state=tmp_path, data=tmp_path / "data")),
+        marks=StoredMarks(
+            store=MarkStore.kept_in(Layout(state=tmp_path, data=tmp_path / "data"))
+        ),
     )
     one = launch(tmp_path)
     two = one.model_copy(update={"launch": "two", "runtime": "codex"})
@@ -765,7 +771,9 @@ def guarding(tmp_path: Path) -> RepositoryModules:
         recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
         exchanges=Unexchanged(),
-        marks=StoredMarks(layout=Layout(state=tmp_path, data=tmp_path / "data")),
+        marks=StoredMarks(
+            store=MarkStore.kept_in(Layout(state=tmp_path, data=tmp_path / "data"))
+        ),
     )
 
 
@@ -927,7 +935,9 @@ def viewing(tmp_path: Path) -> RepositoryModules:
         recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path),
         exchanges=Unexchanged(),
-        marks=StoredMarks(layout=Layout(state=tmp_path, data=tmp_path)),
+        marks=StoredMarks(
+            store=MarkStore.kept_in(Layout(state=tmp_path, data=tmp_path))
+        ),
     )
 
 
@@ -1030,12 +1040,18 @@ def test_a_view_reads_its_module_s_review_marks_watched_as_each_it_read_moves(
         "viewer",
         "9",
     )
-    marks = MarkStore(layout=Layout(state=tmp_path, data=tmp_path).marks(repository))
+    marks = MarkStore.kept_in(Layout(state=tmp_path, data=tmp_path))
     marks.moved(
-        "viewer", [ReviewMark(key={"session": "s1"}, up_to="4", at=clock.now())]
+        repository,
+        "viewer",
+        [ReviewMark(key={"session": "s1"}, up_to="4", at=clock.now())],
     )
     # Another module's mark of the same key is its own.
-    marks.moved("other", [ReviewMark(key={"session": "s1"}, up_to="8", at=clock.now())])
+    marks.moved(
+        repository,
+        "other",
+        [ReviewMark(key={"session": "s1"}, up_to="8", at=clock.now())],
+    )
     assert asyncio.run(viewing(tmp_path).view(asked)).blocks.text() == "read to 4"
 
 
