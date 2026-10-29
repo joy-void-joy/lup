@@ -53,6 +53,7 @@ import { arrivedLines, arriving, owned, owning, ownersOf, readBy, reconcile, set
 import { clock, ticked, ticking, type Tick } from "./ticking";
 import { doing, since, type Activity } from "./agents";
 import { Following } from "./follow";
+import { usePaced } from "./hooks";
 import { mapOutlineKey, mapScopeKeys, Outline, setOutlineFocus, setOutlineToggle, setScopeJump, useNarrow, type ScopeKey } from "./Outline";
 import { Stack, type Mark as StackMark } from "./Stack";
 import { redrawn, structureMargin, type Labelled, type Structured } from "./rails";
@@ -128,6 +129,10 @@ import {
 } from "./review";
 import { freshRows, type Fresh } from "./since";
 import type { Instance, Offer, Remote, Running, Span as ViewSpan } from "./views";
+
+/** The least and the most time between two layouts of what the host answers, in milliseconds (`usePaced`). */
+const PACED_LEAST = 250;
+const PACED_MOST = 2000;
 
 /** Where the page asks the review to go: an agent's group, by its conversation, numbered so the same one asked twice goes twice. */
 export interface Jump {
@@ -630,15 +635,15 @@ function revisualized(view: EditorView, was: { anchor: number; head: number } | 
 }
 
 export function Review({
-    items,
-    agents,
+    items: itemsGiven,
+    agents: agentsGiven,
     draft: given,
     typed,
     change,
-    banner,
-    called,
-    around,
-    drawers,
+    banner: bannerGiven,
+    called: calledGiven,
+    around: aroundGiven,
+    drawers: drawersGiven,
     send,
     opened: told,
     jump,
@@ -648,14 +653,14 @@ export function Review({
     placed,
     pending,
     list,
-    seeing,
+    seeing: seeingGiven,
     implying,
     activities,
     parents,
     states,
     overview,
     setOverview,
-    order,
+    order: orderGiven,
     keepOrder,
     looks,
     running,
@@ -673,37 +678,46 @@ export function Review({
     const places = useRef<string[]>([]);
     const toldOrder = useRef<string[] | null>(null);
     const narrow = useNarrow();
-    const arranging = useMemo(() => ({ parents, looks, running, remote }), [parents, looks, running, remote]);
+    // What the host answers, as the review lays it out: taken no more often than four times what laying the review
+    // out last cost, a quarter of a second at least and two at most, so the hooks of agents at work, each answering
+    // the agent's record, its views and the listing again, lay it out at most a few times a second, however often they
+    // come, whatever the machine (#341). The operator's own words and marks are laid out at once.
+    const cost = useRef(0);
+    const answered = useMemo(
+        () => ({ items: itemsGiven, agents: agentsGiven, banner: bannerGiven, called: calledGiven, around: aroundGiven, drawers: drawersGiven, seeing: seeingGiven, order: orderGiven, parents, looks, running, remote }),
+        [itemsGiven, agentsGiven, bannerGiven, calledGiven, aroundGiven, drawersGiven, seeingGiven, orderGiven, parents, looks, running, remote],
+    );
+    const { items, agents, banner, called, around, drawers, seeing, order, ...arrangedBy } = usePaced(answered, () => Math.min(PACED_MOST, Math.max(PACED_LEAST, 4 * cost.current)));
+    const arranging = useMemo(() => arrangedBy, [arrangedBy.parents, arrangedBy.looks, arrangedBy.running, arrangedBy.remote]);
     // The review as it was last laid out into the editor, which each comment is followed from (`Arranging.previous`).
     const before = useRef<Laid | null>(null);
     // Laid out with what's typed in a comment, though it isn't given yet, so the text laid out is what the editor holds.
     const layout = useMemo(() => {
         const drafted = typed.current ?? given;
-        return {
+        const began = performance.now();
+        const laidOut = laid(
+            items,
+            agents,
+            (head, later, parts) => `━━ ${banner(head)}${parts === "" ? "" : ` · ${parts}`}${later ? " · later" : ""} ━━`,
+            // What the item's kind says of it, then what the core says of how it stands.
+            (item, later, said) => {
+                const told = [
+                    `${cited(item.number)} ${said}`,
+                    ...((item.edits ?? []).length > 0 ? ["edited"] : []),
+                    ...(fresh(item, seeing) ? ["new"] : []),
+                    when(item.made),
+                    ...(later ? ["later"] : []),
+                ];
+                return `── ${told.join(" · ")} ──`;
+            },
             drafted,
-            laidOut: laid(
-                items,
-                agents,
-                (head, later, parts) => `━━ ${banner(head)}${parts === "" ? "" : ` · ${parts}`}${later ? " · later" : ""} ━━`,
-                // What the item's kind says of it, then what the core says of how it stands.
-                (item, later, said) => {
-                    const told = [
-                        `${cited(item.number)} ${said}`,
-                        ...((item.edits ?? []).length > 0 ? ["edited"] : []),
-                        ...(fresh(item, seeing) ? ["new"] : []),
-                        when(item.made),
-                        ...(later ? ["later"] : []),
-                    ];
-                    return `── ${told.join(" · ")} ──`;
-                },
-                drafted,
-                around,
-                ordered(places.current, order ?? []),
-                drawers,
-                called,
-                { ...arranging, previous: before.current },
-            ),
-        };
+            around,
+            ordered(places.current, order ?? []),
+            drawers,
+            called,
+            { ...arranging, previous: before.current },
+        );
+        return { drafted, laidOut, cost: performance.now() - began };
         // `typed` is read as the review is laid out, whatever else lays it out: what's typed alone doesn't.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [items, agents, banner, called, given, around, drawers, seeing, arranging, order]);
@@ -952,6 +966,7 @@ export function Review({
             change(editor.latest.current);
             return;
         }
+        const began = performance.now();
         const arriving = landing.current;
         const state = current.state;
         const head = state.selection.main.head;
@@ -1062,6 +1077,8 @@ export function Review({
         if (arriving !== null && "comment" in arriving) {
             editor.enter();
         }
+        // What laying the review out cost: laying it out, and putting it in the editor, which paces the next (`usePaced`).
+        cost.current = layout.cost + performance.now() - began;
     }, [laidOut, withImplied, seeing]);
 
     // What's drawn beside the text, as it's laid out now and as each agent is doing: how long each item has waited,
