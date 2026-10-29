@@ -276,12 +276,14 @@ def test_frictions_and_how_it_felt_are_kept_as_written_and_end_nothing() -> None
     ]
 
 
-def test_friction_and_how_it_felt_each_take_one_text_alone() -> None:
-    for tool in [friction, how_it_felt]:
+def test_friction_and_how_it_felt_each_take_one_text_a_friction_an_optional_title() -> (
+    None
+):
+    for tool, fields in [(friction, ["text", "title"]), (how_it_felt, ["text"])]:
         schema = tool.spec().input_schema
         properties = schema["properties"]
         assert isinstance(properties, dict)
-        assert list(properties) == ["text"]
+        assert list(properties) == fields
         assert schema["required"] == ["text"]
 
 
