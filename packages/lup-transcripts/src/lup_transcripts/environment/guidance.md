@@ -9,7 +9,7 @@ They hold the operator's own words, and what each was answering: where the reaso
 - `{{ run("lup-dev transcripts show") }} <session>`: what the operator typed in one session, each time after what the agent last said before it; `--all` for the whole conversation, each run of tool calls a line;
 - `{{ run("lup-dev transcripts list") }}`: every kept session, newest first.
 
-What the operator sent through lup (their reviews, answers and replies) isn't in what they typed: lup's `inbox` tool, given a session's name or id as `conversation` and `whole`, reads its exchange with them, each of their comments under what it answers, and `show` ends with that call where there's one.
+What the operator sent through lup (their reviews, answers and replies) isn't in what they typed: lup's `inbox` tool, given a session's name or id as `conversation` and `whole`, reads the session's exchange with them, each of their comments under what it answers, and `show` ends with that call where there's one.
 
 What you read there is what was said then, not a decision the operator made for now: when their view matters, ask them.
 {% endif %}
