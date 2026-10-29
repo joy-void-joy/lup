@@ -21,7 +21,7 @@ from lup_dev.declaration.kinds import (
     Session,
     Verbs,
 )
-from lup_dev.declaration.looks import BRANCH_FOLD, HOLD
+from lup_dev.declaration.looks import BRANCH_FOLD, HOLD, ROLE_FOLD
 from lup_dev.declaration.module import Module
 from lup_dev.host.records import PAUSE
 
@@ -69,11 +69,11 @@ class Core(Module):
     it into the user-level settings of each package manager the room's image
     holds, which a project's own setting outranks (`docs/launch.md`, *The
     package age gate*)."""
-    folds: Folds = Folds.of(*SHELL_FOLDS, BRANCH_FOLD)
+    folds: Folds = Folds.of(*SHELL_FOLDS, BRANCH_FOLD, ROLE_FOLD)
     """The shell's fold kinds, an agent's group, an item, its context, and a
     file's, a body's and a run of unchanged lines'; and the judge's, each place
-    of "since you approved" where an agent worked in several, the core's until
-    the judge is a module: every repository's looks carry them first, and a
+    of "since you approved" where an agent worked in several and each role's
+    files in one, the core's until the judge is a module: every repository's looks carry them first, and a
     person's layer changes how each starts and whether `zR` and `zM` reach it,
     `Folds().replace("lines", …)`."""
     levels: Levels = Levels()

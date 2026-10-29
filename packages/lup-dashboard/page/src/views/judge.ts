@@ -10,7 +10,7 @@
 import type { ChangedFile, Diff, Mark } from "../code";
 import type { components } from "../generated/api";
 import { filesOf, heldSaid, isHeld, placeSaid, reviewedLine } from "../since";
-import { conversationOf, whose, type Answer, type Blocks, type Line, type OfAgent, type Offer, type PlacedFile, type Shown, type Span, type View } from "../views";
+import { conversationOf, whose, type Answer, type Blocks, type Fold, type Line, type OfAgent, type Offer, type PlacedFile, type Shown, type Span, type View } from "../views";
 
 type Item = components["schemas"]["Item"];
 type Reading = components["schemas"]["Reading"];
@@ -347,15 +347,16 @@ export function sinceSummary(shown: Since | null): string {
  */
 function counts(files: readonly SinceFile[]): { parts: string[]; open: number; waiting: boolean } {
     const held = files.filter(isHeld).length;
-    const changedFiles = files.flatMap((each) => (each.file == null || isHeld(each) ? [] : [each.file]));
-    const folded = new Map<Folded, number>();
+    const changedFiles = files.filter((each) => each.file != null && !isHeld(each));
+    // Each automatic file, folded whole and never counted as to review, said as its role's (`2 tests`), else `automatic`.
+    const folded = new Map<string, { reason: Reason; count: number }>();
     for (const each of changedFiles) {
-        const why = foldedOf(each, false);
+        const why = automaticOf(each);
         if (why !== null) {
-            folded.set(why, (folded.get(why) ?? 0) + 1);
+            folded.set(why.one, { reason: why, count: (folded.get(why.one)?.count ?? 0) + 1 });
         }
     }
-    const open = changedFiles.length - [...folded.values()].reduce((sum, each) => sum + each, 0);
+    const open = changedFiles.length - [...folded.values()].reduce((sum, each) => sum + each.count, 0);
     // Reviewed, settled: those standing as the operator saw them with no flagged write waiting, which fold at the end.
     const kept = files.filter((each) => each.file == null && (each.flags ?? []).length === 0 && each.held == null).length;
     const flagged = files.filter((each) => (each.flags ?? []).length > 0 && !isHeld(each)).length;
@@ -363,10 +364,68 @@ function counts(files: readonly SinceFile[]): { parts: string[]; open: number; w
         ...(held === 0 ? [] : [`${held} held at landing`]),
         ...(open === 0 ? [] : [`${open} to review`]),
         ...(flagged === 0 ? [] : [`${flagged} flagged`]),
-        ...[...folded].map(([why, count]) => `${count} ${count === 1 ? FOLDED[why].one : FOLDED[why].many}`),
+        ...[...folded.values()].map(({ reason, count }) => `${count} ${count === 1 ? reason.one : reason.many}`),
         ...(files.length === 0 ? [] : [`${kept} of ${files.length} reviewed`]),
     ];
     return { parts: said, open: open + held, waiting: open > 0 || flagged > 0 || held > 0 };
+}
+
+/** What `automatic` says of a file folded whole for its role's level, beside a test's or a data file's own words. */
+const AUTOMATIC: Reason = { said: "automatic", one: "automatic", many: "automatic" };
+
+/**
+ * Return why a file of "since you approved" folds whole, asking nothing, never counted as to review, where it does: its
+ * role's level `automatic`, said as a test or a data file (`FOLDED`) where it's one, else `automatic`; by its role alone,
+ * a test's or a data file's, where no level was read; none where it's to review.
+ */
+function automaticOf(file: SinceFile): Reason | null {
+    if (file.file == null) {
+        return null;
+    }
+    const role = file.role ?? file.file.reading?.role ?? null;
+    const named = role === "test" || role === "data" ? FOLDED[role] : AUTOMATIC;
+    if (file.level != null) {
+        return file.level === "automatic" ? named : null;
+    }
+    const why = foldedOf(file.file, false);
+    return why === null ? null : FOLDED[why];
+}
+
+/** What the drawer calls each role's group, in the order it lays them out: production code its source. */
+const ROLES: readonly { role: string; called: string }[] = [
+    { role: "production", called: "source" },
+    { role: "test", called: "tests" },
+    { role: "docs", called: "docs" },
+    { role: "data", called: "data" },
+    { role: "operator", called: "operator's documents" },
+    { role: "protected", called: "protected" },
+    { role: "excluded", called: "excluded" },
+    { role: "scratch", called: "scratch" },
+];
+
+/** Return a file's role, as the host read it, else as the judge's reading of it says; production where neither says. */
+function roleOf(file: SinceFile): string {
+    return file.role ?? file.file?.reading?.role ?? "production";
+}
+
+/**
+ * Say what one role's group of a place holds, after its name: how many files are held at landing, to review, flagged,
+ * automatic, and reviewed (`source · 3 to review`, `tests · 5 automatic`).
+ */
+function grouped(called: string, files: readonly SinceFile[]): string {
+    const held = files.filter(isHeld).length;
+    const automatic = files.filter((each) => !isHeld(each) && automaticOf(each) !== null).length;
+    const open = files.filter((each) => each.file != null && !isHeld(each) && automaticOf(each) === null).length;
+    const flagged = files.filter((each) => (each.flags ?? []).length > 0 && !isHeld(each)).length;
+    const kept = files.filter((each) => each.file == null && (each.flags ?? []).length === 0 && each.held == null).length;
+    const parts = [
+        ...(held === 0 ? [] : [`${held} held at landing`]),
+        ...(open === 0 ? [] : [`${open} to review`]),
+        ...(flagged === 0 ? [] : [`${flagged} flagged`]),
+        ...(automatic === 0 ? [] : [`${automatic} automatic`]),
+        ...(kept === 0 ? [] : [`${kept} reviewed`]),
+    ];
+    return [called, ...parts].join(" · ");
 }
 
 /** Return what marking `files` of the place `place` of the agent `conversation` names reviewed at the versions shown offers, Space d on a file or on the drawer, as the reply is sent; a comment on one implying it where `commented`. */
@@ -436,24 +495,24 @@ function placed(conversation: Conversation, place: SincePlace, first: boolean, e
                   : [];
         return { block: "line", id, version: file.version ?? null, offers, spans: [{ text: reviewedLine(file), tone: "reviewed" }] };
     };
-    const left = files.flatMap((file): Blocks["blocks"] => {
+    const shownOf = (file: SinceFile): Blocks["blocks"] => {
         if (file.file == null) {
             return (file.flags ?? []).length > 0 || file.held != null ? [line(file)] : [];
         }
-        const diff = withKey(judged(file.file, false, file.file.before == null, file.version ?? null), key);
+        const diff = leveled(withKey(judged(file.file, false, file.file.before == null, file.version ?? null), key), file);
         const offers = file.held != null ? heldOffers(conversation, place, file) : [reviewing(conversation, place, [file], "mark it reviewed")];
         const offered: Diff = withOffers(file.held == null ? diff : heldDiff(diff, file), offers);
         each.set(offered.id, { file, place, block: offered.id });
         return [offered];
-    });
-    const settled = files.filter((file) => file.file == null && (file.flags ?? []).length === 0 && file.held == null);
-    const done: Blocks["blocks"] =
-        settled.length === 0
+    };
+    const settledOf = (list: readonly SinceFile[], id: string): Blocks["blocks"] => {
+        const settled = list.filter((file) => file.file == null && (file.flags ?? []).length === 0 && file.held == null);
+        return settled.length === 0
             ? []
             : [
                   {
                       block: "fold",
-                      id: `reviewed${key}`,
+                      id,
                       version: null,
                       offers: [],
                       kind: "lines",
@@ -463,7 +522,69 @@ function placed(conversation: Conversation, place: SincePlace, first: boolean, e
                       content: settled.map(line),
                   },
               ];
-    return [...left, ...done];
+    };
+    // Each role's files a group of its own where the place shows several roles, in the order `ROLES` lays them out.
+    const roles = [...new Set(files.map(roleOf))];
+    if (roles.length < 2) {
+        return [...files.flatMap(shownOf), ...settledOf(files, `reviewed${key}`)];
+    }
+    const order = (role: string) => {
+        const at = ROLES.findIndex((each) => each.role === role);
+        return at < 0 ? ROLES.length : at;
+    };
+    return roles
+        .sort((a, b) => order(a) - order(b))
+        .map((role): Fold => {
+            const mine = files.filter((file) => roleOf(file) === role);
+            const called = ROLES.find((each) => each.role === role)?.called ?? role;
+            // A group asking nothing, each file automatic or settled, starts folded.
+            const quiet = mine.every((file) => !isHeld(file) && (file.flags ?? []).length === 0 && (file.file == null || automaticOf(file) !== null));
+            const reviewable = mine.filter((file) => (file.file != null || (file.flags ?? []).length > 0) && file.held?.declined !== true);
+            return {
+                block: "fold",
+                id: `role ${role}${key}`,
+                version: null,
+                // Space d on its line marks each of its files, each by its own offer; this says so.
+                offers: reviewable.length === 0 ? [] : [reviewing(conversation, place, reviewable, "mark each of its files reviewed")],
+                kind: "role",
+                summary: [{ text: grouped(called, mine), tone: "summary" }],
+                open: !quiet,
+                barred: false,
+                content: [...mine.flatMap(shownOf), ...settledOf(mine, `reviewed ${role}${key}`)],
+            };
+        });
+}
+
+/** Each file's `Diff` as its role's level shows it, made once for each level, so the file's layout is kept with it. */
+const levelled = new WeakMap<Diff, Map<string, Diff>>();
+
+/**
+ * Return `diff` as its role's level shows it in "since you approved": folded whole, saying `automatic`, where the level
+ * is `automatic`; where it's reviewed, flagged or held, not folded for its role alone, a test's or a data file's, but
+ * as any file is, by what it asks (`automatic` where it asks nothing); itself where no level was read, or it's shown
+ * so already.
+ */
+function leveled(diff: Diff, file: SinceFile): Diff {
+    const level = file.level ?? null;
+    if (level === null || file.file == null) {
+        return diff;
+    }
+    const automatic = level === "automatic";
+    const folded = foldedOf(file.file, false) !== null;
+    if (automatic ? !(diff.open ?? true) : !folded) {
+        return diff;
+    }
+    const kept = levelled.get(diff) ?? new Map<string, Diff>();
+    const found = kept.get(level);
+    if (found !== undefined) {
+        return found;
+    }
+    const says = diff.says ?? [];
+    const made: Diff = automatic
+        ? { ...diff, open: false, automatic: true, says: ["automatic", ...says.filter((each) => each !== "automatic")] }
+        : { ...diff, open: !(diff.automatic ?? false), says: diff.automatic === true ? ["automatic", ...says.filter((each) => each !== "automatic" && each !== FOLDED.test.said && each !== FOLDED.data.said)] : says.filter((each) => each !== FOLDED.test.said && each !== FOLDED.data.said) };
+    levelled.set(diff, kept.set(level, made));
+    return made;
 }
 
 /**
@@ -496,11 +617,12 @@ export const SINCE: View<OfAgent> = {
                 : showing.map((place) => {
                       const first = place === places[0];
                       const said = counts(place.files ?? []).parts;
+                      const reviewable = (place.files ?? []).filter((file) => (file.file != null || (file.flags ?? []).length > 0) && file.held?.declined !== true);
                       return {
                           block: "fold",
                           id: `place${placeKey(place, first)}`,
                           version: null,
-                          offers: [],
+                          offers: reviewable.length === 0 ? [] : [reviewing(conversation, place, reviewable, "mark each of its files reviewed")],
                           kind: "branch",
                           summary: [{ text: [placeSaid(place), ...(said.length === 0 ? ["nothing"] : said)].join(" · "), tone: "summary" }],
                           open: true,

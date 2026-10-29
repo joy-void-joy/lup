@@ -67,6 +67,18 @@ out or a branch alone, where the agent worked in several: its files under it,
 its line saying which and what it holds (`lup_dev/policy/since.py`). `Core`
 declares it beside the shell's (`Core.folds`) until the judge is a module, so a
 person's layer changes it as it does theirs."""
+ROLE_FOLD = FoldKind(
+    name="role",
+    letter="l",
+    called="roles",
+    one="the role",
+    level=1,
+    colour="warn",
+)
+"""The files of one path role in a place of "since you approved", where it shows
+several: under a line saying the role and what its files hold (`source · 3 to
+review`, `tests · 5 automatic`), which Space `d` settles whole
+(`lup_dev/policy/since.py`). `Core` declares it beside the shell's."""
 REVIEWED_TONE = Tone(name="reviewed", like="muted")
 """A file of "since you approved" standing as the operator last saw it: a line
 of its own, with nothing under it."""

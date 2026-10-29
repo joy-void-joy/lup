@@ -106,6 +106,21 @@
       "by_all": true
     },
     {
+      "name": "role",
+      "letter": "l",
+      "called": "roles",
+      "one": "the role",
+      "level": 1,
+      "opens": "together",
+      "colour": "warn",
+      "chord": true,
+      "whole": false,
+      "counts": true,
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
+    },
+    {
       "name": "earlier",
       "letter": "e",
       "called": "earlier exchanges and steps",

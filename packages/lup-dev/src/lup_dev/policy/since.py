@@ -64,6 +64,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, override
 from pydantic import Field, StringConstraints
 
 from lup.types import Model, MutableModel
+from lup_dev.declaration.kinds import Level
 from lup_dev.git import Git, GitError, Tracked
 from lup_dev.host.protocol import Reply, Request
 from lup_dev.host.service import Handler, Reading, Route
@@ -90,7 +91,7 @@ from lup_dev.policy.landing import (
     worktrees,
 )
 from lup_dev.policy.reviewed import Mark, Reviews
-from lup_dev.policy.roles import Roles
+from lup_dev.policy.roles import Role, Roles
 from lup_dev.policy.store import Store
 from lup_dev.policy.waits import Declined, Wait, Waits
 from lup_dev.policy.worktrees import SessionIndex
@@ -184,6 +185,14 @@ class SinceFile(Model):
     held: HeldAt | None = None
     """The landing waiting on it, where one does: it's shown as the landing's
     tip holds it, and answered by marking it reviewed or declining it."""
+    role: Role | None = None
+    """Its path's role, by the repository's declaration the judge last loaded,
+    which the drawer groups its files by; none where it has loaded none."""
+    level: Level | None = None
+    """How far its role's changes are reviewed (`Levels`): an `automatic` one
+    folds whole, asking nothing; a `hidden` one isn't shown, but where flagged
+    writes wait on it or a landing does. None where no declaration was
+    loaded."""
 
 
 class SincePlace(Model):
@@ -386,6 +395,12 @@ class Snapshot(Model, arbitrary_types_allowed=True):
         """Return the file at `path` as the drawer shows it, from `before`, what the operator last saw (`saw`) or the version at `base`, to `after`, as it stands or as the landing waiting on it holds it, unless it stands as its diff starts (`same`), where it's a line; none where they saw none, it stands as at `base` and no landing waits on it."""
         flags = self.baseline.flags(self.branches, path)
         held = self.held.get(path)
+        role = None if self.roles is None else self.roles.role(path)
+        level = (
+            None
+            if role is None or self.roles is None
+            else self.roles.declaration.levels.get(role)
+        )
         shown = SinceFile(
             path=path,
             version=self.shown(path),
@@ -393,7 +408,12 @@ class Snapshot(Model, arbitrary_types_allowed=True):
             since=None if saw is None else saw.item,
             reviewed=None if saw is None or saw.reviewed is None else saw.reviewed.at,
             held=None if held is None else held.at,
+            role=role,
+            level=level,
         )
+        # A role the operator never reviews is left out, but where something waits on them.
+        if level == "hidden" and not flags and held is None:
+            return None
         if same:
             return None if saw is None and held is None else shown
         latest = max(flags, key=lambda each: each.number, default=None)
@@ -901,12 +921,14 @@ class Standing(Model, arbitrary_types_allowed=True):
             paths = list(
                 dict.fromkeys(each.flagged.path for each in baseline.flags(branches))
             )
+            roles = self.reader.roles(self.party, located.root)
             return SincePlace(
                 branch=located.branch,
                 gone=True,
                 files=[
                     SinceFile(
                         path=path,
+                        role=None if roles is None else roles.role(path),
                         flags=[each.number for each in baseline.flags(branches, path)],
                     )
                     for path in paths

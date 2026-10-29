@@ -133,9 +133,9 @@
       ],
       "blocks": [
         {
-          "block": "diff",
-          "id": "file reader.py",
-          "version": "b1",
+          "block": "fold",
+          "id": "role production",
+          "version": null,
           "offers": [
             {
               "action": "policy-review-since",
@@ -153,6 +153,10 @@
                   {
                     "path": "reader.py",
                     "version": "b1"
+                  },
+                  {
+                    "path": "clock.py",
+                    "version": "b3"
                   }
                 ]
               },
@@ -160,35 +164,145 @@
               "chord": null,
               "runs": "send",
               "commented": true,
-              "says": "mark it reviewed"
+              "says": "mark each of its files reviewed"
             }
           ],
-          "path": "reader.py",
-          "before": null,
-          "after": {
-            "kind": "text",
-            "text": "import json\n\n\ndef read(path):\n    # lup: ignore(\"x\", why=\"y\")\n    return path.read_text().split(\"\\n\")\n"
-          },
-          "says": [
-            "new file"
-          ],
-          "marks": [
+          "kind": "role",
+          "summary": [
             {
-              "taken": "flagged",
-              "said": "new-file",
-              "side": "after",
-              "first": null,
-              "last": null
+              "text": "source · 1 to review · 2 flagged · 1 reviewed",
+              "tone": "summary"
             }
           ],
           "open": true,
-          "automatic": false,
-          "design": true
+          "barred": false,
+          "content": [
+            {
+              "block": "diff",
+              "id": "file reader.py",
+              "version": "b1",
+              "offers": [
+                {
+                  "action": "policy-review-since",
+                  "argument": {
+                    "conversation": {
+                      "party": "conversation",
+                      "repository": "/r/lup.git",
+                      "runtime": "claude",
+                      "session": "s1",
+                      "agent": "a1"
+                    },
+                    "worktree": "/w/feat",
+                    "branch": "feat",
+                    "files": [
+                      {
+                        "path": "reader.py",
+                        "version": "b1"
+                      }
+                    ]
+                  },
+                  "verb": "done",
+                  "chord": null,
+                  "runs": "send",
+                  "commented": true,
+                  "says": "mark it reviewed"
+                }
+              ],
+              "path": "reader.py",
+              "before": null,
+              "after": {
+                "kind": "text",
+                "text": "import json\n\n\ndef read(path):\n    # lup: ignore(\"x\", why=\"y\")\n    return path.read_text().split(\"\\n\")\n"
+              },
+              "says": [
+                "new file"
+              ],
+              "marks": [
+                {
+                  "taken": "flagged",
+                  "said": "new-file",
+                  "side": "after",
+                  "first": null,
+                  "last": null
+                }
+              ],
+              "open": true,
+              "automatic": false,
+              "design": true
+            },
+            {
+              "block": "line",
+              "id": "reviewed clock.py",
+              "version": "b3",
+              "offers": [
+                {
+                  "action": "policy-review-since",
+                  "argument": {
+                    "conversation": {
+                      "party": "conversation",
+                      "repository": "/r/lup.git",
+                      "runtime": "claude",
+                      "session": "s1",
+                      "agent": "a1"
+                    },
+                    "worktree": "/w/feat",
+                    "branch": "feat",
+                    "files": [
+                      {
+                        "path": "clock.py",
+                        "version": "b3"
+                      }
+                    ]
+                  },
+                  "verb": "done",
+                  "chord": null,
+                  "runs": "send",
+                  "commented": true,
+                  "says": "mark it reviewed"
+                }
+              ],
+              "spans": [
+                {
+                  "text": "clock.py · as you saw it in @12 · flagged @60",
+                  "tone": "reviewed"
+                }
+              ]
+            },
+            {
+              "block": "fold",
+              "id": "reviewed production",
+              "version": null,
+              "offers": [],
+              "kind": "lines",
+              "summary": [
+                {
+                  "text": "1 reviewed",
+                  "tone": "summary"
+                }
+              ],
+              "open": false,
+              "barred": false,
+              "content": [
+                {
+                  "block": "line",
+                  "id": "reviewed notes.md",
+                  "version": "b4",
+                  "offers": [],
+                  "spans": [
+                    {
+                      "text": "notes.md · reviewed at b4",
+                      "tone": "reviewed"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         },
         {
-          "block": "diff",
-          "id": "file test_reader.py",
-          "version": "b2",
+          "block": "fold",
+          "id": "role test",
+          "version": null,
           "offers": [
             {
               "action": "policy-review-since",
@@ -213,70 +327,13 @@
               "chord": null,
               "runs": "send",
               "commented": true,
-              "says": "mark it reviewed"
+              "says": "mark each of its files reviewed"
             }
           ],
-          "path": "test_reader.py",
-          "before": null,
-          "after": {
-            "kind": "text",
-            "text": "def test_read():\n    assert True\n"
-          },
-          "says": [
-            "test"
-          ],
-          "marks": [],
-          "open": false,
-          "automatic": true,
-          "design": true
-        },
-        {
-          "block": "line",
-          "id": "reviewed clock.py",
-          "version": "b3",
-          "offers": [
-            {
-              "action": "policy-review-since",
-              "argument": {
-                "conversation": {
-                  "party": "conversation",
-                  "repository": "/r/lup.git",
-                  "runtime": "claude",
-                  "session": "s1",
-                  "agent": "a1"
-                },
-                "worktree": "/w/feat",
-                "branch": "feat",
-                "files": [
-                  {
-                    "path": "clock.py",
-                    "version": "b3"
-                  }
-                ]
-              },
-              "verb": "done",
-              "chord": null,
-              "runs": "send",
-              "commented": true,
-              "says": "mark it reviewed"
-            }
-          ],
-          "spans": [
-            {
-              "text": "clock.py · as you saw it in @12 · flagged @60",
-              "tone": "reviewed"
-            }
-          ]
-        },
-        {
-          "block": "fold",
-          "id": "reviewed",
-          "version": null,
-          "offers": [],
-          "kind": "lines",
+          "kind": "role",
           "summary": [
             {
-              "text": "1 reviewed",
+              "text": "tests · 1 automatic",
               "tone": "summary"
             }
           ],
@@ -284,16 +341,49 @@
           "barred": false,
           "content": [
             {
-              "block": "line",
-              "id": "reviewed notes.md",
-              "version": "b4",
-              "offers": [],
-              "spans": [
+              "block": "diff",
+              "id": "file test_reader.py",
+              "version": "b2",
+              "offers": [
                 {
-                  "text": "notes.md · reviewed at b4",
-                  "tone": "reviewed"
+                  "action": "policy-review-since",
+                  "argument": {
+                    "conversation": {
+                      "party": "conversation",
+                      "repository": "/r/lup.git",
+                      "runtime": "claude",
+                      "session": "s1",
+                      "agent": "a1"
+                    },
+                    "worktree": "/w/feat",
+                    "branch": "feat",
+                    "files": [
+                      {
+                        "path": "test_reader.py",
+                        "version": "b2"
+                      }
+                    ]
+                  },
+                  "verb": "done",
+                  "chord": null,
+                  "runs": "send",
+                  "commented": true,
+                  "says": "mark it reviewed"
                 }
-              ]
+              ],
+              "path": "test_reader.py",
+              "before": null,
+              "after": {
+                "kind": "text",
+                "text": "def test_read():\n    assert True\n"
+              },
+              "says": [
+                "test"
+              ],
+              "marks": [],
+              "open": false,
+              "automatic": true,
+              "design": true
             }
           ]
         }
@@ -491,7 +581,33 @@
           "block": "fold",
           "id": "place",
           "version": null,
-          "offers": [],
+          "offers": [
+            {
+              "action": "policy-review-since",
+              "argument": {
+                "conversation": {
+                  "party": "conversation",
+                  "repository": "/r/lup.git",
+                  "runtime": "claude",
+                  "session": "s1",
+                  "agent": "a1"
+                },
+                "worktree": "/w/feat",
+                "branch": "feat",
+                "files": [
+                  {
+                    "path": "reader.py",
+                    "version": "b1"
+                  }
+                ]
+              },
+              "verb": "done",
+              "chord": null,
+              "runs": "send",
+              "commented": true,
+              "says": "mark each of its files reviewed"
+            }
+          ],
           "kind": "branch",
           "summary": [
             {
@@ -600,7 +716,33 @@
           "block": "fold",
           "id": "place on fix",
           "version": null,
-          "offers": [],
+          "offers": [
+            {
+              "action": "policy-review-since",
+              "argument": {
+                "conversation": {
+                  "party": "conversation",
+                  "repository": "/r/lup.git",
+                  "runtime": "claude",
+                  "session": "s1",
+                  "agent": "a1"
+                },
+                "worktree": null,
+                "branch": "fix",
+                "files": [
+                  {
+                    "path": "reader.py",
+                    "version": "c1"
+                  }
+                ]
+              },
+              "verb": "done",
+              "chord": null,
+              "runs": "send",
+              "commented": true,
+              "says": "mark each of its files reviewed"
+            }
+          ],
           "kind": "branch",
           "summary": [
             {
@@ -663,7 +805,33 @@
           "block": "fold",
           "id": "place on old",
           "version": null,
-          "offers": [],
+          "offers": [
+            {
+              "action": "policy-review-since",
+              "argument": {
+                "conversation": {
+                  "party": "conversation",
+                  "repository": "/r/lup.git",
+                  "runtime": "claude",
+                  "session": "s1",
+                  "agent": "a1"
+                },
+                "worktree": null,
+                "branch": "old",
+                "files": [
+                  {
+                    "path": "gone.py",
+                    "version": null
+                  }
+                ]
+              },
+              "verb": "done",
+              "chord": null,
+              "runs": "send",
+              "commented": true,
+              "says": "mark each of its files reviewed"
+            }
+          ],
           "kind": "branch",
           "summary": [
             {
@@ -711,6 +879,517 @@
                   "tone": "reviewed"
                 }
               ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "files of three roles, each by its level",
+    "repository": "/r/lup.git",
+    "argument": {
+      "runtime": "claude",
+      "session": "s1",
+      "agent": "a1"
+    },
+    "given": {
+      "drawers": {
+        "[\"/r/lup.git\",\"claude\",\"s1\",\"a1\"]": {
+          "since": {
+            "kind": "policy-since",
+            "version": "v5",
+            "same": false,
+            "places": [
+              {
+                "worktree": "/w/feat",
+                "branch": "feat",
+                "gone": false,
+                "files": [
+                  {
+                    "path": "reader.py",
+                    "version": "b1",
+                    "flags": [
+                      59
+                    ],
+                    "role": "production",
+                    "level": "review",
+                    "file": {
+                      "path": "reader.py",
+                      "before": null,
+                      "after": {
+                        "kind": "text",
+                        "text": "import json\n\n\ndef read(path):\n    # lup: ignore(\"x\", why=\"y\")\n    return path.read_text().split(\"\\n\")\n"
+                      },
+                      "reading": {
+                        "role": "production",
+                        "asks": [
+                          {
+                            "name": "new-file",
+                            "taken": "flagged",
+                            "side": "after"
+                          }
+                        ],
+                        "findings": []
+                      }
+                    }
+                  },
+                  {
+                    "path": "test_reader.py",
+                    "version": "b2",
+                    "flags": [],
+                    "role": "test",
+                    "level": "review",
+                    "file": {
+                      "path": "test_reader.py",
+                      "before": null,
+                      "after": {
+                        "kind": "text",
+                        "text": "def test_read():\n    assert True\n"
+                      },
+                      "reading": {
+                        "role": "test",
+                        "asks": [
+                          {
+                            "name": "new-file",
+                            "taken": "flagged",
+                            "side": "after"
+                          }
+                        ],
+                        "findings": []
+                      }
+                    }
+                  },
+                  {
+                    "path": "docs/reader.md",
+                    "version": "b5",
+                    "flags": [],
+                    "role": "docs",
+                    "level": "automatic",
+                    "file": {
+                      "path": "docs/reader.md",
+                      "before": null,
+                      "after": {
+                        "kind": "text",
+                        "text": "# Reader\n"
+                      },
+                      "reading": {
+                        "role": "docs",
+                        "asks": [],
+                        "findings": []
+                      }
+                    }
+                  },
+                  {
+                    "path": "notes.py",
+                    "version": "b6",
+                    "flags": [],
+                    "role": "production",
+                    "level": "review",
+                    "file": {
+                      "path": "notes.py",
+                      "before": {
+                        "kind": "text",
+                        "text": "a = 1\n"
+                      },
+                      "after": {
+                        "kind": "text",
+                        "text": "a = 2\n"
+                      },
+                      "reading": {
+                        "role": "production",
+                        "asks": [],
+                        "findings": []
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    "module": "judge",
+    "view": "since",
+    "answer": {
+      "summary": [
+        {
+          "text": "since you approved · 3 to review · 1 flagged · 1 automatic · 0 of 4 reviewed",
+          "tone": "plain"
+        }
+      ],
+      "waiting": true,
+      "count": 3,
+      "offers": [
+        {
+          "action": "policy-review-since",
+          "argument": {
+            "conversation": {
+              "party": "conversation",
+              "repository": "/r/lup.git",
+              "runtime": "claude",
+              "session": "s1",
+              "agent": "a1"
+            },
+            "worktree": "/w/feat",
+            "branch": "feat",
+            "files": [
+              {
+                "path": "reader.py",
+                "version": "b1"
+              },
+              {
+                "path": "test_reader.py",
+                "version": "b2"
+              },
+              {
+                "path": "docs/reader.md",
+                "version": "b5"
+              },
+              {
+                "path": "notes.py",
+                "version": "b6"
+              }
+            ]
+          },
+          "verb": "done",
+          "chord": null,
+          "runs": "send",
+          "commented": true,
+          "says": "mark every file reviewed"
+        }
+      ],
+      "blocks": [
+        {
+          "block": "fold",
+          "id": "role production",
+          "version": null,
+          "offers": [
+            {
+              "action": "policy-review-since",
+              "argument": {
+                "conversation": {
+                  "party": "conversation",
+                  "repository": "/r/lup.git",
+                  "runtime": "claude",
+                  "session": "s1",
+                  "agent": "a1"
+                },
+                "worktree": "/w/feat",
+                "branch": "feat",
+                "files": [
+                  {
+                    "path": "reader.py",
+                    "version": "b1"
+                  },
+                  {
+                    "path": "notes.py",
+                    "version": "b6"
+                  }
+                ]
+              },
+              "verb": "done",
+              "chord": null,
+              "runs": "send",
+              "commented": true,
+              "says": "mark each of its files reviewed"
+            }
+          ],
+          "kind": "role",
+          "summary": [
+            {
+              "text": "source · 2 to review · 1 flagged",
+              "tone": "summary"
+            }
+          ],
+          "open": true,
+          "barred": false,
+          "content": [
+            {
+              "block": "diff",
+              "id": "file reader.py",
+              "version": "b1",
+              "offers": [
+                {
+                  "action": "policy-review-since",
+                  "argument": {
+                    "conversation": {
+                      "party": "conversation",
+                      "repository": "/r/lup.git",
+                      "runtime": "claude",
+                      "session": "s1",
+                      "agent": "a1"
+                    },
+                    "worktree": "/w/feat",
+                    "branch": "feat",
+                    "files": [
+                      {
+                        "path": "reader.py",
+                        "version": "b1"
+                      }
+                    ]
+                  },
+                  "verb": "done",
+                  "chord": null,
+                  "runs": "send",
+                  "commented": true,
+                  "says": "mark it reviewed"
+                }
+              ],
+              "path": "reader.py",
+              "before": null,
+              "after": {
+                "kind": "text",
+                "text": "import json\n\n\ndef read(path):\n    # lup: ignore(\"x\", why=\"y\")\n    return path.read_text().split(\"\\n\")\n"
+              },
+              "says": [
+                "new file"
+              ],
+              "marks": [
+                {
+                  "taken": "flagged",
+                  "said": "new-file",
+                  "side": "after",
+                  "first": null,
+                  "last": null
+                }
+              ],
+              "open": true,
+              "automatic": false,
+              "design": true
+            },
+            {
+              "block": "diff",
+              "id": "file notes.py",
+              "version": "b6",
+              "offers": [
+                {
+                  "action": "policy-review-since",
+                  "argument": {
+                    "conversation": {
+                      "party": "conversation",
+                      "repository": "/r/lup.git",
+                      "runtime": "claude",
+                      "session": "s1",
+                      "agent": "a1"
+                    },
+                    "worktree": "/w/feat",
+                    "branch": "feat",
+                    "files": [
+                      {
+                        "path": "notes.py",
+                        "version": "b6"
+                      }
+                    ]
+                  },
+                  "verb": "done",
+                  "chord": null,
+                  "runs": "send",
+                  "commented": true,
+                  "says": "mark it reviewed"
+                }
+              ],
+              "path": "notes.py",
+              "before": {
+                "kind": "text",
+                "text": "a = 1\n"
+              },
+              "after": {
+                "kind": "text",
+                "text": "a = 2\n"
+              },
+              "says": [
+                "automatic"
+              ],
+              "marks": [],
+              "open": false,
+              "automatic": true,
+              "design": false
+            }
+          ]
+        },
+        {
+          "block": "fold",
+          "id": "role test",
+          "version": null,
+          "offers": [
+            {
+              "action": "policy-review-since",
+              "argument": {
+                "conversation": {
+                  "party": "conversation",
+                  "repository": "/r/lup.git",
+                  "runtime": "claude",
+                  "session": "s1",
+                  "agent": "a1"
+                },
+                "worktree": "/w/feat",
+                "branch": "feat",
+                "files": [
+                  {
+                    "path": "test_reader.py",
+                    "version": "b2"
+                  }
+                ]
+              },
+              "verb": "done",
+              "chord": null,
+              "runs": "send",
+              "commented": true,
+              "says": "mark each of its files reviewed"
+            }
+          ],
+          "kind": "role",
+          "summary": [
+            {
+              "text": "tests · 1 to review",
+              "tone": "summary"
+            }
+          ],
+          "open": true,
+          "barred": false,
+          "content": [
+            {
+              "block": "diff",
+              "id": "file test_reader.py",
+              "version": "b2",
+              "offers": [
+                {
+                  "action": "policy-review-since",
+                  "argument": {
+                    "conversation": {
+                      "party": "conversation",
+                      "repository": "/r/lup.git",
+                      "runtime": "claude",
+                      "session": "s1",
+                      "agent": "a1"
+                    },
+                    "worktree": "/w/feat",
+                    "branch": "feat",
+                    "files": [
+                      {
+                        "path": "test_reader.py",
+                        "version": "b2"
+                      }
+                    ]
+                  },
+                  "verb": "done",
+                  "chord": null,
+                  "runs": "send",
+                  "commented": true,
+                  "says": "mark it reviewed"
+                }
+              ],
+              "path": "test_reader.py",
+              "before": null,
+              "after": {
+                "kind": "text",
+                "text": "def test_read():\n    assert True\n"
+              },
+              "says": [
+                "new file"
+              ],
+              "marks": [
+                {
+                  "taken": "flagged",
+                  "said": "new-file",
+                  "side": "after",
+                  "first": null,
+                  "last": null
+                }
+              ],
+              "open": true,
+              "automatic": false,
+              "design": true
+            }
+          ]
+        },
+        {
+          "block": "fold",
+          "id": "role docs",
+          "version": null,
+          "offers": [
+            {
+              "action": "policy-review-since",
+              "argument": {
+                "conversation": {
+                  "party": "conversation",
+                  "repository": "/r/lup.git",
+                  "runtime": "claude",
+                  "session": "s1",
+                  "agent": "a1"
+                },
+                "worktree": "/w/feat",
+                "branch": "feat",
+                "files": [
+                  {
+                    "path": "docs/reader.md",
+                    "version": "b5"
+                  }
+                ]
+              },
+              "verb": "done",
+              "chord": null,
+              "runs": "send",
+              "commented": true,
+              "says": "mark each of its files reviewed"
+            }
+          ],
+          "kind": "role",
+          "summary": [
+            {
+              "text": "docs · 1 automatic",
+              "tone": "summary"
+            }
+          ],
+          "open": false,
+          "barred": false,
+          "content": [
+            {
+              "block": "diff",
+              "id": "file docs/reader.md",
+              "version": "b5",
+              "offers": [
+                {
+                  "action": "policy-review-since",
+                  "argument": {
+                    "conversation": {
+                      "party": "conversation",
+                      "repository": "/r/lup.git",
+                      "runtime": "claude",
+                      "session": "s1",
+                      "agent": "a1"
+                    },
+                    "worktree": "/w/feat",
+                    "branch": "feat",
+                    "files": [
+                      {
+                        "path": "docs/reader.md",
+                        "version": "b5"
+                      }
+                    ]
+                  },
+                  "verb": "done",
+                  "chord": null,
+                  "runs": "send",
+                  "commented": true,
+                  "says": "mark it reviewed"
+                }
+              ],
+              "path": "docs/reader.md",
+              "before": null,
+              "after": {
+                "kind": "text",
+                "text": "# Reader\n"
+              },
+              "says": [
+                "automatic"
+              ],
+              "marks": [],
+              "open": false,
+              "automatic": true,
+              "design": true
             }
           ]
         }
