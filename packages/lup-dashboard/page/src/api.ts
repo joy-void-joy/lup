@@ -1,7 +1,7 @@
 // The dashboard's API as the page calls it: the host's requests, asked or watched.
 // Their types are generated from the server's own description (`pnpm run types`),
 // itself made from the host's models, so the page and the host can't disagree.
-import type { paths } from "./generated/api";
+import type { components, paths } from "./generated/api";
 
 type Asking = paths["/api/ask"]["post"];
 /** A request the page may send: one of the host's own. */
@@ -10,6 +10,9 @@ export type Asked = Asking["requestBody"]["content"]["application/json"];
 export type Replied = Asking["responses"][200]["content"]["application/json"];
 /** A reply of one kind. */
 export type ReplyOf<K extends Replied["kind"]> = Extract<Replied, { kind: K }>;
+
+/** What a demo serving a copy of the operator's dashboard state says of it (`GET /api/about`). */
+export type OfCopy = components["schemas"]["OfCopy"];
 
 /** Where a watch stands: its reply arriving, the dashboard out of reach and tried again, or the page's token refused, which trying again can't mend. */
 export type Connection = "connecting" | "live" | "retrying" | "refused";

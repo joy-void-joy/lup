@@ -48,7 +48,7 @@ or answered; clearing old ones goes with lup's cleanup.
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Literal, Self, override
+from typing import TYPE_CHECKING, Annotated, Literal, Self, override
 
 from pydantic import Field, JsonValue, computed_field, model_validator
 
@@ -58,11 +58,15 @@ from lup.types import Model, MutableModel
 from lup_dev.host.protocol import HostError
 from lup_dev.host.watch import Changes, Touched
 from lup_dev.inbox.parts import PartId
+from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
 from lup_ledger.errors import LupLedgerError
 from lup_ledger.parties import Conversation, Lup, Operator, Party, Writer
 from lup_ledger.records import Edge, Kinds, Node
 from lup_ledger.threads import KINDS as THREADS
+
+if TYPE_CHECKING:
+    from lup_dev.layout import Layout
 
 
 class InboxError(HostError):
@@ -1614,6 +1618,20 @@ class Inbox(MutableModel, arbitrary_types_allowed=True):
             whereabouts={each.conversation.key(): each for each in places.values()},
             changes=changes,
         )
+
+    @classmethod
+    def kept_in(cls, layout: Layout, changes: Changes | None = None) -> Inbox:
+        """Open the inbox kept on the ledger in lup's state at `layout`, as the host service keeps it, its tables brought to this lup's (`Ledger.opened`); with nothing converted onto it, as the host service converts an earlier lup's files (`lup_dev.inbox.conversion`).
+
+        Raise `InboxError` where the ledger is at a later version of its tables
+        than this lup reads, or a record doesn't read.
+        """
+        try:
+            ledger = Ledger.opened(LedgerLayout.of(layout), KINDS)
+        except LupLedgerError as unread:
+            message = f"the inbox's ledger doesn't open: {unread}"
+            raise InboxError(message) from unread
+        return cls.opened(ledger, changes)
 
     def draft(self) -> Draft:
         """Return the operator's draft reply; an empty one where they have none."""

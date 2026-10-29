@@ -592,14 +592,22 @@ function leveled(diff: Diff, file: SinceFile): Diff {
  * flagged writes or files held at landing, the files held and to review counted for the overview; each place the
  * agent worked laid out (`placed`), alone as the drawer's own, or, where they worked in several, each a fold of the
  * judge's `branch` kind, open, its line saying which and what it counts. None where their branches changed nothing, or
- * aren't read.
+ * aren't read yet; where the host refused to read them, its line says it's unavailable, and the line under it why.
  */
 export const SINCE: View<OfAgent> = {
     module: "judge",
     view: "since",
     answer: (of, shown, repository) => {
         const conversation = conversationOf(repository, of);
-        const since = shown.drawers.get(whose(conversation))?.since ?? null;
+        const drawers = shown.drawers.get(whose(conversation));
+        const since = drawers?.since ?? null;
+        const unread = drawers?.unread ?? null;
+        if (since === null && unread !== null) {
+            // What the host refused to read is said in the drawer's place, rather than leaving it out as if nothing changed.
+            const why: Line = { block: "line", id: "unread", version: null, offers: [], spans: [{ text: unread, tone: "refused" }] };
+            const summary = [{ text: "since you approved · unavailable", tone: "plain" }];
+            return { blocks: { summary, waiting: false, count: 0, offers: [], blocks: [why] } };
+        }
         const files = since === null ? [] : filesOf(since);
         if (since === null || files.length === 0) {
             return null;

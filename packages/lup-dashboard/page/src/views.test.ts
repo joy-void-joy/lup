@@ -290,6 +290,15 @@ describe("the views the page lays out itself", () => {
         expect(refused?.blocks.at(-1)).toMatchObject({ id: "refused", spans: [{ text: "no files: the copy is gone", tone: "refused" }] });
     });
 
+    it("says \"since you approved\" is unavailable, and why, where the host refused to read it, as a copy of the operator's state does", () => {
+        const given = { drawers: { [whose(PARSER)]: { unread: "the copy reads no worktree" } } };
+        const since = producerOf("judge", "since")?.answer(AGENT as never, shownOf(given), REPOSITORY)?.blocks;
+        expect((since?.summary ?? []).map((each) => each.text).join("")).toBe("since you approved · unavailable");
+        expect(since?.blocks).toMatchObject([{ id: "unread", spans: [{ text: "the copy reads no worktree", tone: "refused" }] }]);
+        expect(since?.waiting).toBe(false);
+        expect(producerOf("judge", "since")?.answer(AGENT as never, shownOf({ drawers: { [whose(PARSER)]: {} } }), REPOSITORY)).toBeNull();
+    });
+
     it("offers each file of \"since you approved\" to be marked reviewed at its version, and every one not settled as the drawer's own", () => {
         const since = producerOf("judge", "since")?.answer(AGENT as never, shownOf(CASES["judge since"]![0]!.given), REPOSITORY);
         const blocks = since?.blocks;
