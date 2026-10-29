@@ -49,7 +49,7 @@
 // A fold may be inside another, as an item's text is inside what came before the
 // operator's last words: the fold keys act on the innermost the cursor is in.
 import { foldEffect, foldedRanges, syntaxTree, unfoldEffect } from "@codemirror/language";
-import { Annotation, EditorSelection, EditorState, Facet, Prec, RangeSetBuilder, StateEffect, StateField, type Range } from "@codemirror/state";
+import { Annotation, EditorSelection, EditorState, Facet, Prec, RangeSetBuilder, StateEffect, StateField, type ChangeSet, type Range } from "@codemirror/state";
 import {
     Decoration,
     EditorView,
@@ -59,7 +59,7 @@ import {
     type ViewUpdate,
 } from "@codemirror/view";
 import { Vim, getCM, vim, type CodeMirror, type CodeMirrorV } from "@replit/codemirror-vim";
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 
 import { newId } from "./anchors";
 import { defineClipboard, shownBelow } from "./clipboard";
@@ -109,7 +109,8 @@ interface Actions {
     /** Where `zj` and `zk` (`next`), or `[z` and `]z` (`edge`), go from the line starting at `line`. */
     foldMotion: (line: number, how: "next" | "edge", forward: boolean) => number | undefined;
     folded: (update: ViewUpdate) => void;
-    folds: () => readonly Folding[];
+    /** The folds laid out, where they are in `state`'s text, the view's where it's not given. */
+    folds: (state?: EditorState) => readonly Folding[];
     undo: (way: "undo" | "redo" | "earlier" | "later") => void;
     send: () => void;
     blocks: () => Block[];
@@ -911,7 +912,7 @@ const chosenFolds = ViewPlugin.fromClass(
             }
             const actions = boundOf(update.state).actions;
             const span = kind === null ? null : visualSpan(update.state);
-            const folds = span === null || actions === null ? [] : chosenIn(actions.folds(), span.from, span.to, kind);
+            const folds = span === null || actions === null ? [] : chosenIn(actions.folds(update.state), span.from, span.to, kind);
             const builder = new RangeSetBuilder<Decoration>();
             const lines = new Set<number>();
             for (const fold of folds) {
@@ -976,7 +977,11 @@ const painting = ViewPlugin.fromClass(
 
         update(update: ViewUpdate) {
             const redrawn = update.transactions.some((each) => each.effects.some((effect) => effect.is(drawn)));
-            if (update.docChanged || update.viewportChanged || redrawn) {
+            const laid = update.transactions.some((each) => each.annotation(rebuilt) === true);
+            if (update.docChanged && !update.viewportChanged && !redrawn && !laid) {
+                // What's typed in a comment changes no line painted: what's painted goes with the text.
+                this.decorations = this.decorations.map(update.changes);
+            } else if (update.docChanged || update.viewportChanged || redrawn) {
                 this.decorations = painted(update.view);
             }
         }
@@ -1377,7 +1382,12 @@ interface Config<D, C> {
     /** The draft's comments, in their places, and the draft with others: what's written in it in one list, whatever lists the draft keeps it in. */
     comments: (draft: D) => C[];
     withComments: (draft: D, comments: C[]) => D;
-    change: (draft: D) => void;
+    /**
+     * Told each change of the draft; `typed` where it's only what's typed in the comment being written, which the
+     * editor shows already, so the view may lay out the text again once typing pauses, rather than at each key
+     * (`Editor.toLaid`); any other change, or the comment's end, comes untyped, laid out at once.
+     */
+    change: (draft: D, typed?: boolean) => void;
     /** Told each time vim enters or leaves insert mode, so the page can say what the keys do in it. */
     inserting: (yes: boolean) => void;
     /** Told where the cursor is each time it moves or the text changes, so the page can say what the keys do there. */
@@ -1446,8 +1456,20 @@ export interface Editor<D, C> {
     landing: RefObject<Landing>;
     /** The folds the operator opened or closed, by key, whether each is folded: each laying out folds every other one as it's laid out. */
     kept: RefObject<Map<string, boolean>>;
-    /** The draft as it was last rendered. */
+    /** The draft as it stands: as it was last rendered, or as the editor changed it since. */
     latest: RefObject<D>;
+    /**
+     * Where `position` in the text as it stands is in the text as the view last laid it out: what's typed in a comment
+     * since is drawn at once and laid out once typing pauses (`Config.change`), so until then a place after it is
+     * further on in the text than in the layout.
+     */
+    toLaid: (position: number) => number;
+    /** Where `position` in the text as the view last laid it out is in the text as it stands (`toLaid`); `assoc` says which side of what's typed there it goes. */
+    fromLaid: (position: number, assoc?: -1 | 1) => number;
+    /** `fold`, laid out where it was in the text as the view last laid it out, where it is in the text as it stands, to fold or open. */
+    live: <T extends Span & { summary?: Span }>(fold: T) => T;
+    /** The folds the view last laid out, where they are in the text as it stands. */
+    folds: () => readonly Folding[];
     /** Change the draft as one step `u` undoes. */
     record: (next: D) => void;
     /** Change the draft as it stands, as what's written is anchored anew, in place of the state it's in: no step `u` undoes. */
@@ -1461,6 +1483,42 @@ export interface Editor<D, C> {
 }
 
 /**
+ * What's changed of the text since the view last laid it out, and how many times it has (`rebuilt`): what's typed in
+ * a comment, drawn at once and laid out once typing pauses (`Config.change`), which the layout's places are mapped
+ * through until it is; none where the text is the layout's exactly. Kept with the text, so whatever reads a place, as
+ * the margin does as each line is drawn, reads it as of the text it draws.
+ */
+export const ahead = StateField.define<{ changes: ChangeSet | null; layouts: number }>({
+    create: () => ({ changes: null, layouts: 0 }),
+    update: (value, transaction) => {
+        if (transaction.annotation(rebuilt) === true) {
+            return { changes: null, layouts: value.layouts + 1 };
+        }
+        if (!transaction.docChanged) {
+            return value;
+        }
+        return { changes: value.changes === null ? transaction.changes : value.changes.compose(transaction.changes), layouts: value.layouts };
+    },
+});
+
+/** Return `span` where it is once `changes` are made: from its start, on before what's put there, to its end, on after it, as a comment grows with what's typed at either. */
+export function spanned<T extends Span>(span: T, changes: ChangeSet): T {
+    const from = changes.mapPos(span.from, -1);
+    return { ...span, from, to: Math.max(changes.mapPos(span.to, 1), from) };
+}
+
+/**
+ * Return `fold` where it is once `changes` are made: what it hides from after what's put at its start, as a body's
+ * starts after the comments on its first line, which stay in view, and as CodeMirror carries a fold, to after what's
+ * put at its end, as a comment closing what it holds grows in it; its summary line as a span.
+ */
+export function foldCarried<T extends Span & { summary?: Span }>(fold: T, changes: ChangeSet): T {
+    const from = changes.mapPos(fold.from, 1);
+    const summary = fold.summary === undefined ? {} : { summary: spanned(fold.summary, changes) };
+    return { ...fold, from, to: Math.max(changes.mapPos(fold.to, 1), from), ...summary };
+}
+
+/**
  * The editor a view draws into `parent`: made once, its keys bound at each render to what the view laid out. The
  * view lays its text into it itself, once it changes, keeping what it must of where the reader is.
  */
@@ -1471,8 +1529,24 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
     const bound = useRef<Bound>({ actions: null, keyed: { ...NONE } });
     const landing = useRef<Landing>(null);
     const kept = useRef(new Map<string, boolean>());
+    // The draft as it stands: the view's, taken in as it gives another, or as the editor changed it since, which the
+    // view may not have rendered yet, what's typed being laid out once typing pauses.
     const latest = useRef(config.draft);
-    latest.current = config.draft;
+    const given = useRef(config.draft);
+    if (given.current !== config.draft) {
+        given.current = config.draft;
+        latest.current = config.draft;
+    }
+    // Whether what's typed is still to be laid out, the view told it as typing (`Config.change`).
+    const typing = useRef(false);
+    // The layout the editor holds, put in it last: the one the view's last render laid out, as it puts its text in the
+    // editor (`rebuilt`), numbered as `ahead` counts them; its places mapped through what's changed of its text since.
+    const offered = useRef(shown);
+    useLayoutEffect(() => {
+        offered.current = shown;
+    });
+    const laidIn = useRef({ layouts: 0, shown });
+    const mapped = useRef<{ changes: ChangeSet; laid: Shown; blocks: Block[]; folds: Folding[] } | null>(null);
     const telling = useRef(config.inserting);
     telling.current = config.inserting;
     const following = useRef(config.moved);
@@ -1501,7 +1575,7 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
         }
         // What folds, for the placeholders: as this view last laid it out; a view draws its own margin (`rails.ts`).
         const margined: Margined = {
-            folds: (state) => boundOf(state).actions?.folds() ?? [],
+            folds: (state) => boundOf(state).actions?.folds(state) ?? [],
             redrawn: (update) => update.transactions.some((each) => each.annotation(rebuilt) === true || each.effects.some((effect) => effect.is(drawn))),
         };
         const created = new EditorView({
@@ -1531,6 +1605,8 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                         if (update.docChanged && !replaced) {
                             actions?.edited(update);
                         }
+                        // The layout the view put in, taken as it's put in, while the render that laid it out is the last.
+                        laidOf(update.state);
                         // A fold opened or closed by the operator, however it was, by its keys, a click, or the cursor
                         // going into it, is kept for the next laying out; an edit only moves the folds with the text,
                         // and the view folding again as it lays out isn't the operator's doing.
@@ -1557,6 +1633,7 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                     deadKeys,
                     keys,
                     typed,
+                    ahead,
                 ],
             }),
         });
@@ -1614,17 +1691,75 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
         return view.current?.state.selection.main.head ?? 0;
     }
 
+    /** The layout `state` holds: the one the view put in last, as `ahead` counts them. */
+    function laidOf(state: EditorState): Shown {
+        const { layouts } = state.field(ahead);
+        if (laidIn.current.layouts !== layouts) {
+            laidIn.current = { layouts, shown: offered.current };
+        }
+        return laidIn.current.shown;
+    }
+
+    /** What's changed of the text the editor holds since it was laid out. */
+    function changesNow(): ChangeSet | null {
+        return view.current?.state.field(ahead).changes ?? null;
+    }
+
+    /** The comments' blocks and the folds of the layout `state` holds, where they are in its text. */
+    function live(state: EditorState | undefined = view.current?.state): { blocks: Block[]; folds: Folding[] } {
+        if (state === undefined) {
+            return offered.current;
+        }
+        const changes = state.field(ahead).changes;
+        const laid = laidOf(state);
+        if (changes === null) {
+            return laid;
+        }
+        const was = mapped.current;
+        if (was !== null && was.changes === changes && was.laid === laid) {
+            return was;
+        }
+        const now = { changes, laid, blocks: laid.blocks.map((each) => spanned(each, changes)), folds: laid.folds.map((each) => foldCarried(each, changes)) };
+        mapped.current = now;
+        return now;
+    }
+
+    function toLaid(position: number): number {
+        const changes = changesNow();
+        return changes === null ? position : changes.invertedDesc.mapPos(position, -1);
+    }
+
+    function fromLaid(position: number, assoc: -1 | 1 = -1): number {
+        const changes = changesNow();
+        return changes === null ? position : changes.mapPos(position, assoc);
+    }
+
     function blockAt(position: number): Block | undefined {
-        return shown.blocks.find((each) => position >= each.from && position <= each.to);
+        return live().blocks.find((each) => position >= each.from && position <= each.to);
+    }
+
+    /** Where `comment`, shown at `block`, takes the cursor back to as it ends (`Own.about`), in the text as it stands. */
+    function aboutOf(own: Own<C>, comment: C, block: Block, from: number | null): number | undefined {
+        const state = view.current?.state;
+        const laid = (state === undefined ? block : laidOf(state).blocks.find((each) => each.comment === block.comment)) ?? block;
+        const back = own.about(comment, laid, from === null ? null : toLaid(from));
+        return back === undefined ? undefined : fromLaid(back);
+    }
+
+    /** Change the draft, `typed` where it's only what's typed in the comment being written (`Config.change`). */
+    function changed(next: D, typed: boolean = false) {
+        latest.current = next;
+        typing.current = typed;
+        change(next, typed);
     }
 
     /** Change the draft as one step `u` undoes: the comment being written, from its opening to its end, is one. */
-    function record(next: D) {
+    function record(next: D, typed: boolean = false) {
         // What changed the draft since, by no step of its own, as an emptied comment dropped, is the state it was in.
         const now = rewritten(history.current, latest.current);
         history.current = writing.current ? rewritten(now, next) : stepped(now, next);
         writing.current = keyed.inserting;
-        change(next);
+        changed(next, typed);
     }
 
     function added(opening: C) {
@@ -1704,20 +1839,23 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 const block = blockAt(head());
                 const written = block === undefined ? undefined : present.find((each) => each.id === block.comment);
                 if (block !== undefined && written !== undefined && !kept.includes(written)) {
-                    const back = opener.current ?? own.about(written, block, null);
+                    const back = opener.current ?? aboutOf(own, written, block, null);
                     landing.current = back === undefined ? null : { at: back };
                 }
                 writing.current = false;
                 opener.current = null;
                 if (kept.length !== present.length) {
-                    change(withComments(latest.current, kept));
+                    changed(withComments(latest.current, kept));
+                } else if (typing.current) {
+                    // What was typed is laid out as the writing ends.
+                    changed(latest.current);
                 }
             },
             finish: (cm) => {
                 const editor = view.current;
                 const block = blockAt(head());
                 const comment = block === undefined ? undefined : comments(latest.current).find((each) => each.id === block.comment);
-                const back = block === undefined || comment === undefined ? undefined : own.about(comment, block, opener.current);
+                const back = block === undefined || comment === undefined ? undefined : aboutOf(own, comment, block, opener.current);
                 Vim.exitInsertMode(cm, true);
                 if (editor === null || back === undefined) {
                     return;
@@ -1738,7 +1876,7 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
             follow: () => own.follow?.(),
             written: (forward) => {
                 const editor = view.current;
-                const target = editor === null ? undefined : nextWritten(shown.blocks, head(), forward, visited.current);
+                const target = editor === null ? undefined : nextWritten(live().blocks, head(), forward, visited.current);
                 if (editor === null || target === undefined) {
                     return;
                 }
@@ -1751,7 +1889,7 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 const editor = view.current;
                 const at = head();
                 // Of folds one inside another, the innermost the cursor is in.
-                const fold = around(shown.folds, at).at(-1);
+                const fold = around(live().folds, at).at(-1);
                 if (editor === null || fold === undefined) {
                     return;
                 }
@@ -1769,7 +1907,7 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                     return;
                 }
                 const closed = (fold: Folding) => isFolded(editor.state, fold);
-                const folds = own.level?.(head(), opening, all, closed) ?? levelled(shown.folds, closed, opening, all);
+                const folds = own.level?.(head(), opening, all, closed) ?? levelled(live().folds, closed, opening, all);
                 foldEvery(folds, !opening);
             },
             choose: (kind, whole) => {
@@ -1791,7 +1929,7 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 }
                 editor.dispatch({ effects: choosing.of(kind) });
                 const span = visualSpan(editor.state);
-                const found = span === null ? [] : chosenIn(shown.folds, span.from, span.to, kind);
+                const found = span === null ? [] : chosenIn(live().folds, span.from, span.to, kind);
                 if (found.length === 0) {
                     config.say?.(`No ${kindOf(kind)?.called ?? kind} here.`);
                 }
@@ -1803,14 +1941,14 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                     return;
                 }
                 const span = visualSpan(editor.state);
-                const folds = span === null ? [] : chosenIn(shown.folds, span.from, span.to, editor.state.field(chosenKind));
+                const folds = span === null ? [] : chosenIn(live().folds, span.from, span.to, editor.state.field(chosenKind));
                 Vim.exitVisualMode(cm, false);
                 if (folds.length === 0) {
                     return;
                 }
                 // Toggled as one: every one closed opens, else every one closes; opened, the folds around each open too, so it's seen.
                 const closing = how === "toggle" ? folds.some((each) => !isFolded(editor.state, each)) : how === "close";
-                const holding = closing ? [] : folds.flatMap((each) => around(shown.folds, each.summary.from).filter((one) => one !== each));
+                const holding = closing ? [] : folds.flatMap((each) => around(live().folds, each.summary.from).filter((one) => one !== each));
                 foldEvery([...new Set([...holding, ...folds])], closing);
             },
             verbChosen: (name) => {
@@ -1822,7 +1960,7 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 const span = visualSpan(editor.state);
                 const kind = editor.state.field(chosenKind);
                 // A fold-wise selection's folds; a plain one's, each scope it holds the header of: groups, items, drawers, files.
-                const folds = span === null ? [] : chosenIn(shown.folds, span.from, span.to, kind).filter((each) => kind !== null || each.scope === true);
+                const folds = span === null ? [] : chosenIn(live().folds, span.from, span.to, kind).filter((each) => kind !== null || each.scope === true);
                 Vim.exitVisualMode(cm, false);
                 own.verbOn?.(name, folds);
             },
@@ -1833,11 +1971,11 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                     return;
                 }
                 const at = head();
-                foldEvery(recursive(own.scope?.(at) ?? shown.folds, at, opening), !opening);
+                foldEvery(recursive(own.scope?.(at) ?? live().folds, at, opening), !opening);
             },
             foldAround: (kind) => {
                 const editor = view.current;
-                const fold = aroundOf(shown.folds, head(), kind);
+                const fold = aroundOf(live().folds, head(), kind);
                 if (editor === null || fold === undefined) {
                     return;
                 }
@@ -1852,22 +1990,23 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 const closed = (fold: Folding) => isFolded(editor.state, fold);
                 const startOf = (position: number) => editor.state.doc.lineAt(position).from;
                 return how === "next"
-                    ? nextFold(shown.folds, closed, line, forward, startOf)
-                    : foldEdge(shown.folds, closed, line, !forward, startOf);
+                    ? nextFold(live().folds, closed, line, forward, startOf)
+                    : foldEdge(live().folds, closed, line, !forward, startOf);
             },
             folded: (update) => {
-                // The folds are where this layout puts them only while the text is still its own.
-                if (update.state.sliceDoc() !== shown.text) {
+                // The folds are where the layout puts them only while the text is still its own.
+                if (update.state.field(ahead).changes !== null) {
                     return;
                 }
-                kept.current = keptFolds(shown.folds, update.startState, update.state, kept.current);
-                for (const fold of shown.folds) {
+                const laid = laidOf(update.state);
+                kept.current = keptFolds(laid.folds, update.startState, update.state, kept.current);
+                for (const fold of laid.folds) {
                     if (isFolded(update.startState, fold) && !isFolded(update.state, fold)) {
                         unfolding.current?.(fold);
                     }
                 }
             },
-            folds: () => shown.folds,
+            folds: (state) => live(state).folds,
             chord: (keys) => chording.current?.(keys),
             say: (text) => config.say?.(text),
             undo: (way) => {
@@ -1875,15 +2014,27 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 const gone = went(now, way);
                 history.current = gone;
                 if (gone.at !== now.at) {
-                    change(gone.states[gone.at]?.draft ?? latest.current);
+                    changed(gone.states[gone.at]?.draft ?? latest.current);
                 }
             },
             send: own.send,
-            paint: (from, to) => own.paint?.(from, to) ?? [],
-            blocks: () => shown.blocks,
+            paint: (from, to) => {
+                const painted = own.paint?.(toLaid(from), toLaid(to)) ?? [];
+                const changes = changesNow();
+                return changes === null
+                    ? painted
+                    : painted.flatMap((each) => {
+                          const start = changes.mapPos(each.from, 1);
+                          const end = changes.mapPos(each.to, -1);
+                          return each.from === each.to ? [each.value.range(start)] : start <= end ? [each.value.range(start, end)] : [];
+                      });
+            },
+            blocks: () => live().blocks,
             edited: (update) => {
                 const next = [...comments(latest.current)];
-                for (const block of shown.blocks) {
+                // Only what's typed in a comment, its lines the same, waits for typing to pause to be laid out.
+                const typed = keyed.inserting && update.startState.doc.lines === update.state.doc.lines;
+                for (const block of live(update.startState).blocks) {
                     const from = update.changes.mapPos(block.from, -1);
                     const to = update.changes.mapPos(block.to, 1);
                     const text = update.state.doc.sliceString(from, to);
@@ -1893,7 +2044,7 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                         next[at] = { ...before, text };
                     }
                 }
-                record(withComments(latest.current, keyed.inserting ? next : saying(next)));
+                record(withComments(latest.current, keyed.inserting ? next : saying(next)), typed);
             },
         };
     }
@@ -1908,8 +2059,15 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
         record,
         rewrite: (next) => {
             history.current = rewritten(history.current, next);
-            change(next);
+            changed(next);
         },
+        toLaid,
+        fromLaid,
+        live: (fold) => {
+            const changes = changesNow();
+            return changes === null ? fold : foldCarried(fold, changes);
+        },
+        folds: () => live().folds,
         draw: (decorations) => view.current?.dispatch({ effects: drawn.of(decorations) }),
         enter: () => {
             const editor = view.current;

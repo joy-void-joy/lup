@@ -6,8 +6,12 @@ import { describe, expect, it } from "vitest";
 
 import type { Folding } from "./comments";
 import {
+    ahead,
     begun,
     chordOf,
+    foldCarried,
+    rebuilt,
+    spanned,
     closedAs,
     deadPressed,
     deadTyped,
@@ -474,5 +478,51 @@ describe("Tab and Shift+Tab in a comment", () => {
         const writing = REVIEW_KEYS.find((part) => part.title === "Writing a comment")?.keys.map((key) => key.keys) ?? [];
         expect(writing).toContain("Tab ⇧Tab");
         expect(writing.indexOf("^t ^d")).toBe(writing.indexOf("Tab ⇧Tab") + 1);
+    });
+});
+
+describe("what's typed in a comment, ahead of the layout", () => {
+    // A layout: a file's line, a comment on it, and a body folded under the line after it.
+    const text = "def a():\nWhy a?\ndef b():\n    return 2\n";
+    const comment = { from: 9, to: 15, comment: "c1" };
+    const body = { from: 24, to: 37, key: "body b", closed: true, summary: { from: 16, to: 24 } };
+    const laid = EditorState.create({ doc: text, extensions: [ahead] });
+
+    it("carries what's typed until the text is laid out again, which counts it", () => {
+        let state = laid.update({ changes: { from: 15, insert: " And b" } }).state;
+        state = state.update({ changes: { from: 9, insert: "So: " } }).state;
+        const changes = state.field(ahead).changes;
+        expect(changes).not.toBeNull();
+        expect(state.field(ahead).layouts).toBe(0);
+        state = state.update({ annotations: rebuilt.of(true) }).state;
+        expect(state.field(ahead)).toEqual({ changes: null, layouts: 1 });
+    });
+
+    it("maps the layout's places through it: a comment growing at either end, a fold after it and its summary moving on", () => {
+        const state = laid.update({ changes: [{ from: 15, insert: " And b" }, { from: 9, insert: "So: " }] }).state;
+        const changes = state.field(ahead).changes;
+        if (changes === null) {
+            throw new Error("nothing ahead");
+        }
+        const block = spanned(comment, changes);
+        expect(state.doc.sliceString(block.from, block.to)).toBe("So: Why a? And b");
+        const fold = foldCarried(body, changes);
+        expect(state.doc.sliceString(fold.summary.from, fold.from)).toBe("def b():");
+        expect(state.doc.sliceString(fold.from, fold.to)).toBe("\n    return 2");
+        // And a place in the text as it stands back to where the layout has it.
+        expect(changes.invertedDesc.mapPos(fold.summary.from, -1)).toBe(body.summary.from);
+        expect(changes.invertedDesc.mapPos(block.to, -1)).toBe(comment.to);
+    });
+
+    it("starts a fold after what's typed at its start, as CodeMirror carries it, a body's from the end of the comments on its first line", () => {
+        // A body folded from the end of the comment on its first line, which stays in view.
+        const own = { from: 15, to: 37, key: "body a", closed: true, summary: { from: 0, to: 8 } };
+        const state = laid.update({ changes: { from: 15, insert: "!" } }).state;
+        const changes = state.field(ahead).changes;
+        if (changes === null) {
+            throw new Error("nothing ahead");
+        }
+        expect(foldCarried(own, changes).from).toBe(16);
+        expect(changes.mapPos(own.from, 1)).toBe(16);
     });
 });
