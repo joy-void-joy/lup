@@ -695,6 +695,8 @@ export function Review({
     const { items, agents, banner, called, around, drawers, seeing, order, ...arrangedBy } = usePaced(answered, () =>
         !loading.current.read ? 0 : typed.current !== null ? PACED_MOST : Math.min(PACED_MOST, Math.max(PACED_LEAST, 4 * cost.current)),
     );
+    // The same object while what it holds is the same, as the rest of what's taken is.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     const arranging = useMemo(() => arrangedBy, [arrangedBy.parents, arrangedBy.looks, arrangedBy.running, arrangedBy.remote]);
     // The review as it was last laid out into the editor, which each comment is followed from (`Arranging.previous`).
     const before = useRef<Laid | null>(null);
