@@ -118,7 +118,12 @@ from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Called, Recorded
 from lup_dev.host.rooms import OwnLaunch, OwnLaunches, RoomRoute, ShowOwnLaunch
 from lup_dev.host.service import Answerer, Companion, HostService, Naming, Route
-from lup_dev.host.timings import TimingsStore
+from lup_dev.host.timings import (
+    ShowTimings,
+    Summary,
+    Timings,
+    TimingsStore,
+)
 from lup_dev.host.timings import routes as timings_routes
 from lup_dev.host.views import ModuleViews
 from lup_dev.host.watch import Changes
@@ -242,7 +247,7 @@ from lup_dev.layout import (
     Layout,
     RoomPaths,
 )
-from lup_dev.listing import given, latest, many, unlisted
+from lup_dev.listing import given, latest, many, moment, unlisted
 from lup_dev.merging import Merging, merged
 from lup_dev.migration import HostRuntime, Migrating
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
@@ -292,6 +297,7 @@ app = typer.Typer(no_args_is_help=True, help="Develop a project with agents.")
 rules = typer.Typer(no_args_is_help=True, help="lup's code rules.")
 host = typer.Typer(help="lup's host service, which rooms call.")
 inbox = typer.Typer(help="What your agents tell and ask you, and your answers.")
+dashboard = typer.Typer()
 private = typer.Typer(
     no_args_is_help=True,
     help="What never leaves under your name: the `Private` module's values.",
@@ -303,6 +309,7 @@ account = typer.Typer(
 app.add_typer(rules, name="rules")
 app.add_typer(host, name="host")
 app.add_typer(inbox, name="inbox")
+app.add_typer(dashboard, name="dashboard")
 app.add_typer(private, name="private")
 app.add_typer(account, name="account")
 
@@ -1111,8 +1118,9 @@ def conversations(talkers: list[Talker], *, every: bool) -> list[str]:
     return [line for each in talkers if each.parent is None for line in shown(each, 1)]
 
 
-@app.command("dashboard")
+@dashboard.callback(invoke_without_command=True)
 def dashboard_open(
+    context: typer.Context,
     *,
     opened: Annotated[
         bool,
@@ -1140,8 +1148,11 @@ def dashboard_open(
     dashboard listens on an address of this machine's beyond localhost, as its
     WireGuard one (`LUP_DASHBOARD_ADDRESSES`), it prints that address instead,
     drawn as a QR code for your phone to scan where `qrencode` is installed:
-    the page, opened once, keeps the token as its cookie.
+    the page, opened once, keeps the token as its cookie. `timings` says how
+    long its keys took to reach the screen in the browsers you used it in.
     """
+    if context.invoked_subcommand is not None:
+        return
     shown = answering("the dashboard").ask(ShowDashboard(), DashboardShown)
     chosen = shown.chosen(address)
     typer.echo(chosen)
@@ -1153,6 +1164,84 @@ def dashboard_open(
         )
     if opened:
         webbrowser.open(shown.address)
+
+
+@dashboard.command("timings")
+def dashboard_timings(
+    *,
+    since: Annotated[
+        str | None,
+        typer.Option(
+            help=(
+                "Only what the host received from this time on: an ISO 8601 time, "
+                "such as 2026-10-30T09:30 (without a zone, this machine's), or an "
+                "ISO 8601 duration back from now, such as PT2H or P3D."
+            )
+        ),
+    ] = None,
+    sessions: Annotated[
+        bool,
+        typer.Option(
+            "--sessions",
+            help=(
+                "Each page session apart, a page loaded, with a line for each window "
+                "of it: the page's size then, and its keys' median and slowest."
+            ),
+        ),
+    ] = False,
+    as_json: Annotated[
+        bool,
+        typer.Option(
+            "--json", help="Each window as the host keeps it, a line of JSON each."
+        ),
+    ] = False,
+    kept: Annotated[
+        Path | None,
+        typer.Option(
+            help=(
+                "Read the timings kept in this directory, laid out as the host keeps "
+                "them in lup's state, as a demo keeps its page's "
+                "(`lup-dashboard demo --timings`), rather than asking the host."
+            )
+        ),
+    ] = None,
+) -> None:
+    """Say how long each key took to reach the screen in the browsers the dashboard was used in, by the page's build.
+
+    The page measures itself as it's used, from the browser's Event Timing
+    API, and sends what it measured every 5 minutes and as its tab is hidden;
+    the host keeps it 14 days (`docs/dashboard.md`, *Its timings*). Each
+    build of the page, oldest first, with the browsers it ran in, the page's
+    size, and for each kind of key how many and the percentiles of how long
+    each took from going down to the next paint, `<16` for one under the
+    browser's floor, with how long the slowest waited before the page handled
+    them and in its handlers; the long animation frames and what ran in them,
+    where the browser reports them; and what each browser couldn't measure.
+    Timings and sizes only, never what was typed or shown, so an agent's
+    session runs it too, in any room.
+    """
+    now = SystemClock().now()
+    try:
+        start = moment(given(since), now)
+    except ValueError as unread:
+        message = (
+            "--since takes an ISO 8601 time, such as 2026-10-30T09:30, or an ISO "
+            "8601 duration, such as PT2H"
+        )
+        raise typer.BadParameter(message) from unread
+    asked = ShowTimings(since=start)
+    if kept is None:
+        timings = reading().ask(asked, Timings)
+    else:
+        store = TimingsStore(home=kept)
+        measured = store.read(asked.page, now, asked.since)
+        timings = Timings(page=asked.page, measured=measured, days=store.days)
+    if as_json:
+        for each in timings.measured:
+            typer.echo(each.model_dump_json())
+        return
+    for line in Summary().said(timings, by_session=sessions):
+        typer.echo(line)
 
 
 @inbox.callback(invoke_without_command=True)
