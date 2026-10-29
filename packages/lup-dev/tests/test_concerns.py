@@ -186,14 +186,22 @@ def test_a_subagent_starts_on_its_parent_s_thread_and_thread_names_one_or_opens_
     # Naming a thread on a call never moves the agent: they still work where they started.
     assert plain == "Your note is with the operator, @6. You can carry on."
     assert thread_of(delivery, 6) == thread_of(delivery, 1)
-    # Nobody holds the new thread, so the root's holder answers for it, told each note whole.
-    lines = told(delivery, main("s1"))
-    assert lines[0] == (
-        '<landed thread="tabs-vanish" item="4" kind="note" from="dev/parser">'
-        "The lexer drops tabs.</landed>"
+    # Nobody holds the new thread, so the root's holder answers for it: told
+    # nothing of their own subagent's notes, which their runtime tells them,
+    # and each note of anyone else whole.
+    assert told(delivery, main("s1")) == []
+    other = launched(delivery, "other", "s2")
+    said(
+        speaker(delivery, other, main("s2")).note(
+            ThreadedRemark(remark="Tabs here too.", thread="tabs-vanish")
+        )
     )
-    assert len(lines) == 3
-    assert lines[2].startswith('<landed thread="dev" item="6"')
+    assert told(delivery, main("s1")) == [
+        (
+            '<landed thread="tabs-vanish" item="7" kind="note" from="other">'
+            "Tabs here too.</landed>"
+        )
+    ]
 
 
 def test_a_number_or_a_node_that_isn_t_a_thread_is_refused_on_a_send(
@@ -417,10 +425,8 @@ def test_join_moves_where_an_agent_works_and_hold_takes_it_from_whoever_held_it(
     assert landed.number == lag.number
     assert took == "You hold @lag, and work in it: what you send lands there."
     assert lag.holder == worker
-    assert told(delivery, main("s1")) == [
-        '<landed thread="lag" item="3" kind="note" from="dev/fixer">On it.</landed>',
-        "lup: `dev/fixer` took @lag, which you held.",
-    ]
+    # Their own subagent's note isn't told to the session holding the thread.
+    assert told(delivery, main("s1")) == ["lup: `dev/fixer` took @lag, which you held."]
 
 
 def test_a_holder_that_ended_holds_nothing_and_the_thread_above_answers(
@@ -447,8 +453,19 @@ def test_a_holder_that_ended_holds_nothing_and_the_thread_above_answers(
 
     lag = delivery.concerns().named(REPOSITORY, "lag")
     assert delivery.concerns().answering(lag) == main("s1")
+    # Their own subagent's note isn't told to the session; another's is.
+    assert told(delivery, main("s1")) == []
+    other = launched(delivery, "other", "s2")
+    said(
+        speaker(delivery, other, main("s2")).note(
+            ThreadedRemark(remark="Still jumps here.", thread="lag")
+        )
+    )
     assert told(delivery, main("s1")) == [
-        '<landed thread="lag" item="4" kind="note" from="dev/reviewer">Still jumps.</landed>'
+        (
+            '<landed thread="lag" item="5" kind="note" from="other">Still jumps '
+            "here.</landed>"
+        )
     ]
     # Its launch ending, a session holds nothing either.
     delivery.layout.record("dev").unlink()

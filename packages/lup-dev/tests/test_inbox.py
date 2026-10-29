@@ -1740,10 +1740,9 @@ def test_an_ended_subagents_answer_goes_to_its_sessions_main_conversation(
         repository=tmp_path / ".git", runtime="claude", session="s1", agent="a1"
     )
     worker = f"{tmp_path.name}/general-purpose·a1"
-    # The question landed in the session's root, which they hold: they're told it whole.
+    # The question landed in the session's root, which they hold: not told
+    # them, as it's their own subagent's (@2 is the root).
     assert context(told) == (
-        f'<landed thread="{tmp_path.name}" item="1" kind="question" '
-        f'from="{tmp_path.name}/a1">Rename it?</landed>\n\n'
         f'<ended item="3" from="{worker}" '
         'name="general-purpose·a1">They were stopped before they ended their turn.</ended>'
         f'\n\n<answer item="4" from="operator" for="{worker}, '
@@ -3296,10 +3295,8 @@ def test_a_stopped_subagent_holds_nothing_and_what_waits_for_it_goes_to_its_sess
         stopped = send(hook, records.ended("a1", "Explore", None))
         told = send(hook, bash("m1"))
     assert stopped == ""
-    # Their question landed in the session's root, which the session holds.
+    # Their question landed in the session's root, @2, never told the session.
     assert context(told) == (
-        '<landed thread="w" item="1" kind="question" from="w/parser">May I?'
-        "</landed>\n\n"
         '<answer item="3" from="operator" for="w/parser, '
         'whose conversation had ended" question="1">\n'
         '<asked>May I?</asked>\n<comment id="3.1">Yes.</comment>\n</answer>\n\n'
@@ -4928,12 +4925,11 @@ def test_a_reply_to_an_ended_subagent_reaches_its_session_as_the_subagents_own(
         asked = delivery.inbox.item(1).state
     assert (review.recipient, review.addressed) == (subagent.main(), subagent)
     # Their end reached the session first (@3), as a subagent's end does,
-    # after the root their question landed in (@2), told whole to the session.
+    # after the root their question landed in (@2), which isn't told the
+    # session: the question is their own subagent's.
     assert asked == Answered(at=clock.now(), answer=4)
     worker = f"{tmp_path.name}/general-purpose·a1"
     assert context(told) == (
-        f'<landed thread="{tmp_path.name}" item="1" kind="question" '
-        f'from="{tmp_path.name}/a1">Rename it?</landed>\n\n'
         f'<ended item="3" from="{worker}" '
         'name="general-purpose·a1">They were stopped before they ended their turn.</ended>'
         f'\n\n<review item="4" from="operator" for="{worker}, '
@@ -10567,6 +10563,7 @@ def test_agents_open_and_hold_threads_and_are_told_what_lands_there_on_each_runt
     *,
     runtime: str,
 ) -> None:
+    """A session opens a thread, their subagent holds it and is told what the session sends there; the session is told nothing their own subagent sends, which their runtime tells them, on either runtime."""
     records = Subagents(tmp_path)
     rollouts = Rollouts(tmp_path)
     worktree = tmp_path / "w"
@@ -10591,46 +10588,54 @@ def test_agents_open_and_hold_threads_and_are_told_what_lands_there_on_each_runt
             return records.lup((hook, mcp), tool, arguments, "a1", "Explore")
         return rollouts.lup((hook, mcp), tool, arguments, "th1")
 
+    def subagent_calls(made: str) -> str:
+        if runtime == "claude":
+            return send(hook, records.call("a1", "Explore", made))
+        return send(hook, rollouts.call("th1", made))
+
+    def session_calls(made: str) -> str:
+        return send(hook, bash(made) if runtime == "claude" else codex_bash(made))
+
     with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, worktree, "one", runtime)
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         send(hook, start("SessionStart", source="startup"))
-        opened = own(
-            "thread", {"name": "lag", "title": "The cursor jumps", "hold": True}, "m1"
-        )
+        opened = own("thread", {"name": "lag", "title": "The cursor jumps"}, "m1")
         if runtime == "claude":
             send(hook, records.spawn("t1", name="parser"))
             records.recorded("a1", "Explore", "t1", name="parser")
         else:
             rollouts.recorded("th1", "t1", "/root/lexer")
-        noted = subagent("note", {"remark": "Typing fast moves it.", "thread": "lag"})
+        held = subagent("thread", {"name": "lag", "hold": True})
+        noted = own("note", {"remark": "Typing fast moves it.", "thread": "lag"}, "m2")
+        told = context(subagent_calls("c1"))
+        theirs = subagent("note", {"remark": "Found it: the debounce."})
         felt = subagent("how_it_felt", {"text": "Calm."})
-        told = context(
-            send(hook, bash("m2") if runtime == "claude" else codex_bash("d2"))
-        )
-        again = send(hook, bash("m3") if runtime == "claude" else codex_bash("d3"))
+        spared = session_calls("m3")
         read = inbox("--thread", "lag")
         concerns = delivery.concerns()
         lag = concerns.named(worktree / ".git", "lag")
         root = concerns.thread(lag.parent or 0)
-    assert opened == (
-        (
-            "Opened @lag, under @w.\n"
-            "You hold @lag, and work in it: what you send lands there."
-        ),
+    assert opened == ("Opened @lag, under @w.", False)
+    assert held == (
+        "You hold @lag, and work in it: what you send lands there.",
         False,
     )
     assert noted[0].startswith("Your note is with the operator, @")
     assert noted[0].endswith(", in @lag. You can carry on.")
-    assert not felt[1]
-    # The holder hears the note whole at their next call, and nothing of how it felt.
+    # The holder hears the session's note whole at their next call.
     assert told.startswith('<landed thread="lag" item="')
-    assert "Typing fast moves it.</landed>" in told
-    assert "Calm." not in told
-    assert again == ""
+    assert 'from="w">Typing fast moves it.</landed>' in told
+    # The subagent works in the thread they hold, so their own note lands there
+    # unnamed; neither it nor how they felt reaches the session above them.
+    assert theirs[0].endswith(". You can carry on.")
+    assert not felt[1]
+    assert spared == ""
     assert (root.name, root.parent) == ("w", None)
     assert read.startswith("Thread @lag (@")
     assert "Typing fast moves it." in read
+    assert "Found it: the debounce." in read
+    assert "Calm." not in read
 
 
 def test_lup_dev_inbox_answer_answers_a_check_and_whoever_asked_it_is_told(

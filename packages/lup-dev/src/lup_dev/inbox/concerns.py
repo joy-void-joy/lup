@@ -18,7 +18,9 @@
   told at their next call, their turn's or their session's start, never
   holding an end or waking them: whoever answers for the thread, its holder
   or else the holder of the nearest thread above, each item whole; everyone
-  else on it, one line. How it felt is told to nobody, as it reaches the
+  else on it, one line. A subagent's items are told to none of the
+  conversations above them (`forebears`), who hear them through their
+  runtime already, and whose context is what threads are meant to spare. How it felt is told to nobody, as it reaches the
   operator alone, nor a flag or a hold, the judge's, which its writer hears.
 - **A holder that has ended holds nothing** (`live`): a subagent ended, a
   session cleared in their launch, or one whose launch has ended. It's read at
@@ -43,7 +45,6 @@ from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.roster import Roster
 from lup_dev.inbox.store import (
     Flagged,
-    Friction,
     HeldChange,
     HowItFelt,
     Inbox,
@@ -405,8 +406,10 @@ class Concerns(Model, arbitrary_types_allowed=True):
     def landed(self, item: Item, thread: Thread | None = None) -> Thread:
         """Put `item`, a conversation's to the operator, in `thread`, else where its sender works, or how it felt where they started; draw a reference to each other thread it names with `@`; and tell whoever answers for the thread and everyone on it (`told`). Return the thread.
 
-        Whoever already has it isn't told: its sender, and for the operator's
-        copy of a message between agents, the agent it went to.
+        Whoever already has it isn't told: its sender; the conversations
+        above a subagent sending it, who hear them through their runtime
+        (`forebears`); and for the operator's copy of a message between agents,
+        the agent it went to.
         """
         sender = item.sender
         if not isinstance(sender, Conversation):
@@ -433,7 +436,7 @@ class Concerns(Model, arbitrary_types_allowed=True):
         reach = told(item)
         self.telling(
             landing,
-            [sender, *self.copied(item)],
+            [sender, *self.forebears(sender), *self.copied(item)],
             whole=self.whole(item, landing) if reach.holder == "whole" else None,
             line=self.line(item, landing),
             holder=reach.holder != "none",
@@ -442,15 +445,31 @@ class Concerns(Model, arbitrary_types_allowed=True):
         return landing
 
     def copied(self, item: Item) -> list[Conversation]:
-        """Return the conversations that have `item`'s words already, beside its sender: the agent a message between agents went to, of which it's the operator's copy; the parent a subagent's friction is copied to."""
+        """Return the agent a message between agents went to, where `item` is the operator's copy of it: they have its words already; none else."""
         match item.reason:
             case Message(to=Conversation() as to):
                 return [to]
-            case Friction() if isinstance(item.sender, Conversation):
-                place = self.inbox.whereabouts.get(item.sender.key())
-                return [] if place is None or place.parent is None else [place.parent]
             case _:
                 return []
+
+    def forebears(self, party: Conversation) -> list[Conversation]:
+        """Return the conversations above `party`: the one that spawned them, theirs, and so on up to their session's own; none for a session's own.
+
+        They hear `party` through their runtime, `party`'s result and end, and
+        through what `party` sends them, so what `party` sends the operator is
+        told to none of them.
+        """
+        if party.agent is None:
+            return []
+
+        def above(each: Conversation, depth: int) -> list[Conversation]:
+            place = self.inbox.whereabouts.get(each.key())
+            parent = None if place is None else place.parent
+            if parent is None or depth > len(self.inbox.whereabouts):
+                return []
+            return [parent, *above(parent, depth + 1)]
+
+        return list(dict.fromkeys([*above(party, 0), party.main()]))
 
     def referred(self, item: Item, landing: Thread) -> list[Thread]:
         """Draw a reference from `item` to each thread other than `landing` its words name with `@`, once each, and return them."""
