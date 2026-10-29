@@ -57,6 +57,7 @@ from lup_dev.codescan.directives import (
     missing,
 )
 from lup_dev.codescan.ruff import Linter
+from lup_dev.declaration.kinds import Role
 from lup_dev.declaration.project import Asking
 from lup_dev.errors import LupDevError
 from lup_dev.inbox.store import (
@@ -67,7 +68,7 @@ from lup_dev.inbox.store import (
     Reading,
     Taken,
 )
-from lup_dev.policy.roles import Role, Roles
+from lup_dev.policy.roles import Roles
 from lup_dev.policy.surface import ApiChange, api_changes
 from lup_dev.private.found import found as values_in
 from lup_dev.private.withheld import Withheld, said

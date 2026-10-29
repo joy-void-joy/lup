@@ -10,6 +10,7 @@ from typing import Literal, get_args
 from pydantic import ValidationInfo, field_validator, model_validator
 
 from lup.types import Model
+from lup_dev.declaration.kinds import Role
 from lup_dev.declaration.module import Modules
 
 type Asking = Literal[
@@ -23,12 +24,6 @@ type Asking = Literal[
 change, `private` a value never published on a line it touches
 (`lup_dev.private`). A path's role asks by its level (`Levels`), never by name
 here."""
-
-type RoleName = Literal[
-    "protected", "operator", "excluded", "test", "scratch", "docs", "data", "production"
-]
-"""A path's role, as `Levels` keys it: named in `held` or `flagged`, it's refused,
-its level going in `Levels`."""
 
 
 class Project(Model, extra="forbid"):
@@ -71,7 +66,7 @@ class Project(Model, extra="forbid"):
         Value error, `protected` is a path's role, whose level goes in `Levels`, not in `held`: `Core(levels=Levels(protected="held"))`
         """
         level = "held" if info.field_name == "held" else "flagged"
-        roles = [name for name in names if name in get_args(RoleName.__value__)]
+        roles = [name for name in names if name in get_args(Role.__value__)]
         if roles:
             said = ", ".join(f"`{role}`" for role in roles)
             given = ", ".join(f'{role}="{level}"' for role in roles)

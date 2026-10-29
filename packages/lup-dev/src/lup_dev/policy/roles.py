@@ -25,20 +25,15 @@ gets is in `docs/judging-writes.md`, *What each change gets*.
 
 import tomllib
 from pathlib import Path, PurePath
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from lup.types import Model
-from lup_dev.declaration.kinds import Pytest
+from lup_dev.declaration.kinds import Pytest, Role
 from lup_dev.declaration.resolve import Declaration
 from lup_dev.layout import CheckoutLayout
 
 if TYPE_CHECKING:
     from lup_dev.codescan.contract import FileReport, Finding
-
-type Role = Literal[
-    "protected", "operator", "excluded", "test", "scratch", "docs", "data", "production"
-]
-"""A path's role, which decides what a change to it gets."""
 
 
 def matches(path: PurePath, patterns: list[str]) -> bool:

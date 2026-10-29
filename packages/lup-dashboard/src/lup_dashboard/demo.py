@@ -19,7 +19,7 @@ from lup.types import Model, MutableModel
 from lup_dashboard.host import Host
 from lup_dashboard.standins import StandInViews
 from lup_dev.clock import Clock, SystemClock
-from lup_dev.declaration.kinds import Levels
+from lup_dev.declaration.kinds import Levels, Role
 from lup_dev.errors import LupDevError
 from lup_dev.host.protocol import (
     Activity,
@@ -103,7 +103,6 @@ from lup_dev.inbox.store import (
 from lup_dev.inbox.store import Asked as Ask
 from lup_dev.inbox.threads import spoken
 from lup_dev.policy.reviewed import Mark, Marks
-from lup_dev.policy.roles import Role
 from lup_dev.policy.since import (
     HeldAt,
     ReviewSince,

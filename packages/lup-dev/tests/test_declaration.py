@@ -6,7 +6,7 @@ import sys
 from collections.abc import Callable, Sequence
 from datetime import timedelta
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, get_args
 
 import pydantic
 import pytest
@@ -52,7 +52,7 @@ from lup_dev.catalog.room import PackageAge, SessionDefaults, StandardMachine
 from lup_dev.catalog.rules import DefaultRules
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import Drop
-from lup_dev.declaration.kinds import lup_actions
+from lup_dev.declaration.kinds import Role, lup_actions
 from lup_dev.declaration.load import load
 from lup_dev.declaration.module import Origin
 from lup_dev.declaration.modules.code_rules import lup_default
@@ -984,6 +984,11 @@ def test_conditions_are_an_address_any_module_fills() -> None:
         "audiobook.conditions",
         "ledger.conditions",
     ]
+
+
+def test_levels_hold_one_field_for_each_role_and_no_other() -> None:
+    """`Levels`' fields can't be made from `Role`, the one list of the roles: this keeps them the same, so a role added to one is added to the other."""
+    assert list(Levels.model_fields) == list(get_args(Role.__value__))
 
 
 class Recordings(Module):

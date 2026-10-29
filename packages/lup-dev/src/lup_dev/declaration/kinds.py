@@ -171,13 +171,21 @@ class Paths(Layer, extra="forbid"):
         return {role: resolved(role) for role in self.roles()}
 
 
+type Role = Literal[
+    "protected", "operator", "excluded", "test", "scratch", "docs", "data", "production"
+]
+"""A path's role, which decides what a change to it gets (`lup_dev.policy.roles`
+says which path has which): the one list of them, which `Levels` keys its fields
+by and `Project` refuses in `held` and `flagged`; a test holds `Levels`' fields to
+it, since they can't be made from it."""
+
 type Level = Literal["hidden", "automatic", "review", "flagged", "held"]
 """How far a path role's changes are reviewed (`Levels`): left out of review,
 shown asking nothing, to review, every write flagged, or every write held."""
 
 
 class Levels(Layer, extra="forbid"):
-    """How far each path role's changes are reviewed, one level a role, keyed by the role's name (`lup_dev.policy.roles`).
+    """How far each path role's changes are reviewed, one level a role, keyed by the role's name (`Role`).
 
     - `hidden`: left out of "since you approved", asking nothing;
     - `automatic`: shown in it folded, asking nothing, never counted as to

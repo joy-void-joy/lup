@@ -64,7 +64,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, override
 from pydantic import Field, StringConstraints
 
 from lup.types import Model, MutableModel
-from lup_dev.declaration.kinds import Level
+from lup_dev.declaration.kinds import Level, Role
 from lup_dev.git import Git, GitError, Tracked
 from lup_dev.host.protocol import Reply, Request
 from lup_dev.host.service import Handler, Reading, Route
@@ -91,7 +91,7 @@ from lup_dev.policy.landing import (
     worktrees,
 )
 from lup_dev.policy.reviewed import Mark, Reviews
-from lup_dev.policy.roles import Role, Roles
+from lup_dev.policy.roles import Roles
 from lup_dev.policy.store import Store
 from lup_dev.policy.waits import Declined, Wait, Waits
 from lup_dev.policy.worktrees import SessionIndex
