@@ -62,6 +62,13 @@ import {
 /** How long the answers to items' contexts and files are gathered before the review is laid out with them, in milliseconds. */
 const GATHERED = 100;
 
+/**
+ * How long typing in a comment pauses before the review is laid out with what was typed, in milliseconds. The editor
+ * shows each key at once; laying the whole review out at each one, before it was drawn, was what made typing lag by
+ * seconds on a large review (#341).
+ */
+const TYPED = 300;
+
 /** The answers gathered so far, and the moment they're due to be laid out, where one is set. */
 interface Gathered {
     contexts: Map<number, Answered<Context>>;
@@ -402,6 +409,10 @@ export function App() {
     }, [connection]);
 
     const pending = useRef<Draft | null>(null);
+    // What's typed in a comment, the editor showing it already, not yet laid out: the review lays it out once typing
+    // pauses (`TYPED`), or at once as anything else lays it out.
+    const typed = useRef<Draft | null>(null);
+    const typing = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // What the review is laid out from, all of it read: until then it's laid out empty, and the host told nothing; nor
     // where the host refused one of them, the review showing what it can.
@@ -415,8 +426,25 @@ export function App() {
         });
     }, []);
 
-    const change = useCallback((next: Draft) => {
-        setDraft(next);
+    const change = useCallback((next: Draft, typedOnly: boolean = false) => {
+        if (typing.current !== null) {
+            clearTimeout(typing.current);
+            typing.current = null;
+        }
+        if (typedOnly) {
+            typed.current = next;
+            typing.current = setTimeout(() => {
+                typing.current = null;
+                const now = typed.current;
+                typed.current = null;
+                if (now !== null) {
+                    setDraft(now);
+                }
+            }, TYPED);
+        } else {
+            typed.current = null;
+            setDraft(next);
+        }
         pending.current = next;
         if (keeping.current !== null) {
             clearTimeout(keeping.current);
@@ -730,7 +758,8 @@ export function App() {
         }
         // What's sent is what the host keeps: a draft it refuses to keep isn't sent, lest the last one kept go instead;
         // the marks the operator's comments imply among its own, applied with them.
-        const now = pruned(implied.length === 0 ? draft : { ...draft, marks: [...(draft.marks ?? []), ...implied] });
+        const drafted = typed.current ?? draft;
+        const now = pruned(implied.length === 0 ? drafted : { ...drafted, marks: [...(drafted.marks ?? []), ...implied] });
         const kept = await ask({ kind: "inbox-keep-draft", draft: now });
         if (kept.kind === "refused") {
             setSaid(kept.error);
@@ -807,6 +836,7 @@ export function App() {
                         items={ready ? waiting : NONE}
                         agents={ready ? agentsRunning : NO_ONE}
                         draft={draft}
+                        typed={typed}
                         change={change}
                         banner={banner}
                         called={called}

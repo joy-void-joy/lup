@@ -27,6 +27,52 @@ export function useSame<T>(value: T, key: (value: T) => string): T {
     return kept.current.value;
 }
 
+/** What's shown of a value given again and again, and when it was last taken. */
+export interface Paced<T> {
+    shown: T;
+    at: number;
+}
+
+/**
+ * Return what's shown of `value`, given at `now`, `paced` having shown what it shows since its `at`: `value` itself
+ * where `every` has passed since, taken at `now`; else what was shown, and how long until `value` is due.
+ */
+export function paced<T>(was: Paced<T>, value: T, now: number, every: number): { paced: Paced<T>; due: number | null } {
+    if (value === was.shown) {
+        return { paced: was, due: null };
+    }
+    const due = was.at + every - now;
+    return due <= 0 ? { paced: { shown: value, at: now }, due: null } : { paced: was, due };
+}
+
+/**
+ * `value`, taken no sooner than `every()` milliseconds after it was last taken: at once where it's been that long, else
+ * once it has, as it stands then. What's laid out from it is laid out no more often, however often it's given anew,
+ * as what the host answers at each hook of agents at work.
+ */
+export function usePaced<T>(value: T, every: () => number): T {
+    const kept = useRef<Paced<T>>({ shown: value, at: 0 });
+    const waiting = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [, wake] = useState(0);
+    const next = paced(kept.current, value, Date.now(), every());
+    kept.current = next.paced;
+    if (next.due !== null && waiting.current === null) {
+        waiting.current = setTimeout(() => {
+            waiting.current = null;
+            wake((times) => times + 1);
+        }, next.due);
+    }
+    useEffect(
+        () => () => {
+            if (waiting.current !== null) {
+                clearTimeout(waiting.current);
+            }
+        },
+        [],
+    );
+    return kept.current.shown;
+}
+
 /** The time, again every `every` milliseconds, so how long something has lasted stays true. */
 export function useNow(every = 1000): Date {
     const [now, setNow] = useState(() => new Date());

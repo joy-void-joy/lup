@@ -49,10 +49,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tokensOf, within, type Filed, type Matter, type Taken } from "./code";
 import { cited, type Block, type Folding, type Span } from "./comments";
 import { BARE, chosenKind, closedAs, folding, hiddenAt, isFolded, mapLetters, mapVerbs, reached, reaching, rebuilt, refold, scrollAfterKey, uncovered, useEditor, vimOf, type Landing } from "./editor";
-import { arrivedLines, arriving, owned, owning, ownersOf, reconcile, settling } from "./reconcile";
+import { arrivedLines, arriving, owned, owning, ownersOf, readBy, reconcile, settling, type Reading } from "./reconcile";
 import { clock, ticked, ticking, type Tick } from "./ticking";
 import { doing, since, type Activity } from "./agents";
 import { Following } from "./follow";
+import { usePaced } from "./hooks";
 import { mapOutlineKey, mapScopeKeys, Outline, setOutlineFocus, setOutlineToggle, setScopeJump, useNarrow, type ScopeKey } from "./Outline";
 import { Stack, type Mark as StackMark } from "./Stack";
 import { redrawn, structureMargin, type Labelled, type Structured } from "./rails";
@@ -129,6 +130,10 @@ import {
 import { freshRows, type Fresh } from "./since";
 import type { Instance, Offer, Remote, Running, Span as ViewSpan } from "./views";
 
+/** The least and the most time between two layouts of what the host answers, in milliseconds (`usePaced`). */
+const PACED_LEAST = 250;
+const PACED_MOST = 2000;
+
 /** Where the page asks the review to go: an agent's group, by their conversation, numbered so the same one asked twice goes twice. */
 export interface Jump {
     to: Conversation;
@@ -140,7 +145,10 @@ interface Props {
     /** The conversations running, in the order the host lists them: each has a group, empty or not. */
     agents: Conversation[];
     draft: Draft;
-    change: (draft: Draft) => void;
+    /** What's typed in a comment and not yet given as `draft`, the editor showing it already: whatever lays the review out lays it out with it. */
+    typed: { readonly current: Draft | null };
+    /** Change the draft; `typed` where it's only what's typed in a comment, which the editor shows already (`Config.change`). */
+    change: (draft: Draft, typed?: boolean) => void;
     /** Name a group: the agent who sent its items, or the one it's of, and where; what they're doing; their context. */
     banner: (head: Head) => string;
     /** Name a conversation as it's called, as whom a comment goes to. */
@@ -627,14 +635,15 @@ function revisualized(view: EditorView, was: { anchor: number; head: number } | 
 }
 
 export function Review({
-    items,
-    agents,
-    draft,
+    items: itemsGiven,
+    agents: agentsGiven,
+    draft: given,
+    typed,
     change,
-    banner,
-    called,
-    around,
-    drawers,
+    banner: bannerGiven,
+    called: calledGiven,
+    around: aroundGiven,
+    drawers: drawersGiven,
     send,
     opened: told,
     jump,
@@ -644,14 +653,14 @@ export function Review({
     placed,
     pending,
     list,
-    seeing,
+    seeing: seeingGiven,
     implying,
     activities,
     parents,
     states,
     overview,
     setOverview,
-    order,
+    order: orderGiven,
     keepOrder,
     looks,
     running,
@@ -669,35 +678,61 @@ export function Review({
     const places = useRef<string[]>([]);
     const toldOrder = useRef<string[] | null>(null);
     const narrow = useNarrow();
-    const arranging = useMemo(() => ({ parents, looks, running, remote }), [parents, looks, running, remote]);
+    // What the host answers, as the review lays it out: once the review has been read as the page loads, taken no more
+    // often than four times what laying the review out last cost, a quarter of a second at least and two at most, so
+    // the hooks of agents at work, each answering the agent's record, its views and the listing again, lay it out at
+    // most a few times a second, however often they come, whatever the machine (#341). The operator's own words and
+    // marks are laid out at once.
+    const cost = useRef(0);
+    // How the review is being first read (`readBy`): until it's read, what the host answers is laid out as it comes.
+    const loading = useRef<Reading>({ since: null, last: 0, read: false });
+    const answered = useMemo(
+        () => ({ items: itemsGiven, agents: agentsGiven, banner: bannerGiven, called: calledGiven, around: aroundGiven, drawers: drawersGiven, seeing: seeingGiven, order: orderGiven, parents, looks, running, remote }),
+        [itemsGiven, agentsGiven, bannerGiven, calledGiven, aroundGiven, drawersGiven, seeingGiven, orderGiven, parents, looks, running, remote],
+    );
+    // While a comment is being typed, what's typed laid out once typing pauses, the host's answers wait as long as
+    // they may, so the keys aren't held up behind a layout: what came meanwhile is laid out with what was typed.
+    const { items, agents, banner, called, around, drawers, seeing, order, ...arrangedBy } = usePaced(answered, () =>
+        !loading.current.read ? 0 : typed.current !== null ? PACED_MOST : Math.min(PACED_MOST, Math.max(PACED_LEAST, 4 * cost.current)),
+    );
+    // The same object while what it holds is the same, as the rest of what's taken is.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const arranging = useMemo(() => arrangedBy, [arrangedBy.parents, arrangedBy.looks, arrangedBy.running, arrangedBy.remote]);
     // The review as it was last laid out into the editor, which each comment is followed from (`Arranging.previous`).
     const before = useRef<Laid | null>(null);
-    const laidOut = useMemo(
-        () =>
-            laid(
-                items,
-                agents,
-                (head, later, parts) => `━━ ${banner(head)}${parts === "" ? "" : ` · ${parts}`}${later ? " · later" : ""} ━━`,
-                // What the item's kind says of it, then what the core says of how it stands.
-                (item, later, said) => {
-                    const told = [
-                        `${cited(item.number)} ${said}`,
-                        ...((item.edits ?? []).length > 0 ? ["edited"] : []),
-                        ...(fresh(item, seeing) ? ["new"] : []),
-                        when(item.made),
-                        ...(later ? ["later"] : []),
-                    ];
-                    return `── ${told.join(" · ")} ──`;
-                },
-                draft,
-                around,
-                ordered(places.current, order ?? []),
-                drawers,
-                called,
-                { ...arranging, previous: before.current },
-            ),
-        [items, agents, banner, called, draft, around, drawers, seeing, arranging, order],
-    );
+    // Laid out with what's typed in a comment, though it isn't given yet, so the text laid out is what the editor holds.
+    const layout = useMemo(() => {
+        const drafted = typed.current ?? given;
+        const began = performance.now();
+        const laidOut = laid(
+            items,
+            agents,
+            (head, later, parts) => `━━ ${banner(head)}${parts === "" ? "" : ` · ${parts}`}${later ? " · later" : ""} ━━`,
+            // What the item's kind says of it, then what the core says of how it stands.
+            (item, later, said) => {
+                const told = [
+                    `${cited(item.number)} ${said}`,
+                    ...((item.edits ?? []).length > 0 ? ["edited"] : []),
+                    ...(fresh(item, seeing) ? ["new"] : []),
+                    when(item.made),
+                    ...(later ? ["later"] : []),
+                ];
+                return `── ${told.join(" · ")} ──`;
+            },
+            drafted,
+            around,
+            ordered(places.current, order ?? []),
+            drawers,
+            called,
+            { ...arranging, previous: before.current },
+        );
+        return { drafted, laidOut, cost: performance.now() - began };
+        // `typed` is read as the review is laid out, whatever else lays it out: what's typed alone doesn't.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [items, agents, banner, called, given, around, drawers, seeing, arranging, order]);
+    const { laidOut } = layout;
+    // The draft as the review is laid out: with what was typed in a comment as it was laid out.
+    const draft = layout.drafted;
     // What the operator's comments imply, a comment counting as a review, shown as the draft's own marks are and sent
     // with them.
     const impliedMarks = useMemo(() => implied(laidOut, draft), [laidOut, draft]);
@@ -733,7 +768,9 @@ export function Review({
         epoch,
         shownNow: true,
         say,
-        moved: (at) => {
+        moved: (moved) => {
+            // Where it is in the review as it's laid out, what's typed in a comment since laid out once typing pauses.
+            const at = editor.toLaid(moved);
             setHead(at);
             if (choosing.current === null) {
                 placed(hereAt(at));
@@ -768,7 +805,7 @@ export function Review({
     // How many lines of the stack are over a line once it's the first under it: what a scroll to the cursor keeps
     // clear, so the cursor's line never goes under the stack. Read as it scrolls, of what's laid out then.
     const over = useRef<(position: number) => number>(() => 0);
-    over.current = (position) => linesOver(roots, position, narrow) * (view.current?.defaultLineHeight ?? 18);
+    over.current = (position) => linesOver(roots, editor.toLaid(position), narrow) * (view.current?.defaultLineHeight ?? 18);
     // The margin, the review's structure: with its labels where there's room for them.
     const gutters = useMemo(() => new Compartment(), []);
     // Where the scroll being made is to, which its margins are read for.
@@ -826,10 +863,11 @@ export function Review({
             // A click on a drawer's label opens it in place, or closes it.
             const label = event.target instanceof Element ? event.target.closest(".cm-line.drawer-label") : null;
             if (label !== null) {
-                const line = current.state.doc.lineAt(current.posAtDOM(label)).from;
+                const line = editor.toLaid(current.state.doc.lineAt(current.posAtDOM(label)).from);
                 const drawer = laidNow.current.drawers.find((each) => each.header.from === line);
-                const own = drawer?.folds.find((each) => each.kind === drawer.kind && each.name === "");
-                if (own !== undefined) {
+                const laidOwn = drawer?.folds.find((each) => each.kind === drawer.kind && each.name === "");
+                if (laidOwn !== undefined) {
+                    const own = editor.live(laidOwn);
                     current.dispatch({ effects: folding(own, !isFolded(current.state, own)) });
                 }
                 return;
@@ -840,12 +878,13 @@ export function Review({
             }
             const answered = target.getAttribute("data-answered");
             if (answered !== null) {
-                current.dispatch({ selection: { anchor: Number(answered) }, scrollIntoView: true });
+                current.dispatch({ selection: { anchor: editor.fromLaid(Number(answered)) }, scrollIntoView: true });
                 return;
             }
-            const at = current.posAtDOM(target);
-            const fold = citationsOf(laidNow.current).find((each) => at >= each.marker.from && at <= each.marker.to)?.fold;
-            if (fold != null) {
+            const at = editor.toLaid(current.posAtDOM(target));
+            const laidFold = citationsOf(laidNow.current).find((each) => at >= each.marker.from && at <= each.marker.to)?.fold;
+            if (laidFold != null) {
+                const fold = editor.live(laidFold);
                 current.dispatch({ effects: folding(fold, !isFolded(current.state, fold)) });
             }
         };
@@ -928,6 +967,13 @@ export function Review({
         if (current === null) {
             return;
         }
+        // Laid out before what was typed since, as where a key comes between a render the host's answer made and this,
+        // it's not put in, lest it take back what was typed: the review is laid out again with it.
+        if (editor.latest.current !== draft) {
+            change(editor.latest.current);
+            return;
+        }
+        const began = performance.now();
         const arriving = landing.current;
         const state = current.state;
         const head = state.selection.main.head;
@@ -938,20 +984,22 @@ export function Review({
         const runs = state.field(owning);
         const writingIn = runs.find((each) => each.owner.startsWith("written ") && head >= each.from && head <= each.to)?.owner;
         const weight = (owner: string) => (owner === writingIn ? 1e9 : owner.startsWith("written ") ? 1e6 : 1);
-        // Nothing to change where the editor holds the text already, as at each key typed in a comment.
+        // Nothing to change where the editor holds the text already, as once typing in a comment pauses.
         const same = state.doc.length === laidOut.text.length && state.sliceDoc() === laidOut.text;
         const made = same ? { changes: [], arrived: [] } : reconcile(state.doc, ownersOf(state.doc, runs), laidOut.text, laidOut.owners, weight);
         const changing = state.changes(made.changes);
         const visual = visualOf(current);
         const anchor = landed(laidOut, changing, arriving);
+        const now = Date.now();
+        const flashing = readBy(loading.current, order !== null, now);
         // What's written in Markdown goes with the text, which is read by it in this transaction; and whose each line
-        // is; and, but as the review is first laid out, what arrived flashes.
+        // is; and, once the review has been read (`readBy`), what arrived flashes.
         current.dispatch({
             changes: changing,
             selection: anchor === null ? undefined : { anchor },
             scrollIntoView: anchor !== null,
             annotations: rebuilt.of(true),
-            effects: [sourced.of(laidFor.sources), owned.of(laidOut.runs), ...(before.current === null ? [] : [arrivedLines.of(made.arrived)])],
+            effects: [sourced.of(laidFor.sources), owned.of(laidOut.runs), ...(flashing ? [arrivedLines.of({ lines: made.arrived, at: now })] : [])],
         });
         if (current.state.doc.length !== laidOut.text.length || current.state.sliceDoc() !== laidOut.text) {
             // The changes always make the text laid out; were they ever not to, it's laid out whole, and said.
@@ -1036,6 +1084,8 @@ export function Review({
         if (arriving !== null && "comment" in arriving) {
             editor.enter();
         }
+        // What laying the review out cost: laying it out, and putting it in the editor, which paces the next (`usePaced`).
+        cost.current = layout.cost + performance.now() - began;
     }, [laidOut, withImplied, seeing]);
 
     // What's drawn beside the text, as it's laid out now and as each agent is doing: how long each item has waited,
@@ -1293,15 +1343,18 @@ export function Review({
 
     /** Go to `position` in the review, as the stack, the margin and the overview do, opening the folds over it, its line under the stack. */
     const jumpTo = useCallback(
-        (position: number) => {
+        (laidAt: number) => {
             const current = view.current;
             if (current === null) {
                 return;
             }
+            const position = editor.fromLaid(laidAt);
             const effects = reaching(current.state, position);
             current.dispatch({ selection: { anchor: position }, effects: [...effects, EditorView.scrollIntoView(position, { y: "start" })], annotations: reached.of(effects.length) });
             current.focus();
         },
+        // The editor's places are read from what it holds as it's called, whichever render's editor it is.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
         [view],
     );
 
@@ -1311,10 +1364,12 @@ export function Review({
         if (current === null) {
             return;
         }
-        const own = laidFor.folds.find((each) => each.of === drawer.of && each.kind === drawer.kind && each.name === "");
+        const laidOwn = laidFor.folds.find((each) => each.of === drawer.of && each.kind === drawer.kind && each.name === "");
+        const own = laidOwn === undefined ? undefined : editor.live(laidOwn);
+        const header = editor.fromLaid(drawer.header.from);
         const effects = own !== undefined && isFolded(current.state, own) ? [folding(own, false)] : [];
-        current.dispatch({ effects, selection: { anchor: drawer.header.from } });
-        current.dispatch({ effects: EditorView.scrollIntoView(drawer.header.from, { y: "start" }) });
+        current.dispatch({ effects, selection: { anchor: header } });
+        current.dispatch({ effects: EditorView.scrollIntoView(header, { y: "start" }) });
         current.focus();
     };
 
@@ -1409,10 +1464,14 @@ export function Review({
     }, []);
     // The margin: what it reads as the review's laid out now.
     const structured = useRef<Structured>({ folds: [], label: () => null, jump: jumpTo, toggle: () => undefined });
+    // Where the text is now, what's typed in a comment ahead of the layout (`Editor.toLaid`): the margin is drawn line
+    // for line with the text as it stands, and says what the layout does.
     structured.current = {
-        folds: laidFor.folds,
-        label: (fold) => (fold.kind !== undefined && fold.scope === true ? labelOf(fold.kind, fold.summary.from) : null),
-        jump: jumpTo,
+        get folds() {
+            return editor.folds();
+        },
+        label: (fold) => (fold.kind !== undefined && fold.scope === true ? labelOf(fold.kind, editor.toLaid(fold.summary.from)) : null),
+        jump: (at) => jumpTo(editor.toLaid(at)),
         toggle: (fold) => {
             const current = view.current;
             if (current !== null) {
