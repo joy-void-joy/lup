@@ -1,6 +1,7 @@
 // A virtual display of the driver's own, for a windowed Chromium to take real key events, which headless Chromium never
 // sees and the DevTools protocol only imitates: a keyboard layout's dead keys among them (#95), which arrive as a
-// composition. `Xvfb` on a free display, its layout set by `setxkbmap`, keys typed by `xdotool`.
+// composition. `Xvfb` on a free display, its layout set by `setxkbmap`, keys typed by `xdotool` (`docs/field-notes.md`,
+// *A windowed Chromium on a virtual display*).
 //
 // `DISPLAY` is set for the programs run on it alone, never for the driver's process: set for the whole room, it breaks
 // headless Chromium's WebGL.
