@@ -678,11 +678,14 @@ export function Review({
     const places = useRef<string[]>([]);
     const toldOrder = useRef<string[] | null>(null);
     const narrow = useNarrow();
-    // What the host answers, as the review lays it out: taken no more often than four times what laying the review
-    // out last cost, a quarter of a second at least and two at most, so the hooks of agents at work, each answering
-    // the agent's record, its views and the listing again, lay it out at most a few times a second, however often they
-    // come, whatever the machine (#341). The operator's own words and marks are laid out at once.
+    // What the host answers, as the review lays it out: once the review has been read as the page loads, taken no more
+    // often than four times what laying the review out last cost, a quarter of a second at least and two at most, so
+    // the hooks of agents at work, each answering the agent's record, its views and the listing again, lay it out at
+    // most a few times a second, however often they come, whatever the machine (#341). The operator's own words and
+    // marks are laid out at once.
     const cost = useRef(0);
+    // How the review is being first read (`readBy`): until it's read, what the host answers is laid out as it comes.
+    const loading = useRef<Reading>({ since: null, last: 0, read: false });
     const answered = useMemo(
         () => ({ items: itemsGiven, agents: agentsGiven, banner: bannerGiven, called: calledGiven, around: aroundGiven, drawers: drawersGiven, seeing: seeingGiven, order: orderGiven, parents, looks, running, remote }),
         [itemsGiven, agentsGiven, bannerGiven, calledGiven, aroundGiven, drawersGiven, seeingGiven, orderGiven, parents, looks, running, remote],
@@ -690,7 +693,7 @@ export function Review({
     // While a comment is being typed, what's typed laid out once typing pauses, the host's answers wait as long as
     // they may, so the keys aren't held up behind a layout: what came meanwhile is laid out with what was typed.
     const { items, agents, banner, called, around, drawers, seeing, order, ...arrangedBy } = usePaced(answered, () =>
-        typed.current !== null ? PACED_MOST : Math.min(PACED_MOST, Math.max(PACED_LEAST, 4 * cost.current)),
+        !loading.current.read ? 0 : typed.current !== null ? PACED_MOST : Math.min(PACED_MOST, Math.max(PACED_LEAST, 4 * cost.current)),
     );
     const arranging = useMemo(() => arrangedBy, [arrangedBy.parents, arrangedBy.looks, arrangedBy.running, arrangedBy.remote]);
     // The review as it was last laid out into the editor, which each comment is followed from (`Arranging.previous`).
@@ -956,8 +959,6 @@ export function Review({
     }
     // Which comments each fold held as the review was last laid out, by its key: one that comes to hold another opens.
     const held = useRef(new Map<string, Set<string>>());
-    // How the review is being first read: when it was first laid out from what it's laid out from, and laid out last.
-    const loading = useRef<Reading>({ since: null, last: 0, read: false });
 
     useEffect(() => {
         const current = view.current;
