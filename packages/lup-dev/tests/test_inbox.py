@@ -197,7 +197,7 @@ from lup_dev.policy.holds import (
     Response,
     stores,
 )
-from lup_dev.policy.landing import LandingTools, landed_felt
+from lup_dev.policy.landing import LandingTools, detached, landed_felt
 from lup_dev.policy.reviewed import Mark, Reviews
 from lup_dev.policy.tools import JudgeTools, stands
 from lup_dev.policy.verdicts import Verdict, VerdictLog
@@ -9293,6 +9293,113 @@ def test_land_invites_each_conversation_still_going_that_worked_on_a_branch_it_l
     assert again == ""
     assert not error
     assert later == ""
+
+
+def handed_back(landings: Landings, records: Subagents, machine: Layout) -> str:
+    """Have subagent `a1` of launch `one` work apart in `feat`'s worktree, the one lup gave them, and end their turn; then land `feat` from the session's own conversation: the landing's answer."""
+    SessionIndex(layout=machine).write(
+        "s1",
+        Worked(
+            repository=landings.repository,
+            worktrees=[landings.dev, landings.feat],
+            started={"": [landings.dev]},
+            apart={"a1": landings.feat},
+        ),
+    )
+    landings.launched("claude")
+    hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+    send(hook, started("claude"))
+    send(hook, records.spawn("t1"))
+    records.recorded("a1", "general-purpose", "t1")
+    send(hook, records.call("a1", "general-purpose", "a1-c1"))
+    _, error = records.lup(
+        (hook, mcp), "rename", {"name": "worker"}, "a1", "general-purpose"
+    )
+    assert not error
+    send(hook, records.ended("a1", "general-purpose", "Handed back."))
+    return merging(landings, mcp)
+
+
+def landed_later(landings: Landings, machine: Layout) -> str:
+    """End launch `one`, then land `more`, a branch of its own, from launch `two`: the landing's answer."""
+    more = landings.branched("more")
+    landings.wrote(more, "src/pkg/more.py", '"""More."""\n')
+    HostClient(
+        layout=machine.host, clock=landings.clock, starter=Unstarted()
+    ).unregister("one")
+    landings.launched("claude", name="two")
+    send(machine.host.launch("two").hook, started("claude"))
+    answer, error = call(
+        machine.host.launch("two").mcp, "land", {"branch": "more", "message": MESSAGE}
+    )
+    assert not error, answer
+    return answer
+
+
+def test_land_detaches_the_worktree_a_subagent_who_may_be_resumed_started_in_and_a_landing_after_their_launch_ends_removes_it(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    tmp_path: Path,
+) -> None:
+    """Resumed, their shell starts where it did, their scratch there as they left it, and they're told why `HEAD` is detached."""
+    feat, records = landings.feat, Subagents(tmp_path)
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    landings.wrote(feat, ".gitignore", "tmp/\n")
+    tip = landings.shell.git(feat, "rev-parse", "HEAD")
+    (feat / "tmp").mkdir()
+    (feat / "tmp" / "probe.py").write_text("scratch git ignores")
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
+        answer = handed_back(landings, records, machine)
+        hook = machine.host.launch("one").hook
+        resumed = context(send(hook, records.call("a1", "general-purpose", "a1-c2")))
+        branch = landings.shell.git(feat, "branch", "--show-current")
+        head = landings.shell.git(feat, "rev-parse", "HEAD")
+        probe = (feat / "tmp" / "probe.py").read_text()
+        later = landed_later(landings, machine)
+    assert (
+        f"- detached the worktree {feat}, where `one/worker` started and may be "
+        "resumed: a landing after their launch ends removes it\n"
+        "- deleted the local branch `feat`\n"
+    ) in answer
+    assert resumed == detached("feat", feat, "dev")
+    assert (branch, head, probe) == ("", tip, "scratch git ignores")
+    assert landings.shell.git(landings.repository, "branch", "--list", "feat") == ""
+    assert (
+        f"- removed the worktree {feat}, kept for `worker` until their launch ended\n"
+    ) in later
+    assert not feat.exists()
+
+
+def test_land_leaves_a_worktree_kept_for_a_subagent_whose_launch_ended_where_its_commit_is_on_no_branch(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    tmp_path: Path,
+) -> None:
+    """Resumed, they committed on the detached `HEAD`, and ended without putting it on a branch: removing the worktree would lose it."""
+    feat, records = landings.feat, Subagents(tmp_path)
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
+        handed_back(landings, records, machine)
+        landings.wrote(feat, "src/pkg/stray.py", '"""Stray."""\n')
+        stray = landings.shell.git(feat, "rev-parse", "HEAD")
+        later = landed_later(landings, machine)
+    assert (
+        f"- the worktree {feat}: kept for `worker`, whose launch has ended, at "
+        f"{stray}, which what landed doesn't hold\n"
+    ) in later
+    assert (feat / "src/pkg/stray.py").is_file()
 
 
 def test_land_ends_on_the_subagents_lup_hasn_t_heard_end_and_the_branches_off_dev(
