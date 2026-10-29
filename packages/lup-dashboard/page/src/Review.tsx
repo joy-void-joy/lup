@@ -946,6 +946,12 @@ export function Review({
         if (current === null) {
             return;
         }
+        // Laid out before what was typed since, as where a key comes between a render the host's answer made and this,
+        // it's not put in, lest it take back what was typed: the review is laid out again with it.
+        if (editor.latest.current !== draft) {
+            change(editor.latest.current);
+            return;
+        }
         const arriving = landing.current;
         const state = current.state;
         const head = state.selection.main.head;
