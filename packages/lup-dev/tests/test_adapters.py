@@ -383,7 +383,7 @@ def test_claude_subagent_stop_holds_once_on_a_held_changes_answer(
 def test_claude_a_failed_subagent_is_no_longer_at_work_and_its_hook_prints_nothing(
     on_claude: Bench, repo: Path
 ) -> None:
-    """Its turn ended on an error from the model's API, so `StopFailure` runs and no `SubagentStop`: from then on, the session's end holds on the file it touched too."""
+    """Their turn ended on an error from the model's API, so `StopFailure` runs and no `SubagentStop`: from then on, the session's end holds on the file they touched too."""
     claude_breaks_core(on_claude, repo)
     claude_breaks_core(on_claude, repo, agent_id="sub")
     stop = payload(repo, "Stop", stop_hook_active=False)
@@ -404,7 +404,7 @@ def test_claude_a_failed_subagent_is_no_longer_at_work_and_its_hook_prints_nothi
 def test_claude_a_stopped_subagent_is_no_longer_at_work_whatever_its_end_would_say(
     on_claude: Bench, repo: Path
 ) -> None:
-    """Nothing reads what the `SubagentStop` of a subagent stopped answers, so what it would hold on doesn't keep it at work."""
+    """Nothing reads what the `SubagentStop` of a subagent stopped answers, so what it would hold on doesn't keep them at work."""
     claude_breaks_core(on_claude, repo)
     claude_breaks_core(on_claude, repo, agent_id="sub")
     claude.hook(
@@ -1169,7 +1169,7 @@ def test_codex_a_subagents_call_holds_back_the_main_conversations_checkpoint(
 ) -> None:
     """Codex's hooks carry the session's working directory for every
     conversation, and no file tool says where it writes, so every conversation
-    of a Codex session works in its one worktree: a subagent's running call holds
+    of a Codex session works in the session's one worktree: a subagent's running call holds
     back the main conversation's checkpoint there, as two conversations working
     in one worktree should, and its own finish runs it."""
     codex.hook(captured("1-session-start", repo), on_codex)
@@ -1513,7 +1513,7 @@ def regex_in(root: Path) -> None:
 def edits_in_room(
     repo: Path, root: Path, bench: Bench, call: str, old: str, **subagent: str
 ) -> None:
-    """An `Edit` of `old` in `CORE` in the worktree at `root`, its hooks reporting `repo`, as a subagent's report the session's worktree whatever it works on; `agent_id` makes it a subagent's."""
+    """An `Edit` of `old` in `CORE` in the worktree at `root`, its hooks reporting `repo`, as a subagent's report the session's worktree whatever they work on; `agent_id` makes it a subagent's."""
     edit: dict[str, object] = {
         "file_path": str(root / CORE),
         "old_string": old,
@@ -1536,8 +1536,8 @@ def edits_in_room(
 def test_claude_a_worker_busy_in_its_worktree_holds_back_checkpoints_there_alone(
     on_claude: Bench, repo: Path, linked: Path
 ) -> None:
-    """A worker's hooks report the session's worktree (`linked` is its own,
-    where its file tools write), as Claude Code's subagents' do: its running call
+    """A worker's hooks report the session's worktree (`linked` is their own,
+    where their file tools write), as Claude Code's subagents' do: their running call
     holds back no checkpoint of the main conversation's in `repo`, and holds
     back one in `linked`, where the main conversation edits too."""
     in_room(payload(repo, "SessionStart", source="startup"), on_claude)
@@ -1877,7 +1877,7 @@ BOTH = "The operator answered.\n\nAnd again."
             ),
         ),
         (
-            # The session's own: its turn's end, which the judge doesn't read.
+            # The session's own: their turn's end, which the judge doesn't read.
             payload(
                 Path("/w"),
                 "StopFailure",
@@ -2445,7 +2445,7 @@ def test_each_runtime_reads_no_record_a_hook_names_under_another_launch_s_own_di
     """A hook's payload, which the room writes, can name a record under another
     launch's own runtime directory, by that launch's id: its home holds the
     record, but the host reads a path only as the launch whose room ran the hook
-    has it, so the subagent is said by its type alone, as where nothing's
+    has it, so the subagent is said by their type alone, as where nothing's
     recorded. Heard from the launch whose own directory it is, it's read."""
     asking = homes.registered("claude", "l1")
     other = homes.registered("claude", "l2", own=True)
@@ -2569,7 +2569,7 @@ def test_codex_reads_a_subagents_name_parent_and_role_from_its_rollout(
         name="grep_tokens", parent="th-a1", kind="explorer", guided=True, handed=True
     )
     assert codex.spawned(subagent("th-a2", grandchild), launch.launch) == grandchilds
-    # First heard at its end, which names its parent's rollout and its own.
+    # First heard at their end, which names their parent's rollout and their own.
     assert (
         codex.spawned(ended("th-a2", grandchild, child), launch.launch) == grandchilds
     )
@@ -2652,7 +2652,7 @@ def test_each_runtime_tells_nothing_a_quiet_holds_and_tells_it_as_it_lifts(
     assert shell("t1", broken) == ""
     compacted = adapter.hook(payload(repo, "SessionStart", source="compact"), bench)
     reminded = json.loads(compacted)["hookSpecificOutput"]["additionalContext"]
-    assert reminded.startswith("This conversation is still quiet: lup doesn't tell it")
+    assert reminded.startswith("You're still quiet: lup doesn't tell you")
     assert shell("t2", broken + "\n") == ""
     lifted = quiet()
     assert f"{repo}/src/pkg/core.py:11:" in lifted
@@ -2718,7 +2718,7 @@ def test_claude_judges_a_worktree_lup_made_from_its_commit_where_its_subagent_fi
     """#240, for the worktrees lup makes: a shell write into one before its
     subagent's first call there is held at that call's end, where a worktree
     made otherwise is accepted as it stood when the session first reached it.
-    The subagent works there from its first call, and the session's own
+    The subagent works there from their first call, and the session's own
     conversation doesn't."""
     in_room(payload(dev, "SessionStart", source="startup"), on_claude)
     if asked:
@@ -2846,7 +2846,7 @@ def spawning(
 
 
 def of_subagent(raw: str, transcript: Path, agent: str = "a1") -> str:
-    """A hook of subagent `agent`, as 2.1.310 sent each: its id and type, the session's transcript and working directory."""
+    """A hook of subagent `agent`, as 2.1.310 sent each: their id and type, the session's transcript and working directory."""
     return with_fields(
         raw,
         agent_id=agent,
@@ -2856,7 +2856,7 @@ def of_subagent(raw: str, transcript: Path, agent: str = "a1") -> str:
 
 
 def spawn_recorded(transcript: Path, agent: str, call: str) -> None:
-    """Write Claude Code's record of subagent `agent`, spawned by call `call`, beside the session's transcript, as 2.1.310 wrote it before its first call."""
+    """Write Claude Code's record of subagent `agent`, spawned by call `call`, beside the session's transcript, as 2.1.310 wrote it before their first call."""
     folder = transcript.with_suffix("") / "subagents"
     folder.mkdir(parents=True, exist_ok=True)
     record = {
@@ -2888,7 +2888,7 @@ def updated(answer: str) -> JsonObject:
 
 @pytest.fixture
 def transcript(kit: Kit) -> Path:
-    """The session's record as its hooks name it, under its launch's own runtime directory, where the host reads it."""
+    """The session's record as their hooks name it, under their launch's own runtime directory, where the host reads it."""
     return kit.registered().named / "projects" / "s1.jsonl"
 
 
@@ -2982,7 +2982,7 @@ def test_claude_leaves_a_subagent_not_asked_to_work_apart_as_it_is(
 
 
 def apart_in_room(on_claude: Bench, dev: Path, transcript: Path) -> Path:
-    """Spawn subagent `a1` to work apart from `dev`, its worktree made in the room, its record written; return its worktree."""
+    """Spawn subagent `a1` to work apart from `dev`, their worktree made in the room, their record written; return their worktree."""
     in_room(payload(dev, "SessionStart", source="startup"), on_claude)
     spawned_in_room(in_room(spawning(dev, transcript), on_claude))
     spawn_recorded(transcript, "a1", "s1")
@@ -3004,9 +3004,9 @@ def test_claude_starts_the_commands_of_a_subagent_working_apart_in_its_worktree(
     transcript: Path,
     tool_input: dict[str, object],
 ) -> None:
-    """Linked at its first call by its record, which names the call that
-    spawned it; its calls count in its worktree, so they hold back no
-    checkpoint of its parent's, whatever its hooks' working directory says."""
+    """Linked at their first call by their record, which names the call that
+    spawned them; their calls count in their worktree, so those calls hold back no
+    checkpoint of their parent's, whatever their hooks' working directory says."""
     root = apart_in_room(on_claude, dev, transcript)
     tool = "Monitor" if "timeout_ms" in tool_input else "Bash"
     raw = of_subagent(pre_tool_use(dev, tool, tool_input, "b1"), transcript)
@@ -3026,8 +3026,8 @@ def test_claude_refuses_a_write_of_a_subagent_working_apart_in_the_worktree_its_
     on_claude: Bench, dev: Path, transcript: Path
 ) -> None:
     """Claude Code resolves a relative path in the session's working directory,
-    which it names as the subagent's: the write would land in its parent's
-    worktree. One in its own lands, and so would one in any other."""
+    which it names as the subagent's: the write would land in their parent's
+    worktree. One in their own lands, and so would one in any other."""
     root = apart_in_room(on_claude, dev, transcript)
     write: dict[str, object] = {"file_path": "docs/new.md", "content": "# New\n"}
     refused = of_subagent(pre_tool_use(dev, "Write", write, "w1"), transcript)
@@ -3060,7 +3060,7 @@ def test_claude_links_a_subagent_launched_in_the_background_by_its_calls_result(
     on_claude: Bench, dev: Path, kit: Kit, transcript: Path
 ) -> None:
     """2.1.310 answers a background spawn at its launch, naming the subagent,
-    which may come before the subagent's first call and its record."""
+    which may come before the subagent's first call and their record."""
     in_room(payload(dev, "SessionStart", source="startup"), on_claude)
     spawned_in_room(in_room(spawning(dev, transcript), on_claude))
     launched = {
@@ -3138,7 +3138,7 @@ def test_claude_has_a_plain_child_of_a_subagent_working_apart_work_in_its_worktr
 def test_claude_makes_the_worktree_of_an_isolated_child_of_a_subagent_from_its_worktrees_commit(
     on_claude: Bench, bare: Path, dev: Path, transcript: Path
 ) -> None:
-    """Not from the session's working directory, which its hooks report."""
+    """Not from the session's working directory, which their hooks report."""
     root = apart_in_room(on_claude, dev, transcript)
     (root / "fixed.txt").write_text("fixed\n")
     Git(cwd=root).run("add", "--all")

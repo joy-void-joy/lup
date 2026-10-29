@@ -16,10 +16,10 @@ ask, so an ask is held at the checkpoint, as on every runtime, the agent waiting
 inside the hook until the operator answers the item it is in their inbox. The
 agent hears what deferred work came due as `additionalContext` of `SessionStart`,
 and a checkpoint's report as `additionalContext` beside the call's result, and the
-result reaches it untouched.
+result reaches them untouched.
 
-A Codex session holds only the worktree it started in, in a room as outside one
-(`docs/judging-writes.md`, *Every worktree of the repository*): its hooks' `cwd` is
+A Codex session holds only the worktree they started in, in a room as outside one
+(`docs/judging-writes.md`, *Every worktree of the repository*): their hooks' `cwd` is
 the "Working directory for the session", and `Bash` and `apply_patch` carry only
 `tool_input.command` (its hooks docs), which lup doesn't parse. Under its
 `workspace-write` sandbox a write elsewhere lies outside the writable roots, so
@@ -28,20 +28,20 @@ Codex session works in that one worktree (`Holding.works`, a subagent's hooks
 carrying the session's `cwd` too: `tool_hook_cwd`, below), so a subagent's
 running call holds back the main conversation's checkpoints there, where a
 runtime whose file tools say where they write lets a worker busy in a worktree
-of its own hold back none: a gap declared with its evidence.
+of their own hold back none: a gap declared with its evidence.
 
 In a launched room (`docs/host.md`, *The one hook*), Codex
 runs the room's hook on `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop` and
 `SubagentStop` (`hooks`): the checkpoint after each call, the only place its
-hooks see a patch, and each conversation's turn's end, which clears the calls it
+hooks see a patch, and each conversation's turn's end, which clears the calls they
 left that no `PostToolUse` finishes. That end is the judge's whole set's
 (`docs/judging-writes.md`, *The turn's end*): the session's `Stop` runs a
 checkpoint, waits for the importers pass, and holds the turn (`decision:
 "block"`, a continuation prompt to Codex) on the type errors and ruff's findings
-left in the files its own conversation touched, until the same findings follow a
+left in the files their own conversation touched, until the same findings follow a
 block (`stop_hook_active`), when the turn ends saying nothing; a refusal, a move,
 an answer to a hold, removed notes and mail hold it once each. A subagent's
-`SubagentStop` never holds on findings, only on what it must be told. Where
+`SubagentStop` never holds on findings, only on what they must be told. Where
 the launch's judge can't answer a hook, the host service answers it through
 `unanswered`: at `PostToolUse` the agent is told beside the call's result, as when
 judging fails; anything else warns the operator in `systemMessage`, and the call
@@ -105,13 +105,13 @@ end is held (`decision: "block"`). From the source at `rust-v0.162.1`:
 - `SubagentStop` carries `stop_hook_active` as `Stop` does
   (`subagent-stop.command.input`), so an end following a hold is let through.
 
-Nothing reaches a Codex session idle between its turns, so the adapter has no
+Nothing reaches a Codex session idle between their turns, so the adapter has no
 way to wake one (`woken` and `pushing` are none), a gap declared with its
 evidence: what an MCP server sends unprompted is only logged
 (`rmcp-client/src/logging_client_handler.rs`), and the app-server that could
 start a turn (`turn/start`) runs inside the terminal's own process under
-`--no-daemon`, out of reach. An item for an idle session waits for its next
-turn: the operator typing in its terminal starts one, told it at
+`--no-daemon`, out of reach. An item for an idle session waits for their next
+turn: the operator typing in their terminal starts one, told it at
 `UserPromptSubmit`.
 
 Nor can lup see what Codex holds for a thread while one of its calls runs, so
@@ -126,7 +126,7 @@ waits in the TUI's until the turn ends; the app-server tells no other client of
 either; and a background terminal's end queues nothing, the model learning of
 it by polling.
 
-Nor can lup's name for a session reach Codex's own title, at its start or at a
+Nor can lup's name for a session reach Codex's own title, at their start or at a
 prompt after a rename, nor a `/rename` there reach lup: a gap declared with its
 evidence. Codex names threads (`/rename`, its own generated titles, `codex
 resume <name>`), but sets a name only through its app server's
@@ -149,14 +149,14 @@ for (`WorktreeAsked`) has no hook here, and lup makes none for a Codex worker:
 a gap declared with its evidence, read at `rust-v0.164.0`, the latest release
 on 2026-10-25. `spawn_agent` takes no working directory and no isolation
 (`SpawnAgentArgs`, `core/src/tools/handlers/multi_agents/spawn.rs` and
-`multi_agents_v2/spawn.rs`); a child's `cwd` is set to its parent turn's
+`multi_agents_v2/spawn.rs`); a child's `cwd` is set to their parent turn's
 (`apply_spawn_agent_runtime_overrides`, `core/src/agent/child_config.rs`); and
 none of its 14 hook events makes a worktree (`HOOK_EVENT_NAMES`,
 `hooks/src/lib.rs`), `SubagentStart` adding context alone. Codex makes a
 worktree only for a whole session (`--worktree`,
 `utils/cli/src/shared_options.rs`, and the TUI's `/worktree`), with its own
 `git worktree add` (`worktree/src/lib.rs`), which no hook replaces. A Codex
-subagent works in its parent's directory, and lup holds it in the session's one
+subagent works in their parent's directory, and lup holds them in the session's one
 worktree as every conversation of the session (above). So no spawn of Codex's
 asks to work apart, and lup isolates none (`given`, `policy/checkpoint.py`): its
 events never name the call that spawned a conversation (`spawned_by`).
@@ -201,10 +201,10 @@ payloads 0.162.1 sent for a patch, a shell command and a turn's end are kept in
 - a hook's `timeout` defaults to 600 seconds and has no maximum, so the hook
   configuration gives `PostToolUse` and `Stop` a day and more, for holds;
 - "Subagent hooks use the parent session id" (its docs), a thread-spawned
-  subagent's tool hooks carry its `agent_id`, and each of its turns ends with
+  subagent's tool hooks carry their `agent_id`, and each of their turns ends with
   `SubagentStop` under the same `agent_id`, where a root turn runs `Stop`
   (`core/src/hook_runtime.rs`, `run_turn_stop_hooks`). `spawn_agent` "Returns the
-  spawned agent id", and a parent waits only through `wait_agent`, so its turn can
+  spawned agent id", and a parent waits only through `wait_agent`, so their turn can
   end while a subagent works;
 - `Stop`'s `stop_hook_active` says "Whether this turn was already continued by
   `Stop`"; `SubagentStop`'s output takes `decision`, `reason` and `systemMessage`
@@ -486,10 +486,10 @@ class SessionStart(Payload):
 
     hook_event_name: Literal["SessionStart"]
     source: str | None = None
-    """How it started: `startup`, `resume`, `clear`, `compact` or `fork`."""
+    """How the session started: `startup`, `resume`, `clear`, `compact` or `fork`."""
 
     def heard(self, fits: int) -> Heard:
-        """Read the session's start, and whether its thread begins empty (`FreshStart`): the judge reads it."""
+        """Read the session's start, and whether their thread begins empty (`FreshStart`): the judge reads it."""
         return Heard(
             event=events.SessionStarted(),
             session=self.session_id,
@@ -500,12 +500,12 @@ class SessionStart(Payload):
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
-        """Tell the conversation its items as it starts."""
+        """Tell the conversation their items as they start."""
         return context(said, self.hook_event_name, telling.items)
 
     @override
     def answer(self, bench: Bench) -> Output | None:
-        """Begin the session again in the worktree it holds, and tell its conversation what came due as it starts; the service adds its items after (`told`)."""
+        """Begin the session again in the worktree they hold, and tell their conversation what came due as they start; the service adds their items after (`told`)."""
         reply = SessionStarted(
             session=self.session_id,
             agent=self.agent_id or "",
@@ -556,7 +556,7 @@ class UserPromptSubmit(Payload):
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
-        """Tell the conversation its items beside the prompt."""
+        """Tell the conversation their items beside the prompt."""
         return context(said, self.hook_event_name, telling.items)
 
     @override
@@ -607,7 +607,7 @@ class PreToolUse(Payload):
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
-        """Tell the conversation its items beside the call, and stamp a call to lup's tools with its caller.
+        """Tell the conversation their items beside the call, and stamp a call to lup's tools with its caller.
 
         The stamp is `updatedInput` beside `permissionDecision: "allow"`, which
         Codex needs to apply it. A call the judge blocked never runs, and one
@@ -676,7 +676,7 @@ class PostToolUse(Payload):
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
-        """Tell the conversation its items beside the call's result."""
+        """Tell the conversation their items beside the call's result."""
         return context(said, self.hook_event_name, telling.items)
 
     @override
@@ -707,7 +707,7 @@ class PostToolUse(Payload):
 
 
 class Stop(Payload):
-    """`Stop`: the session's own conversation ends its turn.
+    """`Stop`: the session's own conversation ends their turn.
 
     What the turn's end tells the agent holds it, as the `reason` of `decision:
     "block"`, which becomes "a new continuation prompt"; its docs list no
@@ -771,14 +771,14 @@ class SubagentStop(Payload):
     It runs only where a turn completes (`run_turn_stop_hooks`, called from
     `run_turn` in `core/src/session/turn.rs`): a subagent stopped, or whose
     turn fails, runs none, and the `Interrupt` hook is a root turn's alone, so
-    its parent isn't told (`docs/field-notes.md`, *A subagent's end*).
+    their parent isn't told (`docs/field-notes.md`, *A subagent's end*).
     """
 
     hook_event_name: Literal["SubagentStop"]
     stop_hook_active: bool = False
     """Whether the subagent's turn goes on because a `SubagentStop` hook blocked it already."""
     last_assistant_message: str | None = None
-    """Its last message of the turn, where it left one."""
+    """Their last message of the turn, where they left one."""
 
     def heard(self, fits: int) -> Heard:
         """Read a subagent's turn's end: the judge reads it."""
@@ -793,7 +793,7 @@ class SubagentStop(Payload):
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
-        """Hold the subagent's turn's end on its items, after any reason the judge holds it for."""
+        """Hold the subagent's turn's end on their items, after any reason the judge holds it for."""
         return held(said, telling.items)
 
     @override
@@ -857,7 +857,7 @@ def unanswered(raw: str, failure: str) -> str:
 
 
 class SessionMeta(Model, extra="ignore"):
-    """The part of a thread's `session_meta` lup reads of a subagent: its own id, its root's, its parent's, its path and its role (`protocol/src/protocol.rs`, `SessionMeta`, at `rust-v0.163.0`)."""
+    """The part of a thread's `session_meta` lup reads of a subagent: their own id, their root's, their parent's, their path and their role (`protocol/src/protocol.rs`, `SessionMeta`, at `rust-v0.163.0`)."""
 
     id: str | None = None
     session_id: str | None = None
@@ -883,20 +883,20 @@ class Subagented(Model, extra="ignore"):
     transcript_path: Path | None = None
     agent_transcript_path: Path | None = None
     """At `SubagentStop`, the subagent's own rollout, where `transcript_path` is
-    its parent's."""
+    their parent's."""
 
 
 def spawned(raw: str, launch: Register, largest: int = 1024 * 1024) -> Spawned | None:
-    """Return how the subagent a Codex hook fires for was spawned, from its own rollout's first line; none for the session's own conversation.
+    """Return how the subagent a Codex hook fires for was spawned, from their own rollout's first line; none for the session's own conversation.
 
-    A subagent's hooks name its own rollout (`transcript_path`), whose
-    `session_meta` gives its path, `/root/<parent>/<name>`, and its parent's
+    A subagent's hooks name their own rollout (`transcript_path`), whose
+    `session_meta` gives their path, `/root/<parent>/<name>`, and their parent's
     thread; a parent that's the root is the session's own conversation. One
     spawned by the first version of `spawn_agent`, which takes no name, has no
-    path, and so no name. Its end names its parent's rollout there (measured
+    path, and so no name. A subagent's end names their parent's rollout there (measured
     by the first lup on 0.158.0, `docs/field-notes.md`, *Subagents' records*)
-    and its own as `agent_transcript_path`, read first, so a subagent first
-    heard at its end is linked too; a rollout whose meta is another thread's
+    and their own as `agent_transcript_path`, read first, so a subagent first
+    heard at their end is linked too; a rollout whose meta is another thread's
     says nothing of it.
 
     None is Codex's own (`Spawned.internal`): a hook names an agent only for a
@@ -905,14 +905,14 @@ def spawned(raw: str, launch: Register, largest: int = 1024 * 1024) -> Spawned |
     reviewer and the memory writer, are named by none (read at
     `rust-v0.163.0`, `docs/field-notes.md`, *A runtime's own agents*).
 
-    Codex hands a subagent with a path its last message itself
+    Codex hands on the last message of a subagent with a path itself
     (`Spawned.handed`): as the subagent's turn completes, it queues a
-    `FINAL_ANSWER` message holding it in its parent's mailbox
+    `FINAL_ANSWER` message holding it in their parent's mailbox
     (`notify_parent_of_terminal_turn`, `core/src/agent/control/completion.rs`).
     One without a path, the first `spawn_agent`'s, the one Codex turns on by
     default (`multi_agent` on, `multi_agent_v2` off, `features/src/lib.rs`), is
-    handed nothing: its parent reads it only through `wait_agent`, so lup
-    hands its last message on (`docs/field-notes.md`, *A subagent's end*).
+    handed nothing: their parent reads it only through `wait_agent`, so lup
+    hands their last message on (`docs/field-notes.md`, *A subagent's end*).
 
     Every subagent reads the session's guidance, Codex's managed developer
     instructions: a spawned thread's configuration is its parent's, the
@@ -984,7 +984,7 @@ def hooks(
     `SessionStart`; `UserPromptSubmit`, each turn's start, which clears the
     calls the conversation left in an earlier turn; `PreToolUse` and
     `PostToolUse` on every tool: Codex is judged after each call. `Stop` and `SubagentStop`: a conversation's
-    turn's end clears the calls it left that no `PostToolUse` finishes (a patch
+    turn's end clears the calls they left that no `PostToolUse` finishes (a patch
     that failed to apply, a call interrupted), and judges what the turn left.
     None at a worktree asked for, which Codex has no hook for (see the module's
     docstring). Each waits up to `timeout`, which a hold's wait for the
@@ -1098,7 +1098,7 @@ class CodexChannel(Channel):
 
 
 class Started(Model, extra="ignore"):
-    """What a Codex rollout's first line says of the session: where it ran."""
+    """What a Codex rollout's first line says of the session: where they ran."""
 
     class Meta(Model, extra="ignore"):
         """The session's own facts."""
@@ -1110,9 +1110,9 @@ class Started(Model, extra="ignore"):
 
 
 class CodexRecords(Model, Records):
-    """Codex's records: a rollout per session under `sessions/`, its first line saying where it ran.
+    """Codex's records: a rollout per session under `sessions/`, its first line saying where the session ran.
 
-    A launched session's is in the home its launch registered alone, as the
+    A launched session's is in the home their launch registered alone, as the
     host service kept it (`lup_dev.host.homes`), and any other's in the
     operator's home alone, so a room can't have one read from its own home
     under another thread's id. Rooms write a home, so the rollout is read
@@ -1132,7 +1132,7 @@ class CodexRecords(Model, Records):
 
     @override
     def conversation(self, session: str, agent: str | None) -> Found | None:
-        """Return the rollout of one conversation, in its launch's home or the operator's home, with that home; none for an id that isn't a plain name, or for what isn't a file there. A subagent is a thread of its own, its id its rollout's, as a session's is, filed under its session's home."""
+        """Return the rollout of one conversation, in its launch's home or the operator's home, with that home; none for an id that isn't a plain name, or for what isn't a file there. A subagent is a thread of their own, their id their rollout's, as a session's is, filed under their session's home."""
         thread = session if agent is None else agent
         if not plain(thread) or not plain(session):
             return None
@@ -1306,7 +1306,7 @@ class TokenUsage(Model, extra="ignore"):
     total_tokens: int = 0
 
     def used(self) -> int:
-        """Return the tokens the context holds after the request: the whole count but the reasoning, which the model keeps out of its context (`tokens_in_context_window`).
+        """Return the tokens the context holds after the request: the whole count but the reasoning, which the model keeps out of their context (`tokens_in_context_window`).
 
         >>> TokenUsage(input_tokens=1000, output_tokens=300, reasoning_output_tokens=200, total_tokens=1300).used()
         1100
@@ -1694,7 +1694,7 @@ class HostEnvironment(Model, extra="ignore"):
 
 
 class HostProvider(Model, extra="ignore"):
-    """A model provider of the operator's: where a host session sends its requests."""
+    """A model provider of the operator's: where a host session sends their requests."""
 
     base_url: str | None = None
 
@@ -1788,16 +1788,16 @@ class CodexWritten(Model):
     """What a host Codex session acts on in the operator's own Codex home, which every room on Codex could write before rooms had homes of their own, checked as it stands (`lup_dev.host.written`).
 
     Each item read in Codex's docs (2026-10-28) and measured on 0.162.0
-    (`docs/field-notes.md`, *A home of the rooms' own*): its configuration,
-    hooks and instructions; what it loads; what it runs before its commands,
-    its shell snapshots and the helpers it puts first on their `PATH`; and the
+    (`docs/field-notes.md`, *A home of the rooms' own*): their configuration,
+    hooks and instructions; what they load; what they run before their commands,
+    their shell snapshots and the helpers they put first on those commands' `PATH`; and the
     login every room on Codex could read.
     """
 
     home: Path
     """The operator's Codex home, `~/.codex` or `CODEX_HOME`."""
     loaded: list[str] = ["rules", "prompts", "skills"]
-    """The directories whose files a host session loads; `rules/` can let it
+    """The directories whose files a host session loads; `rules/` can let them
     run a command without asking."""
     instructions: list[str] = ["AGENTS.md", "AGENTS.override.md"]
     configuration: list[str] = [
@@ -1811,8 +1811,8 @@ class CodexWritten(Model):
     ]
     """Where Codex makes no link itself: one found there is said."""
     before: list[str] = ["shell_snapshots", "tmp"]
-    """What a session runs before its commands: its shell snapshot, and the
-    helpers it puts first on their `PATH`."""
+    """What a session runs before their commands: their shell snapshot, and the
+    helpers they put first on those commands' `PATH`."""
 
     def checked(self, places: written.Places) -> written.Checked:
         """Say what a host session acts on in the home, a line each: what's there, what of it looks planted, and what to do, the login apart."""
@@ -1922,7 +1922,7 @@ class CodexWritten(Model):
         return [
             (
                 f"{', '.join(loaded)}: a host session loads each, and `rules/` can let "
-                "it run a command without asking: check they're yours."
+                "them run a command without asking: check they're yours."
             )
         ]
 
@@ -1941,18 +1941,18 @@ class CodexWritten(Model):
         ]
 
     def run_before(self, places: written.Places) -> list[str]:
-        """Say what a host session runs before its commands, which rooms could have written."""
+        """Say what a host session runs before their commands, which rooms could have written."""
         shown = places.shown(self.home)
         there = [name for name in self.before if written.listed(self.home / name).files]
         if not there:
             return []
         return [
             f"{' and '.join(f'`{name}/`' for name in there)}: a host session runs "
-            "its shell snapshot and the helpers it puts first on its commands' "
-            "`PATH` from them, and a room could have written any: with no host "
+            "their shell snapshot and the helpers they put first on their commands' "
+            "`PATH` from there, and a room could have written any: with no host "
             "session running, "
             + "; ".join(f"`rm -r {shown}/{name}/*`" for name in there)
-            + "; a session makes its own as it starts."
+            + "; a session makes their own as they start."
         ]
 
     def login(self) -> str | None:
