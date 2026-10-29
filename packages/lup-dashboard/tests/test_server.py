@@ -30,15 +30,8 @@ from lup_dev.inbox.protocol import (
     Settled,
     ShowConversation,
 )
-from lup_dev.inbox.store import (
-    Approval,
-    Conversation,
-    Decided,
-    Item,
-    Message,
-    Operator,
-    Text,
-)
+from lup_dev.inbox.store import Approval, Decided, Item, Message, Text
+from lup_ledger.parties import Conversation, Operator
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator

@@ -22,12 +22,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lup.types import MutableModel
-from lup_dev.inbox.store import Conversation, Ended, Item, Operator, Whereabouts
+from lup_dev.inbox.store import Ended, Item, Whereabouts
+from lup_ledger.parties import Conversation, Operator
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from lup_dev.inbox.store import Party
+    from lup_ledger.parties import Party
 
 
 def ids(conversation: Conversation) -> str:

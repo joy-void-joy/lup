@@ -111,10 +111,10 @@ from lup_dev.inbox.marks import (
     ReviewMarks,
 )
 from lup_dev.inbox.protocol import Exchanged, ListItems
-from lup_dev.inbox.store import Conversation as Party
 from lup_dev.layout import HostLayout, Layout
 from lup_dev.policy.checkpoint import Services, Worktree
 from lup_dev.private.withheld import related_of
+from lup_ledger.parties import Conversation as Party
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

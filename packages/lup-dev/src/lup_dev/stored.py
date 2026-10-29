@@ -2,7 +2,8 @@
 
 Where each lives is `layout.py`'s; this is how one is read and written, by every
 subsystem keeping one: the judge's store and records (`lup_dev.policy`), trust on
-launch's approval (`lup_dev.launch`), and the inbox (`lup_dev.inbox`).
+launch's approval (`lup_dev.launch`), and the inbox's files of an earlier lup,
+read once to convert them onto the ledger (`lup_dev.inbox.conversion`).
 """
 
 from typing import TYPE_CHECKING

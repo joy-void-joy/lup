@@ -1,4 +1,4 @@
-"""lup's inbox: its items and its parties, kept one JSON file each in lup's state.
+"""lup's inbox: its items and its parties, kept on the ledger in lup's state.
 
 `docs/inbox.md`, *Parties and items*. Every party has an inbox: the
 operator, and each conversation of each session, their main one or one of their
@@ -31,18 +31,26 @@ inbox never carries them.
 
 The host service is the only writer, on its event loop, and nothing mounts the
 store into a room: the first lup's sessions approved their own questions by
-writing the log they could reach. Each item and each conversation's whereabouts
-is a file of its own, written whole (`stored.py`), rather than one log folded at
-every read. Items are kept once told or answered; clearing old ones goes with
-lup's cleanup.
+writing the log they could reach. Each item is a node on the ledger
+(`ItemNode`), each change to it a version, and where it stands an edge drawn to
+it (`Stands`), never stored on it; what it answers, replies to and cites are
+edges too (`Answers`, `Replies`, `Cites`), drawn from its fields in one place,
+`Inbox.linked`. An item's diff and files are the ledger's attachments; each
+conversation's whereabouts, the operator's draft, the review's order and what
+they write on a conversation are plain records, rewritten in place.
+The service holds every item and whereabouts in memory, as it read them at its
+start, and writes each change through to the ledger before its copy changes
+(`Inbox`). The inbox's files of an earlier lup are converted once, the first
+time the service starts on a ledger holding no item
+(`lup_dev.inbox.conversion`), and left as they were. Items are kept once told
+or answered; clearing old ones goes with lup's cleanup.
 """
 
-import hashlib
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self, override
 
-from pydantic import Field, JsonValue, ValidationError, computed_field, model_validator
+from pydantic import Field, JsonValue, computed_field, model_validator
 
 from lup.sessions import results
 from lup.tools import speaking
@@ -50,8 +58,11 @@ from lup.types import Model, MutableModel
 from lup_dev.host.protocol import HostError
 from lup_dev.host.watch import Changes, Touched
 from lup_dev.inbox.parts import PartId
-from lup_dev.layout import InboxLayout
-from lup_dev.stored import read_model, write_model
+from lup_ledger.environment.store import Ledger
+from lup_ledger.errors import LupLedgerError
+from lup_ledger.parties import Conversation, Lup, Operator, Party, Writer
+from lup_ledger.records import Edge, Kinds, Node
+from lup_ledger.threads import KINDS as THREADS
 
 
 class InboxError(HostError):
@@ -70,37 +81,6 @@ type How = Literal["call", "start", "turn's start", "turn's end", "held call", "
 """How an item was told: beside a call, as its session started, beside the
 prompt its turn started on, as the reason its turn's end was held, as a held
 call's result, or pushed to its idle session, starting a turn."""
-
-
-class Operator(Model):
-    """The operator, whose inbox `lup-dev inbox` shows."""
-
-    party: Literal["operator"] = "operator"
-
-
-class Conversation(Model):
-    """A conversation of a session, within a repository: the session's main one, or one of their subagents."""
-
-    party: Literal["conversation"] = "conversation"
-    repository: Path
-    """The repository's git directory, as the launch registered it."""
-    runtime: str
-    session: str
-    """The runtime's id for the session."""
-    agent: str | None = None
-    """The runtime's id for the subagent; none for the session's main conversation."""
-
-    def key(self) -> str:
-        """Name the conversation as a file name, from what keys it."""
-        return hashlib.sha256(self.model_dump_json().encode()).hexdigest()
-
-    def main(self) -> Conversation:
-        """Return its session's main conversation."""
-        return self.model_copy(update={"agent": None})
-
-
-type Party = Annotated[Operator | Conversation, Field(discriminator="party")]
-"""Who an item is from, or for."""
 
 
 class Decision(Model):
@@ -1094,19 +1074,6 @@ class Whereabouts(Model):
     conversation, named as their launch (`SessionNames`, `host/names.py`)."""
 
 
-def read[M: Model](path: Path, model: type[M]) -> M:
-    """Read a stored file of the inbox as `model`, naming it where it doesn't read."""
-    try:
-        found = read_model(path, model)
-    except (OSError, ValidationError) as unread:
-        message = f"the inbox's {path} doesn't read: {unread}"
-        raise InboxError(message) from unread
-    if found is None:
-        message = f"the inbox's {path} is gone"
-        raise InboxError(message)
-    return found
-
-
 class TalkComment(Model):
     """A comment of the operator's on a conversation they read: on a line or a passage of what the agent said at one step, or, at none, their message on the conversation whole."""
 
@@ -1231,10 +1198,388 @@ class Order(Model):
         return Order(places=[*kept, *(each for each in laid if each not in kept)])
 
 
-class Inbox(MutableModel):
-    """Every item and every conversation's whereabouts, as the host service holds them, each change written through to its file."""
+def located(item: Item) -> Path:
+    """Return the repository `item` is kept under on the ledger: its conversations', the first of its sender, its recipient and whom it was for; else the one its approval is about; else `/`, for one between the operator and themselves about none, which lup doesn't make.
 
-    layout: InboxLayout
+    A version of a node stays in its node's repository, and each of these is
+    the same in every version of the item: a recipient changed when a subagent
+    ends is their session's main conversation.
+    """
+    conversations = [
+        each.repository
+        for each in [item.sender, item.recipient, item.addressed]
+        if isinstance(each, Conversation)
+    ]
+    about = [item.reason.repository] if isinstance(item.reason, Approval) else []
+    return next(iter([*conversations, *about]), Path("/"))
+
+
+def after(earlier: datetime) -> datetime:
+    """Return the time a version is written at: the clock's, or just after `earlier` where the clock reads no later, since each version is after the one before (`Ledger.kept`)."""
+    return max(datetime.now(UTC), earlier + timedelta(microseconds=1))
+
+
+class ItemNode(Node):
+    """An item as the ledger keeps it: one version of it, saying everything it says but its number, which is the node's, and where it stands, which the edges drawn to it say (`Stands`).
+
+    Its sender is who wrote it (`by`). Its fields are the item's (`Item`), but
+    for its attachments, which the ledger keeps beside it, each named by its
+    content's digest: an approval's, a held change's or a flagged write's whole
+    diff and each file it changes, read only on request.
+    """
+
+    kind: Literal["inbox:item"] = "inbox:item"
+    name: None = None
+    by: Party
+    reason: Reason
+    recipient: Party
+    replies: list[Reply] = []
+    citations: list[Citation] = []
+    edits: list[Edit] = []
+    addressed: Conversation | None = None
+    worktree: Path | None = None
+    call: str | None = None
+    quiet: bool = False
+    made: datetime
+    diff: str | None = None
+    """The digest of its whole diff (`Diff`), attached; none where none is kept."""
+    files: str | None = None
+    """The digest of each file it changes, whole (`ChangedFiles`), attached;
+    none where none are kept."""
+
+    @classmethod
+    def of(cls, item: Item, at: datetime, earlier: ItemNode | None = None) -> Self:
+        """Return `item` as a version of its node at `at`, its attachments those of `earlier`, the version before, where there's one."""
+        return cls(
+            number=item.number,
+            repository=located(item),
+            by=item.sender,
+            at=at,
+            reason=item.reason,
+            recipient=item.recipient,
+            replies=item.replies,
+            citations=item.citations,
+            edits=item.edits,
+            addressed=item.addressed,
+            worktree=item.worktree,
+            call=item.call,
+            quiet=item.quiet,
+            made=item.made,
+            diff=None if earlier is None else earlier.diff,
+            files=None if earlier is None else earlier.files,
+        )
+
+    def item(self, state: State) -> Item:
+        """Return the item this version is, standing where `state` says."""
+        return Item(
+            number=self.number,
+            reason=self.reason,
+            sender=self.by,
+            recipient=self.recipient,
+            replies=self.replies,
+            citations=self.citations,
+            edits=self.edits,
+            addressed=self.addressed,
+            worktree=self.worktree,
+            call=self.call,
+            quiet=self.quiet,
+            made=self.made,
+            state=state,
+        )
+
+    def links(self, reading: int) -> list[Answers | Replies | Cites]:
+        """Return the edges its fields say, from it, as it's written: what it answers, an answer its question and a turn's last words the operator's items they answer; the message it replies to; and each item it cites, of reading `reading` of its citations."""
+        match self.reason:
+            case Answer(question=question):
+                answered = [question]
+            case Message(answers=numbers):
+                answered = numbers
+            case _:
+                answered = []
+        replied = (
+            [self.reason.of]
+            if isinstance(self.reason, Message) and self.reason.of is not None
+            else []
+        )
+        cited = {
+            linking(each): each
+            for each in (
+                Cites(
+                    target=citation.item,
+                    part=citation.part,
+                    reading=reading,
+                    source=self.number,
+                    repository=self.repository,
+                    by=self.by,
+                    at=self.at,
+                )
+                for citation in self.citations
+            )
+        }
+        return [
+            *(
+                Answers(
+                    target=each,
+                    source=self.number,
+                    repository=self.repository,
+                    by=self.by,
+                    at=self.at,
+                )
+                for each in dict.fromkeys(answered)
+            ),
+            *(
+                Replies(
+                    target=each,
+                    source=self.number,
+                    repository=self.repository,
+                    by=self.by,
+                    at=self.at,
+                )
+                for each in replied
+            ),
+            *cited.values(),
+        ]
+
+
+def linking(edge: Edge) -> str:
+    """Name what `edge` links, its kind, its target and the part it cites where it cites one, so two drawn alike name it alike.
+
+    >>> linking(Cites(target=12, part=3, reading=1, source=14, repository=Path("/r"), by=Operator(), at=datetime(2026, 1, 1, tzinfo=UTC)))
+    'inbox:cites @12.3'
+    """
+    part = edge.part if isinstance(edge, Cites) and edge.part is not None else None
+    return f"{edge.kind} @{edge.target}" + ("" if part is None else f".{part}")
+
+
+class Stands(Edge):
+    """An edge saying where the item it's drawn to stands, with what its state says: the latest drawn to an item is where it stands, and an item none is drawn to waits.
+
+    One kind for each state: an item told, put back to wait or announced as too
+    long, answered, done, decided, superseded, or withdrawn. Its source, where
+    there's one, is the item its state names: the answer, for one answered; the
+    item superseding it.
+    """
+
+    source: int | None = None
+    """The item its state names, where that item is on the ledger in the same
+    repository; none else, the number staying in its state."""
+    state: State
+
+
+class StandsTold(Stands):
+    """An item told to the conversation it's for, by lup."""
+
+    kind: Literal["inbox:told"] = "inbox:told"
+    state: Told
+
+
+class StandsWaiting(Stands):
+    """An item waiting again, put back by lup where the hook that told it was gone, or announced as too long for a hook; or reopened, its sender having edited it."""
+
+    kind: Literal["inbox:waiting"] = "inbox:waiting"
+    state: Waiting
+
+
+class StandsAnswered(Stands):
+    """A question the operator answered, drawn from their answer."""
+
+    kind: Literal["inbox:answered"] = "inbox:answered"
+    state: Answered
+
+
+class StandsDone(Stands):
+    """A message the operator read."""
+
+    kind: Literal["inbox:done"] = "inbox:done"
+    state: Done
+
+
+class StandsDecided(Stands):
+    """An approval or a held change the operator answered, or a flagged write they approved."""
+
+    kind: Literal["inbox:decided"] = "inbox:decided"
+    state: Decided
+
+
+class StandsSuperseded(Stands):
+    """An approval, a hold or lup's word on citations that a later item replaced, drawn from it."""
+
+    kind: Literal["inbox:superseded"] = "inbox:superseded"
+    state: Superseded
+
+
+class StandsWithdrawn(Stands):
+    """An item taken back: by its sender, or, a flagged write, by lup at a landing."""
+
+    kind: Literal["inbox:withdrawn"] = "inbox:withdrawn"
+    state: Withdrawn
+
+
+def stands(item: Item, source: int | None) -> Stands:
+    """Return the edge saying where `item` stands, drawn from `source`: by lup for what it does of its own accord, by the operator for what they decide, and by its sender for what they take back."""
+    lup = Lup()
+    repository = located(item)
+    match item.state:
+        case Told(at=at) as told:
+            return StandsTold(
+                target=item.number, repository=repository, by=lup, at=at, state=told
+            )
+        case Waiting() as waiting:
+            return StandsWaiting(
+                target=item.number,
+                repository=repository,
+                by=lup,
+                at=waiting.announced or datetime.now(UTC),
+                state=waiting,
+            )
+        case Answered(at=at) as answered:
+            return StandsAnswered(
+                target=item.number,
+                source=source,
+                repository=repository,
+                by=Operator(),
+                at=at,
+                state=answered,
+            )
+        case Done(at=at) as done:
+            return StandsDone(
+                target=item.number,
+                repository=repository,
+                by=Operator(),
+                at=at,
+                state=done,
+            )
+        case Decided(at=at) as decided:
+            return StandsDecided(
+                target=item.number,
+                repository=repository,
+                by=Operator(),
+                at=at,
+                state=decided,
+            )
+        case Superseded(at=at) as superseded:
+            return StandsSuperseded(
+                target=item.number,
+                source=source,
+                repository=repository,
+                by=lup,
+                at=at,
+                state=superseded,
+            )
+        case Withdrawn(at=at) as withdrawn:
+            by: Writer = lup if isinstance(item.reason, Flagged) else item.sender
+            return StandsWithdrawn(
+                target=item.number,
+                repository=repository,
+                by=by,
+                at=at,
+                state=withdrawn,
+            )
+
+
+def named(state: State) -> int | None:
+    """Return the item `state` names: the answer, for an item answered; the item superseding it; none else."""
+    match state:
+        case Answered(answer=number) | Superseded(by=number):
+            return number
+        case _:
+            return None
+
+
+class Answers(Edge):
+    """An item answering another: an answer, the question it answers; a turn's last words, each of the operator's items told since the turn before, which they answer (`Message.answers`)."""
+
+    kind: Literal["inbox:answers"] = "inbox:answers"
+    source: int
+
+
+class Replies(Edge):
+    """The operator's reply to a conversation's message, drawn to that message (`Message.of`)."""
+
+    kind: Literal["inbox:replies"] = "inbox:replies"
+    source: int
+
+
+class Cites(Edge):
+    """An item citing the operator's words: the item they're in, and the part where the citation names one (`Citation`).
+
+    Its citations are read again at each edit: a later reading's edges replace
+    the earlier ones, so those standing are the item's latest reading that
+    found any. The item's own `citations` say which it makes as it stands.
+    """
+
+    kind: Literal["inbox:cites"] = "inbox:cites"
+    source: int
+    part: int | None = None
+    reading: int
+    """Which reading of the citing item's citations it's of, from 1."""
+
+    @override
+    def replaces(self, earlier: Edge) -> bool:
+        """Replace each citation of an earlier reading."""
+        return isinstance(earlier, Cites) and earlier.reading < self.reading
+
+
+DRAFT = "inbox:draft"
+"""The name of the operator's draft reply among the ledger's plain records."""
+
+ORDER = "inbox:order"
+"""The name of the review's order among the ledger's plain records."""
+
+
+# lup: defer(issue=345, why="a conversation's whereabouts are a plain record, unnumbered, until threads need a conversation as a node (piece 3), which makes them one then, once threads move the numbers anyway")
+HEARD = "inbox:conversation:"
+"""What the name of each conversation's whereabouts starts with among the ledger's plain records."""
+
+
+def heard(key: str) -> str:
+    """Name the whereabouts of the conversation keyed `key` among the ledger's plain records.
+
+    >>> heard("5cf8")
+    'inbox:conversation:5cf8'
+    """
+    return f"{HEARD}{key}"
+
+
+def talked_on(key: str) -> str:
+    """Name what the operator wrote on the conversation keyed `key` among the ledger's plain records.
+
+    >>> talked_on("5cf8")
+    'inbox:talk:5cf8'
+    """
+    return f"inbox:talk:{key}"
+
+
+KINDS = Kinds(
+    nodes=[*THREADS.nodes, ItemNode],
+    edges=[
+        *THREADS.edges,
+        StandsTold,
+        StandsWaiting,
+        StandsAnswered,
+        StandsDone,
+        StandsDecided,
+        StandsSuperseded,
+        StandsWithdrawn,
+        Answers,
+        Replies,
+        Cites,
+    ],
+)
+"""The kinds the host service's ledger reads: the ledger's own, threads, and the inbox's."""
+
+
+class Inbox(MutableModel, arbitrary_types_allowed=True):
+    """Every item and every conversation's whereabouts, as the host service holds them, each change written through to the ledger before it's held.
+
+    The ledger is one connection behind one lock (`Ledger`), so a read on
+    another thread, such as an attachment's, is safe beside the event loop's
+    writes; the items and whereabouts held are replaced whole at each change,
+    never changed in place, so a reader on another thread holds the copy it
+    took.
+    """
+
+    ledger: Ledger
     items: dict[int, Item] = {}
     """By number."""
     whereabouts: dict[str, Whereabouts] = {}
@@ -1248,53 +1593,75 @@ class Inbox(MutableModel):
     (`Delivery.roster`), is made again once it changes."""
 
     @classmethod
-    def opened(cls, layout: InboxLayout, changes: Changes | None = None) -> Inbox:
-        """Read the inbox kept at `layout`, telling `changes` of each item written; one never written is empty.
+    def opened(cls, ledger: Ledger, changes: Changes | None = None) -> Inbox:
+        """Read the inbox `ledger` holds, telling `changes` of each item written; one holding no item is empty.
 
-        Raise `InboxError` naming a file that doesn't read.
+        Raise `InboxError` where a record doesn't read.
         """
-        items = [read(path, Item) for path in layout.items.glob("*.json")]
-        places = [read(path, Whereabouts) for path in layout.parties.glob("*.json")]
+        try:
+            nodes = ledger.every(ItemNode)
+            states = {each.target: each.state for each in ledger.drawn_of(Stands)}
+            places = ledger.plains(HEARD, Whereabouts)
+        except LupLedgerError as unread:
+            message = f"the inbox on the ledger doesn't read: {unread}"
+            raise InboxError(message) from unread
         return cls(
-            layout=layout,
-            items={item.number: item for item in items},
-            whereabouts={place.conversation.key(): place for place in places},
+            ledger=ledger,
+            items={
+                each.number: each.item(states.get(each.number, Waiting()))
+                for each in nodes
+            },
+            whereabouts={each.conversation.key(): each for each in places.values()},
             changes=changes,
         )
 
     def draft(self) -> Draft:
         """Return the operator's draft reply; an empty one where they have none."""
-        return read_model(self.layout.draft, Draft) or Draft()
+        return self.ledger.plain(DRAFT, Draft) or Draft()
 
     def drafted(self, draft: Draft) -> Draft:
         """Keep the operator's draft reply, and return it."""
-        write_model(self.layout.draft, draft)
+        self.ledger.rewritten(DRAFT, draft)
         if self.changes is not None:
             self.changes.changed()
         return draft
 
     def order(self) -> Order:
         """Return where the dashboard's review lays out its groups; none where no page has laid any out."""
-        return read_model(self.layout.order, Order) or Order()
+        return self.ledger.plain(ORDER, Order) or Order()
 
     def ordered(self, places: list[str], gone: list[str]) -> Order:
         """Keep where the dashboard's review lays out its groups once a page laid them out at `places`, those at `gone` gone from it (`Order.laid`), and return it."""
         order = self.order().laid(places, gone)
-        write_model(self.layout.order, order)
+        self.ledger.rewritten(ORDER, order)
         return order
 
     def talk(self, conversation: Conversation) -> Talk:
         """Return what the operator wrote on `conversation` where they read it; nothing where they've written nothing."""
-        return read_model(self.layout.talk(conversation.key()), Talk) or Talk()
+        return self.ledger.plain(talked_on(conversation.key()), Talk) or Talk()
 
     def talked(self, conversation: Conversation, talk: Talk) -> Talk:
         """Keep what the operator wrote on `conversation`, in place of the last, and return it."""
-        write_model(self.layout.talk(conversation.key()), talk)
+        self.ledger.rewritten(talked_on(conversation.key()), talk)
         return talk
 
     def kept(self, item: Item) -> Item:
-        """Write `item` through to its file, and hold it, telling `changes` of each conversation it's from, for, or was addressed to."""
-        write_model(self.layout.item(item.number), item)
+        """Write `item` through to the ledger, and hold it, telling `changes` of each conversation it's from, for, or was addressed to.
+
+        What it says changed, it's a new version of its node, its links drawn
+        from it (`linked`); where it stands changed, an edge says so
+        (`stands`). Both are one transaction, kept before the item is held.
+        """
+        before = self.items.get(item.number)
+        standing = Waiting() if before is None else before.state
+        with self.ledger.writing():
+            if (
+                before is None
+                or before.model_copy(update={"state": item.state}) != item
+            ):
+                self.versioned(item)
+            if item.state != standing:
+                self.ledger.drawn(stands(item, self.source(item, named(item.state))))
         self.items = {**self.items, item.number: item}
         self.version += 1
         if self.changes is not None:
@@ -1311,6 +1678,59 @@ class Inbox(MutableModel):
             )
         return item
 
+    def versioned(self, item: Item) -> ItemNode:
+        """Keep a version of `item`'s node saying what `item` says, its attachments the last version's, and draw its links (`linked`); the first at when it was made."""
+        earlier = self.ledger.found(item.number)
+        last = earlier if isinstance(earlier, ItemNode) else None
+        at = item.made if last is None else after(last.at)
+        node = self.ledger.kept(ItemNode.of(item, at, last))
+        self.linked(node, last)
+        return node
+
+    def source(self, item: Item, number: int | None) -> int | None:
+        """Return `number` where it's an item an edge drawn to `item` can come from: on the ledger, in the same repository; none else."""
+        if number is None:
+            return None
+        found = self.ledger.found(number)
+        if found is None or found.repository != located(item):
+            return None
+        return number
+
+    def linked(self, node: ItemNode, last: ItemNode | None = None) -> None:
+        """Draw the edges `node`'s fields say (`ItemNode.links`), each to an item on the ledger in its repository, and each not drawn already: its citations where they changed, a later reading in place of the one before.
+
+        The one place an item's links are drawn, at every version written: so
+        the edges say what the item's fields say, and a field naming an item
+        that isn't on the ledger, or is another repository's, stands alone.
+        Where `last`, the version before, said the same links, they were drawn
+        as it was written, and nothing is read.
+        """
+        if last is not None and [linking(each) for each in last.links(0)] == [
+            linking(each) for each in node.links(0)
+        ]:
+            return
+        drawn = self.ledger.drawn_from(node.number, Edge, current=True)
+        cites = [each for each in drawn if isinstance(each, Cites)]
+        reading = max((each.reading for each in cites), default=0)
+
+        def reachable(target: int) -> bool:
+            found = self.ledger.found(target)
+            return found is not None and found.repository == node.repository
+
+        wanted = [each for each in node.links(reading + 1) if reachable(each.target)]
+        citing = [each for each in wanted if isinstance(each, Cites)]
+        kept = [linking(each) for each in drawn]
+        fresh = [
+            each
+            for each in wanted
+            if not isinstance(each, Cites) and linking(each) not in kept
+        ]
+        changed = [linking(each) for each in citing] != [
+            linking(each) for each in cites
+        ]
+        for each in [*fresh, *(citing if citing and changed else [])]:
+            self.ledger.drawn(each)
+
     def made(
         self,
         reason: Reason,
@@ -1322,14 +1742,14 @@ class Inbox(MutableModel):
         call: str | None = None,
         quiet: bool = False,
     ) -> Item:
-        """Make an item, numbered after every other, and keep it; `call` is the runtime's id for the agent's call that made it, where one did, and `quiet` says it waits for a call (`Item.quiet`).
+        """Make an item, numbered by the ledger, after every node before it, and keep it; `call` is the runtime's id for the agent's call that made it, where one did, and `quiet` says it waits for a call (`Item.quiet`).
 
         One for a conversation that has ended goes to their session's main
         conversation, saying whose it was.
         """
         addressed = self.passed(recipient)
         item = Item(
-            number=max(self.items, default=0) + 1,
+            number=self.ledger.numbered(),
             reason=reason,
             sender=sender,
             recipient=recipient if addressed is None else addressed.main(),
@@ -1434,26 +1854,69 @@ class Inbox(MutableModel):
         )
 
     def attached(self, number: int, diff: str, files: list[ChangedFile]) -> None:
-        """Keep approval, held change or flagged write `number`'s whole diff and each file it changes beside it, each in a file of its own, in place of those kept before."""
-        write_model(self.layout.diff(number), Diff(text=diff))
-        self.filed(number, files)
+        """Keep approval, held change or flagged write `number`'s whole diff and each file it changes as the ledger's attachments, in place of those kept before: a version of its node naming them."""
+        self.attachments(number, diff=Diff(text=diff), files=ChangedFiles(files=files))
 
     def filed(self, number: int, files: list[ChangedFile]) -> None:
-        """Keep each file approval, held change or flagged write `number` changes beside it, whole, in place of those kept before: an approval's files once their types are read, a flagged write's as a later one joins it."""
-        write_model(self.layout.changed(number), ChangedFiles(files=files))
+        """Keep each file approval, held change or flagged write `number` changes as the ledger's attachment, whole, in place of those kept before: an approval's files once their types are read, a flagged write's as a later one joins it."""
+        self.attachments(number, files=ChangedFiles(files=files))
+
+    def attachments(
+        self,
+        number: int,
+        *,
+        diff: Diff | None = None,
+        files: ChangedFiles | None = None,
+    ) -> None:
+        """Keep `diff` and `files` as item `number`'s attachments, each given, in place of those its last version named: a version of its node naming them, its other fields its last version's.
+
+        Safe on any thread: the version is read and written under the ledger's
+        lock, so one written on another thread, the event loop's, is never lost.
+        """
+        named = {
+            **(
+                {}
+                if diff is None
+                else {"diff": self.ledger.attached(diff.model_dump_json().encode())}
+            ),
+            **(
+                {}
+                if files is None
+                else {"files": self.ledger.attached(files.model_dump_json().encode())}
+            ),
+        }
+        with self.ledger.writing():
+            last = self.ledger.node(number, ItemNode)
+            self.ledger.kept(last.model_copy(update={**named, "at": after(last.at)}))
 
     def diff(self, number: int) -> str:
         """Return approval, held change or flagged write `number`'s whole diff, or say it isn't kept."""
-        return read(self.layout.diff(number), Diff).text
+        return self.attachment(number, "diff", Diff).text
 
     def files(self, number: int) -> list[ChangedFile]:
         """Return each file approval, held change or flagged write `number` changes, whole, or say they aren't kept."""
-        return read(self.layout.changed(number), ChangedFiles).files
+        return self.attachment(number, "files", ChangedFiles).files
+
+    def attachment[M: Model](
+        self, number: int, which: Literal["diff", "files"], model: type[M]
+    ) -> M:
+        """Return item `number`'s attachment `which`, as `model`, or say it isn't kept, or doesn't read."""
+        found = self.ledger.found(number)
+        digest = getattr(found, which) if isinstance(found, ItemNode) else None
+        data = None if digest is None else self.ledger.attachment(digest)
+        if data is None:
+            message = f"the inbox keeps no {which} of {cited(number)}"
+            raise InboxError(message)
+        try:
+            return model.model_validate_json(data)
+        except ValueError as unread:
+            message = f"the {which} of {cited(number)} doesn't read: {unread}"
+            raise InboxError(message) from unread
 
     def placed(self, place: Whereabouts) -> Whereabouts:
-        """Write a conversation's whereabouts through to its file, and hold them."""
+        """Write a conversation's whereabouts through to the ledger, a plain record in place of their last, and hold them."""
         key = place.conversation.key()
-        write_model(self.layout.party(key), place)
+        self.ledger.rewritten(heard(key), place)
         self.whereabouts = {**self.whereabouts, key: place}
         self.version += 1
         return place

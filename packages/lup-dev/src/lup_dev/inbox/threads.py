@@ -21,16 +21,8 @@ import textwrap
 
 from lup.types import Model
 from lup_dev.inbox.parts import Part, PartId, blocks
-from lup_dev.inbox.store import (
-    Answer,
-    Conversation,
-    Item,
-    Message,
-    Operator,
-    Quote,
-    Review,
-    Verdict,
-)
+from lup_dev.inbox.store import Answer, Item, Message, Quote, Review, Verdict
+from lup_ledger.parties import Conversation, Operator
 
 
 class Anchor(Model):

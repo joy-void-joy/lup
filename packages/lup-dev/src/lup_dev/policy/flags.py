@@ -36,10 +36,11 @@ from lup_dev.errors import LupDevError
 from lup_dev.git import Git
 from lup_dev.host.client import Detached, HostClient
 from lup_dev.inbox.protocol import AskFlag, Gathering, ShowGathering, Shown
-from lup_dev.inbox.store import ChangedFile, Conversation, Flagged, Text
+from lup_dev.inbox.store import ChangedFile, Flagged, Text
 from lup_dev.layout import HostLayout
 from lup_dev.policy.holds import unified
 from lup_dev.policy.judge import Change, Judge, Judgement
+from lup_ledger.parties import Conversation
 
 
 class Landed(Model):

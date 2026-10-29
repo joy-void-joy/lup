@@ -40,12 +40,14 @@ from lup_dev.clock import Clock
 from lup_dev.host.protocol import Reply, Request
 from lup_dev.host.service import Handler, Reading, Route
 from lup_dev.host.watch import Changes, Remarked
-from lup_dev.inbox.store import Conversation, InboxError
+from lup_dev.inbox.store import InboxError
 from lup_dev.layout import Layout, MarksLayout
 from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from lup_ledger.parties import Conversation
 
 
 CORE = "core"

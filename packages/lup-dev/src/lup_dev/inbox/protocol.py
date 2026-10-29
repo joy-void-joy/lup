@@ -55,14 +55,12 @@ from lup_dev.inbox.store import (
     Answer,
     Approval,
     ChangedFile,
-    Conversation,
     Draft,
     Flagged,
     HeldChange,
     InboxError,
     Item,
     Message,
-    Operator,
     Order,
     Passage,
     Review,
@@ -73,6 +71,7 @@ from lup_dev.inbox.store import (
 )
 from lup_dev.layout import Layout
 from lup_dev.listing import Span
+from lup_ledger.parties import Conversation, Operator
 
 if TYPE_CHECKING:
     from collections.abc import Callable

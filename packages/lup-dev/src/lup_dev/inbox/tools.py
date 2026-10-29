@@ -73,7 +73,6 @@ from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.reading import Narrowing, Reader
 from lup_dev.inbox.store import (
     Answered,
-    Conversation,
     Decision,
     Friction,
     HowItFelt,
@@ -81,14 +80,13 @@ from lup_dev.inbox.store import (
     Item,
     Kind,
     Message,
-    Operator,
-    Party,
     Question,
     Stop,
     cited,
 )
 from lup_dev.inbox.tags import Tag, inside
 from lup_dev.inbox.threads import parts_of, spoken
+from lup_ledger.parties import Conversation, Operator, Party
 
 if TYPE_CHECKING:
     from lup.sessions import results

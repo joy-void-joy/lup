@@ -18,7 +18,8 @@ from pathlib import Path
 from lup.rooms.homes import opened
 from lup.types import Model, MutableModel
 from lup_dev.host.records import Called, Entry, Recorded, Said, Transcript
-from lup_dev.inbox.store import Conversation, InboxError, Item, cited
+from lup_dev.inbox.store import InboxError, Item, cited
+from lup_ledger.parties import Conversation
 
 
 class Moment(Model):

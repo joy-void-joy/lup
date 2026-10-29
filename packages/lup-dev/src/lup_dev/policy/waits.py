@@ -21,7 +21,7 @@ from lup.types import Model, MutableModel
 from lup_dev.host.protocol import Reply, Request
 from lup_dev.host.service import Reading, Route
 from lup_dev.host.watch import Changes, Touched
-from lup_dev.inbox.store import Conversation
+from lup_ledger.parties import Conversation
 
 
 class Declined(Model):

@@ -24,14 +24,12 @@ from lup.types import Model
 from lup_dev.inbox.store import (
     Answer,
     Answered,
-    Conversation,
     Decided,
     Done,
     Flagged,
     HeldChange,
     Item,
     Message,
-    Operator,
     Review,
     Stop,
     Superseded,
@@ -41,6 +39,7 @@ from lup_dev.inbox.store import (
     Withdrawn,
     cited,
 )
+from lup_ledger.parties import Conversation, Operator
 
 if TYPE_CHECKING:
     from collections.abc import Callable

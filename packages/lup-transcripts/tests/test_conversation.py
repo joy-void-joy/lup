@@ -32,14 +32,12 @@ from lup_dev.inbox.store import (
     Answer,
     Answered,
     Citation,
-    Conversation,
     Decided,
     Decision,
     Done,
     HeldChange,
     Item,
     Message,
-    Operator,
     Question,
     Reason,
     Ruling,
@@ -47,6 +45,7 @@ from lup_dev.inbox.store import (
     Unresolved,
     Waiting,
 )
+from lup_ledger.parties import Conversation, Operator
 from lup_transcripts.environment.conversation import (
     EARLIER_KIND,
     FOLD_KINDS,
