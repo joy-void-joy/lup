@@ -36,7 +36,7 @@ present when the session started is allowed and reported.
 
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Literal, get_args
+from typing import TYPE_CHECKING, Literal, get_args
 
 from lup.types import Model
 from lup_dev.codescan.contract import (
@@ -57,7 +57,6 @@ from lup_dev.codescan.directives import (
     missing,
 )
 from lup_dev.codescan.ruff import Linter
-from lup_dev.declaration.kinds import Level
 from lup_dev.declaration.project import Asking
 from lup_dev.errors import LupDevError
 from lup_dev.inbox.store import (
@@ -72,6 +71,9 @@ from lup_dev.policy.roles import Role, Roles
 from lup_dev.policy.surface import ApiChange, api_changes
 from lup_dev.private.found import found as values_in
 from lup_dev.private.withheld import Withheld, said
+
+if TYPE_CHECKING:
+    from lup_dev.declaration.kinds import Level
 
 PRIVATE: Asking = "private"
 """The name a private value on a touched line asks by, and the rule its finding

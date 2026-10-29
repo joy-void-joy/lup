@@ -630,7 +630,8 @@ class Given(Model):
 def leveled(found: list[Part[Levels]]) -> dict[str, Level]:
     """Return each role's level: the one a module gives it, else `Levels`' default; refused where two modules give one role a level.
 
-    >>> leveled([Part(module="core", value=Levels()), Part(module="python", value=Levels(test="hidden"))])["test"]
+    >>> leveled([Part(module="core", value=Levels(), default=Levels()),
+    ...     Part(module="python", value=Levels(test="hidden"), default=None)])["test"]
     'hidden'
     """
     given = [
