@@ -2206,9 +2206,9 @@ THREAD = "019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b"
 """A Codex thread of the project's from before rooms had homes, by its id."""
 
 SNAPSHOT = (
-    "- `shell-snapshots/`: 1 snapshot. A host session runs its own before each "
+    "- `shell-snapshots/`: 1 snapshot. A host session runs their own before each "
     "command, and a room could have written any: with no host session running, "
-    "`rm ~/.claude/shell-snapshots/*`; a session makes a new one as it starts."
+    "`rm ~/.claude/shell-snapshots/*`; a session makes a new one as they start."
 )
 CLAUDE_LOGIN = (
     "- Your host login, `.credentials.json`, was readable by every room: in a "

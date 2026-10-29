@@ -13,7 +13,7 @@ What's said, each line saying what to do (#321):
   resumes one of them, that it resumes only once they move; then the question,
   once, on a terminal. With no terminal, that a terminal or the command moves
   them. With another launch of the repository running, whose session would write
-  on where its record was, each by its name, to end before launching again;
+  on where their record was, each by its name, to end before launching again;
 - after a yes, what moved, and what a host session acts on in the operator's
   directory that a room could have written, with how to replace the host login
   the first time a launch says it (`ToldLayout.host_login`), waiting for Enter
@@ -63,7 +63,7 @@ class MovingOver(Model, arbitrary_types_allowed=True):
     runtime: HostRuntime
     """The runtime launched, as the migration takes it."""
     resumed: str | None
-    """The session the launch resumes, by its id, where it names one."""
+    """The session the launch resumes, by their id, where it names one."""
     say: Callable[[str], None]
     """Where the launch tells the operator what it does."""
     ask: Callable[[str], str | None] | None

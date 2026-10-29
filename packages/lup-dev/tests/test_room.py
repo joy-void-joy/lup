@@ -774,7 +774,7 @@ def test_a_launch_s_directory_goes_with_what_its_session_wrote_there_read_only(
     outside = tmp_path / "outside"
     outside.mkdir()
     outside.chmod(0o555)
-    # What a session writes for itself alone is mounted from the launch's
+    # What a session writes for themselves alone is mounted from the launch's
     # directory, so the room writes there too.
     snapshots = launch.directory / "runtime" / "launch" / "shell-snapshots"
     locked = snapshots / "locked"
