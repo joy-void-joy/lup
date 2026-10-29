@@ -960,13 +960,21 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         ]
 
     def said_to(self, party: Conversation) -> list[Anchor]:
-        """Return every part of the operator's words addressed to `party`, oldest first: what their citations of the operator's words are read against (`spoken`)."""
+        """Return every part of the operator's words addressed to `party`, and each moved into a thread of their repository, oldest first: what their citations of the operator's words are read against (`spoken`).
+
+        A part moved into a thread waits on whoever answers for it, whom the
+        operator mostly didn't address it to, until something cites it
+        (`lup_ledger.threads.answered`).
+        """
+        moved = self.concerns().moved_parts(party.repository)
+        holding = [each.item for each in moved]
         ordered = [self.inbox.items[number] for number in sorted(self.inbox.items)]
         return [
             anchor
             for item in ordered
-            if addressed_to(item, party)
+            if item.number in holding or addressed_to(item, party)
             for anchor in spoken(item)
+            if anchor.id in moved or addressed_to(item, party)
         ]
 
     def cited(self, item: Item) -> Item:

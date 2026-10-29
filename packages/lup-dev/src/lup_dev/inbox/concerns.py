@@ -674,6 +674,17 @@ class Concerns(Model, arbitrary_types_allowed=True):
         self.telling(thread, [party], whole=whole, line=line)
         return wanted.cited()
 
+    def moved_parts(self, repository: Path) -> list[PartId]:
+        """Return each part of the operator's words moved into a thread of `repository`, in the order first moved."""
+        drawn = self.inbox.ledger.drawn_of(Moved)
+        return list(
+            dict.fromkeys(
+                PartId(item=each.source, part=each.part)
+                for each in drawn
+                if each.repository == repository
+            )
+        )
+
     def item(self, repository: Path, number: int) -> Item:
         """Return item `number`, of `repository`; say where the inbox holds none, or it's another's."""
         found = self.inbox.items.get(number)

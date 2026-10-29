@@ -26,6 +26,7 @@ from lup_ledger.records import Edge, Kinds, Name, Node
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from datetime import datetime
 
 type State = Literal[
     "working",
@@ -128,12 +129,13 @@ class In(Edge):
         return isinstance(earlier, In)
 
 
-# lup: defer(issue=345, why="a moved part reads as open until the thread's holder answers it, once their answer is a node that can be drawn to it")
 class Moved(Edge):
     """A part of an item moved into a thread by its id: the operator's words there, which the thread's holder answers.
 
     A part counts as a member of the thread it's moved into, while its item
-    stays in its own. A part is in one thread at a time, like a node.
+    stays in its own. A part is in one thread at a time, like a node. It waits
+    on whoever answers for the thread until a node in the thread cites it
+    (`Edge.cites`), whoever wrote that node (`Standing.unanswered`).
     """
 
     kind: Literal["ledger:moved"] = "ledger:moved"
@@ -328,6 +330,32 @@ class Member(Model):
     drawn: list[SerializeAsAny[Edge]] = []
 
 
+def answered(
+    member: Member,
+    members: list[Member],
+    answering: Callable[[datetime], Conversation | None],
+) -> bool:
+    """Say whether `member`, a part of the operator's words moved into a thread whose members are `members`, is answered: a node in the thread cites it (`Edge.cites`), or one anywhere does whose writer answered for the thread as they wrote it, as `answering` says of a time.
+
+    The operator's words moved into a thread wait on whoever answers for it,
+    so a citation by them counts wherever it lands: a main session answers
+    the operator's part they moved into a thread nobody holds yet from their
+    own root. Anyone else's, from outside the thread, is no answer. A node in
+    the thread counts whoever wrote it, a subagent of its holder's among them:
+    a subagent starts on their parent's thread, so the work their parent
+    handed them answers there, beside the operator's words. A node itself in
+    the thread, never a part, is what answers.
+    """
+    if member.part is None:
+        return False
+    inside = [each.node.number for each in members if each.part is None]
+    return any(
+        each.cites(member.part)
+        and (each.source in inside or each.by == answering(each.at))
+        for each in member.drawn
+    )
+
+
 class Standing(Model):
     """Where a thread stands, as read from the edges drawn to it and to what's in it."""
 
@@ -337,12 +365,21 @@ class Standing(Model):
     a parked thread waits for, what to try); none where nothing has."""
     waiting: list[Member] = []
     """What in it waits on the operator, oldest first, whatever its status."""
+    unanswered: list[Member] = []
+    """The parts of the operator's words moved into it that nothing answers yet
+    (`answered`), oldest first: each waits on whoever answers for the thread."""
     on: list[Conversation] = []
     """Who's on it: its holder first, then each conversation that wrote what's in it."""
 
     @classmethod
-    def read(cls, thread: Thread, drawn: list[Edge], members: list[Member]) -> Self:
-        """Read where `thread` stands from `drawn`, the edges drawn to it, oldest first, and `members`, what's in it.
+    def read(
+        cls,
+        thread: Thread,
+        drawn: list[Edge],
+        members: list[Member],
+        answering: Callable[[datetime], Conversation | None] | None = None,
+    ) -> Self:
+        """Read where `thread` stands from `drawn`, the edges drawn to it, oldest first, and `members`, what's in it; `answering` says who answered for it at a time, its holder as it stands where it's none.
 
         Its latest status says it, but for a thread working or reopened, which
         waits on the operator where a member does.
@@ -356,9 +393,20 @@ class Standing(Model):
         writers = [
             each.node.by for each in members if isinstance(each.node.by, Conversation)
         ]
+
+        def held(at: datetime) -> Conversation | None:
+            del at
+            return thread.holder
+
+        unanswered = [
+            each
+            for each in members
+            if each.part is not None and not answered(each, members, answering or held)
+        ]
         return cls(
             state=state,
             status=status,
             waiting=waiting,
+            unanswered=unanswered,
             on=list(dict.fromkeys([*holder, *writers])),
         )
