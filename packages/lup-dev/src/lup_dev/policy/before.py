@@ -161,7 +161,7 @@ def told(
     *,
     quiet: Quiet,
 ) -> list[Part]:
-    """Say what a write's judgement found in `content`, its files named from `root`, as a checkpoint reports it: what conversation `agent` wasn't told yet, which `record` remembers it told (`Session.news`), and its `quiet` doesn't hold; nothing where that's nothing."""
+    """Say what a write's judgement found in `content`, its files named from `root`, as a checkpoint reports it: what conversation `agent` wasn't told yet, which `record` remembers it told (`Session.news`), and their `quiet` doesn't hold; nothing where that's nothing."""
 
     def seen(kind: Kind, found: list[Finding]) -> Look:
         look = Look(
@@ -344,12 +344,12 @@ def kept(path: Path, hold: str) -> str:
     """Say why a write to `path` is refused while hold `hold` waits on it: the file is nobody's until the operator answers.
 
     >>> kept(Path("/work/AGENTS.md"), "a1b2c3")
-    "lup holds /work/AGENTS.md for the operator's review (hold a1b2c3), so it isn't written until they answer, which reaches the conversation that made the change at its next call."
+    "lup holds /work/AGENTS.md for the operator's review (hold a1b2c3), so it isn't written until they answer, which reaches the conversation that made the change at their next call."
     """
     return (
         f"lup holds {path} for the operator's review (hold {hold}), so it isn't "
         "written until they answer, which reaches the conversation that made the "
-        "change at its next call."
+        "change at their next call."
     )
 
 
@@ -379,7 +379,7 @@ def held_write(
     comment (`approval`); declined, or left unanswered within the patience, it's
     denied, and the agent's version saved, the hold staying open where nobody
     answered. A call its runtime ended while it waited (`Bench.interrupted`)
-    gives up as on no answer, its conversation told at its next call. A hold
+    gives up as on no answer, its conversation told at their next call. A hold
     settled meanwhile with no call waiting on it, as a later checkpoint settles
     one whose call's process ended, is the checkpoint's to tell.
     """

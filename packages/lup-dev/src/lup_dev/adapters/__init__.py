@@ -58,8 +58,8 @@ class Adapter(Model, arbitrary_types_allowed=True):
     read, in the home it registered (`lup_dev.host.homes.translated`); none
     for the session's own conversation, or where nothing's recorded."""
     woken: Callable[[str, str], str] | None
-    """Starts a turn of an idle session: its id and what to tell it in, the line
-    written to its messaging socket out; none where the runtime has no way, a gap
+    """Starts a turn of an idle session: their id and what to tell them in, the line
+    written to their messaging socket out; none where the runtime has no way, a gap
     its module declares."""
     pushing: Pushing | None
     """Starts a turn of an idle session through lup's tool server, on its own
@@ -88,7 +88,7 @@ class Adapter(Model, arbitrary_types_allowed=True):
     looks planted, and what to do, and how to replace its login apart
     (`lup_dev.host.written`)."""
     resumed: Callable[[list[str]], str | None]
-    """Says which session a launch's arguments for its CLI resume, by its id;
+    """Says which session a launch's arguments for its CLI resume, by their id;
     none where they resume none, or open its picker."""
     recorded: Callable[[PurePosixPath], str | None]
     """Says whose own record is at a place in one of its homes: the session's

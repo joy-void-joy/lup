@@ -22,7 +22,7 @@ reported as a `Problem`, which the judge turns into a finding of its own rule:
 
 The last three are reminders (`Problem.reminder`): work that came due rather than
 something wrong with the code, which the gate lists without failing, and a
-session is told at its start.
+session is told at their start.
 """
 
 import io

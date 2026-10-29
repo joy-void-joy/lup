@@ -25,7 +25,7 @@ class Runtime(ABC):
         """Say whether this process runs inside one of the runtime's sessions.
 
         It reads the variables the runtime sets in the commands it runs, so that an
-        agent can't answer its own hold by mistake.
+        agent can't answer their own hold by mistake.
         """
 
     @abstractmethod

@@ -68,7 +68,7 @@
     }
   },
   {
-    "name": "a message to another conversation, named by its path",
+    "name": "a message to another conversation, named by their path",
     "repository": "/r/lup.git",
     "argument": {
       "number": 65

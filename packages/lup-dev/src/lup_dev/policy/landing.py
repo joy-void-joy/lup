@@ -44,7 +44,7 @@ gated branch, `dev` by default:
    landed after it (`tracked`), as `git push <remote>` moves it: the judge
    counts what those refs name as judged;
 7. each conversation still going that worked on a branch it landed, and hasn't
-   said how the work felt, is invited to, once, beside its next call
+   said how the work felt, is invited to, once, beside their next call
    (`invited`): the landing is where a branch's work ends;
 8. the answer says, for each branch it landed, the `# lup: defer` comments its
    merge adds and removes against its first parent, and those the integration
@@ -65,7 +65,7 @@ gated branch, `dev` by default:
     version they saw (`Withdrawn`). One on a branch still there whose file
     stands otherwise may be a write not committed yet, and waits;
 11. the answer ends on what's still running or waiting to land (`going`): the
-    subagents of the session landing that lup hasn't heard end, and the local
+    subagents of the session landing whom lup hasn't heard end, and the local
     branches not on what landed, each with who works in it.
 
 **Which branches it lands:** of the local branches in the history of the tip and
@@ -115,9 +115,9 @@ that isn't there is said once, with its name, and each worktree named as left.
 Left alone, and said: the repository's main worktree, one where the conversation
 landing works, and one where a conversation of a launch still served works, as
 the judge's session index has it (`Holding.works`); the local branch it has
-checked out stays with it. The index places a subagent in a worktree once its
-file tools wrote there, or, in one lup made for it at its runtime's asking, from
-its first call, so a fresh worktree a worker made itself is kept by which
+checked out stays with it. The index places a subagent in a worktree once their
+file tools wrote there, or, in one lup made for them at their runtime's asking,
+from their first call, so a fresh worktree a worker made themselves is kept by which
 branches count as landed, not by this check (#240).
 
 The tool's docstring's first line is its summary, 50 characters at most, which
@@ -428,7 +428,7 @@ def landed_branches(
     `old`, where no given branch was given at that tip and no other branch
     points at it. The graph can't tell two branches at one commit apart:
     one at the tip a given branch was given at was made from it, as a worker
-    starts its next piece (`made`); several at a tip merged, none given, may
+    starts their next piece (`made`); several at a tip merged, none given, may
     be either (`shared`); each is left alone. The rest have nothing of their
     own in it, their tip being one of that line's own commits: a branch just
     made from the integration branch, say, whose worktree a session may be
@@ -960,7 +960,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         `dev`, each with its file and line, or says there are none, so the work
         left undone shows as it lands. Each conversation still going that
         worked on a branch it landed, and hasn't said how the work felt, is
-        invited to, once, beside its next call. Then it cleans up after each
+        invited to, once, beside their next call. Then it cleans up after each
         branch it landed: deletes its copy on the remote, removes its worktree
         where it's clean and nobody works in it, and deletes the local branch.
         A flagged write still waiting that's left nothing to hold, on a branch
@@ -1349,7 +1349,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         )
 
     async def going(self, git: Git, tip: str, onto: str) -> list[str]:
-        """Say what's still running or waiting to land, once `tip` landed on `onto`: the subagents of the session landing that lup hasn't heard end, then the local branches not in `tip`'s history, but the gated and protected ones, each with where it's checked out and who works there; or that nothing is.
+        """Say what's still running or waiting to land, once `tip` landed on `onto`: the subagents of the session landing whom lup hasn't heard end, then the local branches not in `tip`'s history, but the gated and protected ones, each with where it's checked out and who works there; or that nothing is.
 
         It's only as true as lup's hearing of each subagent's end (`Whereabouts.ended`).
         """
@@ -1402,14 +1402,15 @@ class Lander(Model, arbitrary_types_allowed=True):
         return ["Still running or waiting to land:", *lines]
 
     async def invited(self, git: Git, landed: dict[str, str], onto: str) -> None:
-        """Invite each conversation still going that worked on a branch the landing landed, once, to say how the work felt, where it hasn't said: lup's words left for it (`Delivery.left`), told beside its next call, the conversation landing's beside this call's result, never holding an end.
+        """Invite each conversation still going that worked on a branch the landing landed, once, to say how the work felt, where they haven't said: lup's words left for them (`Delivery.left`), told beside their next call, the conversation landing's beside this call's result, never holding an end.
 
         Who worked on a branch is who works in a worktree having it checked
         out: a conversation the judge's session index places there
         (`Holding.works`), or a session's own conversation whose launch
         started there, read before the cleanup removes the worktree. One that
-        has ended isn't told: no runtime reaches it unless it's resumed, and
-        its work's start invited it already (`invitation`, `host/service.py`).
+        has ended isn't told: no runtime reaches them unless they're resumed,
+        and their work's start invited them already (`invitation`,
+        `host/service.py`).
         Each is invited at one landing at most (`Whereabouts.felt_asked`).
         """
         limits = self.launch.limits
@@ -1948,7 +1949,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         return Cleaned(done=[f"removed the worktree {root}"])
 
     def working(self, places: list[Whereabouts]) -> dict[Path, str]:
-        """Return the worktrees a conversation works in, each with who, as the cleanup leaves it: the conversation landing, then each launch still served of this repository where it started, then each of its conversations still going where the judge's session index has it work (`Holding.works`), each by the first found."""
+        """Return the worktrees a conversation works in, each with who, as the cleanup leaves it: the conversation landing, then each launch still served of this repository where it started, then each of its conversations still going where the judge's session index has them work (`Holding.works`), each by the first found."""
         index = SessionIndex(layout=self.layout)
         host = self.layout.host
         # Each launch's conversations are kept beside its record, and aren't a record.
@@ -2110,7 +2111,7 @@ def numbers_refused(refusals: list[Refusal]) -> str:
 
 
 def called(host: HostLayout, place: Whereabouts) -> str:
-    """Say the conversation at `place` as people call it, `dev/explore-auth`, from what the service keeps of its launch; by its runtime's ids where that names none."""
+    """Say the conversation at `place` as people call them, `dev/explore-auth`, from what the service keeps of their launch; by their runtime's ids where that names none."""
     record = recorded(host.record(place.launch))
     try:
         kept = read_model(host.conversations(place.launch), Conversations)

@@ -1896,7 +1896,7 @@ export const rules = {
 
     'fixed-tool-limit': {
         mistake:
-            "A tool that stops its answer at a bound its caller can't set hands the agent part of what it asked for, " +
+            "A tool that stops its answer at a bound its caller can't set hands the agent part of what they asked for, " +
             'with no way to reach the rest.',
         steer:
             "Make the bound a field of the tool's input, defaulting to the value it has, and say in the answer when it " +

@@ -135,7 +135,7 @@ class Profile(Layer, extra="forbid"):
     operator_configuration: bool = True
     """Whether the operator's own runtime configuration is the layer below the
     profile's own (`~/.config/lup/profiles/<name>/<runtime>/`), credentials left
-    out; off, the profile's own is the whole of it. What a session saves of its
+    out; off, the profile's own is the whole of it. What a session saves of their
     preferences is carried back into the profile's own."""
     rooms_home: Literal["project", "global"] = "project"
     """Where its rooms keep their history and state: in a home of each

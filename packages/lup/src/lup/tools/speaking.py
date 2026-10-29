@@ -1,4 +1,4 @@
-"""The tools every ask serves, so the agent can speak to its caller: `blocked`, `stop`, `note`, `friction` and `how_it_felt`.
+"""The tools every ask serves, so the agent can speak to their caller: `blocked`, `stop`, `note`, `friction` and `how_it_felt`.
 
 They act on nothing, so they're served even where an agent has no other tool:
 - `blocked` stops the turn without an answer because the work can't go on: the
@@ -6,7 +6,8 @@ They act on nothing, so they're served even where an agent has no other tool:
   seems wrong. The ask raises `BlockedError` with the agent's words, so a
   caller tells "the agent says this can't be done" from a failure;
 - `stop` stops the turn without an answer by the agent's own choice, saying
-  why: it's done and nothing more is worth doing, or it would rather not go on.
+  why: they're done and nothing more is worth doing, or they'd rather not go
+  on.
   The ask raises `StoppedError`, so a caller tells "the agent chose to end"
   from "the agent can't";
 - `note` attaches a remark to the answer without ending the turn: an assumption

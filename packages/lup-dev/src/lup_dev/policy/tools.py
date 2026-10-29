@@ -17,7 +17,7 @@ so a copy that predates it refuses the call, which says so.
 
 - **Whose verdicts:** the calling session's, by default: the log records each
   verdict's runtime and session, not which of the session's conversations
-  wrote, so a subagent reads its session's. `every` reads every session's, and
+  wrote, so a subagent reads their session's. `every` reads every session's, and
   a move of `HEAD`'s, which is no session's.
 - **Which holds:** the repository's, whoever made them (`logged`,
   `policy/holds.py`): those still open, and those answered where they're asked
@@ -132,7 +132,7 @@ class Scope(Span):
 
 
 class Onlooker(Model, arbitrary_types_allowed=True):
-    """One conversation of a launch, reading what the judge made of the writes in its repository: the tool's function, bound to it."""
+    """One conversation of a launch, reading what the judge made of the writes in their repository: the tool's function, bound to them."""
 
     layout: Layout
     """lup's state on the host, where the verdict logs and the stores are."""
@@ -337,7 +337,7 @@ def settled(verdict: Verdict, hold: Hold | None) -> Verdict:
     """Return a verdict with the operator's answer: its hold's, where it was held and they answered; else the one logged.
 
     The hold has their answer as soon as they give it. The log has an approval
-    of a write its agent waited on only once the judge hears its call finish,
+    of a write its agent waited on only once the judge hears their call finish,
     which a runtime whose hooks don't report a call's finish never tells it.
     """
     if hold is None or hold.answer is None:
@@ -397,7 +397,7 @@ class Quieting(Model):
 
 
 class Quieter(Model, arbitrary_types_allowed=True):
-    """One conversation of a launch, asking lup to hold some findings back after its calls: the tool's function, bound to it, in the repository's process."""
+    """One conversation of a launch, asking lup to hold some findings back after their calls: the tool's function, bound to them, in the repository's process."""
 
     bench: Bench
     """The judge's bench, with the launch's runtime, made once for the process."""

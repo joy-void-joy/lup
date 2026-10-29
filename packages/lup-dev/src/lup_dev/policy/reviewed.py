@@ -11,7 +11,7 @@ version (`lup_dev.policy.since`); a hold at landing starts there too
 A mark is the judge's review mark of the file (`lup_dev.inbox.marks`), keyed
 by its branch and path (`FileKey`), whichever view shows it, the latest alone,
 saying the version reviewed, in the store the core keeps in lup's state on the
-host, which no room mounts, so an agent can't mark its own work reviewed. Each
+host, which no room mounts, so an agent can't mark their own work reviewed. Each
 version marked is kept beside the marks by git's id for it, its bytes as they
 were, so a later diff reads it whatever became of the worktree's store: a
 snapshot there is no ref's, and the store goes with its worktree. A version,

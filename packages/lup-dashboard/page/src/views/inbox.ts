@@ -53,7 +53,7 @@ export function body(item: Item): string {
     }
 }
 
-/** Return the view of an agent-facing item of `reason`: its summary, what it is and, for a message between conversations, whom it went to, named by its path; its body, its text. */
+/** Return the view of an agent-facing item of `reason`: its summary, what it is and, for a message between conversations, whom it went to, named by their path; its body, its text. */
 function itemView(name: string, reason: Item["reason"]["reason"]): View<OfItem> {
     return {
         module: "inbox",

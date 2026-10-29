@@ -40,7 +40,7 @@ function talker(path: string, parent: string | null, depth: number): Talker {
 }
 
 describe("launches", () => {
-    it("puts each subagent under the conversation that spawned it", () => {
+    it("puts each subagent under the conversation that spawned them", () => {
         const listed = {
             kind: "listed" as const,
             launches: [registered("one", "w"), registered("two", "x")],
@@ -73,7 +73,7 @@ describe("launches", () => {
 });
 
 describe("running", () => {
-    it("lists each session and its subagents that aren't over, in the tree's order, with the launch each runs in", () => {
+    it("lists each session and their subagents who aren't over, in the tree's order, with the launch each runs in", () => {
         const idle = { state: "idle" as const, since: AT, lups: false };
         const ended = { state: "ended" as const, since: AT, lups: false };
         const listed = {

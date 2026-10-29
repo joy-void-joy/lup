@@ -49,7 +49,7 @@ names its tools after."""
 
 
 def summaries(tools: list[ToolSpec]) -> list[str]:
-    """Return a line for each tool, its name and its summary, as a session is told lup's tools: in its guidance, and a subagent at its first hook.
+    """Return a line for each tool, its name and its summary, as a session is told lup's tools: in their guidance, and a subagent at their first hook.
 
     >>> from lup.tools.speaking import note
     >>> summaries([note.spec()])
@@ -76,7 +76,7 @@ class RoomTools(ABC):
     ) -> Answer:
         """Run a call to the tool `name` for `caller`, a conversation of `launch`, and return what the model reads.
 
-        The arguments are the model's, as it sent them: the tool validates them.
+        The arguments are the model's, as they sent them: the tool validates them.
         `call` is the runtime's id for the call, where its hook stamped it.
         """
 
@@ -156,7 +156,7 @@ class Stamped(Model, extra="allow"):
 def stamp(arguments: JsonObject, caller: str, call: str) -> JsonObject:
     """Return a call's arguments carrying `caller` and `call`, as a hook rewrites a call to lup's tools for the server to read.
 
-    The model's own `caller` or `call`, where it wrote one, gives way to lup's.
+    The model's own `caller` or `call`, where they wrote one, gives way to lup's.
 
     >>> stamp({"text": "hi", "caller": "mine"}, "c1", "t1")
     {'text': 'hi', 'caller': 'c1', 'call': 't1'}

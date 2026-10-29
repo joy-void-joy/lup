@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 
 class Touched(Model):
-    """A conversation a change touched, by its repository and its runtime's ids, and how: at one of its hooks, by its event's name, or by an item of the inbox it sent or was sent (`item`)."""
+    """A conversation a change touched, by their repository and their runtime's ids, and how: at one of their hooks, by its event's name, or by an item of the inbox they sent or were sent (`item`)."""
 
     repository: Path
     """The repository's git directory, as its launch registered it."""

@@ -107,7 +107,7 @@ class LupDevSettings(Settings):
 class TerminalVariables(Settings):
     """The terminal's variables a room passes through as they are, one field per variable.
 
-    A room's session lost its colour, its locale, its time zone and Ctrl+G until
+    A room's session lost their colour, their locale, their time zone and Ctrl+G until
     these were passed (`docs/launch.md`, *The user, the process, the network*).
     Each is passed under its own name, the field's in capitals; one unset isn't
     passed.

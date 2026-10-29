@@ -20,11 +20,12 @@ whole diff (`ShowDiff`), and the dashboard each file it changes, whole
 flagged (`AskFlag`, joining the item `ShowGathering` finds gathering the
 conversation's flagged writes to the file).
 
-The dashboard reads a conversation's steps as its runtime records them
-(`ShowConversation`), for its task list and its context; the conversation it
-shows is `Transcripts`' view of it. A conversation's items, those it sent and
-was sent in every state, each with its line (`ListItems`, `inbox/lines.py`),
-are what a module's view of it weaves in, read through the core.
+The dashboard reads a conversation's steps as their runtime records them
+(`ShowConversation`), for their task list and their context; the conversation
+it shows is `Transcripts`' view of it. A conversation's items, those they sent
+and were sent in every state, each with its line (`ListItems`,
+`inbox/lines.py`), are what a module's view of the conversation weaves in, read
+through the core.
 """
 
 import asyncio
@@ -113,7 +114,7 @@ class FinishItem(Request, reads=False):
 
 
 class SendItem(Request, reads=False):
-    """Send the operator's message to a conversation of the session a launch runs: its main one, or one of its subagents."""
+    """Send the operator's message to a conversation of the session a launch runs: their main one, or one of their subagents."""
 
     kind: Literal["inbox-send"] = "inbox-send"
     launch: LaunchId
@@ -158,7 +159,7 @@ class KeepOrder(Request, reads=False):
 
 
 class ShowTalk(Request, reads=True):
-    """Show what the operator writes on one conversation they read, and the messages they sent it from there."""
+    """Show what the operator writes on one conversation they read, and the messages they sent the conversation from there."""
 
     kind: Literal["inbox-talk"] = "inbox-talk"
     conversation: Conversation
@@ -293,7 +294,7 @@ class ShowFiles(Request, reads=True):
 
 
 class ShowConversation(Request, reads=True):
-    """Read one conversation as its runtime records it, from its step `since` on: the operator's words, the agent's, and the tools it called."""
+    """Read one conversation as its runtime records it, from its step `since` on: the operator's words, the agent's, and the tools they called."""
 
     kind: Literal["inbox-show-conversation"] = "inbox-show-conversation"
     runtime: str
@@ -346,14 +347,14 @@ class Items(Reply):
     review*)."""
     commented: list[Item] = []
     """The conversations' items the operator's in `answers` are on, as they
-    stand: whose each is, so the page shows an agent the operator's words on its
+    stand: whose each is, so the page shows an agent the operator's words on their
     own items alone, and what each says as it stands, a comment on a passage an
     edit changed marked outdated."""
     paths: list[Pathed] = []
     """Each conversation the items name, with its path, where lup knows it
     (`pathed`): how the dashboard and `lup-dev inbox` name an agent that isn't
-    running, or isn't its launch's latest session, which no launch they're
-    shown names."""
+    running, or isn't their launch's latest session, whom no launch shown there
+    names."""
 
 
 class Readout(Reply):
@@ -365,13 +366,13 @@ class Readout(Reply):
 
 
 class Shown(Reply):
-    """One item, whole, and each conversation it names by its path."""
+    """One item, whole, and each conversation it names by their path."""
 
     kind: Literal["inbox-item"] = "inbox-item"
     item: Item
     paths: list[Pathed] = []
-    """Each conversation the item names, with its path, where lup knows it
-    (`pathed`): how `lup-dev inbox` names it."""
+    """Each conversation the item names, with their path, where lup knows it
+    (`pathed`): how `lup-dev inbox` names them."""
 
 
 class Settled(Reply):
@@ -464,7 +465,7 @@ class Conversed(Reply):
 
 
 class Context(Reply):
-    """An item's moment in the conversation that sent it, read from its runtime's record: from the operator's last words before the call that made it, through the call, to their next words or the record's end."""
+    """An item's moment in the conversation that sent it, read from the runtime's record: from the operator's last words before the call that made it, through the call, to their next words or the record's end."""
 
     kind: Literal["inbox-context"] = "inbox-context"
     number: int
@@ -474,15 +475,15 @@ class Context(Reply):
 
 
 class Exchange(Model):
-    """One item a conversation sent or was sent, with its text whole, as the conversation wrote it or as it's told it, and its line as a view of the conversation shows it, which the core words (`inbox/lines.py`)."""
+    """One item a conversation sent or was sent, with its text whole, as the conversation wrote it or as they're told it, and its line as a view of the conversation shows it, which the core words (`inbox/lines.py`)."""
 
     item: Item
     text: str
     line: list[blocks.Span]
     """Its line: `→ @51 question to you · answered by @53`, what its kind says
     of it, then whom it went to or came from, and where it stands; each
-    conversation it names a span of its own, said by its path, referring to it
-    by its runtime's ids (`Span.conversation`)."""
+    conversation it names a span of their own, said by their path, referring to
+    them by their runtime's ids (`Span.conversation`)."""
     at: datetime
     """When it reached the conversation: when it was told it, else made."""
     comment: str = ""
@@ -493,22 +494,22 @@ class Exchange(Model):
 
 
 class Pathed(Model):
-    """A conversation, and its path as lup's commands call it: its session's name, then each subagent's down to it (`lup-impl/parser`), an unnamed one by its runtime's id; and whether another conversation shares it."""
+    """A conversation, and their path as lup's commands call it: their session's name, then each subagent's down to them (`lup-impl/parser`), an unnamed one by their runtime's id; and whether another conversation shares it."""
 
     conversation: Conversation
     path: str
     alike: bool = False
-    """Whether another conversation of its repository the inbox knows has the
-    same path, so it's named with its runtime's ids beside it
+    """Whether another conversation of their repository the inbox knows has the
+    same path, so they're named with their runtime's ids beside it
     (`inbox/roster.py`)."""
 
     def said(self) -> str:
-        """Say the conversation as lup names it: its path, its runtime's ids in brackets after it where another shares it."""
+        """Say the conversation as lup names them: their path, their runtime's ids in brackets after it where another shares it."""
         return f"{self.path} ({ids(self.conversation)})" if self.alike else self.path
 
 
 def pathed(roster: Roster, items: list[Item]) -> list[Pathed]:
-    """Return each conversation `items` name with its path, once, where lup knows it (`Roster`): each an item is from, for, was addressed to or sent to (`Message.to`), and each a review writes to."""
+    """Return each conversation `items` name with their path, once, where lup knows it (`Roster`): each an item is from, for, was addressed to or sent to (`Message.to`), and each a review writes to."""
     named = dict.fromkeys(
         each
         for item in items
@@ -540,25 +541,25 @@ def pathed(roster: Roster, items: list[Item]) -> list[Pathed]:
 
 
 def called(conversation: Conversation, paths: list[Pathed]) -> str:
-    """Say `conversation` as lup names it, by its path among `paths` (`Pathed.said`), else by its runtime's ids."""
+    """Say `conversation` as lup names them, by their path among `paths` (`Pathed.said`), else by their runtime's ids."""
     found = next((each for each in paths if each.conversation == conversation), None)
     return ids(conversation) if found is None else found.said()
 
 
 class Exchanged(Reply):
-    """The items one conversation sent, and those it was sent, each oldest first, in every state, with its text whole, and each conversation among their parties by its path."""
+    """The items one conversation sent, and those they were sent, each oldest first, in every state, with its text whole, and each conversation among the items' parties by their path."""
 
     kind: Literal["inbox-exchanged"] = "inbox-exchanged"
     sent: list[Exchange]
     received: list[Exchange]
-    """Those for it, those passed on to it from a subagent of its session that
-    had ended, and, for a subagent, those for it passed on to its session's main
-    conversation once it had."""
+    """Those for them, those passed on to them from a subagent of their session
+    that had ended, and, for a subagent, those for them passed on to their
+    session's main conversation once they had."""
     paths: list[Pathed] = []
-    """Each conversation the items are from, for or were addressed to, with its
-    path, where lup knows its session's name: a view says a conversation by
-    it, and refers to it by its runtime's ids, which never change as it's
-    renamed."""
+    """Each conversation the items are from, for or were addressed to, with
+    their path, where lup knows their session's name: a view says a
+    conversation by it, and refers to them by their runtime's ids, which never
+    change as they're renamed."""
 
     def path(self, conversation: Conversation) -> str | None:
         """Return `conversation`'s path, as the exchange gives it; none where lup knows none."""
@@ -576,7 +577,7 @@ def exchanged(
     told: Callable[[Item], str],
     paths: list[Pathed],
 ) -> Exchanged:
-    """Return `items`, those `party` sent, with their text as it wrote it (`written`), and those it was sent, as it's told them (`told`), lup's word on its citations among those, though it's its own item; each with its line as a view of `party` shows it (`lines.lined`), each conversation it names called by its path among `paths`, else by its runtime's ids."""
+    """Return `items`, those `party` sent, with the text as they wrote it (`written`), and those they were sent, as they're told them (`told`), lup's word on their citations among those, though it's their own item; each with its line as a view of `party` shows it (`lines.lined`), each conversation it names called by their path among `paths`, else by their runtime's ids."""
 
     def named(conversation: Conversation) -> str:
         return called(conversation, paths)
@@ -601,7 +602,7 @@ def exchanged(
 
 
 def shown(delivery: Delivery, item: Item) -> Shown:
-    """Return `item` whole, with each conversation it names by its path (`pathed`)."""
+    """Return `item` whole, with each conversation it names by their path (`pathed`)."""
     return Shown(item=item, paths=pathed(delivery.roster(), [item]))
 
 
@@ -652,7 +653,7 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
         )
 
     def listed(self, waiting: list[Item]) -> Items:
-        """Return the items `waiting`, how far the operator has seen each group, the operator's own items about them and the items those are on, and each conversation among them all by its path."""
+        """Return the items `waiting`, how far the operator has seen each group, the operator's own items about them and the items those are on, and each conversation among them all by their path."""
         answers = self.answering(waiting)
         commented = self.commented(answers)
         return Items(
@@ -1013,7 +1014,7 @@ class ContextShowing(Model, Reading[ShowContext], arbitrary_types_allowed=True):
 
 
 class ItemsListing(Model, Reading[ListItems], arbitrary_types_allowed=True):
-    """Answers `ListItems`: the items the conversation sent, as it wrote them, and those it was sent, as it's told them."""
+    """Answers `ListItems`: the items the conversation sent, as they wrote them, and those they were sent, as they're told them."""
 
     delivery: Delivery
 
@@ -1036,7 +1037,7 @@ class ItemsListing(Model, Reading[ListItems], arbitrary_types_allowed=True):
         return self.exchanged(party, [each for each in items if each.of(repository)])
 
     def exchanged(self, party: Conversation, items: list[Item]) -> Exchanged:
-        """Return `items` as `party` sent them, as it wrote them, and as it was sent them, as it's told them, each with its line (`exchanged`); and each conversation among their parties by its path, as lup names it (`pathed`)."""
+        """Return `items` as `party` sent them, as they wrote them, and as they were sent them, as they're told them, each with its line (`exchanged`); and each conversation among the items' parties by their path, as lup names them (`pathed`)."""
         paths = pathed(self.delivery.roster(), items)
         return exchanged(
             party, items, written=written, told=self.delivery.words, paths=paths

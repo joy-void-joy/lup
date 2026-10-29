@@ -11,7 +11,7 @@ worktree launched, come the library's `TerminalSettings` (`terminal_settings`):
   service serves (`served`; `docs/host.md`, *How a room reaches it*), a call to it
   waiting as long as a hold may;
 - the session's own messaging socket, put in the launch's socket directory, so
-  the host service reaches it to start a turn of the idle session where its
+  the host service reaches it to start a turn of the idle session where their
   runtime has one (`docs/inbox.md`, *How an agent is told*);
 - `Core`'s session settings, in the library's terms: the fields the declaration
   set, imposed over the person's own runtime settings, and the rest as lup's
@@ -271,7 +271,7 @@ def served(hold: timedelta = timedelta(hours=25)) -> list[ToolServer]:
 
     A call to it may wait for the operator, so the runtime waits on one as long as
     the hook does: `hold`, above a hold's day. It pushes what waits for an idle
-    session, starting its turn, where the runtime takes a push.
+    session, starting their turn, where the runtime takes a push.
     """
     socket = LaunchSockets(directory=RoomPaths().sockets).mcp
     return [ToolServer(name=SERVER, socket=socket, timeout=hold, pushes=True)]

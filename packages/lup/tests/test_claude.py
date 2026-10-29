@@ -90,7 +90,7 @@ class Listing(BaseModel):
 
 
 class Stop(BaseModel):
-    """The model tries to end its turn, so Claude Code runs the `Stop` hook."""
+    """The model tries to end their turn, so Claude Code runs the `Stop` hook."""
 
 
 class Hang(BaseModel):

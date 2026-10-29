@@ -48,7 +48,7 @@ def placed(root: Path, findings: list[Finding]) -> list[Finding]:
 
 
 class Known(Model):
-    """A finding as a conversation was told it, which it isn't told again while it stands.
+    """A finding as a conversation was told it, which they aren't told again while it stands.
 
     Known by its file, owner, rule and message, and by the text of the line it
     starts on rather than the line's number, so a finding an edit above moves
@@ -110,10 +110,10 @@ class Look(Model):
 
 
 class News(Model):
-    """What of some looks a conversation wasn't told yet, and what it knows once told it."""
+    """What of some looks a conversation wasn't told yet, and what they know once told it."""
 
     findings: list[Finding] = []
-    """Those it wasn't told, in the looks' order."""
+    """Those they weren't told, in the looks' order."""
     known: list[Known] = []
 
 
@@ -173,7 +173,7 @@ importing what changed (`importers`)."""
 
 
 class Quiet(Model):
-    """What a conversation asked not to be told after its calls, for now (`docs/judging-writes.md`, *Quiet*).
+    """What a conversation asked not to be told after their calls, for now (`docs/judging-writes.md`, *Quiet*).
 
     A value never published is a finding of lup's, but no quiet holds it: no
     `ignore` keeps it either, and a push carrying it is refused. Nor does one
@@ -231,19 +231,19 @@ class Quiet(Model):
         return f"{', '.join(named[:-1])}, and {named[-1]}"
 
     def reminder(self) -> str:
-        """Tell a conversation starting again, compacted or resumed, that it's still quiet; nothing where it isn't.
+        """Tell a conversation starting again, compacted or resumed, that they're still quiet; nothing where they aren't.
 
         >>> Quiet().reminder()
         ''
         >>> print(Quiet(kinds=["rules"]).reminder())
-        This conversation is still quiet: lup doesn't tell it lup's findings on the lines changed after its calls. `quiet` with no kinds lifts it, and tells what stands that it wasn't told.
+        You're still quiet: lup doesn't tell you lup's findings on the lines changed after your calls. `quiet` with no kinds lifts it, and tells you what stands that you weren't told.
         """
         if not self.kinds:
             return ""
         return (
-            f"This conversation is still quiet: lup doesn't tell it {self.said()} "
-            "after its calls. `quiet` with no kinds lifts it, and tells what stands "
-            "that it wasn't told."
+            f"You're still quiet: lup doesn't tell you {self.said()} after your "
+            "calls. `quiet` with no kinds lifts it, and tells you what stands that "
+            "you weren't told."
         )
 
 
@@ -543,7 +543,7 @@ def section(header: str, found: list[Finding], *, short: bool = True) -> list[Pa
 
 
 def summary(touched: list[Finding], importers: list[Finding]) -> list[Part]:
-    """Say what stands that a conversation wasn't told, as its quiet lifts: in the files it touched, values never published, lup's findings, type errors and ruff's; then type errors in the files importing them.
+    """Say what stands that a conversation wasn't told, as their quiet lifts: in the files they touched, values never published, lup's findings, type errors and ruff's; then type errors in the files importing them.
 
     Which of lup's findings are on lines a change touched isn't said: that's
     what a change's judgement reads, and the files are read as they stand.
@@ -556,10 +556,10 @@ def summary(touched: list[Finding], importers: list[Finding]) -> list[Part]:
     >>> told = summary([found("/w/a.py", "lup", "regex"), found("/w/a.py", "ruff", "E501")],
     ...     [found("/w/b.py", "pyright", "reportCallIssue")])
     >>> print(text(told))
-    lup's findings in the files this conversation touched (clear each, or keep it with `# lup: ignore("<rule>", why="<reason>")` on its line or the line above, which the operator is asked about; they fail the gate):
+    lup's findings in the files you touched (clear each, or keep it with `# lup: ignore("<rule>", why="<reason>")` on its line or the line above, which the operator is asked about; they fail the gate):
       /w/a.py:3:1 - regex: m
     <BLANKLINE>
-    Type errors and ruff's findings in the files this conversation touched (clean them before the turn ends):
+    Type errors and ruff's findings in the files you touched (clean them before the turn ends):
       /w/a.py:3:1 - E501: m
     <BLANKLINE>
     Type errors in files that import what changed (clean them before the turn ends):
@@ -569,7 +569,7 @@ def summary(touched: list[Finding], importers: list[Finding]) -> list[Part]:
     return [
         *section(
             (
-                "Values never published, in the files this conversation touched "
+                "Values never published, in the files you touched "
                 "(rewrite each before it's committed: the gate's `private` step "
                 "fails on them, and a push or a post carrying one is refused):"
             ),
@@ -578,7 +578,7 @@ def summary(touched: list[Finding], importers: list[Finding]) -> list[Part]:
         ),
         *section(
             (
-                "lup's findings in the files this conversation touched (clear each, "
+                "lup's findings in the files you touched (clear each, "
                 'or keep it with `# lup: ignore("<rule>", why="<reason>")` on its '
                 "line or the line above, which the operator is asked about; they "
                 "fail the gate):"
@@ -587,8 +587,8 @@ def summary(touched: list[Finding], importers: list[Finding]) -> list[Part]:
         ),
         *section(
             (
-                "Type errors and ruff's findings in the files this conversation "
-                "touched (clean them before the turn ends):"
+                "Type errors and ruff's findings in the files you touched (clean "
+                "them before the turn ends):"
             ),
             [each for each in touched if each.owner != "lup"],
         ),
@@ -679,11 +679,11 @@ def moved(moves: list[Moved]) -> str:
 
 
 def turn_end(findings: list[Finding]) -> list[Part]:
-    """Say why the turn can't end: what's still wrong in the files it touched, every finding, or a line per file where that doesn't fit (`fitted`)."""
+    """Say why the turn can't end: what's still wrong in the files they touched, every finding, or a line per file where that doesn't fit (`fitted`)."""
     if not findings:
         return []
     header = (
-        "lup won't end the turn yet: files this conversation touched have "
+        "lup won't end the turn yet: files you touched have "
         "lup's findings, type errors or ruff findings."
     )
     footer = (

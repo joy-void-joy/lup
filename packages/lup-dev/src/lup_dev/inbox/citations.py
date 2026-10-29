@@ -1,8 +1,9 @@
-"""Citations of the operator's words in what an agent sends them: `@820.9[first words … last words]`, each resolved against the operator's words sent to its conversation.
+"""Citations of the operator's words in what an agent sends them: `@820.9[first words … last words]`, each resolved against the operator's words sent to the agent's conversation.
 
 `docs/inbox.md`, *Citing the operator's words*. An agent answers the operator
-in its own words, and may point at theirs inline: a part of one of their items
-by its id, as `@414.3` cites a part already, with the passage it means named
+in their own words, and may point at the operator's inline: a part of one of
+the operator's items by its id, as `@414.3` cites a part already, with the
+passage they mean named
 by its first and last words between brackets, as a browser's text fragment
 names one (`#:~:text=start,end`); its words alone where they're short
 (`@820.9[why not split it]`); the item's number alone where the tag gave the

@@ -207,7 +207,8 @@ class Read(Model):
     """How far the operator has read a conversation: up to the step their review mark on its drawer names, or their own last words typed to it, whichever is later, and when they moved the mark; none read where neither.
 
     Their words typed to the agent count as a review of what came before them,
-    as a comment sent on a file does: they were reading it in its terminal.
+    as a comment sent on a file does: they were reading it in the agent's
+    terminal.
     """
 
     step: int | None = None
@@ -365,7 +366,7 @@ def counted(count: int, one: str) -> str:
 
 
 def inboxed(exchanged: Exchanged) -> list[Inboxed]:
-    """Return the items the conversation exchanged as it shows them, those it sent first, then those it was sent: each in its line as the core words it (`Exchange.line`), in the tone of its way, sent or received, its text under it with the operator's comment on deciding it after it.
+    """Return the items the agent exchanged as their conversation shows them, those they sent first, then those they were sent: each in its line as the core words it (`Exchange.line`), in the tone of its way, sent or received, its text under it with the operator's comment on deciding it after it.
 
     One repeating the conversation's own words, a turn's last words lup made a
     note of, is left out: the agent's words show it already.
@@ -561,7 +562,7 @@ def turned(turns: list[Turn], of: OfAgent, view: Method, run: int = 3) -> list[B
 
 
 def agent_s(turn: Turn) -> bool:
-    """Say whether `turn` is the agent's words, which the cap on what's open counts: never its calls, which fold anyway, nor an item."""
+    """Say whether `turn` is the agent's words, which the cap on what's open counts: never their calls, which fold anyway, nor an item."""
     return isinstance(turn, Spoken) and turn.said.by != "operator"
 
 

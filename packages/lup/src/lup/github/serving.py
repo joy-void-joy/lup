@@ -249,7 +249,7 @@ class NewDraft(Arguments):
 
 
 class GitHubServing(ModuleServing):
-    """lup's GitHub tools, served to each launched session, which write to its repository alone and read any the operator's login can; and an issue's state, for the gate in a room."""
+    """lup's GitHub tools, served to each launched session, which write to the session's repository alone and read any the operator's login can; and an issue's state, for the gate in a room."""
 
     module: GitHub
 

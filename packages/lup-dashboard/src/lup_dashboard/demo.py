@@ -345,7 +345,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         return StandInViews(runtimes=self.runtimes, exchanged=self.exchanged)
 
     async def viewed(self, viewing: Viewing) -> Viewed | Refused:
-        """Answer a module's view with its module's own layout over the demo's stand-ins (`lup_dashboard/standins.py`), the conversation it's of written as its record first, as it stands: the parser subagent's a step longer each time its drawer is asked, as when the page reads it (`ShowConversation`); a view the module refuses, refused, saying why."""
+        """Answer a module's view with its module's own layout over the demo's stand-ins (`lup_dashboard/standins.py`), the conversation it's of written as its record first, as it stands: the parser subagent's a step longer each time their drawer is asked, as when the page reads it (`ShowConversation`); a view the module refuses, refused, saying why."""
         try:
             of = OfAgent.model_validate(viewing.argument)
         except ValidationError:
@@ -426,21 +426,21 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         self.changed = asyncio.Event()
 
     def grow(self) -> None:
-        """Let the parser subagent start the two writes to its branch, calling `Edit`, and end the call a moment later (`wrote`), as its hooks would say."""
+        """Let the parser subagent start the two writes to their branch, calling `Edit`, and end the call a moment later (`wrote`), as their hooks would say."""
         self.editing = True
         self.changed.set()
         self.changed = asyncio.Event()
         asyncio.get_running_loop().call_later(1.5, self.wrote)
 
     def wrote(self) -> None:
-        """Let the two writes land on the parser subagent's branch as its call ends: its drawer brings them in as the page reads it at that hook."""
+        """Let the two writes land on the parser subagent's branch as their call ends: their drawer brings them in as the page reads it at that hook."""
         self.editing = False
         self.grew = True
         self.changed.set()
         self.changed = asyncio.Event()
 
     def standing(self, session: str, agent: str | None) -> Standing:
-        """Return what a stand-in conversation's record says of it: the parser subagent's three tasks and a ninth of the long window; its session's half of it and no task; the second runtime's session's own window and plan; none for the rest."""
+        """Return what a stand-in conversation's record says of it: the parser subagent's three tasks and a ninth of the long window; their session's half of it and no task; the second runtime's session's own window and plan; none for the rest."""
         match (session, agent):
             case ("s1", "a02"):
                 return Standing(
@@ -500,7 +500,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         return Since(worktree=dev, branch=None, version="demo", same=seen == "demo")
 
     def parser_stands(self) -> list[Stands]:
-        """Return the parser subagent's branch as it stands: its new reader module, flagged, and its test; once `grew`, the reader with a method more and the clock's change, flagged."""
+        """Return the parser subagent's branch as it stands: their new reader module, flagged, and its test; once `grew`, the reader with a method more and the clock's change, flagged."""
         [reader] = flagged_files(59)
         [clock] = flagged_files(60)
         grown = Text(text=READER + READER_GROWN)
@@ -534,7 +534,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         ]
 
     def worked_stands(self, n: int) -> list[Stands]:
-        """Return worker `n`'s branch as it stands: the module of each of its flagged writes (`worked_files`)."""
+        """Return worker `n`'s branch as it stands: the module of each of their flagged writes (`worked_files`)."""
         numbers = [
             each.number
             for each in self.worked()
@@ -896,7 +896,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         return Shown(item=item)
 
     def exchanged(self, conversation: Conversation) -> Exchanged:
-        """Return the stand-in items `conversation` sent, as it wrote them, and those it was sent, as it's told them, and each conversation among their parties by its path, as the listing has it."""
+        """Return the stand-in items `conversation` sent, as they wrote them, and those they were sent, as they're told them, and each conversation among the items' parties by their path, as the listing has it."""
         items = [
             each
             for each in self.every()
@@ -932,7 +932,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         ]
 
     def every(self) -> list[Item]:
-        """Return every stand-in item, by number: those waiting for the operator; the parser subagent's note they replied to, at the call that sent it; an ended subagent's note whose reply went to its session; the voice session's note the operator reviewed, edited since, and their review, which its turn's last words answer (`answer`); the parser subagent's late question, once it has arrived (`arrives`); and the messages sent from the page. Each a draft sent covered is done."""
+        """Return every stand-in item, by number: those waiting for the operator; the parser subagent's note they replied to, at the call that sent it; an ended subagent's note whose reply went to their session; the voice session's note the operator reviewed, edited since, and their review, which the session answers in the last words of a turn (`answer`); the parser subagent's late question, once it has arrived (`arrives`); and the messages sent from the page. Each a draft sent covered is done."""
         first, second = self.runtimes
         lup = Path("/home/op/lup.git")
         parser = Conversation(repository=lup, runtime=first, session="s1", agent="a02")
@@ -1047,8 +1047,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 made=self.ago(23),
                 state=Told(at=self.ago(23), how="call"),
             ),
-            # The voice session's note the operator reviewed, which it edited since, back before them; and their
-            # review, which its turn's end answers.
+            # The voice session's note the operator reviewed, which the session edited since, back before them;
+            # and their review, which the session's turn's end answers.
             Item(
                 number=45,
                 reason=Message(kind="note", text=VOICE_EDITED),
@@ -1264,7 +1264,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         ]
 
     def reviewed_voice(self, voice: Conversation) -> Item:
-        """Return the operator's review of the voice session's note: a comment on a passage of it, one on it whole, and a message to the session, told to it at a call."""
+        """Return the operator's review of the voice session's note: a comment on a passage of it, one on it whole, and a message to the session, told to them at a call."""
         return Item(
             number=50,
             reason=Review(
@@ -1301,7 +1301,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         )
 
     def answer(self, voice: Conversation) -> Item:
-        """Return the voice session's turn's last words, answering the operator's review of its note (`reviewed_voice`), its citations of their words read as the host reads them (`resolved`): one edited to name the part it meant, and one that names no passage, shown as written."""
+        """Return the voice session's turn's last words, answering the operator's review of that note (`reviewed_voice`), the session's citations of the operator's words read as the host reads them (`resolved`): one edited to name the part the session meant, and one that names no passage, shown as written."""
         said = spoken(self.reviewed_voice(voice))
         return Item(
             number=56,
@@ -1655,7 +1655,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         return steps(self.recorded(session, agent))
 
     def recorded(self, session: str, agent: str | None) -> list[Said | StandIn]:
-        """Return a stand-in conversation, each call with what reading it whole answers: for the parser subagent, the call that sent @47, then its moment around @51 with what led to it, then what it read since the demo began; for the first worker, a day's work (`long_conversation`); for the second runtime's session and its subagent, a render that broke; for any other, a short exchange."""
+        """Return a stand-in conversation, each call with what reading it whole answers: for the parser subagent, the call that sent @47, then their moment around @51 with what led to it, then what they read since the demo began; for the first worker, a day's work (`long_conversation`); for the second runtime's session and their subagent, a render that broke; for any other, a short exchange."""
         tree = "/home/op/lup.git/tree/dev"
         if (session, agent) == ("s1", worker_agent(1)) and self.size > 0:
             return self.long_conversation()
@@ -1825,7 +1825,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         ]
 
     def growing(self) -> list[Said | StandIn]:
-        """Return the steps the parser subagent took since the demo began: a call, then what it found, in turn."""
+        """Return the steps the parser subagent took since the demo began: a call, then what they found, in turn."""
         rollouts = "/home/op/records/sessions/2026/10/17"
         return [
             stand_in(
@@ -1888,7 +1888,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         )
 
     def worked(self) -> list[Item]:
-        """Return the busy day's items (`size`): each worker's note, written in Markdown, and its friction, then the flagged writes, each worker's in turn, each of a module of hundreds of lines (`worked_files`); numbered from `first_worked`, made over the last hours, oldest first, each by a call, so each has a moment (`worked_context`)."""
+        """Return the busy day's items (`size`): each worker's note, written in Markdown, and their friction, then the flagged writes, each worker's in turn, each of a module of hundreds of lines (`worked_files`); numbered from `first_worked`, made over the last hours, oldest first, each by a call, so each has a moment (`worked_context`)."""
         if self.size == 0:
             return []
 
@@ -1996,7 +1996,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         )
 
     def worked_context(self, number: int) -> Context | Refused:
-        """Return the stand-in moment of a worker's item (`worked`): its brief, the reading before the item, the call that made it, and what came after."""
+        """Return the stand-in moment of a worker's item (`worked`): their brief, the reading before the item, the call that made it, and what came after."""
         item = next((each for each in self.worked() if each.number == number), None)
         if item is None:
             return Refused(error=f"{cited(number)} was made by no agent's call")
@@ -2031,7 +2031,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         return Context(number=number, entries=entries, anchor=5)
 
     def long_conversation(self, length: int = 300) -> list[Said | StandIn]:
-        """Return the first worker's conversation, `length` steps after its brief, as a day's work reads: what it's on, then a run of calls reading a module, changing a function, running its tests and reading them, in turn. A subagent never has the operator's typed words after its brief, so its whole run is one exchange, its drawer keeping only the agent's last words open (`EARLIER_KIND.keeps_open`)."""
+        """Return the first worker's conversation, `length` steps after their brief, as a day's work reads: what they're on, then a run of calls reading a module, changing a function, running its tests and reading them, in turn. A subagent never has the operator's typed words after their brief, so their whole run is one exchange, their drawer keeping only the agent's last words open (`EARLIER_KIND.keeps_open`)."""
         tree = worker_worktree(1)
 
         def step(at: int) -> Said | StandIn:
@@ -2110,12 +2110,12 @@ def worker_agent(n: int) -> str:
 
 
 def worker_worktree(n: int) -> Path:
-    """Return worker `n`'s worktree: one of its own, beside the demo's."""
+    """Return worker `n`'s worktree: one of their own, beside the demo's."""
     return Path("/home/op/lup.git/tree") / f"worker-{n}"
 
 
 def worked_path(n: int, i: int) -> Path:
-    """Return the module worker `n`'s write `i` landed, from its worktree's root."""
+    """Return the module worker `n`'s write `i` landed, from their worktree's root."""
     return Path("packages/lup/src/lup") / f"worker{n}" / f"module_{i}.py"
 
 

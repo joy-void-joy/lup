@@ -5,7 +5,7 @@ its name is the function's, its description the docstring, its input the
 parameter's model; `@lup.tool` makes one (`lup.doors`). Its `before` hooks run on
 the validated input, in order, before the function does. A validation error, or
 a hook's `Deny`, answers the call instead, so the agent reads why and calls
-again within its turn. A tool returning a model answers with its JSON; one
+again within their turn. A tool returning a model answers with its JSON; one
 returning `str` answers in those words, for a tool whose answer is meant to be
 read rather than parsed.
 

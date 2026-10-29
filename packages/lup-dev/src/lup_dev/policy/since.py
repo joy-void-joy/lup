@@ -182,7 +182,7 @@ class Snapshotting(MutableModel, arbitrary_types_allowed=True):
 
 
 class Located(Model):
-    """Where a conversation's work stands: its worktree, and the branch it has checked out."""
+    """Where a conversation's work stands: their worktree, and the branch they have checked out."""
 
     root: Path
     branch: str | None
@@ -309,7 +309,7 @@ class Reader(Model, arbitrary_types_allowed=True):
     its drawer opens and a marking may come at once."""
 
     def located(self, party: Conversation) -> Located:
-        """Return where `party` works: the worktree its file tools write in, as the judge's session index has it, else the one its launch started in; and the branch it has checked out.
+        """Return where `party` works: the worktree their file tools write in, as the judge's session index has it, else the one their launch started in; and the branch they have checked out.
 
         Raise `InboxError` where lup never heard the conversation.
         """

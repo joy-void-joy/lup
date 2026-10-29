@@ -1,7 +1,7 @@
 """The operator's words as parts, each with an id: the parts of their items an agent cites, where a quoted passage lies in an item.
 
 `docs/inbox.md`, *Parts and ids*. The operator's words reach an agent in items
-with parts of their own: what they said on its items (`anchors`), a review's
+with parts of their own: what they said on the agent's items (`anchors`), a review's
 comments, in its order; the comment a reply to a note carries; each passage's
 reply in a message sent from reading a conversation; an answer's rulings, then
 its comment; and, after those, the rest of their words (`spoken`), a review's
@@ -13,7 +13,7 @@ A passage the operator quoted is found in the item it's of by the part it
 starts in (`located`): by its offsets where the item's text is what the
 dashboard showed, else by its first line where that's in one part alone. The
 tag then carries the part's id and the quote's first line, since the agent has
-its own words and the id finds the rest; a passage of a changed file's lines,
+their own words and the id finds the rest; a passage of a changed file's lines,
 which no part holds, is quoted whole, as before.
 """
 
@@ -148,7 +148,7 @@ def cue(text: str, longest: int = 80) -> str:
 
     A passage the operator quotes is usually a whole paragraph, one line of
     the source however long, so the first line alone saved little: the agent
-    has its own words in its context, and the id names the part.
+    has their own words in their context, and the id names the part.
 
     >>> cue("Twenty kinds of line.\nFour carry what was said.")
     'Twenty kinds of line.'
@@ -212,5 +212,5 @@ def parts_of(item: Item, text: str) -> list[Part]:
 
 
 def addressed_to(item: Item, party: Conversation) -> bool:
-    """Say whether `item` is the operator's, addressed to `party`: for it, or passed on to it from its subagent that had ended."""
+    """Say whether `item` is the operator's, addressed to `party`: for them, or passed on to them from their subagent that had ended."""
     return item.sender == Operator() and party in (item.recipient, item.addressed)

@@ -30,10 +30,10 @@ type Usage = components["schemas"]["Usage"];
 export type Answered<T> = { shown: T } | { refused: string };
 
 /**
- * What one agent's views the page lays out itself read of it, by its conversation (`whose`): its task list and what
- * its context holds, read with its runtime's record (`inbox-show-conversation`), and what its branch changed since the
- * operator last saw it. None of a view's before the host has answered. Its conversation is `Transcripts`' own view,
- * asked of the host.
+ * What one agent's views the page lays out itself read of them, by their conversation (`whose`): their task list and
+ * what their context holds, read with their runtime's record (`inbox-show-conversation`), and what their branch changed
+ * since the operator last saw it. None of a view's before the host has answered. Their conversation is `Transcripts`'
+ * own view, asked of the host.
  */
 export interface AgentDrawers {
     tasks: Task[];
@@ -41,7 +41,7 @@ export interface AgentDrawers {
     since: Since | null;
 }
 
-/** Each agent's data, by `whose` its conversation is. */
+/** Each agent's data, by `whose` their conversation is. */
 export type Drawers = Map<string, AgentDrawers>;
 
 export const UNREAD: AgentDrawers = { tasks: [], usage: null, since: null };
@@ -52,7 +52,7 @@ export interface Beyond {
     files: ReadonlyMap<number, Answered<ChangedFile[]>>;
 }
 
-/** One conversation running, as the host lists it: the launch it runs in, and whether the operator holds its flagged writes. */
+/** One conversation running, as the host lists them: the launch they run in, and whether the operator holds the conversation's flagged writes. */
 export interface Running {
     launch: string;
     holding: boolean;
@@ -64,9 +64,9 @@ export interface Shown {
     items: ReadonlyMap<number, Item>;
     beyond: Beyond;
     drawers: Drawers;
-    /** Each conversation running, by `whose` it is. */
+    /** Each conversation running, by `whose` they are. */
     running: ReadonlyMap<string, Running>;
-    /** A conversation as the operator reads it named: by its path. */
+    /** A conversation as the operator reads them named: by their path. */
     called: (party: Conversation) => string;
 }
 
@@ -85,7 +85,7 @@ export interface View<A> {
     answer: (argument: A, shown: Shown, repository: string) => Answer | null;
 }
 
-/** Return what names a conversation among others: its repository, runtime, session and subagent. */
+/** Return what names a conversation among others: their repository, runtime, session and subagent. */
 export function whose(conversation: Conversation): string {
     return JSON.stringify([conversation.repository, conversation.runtime, conversation.session, conversation.agent ?? null]);
 }

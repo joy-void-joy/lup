@@ -1,7 +1,7 @@
 // The header stack (`docs/dashboard.md`, *The review*): over the review, the headers of
 // the scopes the top of the view is inside, each pinned while its own line is
 // scrolled off, as VS Code's sticky scroll does: an agent's banner, a subagent's
-// under its parent's where groups nest, an item's header or a drawer's summary
+// under their parent's where groups nest, an item's header or a drawer's summary
 // line, a file's header. Each is the line the buffer shows at that level, drawn
 // as it's drawn there. A scope's header is pushed up by the next one as its scope
 // ends, so the stack slides rather than jumps. It follows the view: the cursor
@@ -24,7 +24,7 @@ export interface Sticky {
 
 /**
  * Return the scopes of `laidOut` a header is pinned for, outermost first, each holding those in it, read from its tree
- * (`Laid.nodes`): each group, a subagent's inside its parent's, to the next one as deep or shallower; each of its
+ * (`Laid.nodes`): each group, a subagent's inside their parent's, to the next one as deep or shallower; each of its
  * drawers and items to the next scope or group; each file of an item or a drawer over its lines.
  */
 export function stickies(laidOut: Laid): Sticky[] {
