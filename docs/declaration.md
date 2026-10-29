@@ -40,7 +40,8 @@ project = Project(
 - **A collection changes by operations on what's below it:** `Rules().add("runtime-mention")` is `CodeRules`' rules as they stand, plus one. The second `.edit(CodeRules(…))` sets only `exempt`, so the rules the first set stay, and no layer restates another.
 - **`why`** is optional on `.edit`, `.drop` and `.replace`, and is kept with the change for whoever reads the project later. An `Exemption` always carries its own.
 - **A module of the project's own** is written the way lup's are: a `Module` subclass whose name is a class attribute, whose docstring is its one sentence, and whose parts are fields defaulting to its own values. `before="rules"` puts its step ahead of `Python`'s `rules` step, since names are shared across modules.
-- **`held` and `flagged`** are the fields of `Project` that aren't a module's: what a change asks that waits for the operator, and what lands flagged, named by a role, a kind of change or a rule's id (`docs/judging-writes.md`, *What each change gets*). A name in both, or one that's neither a role, a kind nor shaped like a rule's id, fails the load; whether a rule of that id exists is checked at the judge's first judgement.
+- **`held` and `flagged`** are the fields of `Project` that aren't a module's: what a change asks that waits for the operator, and what lands flagged, named by a kind of change (`new-file`, `whole-file`, `public-api`, `ignore`, `private`) or a rule's id (`docs/judging-writes.md`, *What each change gets*). A name in both, or one that's neither a kind nor shaped like a rule's id, fails the load; whether a rule of that id exists is checked at the judge's first judgement. A path's role is never named there: one named fails the load, saying the level it was given goes in `Levels` (`Core(levels=Levels(docs="held"))`).
+- **`Levels`** say how far each path role's changes are reviewed, one level a role: `hidden`, left out of "since you approved"; `automatic`, shown folded, asking nothing; `review`, to review; `flagged`, every write flagged; `held`, every write held (`docs/judging-writes.md`, *What each change gets*). `Core` holds them (`Core.levels`), lup's defaults holding what's protected and the operator's documents, reviewing production code and docs, tests, data and what's excluded automatic and scratch hidden. A project changes one on `Core`, a person's layer over that, as any `Layer`; a module that brings a role may give its level (`levels = Levels(data="hidden")`), a role's level given by one module at most, two failing the load.
 
 A project without a `lup_project.py` gets `Project()`, which is `Project(modules=Modules.default())`.
 
@@ -132,6 +133,7 @@ Every collection a module holds is a selection (`Selection`, `declaration/gramma
 | `Exemptions` | an `Exemption` per rule, listing every path it lifts the rule from | `CodeRules` |
 | `TestRoots` | `Pytest` roots | `Python` |
 | `Packages` | `Package`s of the room's image | `Core` |
+| `Levels` | a `Layer` of a level per path role (`protected`, `operator`, `excluded`, `test`, `scratch`, `docs`, `data`, `production`): `hidden`, `automatic`, `review`, `flagged` or `held`, how far each role's changes are reviewed | `Core` |
 | `Session` | a `Layer` of session settings (`docs/launch.md`, *The settings compiled for each runtime*) | `Core` |
 | `Credentials` | a `Layer`: the actions allowed, and the protected and gated refs (`docs/credentials.md`) | `Core` |
 | `Guidance` | `Section`s: a file from the root, or one a Python package ships | each of lup's modules but `GitHub` |

@@ -6,7 +6,7 @@ import sys
 from collections.abc import Callable, Sequence
 from datetime import timedelta
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, get_args
 
 import pydantic
 import pytest
@@ -23,6 +23,7 @@ from lup_dev import (
     Exemptions,
     Gate,
     Guidance,
+    Levels,
     Module,
     Modules,
     Package,
@@ -51,7 +52,7 @@ from lup_dev.catalog.room import PackageAge, SessionDefaults, StandardMachine
 from lup_dev.catalog.rules import DefaultRules
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import Drop
-from lup_dev.declaration.kinds import lup_actions
+from lup_dev.declaration.kinds import Role, lup_actions
 from lup_dev.declaration.load import load
 from lup_dev.declaration.module import Origin
 from lup_dev.declaration.modules.code_rules import lup_default
@@ -383,9 +384,20 @@ def test_the_defaults_resolve_to_lup_s_modules_and_parts() -> None:
     assert resolved.exempt == []
     assert resolved.conditions == []
     assert (resolved.held, resolved.flagged) == (
-        ["protected", "operator", "ignore"],
+        ["ignore"],
         ["new-file", "whole-file", "public-api", "private"],
     )
+    # Each role's level, the defaults: what's protected and the operator's documents held.
+    assert resolved.levels == {
+        "protected": "held",
+        "operator": "held",
+        "excluded": "automatic",
+        "test": "automatic",
+        "scratch": "hidden",
+        "docs": "review",
+        "data": "automatic",
+        "production": "review",
+    }
     assert [(each.module, each.requirement.tool) for each in resolved.requirements] == [
         ("code-rules", "node"),
         ("python", "uv"),
@@ -974,11 +986,58 @@ def test_conditions_are_an_address_any_module_fills() -> None:
     ]
 
 
+def test_levels_hold_one_field_for_each_role_and_no_other() -> None:
+    """`Levels`' fields can't be made from `Role`, the one list of the roles: this keeps them the same, so a role added to one is added to the other."""
+    assert list(Levels.model_fields) == list(get_args(Role.__value__))
+
+
+class Recordings(Module):
+    """A module bringing its data, which the operator never reads, giving its level."""
+
+    name = "recordings"
+
+    levels: Levels = Levels(data="hidden")
+
+
+def test_each_role_s_level_is_the_one_a_module_gives_it_layered_by_the_project_and_given_by_one_module_alone() -> (
+    None
+):
+    given = resolve(Project(modules=Modules.default().add(Recordings())))
+    assert (given.levels["data"], given.levels["test"]) == ("hidden", "automatic")
+    # The project changes a level on the module holding it, the person's layer over that.
+    edited = Project(
+        modules=Modules().edit(Core(levels=Levels(test="hidden", docs="automatic")))
+    )
+    person = Project(modules=Modules().edit(Core(levels=Levels(docs="flagged"))))
+    layered = resolve(
+        Project(modules=person.modules.over(edited.modules.over(Project().modules)))
+    )
+    assert (layered.levels["test"], layered.levels["docs"]) == ("hidden", "flagged")
+    # Two modules giving one role a level fail the load, naming both.
+    with pytest.raises(ProjectError, match="`data` by `core` and `recordings`"):
+        resolve(
+            Project(
+                modules=Modules.default()
+                .add(Recordings())
+                .edit(Core(levels=Levels(data="review")))
+            )
+        )
+
+
 def test_what_is_held_and_flagged_is_named_once_and_checked_as_it_loads() -> None:
-    held = resolve(Project(held=["protected", "regex"], flagged=["new-file"]))
-    assert (held.held, held.flagged) == (["protected", "regex"], ["new-file"])
+    held = resolve(Project(held=["ignore", "regex"], flagged=["new-file"]))
+    assert (held.held, held.flagged) == (["ignore", "regex"], ["new-file"])
     with pytest.raises(ValidationError, match="name nothing held or flagged"):
         Project(held=["Protected Paths"])
+    # A path's role goes in `Levels`, saying how.
+    with pytest.raises(
+        ValidationError,
+        match=(
+            r"`docs`, `test` are paths' roles, whose level goes in `Levels`, not in "
+            r'`flagged`: `Core\(levels=Levels\(docs="flagged", test="flagged"\)\)`'
+        ),
+    ):
+        Project(flagged=["docs", "test", "new-file"])
     with pytest.raises(
         ValidationError, match=r"\['new-file'\] are both held and flagged"
     ):

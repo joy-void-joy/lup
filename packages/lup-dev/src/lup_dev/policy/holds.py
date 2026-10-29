@@ -42,6 +42,7 @@ from filelock import FileLock, Timeout
 
 from lup.types import Model
 from lup_dev.clock import Clock
+from lup_dev.declaration.kinds import Role
 from lup_dev.errors import LupDevError
 from lup_dev.git import Git
 from lup_dev.host.client import Detached, HostClient
@@ -49,7 +50,6 @@ from lup_dev.host.protocol import Holding, HostError, ShowHolding
 from lup_dev.inbox.protocol import AskHold, Shown
 from lup_dev.inbox.store import ChangedFile, Conversation, HeldChange, Reading
 from lup_dev.layout import HostLayout, Layout, StoreLayout
-from lup_dev.policy.roles import Role
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.stored import read_model, write_model
 

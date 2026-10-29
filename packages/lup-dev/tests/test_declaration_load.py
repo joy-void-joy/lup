@@ -17,7 +17,7 @@ DECLARATION = """
 from lup_dev import CodeRules, Modules, Project, Rules
 
 project = Project(
-    held=["protected"],
+    held=["regex"],
     modules=Modules.default().edit(CodeRules(rules=Rules().drop("tuple-shape", why="{why}"))),
 )
 """
@@ -46,7 +46,7 @@ def test_the_declaration_is_read_from_the_root(tmp_path: Path) -> None:
     write(tmp_path / "lup_project.py", DECLARATION.format(why="at the root"))
     declared = load(tmp_path)
     assert declared.source == Path("lup_project.py")
-    assert declared.project.held == ["protected"]
+    assert declared.project.held == ["regex"]
     assert why(tmp_path) == "at the root"
     assert "lup_project" not in sys.modules
 
@@ -273,7 +273,7 @@ class Narration(Module):
 
 
 project = Project(
-    held=["protected"],
+    held=["regex"],
     modules=Modules.default().edit(Python(runner=Poetry())).add(Narration()),
 )
 '''
@@ -300,7 +300,7 @@ def test_what_judging_reads_is_kept_as_json_whatever_classes_the_project_brings(
     assert declaration.source == Path("lup_project.py")
     assert "episodes/**" in declaration.paths.protected
     assert declaration.conditions == ["audiobook.conditions"]
-    assert declaration.held == ["protected"]
+    assert declaration.held == ["regex"]
     assert declaration.tests is None
 
 
@@ -332,7 +332,7 @@ class Ours(Module):
     )
 
 
-project = Project(held=["protected"], modules=Modules.default().add(Ours()))
+project = Project(held=["regex"], modules=Modules.default().add(Ours()))
 '''
 
 MINE = '''
@@ -369,7 +369,7 @@ def test_the_person_s_layer_is_layered_on_the_project_s(tmp_path: Path) -> None:
     resolved = resolve(declared.project)
     assert [each.name for each in resolved.repositories] == ["atlas", "beacon"]
     assert [module.name for module in resolved.modules][-2:] == ["ours", "mine"]
-    assert resolved.held == ["protected"]
+    assert resolved.held == ["regex"]
     assert not any(name.startswith("lup_project") for name in sys.modules)
     assert not (tmp_path / "__pycache__").exists()
 
@@ -446,14 +446,14 @@ def test_the_person_s_layer_edits_the_project_s_own_module(tmp_path: Path) -> No
         from lup_project import Ours
 
         project = Project(
-            held=["protected", "regex"],
+            held=["ignore", "regex"],
             modules=Modules().edit(Ours(repositories=Repositories().drop("atlas"))),
         )
         """,
     )
     resolved = resolve(load(tmp_path).project)
     assert resolved.repositories == []
-    assert resolved.held == ["protected", "regex"]
+    assert resolved.held == ["ignore", "regex"]
 
 
 def test_the_person_s_layer_alone_is_layered_on_the_defaults(tmp_path: Path) -> None:

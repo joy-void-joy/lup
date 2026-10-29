@@ -146,6 +146,26 @@ const HELD_SINCE: Since = {
     ],
 };
 
+/** A branch's files of three roles, with their levels as the host read them: the source to review, a test reviewed, the docs automatic. */
+const LEVELED: Since = {
+    kind: "policy-since",
+    version: "v5",
+    same: false,
+    places: [
+        {
+            worktree: "/w/feat",
+            branch: "feat",
+            gone: false,
+            files: [
+                { path: "reader.py", version: "b1", flags: [59], role: "production", level: "review", file: { ...FILES[0]!, reading: { role: "production", asks: [{ name: "new-file", taken: "flagged", side: "after" }], findings: [] }, before: null } },
+                { path: "test_reader.py", version: "b2", flags: [], role: "test", level: "review", file: { ...FILES[1]!, reading: { role: "test", asks: [{ name: "new-file", taken: "flagged", side: "after" }], findings: [] } } },
+                { path: "docs/reader.md", version: "b5", flags: [], role: "docs", level: "automatic", file: { path: "docs/reader.md", before: null, after: text("# Reader\n"), reading: { role: "docs", asks: [], findings: [] } } },
+                { path: "notes.py", version: "b6", flags: [], role: "production", level: "review", file: { path: "notes.py", before: text("a = 1\n"), after: text("a = 2\n"), reading: { role: "production", asks: [], findings: [] } } },
+            ],
+        },
+    ],
+};
+
 /** A landing of the session's waiting on the parser's module, and on one of the session's own. */
 const WAIT: Wait = {
     key: "w1",
@@ -179,6 +199,7 @@ const CASES: Record<string, Case[]> = {
         { name: "a branch's files since the operator approved it", repository: REPOSITORY, argument: AGENT, given: { drawers: { [whose(PARSER)]: { since: SINCE } } } },
         { name: "a branch that changed nothing", repository: REPOSITORY, argument: AGENT, given: { drawers: { [whose(PARSER)]: { since: { ...SINCE, places: [] } } } } },
         { name: "a file held at landing, one declined, and three places", repository: REPOSITORY, argument: AGENT, given: { drawers: { [whose(PARSER)]: { since: HELD_SINCE } } } },
+        { name: "files of three roles, each by its level", repository: REPOSITORY, argument: AGENT, given: { drawers: { [whose(PARSER)]: { since: LEVELED } } } },
     ],
     "judge banner": [
         { name: "an agent whose flagged writes are held", repository: REPOSITORY, argument: AGENT, given: { running: { [whose(PARSER)]: { launch: "l1", holding: true } } } },
@@ -272,15 +293,35 @@ describe("the views the page lays out itself", () => {
     it("offers each file of \"since you approved\" to be marked reviewed at its version, and every one not settled as the drawer's own", () => {
         const since = producerOf("judge", "since")?.answer(AGENT as never, shownOf(CASES["judge since"]![0]!.given), REPOSITORY);
         const blocks = since?.blocks;
-        expect(blocks?.blocks.map((each) => each.id)).toEqual(["file reader.py", "file test_reader.py", "reviewed clock.py", "reviewed"]);
+        // Its files of two roles, each role a group: the source, then the tests.
+        expect(blocks?.blocks.map((each) => each.id)).toEqual(["role production", "role test"]);
+        const [source, tests] = (blocks?.blocks ?? []).map((each) => (each.block === "fold" && Array.isArray(each.content) ? each.content : []));
+        expect(source?.map((each) => each.id)).toEqual(["file reader.py", "reviewed clock.py", "reviewed production"]);
+        expect(tests?.map((each) => each.id)).toEqual(["file test_reader.py"]);
         expect(blocks?.count).toBe(1);
         expect(blocks?.waiting).toBe(true);
-        expect(blocks?.blocks[0]?.offers[0]?.argument).toEqual({ conversation: PARSER, worktree: "/w/feat", branch: "feat", files: [{ path: "reader.py", version: "b1" }] });
-        // A file reviewed already, settled under the drawer's last fold, offers nothing, and the drawer whole leaves it out.
+        expect(source?.[0]?.offers[0]?.argument).toEqual({ conversation: PARSER, worktree: "/w/feat", branch: "feat", files: [{ path: "reader.py", version: "b1" }] });
+        // A file reviewed already, settled under its group's last fold, offers nothing, and the drawer whole leaves it out.
         expect(blocks?.offers[0]?.argument).toMatchObject({ files: [{ path: "reader.py" }, { path: "test_reader.py" }, { path: "clock.py" }] });
-        const settled = blocks?.blocks.at(-1);
+        const settled = source?.at(-1);
         expect(settled?.block === "fold" && Array.isArray(settled.content) ? settled.content.map((each) => each.offers) : null).toEqual([[]]);
-        expect([...(since?.files?.keys() ?? [])]).toEqual(["file reader.py", "file test_reader.py", "reviewed clock.py", "reviewed notes.md"]);
+        expect([...(since?.files?.keys() ?? [])]).toEqual(["file reader.py", "reviewed clock.py", "reviewed notes.md", "file test_reader.py"]);
+    });
+
+    it("groups a place's files by role, each a fold saying what it holds, by each role's level: automatic folded and never to review, a test reviewed open", () => {
+        const since = producerOf("judge", "since")?.answer(AGENT as never, shownOf(CASES["judge since"]![3]!.given), REPOSITORY);
+        const blocks = since?.blocks;
+        expect((blocks?.summary ?? []).map((each) => each.text).join("")).toBe("since you approved · 3 to review · 1 flagged · 1 automatic · 0 of 4 reviewed");
+        const groups = (blocks?.blocks ?? []).flatMap((each) => (each.block === "fold" ? [each] : []));
+        expect(groups.map((each) => [each.kind, each.summary.map((span) => span.text).join(""), each.open])).toEqual([
+            ["role", "source · 2 to review · 1 flagged", true],
+            ["role", "tests · 1 to review", true],
+            ["role", "docs · 1 automatic", false],
+        ]);
+        const [, tests, docs] = groups.map((each) => (Array.isArray(each.content) ? each.content : []));
+        // A test reviewed is open, as any file asking something is; docs automatic fold whole, saying so.
+        expect(tests?.[0]?.block === "diff" ? [tests[0].open, tests[0].says] : null).toEqual([true, ["new file"]]);
+        expect(docs?.[0]?.block === "diff" ? [docs[0].open, docs[0].says?.[0]] : null).toEqual([false, "automatic"]);
     });
 
     it("holds a file a landing waits on: marked reviewed to let it land, declined, a comment implying that; each place a fold, its files named by it", () => {

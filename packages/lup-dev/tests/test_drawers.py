@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, override
 import pytest
 from pydantic import ValidationError
 
-from lup_dev import cli
+from lup_dev import Core, Levels, Modules, cli
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.resolve import Declaration
 from lup_dev.host.pushes import Pushes
@@ -379,6 +379,26 @@ def test_a_file_nothing_flagged_carries_its_role_by_the_declaration_the_judge_la
         "src/rooms.test.ts": "test",
         "src/rooms.ts": "production",
     }
+    # Each with its role and its role's level, by lup's defaults.
+    assert [(str(each.path), each.role, each.level) for each in only(shown).files] == [
+        ("fixture.json", "data", "automatic"),
+        ("src/rooms.test.ts", "test", "automatic"),
+        ("src/rooms.ts", "production", "review"),
+    ]
+    # A role the declaration hides is left out, but where a flagged write waits on its file.
+    hiding = Project(
+        modules=Modules().edit(Core(levels=Levels(test="hidden", data="hidden")))
+    )
+    write_model(
+        layout.declaration(bare),
+        LastDeclaration(declaration=Declaration.of(hiding), commit="c2"),
+    )
+    branch.flagged("fixture.json", None, "{}\n")
+    hidden = branch.reader(tmp_path).read(ShowSince(conversation=branch.party))
+    assert [(str(each.path), each.level) for each in only(hidden).files] == [
+        ("fixture.json", "hidden"),
+        ("src/rooms.ts", "review"),
+    ]
 
 
 def test_a_file_is_shown_from_where_the_branch_left_the_integration_branch_so_what_that_took_in_since_is_never_shown_undone(

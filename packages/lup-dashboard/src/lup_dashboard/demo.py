@@ -19,6 +19,7 @@ from lup.types import Model, MutableModel
 from lup_dashboard.host import Host
 from lup_dashboard.standins import StandInViews
 from lup_dev.clock import Clock, SystemClock
+from lup_dev.declaration.kinds import Levels, Role
 from lup_dev.errors import LupDevError
 from lup_dev.host.protocol import (
     Activity,
@@ -157,6 +158,8 @@ class Stands(Model):
     flag: int | None = None
     reading: Reading | None = None
     held: HeldAt | None = None
+    role: Role = "production"
+    """Its path's role, as the host reads it by lup's default declaration."""
 
 
 class Standing(MutableModel):
@@ -658,6 +661,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             path=Path("packages/lup/tests/test_reader.py"),
             before=None,
             after=Text(text=TEST_READER),
+            role="test",
         )
         return [
             *(
@@ -734,6 +738,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 flags=flags,
                 reviewed=None if mark is None else mark.at,
                 held=held,
+                role=each.role,
+                level=Levels().model_dump()[each.role],
             )
             if before == each.after:
                 return None if mark is None and held is None else shown
