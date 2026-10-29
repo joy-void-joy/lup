@@ -197,10 +197,12 @@ from lup_dev.policy.holds import (
     Response,
     stores,
 )
-from lup_dev.policy.landing import LandingTools
+from lup_dev.policy.landing import LandingTools, landed_felt
 from lup_dev.policy.reviewed import Mark, Reviews
 from lup_dev.policy.tools import JudgeTools, stands
 from lup_dev.policy.verdicts import Verdict, VerdictLog
+from lup_dev.policy.worktrees import Holding as Worked
+from lup_dev.policy.worktrees import SessionIndex
 from lup_dev.private.withheld import Withheld
 from lup_dev.private.withheld import kept as listed_at
 from lup_dev.remote.protocol import Remotes
@@ -9231,6 +9233,66 @@ def test_land_where_the_defer_comments_can_t_be_read_says_so_and_lands_all_the_s
         "failed: node: not found\n"
         "Cleaned up after it:\n"
     ) in answer
+
+
+def test_land_invites_each_conversation_still_going_that_worked_on_a_branch_it_landed_once_where_it_hasn_t_said(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    tmp_path: Path,
+) -> None:
+    """Told beside its next call, the conversation landing's beside the landing's own result: never one that ended, which nothing reaches, nor one that said how it felt already, nor one a landing invited before."""
+    feat, records = landings.feat, Subagents(tmp_path)
+    more = landings.branched("more")
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    landings.wrote(more, "src/pkg/more.py", '"""More."""\n')
+    worked = Worked(
+        repository=landings.repository,
+        worktrees=[landings.dev, feat, more],
+        started={"": [landings.dev, feat]},
+        wrote={"a1": [feat, more], "a2": [feat], "a3": [feat]},
+    )
+    SessionIndex(layout=machine).write("s1", worked)
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
+        landings.launched("claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, started("claude"))
+        for agent, call_id in [("a1", "t1"), ("a2", "t2"), ("a3", "t3")]:
+            send(hook, records.spawn(call_id, name=f"worker-{agent}"))
+            records.recorded(agent, "general-purpose", call_id, name=f"worker-{agent}")
+            send(hook, records.call(agent, "general-purpose", f"{agent}-c1"))
+        send(hook, records.ended("a2", "general-purpose", "Handed back."))
+        records.lup(
+            (hook, mcp),
+            "how_it_felt",
+            {"text": "Calm work."},
+            "a3",
+            "general-purpose",
+        )
+        send(hook, lup_call("land", {}, "l1"))
+        merging(landings, mcp)
+        landed = context(send(hook, lup_finished("land", "l1")))
+        ending = send(hook, claude("Stop", stop_hook_active=False))
+        worker = context(send(hook, records.call("a1", "general-purpose", "a1-c2")))
+        quiet = send(hook, records.call("a3", "general-purpose", "a3-c2"))
+        again = send(hook, records.call("a1", "general-purpose", "a1-c3"))
+        landings.shell.git(landings.dev, "merge", "-q", "--no-ff", "--no-edit", "more")
+        landings.passing(landings.shell.git(landings.dev, "rev-parse", "HEAD"))
+        _, error = call(mcp, "land", {})
+        later = send(hook, records.call("a1", "general-purpose", "a1-c4"))
+    # The landing's own result tells the landing conversation what waits too.
+    assert landed.split("\n\n")[0] == landed_felt(["feat"])
+    assert ending == ""
+    assert worker == landed_felt(["feat"])
+    assert quiet == ""
+    assert again == ""
+    assert not error
+    assert later == ""
 
 
 def test_land_ends_on_the_subagents_lup_hasn_t_heard_end_and_the_branches_off_dev(

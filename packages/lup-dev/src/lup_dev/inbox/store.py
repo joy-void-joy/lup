@@ -1069,6 +1069,13 @@ class Whereabouts(Model):
     (`Ended.held`), since its runtime hands on only the end it lets through.
     Kept here rather than in memory, so a restart of the service between the
     two ends loses none."""
+    words: list[str] = []
+    """lup's own words left for it, oldest first: told beside its next call or
+    at its next turn's or session's start, and never holding its turn's end
+    (`Delivery.left`). Kept here, so a restart of the service loses none."""
+    felt_asked: bool = False
+    """Whether a landing of a branch it worked on has invited it to say how the
+    work felt (`Lander.invited`): one does once, whatever launch it's heard in."""
     name: str | None = None
     """A subagent's own name as its latest hook was heard, kept once its launch
     has ended, so `inbox` reads it by its name then, and `send` reaches it by

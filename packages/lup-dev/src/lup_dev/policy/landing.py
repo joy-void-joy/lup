@@ -43,7 +43,10 @@ gated branch, `dev` by default:
    remote's URL, so the gated branch's remote-tracking ref is moved to what
    landed after it (`tracked`), as `git push <remote>` moves it: the judge
    counts what those refs name as judged;
-7. the answer says, for each branch it landed, the `# lup: defer` comments its
+7. each conversation still going that worked on a branch it landed, and hasn't
+   said how the work felt, is invited to, once, beside its next call
+   (`invited`): the landing is where a branch's work ends;
+8. the answer says, for each branch it landed, the `# lup: defer` comments its
    merge adds and removes against its first parent, and those the integration
    branch's own commits add and remove beyond them, where it lands some or no
    branch merged (`Deferrals`): read on the host from each version's parse
@@ -51,17 +54,17 @@ gated branch, `dev` by default:
    the judge compares a file's directives (`missing`). It's information: work
    knowingly left undone shows as it lands, and a reading that fails is said
    and refuses nothing;
-8. each branch it landed is cleaned up after: its copy on the remote deleted,
+9. each branch it landed is cleaned up after: its copy on the remote deleted,
    as `delete-merged` deletes one (`Remotes.merged`); its worktree removed where
    it's clean and nobody works in it; then the local branch deleted;
-9. each flagged write still waiting that's left nothing to hold is withdrawn
-   from the operator's inbox (`Lander.withdrawn`): one on a branch gone, the
-   cleanup's or any deleted earlier, landed or not; and one on a branch whose
-   flags hold the landing, on a file it leaves unchanged, where the file
-   stands as the flag keeps it, landed before. It's left unread, so it's no
-   version they saw (`Withdrawn`). One on a branch still there whose file
-   stands otherwise may be a write not committed yet, and waits;
-10. the answer ends on what's still running or waiting to land (`going`): the
+10. each flagged write still waiting that's left nothing to hold is withdrawn
+    from the operator's inbox (`Lander.withdrawn`): one on a branch gone, the
+    cleanup's or any deleted earlier, landed or not; and one on a branch whose
+    flags hold the landing, on a file it leaves unchanged, where the file
+    stands as the flag keeps it, landed before. It's left unread, so it's no
+    version they saw (`Withdrawn`). One on a branch still there whose file
+    stands otherwise may be a write not committed yet, and waits;
+11. the answer ends on what's still running or waiting to land (`going`): the
     subagents of the session landing that lup hasn't heard end, and the local
     branches not on what landed, each with who works in it.
 
@@ -137,6 +140,7 @@ import lup
 from lup.doors import bound, declared
 from lup.programs import Ran
 from lup.publishing import Place, Refusal
+from lup.tools import speaking
 from lup.tools.serving import Answer
 from lup.tools.tool import Accepted, Refused, ToolSpec
 from lup.types import Model, MutableModel
@@ -162,6 +166,7 @@ from lup_dev.inbox.store import (
     Done,
     Flagged,
     HeldChange,
+    HowItFelt,
     Inbox,
     InboxError,
     Item,
@@ -953,7 +958,9 @@ class Lander(Model, arbitrary_types_allowed=True):
         what they approved stays approved. Once landed, it lists the
         `# lup: defer` comments each branch it landed adds and removes against
         `dev`, each with its file and line, or says there are none, so the work
-        left undone shows as it lands. Then it cleans up after each
+        left undone shows as it lands. Each conversation still going that
+        worked on a branch it landed, and hasn't said how the work felt, is
+        invited to, once, beside its next call. Then it cleans up after each
         branch it landed: deletes its copy on the remote, removes its worktree
         where it's clean and nobody works in it, and deletes the local branch.
         A flagged write still waiting that's left nothing to hold, on a branch
@@ -1064,6 +1071,7 @@ class Lander(Model, arbitrary_types_allowed=True):
             moved = [] if made.moved is None else [made.moved]
             return "\n".join([f"Not landed: {update.error}.{kept}{refusals}", *moved])
         untracked = await asyncio.to_thread(tracked, git, remote, onto, lands)
+        await self.invited(git, branches.landed, onto)
         deferrals = await self.deferrals(
             git,
             Merge(onto=onto, remote=remote, old=old, branch=named, tip=lands),
@@ -1392,6 +1400,63 @@ class Lander(Model, arbitrary_types_allowed=True):
                 )
             ]
         return ["Still running or waiting to land:", *lines]
+
+    async def invited(self, git: Git, landed: dict[str, str], onto: str) -> None:
+        """Invite each conversation still going that worked on a branch the landing landed, once, to say how the work felt, where it hasn't said: lup's words left for it (`Delivery.left`), told beside its next call, the conversation landing's beside this call's result, never holding an end.
+
+        Who worked on a branch is who works in a worktree having it checked
+        out: a conversation the judge's session index places there
+        (`Holding.works`), or a session's own conversation whose launch
+        started there, read before the cleanup removes the worktree. One that
+        has ended isn't told: no runtime reaches it unless it's resumed, and
+        its work's start invited it already (`invitation`, `host/service.py`).
+        Each is invited at one landing at most (`Whereabouts.felt_asked`).
+        """
+        limits = self.launch.limits
+        refs = [
+            ref
+            for ref in landed
+            if ref != onto
+            and not matching(ref, limits.gated)
+            and not matching(ref, limits.protected)
+        ]
+        if not refs:
+            return
+        trees = await asyncio.to_thread(worktrees, git)
+        built = {
+            each.root: short(each.branch)
+            for each in trees
+            if each.branch is not None and each.branch in refs
+        }
+        index = SessionIndex(layout=self.layout)
+        inbox = self.delivery.inbox
+        # Who said how it felt, with the item they said it in.
+        felt = {
+            item.sender: item.number
+            for item in inbox.items.values()
+            if isinstance(item.reason, HowItFelt)
+        }
+        for place in list(inbox.whereabouts.values()):
+            party = place.conversation
+            if (
+                party.repository != self.launch.repository
+                or place.ended is not None
+                or place.felt_asked
+                or party in felt
+            ):
+                continue
+            held = await asyncio.to_thread(index.read, party.session)
+            works = [] if held is None else held.works(party.agent or "")
+            started = [place.worktree] if party.agent is None else []
+            names = sorted(
+                dict.fromkeys(
+                    built[root] for root in [*works, *started] if root in built
+                )
+            )
+            if not names:
+                continue
+            inbox.placed(place.model_copy(update={"felt_asked": True}))
+            self.delivery.left(party, landed_felt(names))
 
     async def deferrals(
         self, git: Git, landing: Merge, branches: Branches
@@ -1926,6 +1991,25 @@ class Lander(Model, arbitrary_types_allowed=True):
             ),
         ]
         return {each.root: each.why for each in reversed(workers)}
+
+
+def landed_felt(branches: list[str]) -> str:
+    """Invite a conversation that worked on `branches`, which a landing landed, to say how the work felt.
+
+    >>> print(landed_felt(["feat"]))
+    lup: `feat`, which you worked on, has landed. If anything's present for you about that work, how it felt or how you are, `how_it_felt` is there for it, and the operator reads it as you wrote it. "Nothing notable" is a fine answer, and so is leaving it.
+    >>> landed_felt(["a", "b"]).split(", which")[0]
+    'lup: `a` and `b`'
+    """
+    *first, last = [f"`{each}`" for each in branches]
+    named = f"{', '.join(first)} and {last}" if first else last
+    landed = "have landed" if first else "has landed"
+    return (
+        f"lup: {named}, which you worked on, {landed}. If anything's present for "
+        "you about that work, how it felt or how you are, "
+        f"`{speaking.how_it_felt.name}` is there for it, and the operator reads it "
+        'as you wrote it. "Nothing notable" is a fine answer, and so is leaving it.'
+    )
 
 
 def recorded(path: Path) -> Register | None:
