@@ -18,6 +18,7 @@ from lup_dashboard.server import Access, application
 from lup_dev.clock import Clock
 from lup_dev.host.protocol import HostError, Listed, ListLaunches, Refused
 from lup_dev.host.records import Called
+from lup_dev.host.timings import TimingsStore
 from lup_dev.host.workers import Viewed, Viewing
 from lup_dev.inbox.protocol import (
     Conversed,
@@ -605,6 +606,34 @@ def test_the_demo_keeps_one_order_of_the_reviews_groups_for_every_page(
     assert one == {"kind": "inbox-ordered", "order": {"places": ["now b", "now a"]}}
     assert other == {"kind": "inbox-ordered", "order": {"places": ["now a", "now c"]}}
     assert shown.json() == other
+
+
+def test_the_demo_keeps_what_the_page_measured_of_itself_as_the_host_does(
+    page: Path, tmp_path: Path
+) -> None:
+    served = client(Demo(clock=Fixed(), timings=tmp_path / "timings"), page)
+    start = datetime(2026, 10, 1, 11, 55, tzinfo=UTC)
+    report = {
+        "page": "dashboard",
+        "session": "a1b2c3",
+        "browser": {"name": "Chrome", "version": "151", "device": "desktop"},
+        "windows": [
+            {
+                "sequence": 1,
+                "start": start.isoformat(),
+                "end": (start + timedelta(minutes=5)).isoformat(),
+                "size": {"lines": 15_203},
+                "keys": {"typing": {"painted": {"16": 3}, "under": 2}},
+            }
+        ],
+    }
+    asked = {"kind": "page-timings-keep", "report": report}
+    kept = served.post("/api/ask", json=asked, headers=bearing())
+    assert kept.json() == {"kind": "page-timings-kept", "windows": 1}
+    read = TimingsStore(home=tmp_path / "timings").read("dashboard", Fixed().now())
+    assert [(each.session, each.window.keys["typing"].keys()) for each in read] == [
+        ("a1b2c3", 5)
+    ]
 
 
 def settling(approved: bool, reason: Approval | Message) -> Settled:

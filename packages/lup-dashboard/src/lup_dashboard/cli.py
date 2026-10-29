@@ -135,6 +135,16 @@ def demo(
             )
         ),
     ] = 0,
+    timings: Annotated[
+        Path | None,
+        typer.Option(
+            help=(
+                "Keep what the page measures of itself in this directory, laid out "
+                "as the host keeps it, for `lup-dev dashboard timings --kept` to "
+                "read; by default in the demo's own directory, gone as it stops."
+            )
+        ),
+    ] = None,
     copy: Annotated[
         bool,
         typer.Option(
@@ -165,16 +175,16 @@ def demo(
                 "--size, --hooks or --approval-lines"
             )
             raise typer.BadParameter(message)
-        copied(port, address)
+        copied(port, address, timings)
         return
-    host = Demo(hooks=hooks, approval_lines=approval_lines)
+    host = Demo(hooks=hooks, approval_lines=approval_lines, timings=timings)
     if size is not None:
         host.size = size
     served(host, port, address)
 
 
-def copied(port: int, address: str) -> None:
-    """Serve the dashboard over a copy of the operator's dashboard state, taken into a directory of its own removed as it stops, until stopped.
+def copied(port: int, address: str, timings: Path | None = None) -> None:
+    """Serve the dashboard over a copy of the operator's dashboard state, taken into a directory of its own removed as it stops, until stopped; what the page measures of itself kept in `timings`, where it's given.
 
     The checkout it runs in answers its repository's views by its own
     declaration (`checkout`). What the copy can't be taken or read for is said,
@@ -196,6 +206,7 @@ def copied(port: int, address: str) -> None:
                 root,
                 readers,
                 say=lambda line: typer.echo(f"copy: {line}", err=True),
+                timings=timings,
             )
         except (CopyError, HostError) as failed:
             typer.echo(f"lup-dashboard: the copy can't be served: {failed}", err=True)

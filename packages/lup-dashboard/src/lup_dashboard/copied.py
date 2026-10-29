@@ -64,7 +64,9 @@ to the handlers as one that refuses, or keeps what it would do in the copy:
   here, nothing served on a launch's sockets (`NoCourier`, `NoAnswerer`,
   `NoJudge`).
 What the handlers write, lup's state and runtime directory and each module's
-data, is inside the copy's directory (`CopyLayout.lup`). A worktree an item
+data, is inside the copy's directory (`CopyLayout.lup`), what the page measured
+of itself among it (`KeepTimings`), unless the demo was given a directory of
+its own for that (`--timings`). A worktree an item
 names, which the room mounts writable, is never written: the edges above are
 the ways the host would. The landings waiting, which the host holds in memory
 alone, aren't copied, so none waits here.
@@ -107,6 +109,8 @@ from lup_dev.host.service import (
     Served,
 )
 from lup_dev.host.service import Listing as LaunchesListing
+from lup_dev.host.timings import TimingsStore
+from lup_dev.host.timings import routes as timings_routes
 from lup_dev.host.views import ModuleViews
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import LaunchJudge, RepositoryAsking, Viewing
@@ -527,8 +531,9 @@ def taken(
     *,
     clock: Clock | None = None,
     say: Callable[[str], None] = lambda _: None,
+    timings: Path | None = None,
 ) -> CopyHost:
-    """Take a copy of the operator's dashboard state into `layout`, asked of the host through `asking`, and return the host over it: its handlers as this checkout has them, the launch's own repository's views answered by the declaration of the checkout at `root`, each runtime's records read by its reader of `readers`, as they're asked for.
+    """Take a copy of the operator's dashboard state into `layout`, asked of the host through `asking`, and return the host over it: its handlers as this checkout has them, the launch's own repository's views answered by the declaration of the checkout at `root`, each runtime's records read by its reader of `readers`, as they're asked for, and what the page measures of itself kept in `timings`, else in the copy.
 
     Raise `CopyError` where a file copied, or this checkout's declaration,
     doesn't read, saying which and why; `HostError` where the host can't be
@@ -622,6 +627,7 @@ def taken(
         *inbox_routes(delivery, recorded, lup),
         *marks_routes(lup, clock, changes),
         *waits_routes(waits),
+        *timings_routes(TimingsStore(home=timings or lup.host.timings), clock),
         *unread(Withholding()),
         Route.reading(module_views, watch=module_views.watched),
     ]
