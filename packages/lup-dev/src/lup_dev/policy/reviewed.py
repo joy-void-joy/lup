@@ -5,7 +5,7 @@ reviewed at the version the page shows, whether or not anything flagged it, as
 a forge's "viewed" box is ticked, and so does a comment sent on its lines, at
 the version it was written on: the drawer then shows the file as one line,
 until the agent writes it again, when it shows only what changed since that
-version (`lup_dev.policy.since`); a hold at landing starts there too
+version (`lup_dev.policy.since`); a file held at landing starts there too
 (`Baseline`, `lup_dev.policy.landing`).
 
 A mark is the judge's review mark of the file (`lup_dev.inbox.marks`), keyed

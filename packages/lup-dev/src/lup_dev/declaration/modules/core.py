@@ -20,7 +20,7 @@ from lup_dev.declaration.kinds import (
     Session,
     Verbs,
 )
-from lup_dev.declaration.looks import HOLD
+from lup_dev.declaration.looks import BRANCH_FOLD, HOLD
 from lup_dev.declaration.module import Module
 from lup_dev.host.records import PAUSE
 
@@ -68,11 +68,13 @@ class Core(Module):
     it into the user-level settings of each package manager the room's image
     holds, which a project's own setting outranks (`docs/launch.md`, *The
     package age gate*)."""
-    folds: Folds = Folds.of(*SHELL_FOLDS)
+    folds: Folds = Folds.of(*SHELL_FOLDS, BRANCH_FOLD)
     """The shell's fold kinds, an agent's group, an item, its context, and a
-    file's, a body's and a run of unchanged lines', which every repository's
-    looks carry first: a person's layer changes how each starts and whether
-    `zR` and `zM` reach it, `Folds().replace("lines", …)`."""
+    file's, a body's and a run of unchanged lines'; and the judge's, each place
+    of "since you approved" where an agent worked in several, the core's until
+    the judge is a module: every repository's looks carry them first, and a
+    person's layer changes how each starts and whether `zR` and `zM` reach it,
+    `Folds().replace("lines", …)`."""
     verbs: Verbs = Verbs.of(*SHELL_VERBS, HOLD, PAUSE)
     """The verbs the review's keys say, Space and a key: the shell's, done,
     decline, send to and comment, which apply to anything; the judge's, hold;

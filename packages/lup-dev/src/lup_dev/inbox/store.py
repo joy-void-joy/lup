@@ -449,7 +449,13 @@ class Approval(Model):
 
 
 class AtLanding(Model):
-    """What a hold at landing waits on: one file the landing changes, flagged on a branch it lands and not yet approved, and the landing it holds (`lup_dev.policy.landing`)."""
+    """What a hold at landing an earlier lup made waits on: one file the landing changes, flagged on a branch it lands and not yet approved, and the landing it holds.
+
+    `land` makes no such item: each such file is held at landing in its
+    writer's "since you approved" drawer (`lup_dev.policy.waits`). Items kept
+    from an earlier lup are read, as a version of the file the operator saw,
+    and answered.
+    """
 
     onto: str
     """The gated branch the landing moves, by its full name: `refs/heads/dev`."""
@@ -479,9 +485,9 @@ class HeldChange(Model):
 
     The judge's (`lup_dev.policy.holds`): a write that asks waits for the
     answer inside its hook, or, for what a move of `HEAD` brought, is asked
-    after the fact, no agent waiting. Or a landing's (`lup_dev.policy.landing`):
-    a file flagged on a branch it lands, which the landing waits on, its answer
-    the item's own state.
+    after the fact, no agent waiting. Or a landing's, kept from an earlier
+    lup (`AtLanding`): a file flagged on a branch it lands, which the landing
+    waited on, its answer the item's own state.
     """
 
     reason: Literal["held"] = "held"

@@ -355,6 +355,10 @@ class Items(Reply):
     (`pathed`): how the dashboard and `lup-dev inbox` name an agent that isn't
     running, or isn't their launch's latest session, whom no launch shown there
     names."""
+    landings: dict[int, str] = {}
+    """By each flagged write listed that a landing waits on, what that landing
+    lands where (`Delivery.landing`): what `lup-dev inbox` says on the flags'
+    line."""
 
 
 class Readout(Reply):
@@ -662,6 +666,11 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
             answers=answers,
             commented=commented,
             paths=pathed(self.delivery.roster(), [*waiting, *answers, *commented]),
+            landings={
+                each.number: named
+                for each in waiting
+                if (named := self.delivery.landing(each.number)) is not None
+            },
         )
 
     def seen(self, items: list[Item]) -> list[Seen]:

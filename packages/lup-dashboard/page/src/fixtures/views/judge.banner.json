@@ -85,5 +85,294 @@
       ],
       "blocks": []
     }
+  },
+  {
+    "name": "an agent ended, whose file a landing waits on",
+    "repository": "/r/lup.git",
+    "argument": {
+      "runtime": "claude",
+      "session": "s1",
+      "agent": "a1"
+    },
+    "given": {
+      "drawers": {
+        "[\"/r/lup.git\",\"claude\",\"s1\",\"a1\"]": {
+          "since": {
+            "kind": "policy-since",
+            "version": "v4",
+            "same": false,
+            "places": [
+              {
+                "worktree": "/w/feat",
+                "branch": "feat",
+                "gone": false,
+                "files": [
+                  {
+                    "path": "reader.py",
+                    "version": "b1",
+                    "flags": [
+                      59
+                    ],
+                    "held": {
+                      "key": "w1",
+                      "lander": {
+                        "party": "conversation",
+                        "repository": "/r/lup.git",
+                        "runtime": "claude",
+                        "session": "s1",
+                        "agent": null
+                      },
+                      "named": "`feat` on `dev`",
+                      "tip": "c0ffee",
+                      "declined": false
+                    },
+                    "file": {
+                      "path": "reader.py",
+                      "before": null,
+                      "after": {
+                        "kind": "text",
+                        "text": "import json\n\n\ndef read(path):\n    # lup: ignore(\"x\", why=\"y\")\n    return path.read_text().split(\"\\n\")\n"
+                      },
+                      "reading": {
+                        "role": "production",
+                        "asks": [
+                          {
+                            "name": "new-file",
+                            "taken": "flagged",
+                            "side": "after"
+                          }
+                        ],
+                        "findings": []
+                      }
+                    }
+                  },
+                  {
+                    "path": "clock.py",
+                    "version": "b3",
+                    "flags": [
+                      60
+                    ],
+                    "reviewed": "2026-10-27T09:00:00Z",
+                    "held": {
+                      "key": "w1",
+                      "lander": {
+                        "party": "conversation",
+                        "repository": "/r/lup.git",
+                        "runtime": "claude",
+                        "session": "s1",
+                        "agent": null
+                      },
+                      "named": "`feat` on `dev`",
+                      "tip": "c0ffee",
+                      "declined": true
+                    }
+                  }
+                ]
+              },
+              {
+                "worktree": null,
+                "branch": "fix",
+                "gone": false,
+                "files": [
+                  {
+                    "path": "reader.py",
+                    "version": "c1",
+                    "flags": [],
+                    "file": {
+                      "path": "reader.py",
+                      "before": {
+                        "kind": "text",
+                        "text": "a = 1\n"
+                      },
+                      "after": {
+                        "kind": "text",
+                        "text": "a = 2\n"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "worktree": null,
+                "branch": "old",
+                "gone": true,
+                "files": [
+                  {
+                    "path": "gone.py",
+                    "flags": [
+                      61
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    "module": "judge",
+    "view": "banner",
+    "answer": {
+      "summary": [
+        {
+          "text": "landing waits on 1 file",
+          "tone": "strong"
+        }
+      ],
+      "waiting": true,
+      "count": 0,
+      "offers": [],
+      "blocks": []
+    }
+  },
+  {
+    "name": "a session landing, waiting on files in their subagent's drawer and their own",
+    "repository": "/r/lup.git",
+    "argument": {
+      "runtime": "claude",
+      "session": "s1",
+      "agent": null
+    },
+    "given": {
+      "running": {
+        "[\"/r/lup.git\",\"claude\",\"s1\",null]": {
+          "launch": "l1",
+          "holding": false
+        }
+      },
+      "landings": [
+        {
+          "key": "w1",
+          "repository": "/r/lup.git",
+          "lander": {
+            "party": "conversation",
+            "repository": "/r/lup.git",
+            "runtime": "claude",
+            "session": "s1",
+            "agent": null
+          },
+          "onto": "refs/heads/dev",
+          "old": "0ld",
+          "tip": "c0ffee",
+          "branches": [
+            "feat"
+          ],
+          "files": [
+            {
+              "path": "reader.py",
+              "flags": [
+                59
+              ],
+              "writers": [
+                {
+                  "party": "conversation",
+                  "repository": "/r/lup.git",
+                  "runtime": "claude",
+                  "session": "s1",
+                  "agent": "a1"
+                }
+              ]
+            },
+            {
+              "path": "hall.py",
+              "flags": [
+                63
+              ],
+              "writers": [
+                {
+                  "party": "conversation",
+                  "repository": "/r/lup.git",
+                  "runtime": "claude",
+                  "session": "s1",
+                  "agent": null
+                }
+              ]
+            },
+            {
+              "path": "clock.py",
+              "flags": [
+                60
+              ],
+              "writers": [
+                {
+                  "party": "conversation",
+                  "repository": "/r/lup.git",
+                  "runtime": "claude",
+                  "session": "s1",
+                  "agent": "a1"
+                }
+              ],
+              "declined": {
+                "at": "2026-10-27T09:00:00Z",
+                "words": ""
+              }
+            }
+          ],
+          "began": "2026-10-27T09:00:00Z"
+        }
+      ],
+      "paths": {
+        "[\"/r/lup.git\",\"claude\",\"s1\",\"a1\"]": "lup-impl/parser"
+      }
+    },
+    "module": "judge",
+    "view": "banner",
+    "answer": {
+      "summary": [
+        {
+          "text": "landing `feat` on `dev` waits on 2 files",
+          "tone": "strong"
+        },
+        {
+          "text": " in ",
+          "tone": "strong"
+        },
+        {
+          "text": "lup-impl/parser",
+          "tone": "strong",
+          "conversation": {
+            "runtime": "claude",
+            "session": "s1",
+            "agent": "a1"
+          }
+        },
+        {
+          "text": "'s drawer",
+          "tone": "strong"
+        }
+      ],
+      "waiting": false,
+      "count": 0,
+      "offers": [
+        {
+          "action": "set-holding",
+          "argument": {
+            "launch": "l1",
+            "session": "s1",
+            "agent": null,
+            "on": true
+          },
+          "verb": "hold",
+          "chord": null,
+          "runs": "send",
+          "commented": false,
+          "says": "hold their flagged writes"
+        }
+      ],
+      "blocks": []
+    }
+  },
+  {
+    "name": "an agent ended, nothing of theirs waiting",
+    "repository": "/r/lup.git",
+    "argument": {
+      "runtime": "claude",
+      "session": "s1",
+      "agent": "a1"
+    },
+    "given": {},
+    "module": "judge",
+    "view": "banner",
+    "answer": null
   }
 ]

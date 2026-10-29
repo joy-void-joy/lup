@@ -81,7 +81,7 @@ function whyNot(verb: Verb): string {
         case CORE.done:
             return "nothing here is marked done";
         case CORE.decline:
-            return "only an approval or a held change is declined; a flagged write has landed, so declining it waits on holding writes at landing (#247)";
+            return "only an approval, a held change or a file held at landing is declined; a flagged write has landed, and is declined once a landing waits on it";
         case CORE.send:
             return "an item is left for later; sending to an agent or a named pile comes with piles (#312)";
         case CORE.comment:
@@ -405,11 +405,14 @@ export function listed(draft: Draft, number: number, list: Listed | null): Draft
     return { ...draft, done: put("done"), declined: put("declined"), parked: put("parked") };
 }
 
-/** Return `draft` with the mark `act` makes by `verb` added, or taken away (`unmarking`). */
+/**
+ * Return `draft` with the mark `act` makes by `verb` added, or taken away (`unmarking`): added, it replaces the block's
+ * mark of the same action by another verb, as a file held at landing is marked reviewed or declined, never both.
+ */
 function offered(draft: Draft, act: Extract<Act, { kind: "mark" }>, verb: string, unmarking: boolean): Draft {
-    const marks = draft.marks ?? [];
+    const marks = (draft.marks ?? []).filter((each) => !(each.block === act.block && each.action === act.offer.action && (unmarking ? each.verb === verb : each.verb !== verb)));
     if (unmarking) {
-        return { ...draft, marks: marks.filter((each) => !(each.block === act.block && each.verb === verb && each.action === act.offer.action)) };
+        return { ...draft, marks };
     }
     const made: Marked = {
         id: newId(),
@@ -426,8 +429,9 @@ function offered(draft: Draft, act: Extract<Act, { kind: "mark" }>, verb: string
 /**
  * Return the marks the operator's comments imply, a comment counting as a review (`Offer.commented`): for each comment
  * or remark written on a block offering what a comment on it implies, as a file of "since you approved" offers marking
- * it reviewed, that offer marked by its verb on the block, at the version the comment was written on, the latest
- * written on it; none where the draft marks the block by that offer already, the operator's own mark the later word.
+ * it reviewed, or a file held at landing offers declining its landing, that offer marked by its verb on the block, at the
+ * version the comment was written on, the latest written on it; none where the draft marks the block by that offer's
+ * action already, by any verb, the operator's own mark the later word.
  * Shown as the draft's own marks are, and kept in the draft as it's sent, so Ctrl+Enter applies them with the rest.
  */
 export function implied(laidOut: Laid, draft: Draft): Marked[] {
@@ -444,7 +448,7 @@ export function implied(laidOut: Laid, draft: Draft): Marked[] {
             if (offer.commented !== true || verb === null) {
                 continue;
             }
-            if ((draft.marks ?? []).some((mark) => mark.block === block && mark.action === offer.action && mark.verb === verb)) {
+            if ((draft.marks ?? []).some((mark) => mark.block === block && mark.action === offer.action)) {
                 continue;
             }
             found.set(`${block} ${offer.action}`, {

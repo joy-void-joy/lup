@@ -31,12 +31,14 @@ gated branch, `dev` by default:
    the host doesn't run, so `land` reads the pass and never runs the gate. The
    room writes the passes, so this steers and guards nothing;
 5. each file the landing changes that's flagged on a branch it lands, and not
-   approved, is a hold in the operator's inbox, one item a file covering every
-   flag on it (`AtLanding`), its diff from the version of the file the operator
-   last saw there to the tip's; the call waits until each is answered. Approved,
-   each flag it covers is approved with it; a comment without approval, or a
-   decline, sends the operator's words to the conversation landing, and nothing
-   is pushed (`Delivery.held_back`, `Delivery.landing_decided`);
+   approved, holds it: the landing waits on each, every flag on it (`Wait`,
+   `lup_dev.policy.waits`), raising one desktop notice for them all, and each
+   is held at landing in its writer's "since you approved" drawer, shown from
+   the version of the file the operator last saw there to the tip's
+   (`lup_dev.policy.since`); the call waits until each is answered there.
+   Marked reviewed, each flag on it is approved; declined, or commented on
+   without being marked reviewed, nothing is pushed, and the call answers
+   with the operator's words (`Waits.declined`);
 6. the push goes the remote helper's way (`PushHandler`): held to the launch's
    limits, through `Publishing`, and told to `Remotes.landed`, which
    asks trust's approval where it moved the integration branch. It names the
@@ -87,11 +89,11 @@ its worktree had checked out (`Flagged.branch`): one on a branch renamed or
 deleted since holds nothing, and a stale one on a branch name used again holds
 that branch's landing.
 
-**The version a hold starts from** is the latest the operator saw of the file on
-the branches landed: a flagged write or a hold at landing they approved, read or
-commented on, so a hold after a comment shows what changed in answer to it, or
-the version they last marked reviewed in its agent's drawer
-(`lup_dev.policy.reviewed`), whichever came last. Where they saw none, it's the file at the gated branch's tip on the remote,
+**The version a held file is shown from** is the latest the operator saw of
+it on the branches landed: the version they last marked reviewed in its writer's
+drawer, a decline marking it so (`lup_dev.policy.reviewed`), or a flagged write
+or a hold at landing an earlier lup made, which they approved, read or
+commented on, whichever came last. Where they saw none, it's the file at the gated branch's tip on the remote,
 which the tip holds, so the integration branch's own changes don't show. One
 they saw before the integration branch changed the file too, merged since,
 shows that change as well.
@@ -127,6 +129,7 @@ answers in words, as `content`.
 
 import asyncio
 import hashlib
+import uuid
 from collections import Counter
 from collections.abc import Awaitable, Callable
 from datetime import datetime
@@ -171,7 +174,6 @@ from lup_dev.inbox.store import (
     InboxError,
     Item,
     Reading,
-    Superseded,
     Text,
     Waiting,
     Whereabouts,
@@ -180,9 +182,9 @@ from lup_dev.inbox.store import (
 )
 from lup_dev.layout import CheckoutLayout, GitDirectoryLayout, HostLayout, Layout
 from lup_dev.merging import Conflicted, Failed, Merged, Merging
-from lup_dev.policy.holds import unified
 from lup_dev.policy.reviewed import Mark, Reviews
 from lup_dev.policy.roles import matches
+from lup_dev.policy.waits import Awaited, Wait, Waits
 from lup_dev.policy.worktrees import SessionIndex
 from lup_dev.private.found import in_prose
 from lup_dev.private.history import Commit, Spot
@@ -240,10 +242,12 @@ class Landing(Model):
 
 
 class Flag(Model):
-    """A flagged write as a landing reads it: its item's number, and what it flagged."""
+    """A flagged write as a landing reads it: its item's number, what it flagged, and who wrote it."""
 
     number: int
     flagged: Flagged
+    writer: Conversation | None = None
+    """The conversation whose write it flagged, its item's sender."""
 
 
 class Seen(Model):
@@ -253,24 +257,19 @@ class Seen(Model):
     at: datetime
 
 
-class Held(Model):
-    """A hold at landing as `land` waits on it: its item, and the file it holds."""
-
-    number: int
-    path: Path
-
-
 class Outcome(Model):
-    """How the operator answered one hold at landing."""
+    """How the operator answered one file a landing waited on."""
 
-    held: Held
+    path: Path
     approved: bool
     said: str
     """How, in a few words: `approved`, `declined`."""
+    words: str = ""
+    """What they said on it, where they declined it saying something."""
 
 
 class Waited(Model):
-    """What a landing's wait on its holds came to: what reached the conversation meanwhile, told whole, and how each hold was answered."""
+    """What a landing's wait on its files came to: what reached the conversation meanwhile, told whole, and how each file was answered."""
 
     told: str
     outcomes: list[Outcome]
@@ -745,22 +744,30 @@ def settled_at(item: Item) -> datetime | None:
             return None
 
 
-def outcome(held: Held, item: Item) -> Outcome:
-    """Say how the operator answered hold `held`, its item `item` as it stands."""
-    match item.state:
-        case Decided(approved=True):
-            return Outcome(held=held, approved=True, said="approved")
-        case Decided():
-            return Outcome(held=held, approved=False, said="declined")
-        case Done():
-            return Outcome(held=held, approved=False, said="commented on, not approved")
-        case Superseded(by=by):
-            said = f"superseded by {cited(by)}, another landing's hold on the file"
-            return Outcome(held=held, approved=False, said=said)
-        case _:
-            return Outcome(
-                held=held, approved=False, said="still waiting for the operator"
-            )
+def outcome(awaited: Awaited, approving: Callable[[int], bool]) -> Outcome:
+    """Say how the operator answered `awaited`, a file a landing waited on, each of its flags approved where `approving` says.
+
+    >>> from lup_dev.policy.waits import Declined
+    >>> done = Awaited(path=Path("a.py"), flags=[3], writers=[])
+    >>> outcome(done, lambda _: True).said
+    'approved'
+    >>> said = Declined(at=datetime(2026, 1, 1), words="Not yet.")
+    >>> no = outcome(done.model_copy(update={"declined": said}), lambda _: False)
+    >>> (no.approved, no.said, no.words)
+    (False, 'declined', 'Not yet.')
+    """
+    if awaited.declined is not None:
+        return Outcome(
+            path=awaited.path,
+            approved=False,
+            said="declined",
+            words=awaited.declined.words,
+        )
+    if all(approving(each) for each in awaited.flags):
+        return Outcome(path=awaited.path, approved=True, said="approved")
+    return Outcome(
+        path=awaited.path, approved=False, said="still waiting for the operator"
+    )
 
 
 def flagged_on(path: Path, landed: list[str], item: Item) -> bool:
@@ -772,25 +779,6 @@ def flagged_on(path: Path, landed: list[str], item: Item) -> bool:
             return held.path == path and any(each in landed for each in held.branches)
         case _:
             return False
-
-
-def shown_from(
-    onto: str, since: int | None, old: str | None, reviewed: Mark | None = None
-) -> str:
-    """Say which version of the file a hold's diff starts from: the one the operator marked `reviewed`, the item `since`, the gated branch `onto`'s tip on the remote, `old`, or none."""
-    if reviewed is not None:
-        version = "its deletion" if reviewed.version is None else reviewed.version
-        return (
-            f"Shown since the version you last marked reviewed in its agent's "
-            f"drawer, {version}."
-        )
-    if since is not None:
-        return f"Shown since {cited(since)}, the version of it you last saw."
-    if old is not None:
-        return (
-            f"Shown from `{onto}`'s tip on the remote, {old}: you've seen none of it."
-        )
-    return f"Shown whole: `{onto}` isn't on the remote yet."
 
 
 def approved(item: Item) -> bool:
@@ -827,7 +815,11 @@ class Baseline(Model, arbitrary_types_allowed=True):
     def flags(self, branches: list[str], path: Path | None = None) -> list[Flag]:
         """Return the flagged writes on `branches` the operator hasn't approved and lup hasn't taken back (`Withdrawn`), those on the file at `path` alone where one's given."""
         return [
-            Flag(number=item.number, flagged=item.reason)
+            Flag(
+                number=item.number,
+                flagged=item.reason,
+                writer=item.sender if isinstance(item.sender, Conversation) else None,
+            )
             for item in self.about
             if isinstance(item.reason, Flagged)
             and item.reason.branch in branches
@@ -917,6 +909,9 @@ class Lander(Model, arbitrary_types_allowed=True):
     parser: Parser = Field(default_factory=EngineParser)
     """Reads a file from its parse alone, on the host: each `# lup: defer`
     comment a landing adds and removes (`deferrals`)."""
+    waits: Waits
+    """The landings waiting on the operator, the service's: this one's among
+    them while it waits."""
 
     @property
     def party(self) -> Conversation:
@@ -1051,9 +1046,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         given = {f"refs/heads/{source}": tip, f"refs/heads/{named}": lands}
         branches = await asyncio.to_thread(landed_branches, git, lands, old, given)
         changed = await asyncio.to_thread(changed_files, git, old, lands)
-        holds = await self.holds(
-            git, onto, lands, old, branches.holding, changed=changed
-        )
+        holds = self.holds(onto, lands, old, branches.holding, changed=changed)
         waited = await self.waited(holds)
         if not all(each.approved for each in waited.outcomes):
             return unapproved(waited, made.moved)
@@ -1548,87 +1541,68 @@ class Lander(Model, arbitrary_types_allowed=True):
             "`land` again."
         )
 
-    async def holds(
+    def holds(
         self,
-        git: Git,
         onto: str,
         tip: str,
         old: str | None,
         branches: list[str],
         *,
         changed: list[Path],
-    ) -> list[Held]:
-        """Put a hold in the operator's inbox for each file the landing changes, `changed`, that's flagged on one of `branches`, those it lands or may have merged (`Branches.holding`), and not approved, covering every such flag on it, and return them."""
+    ) -> Wait | None:
+        """Return the landing's wait on each file it changes, `changed`, that's flagged on one of `branches`, those it lands or may have merged (`Branches.holding`), and not approved, every such flag on it; none where none is."""
         names = [short(ref) for ref in branches]
         flags = [
             each for each in self.baseline.flags(names) if each.flagged.path in changed
         ]
         paths = list(dict.fromkeys(each.flagged.path for each in flags))
-        return [
-            await self.hold(
-                git,
-                [each for each in flags if each.flagged.path == path],
-                AtLanding(onto=onto, tip=tip, path=path, branches=[], flags=[]),
-                landed=names,
-                old=old,
-            )
-            for path in paths
-        ]
+        if not paths:
+            return None
 
-    async def hold(
-        self,
-        git: Git,
-        flags: list[Flag],
-        held: AtLanding,
-        *,
-        landed: list[str],
-        old: str | None,
-    ) -> Held:
-        """Put the hold on `held`'s file in the operator's inbox, covering `flags` on it, its diff from the version of it the operator last saw on the branches `landed` to the tip's, and return it."""
-        path = held.path
-        landing = held.model_copy(
-            update={
-                "branches": list(
-                    dict.fromkeys(
-                        each.flagged.branch for each in flags if each.flagged.branch
-                    )
+        def awaited(path: Path) -> Awaited:
+            on = [each for each in flags if each.flagged.path == path]
+            return Awaited(
+                path=path,
+                flags=[each.number for each in on],
+                writers=list(
+                    dict.fromkeys(each.writer for each in on if each.writer is not None)
                 ),
-                "flags": [each.number for each in flags],
-            }
-        )
-        baseline = self.baseline
-        saw = await asyncio.to_thread(baseline.saw, path, landed)
-        since = None if saw is None else saw.item
-        reviewed = None if saw is None or saw.reviewed is None else saw.reviewed
-        before = await asyncio.to_thread(started, saw, git, old, path)
-        after = await asyncio.to_thread(blob, git, landing.tip, path)
-        latest = max(flags, key=lambda each: each.number)
-        reading = await asyncio.to_thread(baseline.reading, latest, after)
-        asks = dict.fromkeys(
-            line for each in flags for line in each.flagged.summary.splitlines()
-        )
-        onto = short(landing.onto)
-        named = ", ".join(f"`{each}`" for each in landing.branches)
-        change = HeldChange(
-            text=(
-                f"Let `{path}` land on `{onto}`? It's flagged on {named}, and the "
-                f"landing of {landing.tip} waits on your approval."
+            )
+
+        return Wait(
+            key=uuid.uuid4().hex,
+            repository=self.launch.repository,
+            lander=self.party,
+            onto=onto,
+            old=old,
+            tip=tip,
+            branches=list(
+                dict.fromkeys(
+                    each.flagged.branch for each in flags if each.flagged.branch
+                )
             ),
-            summary="\n".join([*asks, shown_from(onto, since, old, reviewed)]),
-            worktree=latest.flagged.worktree,
-            landing=landing.model_copy(
-                update={
-                    "since": since,
-                    "reviewed": None if reviewed is None else reviewed.at,
-                }
+            files=[awaited(path) for path in paths],
+            began=self.delivery.clock.now(),
+        )
+
+    async def noticed(self, wait: Wait) -> None:
+        """Raise one desktop notice for `wait`, a landing beginning to wait: who lands what where, how many files it waits on, and whose drawers show them."""
+        roster = self.delivery.roster()
+        count = len(wait.files)
+        files = f"{count} file{'' if count == 1 else 's'}"
+        writers = list(
+            dict.fromkeys(who for each in wait.files for who in each.writers)
+        )
+        drawers = ", ".join(roster.who(each) for each in writers) or "its writers"
+        await self.delivery.notices.notify(
+            f"lup: {roster.who(self.party)}'s landing of {wait.named} waits on {files}",
+            "\n".join(
+                [
+                    ", ".join(str(each.path) for each in wait.files),
+                    f'Answer each in "since you approved" of {drawers}.',
+                ]
             ),
         )
-        diff = unified(path, text(before), text(after))
-        file = ChangedFile.of(path, before, after, reading)
-        item = await self.delivery.held_at_landing(
-            change, self.party, diff, [file], call=self.call
-        )
-        return Held(number=item.number, path=path)
 
     async def withdrawn(
         self,
@@ -1692,24 +1666,39 @@ class Lander(Model, arbitrary_types_allowed=True):
 
         return [flag for flag in waiting if await withdrew(flag)]
 
-    async def waited(self, holds: list[Held]) -> Waited:
-        """Hold the call until no hold of `holds` waits for the operator, and return what reached the conversation meanwhile, told, and how each was answered; at once, telling nothing, where there's none."""
-        if not holds:
+    async def waited(self, wait: Wait | None) -> Waited:
+        """Hold the call until each file `wait` waits on is answered in its writer's drawer, its flags approved or the file declined, and return what reached the conversation meanwhile, told, and how each was answered; at once, telling nothing, where there's none.
+
+        The wait is kept in `waits` while the call holds, so the drawers show
+        each file held at landing, and forgotten as it ends, however it ends.
+        """
+        if wait is None:
             return Waited(told="", outcomes=[])
         inbox = self.delivery.inbox
 
+        def approving(number: int) -> bool:
+            found = inbox.items.get(number)
+            return found is not None and approved(found)
+
+        def standing() -> Wait:
+            return self.waits.waits.get(wait.key, wait)
+
         def answered() -> bool:
-            return not any(
-                isinstance(inbox.item(each.number).state, Waiting) for each in holds
+            return all(
+                outcome(each, approving).said != "still waiting for the operator"
+                for each in standing().files
             )
 
-        told = await self.delivery.held(
-            self.party, answered, on=[], home=self.launch.home
-        )
-        return Waited(
-            told=told,
-            outcomes=[outcome(each, inbox.item(each.number)) for each in holds],
-        )
+        self.waits.began(wait)
+        try:
+            await self.noticed(wait)
+            told = await self.delivery.held(
+                self.party, answered, on=[], home=self.launch.home
+            )
+            outcomes = [outcome(each, approving) for each in standing().files]
+        finally:
+            self.waits.ended(wait.key)
+        return Waited(told=told, outcomes=outcomes)
 
     async def cleaned(
         self,
@@ -2182,10 +2171,30 @@ def local_deleted(git: Git, ref: str, commit: str) -> Cleaned:
 
 
 def unapproved(waited: Waited, moved: str | None = None) -> str:
-    """Say that a landing didn't land, the operator not having approved each hold: how they answered each, where its merge `moved` the local branch, then what reached the conversation meanwhile, their words among it."""
+    r"""Say that a landing didn't land, the operator not having approved each file it waited on: how they answered each, with what they said on it, where its merge `moved` the local branch, then what reached the conversation meanwhile.
+
+    >>> print(unapproved(Waited(told="", outcomes=[Outcome(path=Path("a.py"), approved=True,
+    ...     said="approved"), Outcome(path=Path("b.py"), approved=False, said="declined",
+    ...     words="b.py:3\n+x = 1\nName it.")])))
+    Not landed: the operator didn't approve each file it waits on.
+    - `a.py`: approved
+    - `b.py`: declined, saying:
+      b.py:3
+      +x = 1
+      Name it.
+    What they approved stays approved. Answer what they said, commit, and call `land` again: each file left is held again, shown from the version they last saw.
+    """
     lines = [
-        f"- {cited(each.held.number)} (`{each.held.path}`): {each.said}"
+        line
         for each in waited.outcomes
+        for line in (
+            [f"- `{each.path}`: {each.said}"]
+            if not each.words.strip()
+            else [
+                f"- `{each.path}`: {each.said}, saying:",
+                *(f"  {said}" for said in each.words.strip().splitlines()),
+            ]
+        )
     ]
     told = [waited.told] if waited.told else []
     return "\n".join(
@@ -2204,12 +2213,14 @@ def unapproved(waited: Waited, moved: str | None = None) -> str:
 
 
 def approvals(waited: Waited) -> list[str]:
-    """Say which holds the operator approved for a landing that landed, then what reached the conversation meanwhile, their comments among it; nothing where none held it."""
+    """Say which files the operator approved for a landing that landed, then what reached the conversation meanwhile; nothing where none held it.
+
+    >>> approvals(Waited(told="", outcomes=[Outcome(path=Path("a.py"), approved=True, said="approved")]))
+    ['The operator approved `a.py`.']
+    """
     if not waited.outcomes:
         return []
-    named = ", ".join(
-        f"{cited(each.held.number)} (`{each.held.path}`)" for each in waited.outcomes
-    )
+    named = ", ".join(f"`{each.path}`" for each in waited.outcomes)
     return [
         f"The operator approved {named}.",
         *([waited.told] if waited.told else []),
@@ -2298,6 +2309,9 @@ class LandingTools(Model, RoomTools, arbitrary_types_allowed=True):
     parser: Parser = Field(default_factory=EngineParser)
     """Reads a file from its parse alone, on the host, for what a landing
     says of its `# lup: defer` comments."""
+    waits: Waits = Field(default_factory=Waits)
+    """The landings waiting on the operator, which the drawers read: the
+    service's, shared with them."""
 
     @override
     def specs(self) -> list[ToolSpec]:
@@ -2329,6 +2343,7 @@ class LandingTools(Model, RoomTools, arbitrary_types_allowed=True):
             run=self.run,
             turns=self.turns,
             parser=self.parser,
+            waits=self.waits,
         )
         [tool] = [tool for tool in bound(lander) if tool.spec().name == name]
         match await tool.call(arguments):

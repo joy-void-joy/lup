@@ -103,13 +103,16 @@ from lup_dev.inbox.store import Asked as Ask
 from lup_dev.inbox.threads import spoken
 from lup_dev.policy.reviewed import Mark, Marks
 from lup_dev.policy.since import (
+    HeldAt,
     ReviewSince,
     ShowSince,
     Since,
     SinceFile,
+    SincePlace,
     SinceReviewed,
     ViewedFile,
 )
+from lup_dev.policy.waits import Awaited, LandingsWaiting, ShowLandings, Wait
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -146,13 +149,14 @@ def steps(recorded: list[Said | StandIn]) -> list[Entry]:
 
 
 class Stands(Model):
-    """A file of a stand-in branch as it stands: what the integration branch holds of it, what the branch makes of it, and the flagged write on it, with the judge's reading."""
+    """A file of a stand-in branch as it stands: what the integration branch holds of it, what the branch makes of it, the flagged write on it, with the judge's reading, and the landing waiting on it."""
 
     path: Path
     before: Content | None
     after: Content | None
     flag: int | None = None
     reading: Reading | None = None
+    held: HeldAt | None = None
 
 
 class Standing(MutableModel):
@@ -237,6 +241,20 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     seeded: bool = False
     """Whether each group has been marked seen up to its last item made 3
     minutes before the demo began (`seen`), as the first listing does."""
+    landing: bool = True
+    """Whether the lup-impl session's landing of the ended fix-clock subagent's
+    branch still waits on the operator: until they mark its file reviewed, or
+    decline it, when the stand-in call is done waiting (`landed`)."""
+    declined: bool = False
+    """Whether the operator declined the landing's file, which the drawer says
+    until the stand-in call is done waiting."""
+    lands: timedelta = timedelta(seconds=2)
+    """How long after the operator answers the landing's file its stand-in call
+    is done waiting, as a call wakes to the answer."""
+    ticker: Path = Path("packages/lup-dev/src/lup_dev/ticker.py")
+    """The fix-clock subagent's new module, flagged, held at landing."""
+    ticker_names: Path = Path("packages/lup-dev/src/lup_dev/ticker_names.py")
+    """The fix-clock subagent's module on their other branch, `clock-names`."""
 
     @override
     async def ask(self, request: Asked) -> Replied:
@@ -312,8 +330,18 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                         self.grows.total_seconds(), self.grow
                     )
                 return self.since(conversation, seen)
-            case ReviewSince(conversation=conversation, files=viewed, seen=seen):
-                return self.reviewed(conversation, viewed, seen)
+            case ReviewSince(
+                conversation=conversation,
+                branch=branch,
+                files=viewed,
+                seen=seen,
+                decline=decline,
+            ):
+                return self.reviewed(
+                    conversation, branch, viewed, seen, decline=decline
+                )
+            case ShowLandings():
+                return LandingsWaiting(waiting=self.waiting())
             case MoveMarks() as moving:
                 return self.moved(moving)
             case Viewing() as viewing:
@@ -478,7 +506,17 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 return Standing()
 
     def since(self, conversation: Conversation, seen: str | None) -> Since:
-        """Return what a stand-in conversation's branch changed since the operator last saw it (`drawn`): the parser subagent's new reader module and its test and, once `grew`, the reader grown and a change to the clock beside it; a worker's modules; nothing for the rest."""
+        """Return what a stand-in conversation's branches changed since the operator last saw them (`drawn`): the parser subagent's new reader module and its test and, once `grew`, the reader grown and a change to the clock beside it; a worker's modules; the ended fix-clock subagent's clock module, held at landing while the landing waits, and a module on a branch no worktree has checked out; nothing for the rest."""
+        places = self.places(conversation)
+        version = " | ".join(
+            stand_in_id(Text(text=each.model_dump_json())) or "" for each in places
+        )
+        if seen == version:
+            return Since(version=version, same=True)
+        return Since(version=version, places=places)
+
+    def places(self, conversation: Conversation) -> list[SincePlace]:
+        """Return each place a stand-in conversation worked, as its drawer shows it (`since`)."""
         dev = conversation.repository / "tree" / "dev"
         worker = next(
             (
@@ -488,16 +526,128 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             ),
             None,
         )
-        if conversation.session == "s1" and worker is not None and self.size > 0:
-            return self.drawn(
-                worker_worktree(worker),
-                f"worker-{worker}",
-                self.worked_stands(worker),
-                seen,
+        if conversation.session != "s1":
+            return [SincePlace(worktree=dev, branch=None)]
+        if worker is not None and self.size > 0:
+            tree = worker_worktree(worker)
+            return [self.drawn(tree, f"worker-{worker}", self.worked_stands(worker))]
+        if conversation.agent == "a02":
+            return [self.drawn(dev, "feat-reader", self.parser_stands())]
+        if conversation.agent == FIX_CLOCK:
+            tree = conversation.repository / "tree" / "fix-clock"
+            return [
+                self.drawn(tree, "fix-clock", self.clock_stands()),
+                self.drawn(None, "clock-names", self.names_stands()),
+            ]
+        return [SincePlace(worktree=dev, branch=None)]
+
+    def fix_clock_flags(self) -> list[Item]:
+        """Return the ended fix-clock subagent's two flagged writes: their ticker module on `fix-clock`, which the session's landing waits on, and the names beside it on `clock-names`, which no worktree has checked out."""
+        writer = self.lup_session().model_copy(update={"agent": FIX_CLOCK})
+        tree = writer.repository / "tree" / "fix-clock"
+        return [
+            Item(
+                number=number,
+                reason=Flagged(
+                    text=f"{path} landed, flagged for the operator's review.",
+                    summary=f"{path} is a new production file",
+                    worktree=tree,
+                    path=path,
+                    branch=branch,
+                ),
+                sender=writer,
+                recipient=Operator(),
+                worktree=tree,
+                call=f"call-{number}",
+                made=self.ago(minutes),
             )
-        if conversation.session == "s1" and conversation.agent == "a02":
-            return self.drawn(dev, "feat-reader", self.parser_stands(), seen)
-        return Since(worktree=dev, branch=None, version="demo", same=seen == "demo")
+            for number, path, branch, minutes in [
+                (68, self.ticker, "fix-clock", 30),
+                (69, self.ticker_names, "clock-names", 28),
+            ]
+        ]
+
+    def clock_stands(self) -> list[Stands]:
+        """Return the fix-clock subagent's branch as it stands: the clock module, flagged, held at landing while the session's landing waits on it."""
+        held = (
+            HeldAt(
+                key=LANDING_KEY,
+                lander=self.lup_session(),
+                named="`fix-clock` on `dev`",
+                tip=LANDING_TIP,
+                declined=self.declined,
+            )
+            if self.landing
+            else None
+        )
+        return [
+            Stands(
+                path=self.ticker,
+                before=None,
+                after=Text(text=CLOCK_SOURCE),
+                flag=68,
+                reading=Reading(
+                    role="production",
+                    asks=[
+                        Ask(name="new-file", taken="flagged"),
+                        Ask(
+                            name="public-api",
+                            taken="flagged",
+                            line=4,
+                            api=ApiChanged(kind="class-added", name="Ticker"),
+                        ),
+                    ],
+                ),
+                held=held,
+            )
+        ]
+
+    def names_stands(self) -> list[Stands]:
+        """Return the fix-clock subagent's other branch, `clock-names`, which no worktree has checked out: a module of names, flagged."""
+        return [
+            Stands(
+                path=self.ticker_names,
+                before=None,
+                after=Text(text=NAMES_SOURCE),
+                flag=69,
+                reading=Reading(
+                    role="production", asks=[Ask(name="new-file", taken="flagged")]
+                ),
+            )
+        ]
+
+    def lup_session(self) -> Conversation:
+        """Return the lup-impl session's own conversation, who lands the fix-clock subagent's branch."""
+        first, _ = self.runtimes
+        return Conversation(
+            repository=Path("/home/op/lup.git"), runtime=first, session="s1"
+        )
+
+    def waiting(self) -> list[Wait]:
+        """Return the landings waiting on the operator: the lup-impl session's landing of `fix-clock` on `dev`, waiting on its clock module, held in the fix-clock subagent's drawer, while it waits (`landing`)."""
+        if not self.landing:
+            return []
+        writer = self.lup_session().model_copy(update={"agent": FIX_CLOCK})
+        return [
+            Wait(
+                key=LANDING_KEY,
+                repository=Path("/home/op/lup.git"),
+                lander=self.lup_session(),
+                onto="refs/heads/dev",
+                old=None,
+                tip=LANDING_TIP,
+                branches=["fix-clock"],
+                files=[Awaited(path=self.ticker, flags=[68], writers=[writer])],
+                began=self.ago(3),
+            )
+        ]
+
+    def landed(self) -> None:
+        """End the stand-in landing's wait, the operator having answered its file: landed where they approved it, not where they declined it; each watch answers again."""
+        self.landing = False
+        self.declined = False
+        self.changed.set()
+        self.changed = asyncio.Event()
 
     def parser_stands(self) -> list[Stands]:
         """Return the parser subagent's branch as it stands: their new reader module, flagged, and its test; once `grew`, the reader with a method more and the clock's change, flagged."""
@@ -554,9 +704,9 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         ]
 
     def drawn(
-        self, worktree: Path, branch: str, stands: list[Stands], seen: str | None
-    ) -> Since:
-        """Return the drawer of a stand-in branch as the host reads it (`lup_dev.policy.since`): each file of `stands` from the version the operator last marked reviewed, else from the integration branch's, one standing as it was marked with nothing under it; its flag's reading while it isn't approved; the files left out where `seen` is the version as it stands."""
+        self, worktree: Path | None, branch: str, stands: list[Stands]
+    ) -> SincePlace:
+        """Return a place of a stand-in drawer as the host reads it (`lup_dev.policy.since`): each file of `stands` from the version the operator last marked reviewed, else from the integration branch's, one standing as it was marked with nothing under it; its flag's reading while it isn't approved, and the landing waiting on it."""
         marks = self.marks.get(branch, Marks(branch=branch))
         self.versions = {
             **self.versions,
@@ -577,14 +727,16 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             flags = (
                 [] if each.flag is None or each.flag in self.approved else [each.flag]
             )
+            held = each.held if flags else None
             shown = SinceFile(
                 path=each.path,
                 version=stand_in_id(each.after),
                 flags=flags,
                 reviewed=None if mark is None else mark.at,
+                held=held,
             )
             if before == each.after:
-                return None if mark is None else shown
+                return None if mark is None and held is None else shown
             file = ChangedFile(
                 path=each.path,
                 before=before,
@@ -598,37 +750,58 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             for each in sorted(stands, key=lambda stand: stand.path)
             if (found := filed(each)) is not None
         ]
-        version = (
-            stand_in_id(
-                Text(text=f"{[each.version for each in shown]} {self.approved} {marks}")
-            )
-            or ""
-        )
-        if seen == version:
-            return Since(worktree=worktree, branch=branch, version=version, same=True)
-        return Since(worktree=worktree, branch=branch, version=version, files=shown)
+        return SincePlace(worktree=worktree, branch=branch, files=shown)
 
     def reviewed(
-        self, conversation: Conversation, viewed: list[ViewedFile], seen: str | None
+        self,
+        conversation: Conversation,
+        branch: str | None,
+        viewed: list[ViewedFile],
+        seen: str | None,
+        *,
+        decline: bool = False,
     ) -> SinceReviewed | Refused:
-        """Mark each file of `viewed` reviewed at the version shown, in memory, approving the flag on each still standing at it, as the host does (`lup_dev.policy.since`), with the drawer after where it stood at `seen`, the version the page shows; each watch answers again."""
+        """Mark each file of `viewed` reviewed at the version shown on the place of `branch`, the conversation's first where it names none, in memory, approving the flag on each still standing at it, or, `decline`, declining the landing waiting on it, as the host does (`lup_dev.policy.since`), with the drawer after where it stood at `seen`, the version the page shows; each watch answers again. A landing waiting on a file answered ends its wait a moment after (`lands`)."""
         standing = self.since(conversation, None)
-        if standing.branch is None:
+        place = next(
+            (
+                each
+                for each in standing.places
+                if branch is None or each.branch == branch
+            ),
+            None,
+        )
+        if place is None or place.branch is None:
             return Refused(error="the demo's conversation has no branch to mark on")
-        versions = {each.path: each.version for each in standing.files}
-        flags = {each.path: each.flags for each in standing.files}
+        versions = {each.path: each.version for each in place.files}
+        flags = {each.path: each.flags for each in place.files}
+        held = [each.path for each in place.files if each.held is not None]
         moved = [
             each.path for each in viewed if versions.get(each.path) != each.version
         ]
-        approved = [
-            number
-            for each in viewed
-            if each.path not in moved
-            for number in flags.get(each.path, [])
-        ]
+        approved = (
+            []
+            if decline
+            else [
+                number
+                for each in viewed
+                if each.path not in moved
+                for number in flags.get(each.path, [])
+            ]
+        )
         self.approved = [*self.approved, *approved]
+        declined = [each.path for each in viewed if decline and each.path in held]
+        answered = [
+            each.path for each in viewed if each.path in held and each.path not in moved
+        ]
+        if declined:
+            self.declined = True
+        if answered:
+            asyncio.get_running_loop().call_later(
+                self.lands.total_seconds(), self.landed
+            )
         at = self.clock.now()
-        before = self.marks.get(standing.branch, Marks(branch=standing.branch))
+        before = self.marks.get(place.branch, Marks(branch=place.branch))
         latest = {
             each.path: each
             for each in [
@@ -638,21 +811,25 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         }
         self.marks = {
             **self.marks,
-            standing.branch: Marks(branch=standing.branch, files=list(latest.values())),
+            place.branch: Marks(branch=place.branch, files=list(latest.values())),
         }
         self.changed.set()
         self.changed = asyncio.Event()
         reviewed = SinceReviewed(
-            reviewed=[each.path for each in viewed], approved=approved, moved=moved
+            reviewed=[each.path for each in viewed],
+            approved=approved,
+            declined=declined,
+            moved=moved,
         )
         if seen != standing.version:
             return reviewed
         after = self.since(conversation, None)
         paths = [each.path for each in viewed]
+        [now] = [each for each in after.places if each.branch == place.branch]
         return reviewed.model_copy(
             update={
                 "version": after.version,
-                "files": [each for each in after.files if each.path in paths],
+                "files": [each for each in now.files if each.path in paths],
             }
         )
 
@@ -693,6 +870,15 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 [("survey-legacy", 52), ("probe-meta", 40), ("nest-probe", 33)]
             )
         ]
+        fix_clock = talker(
+            "fix-clock",
+            "s1",
+            Activity(state="ended", since=self.ago(25)),
+            agent=FIX_CLOCK,
+            kind="general-purpose",
+            parent="lup-impl",
+            depth=1,
+        )
         talkers = {
             "a1f0": [
                 talker("lup-impl", "s1", calling),
@@ -731,6 +917,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     depth=2,
                 ),
                 *ended,
+                fix_clock,
                 *self.working(),
             ],
             "b2e1": [
@@ -1218,6 +1405,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 call="call-60",
                 made=self.ago(2.5),
             ),
+            *self.fix_clock_flags(),
             *(
                 []
                 if self.arrived is None
@@ -2560,6 +2748,32 @@ def turns(path: Path) -> list[Entry]:
 See [the field notes](docs/field-notes.md) and `records.py`.
 """
 """A session's note written in Markdown, as agents write them: a table, emphasis, a list, a heading, code and a link, for the page to show as such."""
+
+
+FIX_CLOCK = "a07"
+"""The ended fix-clock subagent of the lup-impl session, by their runtime's id:
+their branch's landing waits on the operator, its clock module held in their
+drawer, and a module of theirs is on a branch no worktree has checked out."""
+LANDING_KEY = "demo-landing"
+"""The stand-in landing's key among those waiting (`Wait.key`)."""
+LANDING_TIP = "c1a55e5d0c4a7b1e9f0a3b2c4d5e6f708192a3b4"
+"""The commit the stand-in landing puts on `dev`."""
+CLOCK_SOURCE = (
+    '"""A clock that ticks: what the dashboard\'s drawn spans read."""\n\n\n'
+    "class Ticker:\n"
+    '    """Says the time since a moment, again as it passes."""\n\n'
+    "    def __init__(self, every: float = 5.0) -> None:\n"
+    "        self.every = every\n\n"
+    "    def due(self, last: float, now: float) -> bool:\n"
+    '        """Say whether the next tick is due."""\n'
+    "        return now - last >= self.every\n"
+)
+"""The clock module's text."""
+NAMES_SOURCE = (
+    '"""What each tick is called."""\n\n'
+    'NAMES = {"s": "seconds", "m": "minutes", "h": "hours"}\n'
+)
+"""The names module's text."""
 
 
 def stand_in_id(content: Content | None) -> str | None:

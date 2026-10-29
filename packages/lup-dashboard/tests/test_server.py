@@ -166,6 +166,7 @@ def test_the_socket_sends_a_watchs_replies_under_its_number_then_its_end(
                 "answers": [],
                 "commented": [],
                 "paths": [],
+                "landings": {},
             },
         },
         {
@@ -219,6 +220,7 @@ def test_one_socket_carries_every_watch_and_a_stopped_one_says_no_more(
             "answers": [],
             "commented": [],
             "paths": [],
+            "landings": {},
         },
     }
     assert host.asked == [ListLaunches(), ListInbox()]
@@ -412,6 +414,8 @@ def test_the_demo_serves_its_stand_in_launches_and_refuses_the_rest(page: Path) 
         58,
         59,
         60,
+        68,
+        69,
         62,
     ]
     assert other.json() == {

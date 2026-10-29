@@ -208,7 +208,7 @@ export function reviewKeys(kinds: readonly Kind[], verbs: readonly Verb[] = []):
             },
             {
                 keys: "gd",
-                does: "on a citation, go to the passage of your words it cites, above the answer; on that passage, back to the citation",
+                does: "on a citation, go to the passage of your words it cites, above the answer; on that passage, back to the citation; on a banner naming another agent's drawer, as a landing waiting on files there, to that drawer",
                 short: "follow",
             },
             {

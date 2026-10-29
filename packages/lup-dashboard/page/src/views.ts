@@ -23,6 +23,8 @@ type Context = components["schemas"]["Context"];
 type ChangedFile = components["schemas"]["ChangedFile"];
 type Since = components["schemas"]["Since"];
 type SinceFile = components["schemas"]["SinceFile"];
+type SincePlace = components["schemas"]["SincePlace"];
+type Wait = components["schemas"]["Wait"];
 type Task = components["schemas"]["Task"];
 type Usage = components["schemas"]["Usage"];
 
@@ -66,15 +68,24 @@ export interface Shown {
     drawers: Drawers;
     /** Each conversation running, by `whose` they are. */
     running: ReadonlyMap<string, Running>;
+    /** The landings waiting on the operator, the oldest first (`policy-show-landings`). */
+    landings: readonly Wait[];
     /** A conversation as the operator reads them named: by their path. */
     called: (party: Conversation) => string;
+}
+
+/** A file of "since you approved" as a block shows it: the file, the place of the agent's it's in, and the block's id. */
+export interface PlacedFile {
+    file: SinceFile;
+    place: SincePlace;
+    block: string;
 }
 
 /** What a producer answers: the view's blocks, and what the page's own handling of it reads until the blocks say it all. */
 export interface Answer {
     blocks: Blocks;
     /** For "since you approved": each file a block shows, by the block's id, and what the host answered of the drawer. */
-    files?: ReadonlyMap<string, SinceFile>;
+    files?: ReadonlyMap<string, PlacedFile>;
     since?: Since;
 }
 

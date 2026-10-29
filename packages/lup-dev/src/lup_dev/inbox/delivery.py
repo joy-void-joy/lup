@@ -928,6 +928,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     settle_hold: Callable[[HeldChange, bool, str], None] | None = None
     """Writes the operator's answer to a held change where its hook waits for
     it, yes or no and their comment; none where this service answers no hold."""
+    landing: Callable[[int], str | None] = lambda _: None
+    """Says what the landing waiting on the flagged write it's given, by its
+    number, lands where, in a few words (`lup_dev.policy.waits`); none where
+    none waits on it: a flag's line in the inbox says it."""
     rostered: Roster | None = None
     """The roster last made (`roster`), in memory: made again once the inbox
     or a session's name changes."""
@@ -2560,64 +2564,6 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             change, sender, Operator(), change.worktree, self.clock.now(), call=call
         )
         self.inbox.attached(item.number, diff, files)
-        await self.noticed(item)
-        return item
-
-    async def held_at_landing(
-        self,
-        change: HeldChange,
-        sender: Conversation,
-        diff: str,
-        files: list[ChangedFile],
-        *,
-        call: str | None = None,
-    ) -> Item:
-        """Put a hold at landing in the operator's inbox from the conversation landing, its diff and file kept beside it, anchored to `call`, and raise its notice; return it.
-
-        A hold of the same repository's still waiting on the same file at a
-        landing onto the same branch, from an earlier landing whose call may be
-        gone, is joined where it holds the same tip and flags, and superseded
-        by this one otherwise, waking the call waiting on it.
-        """
-        landing = change.landing
-        if landing is None:
-            message = "a hold at landing says what it holds at landing"
-            raise InboxError(message)
-        earlier = [
-            item
-            for item in self.inbox.waiting(Operator())
-            if isinstance(item.sender, Conversation)
-            and item.sender.repository == sender.repository
-            and isinstance(item.reason, HeldChange)
-            and item.reason.landing is not None
-            and item.reason.landing.onto == landing.onto
-            and item.reason.landing.path == landing.path
-        ]
-        same = next(
-            (
-                item
-                for item in earlier
-                if isinstance(item.reason, HeldChange)
-                and item.reason.landing == landing
-                and item.sender == sender
-            ),
-            None,
-        )
-        if same is not None:
-            return same
-        item = self.inbox.made(
-            change, sender, Operator(), change.worktree, self.clock.now(), call=call
-        )
-        self.inbox.attached(item.number, diff, files)
-        superseded = Superseded(at=self.clock.now(), by=item.number)
-        for each in earlier:
-            self.inbox.kept(each.model_copy(update={"state": superseded}))
-            if isinstance(each.sender, Conversation):
-                self.arrive(each.sender)
-            self.say(
-                f"{cited(each.number)}, a hold at landing, is superseded by "
-                f"{cited(item.number)}"
-            )
         await self.noticed(item)
         return item
 

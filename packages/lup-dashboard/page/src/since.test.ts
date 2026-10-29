@@ -68,29 +68,45 @@ describe("a file being marked reviewed", () => {
     const at = "2026-10-23T21:00:00Z";
     const a: SinceFile = { path: "a.py", version: "a1", flags: [70], file: { path: "a.py", before: null, after: { kind: "text", text: "a = 1\n" } } };
     const b: SinceFile = { path: "b.py", version: "b1", flags: [], file: { path: "b.py", before: { kind: "text", text: "b = 1\n" }, after: { kind: "text", text: "b = 2\n" } } };
-    const drawer: Since = { kind: "policy-since", worktree: "/r/tree/feat", branch: "feat", version: "t1 0 s1", same: false, files: [a, b] };
-    const line: SinceFile = { path: "a.py", version: "a1", flags: [], file: null, since: null, reviewed: at };
+    const feat = { worktree: "/r/tree/feat", branch: "feat", gone: false, files: [a, b] };
+    // The same path on another of the agent's places, at its tip.
+    const fix = { worktree: null, branch: "fix", gone: false, files: [{ ...a, version: "a2" }] };
+    const drawer: Since = { kind: "policy-since", version: "t1 0 s1", same: false, places: [feat, fix] };
+    const line: SinceFile = { path: "a.py", version: "a1", flags: [], file: null, since: null, reviewed: at, held: null };
+    const mark = { worktree: "/r/tree/feat", branch: "feat", path: "a.py", version: "a1", at };
 
-    it("is the line of one reviewed at once, its flags approved with it, the other files as they are", () => {
-        const shown = marked(drawer, [{ path: "a.py", version: "a1", at }]);
-        expect(shown.files).toEqual([line, b]);
-        expect(shown.files?.[1]).toBe(b);
+    it("is the line of one reviewed at once, its flags approved with it, in its place alone, the other files as they are", () => {
+        const shown = marked(drawer, [mark]);
+        expect(shown.places?.[0]?.files).toEqual([line, b]);
+        expect(shown.places?.[0]?.files?.[1]).toBe(b);
+        expect(shown.places?.[1]).toBe(fix);
         expect(reviewedLine(line)).toBe("a.py · reviewed at a1");
     });
 
     it("stays as it is where it moved since the version marked, and the drawer is the one read where nothing's marked", () => {
-        expect(marked(drawer, [{ path: "a.py", version: "a0", at }])).toBe(drawer);
+        expect(marked(drawer, [{ ...mark, version: "a0" }])).toBe(drawer);
+        expect(marked(drawer, [{ ...mark, branch: "other" }])).toBe(drawer);
         expect(marked(drawer, [])).toBe(drawer);
     });
 
     it("is laid out the same as the host's answer marking it, so the answer lays out nothing again", () => {
-        const shown = marked(drawer, [{ path: "a.py", version: "a1", at }]);
-        const answer: Since = { ...drawer, version: "t1 1 s2", files: [{ path: "a.py", version: "a1", flags: [], reviewed: "2026-10-23T21:00:01Z" }, b] };
+        const shown = marked(drawer, [mark]);
+        const answer: Since = { ...drawer, version: "t1 1 s2", places: [{ ...feat, files: [{ path: "a.py", version: "a1", flags: [], reviewed: "2026-10-23T21:00:01Z" }, b] }, fix] };
         expect(sameShown(shown, answer)).toBe(true);
-        // A flag waiting on it still, a file shown otherwise, or another branch are laid out anew.
-        const waiting: Since = { ...answer, files: [{ path: "a.py", version: "a1", flags: [70], reviewed: at }, b] };
+        // A flag waiting on it still, a file shown otherwise, another branch, or a place more are laid out anew.
+        const waiting: Since = { ...answer, places: [{ ...feat, files: [{ path: "a.py", version: "a1", flags: [70], reviewed: at }, b] }, fix] };
         expect(sameShown(shown, waiting)).toBe(false);
         expect(sameShown(shown, drawer)).toBe(false);
-        expect(sameShown(drawer, { ...drawer, branch: "other" })).toBe(false);
+        expect(sameShown(drawer, { ...drawer, places: [{ ...feat, branch: "other" }, fix] })).toBe(false);
+        expect(sameShown(drawer, { ...drawer, places: [feat] })).toBe(false);
+    });
+});
+
+describe("a file held at landing", () => {
+    const held = { key: "w1", lander: { party: "conversation" as const, repository: "/r.git", runtime: "claude", session: "s1" }, named: "`feat` on `dev`", tip: "c0ffee", declined: false };
+
+    it("says so on its line, and that it's declined once it is", () => {
+        expect(reviewedLine({ path: "a.py", version: "a1b2c3d4", flags: [70], reviewed: "2026-10-23T21:00:00Z", held })).toBe("a.py · reviewed at a1b2c3d · flagged @70 · held at landing: `feat` on `dev`");
+        expect(reviewedLine({ path: "a.py", version: "a1", flags: [70], held: { ...held, declined: true } })).toBe("a.py · flagged @70 · landing declined: `feat` on `dev`");
     });
 });

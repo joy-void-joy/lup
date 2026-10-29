@@ -101,6 +101,7 @@ import {
     sameId,
     scopeAt,
     shownAt,
+    shownAs,
     sinceFileAt,
     stepped,
     tallied,
@@ -122,12 +123,14 @@ import {
     type Item,
     type Keeping,
     type Laid,
+    type PlacedFile,
     type Region,
     type Scope,
+    type Wait,
     type Where,
     type Written,
 } from "./review";
-import { freshRows, type Fresh } from "./since";
+import { filesOf, freshRows, type Fresh } from "./since";
 import type { Instance, Offer, Remote, Running, Span as ViewSpan } from "./views";
 
 /** The least and the most time between two layouts of what the host answers, in milliseconds (`usePaced`). */
@@ -198,6 +201,8 @@ interface Props {
     looks: Merged;
     /** Each conversation running, by `whose` they are: their banner's parts, and what holding their writes asks. */
     running: ReadonlyMap<string, Running>;
+    /** The landings waiting on the operator, which the judge's part of a banner says. */
+    landings: readonly Wait[];
     /** What the host answered of each view the page doesn't lay out itself, by its instance's id (`views.ts`). */
     remote: Remote;
     /** Told each view a fold reads as it opens, its module's, as the operator opens it, so the page asks it of the host. */
@@ -581,6 +586,36 @@ function Heading({ parts, tally }: { parts: Where[]; tally: string }) {
 }
 
 /** Return what names a file of a "since you approved" drawer among what the operator looked at: the drawer, and its path. */
+/**
+ * Return where `gd` goes from a banner whose parts name another agent's drawer, as a landing waiting on files in its
+ * writer's "since you approved" does: that drawer's line, the first named; none where the cursor is on no banner, or
+ * its parts name none laid out.
+ */
+function namedDrawer(laidOut: Laid, position: number): number | undefined {
+    const group = groupAt(laidOut, position);
+    const named = (group?.parts ?? []).flatMap((part) => (part.answer?.blocks.summary ?? []).flatMap((span) => (span.conversation == null ? [] : [span.conversation])));
+    for (const each of named) {
+        const drawer = laidOut.drawers.find(
+            (one) => one.kind === "since" && one.conversation.runtime === each.runtime && one.conversation.session === each.session && (one.conversation.agent ?? null) === (each.agent ?? null),
+        );
+        if (drawer !== undefined) {
+            return drawer.header.from;
+        }
+    }
+    return undefined;
+}
+
+/** What names a file of a "since you approved" drawer among its others: its block's id after `file ` or `reviewed `, its path and, past the drawer's first place, its place's. */
+function fileKey(file: PlacedFile): string {
+    return file.block.replace(/^(file|reviewed) /, "");
+}
+
+/** Return what names the file `filed` shows among the others of `drawer` (`fileKey`): its path where the drawer shows it in no block it knows. */
+function fileKeyOf(drawer: Drawer, filed: Filed): string {
+    const placed = shownAs(drawer, filed);
+    return placed === undefined ? filed.path : fileKey(placed);
+}
+
 function lookedAt(of: string, path: string): string {
     return `${of}\n${path}`;
 }
@@ -664,6 +699,7 @@ export function Review({
     keepOrder,
     looks,
     running,
+    landings,
     remote,
     load,
 }: Props) {
@@ -687,8 +723,8 @@ export function Review({
     // How the review is being first read (`readBy`): until it's read, what the host answers is laid out as it comes.
     const loading = useRef<Reading>({ since: null, last: 0, read: false });
     const answered = useMemo(
-        () => ({ items: itemsGiven, agents: agentsGiven, banner: bannerGiven, called: calledGiven, around: aroundGiven, drawers: drawersGiven, seeing: seeingGiven, order: orderGiven, parents, looks, running, remote }),
-        [itemsGiven, agentsGiven, bannerGiven, calledGiven, aroundGiven, drawersGiven, seeingGiven, orderGiven, parents, looks, running, remote],
+        () => ({ items: itemsGiven, agents: agentsGiven, banner: bannerGiven, called: calledGiven, around: aroundGiven, drawers: drawersGiven, seeing: seeingGiven, order: orderGiven, parents, looks, running, landings, remote }),
+        [itemsGiven, agentsGiven, bannerGiven, calledGiven, aroundGiven, drawersGiven, seeingGiven, orderGiven, parents, looks, running, landings, remote],
     );
     // While a comment is being typed, what's typed laid out once typing pauses, the host's answers wait as long as
     // they may, so the keys aren't held up behind a layout: what came meanwhile is laid out with what was typed.
@@ -697,7 +733,7 @@ export function Review({
     );
     // The same object while what it holds is the same, as the rest of what's taken is.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    const arranging = useMemo(() => arrangedBy, [arrangedBy.parents, arrangedBy.looks, arrangedBy.running, arrangedBy.remote]);
+    const arranging = useMemo(() => arrangedBy, [arrangedBy.parents, arrangedBy.looks, arrangedBy.running, arrangedBy.landings, arrangedBy.remote]);
     // The review as it was last laid out into the editor, which each comment is followed from (`Arranging.previous`).
     const before = useRef<Laid | null>(null);
     // Laid out with what's typed in a comment, though it isn't given yet, so the text laid out is what the editor holds.
@@ -899,7 +935,7 @@ export function Review({
     const firstRead = useRef(new Set<string>());
     const inFile = useRef<{ of: string; path: string } | null>(null);
     const freshOf: Freshness = (scope, file) =>
-        isDrawer(scope) && scope.kind === "since" ? freshRows(looked.current.get(lookedAt(scope.of, file.path)) ?? null, file) : null;
+        isDrawer(scope) && scope.kind === "since" ? freshRows(looked.current.get(lookedAt(scope.of, fileKeyOf(scope, file))) ?? null, file) : null;
 
     // What each group's end says of whose it is.
     const ends: Ends = (group) => (group.conversation === null ? "lup's approvals" : (called(group.conversation).split("/").at(-1) ?? ""));
@@ -918,19 +954,19 @@ export function Review({
     function read(laid: Laid) {
         // A drawer read with nothing in it isn't shown, but it's been read: a file coming to it later is new to the operator.
         for (const [key, data] of drawers) {
-            if (data.since?.worktree != null && (data.since.files ?? []).length === 0) {
+            if (data.since != null && filesOf(data.since).length === 0) {
                 firstRead.current.add(`since ${key}`);
             }
         }
         for (const drawer of laid.drawers) {
-            if (drawer.kind !== "since" || drawer.worktree === null) {
+            if (drawer.kind !== "since") {
                 continue;
             }
             const first = !firstRead.current.has(drawer.of);
             firstRead.current.add(drawer.of);
             for (const each of drawer.files) {
-                const key = lookedAt(drawer.of, each.path);
-                const shownFile = each.file == null ? undefined : drawer.diffs.get(each.path);
+                const key = lookedAt(drawer.of, fileKey(each));
+                const shownFile = each.file.file == null ? undefined : drawer.diffs.get(each.block);
                 if (shownFile === undefined) {
                     looked.current.delete(key);
                 } else if (first) {
@@ -944,14 +980,15 @@ export function Review({
     function left(at: number) {
         const drawer = drawerAt(laidOut, at);
         const file = drawer?.kind === "since" ? sinceFileAt(drawer, at) : undefined;
-        const now = drawer === undefined || file === undefined ? null : { of: drawer.of, path: file.path };
+        const now = drawer === undefined || file === undefined ? null : { of: drawer.of, path: fileKey(file) };
         const was = inFile.current;
         inFile.current = now;
         if (was === null || (now !== null && now.of === was.of && now.path === was.path)) {
             return;
         }
         const drawerWas = laidOut.drawers.find((each) => each.of === was.of);
-        const standing = drawerWas?.files.find((each) => each.path === was.path)?.file == null ? undefined : drawerWas?.diffs.get(was.path);
+        const placed = drawerWas?.files.find((each) => fileKey(each) === was.path);
+        const standing = placed === undefined || placed.file.file == null ? undefined : drawerWas?.diffs.get(placed.block);
         if (standing === undefined) {
             return;
         }
@@ -1247,8 +1284,8 @@ export function Review({
                     return [{ keys: `␣${each.key}`, says: `${each.called}, not built yet`, on: called(agent) }];
                 }
                 const drawer = each.name === "decline" ? drawerAt(laidOut, at) : undefined;
-                const flagged = drawer?.kind === "since" && (sinceFileAt(drawer, at)?.flags ?? []).length > 0;
-                return flagged ? [{ keys: `␣${each.key}`, says: `${each.called}, not yet: a flagged write has landed, and declining it waits on holding writes at landing`, on: null }] : [];
+                const flagged = drawer?.kind === "since" && (sinceFileAt(drawer, at)?.file.flags ?? []).length > 0;
+                return flagged ? [{ keys: `␣${each.key}`, says: `${each.called}, not yet: a flagged write has landed, and is declined once a landing waits on it`, on: null }] : [];
             }
             return [{ keys: `␣${each.key}`, says: reach.says, on: reach.on }];
         });
@@ -1588,9 +1625,10 @@ export function Review({
         },
         follow: () => {
             const current = view.current;
-            const target = current === null ? undefined : following(citationsOf(laidOut), editor.head());
+            const head = editor.head();
+            const target = current === null ? undefined : (following(citationsOf(laidOut), head) ?? namedDrawer(laidOut, head));
             if (current === null || target === undefined) {
-                say("gd follows a citation of your words to the passage it cites, and that passage back: put the cursor on one.");
+                say("gd follows a citation of your words to the passage it cites, and that passage back, and a banner naming another agent's drawer to it: put the cursor on one.");
                 return;
             }
             const effects = reaching(current.state, target);
