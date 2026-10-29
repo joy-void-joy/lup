@@ -5,7 +5,8 @@ tools (`lup.tools.speaking`) as much as part of the result, so the caller reads
 them as the agent wrote them; they live here because the tools' module builds on
 this one. Each is one text in the agent's own words, never a form of labelled
 parts: what's present for an agent at the moment isn't shaped like one, and a
-form shapes the answer it asks for.
+form shapes the answer it asks for. A friction may carry a short title beside
+it, naming it where frictions are listed a line each.
 """
 
 from datetime import timedelta
@@ -41,6 +42,13 @@ class Friction(Model):
     """What got in your way, at the moment it did, in your own words."""
 
     text: str = Field(description="In your own words.")
+    title: str = Field(
+        default="",
+        description=(
+            "A few words naming it, which a list of frictions shows a line each: "
+            "`the gate hangs on a fresh worktree`. Left out, its first line."
+        ),
+    )
 
 
 class HowItFelt(Model):
