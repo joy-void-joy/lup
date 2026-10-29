@@ -138,6 +138,8 @@ function reasoned(reading: Reading): Reason[] {
                 return plainly("protected");
             case "operator":
                 return plainly("operator's document", "operator's documents");
+            case "role":
+                return { said: "by its role's level", one: "by its role's level", many: "by their role's level" };
             case "new-file":
                 return { said: "new file", one: "new file", many: "new files" };
             case "whole-file":

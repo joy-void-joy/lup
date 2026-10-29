@@ -10,6 +10,7 @@ from lup_dev import (
     Core,
     Exemption,
     Exemptions,
+    Levels,
     Modules,
     Paths,
     Project,
@@ -48,7 +49,7 @@ CORE = (
 
 
 EVERY_HELD = Project(
-    held=["protected", "operator", "new-file", "whole-file", "public-api", "ignore"],
+    held=["new-file", "whole-file", "public-api", "ignore"],
     flagged=[],
 )
 """Every kind of change held, so a test reads what each change asks."""
@@ -115,6 +116,67 @@ def test_tests_scratch_docs_and_data_are_allowed_at_any_size(judge: Judging) -> 
         judgement = judge(edit(path, None, big))
         assert judgement.outcome == "allow", path
         assert judgement.findings == []
+
+
+def leveled(**levels: str) -> Project:
+    """A project whose `Core` gives these roles these levels, the kinds and rules as lup's defaults hold and flag them."""
+    return Project(modules=Modules().edit(Core(levels=Levels.model_validate(levels))))
+
+
+def test_a_role_held_or_flagged_by_its_level_asks_at_every_write_and_one_reviewed_lets_its_own_ask_through(
+    judge: Judging,
+) -> None:
+    docs = judge(edit("docs/a.md", "a\n", "b\n"), project=leveled(docs="held"))
+    assert (docs.outcome, [ask.kind for ask in docs.asks]) == ("ask", ["role"])
+    assert docs.asks[0].reason == (
+        "docs/a.md is a docs path, whose every write the project's `Levels` holds"
+    )
+    test = judge(
+        edit("tests/test_a.py", None, "x = 1\n"), project=leveled(test="flagged")
+    )
+    assert (test.outcome, [ask.kind for ask in test.flags]) == ("allow", ["role"])
+    # Production code flagged at every write, its own design asks flagged beside it.
+    created = judge(
+        edit("src/pkg/new.py", None, '"""New."""\n', baseline=None),
+        project=leveled(production="flagged"),
+    )
+    assert [ask.kind for ask in created.flags] == ["role", "new-file"]
+    # A protected path, or an operator's document, reviewed rather than held, asks nothing of its own.
+    config = judge(
+        edit("pyproject.toml", "a\n", "b\n"), project=leveled(protected="review")
+    )
+    assert (config.outcome, config.asks, config.flags) == ("allow", [], [])
+    design = judge(edit("DESIGN.md", "a\n", "b\n"), project=leveled(operator="flagged"))
+    assert (design.outcome, [ask.kind for ask in design.flags]) == (
+        "allow",
+        ["operator"],
+    )
+
+
+def test_a_role_not_reviewed_lets_its_design_asks_through_but_never_an_ignore_a_private_value_or_a_rule(
+    judge: Judging,
+) -> None:
+    automatic = Project(
+        held=["ignore", "regex"],
+        modules=Modules().edit(Core(levels=Levels(production="automatic"))),
+    )
+    created = judge(
+        edit("src/pkg/new.py", None, '"""New."""\n', baseline=None), project=automatic
+    )
+    assert (created.outcome, created.asks, created.flags) == ("allow", [], [])
+    whole = judge(
+        edit("src/pkg/core.py", CORE, CORE + "\n", whole=True), project=automatic
+    )
+    assert (whole.asks, whole.flags) == ([], [])
+    ignored = (
+        CORE + 'y = (1, 2)  # BAD tuple-shape  # lup: ignore("tuple-shape", why="sh")\n'
+    )
+    ignore = judge(edit("src/pkg/core.py", CORE, ignored), project=automatic)
+    assert [ask.kind for ask in ignore.asks] == ["ignore"]
+    ruled = judge(
+        edit("src/pkg/core.py", CORE, CORE + "x = 1  # BAD regex\n"), project=automatic
+    )
+    assert [ask.name() for ask in ruled.asks] == ["regex"]
 
 
 def test_the_operators_documents_ask(judge: Judging) -> None:
@@ -434,7 +496,7 @@ def test_an_approval_covers_the_paths_design_asks_but_not_its_suppressions(
     assert judge(edit(str(path), CORE, ignored), approved=[path]).outcome == "ask"
 
 
-ONLY_PROTECTED = Project(held=["protected", "operator"], flagged=[])
+ONLY_PROTECTED = Project(held=[], flagged=[])
 
 
 def test_asking_only_about_protected_paths_allows_every_other_ask(
@@ -660,7 +722,7 @@ def test_a_reading_says_what_a_file_asks_held_or_flagged_each_on_its_line(
     judge: Judging,
 ) -> None:
     project = Project(
-        held=["protected", "operator", "ignore", "regex"],
+        held=["ignore", "regex"],
         flagged=["new-file", "whole-file", "public-api", "tuple-shape"],
     )
     after = (
@@ -729,7 +791,7 @@ def test_from_the_parse_alone_a_change_asks_what_the_whole_judgement_asks_but_ru
     kit: Kit, tmp_path: Path
 ) -> None:
     project = Project(
-        held=["protected", "operator", "ignore", "regex"],
+        held=["ignore", "regex"],
         flagged=["new-file", "whole-file", "public-api", "tuple-shape"],
     )
     judging = Judge(
@@ -873,7 +935,7 @@ def test_a_new_file_s_path_holding_a_value_is_told(judge: Judging) -> None:
 
 
 def test_a_project_holding_private_values_holds_the_write(judge: Judging) -> None:
-    holding = Project(held=["protected", "operator", "ignore", "private"], flagged=[])
+    holding = Project(held=["ignore", "private"], flagged=[])
     change = edit("docs/notes.md", "a\n", "a\nKestrel Labs\n")
     judgement = judge(change, project=holding, withheld=WITHHELD)
     assert judgement.outcome == "ask"

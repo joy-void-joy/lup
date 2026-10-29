@@ -13,6 +13,7 @@ from lup_dev.declaration.kinds import (
     Credentials,
     Folds,
     Guidance,
+    Levels,
     Package,
     Packages,
     Paths,
@@ -75,6 +76,12 @@ class Core(Module):
     the judge is a module: every repository's looks carry them first, and a
     person's layer changes how each starts and whether `zR` and `zM` reach it,
     `Folds().replace("lines", …)`."""
+    levels: Levels = Levels()
+    """How far each path role's changes are reviewed (`Levels`): lup's defaults,
+    a protected path and an operator's document held, production code and docs
+    to review, tests, data and what's excluded automatic, scratch hidden. A
+    project changes one, `Core(levels=Levels(test="hidden"))`, and a person's
+    layer over that."""
     verbs: Verbs = Verbs.of(*SHELL_VERBS, HOLD, PAUSE)
     """The verbs the review's keys say, Space and a key: the shell's, done,
     decline, send to and comment, which apply to anything; the judge's, hold;

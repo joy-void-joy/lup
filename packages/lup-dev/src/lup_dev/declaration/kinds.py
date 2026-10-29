@@ -10,7 +10,7 @@ doctests) arrive with the pieces that read them.
 
 from functools import reduce
 from pathlib import Path
-from typing import Self, override
+from typing import Literal, Self, override
 
 from pydantic import model_validator
 
@@ -33,6 +33,7 @@ from lup_dev.declaration.grammar import (
     Only,
     Replace,
     listed,
+    set_fields,
 )
 from lup_dev.declaration.serving import ModuleServing
 from lup_dev.host.protocol import GitHubRepository, Limits, actions
@@ -168,6 +169,55 @@ class Paths(Layer, extra="forbid"):
             return [each.entry for each in self.role(role).resolve(own, own)]
 
         return {role: resolved(role) for role in self.roles()}
+
+
+type Level = Literal["hidden", "automatic", "review", "flagged", "held"]
+"""How far a path role's changes are reviewed (`Levels`): left out of review,
+shown asking nothing, to review, every write flagged, or every write held."""
+
+
+class Levels(Layer, extra="forbid"):
+    """How far each path role's changes are reviewed, one level a role, keyed by the role's name (`lup_dev.policy.roles`).
+
+    - `hidden`: left out of "since you approved", asking nothing;
+    - `automatic`: shown in it folded, asking nothing, never counted as to
+      review;
+    - `review`: shown to review, what a change asks by its kind and the rules
+      held or flagged as `Project` says;
+    - `flagged`: every write lands flagged, its branch's landing waiting on it;
+    - `held`: every write held for the operator's answer.
+
+    At `automatic` and `hidden`, a change's design asks (`new-file`,
+    `whole-file`, `public-api`) are let through, since the operator doesn't
+    review the role; an added `ignore`, a value never published and a rule the
+    project holds or flags still ask, whatever the level, since they're about
+    exceptions and publishing rather than the code's review
+    (`docs/judging-writes.md`, *What each change gets*).
+
+    `Core` holds it, and any module may: a module gives the levels of the
+    roles it brings by setting them, each role's level set by one module at
+    most, the rest the defaults here. A project changes them on the module
+    holding them, `Core(levels=Levels(test="hidden"))`, and the person's own
+    layer over that.
+
+    >>> Levels(test="hidden").over(Levels(docs="automatic")).model_dump()["test"]
+    'hidden'
+    """
+
+    protected: Level = "held"
+    operator: Level = "held"
+    """The operator's documents."""
+    excluded: Level = "automatic"
+    test: Level = "automatic"
+    scratch: Level = "hidden"
+    docs: Level = "review"
+    data: Level = "automatic"
+    production: Level = "review"
+    """Everything no other role claims: the code under review."""
+
+    def given(self) -> dict[str, Level]:
+        """Return the levels this layer sets, by role: those a module gives."""
+        return {role: getattr(self, role) for role in set_fields(self)}
 
 
 class Gate(Named[Step]):

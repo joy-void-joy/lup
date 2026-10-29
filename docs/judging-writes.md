@@ -8,7 +8,7 @@ lup judges every write in the worktrees an agent's session holds: it lets it lan
 
 | Change | What it asks | By default |
 |---|---|---|
-| A test, scratch (`tmp/`), docs or data file | nothing | lands |
+| A test, scratch (`tmp/`), docs or data file | nothing, unless its role's level holds or flags its writes, `role` | lands |
 | An operator's document (`DESIGN.md`, `AGENTS.md`, and in lup's own repository its modules' guidance) | `operator` | held |
 | A protected path, or a file with a secret's name | `protected`; a protected Python module gets lup's rules too | held |
 | A path the declaration excludes | nothing, and no rule's findings; one also protected still asks `protected`, and a value never published is still told | lands |
@@ -23,7 +23,8 @@ lup judges every write in the worktrees an agent's session holds: it lets it lan
 | Any other production change | nothing | lands, its findings told |
 
 - **There's no line count:** a size limit makes agents split their edits to fit it.
-- **Held and flagged are named in the declaration** (`Project.held`, `Project.flagged`; `docs/declaration.md`), in one vocabulary: the two roles that ask, the kinds of change, and lup's rules by their ids. A protected change takes effect outside the agent's reach before anything lands, and an `ignore` takes a check away, so they're held; a design change can be seen once it has landed, before anything is published, so it's flagged.
+- **Held and flagged are named in the declaration,** a path's role by its level, a kind of change or a rule by name (`Levels`, `Project.held`, `Project.flagged`; `docs/declaration.md`). A protected change takes effect outside the agent's reach before anything lands, and an `ignore` takes a check away, so they're held; a design change can be seen once it has landed, before anything is published, so it's flagged.
+- **A role's level** (`Core.levels`) says how far its changes are reviewed: at `held` every write to it asks, held, and at `flagged` every write lands flagged, a protected path and an operator's document asking by their own names, any other role as `role`; at `review`, `automatic` and `hidden` the role asks nothing of its own (lup's defaults hold `protected` and `operator`, review production code and docs, and ask nothing of the rest). At `automatic` and `hidden` the operator doesn't review the role, so what a change asks about the code's design, `new-file`, `whole-file` and `public-api`, is let through there; an added `ignore`, a value never published and a rule `held` or `flagged` names still ask, whatever the level, since they're about exceptions and publishing rather than the code's review: the operator wants to see every exception to a rule wherever it's written, no level should publish a private value unseen, and a rule named there is the project saying its findings always reach them. The levels also place each file in "since you approved" (`docs/dashboard.md`, *The drawers*).
 - **The operator's switch:** "hold each flagged write" holds what the declaration flags for one conversation and their subagents, turned with `h` on their banner in the dashboard's review (`switched`, `host/service.py`): a subagent is held where their own switch is on, or that of any conversation above them.
 - **An approval covers the path's design asks** (a new file, a whole write, a public-API change) for the rest of the session, in that worktree, so a file approved isn't asked again as it's worked on.
 

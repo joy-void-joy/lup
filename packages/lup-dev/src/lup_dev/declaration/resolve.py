@@ -54,6 +54,8 @@ from lup_dev.declaration.kinds import (
     Folds,
     Gate,
     Guidance,
+    Level,
+    Levels,
     Mounted,
     Package,
     Packages,
@@ -239,6 +241,9 @@ class Resolved(Model):
     """What a change waits for the operator's answer on, by name (`Project.held`)."""
     flagged: list[str]
     """What a change lands with, flagged, by name (`Project.flagged`)."""
+    levels: dict[str, Level]
+    """How far each path role's changes are reviewed, by role (`Levels`): each
+    module's given, the rest `Levels`' defaults."""
     profile: str | None = None
     """The profile the person's layer chooses for the repository's launches,
     by its name (`Project.profile`); none for `default`, where `--profile`
@@ -614,6 +619,40 @@ def checked(modules: list[Module]) -> list[Module]:
     return modules
 
 
+class Given(Model):
+    """A role's level as one module gives it."""
+
+    role: str
+    module: str
+    level: Level
+
+
+def leveled(found: list[Part[Levels]]) -> dict[str, Level]:
+    """Return each role's level: the one a module gives it, else `Levels`' default; refused where two modules give one role a level.
+
+    >>> leveled([Part(module="core", value=Levels()), Part(module="python", value=Levels(test="hidden"))])["test"]
+    'hidden'
+    """
+    given = [
+        Given(role=role, module=part.module, level=level)
+        for part in found
+        for role, level in part.value.given().items()
+    ]
+    roles = list(dict.fromkeys(each.role for each in given))
+    twice = [role for role in roles if [each.role for each in given].count(role) > 1]
+    if twice:
+        said = "; ".join(
+            f"`{role}` by {listed([each.module for each in given if each.role == role])}"
+            for role in twice
+        )
+        message = (
+            f"Levels: {said}; a role's level is given by one module, the one "
+            "holding it to change"
+        )
+        raise ProjectError(message)
+    return {**Levels().model_dump(), **{each.role: each.level for each in given}}
+
+
 def resolve(project: Project) -> Resolved:
     """Resolve `project`'s declaration, or raise `ProjectError` saying what's wrong.
 
@@ -681,6 +720,7 @@ def resolve(project: Project) -> Resolved:
         repositories=neighbours(modules),
         held=project.held,
         flagged=project.flagged,
+        levels=leveled(parts(modules, Levels)),
         profile=project.profile,
         served=found,
         looks=looked(modules, found),
@@ -728,6 +768,10 @@ class Declaration(Model):
     """What a change waits for the operator's answer on, by name."""
     flagged: list[str] = Project().flagged
     """What a change lands with, flagged, by name."""
+    levels: dict[str, Level] = Levels().model_dump()
+    """How far each path role's changes are reviewed, by role (`Levels`):
+    lup's defaults for a declaration kept before levels were, which says
+    none."""
     modules: list[str] = []
     """The modules it selects, by name, in order."""
 
@@ -752,6 +796,7 @@ class Declaration(Model):
             runner=Prefixed.of(resolved.runner),
             held=resolved.held,
             flagged=resolved.flagged,
+            levels=resolved.levels,
             modules=[module.name for module in resolved.modules],
         )
 

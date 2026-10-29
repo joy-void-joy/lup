@@ -57,6 +57,7 @@ from lup_dev.codescan.directives import (
     missing,
 )
 from lup_dev.codescan.ruff import Linter
+from lup_dev.declaration.kinds import Level
 from lup_dev.declaration.project import Asking
 from lup_dev.errors import LupDevError
 from lup_dev.inbox.store import (
@@ -76,9 +77,21 @@ PRIVATE: Asking = "private"
 """The name a private value on a touched line asks by, and the rule its finding
 is told under."""
 
-type AskKind = Asking | Literal["rule"]
-"""What a change asks the operator about: a path's role, a kind of change
-(`Asking`), or one of lup's rules, a finding of which the project holds or flags."""
+type RoleAsk = Literal["protected", "operator", "role"]
+"""What a path's role asks, held or flagged by its level alone (`Levels`): a
+protected path and an operator's document by their own names, any other role
+as `role`."""
+
+type DesignAsk = Literal["new-file", "whole-file", "public-api"]
+"""What a change asks about the code's design, which a role whose level is
+`automatic` or `hidden` lets through, the operator not reviewing it; an
+`ignore`, a value never published and a rule ask whatever the level, being
+about exceptions and publishing rather than review."""
+
+type AskKind = Asking | RoleAsk | Literal["rule"]
+"""What a change asks the operator about: a path's role (`RoleAsk`), a kind of
+change (`Asking`), or one of lup's rules, a finding of which the project holds
+or flags."""
 
 type Outcome = Literal["allow", "ask"]
 
@@ -461,8 +474,9 @@ class Judge(Model, arbitrary_types_allowed=True):
         return reports
 
     def one(self, change: Change, versions: Versions) -> Judgement:
-        """Judge one change, from the engine's reports on its versions."""
+        """Judge one change, from the engine's reports on its versions, by its path's role and the role's level (`Levels`)."""
         role = self.roles.role(change.path)
+        level = self.roles.declaration.levels.get(role, "review")
         removed = [
             RemovedNote(path=change.path, text=directive.identity().text)
             for directive in missing(
@@ -482,7 +496,7 @@ class Judge(Model, arbitrary_types_allowed=True):
                 )
                 ask = Ask(kind="protected", reason=reason)
                 if change.after is None or not self.roles.ruled(change.path):
-                    sorted_ = self.sorted([ask])
+                    sorted_ = self.sorted([ask], level)
                     return Judgement(
                         path=change.path,
                         role=role,
@@ -491,10 +505,10 @@ class Judge(Model, arbitrary_types_allowed=True):
                         flags=sorted_.flagged,
                         removed=removed,
                     )
-                return self.ruled(change, versions, removed, [ask])
+                return self.ruled(change, versions, removed, [ask], level)
             case "operator":
                 reason = f"{change.path} is one of the operator's documents"
-                sorted_ = self.sorted([Ask(kind="operator", reason=reason)])
+                sorted_ = self.sorted([Ask(kind="operator", reason=reason)], level)
                 return Judgement(
                     path=change.path,
                     role=role,
@@ -504,17 +518,41 @@ class Judge(Model, arbitrary_types_allowed=True):
                 )
             case "production":
                 if change.after is None:
-                    return Judgement(
-                        path=change.path, role=role, outcome="allow", removed=removed
-                    )
-                return self.ruled(change, versions, removed, [])
+                    return self.leveled(change, role, level, removed)
+                own = self.asked(change, role, level)
+                return self.ruled(change, versions, removed, own, level)
             case _:
-                return Judgement(
-                    path=change.path,
-                    role=role,
-                    outcome="allow",
-                    information=self.information(versions),
-                )
+                return self.leveled(change, role, level, [], self.information(versions))
+
+    def asked(self, change: Change, role: Role, level: Level) -> list[Ask]:
+        """Return what a change asks by its path's role alone, where the role has no ask of its own: a `role` ask, where its level holds or flags every write; nothing else."""
+        if level not in ["held", "flagged"]:
+            return []
+        reason = (
+            f"{change.path} is a {role} path, whose every write the project's "
+            f"`Levels` {'holds' if level == 'held' else 'flags'}"
+        )
+        return [Ask(kind="role", reason=reason)]
+
+    def leveled(
+        self,
+        change: Change,
+        role: Role,
+        level: Level,
+        removed: list[RemovedNote],
+        information: list[Finding] | None = None,
+    ) -> Judgement:
+        """Judge a change no rule reads by its path's role alone: let through, or, where the role's level holds or flags every write, asking `role`."""
+        sorted_ = self.sorted(self.asked(change, role, level), level)
+        return Judgement(
+            path=change.path,
+            role=role,
+            outcome="ask" if sorted_.held else "allow",
+            asks=sorted_.held,
+            flags=sorted_.flagged,
+            removed=removed,
+            information=information or [],
+        )
 
     def private(self, change: Change) -> list[Finding]:
         """Return each value never published in what a change writes, as a lup finding naming its kind, never the value: in its content, and in the path of a file it creates.
@@ -582,20 +620,30 @@ class Judge(Model, arbitrary_types_allowed=True):
             }
         )
 
-    def sorted(self, asks: list[Ask]) -> Sorted:
-        """Sort a change's asks as the declaration says: each held or flagged by its name (`Project.held`, `Project.flagged`), and the rest let through; every flagged one held where the operator holds each flagged write of the agent (`holding`)."""
+    def sorted(self, asks: list[Ask], level: Level = "review") -> Sorted:
+        """Sort a change's asks as the declaration says, its path's role's level being `level`: an ask of the role's held or flagged by that level (`Levels`); one about the code's design let through where the level is `automatic` or `hidden`, the operator not reviewing the role; every other held or flagged by its name (`Project.held`, `Project.flagged`), and the rest let through. Every flagged one is held where the operator holds each flagged write of the agent (`holding`)."""
         held = self.roles.declaration.held
         flagged = self.roles.declaration.flagged
+
+        def taken(ask: Ask) -> Level | None:
+            if ask.kind in get_args(RoleAsk.__value__):
+                return level if level in ["held", "flagged"] else None
+            if ask.kind in get_args(DesignAsk.__value__) and level in [
+                "automatic",
+                "hidden",
+            ]:
+                return None
+            name = ask.name()
+            return "held" if name in held else "flagged" if name in flagged else None
+
         return Sorted(
             held=[
                 ask
                 for ask in asks
-                if ask.name() in held or (self.holding and ask.name() in flagged)
+                if (way := taken(ask)) == "held" or (self.holding and way == "flagged")
             ],
             flagged=[
-                ask
-                for ask in asks
-                if ask.name() in flagged and not self.holding and ask.name() not in held
+                ask for ask in asks if taken(ask) == "flagged" and not self.holding
             ],
         )
 
@@ -625,11 +673,13 @@ class Judge(Model, arbitrary_types_allowed=True):
         versions: Versions,
         removed: list[RemovedNote],
         always: list[Ask],
+        level: Level = "review",
     ) -> Judgement:
         """Judge a change lup's rules read: what it asks, and its findings, which are told.
 
         Production code and protected modules alike; `always` is what the path
-        asks whatever the change, which no approval covers.
+        asks whatever the change, which no approval covers; `level` its role's,
+        which its asks are sorted by (`sorted`).
         """
         after = change.after or ""
         design = [
@@ -658,7 +708,8 @@ class Judge(Model, arbitrary_types_allowed=True):
                 *always,
                 *(ask for ask in design if not (covered and ask.covered())),
                 *ruled,
-            ]
+            ],
+            level,
         )
         return Judgement(
             path=change.path,
