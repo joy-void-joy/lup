@@ -118,6 +118,8 @@ from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Called, Recorded
 from lup_dev.host.rooms import OwnLaunch, OwnLaunches, RoomRoute, ShowOwnLaunch
 from lup_dev.host.service import Answerer, Companion, HostService, Naming, Route
+from lup_dev.host.timings import TimingsStore
+from lup_dev.host.timings import routes as timings_routes
 from lup_dev.host.views import ModuleViews
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import JudgeHook, WorkerJudge, Workers, WorkersAsking
@@ -539,13 +541,14 @@ def control_routes(
     *,
     waits: Waits,
 ) -> list[Route]:
-    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; the dashboard's, `dashboard`'s address; the drawer's, what a branch changed since the operator approved it, read from lup's state at `layout`, each file a landing waits on in `waits` held there; the landings waiting; the review marks, kept there; and a module's view the dashboard shows, through `views`, watched at its own triggers, where it's given."""
+    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; the dashboard's, `dashboard`'s address; the drawer's, what a branch changed since the operator approved it, read from lup's state at `layout`, each file a landing waits on in `waits` held there; the landings waiting; the review marks, kept there; what a page measured of itself, kept there too; and a module's view the dashboard shows, through `views`, watched at its own triggers, where it's given."""
     return [
         *inbox_routes(delivery, recorded, layout),
         Route.to(dashboard_shown(dashboard)),
         *since_routes(delivery, layout, LupDevSettings().lup_integration_branch, waits),
         *waits_routes(waits),
         *marks_routes(layout, delivery.clock, delivery.inbox.changes),
+        *timings_routes(TimingsStore(home=layout.host.timings), delivery.clock),
         *([] if views is None else [Route.reading(views, watch=views.watched)]),
     ]
 
