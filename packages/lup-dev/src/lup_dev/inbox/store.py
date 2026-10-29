@@ -242,7 +242,7 @@ class Stop(speaking.Stop):
 
 
 class Ended(Model):
-    """A subagent's end, for the conversation that spawned them: their name, whether they ended their turn, were stopped or failed, and their last message where their runtime doesn't hand that to their parent itself."""
+    """A subagent's end, for the conversation that spawned them: their name, whether they ended their turn, were stopped or failed, their last message where their runtime doesn't hand that to their parent itself, and what they said at each end lup held, which no runtime hands on."""
 
     reason: Literal["ended"] = "ended"
     name: str
@@ -261,6 +261,32 @@ class Ended(Model):
     said: str | None = None
     """Their last message, whole, where their runtime doesn't hand it on; none
     where it does, or the subagent left none."""
+    held: list[str] = []
+    """What they said at each end of their turn lup held to tell them what
+    waited, oldest first, whole: their report, often. Each runtime hands a
+    parent only the words of the end it lets through, the next one's
+    (`docs/field-notes.md`, *A subagent's end*), so lup hands these on whoever
+    hands the last."""
+
+    @property
+    def kept(self) -> list[str]:
+        """Return what they said at each end lup held, as lup hands it on: those saying something."""
+        return [each for each in self.held if each.strip()]
+
+    @property
+    def earlier(self) -> str | None:
+        """Say what comes before what they said at each end lup held, where it held one that said something; none where it held none.
+
+        >>> Ended(name="parser", held=["Done."]).earlier
+        'Before that, lup held an end of their turn to tell them what waited, and no runtime hands you what they said there:'
+        """
+        if not self.kept:
+            return None
+        ends = "an end" if len(self.kept) == 1 else "ends"
+        return (
+            f"Before that, lup held {ends} of their turn to tell them what waited, "
+            "and no runtime hands you what they said there:"
+        )
 
     @property
     def passed(self) -> str | None:
@@ -294,15 +320,21 @@ class Ended(Model):
 
     @property
     def text(self) -> str:
-        """Say it as lup tells the parent: how they ended, then their last message, where lup hands that on.
+        """Say it as lup tells the parent: how they ended, their last message where lup hands that on, then what they said at each end lup held.
 
         >>> print(Ended(name="parser", said="Done: three call sites.").text)
         They ended their turn. Their last message:
         Done: three call sites.
         >>> print(Ended(name="parser", handed=True, said="Done.").text)
         They ended their turn. Their last message reaches you from your runtime.
+        >>> print(Ended(name="parser", handed=True, said="Done.", held=["Parsed."]).text)
+        They ended their turn. Their last message reaches you from your runtime.
+        Before that, lup held an end of their turn to tell them what waited, and no runtime hands you what they said there:
+        Parsed.
         """
-        return self.heading if self.passed is None else f"{self.heading}\n{self.passed}"
+        last = [] if self.passed is None else [self.passed]
+        held = [] if self.earlier is None else [self.earlier, *self.kept]
+        return "\n".join([self.heading, *last, *held])
 
 
 class Place(Model):
@@ -1035,6 +1067,12 @@ class Whereabouts(Model):
     """The conversation that spawned them, for a subagent a conversation
     spawned, who hears of their end and of what they say of their work; none for
     a session's own. The runtime's own agents never reach the inbox (`Spawned.internal`)."""
+    held: list[str] = []
+    """What they said at each end of their turn lup held to tell them what
+    waited, since they were heard there, oldest first: handed to their parent
+    with their end (`Ended.held`), since their runtime hands on only the end it
+    lets through. Kept here rather than in memory, so a restart of the service
+    between the two ends loses none."""
     name: str | None = None
     """A subagent's own name as their latest hook was heard, kept once their
     launch has ended, so `inbox` reads them by their name then, and `send`

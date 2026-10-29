@@ -48,6 +48,7 @@ from lup_dev.adapters.claude import (
     ClaudeRecords,
     ClaudeTranscripts,
 )
+from lup_dev.codescan.contract import FileReport, Parser, Source
 from lup_dev.codescan.engine import EngineError
 from lup_dev.commanding import RoomMarks
 from lup_dev.declaration.package_managers.uv import Uv
@@ -211,7 +212,7 @@ from lup_transcripts.environment.module import Transcripts
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable, Generator
 
-    from conftest import FakeClock, InProcess, JudgingInProcess, Kit, Shell
+    from conftest import FakeClock, FakeParser, InProcess, JudgingInProcess, Kit, Shell
     from mcp.client._transport import TransportStreams
     from pydantic import JsonValue
 
@@ -450,10 +451,11 @@ def inboxed(
     modules: LaunchModules | None = None,
     remotes: Callable[[Delivery], Remotes] | None = None,
     rooms: Callable[[Program], Awaitable[Ran]] | None = None,
+    parser: Parser | None = None,
     bearings: bool = False,
     queues: dict[str, Queues] | None = None,
 ) -> Generator[Watched]:
-    """A host service with lup's inbox and the dashboard's kind, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter; containers asked of `podman`, where given; each hook answered by `judge`, else with nothing, and each launch's modules served by `modules`, where given; `land` pushing through the remotes `remotes` makes over the delivery, where given, else through remotes telling no one, and running in a launch's room through `rooms`, where given; a new main session told its bearings where `bearings` asks, its integration branch `dev`; what each runtime holds for a conversation read by `queues`, where given, a held call looking at it, and at its time limit, every few milliseconds."""
+    """A host service with lup's inbox and the dashboard's kind, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter; containers asked of `podman`, where given; each hook answered by `judge`, else with nothing, and each launch's modules served by `modules`, where given; `land` pushing through the remotes `remotes` makes over the delivery, where given, else through remotes telling no one, running in a launch's room through `rooms`, and reading a file's parse through `parser`, where given; a new main session told its bearings where `bearings` asks, its integration branch `dev`; what each runtime holds for a conversation read by `queues`, where given, a held call looking at it, and at its time limit, every few milliseconds."""
     known = cli.Adapters(known=cli.adapters())
     couriers = cli.Couriers(adapters=known)
     wakers = cli.Wakers(adapters=known)
@@ -491,8 +493,13 @@ def inboxed(
         ),
         routes=cli.control_routes(delivery, recorded or {}, None, judging or machine),
         tools=[
-            each.model_copy(update={"run": rooms})
-            if isinstance(each, LandingTools) and rooms is not None
+            each.model_copy(
+                update={
+                    **({} if rooms is None else {"run": rooms}),
+                    **({} if parser is None else {"parser": parser}),
+                }
+            )
+            if isinstance(each, LandingTools)
             else each
             for each in cli.room_tools(
                 delivery,
@@ -2492,15 +2499,17 @@ class Subagents:
             transcript_path=str(self.transcript),
         )
 
-    def ended(self, agent: str, kind: str, said: str | None) -> str:
-        """Subagent `agent`'s turn ending, saying `said`; with no message, as Claude Code ends one it stopped."""
+    def ended(
+        self, agent: str, kind: str, said: str | None, *, again: bool = False
+    ) -> str:
+        """Subagent `agent`'s turn ending, saying `said`; with no message, as Claude Code ends one it stopped; `again` where a hook held their last end."""
         return claude(
             "SubagentStop",
             session_id=self.session,
             agent_id=agent,
             agent_type=kind,
             transcript_path=str(self.transcript),
-            stop_hook_active=False,
+            stop_hook_active=again,
             **({} if said is None else {"last_assistant_message": said}),
         )
 
@@ -2993,8 +3002,8 @@ class Rollouts:
             transcript_path=str(self.rollout(thread)),
         )
 
-    def ended(self, thread: str, parent: str, said: str) -> str:
-        """Subagent `thread`'s turn ending, saying `said`: naming their parent's rollout, and their own beside it."""
+    def ended(self, thread: str, parent: str, said: str, *, again: bool = False) -> str:
+        """Subagent `thread`'s turn ending, saying `said`: naming their parent's rollout, and their own beside it; `again` where a hook held their last end."""
         return codex(
             "SubagentStop",
             agent_id=thread,
@@ -3002,7 +3011,7 @@ class Rollouts:
             transcript_path=str(self.rollout(parent)),
             agent_transcript_path=str(self.rollout(thread)),
             last_assistant_message=said,
-            stop_hook_active=False,
+            stop_hook_active=again,
         )
 
     def lup(
@@ -3222,6 +3231,75 @@ def test_wait_inbox_returns_when_its_own_subagent_ends_with_its_last_message_on_
         False,
     )
     assert after == ""
+
+
+HELD_BEFORE = (
+    "Before that, lup held an end of their turn to tell them what waited, and "
+    "no runtime hands you what they said there:"
+)
+"""What a subagent's end tells their parent before what they said at an end lup held."""
+
+
+def test_what_a_subagent_said_at_an_end_held_for_what_waited_reaches_its_parent_on_each_runtime(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """Seen in a probe on Claude Code 2.1.303 (`docs/field-notes.md`, *A subagent's end*): held at their end, a subagent goes on, and their runtime hands their parent only what they say at their next end, so the report they ended on first reached no one."""
+    records = Subagents(tmp_path)
+    rollouts = Rollouts(tmp_path)
+
+    def sent(mcp: Path, to: str) -> None:
+        text = "Count the tests too."
+        _, error = call(mcp, "send", {"to": to, "kind": "note", "text": text})
+        assert not error
+
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        launched(machine, clock, tmp_path / "v", "two", "codex")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        hook2, mcp2 = machine.host.launch("two").hook, machine.host.launch("two").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook2, codex("SessionStart", source="startup"))
+        send(hook, records.spawn("t1", name="parser"))
+        records.recorded("a1", "Explore", "t1", name="parser")
+        send(hook, records.call("a1", "Explore", "c1"))
+        sent(mcp, "parser")
+        held = send(hook, records.ended("a1", "Explore", "Parsed: three call sites."))
+        let = send(
+            hook, records.ended("a1", "Explore", "And twelve tests.", again=True)
+        )
+        told = context(send(hook, bash("m1")))
+        # The first `spawn_agent`'s subagent, whose last message Codex hands on
+        # to no one.
+        rollouts.recorded("th1", "t1")
+        send(hook2, rollouts.call("th1", "d1"))
+        sent(mcp2, "th1")
+        held2 = json.loads(send(hook2, rollouts.ended("th1", "t1", "Lexed: two.")))
+        let2 = send(hook2, rollouts.ended("th1", "t1", "And one more.", again=True))
+        told2 = context(send(hook2, codex_bash("e1")))
+        places = [
+            each.held for each in delivery.inbox.whereabouts.values() if each.ended
+        ]
+    assert "Count the tests too." in context(held)
+    assert let == ""
+    assert told == (
+        '<ended item="3" from="w/parser" name="parser">\n'
+        "They ended their turn. Their last message reaches you from your runtime.\n"
+        f"{HELD_BEFORE}\n"
+        "<said>Parsed: three call sites.</said>\n"
+        "</ended>"
+    )
+    assert "Count the tests too." in held2["reason"]
+    assert let2 == ""
+    assert told2 == (
+        '<ended item="6" from="v/explorer·th1" name="explorer·th1">\n'
+        "They ended their turn. Their last message:\n"
+        "<said>And one more.</said>\n"
+        f"{HELD_BEFORE}\n"
+        "<said>Lexed: two.</said>\n"
+        "</ended>"
+    )
+    # Once handed on, what they said is no longer kept for an end to come.
+    assert places == [[], []]
 
 
 @pytest.mark.parametrize("reach", ["operator", "operator and parent"])
@@ -7445,9 +7523,13 @@ class Landings:
         shell: Shell,
         machine: Layout,
         clock: FakeClock,
+        *,
+        parser: FakeParser,
     ) -> None:
         self.repository = bare
         self.shell = shell
+        self.parser = parser
+        """What reads a file's parse on the host, for a landing's `# lup: defer` comments."""
         self.machine = machine
         self.clock = clock
         self.forge = tmp_path / "forge.git"
@@ -7642,9 +7724,15 @@ class MergeGate(Processes):
 
 @pytest.fixture
 def landings(
-    bare: Path, tmp_path: Path, shell: Shell, machine: Layout, clock: FakeClock
+    bare: Path,
+    tmp_path: Path,
+    shell: Shell,
+    machine: Layout,
+    clock: FakeClock,
+    *,
+    parser: FakeParser,
 ) -> Landings:
-    return Landings(bare, tmp_path, shell, machine, clock)
+    return Landings(bare, tmp_path, shell, machine, clock, parser=parser)
 
 
 def started(runtime: str) -> str:
@@ -7694,7 +7782,9 @@ def test_land_puts_the_branch_on_dev_and_cleans_up_what_it_landed_but_what_s_in_
     tip = landings.merged()
     tracking = ["for-each-ref", "--format=%(objectname)", "refs/remotes/origin/dev"]
     before = landings.shell.git(repository, *tracking)
-    with inboxed(machine, clock, notices, said, rooms=landings.room):
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
         landings.launched("claude")
         landings.launched("claude", name="two", worktree=busy)
         send(machine.host.launch("one").hook, started("claude"))
@@ -7705,6 +7795,7 @@ def test_land_puts_the_branch_on_dev_and_cleans_up_what_it_landed_but_what_s_in_
     assert landings.shell.git(repository, *tracking) == tip
     assert answer == (
         f"Landed {tip} on `dev` at `origin`, which was at {old}.\n"
+        "`busy`, `feat` and `kept` add no `# lup: defer` comment and remove none, against `dev`.\n"
         "Cleaned up after it:\n"
         "- deleted `feat` on `origin`\n"
         f"- removed the worktree {feat}\n"
@@ -7761,6 +7852,7 @@ def test_land_removes_worktrees_in_the_container_the_launch_has_when_it_cleans_u
             notices,
             said,
             rooms=landings.room,
+            parser=landings.parser,
             podman=podman_of("lup-one"),
         ) as delivery,
         ThreadPoolExecutor(max_workers=1) as pool,
@@ -7822,13 +7914,16 @@ def test_land_leaves_whole_a_worktree_the_room_hides_something_in_saying_so(
     landings.mounted = [Path("/"), landings.repository, feat / ".venv"]
     old = landings.on_forge("refs/heads/dev")
     tip = landings.merged()
-    with inboxed(machine, clock, notices, said, rooms=landings.room):
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
         landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
         answer, error = call(machine.host.launch("one").mcp, "land", {})
     assert not error
     assert answer == (
         f"Landed {tip} on `dev` at `origin`, which was at {old}.\n"
+        "`feat` adds no `# lup: defer` comment and removes none, against `dev`.\n"
         "Left:\n"
         f"- the worktree {feat}: its `.venv` is hidden from the room, so it's "
         "removed on the host\n"
@@ -7855,13 +7950,16 @@ def test_land_removes_no_worktree_where_the_room_cant_say_what_it_mounts(
     landings.unlisting = "findmnt: command not found"
     old = landings.on_forge("refs/heads/dev")
     tip = landings.merged()
-    with inboxed(machine, clock, notices, said, rooms=landings.room):
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
         landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
         answer, error = call(machine.host.launch("one").mcp, "land", {})
     assert not error
     assert answer == (
         f"Landed {tip} on `dev` at `origin`, which was at {old}.\n"
+        "`feat` adds no `# lup: defer` comment and removes none, against `dev`.\n"
         "Left:\n"
         "- lup couldn't list what your room mounts (`findmnt`: findmnt: command "
         "not found), so no worktree was removed\n"
@@ -7891,13 +7989,16 @@ def test_land_says_once_where_no_container_is_there_and_names_each_worktree_left
     old = landings.on_forge("refs/heads/dev")
     tip = landings.merged()
     landings.containers = []
-    with inboxed(machine, clock, notices, said, rooms=landings.room):
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
         landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
         answer, error = call(machine.host.launch("one").mcp, "land", {})
     assert not error
     assert answer == (
         f"Landed {tip} on `dev` at `origin`, which was at {old}.\n"
+        "`feat` and `kept` add no `# lup: defer` comment and remove none, against `dev`.\n"
         "Cleaned up after it:\n"
         "- deleted `feat` on `origin`\n"
         "Left:\n"
@@ -7936,7 +8037,9 @@ def test_land_leaves_alone_a_branch_with_nothing_of_its_own_and_a_flag_on_it_hol
     tip = landings.merged("later")
     fresh = landings.branched("fresh")
     session = lander(landings, "claude")
-    with inboxed(machine, clock, notices, said, rooms=landings.room) as delivery:
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ) as delivery:
         landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
         flags = [
@@ -7953,6 +8056,7 @@ def test_land_leaves_alone_a_branch_with_nothing_of_its_own_and_a_flag_on_it_hol
     assert not error
     assert answer == (
         f"Landed {tip} on `dev` at `origin`, which was at {old}.\n"
+        "`feat` and `later` add no `# lup: defer` comment and remove none, against `dev`.\n"
         "Cleaned up after it:\n"
         f"- removed the worktree {feat}\n"
         "- deleted the local branch `feat`\n"
@@ -7985,7 +8089,9 @@ def test_land_refuses_a_branch_without_a_pass_of_the_gate_one_behind_the_remote_
     tip = shell.git(dev, "rev-parse", "HEAD")
     tree = shell.git(dev, "rev-parse", "HEAD^{tree}")
     old = landings.on_forge("refs/heads/dev")
-    with inboxed(machine, clock, notices, said, rooms=landings.room):
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
         landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
         unpassed, _ = call(machine.host.launch("one").mcp, "land", {})
@@ -8035,7 +8141,9 @@ def test_a_landing_waits_on_each_file_flagged_on_what_it_lands_as_a_hold_and_lan
     session = lander(landings, runtime)
     worker = session.model_copy(update={"agent": "a1"})
     with (
-        inboxed(machine, clock, notices, said, rooms=landings.room) as delivery,
+        inboxed(
+            machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+        ) as delivery,
         ThreadPoolExecutor(max_workers=1) as pool,
     ):
         landings.launched(runtime)
@@ -8092,6 +8200,7 @@ def test_a_landing_waits_on_each_file_flagged_on_what_it_lands_as_a_hold_and_lan
     assert answer.startswith(
         f"Landed {tip} on `dev` at `origin`, which was at {old}.\n"
         f"The operator approved @{hold.number} (`src/pkg/rooms.py`).\n"
+        "`feat` adds no `# lup: defer` comment and removes none, against `dev`.\n"
         "Cleaned up after it:\n"
     )
     assert (
@@ -8128,7 +8237,9 @@ def test_land_withdraws_each_flag_left_nothing_to_hold_on_a_branch_gone_or_a_fil
     shell.git(dev, "merge", "-q", "--no-ff", "--no-edit", "kept")
     tip = landings.merged()
     session = lander(landings, "claude")
-    with inboxed(machine, clock, notices, said, rooms=landings.room) as delivery:
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ) as delivery:
         landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
         flags = [
@@ -8160,6 +8271,7 @@ def test_land_withdraws_each_flag_left_nothing_to_hold_on_a_branch_gone_or_a_fil
     assert not error
     assert answer == (
         f"Landed {tip} on `dev` at `origin`, which was at {old}.\n"
+        "`feat` and `kept` add no `# lup: defer` comment and remove none, against `dev`.\n"
         "Cleaned up after it:\n"
         f"- removed the worktree {feat}\n"
         "- deleted the local branch `feat`\n"
@@ -8208,7 +8320,9 @@ def test_a_comment_on_a_hold_lands_nothing_and_the_next_hold_shows_what_changed_
     tip = landings.merged()
     session = lander(landings, "claude")
     with (
-        inboxed(machine, clock, notices, said, rooms=landings.room) as delivery,
+        inboxed(
+            machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+        ) as delivery,
         ThreadPoolExecutor(max_workers=2) as pool,
     ):
         landings.launched("claude")
@@ -8302,7 +8416,9 @@ def test_a_hold_at_landing_starts_from_the_version_the_operator_marked_reviewed(
     tip = landings.merged()
     session = lander(landings, "claude")
     with (
-        inboxed(machine, clock, notices, said, rooms=landings.room) as delivery,
+        inboxed(
+            machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+        ) as delivery,
         ThreadPoolExecutor(max_workers=1) as pool,
     ):
         landings.launched("claude")
@@ -8342,7 +8458,9 @@ def test_a_land_sent_again_across_a_restart_holds_on_its_holds_again_and_lands_o
     tip = landings.merged()
     session = lander(landings, "claude")
     with (
-        inboxed(machine, clock, notices, said, rooms=landings.room) as delivery,
+        inboxed(
+            machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+        ) as delivery,
         ThreadPoolExecutor(max_workers=1) as pool,
     ):
         landings.launched("claude")
@@ -8411,7 +8529,9 @@ def test_land_merges_a_branch_onto_dev_in_the_room_gates_the_merge_and_moves_dev
     landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
     branch = shell.git(dev, "rev-parse", "feat")
     old = moved_on(landings)
-    with inboxed(machine, clock, notices, said, rooms=landings.room):
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
         landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
         answer = merging(landings, machine.host.launch("one").mcp)
@@ -8420,6 +8540,7 @@ def test_land_merges_a_branch_onto_dev_in_the_room_gates_the_merge_and_moves_dev
         f"Merged `feat` onto `dev` as {merge}, and moved `dev` here to it: the gate "
         "passed on it.\n"
         f"Landed {merge} on `dev` at `origin`, which was at {old}.\n"
+        "`feat` adds no `# lup: defer` comment and removes none, against `dev`.\n"
         "Cleaned up after it:\n"
         f"- removed the worktree {feat}\n"
         "- deleted the local branch `feat`\n"
@@ -8466,7 +8587,9 @@ def test_land_of_a_branch_leaves_alone_one_made_from_its_tip_worktree_and_all(
     # place them in their new worktree (#240): nothing says anyone works there.
     following = landings.branched("since-review-instant", start="since-merge-base")
     old = landings.on_forge("refs/heads/dev")
-    with inboxed(machine, clock, notices, said, rooms=landings.room):
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
         landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
         answer, error = call(
@@ -8480,6 +8603,7 @@ def test_land_of_a_branch_leaves_alone_one_made_from_its_tip_worktree_and_all(
         f"Merged `since-merge-base` onto `dev` as {merge}, and moved `dev` here to "
         "it: the gate passed on it.\n"
         f"Landed {merge} on `dev` at `origin`, which was at {old}.\n"
+        "`since-merge-base` adds no `# lup: defer` comment and removes none, against `dev`.\n"
         "Cleaned up after it:\n"
         f"- removed the worktree {handed}\n"
         "- deleted the local branch `since-merge-base`\n"
@@ -8528,7 +8652,9 @@ def test_land_leaves_alone_each_branch_at_a_tip_merged_that_another_shares_and_t
     tip = landings.merged()
     session = lander(landings, "claude")
     with (
-        inboxed(machine, clock, notices, said, rooms=landings.room) as delivery,
+        inboxed(
+            machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+        ) as delivery,
         ThreadPoolExecutor(max_workers=1) as pool,
     ):
         landings.launched("claude")
@@ -8548,6 +8674,7 @@ def test_land_leaves_alone_each_branch_at_a_tip_merged_that_another_shares_and_t
     assert answer == (
         f"Landed {tip} on `dev` at `origin`, which was at {old}.\n"
         f"The operator approved @{hold.number} (`{path}`).\n"
+        "`dev`'s own commits add no `# lup: defer` comment and remove none, against `dev` on `origin`.\n"
         "Left alone, at a tip `dev` merged that another branch points at too, so "
         "which of them was merged can't be told: `feat`, `next`.\n"
         f"{NOTHING_GOING}"
@@ -8571,7 +8698,9 @@ def test_land_amends_the_gate_s_fixes_into_the_merge_its_parents_and_message_kep
     branch = shell.git(dev, "rev-parse", "feat")
     old = moved_on(landings)
     landings.gate.fixes = {"src/pkg/rooms.py": '"""Rooms, formatted."""\n'}
-    with inboxed(machine, clock, notices, said, rooms=landings.room):
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
         landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
         answer = merging(landings, machine.host.launch("one").mcp)
@@ -8601,7 +8730,9 @@ def test_land_of_a_branch_that_held_dev_finds_its_pass_and_the_gate_runs_nothing
     shell.git(feat, "merge", "-q", "--no-edit", "dev")
     branch = shell.git(feat, "rev-parse", "HEAD")
     landings.passing(branch)
-    with inboxed(machine, clock, notices, said, rooms=landings.room):
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
         landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
         answer = merging(landings, machine.host.launch("one").mcp)
@@ -8631,7 +8762,9 @@ def test_land_of_a_branch_that_conflicts_names_the_files_and_who_resolves_them_c
     landings.wrote(dev, "src/pkg/rooms.py", '"""Chambers."""\n')
     before = shell.git(dev, "rev-parse", "HEAD")
     old = landings.on_forge("refs/heads/dev")
-    with inboxed(machine, clock, notices, said, rooms=landings.room):
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
         landings.launched("claude")
         landings.launched("claude", name="two", worktree=feat)
         send(machine.host.launch("one").hook, started("claude"))
@@ -8661,7 +8794,9 @@ def test_land_where_the_gate_fails_on_the_merge_answers_its_report_changing_noth
     landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
     old = moved_on(landings)
     landings.gate.code = 1
-    with inboxed(machine, clock, notices, said, rooms=landings.room):
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
         landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
         answer = merging(landings, machine.host.launch("one").mcp)
@@ -8694,7 +8829,9 @@ def test_land_refuses_a_merge_message_or_a_commit_citing_an_item_before_it_merge
     write_model(
         listed_at(machine.module_data("private", landings.repository)), Withheld()
     )
-    with inboxed(machine, clock, notices, said, rooms=landings.room):
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
         landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
         answer = merging(landings, machine.host.launch("one").mcp, "Merge: as @1477.2")
@@ -8737,7 +8874,9 @@ def test_land_merges_a_message_citing_an_item_where_the_list_doesn_t_withhold_th
         listed_at(machine.module_data("private", landings.repository)),
         Withheld(numbers=False),
     )
-    with inboxed(machine, clock, notices, said, rooms=landings.room):
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
         landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
         answer = merging(landings, machine.host.launch("one").mcp, "Merge: as @1505")
@@ -8756,7 +8895,9 @@ def test_land_leaves_dev_where_uncommitted_work_is_in_the_way_and_lands_once_it_
     landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
     old = moved_on(landings)
     (dev / "src/pkg/rooms.py").write_text("work not committed\n")
-    with inboxed(machine, clock, notices, said, rooms=landings.room):
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
         landings.launched("claude")
         mcp = machine.host.launch("one").mcp
         send(machine.host.launch("one").hook, started("claude"))
@@ -8788,7 +8929,9 @@ def test_land_refuses_a_merge_without_its_message_a_message_without_a_branch_and
     said: list[str],
 ) -> None:
     landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
-    with inboxed(machine, clock, notices, said, rooms=landings.room):
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
         landings.launched("claude", runner=False)
         mcp = machine.host.launch("one").mcp
         send(machine.host.launch("one").hook, started("claude"))
@@ -8821,7 +8964,9 @@ def test_land_where_the_room_can_t_merge_says_what_it_said_changing_nothing(
     landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
     old = landings.on_forge("refs/heads/dev")
     landings.unmerging = "Error: No such command 'merge'.\n"
-    with inboxed(machine, clock, notices, said, rooms=landings.room):
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
         landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
         answer = merging(landings, machine.host.launch("one").mcp)
@@ -8843,7 +8988,9 @@ def test_land_of_a_branch_dev_holds_already_lands_dev_as_it_is(
     landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
     old = landings.on_forge("refs/heads/dev")
     tip = landings.merged()
-    with inboxed(machine, clock, notices, said, rooms=landings.room):
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
         landings.launched("claude")
         mcp = machine.host.launch("one").mcp
         send(machine.host.launch("one").hook, started("claude"))
@@ -8858,6 +9005,146 @@ def test_land_of_a_branch_dev_holds_already_lands_dev_as_it_is(
     assert landings.on_forge("refs/heads/dev") == tip
 
 
+def test_land_says_each_defer_comment_the_branch_s_merge_adds_and_removes_where_each_is(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    """A deferral moved to another line is neither added nor removed, and a file that isn't Python is never read for one."""
+    feat, dev, shell = landings.feat, landings.dev, landings.shell
+    landings.wrote(
+        dev,
+        "src/pkg/hall.py",
+        '"""Hall."""\n\n'
+        '# lup: defer(issue=80, why="the hall waits on #80")\n'
+        "HALL = 1\n"
+        '# lup: defer(when=Released, why="the door waits on a release")\n'
+        "DOOR = 2\n",
+    )
+    shell.git(landings.repository, "push", "-q", "origin", "dev")
+    old = landings.on_forge("refs/heads/dev")
+    shell.git(feat, "merge", "-q", "--ff-only", "dev")
+    landings.wrote(
+        feat,
+        "src/pkg/hall.py",
+        '"""Hall."""\n\n'
+        "HALL = 1\n"
+        '# lup: defer(when=Released, why="the door waits on a release")\n'
+        "DOOR = 2\n",
+    )
+    landings.wrote(
+        feat,
+        "src/pkg/rooms.py",
+        '"""Rooms."""\n\n'
+        '# lup: defer(issue="joy-void-joy/lup-legacy#7", when=Released, why="a '
+        'stand-in")\n'
+        "ROOMS = 1\n",
+    )
+    landings.wrote(feat, "docs/rooms.md", '# lup: defer(issue=1, why="prose")\n')
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    merge = landings.on_forge("refs/heads/dev")
+    assert answer == (
+        f"Merged `feat` onto `dev` as {merge}, and moved `dev` here to it: the gate "
+        "passed on it.\n"
+        f"Landed {merge} on `dev` at `origin`, which was at {old}.\n"
+        "The `# lup: defer` comments `feat` adds and removes, against `dev`:\n"
+        "- adds src/pkg/rooms.py:3: `# lup: defer(issue="
+        '"joy-void-joy/lup-legacy#7", when=Released, why="a stand-in")`\n'
+        "- removes src/pkg/hall.py:3: `# lup: defer(issue=80, why="
+        '"the hall waits on #80")`\n'
+        "Cleaned up after it:\n"
+        f"- removed the worktree {feat}\n"
+        "- deleted the local branch `feat`\n"
+        f"{NOTHING_GOING}"
+    )
+    read = {each.path for asked in landings.parser.parsed_asked for each in asked}
+    assert read == {Path("src/pkg/hall.py"), Path("src/pkg/rooms.py")}
+
+
+def test_land_of_dev_as_it_is_says_each_merged_branch_s_defer_comments_then_its_own_commits(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    feat, dev, shell = landings.feat, landings.dev, landings.shell
+    old = landings.on_forge("refs/heads/dev")
+    landings.wrote(
+        feat,
+        "src/pkg/rooms.py",
+        '"""Rooms."""\n\n# lup: defer(issue=12, why="rooms wait")\nROOMS = 1\n',
+    )
+    shell.git(dev, "merge", "-q", "--no-ff", "--no-edit", "feat")
+    landings.wrote(
+        dev,
+        "src/pkg/hall.py",
+        '"""Hall."""\n\n# lup: defer(issue=13, why="the hall waits")\nHALL = 1\n',
+    )
+    tip = shell.git(dev, "rev-parse", "HEAD")
+    landings.passing(tip)
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer, error = call(machine.host.launch("one").mcp, "land", {})
+    assert not error
+    assert answer == (
+        f"Landed {tip} on `dev` at `origin`, which was at {old}.\n"
+        "The `# lup: defer` comments `feat` adds and removes, against `dev`:\n"
+        '- adds src/pkg/rooms.py:3: `# lup: defer(issue=12, why="rooms wait")`\n'
+        "The `# lup: defer` comments `dev`'s own commits add and remove, against "
+        "`dev` on `origin`:\n"
+        '- adds src/pkg/hall.py:3: `# lup: defer(issue=13, why="the hall waits")`\n'
+        "Cleaned up after it:\n"
+        f"- removed the worktree {feat}\n"
+        "- deleted the local branch `feat`\n"
+        f"{NOTHING_GOING}"
+    )
+
+
+class Unreadable(Parser):
+    """The engine's reading of a file's parse, failing as it does on a host with no Node, or no engine built."""
+
+    @override
+    def parsed(self, root: Path, sources: list[Source]) -> list[FileReport]:
+        message = "the engine's `parse` failed: node: not found"
+        raise EngineError(message)
+
+
+def test_land_where_the_defer_comments_can_t_be_read_says_so_and_lands_all_the_same(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=Unreadable()
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    merge = landings.on_forge("refs/heads/dev")
+    assert merge is not None
+    assert (
+        f"Landed {merge} on `dev` at `origin`, which was at "
+        f"{landings.shell.git(landings.dev, 'rev-parse', f'{merge}^1')}.\n"
+        "lup couldn't read the `# lup: defer` comments it lands: the engine's `parse` "
+        "failed: node: not found\n"
+        "Cleaned up after it:\n"
+    ) in answer
+
+
 def test_land_ends_on_the_subagents_lup_hasn_t_heard_end_and_the_branches_off_dev(
     landings: Landings,
     machine: Layout,
@@ -8869,7 +9156,15 @@ def test_land_ends_on_the_subagents_lup_hasn_t_heard_end_and_the_branches_off_de
     idea = landings.branched("idea")
     landings.wrote(idea, "src/pkg/idea.py", '"""Idea."""\n')
     landings.shell.git(landings.repository, "branch", "draft", "idea")
-    with inboxed(machine, clock, notices, said, spawns=Unguided(), rooms=landings.room):
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        spawns=Unguided(),
+        rooms=landings.room,
+        parser=landings.parser,
+    ):
         landings.launched("claude")
         hook = machine.host.launch("one").hook
         send(hook, started("claude"))
@@ -8897,7 +9192,9 @@ def test_a_hold_declined_after_a_merge_leaves_it_on_dev_here_and_says_so(
     old = landings.on_forge("refs/heads/dev")
     session = lander(landings, "claude")
     with (
-        inboxed(machine, clock, notices, said, rooms=landings.room) as delivery,
+        inboxed(
+            machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+        ) as delivery,
         ThreadPoolExecutor(max_workers=1) as pool,
     ):
         landings.launched("claude")
