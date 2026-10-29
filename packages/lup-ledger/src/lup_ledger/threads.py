@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, Self, override
 from pydantic import AwareDatetime, Field, SerializeAsAny
 
 from lup.types import Model
-from lup_ledger.parties import Conversation, Operator
+from lup_ledger.parties import Conversation, Lup, Operator
 from lup_ledger.records import Edge, Kinds, Name, Node
 
 if TYPE_CHECKING:
@@ -291,18 +291,24 @@ class Settled(Status):
 
 
 class Declined(Status):
-    """A thread declined: nothing will be done about it."""
+    """A thread declined: nothing will be done about it. Only the operator declines one."""
 
     kind: Literal["ledger:declined"] = "ledger:declined"
     stands: ClassVar[State] = "declined"
+    by: Operator
     why: str = ""
 
 
 class Reopened(Status):
-    """A thread reopened: back to whoever was on it, after it was parked, done, settled or declined."""
+    """A thread reopened: back to whoever was on it, after it was parked, done, settled or declined.
+
+    The operator reopens one, and lup does where what a parked one waits for
+    comes; an agent never does.
+    """
 
     kind: Literal["ledger:reopened"] = "ledger:reopened"
     stands: ClassVar[State] = "working"
+    by: Annotated[Operator | Lup, Field(discriminator="party")]
     why: str = ""
 
 

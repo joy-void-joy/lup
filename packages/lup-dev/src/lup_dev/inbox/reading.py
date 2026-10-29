@@ -37,16 +37,12 @@ from typing import TYPE_CHECKING
 from pydantic import Field, PositiveInt
 
 from lup.types import Model
+from lup_dev.inbox.concerns import Concerns, triggers
 from lup_dev.inbox.delivery import (
     Delivery,
-    ItemKind,
     clocked,
-    kind,
-    opening,
     remarked,
     standing,
-    what,
-    written,
 )
 from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.roster import Roster, ids
@@ -56,15 +52,33 @@ from lup_dev.inbox.store import (
     Done,
     Flagged,
     Item,
+    ItemNode,
     Message,
     Review,
     Waiting,
     cited,
 )
 from lup_dev.inbox.tags import Tag
-from lup_dev.inbox.threads import Anchor, addressed_to, anchors
+from lup_dev.inbox.texts import (
+    ItemKind,
+    kind,
+    opening,
+    what,
+    written,
+)
+from lup_dev.inbox.threads import Anchor, addressed_to, anchors, cue, spoken
 from lup_dev.listing import Span, latest, many, unlisted
-from lup_ledger.parties import Conversation, Operator, Party
+from lup_ledger import threads as ledger
+from lup_ledger.parties import Conversation, Lup, Operator, Party, Writer
+from lup_ledger.threads import (
+    Answered,
+    Check,
+    Member,
+    Moved,
+    Parked,
+    Standing,
+    Thread,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -122,6 +136,15 @@ class Narrowing(Span):
         description=(
             "How many items to list at most, the latest: left out, 50 a line each, "
             "or 10 whole. Those left out are counted."
+        ),
+    )
+    thread: str | None = Field(
+        default=None,
+        description=(
+            "Only one thread, by its name (`dashboard-lag`) or number, read whole: "
+            "where it stands, the threads under it, then what's in it in the order "
+            "it came, each whole, the operator's words on an agent's item under it, "
+            "every state; `since`, `until` and `limit` narrow it."
         ),
     )
 
@@ -285,7 +308,9 @@ class Reader(Model, arbitrary_types_allowed=True):
         return self.delivery.roster()
 
     def read(self, items: list[Item], wanted: Narrowing) -> Read:
-        """Return `items`, oldest first, as `wanted` narrows them: a line each, or each whole, then what was left out and what reads it."""
+        """Return `items`, oldest first, as `wanted` narrows them: a line each, or each whole, then what was left out and what reads it; or one thread of theirs, whole (`threaded`)."""
+        if wanted.thread is not None:
+            return self.threaded(items, wanted.thread, wanted)
         conversation = wanted.conversation
         readable = [
             item
@@ -385,6 +410,159 @@ class Reader(Model, arbitrary_types_allowed=True):
         return Read(
             text="\n".join([*head, said, *gap, *left, *settled]), found=len(chosen)
         )
+
+    def threaded(self, items: list[Item], said: str, wanted: Narrowing) -> Read:
+        """Return the thread of `items`' repositories `said` names, whole: where it stands, the threads under it, the items of other threads that name it, then what's in it, oldest first, each whole, the latest `wanted` lets through."""
+        concerns = self.delivery.concerns()
+        repositories = list(
+            dict.fromkeys(
+                each.repository
+                for item in items
+                for each in [item.sender, item.recipient, item.addressed]
+                if isinstance(each, Conversation)
+            )
+        )
+        found = [
+            each
+            for each in (
+                concerns.found(repository, said) for repository in repositories
+            )
+            if isinstance(each, Thread)
+        ]
+        threads = list({each.number: each for each in found}.values())
+        if not threads:
+            return Read(
+                text=(
+                    f"No thread{self.where} is `{said}`: `thread` takes a thread's "
+                    "name or number."
+                )
+            )
+        if len(threads) > 1:
+            numbers = and_said([f"@{each.number}" for each in threads])
+            return Read(
+                text=f"`{said}` names threads of several repositories, {numbers}: read one by its number."
+            )
+        [thread] = threads
+        members = concerns.threads.members(thread.number)
+        window = wanted.window(self.delivery.clock.now())
+        timely = [each for each in members if window.covers(made_of(each))]
+        shown = latest(
+            timely, made_of, wanted.model_copy(update={"whole": True}).most()
+        )
+        placed = [each.node.number for each in shown if each.part is None]
+        said_whole = [self.member(each, thread, placed) for each in shown]
+        left = (
+            unlisted(
+                len(timely) - len(shown),
+                "earlier entry",
+                made_of(shown[0]),
+                len(timely),
+                until=self.spelling.until,
+                limit=self.spelling.limit,
+            )
+            if shown
+            else []
+        )
+        nothing = [] if timely else [f"Nothing is in it{window.said()}."]
+        return Read(
+            text="\n\n".join(
+                [
+                    "\n".join(self.heading_of(concerns, thread)),
+                    *said_whole,
+                    *nothing,
+                    *left,
+                ]
+            ),
+            found=len(timely),
+        )
+
+    def heading_of(self, concerns: Concerns, thread: Thread) -> list[str]:
+        """Say where `thread` stands, the threads right under it, and the items of other threads that name it, a line each."""
+        above = (
+            ""
+            if thread.parent is None
+            else f", under @{concerns.thread(thread.parent).name}"
+        )
+        holder = (
+            "held by nobody"
+            if thread.holder is None or not concerns.live(thread.holder)
+            else f"held by {self.called(thread.holder)}"
+        )
+        under = [
+            f'- @{each.name}, "{each.title}": {stood(concerns.standing(each))}'
+            for each in concerns.threads.under(thread.number)
+        ]
+        refers = [
+            f"- {self.line(item)}"
+            for each in concerns.threads.references(thread.number)
+            if (item := self.delivery.inbox.items.get(each.source)) is not None
+        ]
+        return [
+            (
+                f'Thread @{thread.name} (@{thread.number}), "{thread.title}"{above}, '
+                f"{holder}: {stood(concerns.standing(thread))}."
+            ),
+            *(["Under it:", *under] if under else []),
+            *(["Elsewhere, naming it:", *refers] if refers else []),
+        ]
+
+    def member(self, member: Member, thread: Thread, placed: list[int]) -> str:
+        """Say what's in `thread` whole under a heading: an item as `whole` does, the operator's words on it under it; a part of their words moved in, with who moved it; a check, and their answer to it where they gave one."""
+        node = member.node
+        if member.part is not None:
+            part = PartId(item=node.number, part=member.part)
+            item = self.delivery.inbox.items.get(node.number)
+            anchor = (
+                None
+                if item is None
+                else next((each for each in spoken(item) if each.id == part), None)
+            )
+            moved = next(
+                (
+                    each
+                    for each in self.delivery.inbox.ledger.drawn_to(
+                        thread.number, Moved
+                    )
+                    if each.source == node.number and each.part == member.part
+                ),
+                None,
+            )
+            by = "" if moved is None else f", moved here by {self.wrote(moved.by)}"
+            return (
+                f"{part.cited()}  {clocked(made_of(member))}  the operator's words{by}:\n"
+                + Tag(
+                    name="part",
+                    attributes={"id": part.said()},
+                    parts=["" if anchor is None else anchor.text],
+                ).written()
+            )
+        if isinstance(node, Check):
+            answers = [each for each in member.drawn if isinstance(each, Answered)]
+            stands = (
+                "waiting on the operator"
+                if not answers
+                else f"answered at {clocked(answers[-1].at)}"
+            )
+            answer = [
+                Tag(
+                    name="answered",
+                    attributes={"from": "operator"},
+                    parts=[each.text or "Ticked."],
+                )
+                for each in answers
+            ]
+            return (
+                f"@{node.number}  {clocked(node.at)}  a check from {self.wrote(node.by)}, {stands}:\n"
+                + Tag(
+                    name="check",
+                    attributes={"item": str(node.number)},
+                    parts=[node.text, *answer],
+                ).written()
+            )
+        item = self.delivery.inbox.items.get(node.number)
+        if item is None:
+            return f"@{node.number}  {clocked(node.at)}  a `{node.kind}`."
+        return self.whole(item, placed)
 
     def waits(self, item: Item) -> bool:
         """Say whether `item` still waits, as the reader lists what waits: for them alone, where they read their own exchange; else for whomever it's for."""
@@ -574,6 +752,14 @@ class Reader(Model, arbitrary_types_allowed=True):
             return "you"
         return self.roster.who(party)
 
+    def wrote(self, writer: Writer) -> str:
+        """Name who wrote a record for the reader: lup, or a party as `called` names them."""
+        match writer:
+            case Lup():
+                return "lup"
+            case _:
+                return self.called(writer)
+
     def attributed(self, party: Conversation) -> str:
         """Name a conversation as a tag's attribute says it (`Roster.called`)."""
         return self.roster.called(party)
@@ -637,6 +823,47 @@ class Reader(Model, arbitrary_types_allowed=True):
         place = self.delivery.inbox.whereabouts.get(conversation.key())
         since = [] if place is None else [place.since]
         return max([*made, *since])
+
+
+def stood(standing: Standing) -> str:
+    """Say where a thread stands, in a few words: its state, what a parked one waits for or what to try on one done, and what in it waits on the operator, counted by what each is.
+
+    >>> stood(Standing(state="working"))
+    'working'
+    """
+
+    def named(member: Member) -> str:
+        match member.node:
+            case Check():
+                return "check"
+            case ItemNode() as node if member.part is None:
+                return kind(node.item(Waiting()))
+            case _:
+                return "part of the operator's words"
+
+    match standing.status:
+        case Parked(until=until):
+            state = f"parked until {triggers(until)}"
+        case ledger.Done(to_try=to_try):
+            state = f"done to confirm, to try: {cue(to_try)}"
+        case _:
+            state = standing.state
+    kinds = [named(each) for each in standing.waiting]
+    counted = ", ".join(many(kinds.count(each), each) for each in dict.fromkeys(kinds))
+    if not kinds:
+        return state
+    if standing.state == "waiting on the operator":
+        return f"{state}: {counted}"
+    return f"{state}; waiting on the operator: {counted}"
+
+
+def made_of(member: Member) -> datetime:
+    """Return when what's in a thread was made: an item when it was made, any other node when its version was written."""
+    match member.node:
+        case ItemNode(made=made):
+            return made
+        case node:
+            return node.at
 
 
 def cited_at(item: Item) -> str:

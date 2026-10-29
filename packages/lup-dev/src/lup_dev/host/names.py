@@ -29,10 +29,14 @@ were keys there.
 import string
 from itertools import count, groupby
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from lup.types import Model
 from lup_dev.host.protocol import HostError, Name, Register, handle
 from lup_dev.stored import read_model, write_model
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 CONTAINED = string.ascii_letters + string.digits + "_."
 """The characters a container's name holds beside `-` and its first, as podman allows them."""
@@ -61,6 +65,25 @@ def shaped(title: str) -> str | None:
         return handle(name)
     except ValueError:
         return None
+
+
+def lettered(name: str) -> str:
+    """Return `name` where it holds a letter, which an agent's name must, so `@` never reads it as an item's number; else raise `ValueError` saying so.
+
+    >>> lettered("v2")
+    'v2'
+    >>> lettered("2026")
+    Traceback (most recent call last):
+    ...
+    ValueError: `2026` has no letter, so `@2026` would read as an item's number: a name holds a letter
+    """
+    if not any(each.isalpha() for each in name):
+        message = (
+            f"`{name}` has no letter, so `@{name}` would read as an item's number: "
+            "a name holds a letter"
+        )
+        raise ValueError(message)
+    return name
 
 
 def container_name(repository: Path, name: str) -> str:
@@ -107,20 +130,31 @@ def taken(holder: Register, name: str) -> str:
     )
 
 
-def claimed(request: Register, launches: list[Register]) -> str:
+def claimed(
+    request: Register,
+    launches: list[Register],
+    refused: Callable[[str], str | None] = lambda _: None,
+) -> str:
     """Return the name `request` takes among `launches`: as asked where it's exact, else the first of it, `-2`, `-3`… that's free.
 
-    A record from before launches had names asks its worktree's. Raise
-    `HostError` where an exact name is held.
+    A name is free where no launch holds it and `refused` says nothing against
+    it: a thread of the repository has it (`Roots.refused`). A record from
+    before launches had names asks its worktree's. Raise `HostError` where an
+    exact name is held.
     """
     asked = request.name or request.worktree.name
     holder = held(asked, launches, request)
-    if holder is None:
+    against = refused(asked)
+    if holder is None and against is None:
         return asked
     if request.exact:
-        raise HostError(taken(holder, asked))
+        raise HostError(taken(holder, asked) if holder is not None else str(against))
     candidates = (f"{asked}-{number}" for number in count(2))
-    return next(each for each in candidates if held(each, launches, request) is None)
+    return next(
+        each
+        for each in candidates
+        if held(each, launches, request) is None and refused(each) is None
+    )
 
 
 class Names(Model):

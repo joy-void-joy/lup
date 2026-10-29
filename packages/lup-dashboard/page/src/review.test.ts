@@ -276,7 +276,7 @@ describe("laid", () => {
         const friction: Item = {
             ...NOTE,
             number: 50,
-            reason: { reason: "friction", text: "`ls` failed" },
+            reason: { reason: "friction", text: "`ls` failed", title: "" },
             sender: from("s1", "a1"),
             rank: NEWS,
         };
@@ -351,7 +351,7 @@ describe("laid", () => {
     });
 
     it("walks to what's to answer with ]a and [a, in the order it came, passing over news, flags and what's settled", () => {
-        const friction: Item = { ...NOTE, number: 60, reason: { reason: "friction", text: "`ls` failed" }, sender: from("s1", "a1"), rank: NEWS };
+        const friction: Item = { ...NOTE, number: 60, reason: { reason: "friction", text: "`ls` failed", title: "" }, sender: from("s1", "a1"), rank: NEWS };
         const out = laid([QUESTION, NOTE, friction, FLAGGED, APPROVAL], [], banner, header, EMPTY, NOTHING);
         expect(heads(out)).toEqual(["━━ s1 ━━", "── #51 ──", "── #60 ──", "━━ s2 ━━", "── #52 ──", "── #70 ──", "━━ lup ━━", "── #54 ──"]);
         const at = (text: string) => out.text.indexOf(text);
@@ -387,7 +387,7 @@ describe("laid", () => {
     });
 
     it("counts what's to answer and what's new for the header over the review, those settled in the draft left out", () => {
-        const friction: Item = { ...NOTE, number: 60, reason: { reason: "friction", text: "`ls` failed" }, rank: NEWS };
+        const friction: Item = { ...NOTE, number: 60, reason: { reason: "friction", text: "`ls` failed", title: "" }, rank: NEWS };
         const items = [QUESTION, NOTE, friction, FLAGGED];
         // Each group seen up to an item, as the operator marked it with Space d on its banner.
         const seen = (upTo: number): Seeing => ({ groups: new Map([[whose(from("s1", "a1")), upTo], [whose(from("s2")), upTo]]), commented: new Set() });
@@ -403,7 +403,7 @@ describe("laid", () => {
         const friction: Item = {
             ...NOTE,
             number: 62,
-            reason: { reason: "friction", text: "`uv run lup-dev check` printed: engine stale\nI was running the gate." },
+            reason: { reason: "friction", text: "`uv run lup-dev check` printed: engine stale\nI was running the gate.", title: "" },
         };
         const went: Item = {
             ...NOTE,

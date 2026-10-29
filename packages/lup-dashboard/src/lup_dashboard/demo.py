@@ -36,7 +36,6 @@ from lup_dev.host.records import Call, Called, Entry, Said, Task, Transcript, Us
 from lup_dev.host.workers import Viewed, Viewing
 from lup_dev.inbox import marks
 from lup_dev.inbox.citations import resolved
-from lup_dev.inbox.delivery import body, written
 from lup_dev.inbox.marks import CORE, MarksMoved, MarkStore, MoveMarks, ReviewMark
 from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.protocol import (
@@ -99,6 +98,10 @@ from lup_dev.inbox.store import (
     cited,
 )
 from lup_dev.inbox.store import Asked as Ask
+from lup_dev.inbox.texts import (
+    body,
+    written,
+)
 from lup_dev.inbox.threads import spoken
 from lup_dev.policy.reviewed import Mark, Marks
 from lup_dev.policy.since import (

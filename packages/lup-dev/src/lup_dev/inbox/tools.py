@@ -1,4 +1,4 @@
-"""The inbox's tools in a launched session: the speaking tools, `ask`, `send`, `wait_inbox`, `inbox` and `withdraw`.
+"""The inbox's tools in a launched session: the speaking tools, `ask`, `send`, `thread`, `wait_inbox`, `inbox` and `withdraw`.
 
 `docs/inbox.md`, *lup's tools*. Each is a function of the conversation
 calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
@@ -32,6 +32,11 @@ calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
   and the agent's own item read whole;
 - `withdraw` takes back a message or question the agent sent that the
   operator needn't see, with its reason: the agent's workflow is their own;
+- `thread` says what the agent does with one thread besides sending into it:
+  open it, work in it, hold it, hand it, move the operator's words into it,
+  park it, say it's done (`inbox/concerns.py`); each tool that sends takes a
+  `thread` it lands in (`THREAD`), and `ask` takes `checks`, each a check
+  in the question's thread;
 - `edit` changes what the agent sent the operator: a passage of its text, or
   its text whole (`docs/inbox.md`, *Editing what was sent*).
 
@@ -49,10 +54,11 @@ import inspect
 from datetime import timedelta
 from typing import TYPE_CHECKING, Literal, override
 
-from pydantic import Field, JsonValue
+from pydantic import AwareDatetime, Field, JsonValue, ValidationError
 
 import lup
 from lup.doors import bound
+from lup.sessions import results
 from lup.tools import speaking
 from lup.tools.serving import Answer
 from lup.tools.tool import Accepted, AgentTool, Refused, ToolSpec
@@ -60,17 +66,16 @@ from lup.types import Model
 from lup_dev.host.protocol import Register
 from lup_dev.host.rooms import RoomTools
 from lup_dev.inbox.citations import unresolved
+from lup_dev.inbox.concerns import Concerns, triggers
 from lup_dev.inbox.delivery import (
     Delivery,
     Waking,
-    body,
     clocked,
     standing,
-    what,
     whose,
 )
 from lup_dev.inbox.parts import PartId
-from lup_dev.inbox.reading import Narrowing, Reader
+from lup_dev.inbox.reading import Narrowing, Reader, and_said, stood
 from lup_dev.inbox.store import (
     Answered,
     Decision,
@@ -85,12 +90,24 @@ from lup_dev.inbox.store import (
     cited,
 )
 from lup_dev.inbox.tags import Tag, inside
+from lup_dev.inbox.texts import (
+    body,
+    what,
+)
 from lup_dev.inbox.threads import parts_of, spoken
 from lup_ledger.parties import Conversation, Operator, Party
+from lup_ledger.threads import (
+    BranchLanded,
+    CommitLanded,
+    ConditionHeld,
+    ConversationEnded,
+    IssueClosed,
+    Thread,
+    TimeCame,
+    Trigger,
+)
 
 if TYPE_CHECKING:
-    from lup.sessions import results
-    from lup.tools.speaking import Problem, Remark
     from lup_dev.host.courier import Conversation as Caller
 
 
@@ -98,6 +115,40 @@ class Said(Model):
     """What a call to one of the inbox's tools says back, in words."""
 
     text: str
+
+
+THREAD = (
+    "The thread it lands in: an existing one's name (`dashboard-lag`), or a new "
+    "title, which opens a thread under the one you work in. Left out, the one you "
+    "work in. Naming one doesn't move you there."
+)
+"""What `thread` says on every tool that sends: each speaking tool that sends
+takes the library's input with it, under the library's title, so its schema and
+a refusal of it name it as an ask from code does."""
+
+
+class ThreadedProblem(speaking.Problem, title="Problem"):
+    """What keeps you from going on."""
+
+    thread: str | None = Field(default=None, description=THREAD)
+
+
+class ThreadedStop(speaking.Stop, title="Stop"):
+    """Why you're stopping, by your own choice."""
+
+    thread: str | None = Field(default=None, description=THREAD)
+
+
+class ThreadedRemark(speaking.Remark, title="Remark"):
+    """A remark you attach to your answer."""
+
+    thread: str | None = Field(default=None, description=THREAD)
+
+
+class ThreadedFriction(results.Friction, title="Friction"):
+    """What got in your way, at the moment it did, in your own words."""
+
+    thread: str | None = Field(default=None, description=THREAD)
 
 
 class Choice(Model):
@@ -128,6 +179,15 @@ class Asking(Model):
             "later call."
         ),
     )
+    checks: list[str] = Field(
+        default=[],
+        description=(
+            "What only the operator can try or measure, a line each, with what "
+            "they should see: each waits on them in the thread until they answer "
+            "it with what they saw."
+        ),
+    )
+    thread: str | None = Field(default=None, description=THREAD)
 
 
 class Sending(Model):
@@ -148,6 +208,99 @@ class Sending(Model):
         )
     )
     text: str = Field(description="The message, in full.")
+    thread: str | None = Field(default=None, description=THREAD)
+
+
+class Parking(Model):
+    """What a parked thread waits for: the first of these to come."""
+
+    why: str = Field(default="", description="Why it waits, in a line.")
+    issue: int | str | None = Field(
+        default=None,
+        description="An issue closing: its number here, or `owner/name#7`.",
+    )
+    branch: str | None = Field(
+        default=None, description="A branch landing on the integration branch."
+    )
+    commit: str | None = Field(
+        default=None,
+        description="A commit reaching the integration branch, by its hash or its start.",
+    )
+    ended: str | None = Field(
+        default=None,
+        description=(
+            "A conversation ending, by their name or path, as `inbox` lines name them."
+        ),
+    )
+    at: AwareDatetime | None = Field(
+        default=None, description="A time, in ISO 8601 with its zone."
+    )
+    when: str | None = Field(
+        default=None,
+        description="A condition holding, as `defer`'s `when=` names one.",
+    )
+
+
+class Threading(Model):
+    """What you say about one thread, besides sending into it."""
+
+    name: str = Field(
+        description=(
+            "The thread: an existing one's name (`dashboard-lag`) or number, or, "
+            "with `title`, a new one's name. Alone, the answer says where it stands."
+        )
+    )
+    title: str | None = Field(
+        default=None,
+        description="Open it, with this title: what it's about, in a line.",
+    )
+    under: str | None = Field(
+        default=None,
+        description=(
+            "With `title`, the thread it opens under, by name or number; left out, "
+            "the one you work in."
+        ),
+    )
+    join: bool = Field(
+        default=False,
+        description=(
+            "Work in it from now on: what you send without `thread` lands there. "
+            "It doesn't make you its holder."
+        ),
+    )
+    hold: bool = Field(
+        default=False,
+        description=(
+            "Lead it, and work in it: whatever lands there is told to you whole. "
+            "It has one holder: taking it from another, they're told."
+        ),
+    )
+    hand: str | None = Field(
+        default=None,
+        description=(
+            "Give it to another agent, by their name or path, who leads it and "
+            "works in it from then on, and is told."
+        ),
+    )
+    move: list[str] = Field(
+        default=[],
+        description=(
+            "Items, or parts of the operator's words, to put in it, by id as their "
+            "tags cite them: `2159` an item, `2159.3` a part. Its holder is told "
+            "each whole, and others on it a line."
+        ),
+    )
+    park: Parking | None = Field(
+        default=None,
+        description="Set it aside until something comes: the first of what's given.",
+    )
+    done: str | None = Field(
+        default=None,
+        description=(
+            "Say it's done, for the operator to confirm: what they try, and what "
+            "they should see."
+        ),
+    )
 
 
 class Awaiting(Model):
@@ -228,6 +381,15 @@ class Withdrawing(Model):
     )
 
 
+class Planned(Model, arbitrary_types_allowed=True):
+    """What a call to `thread` does, read before any of it is: the thread, whom it's handed to, what parks it, and what opening it said."""
+
+    thread: Thread
+    to: Conversation | None = None
+    until: list[Trigger] = []
+    said: list[str] = []
+
+
 type Reach = Literal["operator", "operator and parent"]
 """Who reads what a conversation says with `how_it_felt`: the operator alone,
 or the operator and, where they're a subagent, the conversation that spawned
@@ -272,12 +434,39 @@ class Speaker(Model, arbitrary_types_allowed=True):
     every launch once the operator trusts the copy that holds it."""
 
     async def said(
-        self, reason: Message | Friction | HowItFelt | Stop | Question
+        self,
+        reason: Message | Friction | HowItFelt | Stop | Question,
+        thread: Thread | None = None,
     ) -> Item:
-        """Put `reason` in the operator's inbox, from this conversation, and return it as kept, its citations of their words read (`Delivery.cited`)."""
+        """Put `reason` in the operator's inbox, from this conversation, in `thread`, else where they work, and return it as kept, its citations of their words read (`Delivery.cited`)."""
         return await self.delivery.posted(
-            reason, self.party, Operator(), self.launch.worktree, call=self.call
+            reason,
+            self.party,
+            Operator(),
+            self.launch.worktree,
+            call=self.call,
+            thread=thread,
         )
+
+    @property
+    def concerns(self) -> Concerns:
+        """The threads, as this conversation works in them (`inbox/concerns.py`)."""
+        return self.delivery.concerns()
+
+    def threaded(self, said: str | None) -> Thread | None:
+        """Return the thread a call's `thread` names: an existing one, or one it opens under where this conversation works (`Concerns.addressed`); none where it names none. Raise `InboxError` where it can't be one."""
+        return self.concerns.addressed(self.party, said)
+
+    @staticmethod
+    def landing(thread: Thread | None) -> str:
+        """Say where what a call sent landed, after its number: the thread the call named; nothing where it named none, as it landed where the agent works.
+
+        >>> from datetime import UTC, datetime
+        >>> from pathlib import Path
+        >>> Speaker.landing(Thread(number=4, repository=Path("/r"), by=Operator(), at=datetime(2026, 1, 1, tzinfo=UTC), name="lag", title="Lag"))
+        ', in @lag'
+        """
+        return "" if thread is None else f", in @{thread.name}"
 
     @staticmethod
     def answered(text: str, item: Item) -> Said:
@@ -300,7 +489,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         )
         return True
 
-    async def blocked(self, said: Problem) -> Said:
+    async def blocked(self, said: ThreadedProblem) -> Said:
         """Say the work can't go on, and what's wrong.
 
         Call it when the work can't go on: the task can't be done as asked,
@@ -309,14 +498,18 @@ class Speaker(Model, arbitrary_types_allowed=True):
         inbox as a problem, and they're notified. Then end your turn. To end
         your work by your own choice instead, it's `stop`.
         """
-        item = await self.said(Message(kind="problem", text=said.problem))
+        try:
+            thread = self.threaded(said.thread)
+        except InboxError as refused:
+            return Said(text=f"Not sent: {refused}")
+        item = await self.said(Message(kind="problem", text=said.problem), thread)
         return self.answered(
-            f"Your problem is with the operator, {cited(item.number)}, and they're "
-            "notified. You can end your turn now.",
+            f"Your problem is with the operator, {cited(item.number)}"
+            f"{self.landing(thread)}, and they're notified. You can end your turn now.",
             item,
         )
 
-    async def stop(self, said: speaking.Stop) -> Said:
+    async def stop(self, said: ThreadedStop) -> Said:
         """End your work by your own choice, saying why.
 
         When the work is done and nothing more is worth doing, or when you'd
@@ -324,14 +517,19 @@ class Speaker(Model, arbitrary_types_allowed=True):
         the operator's inbox, never your parent's. Then end your turn. Where the
         work can't go on, it's `blocked`.
         """
-        item = await self.said(Stop.model_validate(said.model_dump()))
+        try:
+            thread = self.threaded(said.thread)
+        except InboxError as refused:
+            return Said(text=f"Not sent: {refused}")
+        stopped = Stop.model_validate(said.model_dump(exclude={"thread": True}))
+        item = await self.said(stopped, thread)
         return self.answered(
-            f"The operator will read why you stopped, {cited(item.number)}. You can "
-            "end your turn now.",
+            f"The operator will read why you stopped, {cited(item.number)}"
+            f"{self.landing(thread)}. You can end your turn now.",
             item,
         )
 
-    async def note(self, said: Remark) -> Said:
+    async def note(self, said: ThreadedRemark) -> Said:
         """Tell the operator a doubt, and carry on.
 
         An assumption your work rests on, a doubt, or a counterargument the
@@ -341,13 +539,18 @@ class Speaker(Model, arbitrary_types_allowed=True):
         that needs their eyes soon, is an `ask`, which waits on them and
         notifies them.
         """
-        item = await self.said(Message(kind="note", text=said.remark))
+        try:
+            thread = self.threaded(said.thread)
+        except InboxError as refused:
+            return Said(text=f"Not sent: {refused}")
+        item = await self.said(Message(kind="note", text=said.remark), thread)
         return self.answered(
-            f"Your note is with the operator, {cited(item.number)}. You can carry on.",
+            f"Your note is with the operator, {cited(item.number)}"
+            f"{self.landing(thread)}. You can carry on.",
             item,
         )
 
-    async def friction(self, said: results.Friction) -> Said:
+    async def friction(self, said: ThreadedFriction) -> Said:
         """Say what got in your way, and carry on.
 
         Call it the moment something gets in the way of the work, whatever it
@@ -357,14 +560,18 @@ class Speaker(Model, arbitrary_types_allowed=True):
         too, whole, at their next call. Your work goes on: nothing waits for an
         answer. A doubt about the work itself is a `note`.
         """
-        friction = Friction.model_validate(said.model_dump())
-        item = await self.said(friction)
+        try:
+            thread = self.threaded(said.thread)
+        except InboxError as refused:
+            return Said(text=f"Not sent: {refused}")
+        friction = Friction.model_validate(said.model_dump(exclude={"thread": True}))
+        item = await self.said(friction, thread)
         parent = (
             ", and your parent has it too" if await self.passed_up(friction) else ""
         )
         return self.answered(
             f"Thanks: your friction is with the operator, {cited(item.number)}"
-            f"{parent}. You can carry on.",
+            f"{self.landing(thread)}{parent}. You can carry on.",
             item,
         )
 
@@ -421,6 +628,10 @@ class Speaker(Model, arbitrary_types_allowed=True):
         returns or says, the question still open. Without it, the call returns
         at once, and the answer reaches you at a later call, or through
         `wait_inbox`.
+
+        `checks` asks the operator to try or measure what only they can, a
+        line each: each waits on them in the question's thread until they
+        answer it with what they saw, which reaches you then.
         """
         question = Question(
             text=asked.question,
@@ -430,15 +641,21 @@ class Speaker(Model, arbitrary_types_allowed=True):
             ],
         )
         found = self.asked()
+        try:
+            thread = None if found is not None else self.threaded(asked.thread)
+        except InboxError as refused:
+            return Said(text=f"Not asked: {refused}")
         item = (
-            await self.said(question)
+            await self.said(question, thread)
             if found is None
             else self.delivery.inbox.item(found)
         )
         number = item.number
+        checks = [] if found is not None else self.checked(item, asked.checks)
         if not asked.wait:
             return self.answered(
-                f"Your question is with the operator, {cited(number)}. Their answer "
+                f"Your question is with the operator, {cited(number)}"
+                f"{self.landing(thread)}{self.checking(checks)}. Their answer "
                 "reaches you at a later call; `wait_inbox` waits for it.",
                 item,
             )
@@ -468,6 +685,26 @@ class Speaker(Model, arbitrary_types_allowed=True):
             item,
         )
 
+    def checked(self, item: Item, lines: list[str]) -> list[int]:
+        """Put a check for each of `lines` in the thread `item`, a question, landed in, and return their numbers."""
+        concerns = self.concerns
+        thread = concerns.containing(item.number)
+        if thread is None or not lines:
+            return []
+        return [each.number for each in concerns.checks(self.party, thread, lines)]
+
+    @staticmethod
+    def checking(checks: list[int]) -> str:
+        """Say the checks a question put to the operator beside it, after its number; nothing where it put none.
+
+        >>> Speaker.checking([7, 8])
+        ', and its checks @7 and @8 wait on them'
+        """
+        if not checks:
+            return ""
+        said = and_said([cited(each) for each in checks])
+        return f", and its {'check' if len(checks) == 1 else 'checks'} {said} wait{'s' if len(checks) == 1 else ''} on them"
+
     @lup.tool
     async def send(self, sending: Sending) -> Said:
         """Send a message to a party's inbox.
@@ -488,14 +725,17 @@ class Speaker(Model, arbitrary_types_allowed=True):
         """
         try:
             recipient = self.addressed(sending.to)
+            thread = self.threaded(sending.thread)
         except InboxError as unreached:
             return Said(text=f"Not sent: {unreached}")
         message = Message(kind=sending.kind, text=sending.text)
         match recipient:
             case Operator():
-                item = await self.said(message)
+                item = await self.said(message, thread)
                 return self.answered(
-                    f"Your message is with the operator, {cited(item.number)}.", item
+                    f"Your message is with the operator, {cited(item.number)}"
+                    f"{self.landing(thread)}.",
+                    item,
                 )
             case Conversation():
                 item = await self.delivery.posted(
@@ -505,9 +745,11 @@ class Speaker(Model, arbitrary_types_allowed=True):
                     self.launch.worktree,
                     call=self.call,
                 )
-                copy = await self.said(message.model_copy(update={"to": recipient}))
+                copy = await self.said(
+                    message.model_copy(update={"to": recipient}), thread
+                )
                 return self.answered(
-                    self.arriving(recipient, item.number, copy.number), copy
+                    self.arriving(recipient, item.number, copy.number, thread), copy
                 )
 
     def addressed(self, to: str) -> Party:
@@ -580,8 +822,14 @@ class Speaker(Model, arbitrary_types_allowed=True):
             f"subagents by their name, their path or their runtime's id: {theirs}."
         )
 
-    def arriving(self, recipient: Conversation, number: int, copy: int) -> str:
-        """Say where message `number` to `recipient`, another conversation, is, and how it'll be told, with the number of the operator's `copy`."""
+    def arriving(
+        self,
+        recipient: Conversation,
+        number: int,
+        copy: int,
+        thread: Thread | None = None,
+    ) -> str:
+        """Say where message `number` to `recipient`, another conversation, is, and how it'll be told, with the number of the operator's `copy`, and the thread it landed in where the call named one."""
         whose = (
             "your parent"
             if recipient == self.delivery.parent(self.party)
@@ -590,7 +838,8 @@ class Speaker(Model, arbitrary_types_allowed=True):
         return (
             f"Your message is in the inbox of {whose} {self.called(recipient)}, "
             f"{cited(number)}, "
-            f"and the operator has a copy, {cited(copy)}. It's told at their "
+            f"and the operator has a copy, {cited(copy)}{self.landing(thread)}. It's "
+            "told at their "
             "next call, their turn's end or their `wait_inbox`, whichever comes first"
             f"{self.idle(recipient)}."
         )
@@ -672,9 +921,11 @@ class Speaker(Model, arbitrary_types_allowed=True):
         under it, and their turn's end saying which of the operator's it
         answers, so the
         exchange reads as one thread: how you read what an earlier session
-        said and was told. Given an item's `number`, any of this repository's, it's read
-        whole. It marks nothing read and answers nothing: what reaches you
-        still comes through `wait_inbox` and beside your calls.
+        said and was told. `thread` reads one thread whole: where it stands,
+        the threads under it, then what's in it in order, each whole. Given an
+        item's `number`, any of this repository's, it's read whole. It marks
+        nothing read and answers nothing: what reaches you still comes through
+        `wait_inbox` and beside your calls.
         """
         items = self.delivery.inbox.about(self.party.repository)
         if reading.part is not None:
@@ -691,6 +942,171 @@ class Speaker(Model, arbitrary_types_allowed=True):
             where=" about this repository",
         )
         return Said(text=reader.read(items, reading).text)
+
+    @lup.tool
+    async def thread(self, threading: Threading) -> Said:
+        """Open, join, hold or park a thread; say it's done.
+
+        A thread is one concern: what you and the operator say about one
+        thing, with sub-threads under it. `name` is the thread; each field you
+        give says one thing of it, and one call can say several: open it
+        under another, hold it, and move the operator's words in.
+        - `title` opens it, under `under`, or the thread you work in;
+        - `join` makes it the thread you work in, where what you send without
+          `thread` lands; `hold` makes you its holder too, who leads it and is
+          told whole whatever lands there; `hand` gives it to another agent,
+          who holds it and works in it;
+        - `move` puts items, or parts of the operator's words, in it by id;
+        - `park` sets it aside until something comes; `done` says it's done,
+          for the operator to confirm, with what they try.
+
+        Opening, moving, parking and saying done don't move you: you work in a
+        thread until you join, hold or are handed another. Settling, declining
+        and reopening are the operator's. With `name` alone, the answer says
+        where the thread stands.
+        """
+        concerns = self.concerns
+        try:
+            planned = self.planned(concerns, threading)
+        except (InboxError, ValueError) as refused:
+            return Said(text=f"Nothing done: {refused}")
+        thread = planned.thread
+        said = [*planned.said]
+        if threading.hold:
+            thread = concerns.held(self.party, thread)
+            said.append(
+                f"You hold @{thread.name}, and work in it: what you send lands there."
+            )
+        if threading.join and not threading.hold:
+            concerns.joined(self.party, thread)
+            said.append(f"You work in @{thread.name}: what you send lands there.")
+        if planned.to is not None:
+            thread = concerns.handed(self.party, thread, planned.to)
+            said.append(
+                f"@{thread.name} is {self.called(planned.to)}'s now, who's told."
+            )
+        moved = [concerns.moved(self.party, thread, each) for each in threading.move]
+        if moved:
+            said.append(f"Moved {and_said(moved)} into @{thread.name}.")
+        if threading.park is not None:
+            concerns.parked(self.party, thread, planned.until, threading.park.why)
+            said.append(f"@{thread.name} is parked until {triggers(planned.until)}.")
+        if threading.done is not None:
+            concerns.done(self.party, thread, threading.done)
+            said.append(f"@{thread.name} is done, for the operator to confirm.")
+        if not said:
+            said.append(self.standing(concerns, thread))
+        return Said(text="\n".join(said))
+
+    def planned(self, concerns: Concerns, threading: Threading) -> Planned:
+        """Read what `threading` asks before any of it is done, so a call refused does nothing: the thread, opened where `title` says, whom it's handed to, and what parks it.
+
+        Raise `InboxError` where something can't be: a thread that isn't
+        there, a title for one that is, a holder and a hand at once, parked and
+        done at once, a park with nothing it waits for, an agent nobody is.
+        """
+        repository = self.party.repository
+        if threading.hold and threading.hand is not None:
+            message = "`hold` takes it and `hand` gives it away: say one"
+            raise InboxError(message)
+        if threading.park is not None and threading.done is not None:
+            message = "a thread is parked or done, not both: say one"
+            raise InboxError(message)
+        until = [] if threading.park is None else self.until(threading.park)
+        if threading.park is not None and not until:
+            message = "`park` takes what it waits for: an issue, a branch, a commit, a conversation, a time or a condition"
+            raise InboxError(message)
+        to = None if threading.hand is None else self.handed_to(threading.hand)
+        for each in threading.move:
+            self.movable(concerns, each)
+        found = concerns.found(repository, threading.name)
+        if threading.title is None:
+            if found is None:
+                message = f"no thread of this repository is `{threading.name}`: give `title` to open it"
+                raise InboxError(message)
+            return Planned(
+                thread=concerns.named(repository, threading.name), to=to, until=until
+            )
+        if found is not None:
+            message = f"`{threading.name}` names @{found.number} already: leave out `title`, or pick another name"
+            raise InboxError(message)
+        under = (
+            concerns.working(self.party)
+            if threading.under is None
+            else concerns.named(repository, threading.under)
+        )
+        try:
+            opened = concerns.opened(
+                self.party,
+                threading.title,
+                under,
+                name=threading.name.removeprefix("@"),
+            )
+        except ValidationError as unnamed:
+            message = f"`{threading.name}` can't be a thread's name: letters, digits, `-`, `_` and `.`, a letter among them"
+            raise InboxError(message) from unnamed
+        return Planned(
+            thread=opened,
+            to=to,
+            until=until,
+            said=[f"Opened @{opened.name}, under @{under.name}."],
+        )
+
+    def until(self, parking: Parking) -> list[Trigger]:
+        """Return what `parking` says a thread waits for, each trigger given. Raise `InboxError` where its conversation is nobody's."""
+        ended = (
+            []
+            if parking.ended is None
+            else [
+                ConversationEnded(conversation=self.conversation_named(parking.ended))
+            ]
+        )
+        return [
+            *([] if parking.issue is None else [IssueClosed(issue=parking.issue)]),
+            *([] if parking.branch is None else [BranchLanded(branch=parking.branch)]),
+            *([] if parking.commit is None else [CommitLanded(commit=parking.commit)]),
+            *ended,
+            *([] if parking.at is None else [TimeCame(at=parking.at)]),
+            *([] if parking.when is None else [ConditionHeld(when=parking.when)]),
+        ]
+
+    def conversation_named(self, said: str) -> Conversation:
+        """Return the conversation of this repository `said` names, by their name, path or runtime's id, the one last heard where several had it, as `inbox` reads one; raise `InboxError` where it names none."""
+        items = self.delivery.inbox.about(self.party.repository)
+        reader = Reader(delivery=self.delivery, reader=self.party)
+        found = reader.matching(said, items)
+        if not found:
+            message = f"no conversation of this repository is `{said}`"
+            raise InboxError(message)
+        return found[0]
+
+    def handed_to(self, said: str) -> Conversation:
+        """Return the agent `said` names to hand a thread to, by their name, path or runtime's id, who goes on; raise `InboxError` where it names nobody who does."""
+        found = self.conversation_named(said)
+        if not self.concerns.live(found):
+            message = f"{self.called(found)} has ended, and holds nothing"
+            raise InboxError(message)
+        return found
+
+    def movable(self, concerns: Concerns, said: str) -> None:
+        """Say, raising `InboxError`, where `said`, given to `move`, names nothing of this repository a thread takes."""
+        bare = said.strip().removeprefix("@")
+        number = bare if bare.isdigit() else PartId.parsed(bare).item
+        concerns.item(self.party.repository, int(number))
+
+    def standing(self, concerns: Concerns, thread: Thread) -> str:
+        """Say where `thread` stands, in a line: its title, the thread it's under, who holds it, and where it stands (`stood`)."""
+        above = (
+            ""
+            if thread.parent is None
+            else f", under @{concerns.thread(thread.parent).name}"
+        )
+        holder = (
+            "held by nobody"
+            if thread.holder is None or not concerns.live(thread.holder)
+            else f"held by {self.called(thread.holder)}"
+        )
+        return f'@{thread.name}, "{thread.title}"{above}, {holder}: {stood(concerns.standing(thread))}.'
 
     @lup.tool
     async def withdraw(self, withdrawing: Withdrawing) -> Said:
@@ -809,6 +1225,8 @@ class Speaker(Model, arbitrary_types_allowed=True):
 
         A speaking tool's description is its function's docstring; `how_it_felt`'s
         ends saying whom it reaches, as `how_it_felt_reaches` says (`reaching`).
+        Each takes what the library's does, and those that send a `thread`
+        beside it (`THREAD`); `how_it_felt` lands where the agent started.
         """
         functions = {
             speaking.blocked.name: self.blocked,
@@ -824,11 +1242,19 @@ class Speaker(Model, arbitrary_types_allowed=True):
         descriptions[felt] = (
             f"{descriptions[felt]}\n\n{reaching(self.how_it_felt_reaches)}"
         )
+        inputs: dict[str, type[Model]] = {
+            speaking.blocked.name: ThreadedProblem,
+            speaking.stop.name: ThreadedStop,
+            speaking.note.name: ThreadedRemark,
+            speaking.friction.name: ThreadedFriction,
+            speaking.how_it_felt.name: results.HowItFelt,
+        }
         speaking_tools = [
             tool.model_copy(
                 update={
                     "description": descriptions[tool.name],
                     "function": functions[tool.name],
+                    "input": inputs[tool.name],
                 }
             )
             for tool in [

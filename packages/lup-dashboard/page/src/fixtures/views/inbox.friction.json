@@ -11,7 +11,8 @@
           "number": 57,
           "reason": {
             "reason": "friction",
-            "text": "The gate printed nothing for four minutes."
+            "text": "The gate printed nothing for four minutes.",
+            "title": ""
           },
           "sender": {
             "party": "conversation",

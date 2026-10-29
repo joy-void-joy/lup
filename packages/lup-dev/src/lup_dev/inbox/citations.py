@@ -25,7 +25,7 @@ is told (`unresolved`).
 
 import itertools
 from collections import Counter
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Literal, Self
 
 from markdown_it import MarkdownIt
 
@@ -125,13 +125,33 @@ def parted(src: str, start: int, end: int) -> Parted:
     return Parted(first=read(start, end), last="")
 
 
-# lup: ignore("FBT001", why="markdown-it calls each inline rule as `rule(state, silent)`, its flag positional")
-def citing(state: StateInline, silent: bool) -> bool:
+type Asked = Literal["read", "seen"]
+"""What markdown-it asks an inline rule: to read what's there, leaving a token;
+or only whether something is there, leaving none."""
+
+type Reading = Callable[[StateInline, Asked], bool]
+"""An inline rule of lup's: what it's asked said by name (`Asked`)."""
+
+type Rule = Callable[[StateInline, bool], bool]
+"""An inline rule as markdown-it calls it: `rule(state, silent)`."""
+
+
+def ruled(reading: Reading) -> Rule:
+    """Return `reading` as markdown-it calls an inline rule, its flag read as what it asks (`Asked`): the one place lup's rules take that flag positional."""
+
+    # lup: ignore("FBT001", why="markdown-it calls each inline rule as `rule(state, silent)`, its flag positional")
+    def rule(state: StateInline, silent: bool) -> bool:
+        return reading(state, "seen" if silent else "read")
+
+    return rule
+
+
+def citing(state: StateInline, asked: Asked) -> bool:
     """Read a citation at the inline position `state` is at, as markdown-it's inline rules do: `@`, an item's number, a part's after a dot, the words between brackets on its line; one with neither a part nor words is an item's citation, read by nobody here.
 
     The token it leaves carries what it read (`Written`), and how many times
     the same citation is written before it in the inline text, so it's
-    placed in the text whole; where `silent`, markdown-it only asks whether
+    placed in the text whole; where it's `seen`, markdown-it only asks whether
     one is there, and none is left.
     """
     src, start = state.src, state.pos
@@ -157,7 +177,7 @@ def citing(state: StateInline, silent: bool) -> bool:
             "" if words is None else f"[{words.text}]",
         ]
     )
-    if not silent:
+    if asked == "read":
         read = (
             Parted(first="", last="")
             if words is None
@@ -181,7 +201,7 @@ def citing(state: StateInline, silent: bool) -> bool:
 def reader() -> MarkdownIt:
     """Return the Markdown reader citations are read with: CommonMark with GitHub's tables and strikethrough, as an item's parts are read (`inbox/parts.py`), and the inline rule reading a citation (`citing`)."""
     made = MarkdownIt("commonmark").enable(["table", "strikethrough"])
-    made.inline.ruler.push("citation", citing)
+    made.inline.ruler.push("citation", ruled(citing))
     return made
 
 
