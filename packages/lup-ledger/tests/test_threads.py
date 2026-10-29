@@ -475,31 +475,26 @@ def test_a_part_moved_into_a_thread_waits_on_whoever_answers_for_it_until_someth
     assert threads.standing(lag.number).unanswered == []
 
 
-def test_a_citation_from_outside_a_thread_answers_where_its_writer_answered_for_it_as_they_wrote_it(
+def test_a_citation_from_outside_a_thread_is_no_answer_whoever_answers_for_it(
     citing: Ledger,
 ) -> None:
     threads = Threads(ledger=citing)
     main = opened(citing, "main", holder=MAIN)
     lag = opened(citing, "lag", parent=main.number, holder=None)
-    page = opened(citing, "page", parent=main.number, holder=None)
     review = item(citing, Operator())
     placed(citing, review, main)
     moved(citing, review, lag, 3)
-    moved(citing, review, page, 4)
+    routed = item(citing, MAIN)
+    placed(citing, routed, main)
+    cite(citing, routed, review, 3, minutes=2)
+    outside = threads.standing(lag.number)
     answer = item(citing, MAIN)
-    placed(citing, answer, main)
-    cite(citing, answer, review, 3, minutes=2)
-    citing.kept(lag.model_copy(update={"holder": WORKER, "at": at(3)}))
-    citing.kept(page.model_copy(update={"holder": WORKER, "at": at(3)}))
-    late = item(citing, MAIN)
-    placed(citing, late, main)
-    cite(citing, late, review, 4, minutes=4)
+    placed(citing, answer, lag)
+    cite(citing, answer, review, 3, minutes=3)
 
-    assert threads.answering_at(lag.number, at(2)) == MAIN
-    assert threads.answering_at(lag.number, at(4)) == WORKER
-    assert threads.answering_at(lag.number, START - timedelta(minutes=1)) is None
+    assert threads.answering(lag.number) == MAIN
+    assert [each.part for each in outside.unanswered] == [3]
     assert threads.standing(lag.number).unanswered == []
-    assert [each.part for each in threads.standing(page.number).unanswered] == [4]
 
 
 def test_the_threads_parked_are_those_whose_latest_status_parks_them(

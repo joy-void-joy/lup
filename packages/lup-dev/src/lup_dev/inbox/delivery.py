@@ -977,7 +977,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         """Return every part of the operator's words addressed to `party`, and each moved into a thread of their repository, oldest first: what their citations of the operator's words are read against (`spoken`).
 
         A part moved into a thread waits on whoever answers for it, whom the
-        operator mostly didn't address it to, until something cites it
+        operator mostly didn't address it to, until an item in the thread cites it
         (`lup_ledger.threads.answered`).
         """
         moved = self.concerns().moved_parts(party.repository)

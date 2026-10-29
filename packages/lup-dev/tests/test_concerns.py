@@ -373,7 +373,7 @@ def test_the_thread_tool_opens_holds_hands_moves_parks_and_says_done(
     assert told(delivery, main("s1")) == []
 
 
-def test_a_part_moved_into_a_thread_is_answered_by_whoever_answers_for_it_citing_it(
+def test_a_part_moved_into_a_thread_is_answered_by_an_item_in_that_thread_citing_it(
     delivery: Delivery,
 ) -> None:
     register = launched(delivery, "dev", "s1")
@@ -429,11 +429,18 @@ def test_a_part_moved_into_a_thread_is_answered_by_whoever_answers_for_it_citing
             ThreadedRemark(remark=f"Fixed @{review.number}.1: the IME's composition.")
         )
     )
-    said(lead.note(ThreadedRemark(remark=f"@{review.number}.2: next week.")))
+    said(lead.note(ThreadedRemark(remark=f"Moved @{review.number}.2 into @voice.")))
+    routed = len(concerns.standing(voice).unanswered)
+    said(
+        lead.note(
+            ThreadedRemark(remark=f"@{review.number}.2: next week.", thread="voice")
+        )
+    )
 
     assert before == [1, 1]
     assert outside == [1, 1]
     assert concerns.standing(lag).unanswered == []
+    assert routed == 1
     assert concerns.standing(voice).unanswered == []
 
 

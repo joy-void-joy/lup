@@ -25,7 +25,6 @@ from lup_ledger.threads import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from datetime import datetime
     from pathlib import Path
 
     from lup_ledger.parties import Conversation
@@ -111,28 +110,6 @@ class Threads(Model, arbitrary_types_allowed=True):
         """Return the references to thread `number` from items of other threads that touch it, in the order drawn."""
         return self.ledger.drawn_to(number, Refers)
 
-    def answering_at(self, number: int, at: datetime) -> Conversation | None:
-        """Return who answered for thread `number` at `at`: its holder then, as its version then says, or, where nobody held it, the holder then of the nearest thread above; none where nobody did, or it wasn't opened yet.
-
-        Whether a holder had ended by then isn't on the ledger, so one who had
-        still holds here: whoever answered above them only counts once
-        nobody holds it.
-        """
-
-        def then(each: int) -> Thread | None:
-            versions = [
-                version
-                for version in self.ledger.versions(each)
-                if isinstance(version, Thread) and version.at <= at
-            ]
-            return versions[-1] if versions else None
-
-        with self.ledger.together():
-            thread = then(number)
-            while thread is not None and thread.holder is None:
-                thread = None if thread.parent is None else then(thread.parent)
-        return None if thread is None else thread.holder
-
     def parked(self, repository: Path | None = None) -> list[Parked]:
         """Return what each parked thread waits for, the status it stands at, of `repository`, or of every one where it's none, in the order each was parked.
 
@@ -158,14 +135,9 @@ class Threads(Model, arbitrary_types_allowed=True):
         return statuses[-1] if statuses else None
 
     def standing(self, number: int) -> Standing:
-        """Return where thread `number` stands, read from the edges drawn to it and to what's in it (`Standing.read`), who answered for it at each citation's time read from its versions and those above it (`answering_at`)."""
+        """Return where thread `number` stands, read from the edges drawn to it and to what's in it (`Standing.read`)."""
         with self.ledger.together():
             thread = self.thread(number)
             drawn = self.ledger.drawn_to(number, Edge)
             members = self.members(number)
-            return Standing.read(
-                thread,
-                drawn,
-                members,
-                answering=lambda at: self.answering_at(number, at),
-            )
+        return Standing.read(thread, drawn, members)

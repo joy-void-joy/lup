@@ -26,7 +26,6 @@ from lup_ledger.records import Edge, Kinds, Name, Node
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from datetime import datetime
 
 type State = Literal[
     "working",
@@ -135,7 +134,7 @@ class Moved(Edge):
     A part counts as a member of the thread it's moved into, while its item
     stays in its own. A part is in one thread at a time, like a node. It waits
     on whoever answers for the thread until a node in the thread cites it
-    (`Edge.cites`), whoever wrote that node (`Standing.unanswered`).
+    (`Edge.cites`), whoever wrote that node (`answered`).
     """
 
     kind: Literal["ledger:moved"] = "ledger:moved"
@@ -330,29 +329,22 @@ class Member(Model):
     drawn: list[SerializeAsAny[Edge]] = []
 
 
-def answered(
-    member: Member,
-    members: list[Member],
-    answering: Callable[[datetime], Conversation | None],
-) -> bool:
-    """Say whether `member`, a part of the operator's words moved into a thread whose members are `members`, is answered: a node in the thread cites it (`Edge.cites`), or one anywhere does whose writer answered for the thread as they wrote it, as `answering` says of a time.
+def answered(member: Member, members: list[Member]) -> bool:
+    """Say whether `member`, a part of the operator's words moved into a thread whose members are `members`, is answered: a node in the thread cites it (`Edge.cites`), whoever wrote it.
 
-    The operator's words moved into a thread wait on whoever answers for it,
-    so a citation by them counts wherever it lands: a main session answers
-    the operator's part they moved into a thread nobody holds yet from their
-    own root. Anyone else's, from outside the thread, is no answer. A node in
-    the thread counts whoever wrote it, a subagent of its holder's among them:
-    a subagent starts on their parent's thread, so the work their parent
-    handed them answers there, beside the operator's words. A node itself in
-    the thread, never a part, is what answers.
+    The answer is where the operator reads it, beside their words: whoever
+    answers for the thread from above answers into it, naming it as they
+    send. A citation from outside the thread is a reference, no answer, so a
+    mover saying where they routed a part doesn't close it. A subagent's
+    counts, since a subagent starts on their parent's thread and the work their
+    parent handed them answers there. A node itself in the thread, never a
+    part, is what answers.
     """
     if member.part is None:
         return False
     inside = [each.node.number for each in members if each.part is None]
     return any(
-        each.cites(member.part)
-        and (each.source in inside or each.by == answering(each.at))
-        for each in member.drawn
+        each.cites(member.part) and each.source in inside for each in member.drawn
     )
 
 
@@ -372,14 +364,8 @@ class Standing(Model):
     """Who's on it: its holder first, then each conversation that wrote what's in it."""
 
     @classmethod
-    def read(
-        cls,
-        thread: Thread,
-        drawn: list[Edge],
-        members: list[Member],
-        answering: Callable[[datetime], Conversation | None] | None = None,
-    ) -> Self:
-        """Read where `thread` stands from `drawn`, the edges drawn to it, oldest first, and `members`, what's in it; `answering` says who answered for it at a time, its holder as it stands where it's none.
+    def read(cls, thread: Thread, drawn: list[Edge], members: list[Member]) -> Self:
+        """Read where `thread` stands from `drawn`, the edges drawn to it, oldest first, and `members`, what's in it.
 
         Its latest status says it, but for a thread working or reopened, which
         waits on the operator where a member does.
@@ -393,15 +379,10 @@ class Standing(Model):
         writers = [
             each.node.by for each in members if isinstance(each.node.by, Conversation)
         ]
-
-        def held(at: datetime) -> Conversation | None:
-            del at
-            return thread.holder
-
         unanswered = [
             each
             for each in members
-            if each.part is not None and not answered(each, members, answering or held)
+            if each.part is not None and not answered(each, members)
         ]
         return cls(
             state=state,
