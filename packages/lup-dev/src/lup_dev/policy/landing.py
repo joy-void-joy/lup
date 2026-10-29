@@ -56,7 +56,9 @@ gated branch, `dev` by default:
    and refuses nothing;
 9. each branch it landed is cleaned up after: its copy on the remote deleted,
    as `delete-merged` deletes one (`Remotes.merged`); its worktree removed where
-   it's clean and nobody works in it; then the local branch deleted;
+   it's clean and nobody works in it, or detached where a subagent who may be
+   resumed started there; then the local branch deleted. A worktree kept so is
+   removed by the first landing after its subagent's launch ends (`lapsed`);
 10. each flagged write still waiting that's left nothing to hold is withdrawn
     from the operator's inbox (`Lander.withdrawn`): one on a branch gone, the
     cleanup's or any deleted earlier, landed or not; and one on a branch whose
@@ -119,6 +121,20 @@ checked out stays with it. The index places a subagent in a worktree once their
 file tools wrote there, or, in one lup made for them at their runtime's asking,
 from their first call, so a fresh worktree a worker made themselves is kept by which
 branches count as landed, not by this check (#240).
+
+**Kept, detached, while a subagent may be resumed there:** the worktree lup gave
+a subagent to work apart in (`Holding.apart`) is where their shell starts each
+command. Their runtime can resume them after their turn ended, their parent
+writing to them again: had the landing removed it, each command of theirs would
+fail before it ran. So where their turn ended while their launch is still
+served (`Resumable`), the cleanup detaches its `HEAD` at the commit it has
+checked out, in the room, which changes no file, deletes the branch as for any
+other, and leaves them lup's words saying so, told beside their next call
+(`Delivery.left`). Once their launch has ended, nothing resumes them: the next
+landing removes it as it removes any, where what landed holds its commit, and
+names it as left where it doesn't, since it would be on no branch (`Lapsed`).
+A worktree a resumed subagent put a branch in since is that branch's, and its
+landing's to clean up after.
 
 The tool's docstring's first line is its summary, 50 characters at most, which
 the guidance lists (`launch/guidance.py`); the rest is its description. It
@@ -281,6 +297,8 @@ class Worktree(Model):
 
     root: Path
     branch: str | None = None
+    head: str | None = None
+    """The commit its `HEAD` names; none before the repository's first."""
 
 
 class Worker(Model):
@@ -288,6 +306,25 @@ class Worker(Model):
 
     root: Path
     why: str
+
+
+class Resumable(Model):
+    """A subagent whose turn ended while their launch is still served, in the worktree lup gave them to work apart in (`Holding.apart`), where their shell starts each command: their runtime may resume them there, so a landing's cleanup keeps it, detached, rather than remove it."""
+
+    root: Path
+    conversation: Conversation
+    who: str
+    """Who they are, as people call them (`called`)."""
+
+
+class Lapsed(Model):
+    """A worktree a landing kept, detached, for a subagent who might be resumed there (`Resumable`), once their launch has ended and nothing resumes them: who it was kept for, and why it stays, where it does."""
+
+    who: str
+    why: str | None = None
+    """Why it isn't removed: its `HEAD` is a commit the integration branch
+    doesn't hold, which removing it would leave on no branch. None where it's
+    removed."""
 
 
 class Reached(Model):
@@ -520,24 +557,29 @@ def started(saw: Saw | None, git: Git, old: str | None, path: Path) -> bytes | N
 
 
 def worktrees(git: Git) -> list[Worktree]:
-    """Return the repository's worktrees, its main one first, as `git worktree list` gives them, each with the branch it has checked out."""
+    """Return the repository's worktrees, its main one first, as `git worktree list` gives them, each with the branch it has checked out and the commit its `HEAD` names."""
     fields = nul_separated(git.run("worktree", "list", "--porcelain", "-z").output)
     starts = [at for at, field in enumerate(fields) if field.startswith("worktree ")]
     records = [
         fields[start:end]
         for start, end in zip(starts, [*starts[1:], len(fields)], strict=True)
     ]
+
+    def labelled(record: list[str], label: str) -> str | None:
+        return next(
+            (
+                field.removeprefix(f"{label} ")
+                for field in record
+                if field.startswith(f"{label} ")
+            ),
+            None,
+        )
+
     return [
         Worktree(
             root=Path(record[0].removeprefix("worktree ")),
-            branch=next(
-                (
-                    field.removeprefix("branch ")
-                    for field in record
-                    if field.startswith("branch ")
-                ),
-                None,
-            ),
+            branch=labelled(record, "branch"),
+            head=labelled(record, "HEAD"),
         )
         for record in records
     ]
@@ -963,6 +1005,9 @@ class Lander(Model, arbitrary_types_allowed=True):
         invited to, once, beside their next call. Then it cleans up after each
         branch it landed: deletes its copy on the remote, removes its worktree
         where it's clean and nobody works in it, and deletes the local branch.
+        A worktree a subagent started in, whose turn ended while their session
+        goes on, it keeps, detached at what landed, so they can be resumed
+        there; a landing after their session ends removes it.
         A flagged write still waiting that's left nothing to hold, on a branch
         gone or on a file a branch it landed leaves unchanged, it withdraws
         from the operator's inbox, saying which.
@@ -1077,7 +1122,9 @@ class Lander(Model, arbitrary_types_allowed=True):
             Merge(onto=onto, remote=remote, old=old, branch=named, tip=lands),
             branches,
         )
-        cleaned = await self.cleaned(git, remote, refs, branches.landed, onto)
+        cleaned = await self.cleaned(
+            git, remote, refs, branches.landed, onto=onto, tip=lands
+        )
         withdrawn = await self.withdrawn(git, onto, lands, branches.holding, changed)
         was = "new there" if old is None else f"which was at {old}"
         going = await self.going(git, lands, onto)
@@ -1717,9 +1764,11 @@ class Lander(Model, arbitrary_types_allowed=True):
         remote: str,
         refs: list[Ref],
         branches: dict[str, str],
+        *,
         onto: str,
+        tip: str,
     ) -> Cleaned:
-        """Clean up after each branch the landing landed but those gated or protected: its copy on `remote`, which listed `refs` before the push; its worktree; its local branch."""
+        """Clean up after each branch the landing landed but those gated or protected: its copy on `remote`, which listed `refs` before the push; its worktree, or where a subagent who may be resumed started there, its `HEAD` detached (`Resumable`); its local branch. Then remove each worktree a landing kept so whose launch has ended since, where `tip`, which landed, holds its commit (`Lapsed`)."""
         limits = self.launch.limits
         landed = {
             ref: commit
@@ -1728,8 +1777,6 @@ class Lander(Model, arbitrary_types_allowed=True):
             and not matching(ref, limits.gated)
             and not matching(ref, limits.protected)
         }
-        if not landed:
-            return Cleaned()
         listed = [ref.name for ref in refs]
         trees = await asyncio.to_thread(worktrees, git)
         places = list(self.delivery.inbox.whereabouts.values())
@@ -1739,13 +1786,19 @@ class Lander(Model, arbitrary_types_allowed=True):
             **({} if main is None else {main: "the repository's main worktree"}),
             **working,
         }
+        resumable = await asyncio.to_thread(self.resumable, places)
+        lapsed = await asyncio.to_thread(self.lapsed, git, places, trees[1:], left, tip)
+        if not landed and not lapsed:
+            return Cleaned()
         roots = {
             ref: [each.root for each in trees if each.branch == ref] for ref in landed
         }
+        mine = [root for each in roots.values() for root in each if root not in left]
         removing = [
-            root for each in roots.values() for root in each if root not in left
+            *(root for root in mine if root not in resumable),
+            *(root for root, lapse in lapsed.items() if lapse.why is None),
         ]
-        reached = await self.reached() if removing else Reached()
+        reached = await self.reached() if mine or removing else Reached()
         laid = await self.laid(reached)
         room = reached if laid.unlisted is None else Reached(unreached=laid.unlisted)
 
@@ -1776,9 +1829,20 @@ class Lander(Model, arbitrary_types_allowed=True):
                         on_remote=ref in listed,
                         roots=roots[ref],
                         left=left,
+                        resumable=resumable,
                         room=room,
+                        onto=onto,
                     )
                     for ref, commit in landed.items()
+                ],
+                *[
+                    await self.worktree_removed(
+                        root,
+                        left.get(root, lapse.why),
+                        room,
+                        kept=f", kept for {lapse.who} until their launch ended",
+                    )
+                    for root, lapse in lapsed.items()
                 ],
             ]
         )
@@ -1879,12 +1943,17 @@ class Lander(Model, arbitrary_types_allowed=True):
         on_remote: bool,
         roots: list[Path],
         left: dict[Path, str],
+        resumable: dict[Path, Resumable],
         room: Reached,
+        onto: str,
     ) -> Cleaned:
-        """Clean up after the branch `ref`, landed at `commit`: its copy on `remote` where it's there, each worktree of `roots` having it checked out but those `left` names, in `room` where it's reached, and the local branch where none still has it."""
+        """Clean up after the branch `ref`, landed at `commit` on `onto`: its copy on `remote` where it's there, each worktree of `roots` having it checked out but those `left` names, in `room` where it's reached, removed, or detached where it's `resumable`; and the local branch where none still has it."""
         deleted = await self.remote_deleted(remote, ref) if on_remote else Cleaned()
         trees = [
-            await self.worktree_removed(root, left.get(root), room) for root in roots
+            await self.worktree_detached(root, resumable[root], ref, room, onto)
+            if root in resumable and root not in left
+            else await self.worktree_removed(root, left.get(root), room)
+            for root in roots
         ]
         kept = [root for root, each in zip(roots, trees, strict=True) if each.left]
         branch = (
@@ -1913,9 +1982,9 @@ class Lander(Model, arbitrary_types_allowed=True):
         return Cleaned(done=[f"deleted `{short(ref)}` on `{remote}`"])
 
     async def worktree_removed(
-        self, root: Path, why: str | None, room: Reached
+        self, root: Path, why: str | None, room: Reached, *, kept: str = ""
     ) -> Cleaned:
-        """Remove the worktree at `root` in the launch's room, `room`, as its session would, unless `why` says why it's left; say how it went.
+        """Remove the worktree at `root` in the launch's room, `room`, as its session would, unless `why` says why it's left; say how it went, with what it was `kept` for where a landing kept it.
 
         `git worktree remove` without `--force` keeps a worktree with changes or
         untracked files, saying so, and takes what git ignores with it. Where
@@ -1946,23 +2015,60 @@ class Lander(Model, arbitrary_types_allowed=True):
         if ran.status != 0:
             said = oneline(ran.said()) or f"it ended with status {ran.status}"
             return Cleaned(left=[f"the worktree {root}: `git worktree remove`: {said}"])
-        return Cleaned(done=[f"removed the worktree {root}"])
+        return Cleaned(done=[f"removed the worktree {root}{kept}"])
+
+    async def worktree_detached(
+        self, root: Path, kept: Resumable, ref: str, room: Reached, onto: str
+    ) -> Cleaned:
+        """Detach the worktree at `root` at the commit it has checked out, in the launch's room, `room`, where it's reached, so the branch `ref` can be deleted while the subagent who started there, `kept`, may be resumed in it; leave them lup's words saying so; say how it went.
+
+        A subagent's runtime can resume them once their turn ended, their
+        parent writing to them again, and their shell starts each command in
+        the directory they started in: were it removed, every command of theirs
+        would fail before it ran, until they made the directory again. Detached
+        at its own commit, the worktree's files stay as they are, changes not
+        committed among them. A landing after their launch ends removes it
+        (`lapsed`).
+        """
+        if room.container is None:
+            return Cleaned(left=[f"the worktree {root}"])
+        ran = await self.run(
+            Program(
+                command=[
+                    "podman",
+                    "exec",
+                    "--workdir",
+                    str(self.launch.worktree),
+                    room.container,
+                    "git",
+                    "-C",
+                    str(root),
+                    "switch",
+                    "--quiet",
+                    "--detach",
+                ],
+                payload="",
+                directory=self.launch.repository,
+            )
+        )
+        if ran.status != 0:
+            said = oneline(ran.said()) or f"it ended with status {ran.status}"
+            return Cleaned(left=[f"the worktree {root}: `git switch --detach`: {said}"])
+        self.delivery.left(kept.conversation, detached(short(ref), root, short(onto)))
+        return Cleaned(
+            done=[
+                (
+                    f"detached the worktree {root}, where {kept.who} started and may "
+                    "be resumed: a landing after their launch ends removes it"
+                )
+            ]
+        )
 
     def working(self, places: list[Whereabouts]) -> dict[Path, str]:
         """Return the worktrees a conversation works in, each with who, as the cleanup leaves it: the conversation landing, then each launch still served of this repository where it started, then each of its conversations still going where the judge's session index has them work (`Holding.works`), each by the first found."""
         index = SessionIndex(layout=self.layout)
         host = self.layout.host
-        # Each launch's conversations are kept beside its record, and aren't a record.
-        records = [
-            recorded(path)
-            for path in sorted(host.launches.glob("*.json"))
-            if path != host.conversations(path.stem.removesuffix(".conversations"))
-        ]
-        live = {
-            record.launch: record
-            for record in records
-            if record is not None and record.repository == self.launch.repository
-        }
+        live = self.served()
         own = index.read(self.caller.session)
         mine = [
             *([] if self.caller.agent is not None else [self.launch.worktree]),
@@ -1992,6 +2098,102 @@ class Lander(Model, arbitrary_types_allowed=True):
             ),
         ]
         return {each.root: each.why for each in reversed(workers)}
+
+    def served(self) -> dict[str, Register]:
+        """Return each launch of this repository the service still serves, by its id, as its record has it."""
+        host = self.layout.host
+        # Each launch's conversations are kept beside its record, and aren't a record.
+        records = [
+            recorded(path)
+            for path in sorted(host.launches.glob("*.json"))
+            if path != host.conversations(path.stem.removesuffix(".conversations"))
+        ]
+        return {
+            record.launch: record
+            for record in records
+            if record is not None and record.repository == self.launch.repository
+        }
+
+    def apart(self, places: list[Whereabouts]) -> dict[Path, Whereabouts]:
+        """Return the worktree lup gave each subagent of this repository heard at `places` to work apart in, where their shell starts (`Holding.apart`), as the judge's session index has it, by its root, with where they were heard."""
+        index = SessionIndex(layout=self.layout)
+        return {
+            root: place
+            for place in places
+            if place.conversation.agent is not None
+            and place.conversation.repository == self.launch.repository
+            and (held := index.read(place.conversation.session)) is not None
+            and (root := held.apart.get(place.conversation.agent)) is not None
+        }
+
+    def resumable(self, places: list[Whereabouts]) -> dict[Path, Resumable]:
+        """Return the worktree each subagent whose turn ended while their launch is still served was given to work apart in, by its root, with who they are (`Resumable`)."""
+        live = self.served()
+        return {
+            root: Resumable(
+                root=root,
+                conversation=place.conversation,
+                who=called(self.layout.host, place),
+            )
+            for root, place in self.apart(places).items()
+            if place.ended is not None and place.launch in live
+        }
+
+    def lapsed(
+        self,
+        git: Git,
+        places: list[Whereabouts],
+        trees: list[Worktree],
+        left: dict[Path, str],
+        tip: str,
+    ) -> dict[Path, Lapsed]:
+        """Return each worktree a landing kept, detached, for a subagent who might have been resumed there, whose launch has ended since, by its root, but those `left` names: who it was for, and why it stays where `tip` doesn't hold its commit (`Lapsed`).
+
+        Of `trees`, the repository's worktrees but its main one, those with no
+        branch checked out alone: one a subagent resumed there has since put a
+        branch in is that branch's, and its landing's to clean up after.
+        """
+        live = self.served()
+        detached = {
+            each.root: each.head
+            for each in trees
+            if each.branch is None and each.head is not None
+        }
+
+        def lapse(place: Whereabouts, head: str) -> Lapsed:
+            who = called(self.layout.host, place)
+            holds = git.run("merge-base", "--is-ancestor", head, tip, ok=[0, 1])
+            return Lapsed(
+                who=who,
+                why=None
+                if holds.status == 0
+                else (
+                    f"kept for {who}, whose launch has ended, at {head}, which "
+                    "what landed doesn't hold"
+                ),
+            )
+
+        return {
+            root: lapse(place, head)
+            for root, place in self.apart(places).items()
+            if place.launch not in live
+            and root not in left
+            and (head := detached.get(root)) is not None
+        }
+
+
+def detached(branch: str, root: Path, onto: str) -> str:
+    """Tell a subagent who may be resumed that `branch` landed on `onto` and its local branch is gone, and that their worktree at `root`, where they started, stays, detached at what landed.
+
+    >>> print(detached("feat", Path("/r/tree/w"), "dev"))
+    lup: `feat` landed on `dev`, and its local branch is gone. Your worktree /r/tree/w stays as it was, its `HEAD` detached at what landed: start what's next there on a branch of its own, from `dev` (`git switch -c <branch> dev`).
+    """
+    return (
+        f"lup: `{branch}` landed on `{onto}`, and its local branch is gone. Your "
+        f"worktree {root} stays as it was, its `HEAD` detached at what landed: "
+        f"start what's next there on a branch of its own, from `{onto}` "
+        f"(`git switch -c <branch> {onto}`)."
+    )
 
 
 def landed_felt(branches: list[str]) -> str:
@@ -2111,7 +2313,7 @@ def numbers_refused(refusals: list[Refusal]) -> str:
 
 
 def called(host: HostLayout, place: Whereabouts) -> str:
-    """Say the conversation at `place` as people call them, `dev/explore-auth`, from what the service keeps of their launch; by their runtime's ids where that names none."""
+    """Say the conversation at `place` as people call them, `dev/explore-auth`, from what the service keeps of their launch; once their launch has ended, by the name a subagent last had there; by their runtime's ids where none names them."""
     record = recorded(host.record(place.launch))
     try:
         kept = read_model(host.conversations(place.launch), Conversations)
@@ -2132,7 +2334,7 @@ def called(host: HostLayout, place: Whereabouts) -> str:
         )
     )
     if record is None or kept is None or found is None:
-        return ids(conversation)
+        return ids(conversation) if place.name is None else f"`{place.name}`"
     return f"`{kept.path(found, record.name or record.launch)}`"
 
 
