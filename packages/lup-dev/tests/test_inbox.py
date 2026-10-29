@@ -2941,6 +2941,94 @@ def test_a_claude_fork_and_a_codex_subagent_read_the_guidance_and_are_told_nothi
     assert introduction() not in codex_told
 
 
+INVITED = (
+    "lup: whenever something's present for you in this work, and as you finish "
+    "it, `how_it_felt` is there for how the work felt to you or how you are, in "
+    'your own words. The operator reads it as you wrote it. "Nothing notable" is '
+    "a fine answer, and so is leaving it."
+)
+"""What lup invites a subagent to, once, as its work starts (`invitation`)."""
+
+
+def lup_finished(tool: str, call: str, **fields: object) -> str:
+    """A Claude Code call to one of lup's tools finishing."""
+    return claude(
+        "PostToolUse",
+        tool_name=f"mcp__lup__{tool}",
+        tool_input={},
+        tool_use_id=call,
+        tool_response=[{"type": "text", "text": "Done."}],
+        **fields,
+    )
+
+
+def test_a_subagent_is_invited_to_say_how_it_felt_once_as_its_first_call_to_lup_s_tools_finishes_on_each_runtime(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """Never a session's own conversation, never at a call's start or a turn's end, and never one that never calls lup's tools: a subagent type given only its own tools (`claude-code-guide`) can't answer it."""
+    records = Subagents(tmp_path)
+    rollouts = Rollouts(tmp_path)
+    other = tmp_path / "other"
+    other.mkdir()
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        launched(machine, clock, other, "two", "codex")
+        hook, hook2 = machine.host.launch("one").hook, machine.host.launch("two").hook
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook2, codex("SessionStart", source="startup"))
+        send(hook, records.spawn("t1", name="parser"))
+        records.recorded("a1", "Explore", "t1", name="parser")
+        send(hook, records.spawn("t2", name="guide"))
+        records.recorded("a2", "claude-code-guide", "t2", name="guide")
+        fields = {
+            "agent_id": "a1",
+            "agent_type": "Explore",
+            "transcript_path": str(records.transcript),
+        }
+        send(hook, records.call("a1", "Explore", "c1"))
+        main = send(hook, lup_finished("note", "m1"))
+        send(hook, records.call("a2", "claude-code-guide", "g1"))
+        guide = send(
+            hook,
+            claude(
+                "PostToolUse",
+                tool_name="Bash",
+                tool_input={"command": "ls"},
+                tool_use_id="g1",
+                tool_response={"stdout": ""},
+                agent_id="a2",
+                agent_type="claude-code-guide",
+                transcript_path=str(records.transcript),
+            ),
+        )
+        started = send(hook, lup_call("note", {"remark": "x"}, "c2", **fields))
+        first = send(hook, lup_finished("note", "c2", **fields))
+        again = send(hook, lup_finished("note", "c3", **fields))
+        ended = send(hook, records.ended("a1", "Explore", "Parsed."))
+        rollouts.recorded("th1", "t1")
+        send(hook2, rollouts.call("th1", "d1"))
+        codex_first = send(
+            hook2,
+            codex(
+                "PostToolUse",
+                tool_name="mcp__lup__rename",
+                tool_input={"name": "lexer"},
+                tool_use_id="d2",
+                tool_response="Named.",
+                agent_id="th1",
+                agent_type="explorer",
+                transcript_path=str(rollouts.rollout("th1")),
+            ),
+        )
+    assert main == ""
+    assert guide == ""
+    assert INVITED not in started
+    assert context(first) == INVITED
+    assert again == ""
+    assert INVITED not in ended
+    assert context(codex_first) == INVITED
+
+
 def test_a_record_a_hook_names_under_another_launch_s_own_directory_is_read_nowhere(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:

@@ -1819,6 +1819,7 @@ BOTH = "The operator answered.\n\nAnd again."
                 fits=10_000,
                 event=events.CallFinished(call="t3", tool="mcp__lup__ask"),
                 session="s1",
+                served=True,
                 judged=False,
             ),
         ),

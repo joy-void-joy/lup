@@ -616,6 +616,27 @@ def introduction(tools: list[ToolSpec]) -> str:
     return "\n".join([opening, "", *summaries(tools), "", direct])
 
 
+def invitation() -> str:
+    """Invite a subagent to say how the work is for it, whenever something's present and as it finishes: an ask of its own, as a brief makes one.
+
+    Subagents whose brief asked for it wrote one 63 times of 64, those neither
+    asked nor reading a guidance file none of 41, the introduction's line
+    among the tools notwithstanding (`docs/field-notes.md`, *What prompts
+    `how_it_felt`*). It says who reads it without saying "alone": whom it
+    reaches is the inbox's to set (`Speaker.how_it_felt_reaches`), and the
+    tool's description says.
+
+    >>> print(invitation())
+    lup: whenever something's present for you in this work, and as you finish it, `how_it_felt` is there for how the work felt to you or how you are, in your own words. The operator reads it as you wrote it. "Nothing notable" is a fine answer, and so is leaving it.
+    """
+    return (
+        "lup: whenever something's present for you in this work, and as you "
+        f"finish it, `{speaking.how_it_felt.name}` is there for how the work felt "
+        "to you or how you are, in your own words. The operator reads it as you "
+        'wrote it. "Nothing notable" is a fine answer, and so is leaving it.'
+    )
+
+
 class Running(Model):
     """A main conversation the service serves: its launch as it stands, the launch's name, and its session, the latest heard in it."""
 
@@ -1400,7 +1421,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         A subagent that doesn't read the guidance is told once, at its first
         hook that isn't its turn's end, the tools lup serves it, which the
         guidance lists (`introduction`). Not at its end, which would hold it to
-        read them.
+        read them. Every subagent is invited once to say how the work is for it
+        (`invitation`), beside its first call to lup's tools to finish: as its
+        work starts, once it's shown it has them, and never at an end.
         The conversation spawning one isn't asked to name it: the subagent
         knows its task, and what a spawning call is told comes beside its
         result, once the subagent has started.
@@ -1427,7 +1450,14 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             )
             tools = [spec for each in self.toolsets(request) for spec in each.specs()]
             introducing.append(introduction(tools))
-        return Noted(conversation=conversation, said=[*introducing, *naming])
+        finished = isinstance(heard.event, CallFinished) and heard.served
+        inviting = heard.agent is not None and finished and not conversation.invited
+        if inviting:
+            conversation = conversations.kept(
+                conversation.model_copy(update={"invited": True})
+            )
+        invited = [invitation()] if inviting else []
+        return Noted(conversation=conversation, said=[*introducing, *naming, *invited])
 
     def subagent_renamed(self, launch: str, subagent: Conversation, name: str) -> str:
         """Rename `subagent`, a subagent of launch `launch`, and return how it's called: its launch's name, then each name down to it.

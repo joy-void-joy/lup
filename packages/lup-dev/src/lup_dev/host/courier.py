@@ -65,10 +65,11 @@ class Heard(Model):
     """The runtime's id for the subagent whose conversation it is; none for the
     session's own."""
     served: bool = False
-    """Whether the call is to one of lup's tools, served on the launch's
-    `mcp.sock`: its own result tells the conversation what waits, so its start
-    doesn't, where what's told beside it would reach the model only once a held
-    call returns."""
+    """At a call's start or finish, whether the call is to one of lup's tools,
+    served on the launch's `mcp.sock`: its own result tells the conversation
+    what waits, so its start doesn't, where what's told beside it would reach
+    the model only once a held call returns; and a subagent's first one
+    finishing says it has lup's tools (`invitation`)."""
     judged: bool
     """Whether the launch's judge reads it; one it doesn't is answered without
     starting the judge."""
@@ -288,6 +289,9 @@ class Conversation(Model):
     introduced: bool = False
     """Whether a subagent knows the tools lup serves it: told them once, or
     reading the guidance that lists them to its session (`Spawned.guided`)."""
+    invited: bool = False
+    """Whether a subagent was invited to say how the work is for it, which lup
+    does once, beside its first finished call to lup's tools (`invitation`)."""
     holding: bool = False
     """Whether the operator holds each flagged write of it: their switch, "hold
     each flagged write", which the judge asks (`ShowHolding`)."""
