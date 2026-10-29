@@ -43,19 +43,27 @@ gated branch, `dev` by default:
    remote's URL, so the gated branch's remote-tracking ref is moved to what
    landed after it (`tracked`), as `git push <remote>` moves it: the judge
    counts what those refs name as judged;
-7. each branch it landed is cleaned up after: its copy on the remote deleted,
+7. the answer says, for each branch it landed, the `# lup: defer` comments its
+   merge adds and removes against its first parent, and those the integration
+   branch's own commits add and remove beyond them, where it lands some or no
+   branch merged (`Deferrals`): read on the host from each version's parse
+   alone, as trust's first reading reads a change (`Parser`), and compared as
+   the judge compares a file's directives (`missing`). It's information: work
+   knowingly left undone shows as it lands, and a reading that fails is said
+   and refuses nothing;
+8. each branch it landed is cleaned up after: its copy on the remote deleted,
    as `delete-merged` deletes one (`Remotes.merged`); its worktree removed where
    it's clean and nobody works in it; then the local branch deleted;
-8. each flagged write still waiting that's left nothing to hold is withdrawn
+9. each flagged write still waiting that's left nothing to hold is withdrawn
    from the operator's inbox (`Lander.withdrawn`): one on a branch gone, the
    cleanup's or any deleted earlier, landed or not; and one on a branch whose
    flags hold the landing, on a file it leaves unchanged, where the file
    stands as the flag keeps it, landed before. It's left unread, so it's no
    version they saw (`Withdrawn`). One on a branch still there whose file
    stands otherwise may be a write not committed yet, and waits;
-9. the answer ends on what's still running or waiting to land (`going`): the
-   subagents of the session landing that lup hasn't heard end, and the local
-   branches not on what landed, each with who works in it.
+10. the answer ends on what's still running or waiting to land (`going`): the
+    subagents of the session landing that lup hasn't heard end, and the local
+    branches not on what landed, each with who works in it.
 
 **Which branches it lands:** of the local branches in the history of the tip and
 not in that of the gated branch's tip on the remote, those the landing merged
@@ -120,7 +128,7 @@ from collections import Counter
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from itertools import batched
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import override
 
 from pydantic import Field, JsonValue, TypeAdapter, ValidationError
@@ -132,6 +140,10 @@ from lup.publishing import Place, Refusal
 from lup.tools.serving import Answer
 from lup.tools.tool import Accepted, Refused, ToolSpec
 from lup.types import Model, MutableModel
+from lup_dev.catalog.paths import PythonPaths
+from lup_dev.codescan.contract import Parser, Source
+from lup_dev.codescan.directives import Directive, Identity, added_deferrals
+from lup_dev.codescan.engine import EngineError, EngineParser
 from lup_dev.errors import LupDevError
 from lup_dev.gate import Passed, Standing
 from lup_dev.git import LISTED, Git, Tracked, nul_separated
@@ -165,6 +177,7 @@ from lup_dev.layout import CheckoutLayout, GitDirectoryLayout, HostLayout, Layou
 from lup_dev.merging import Conflicted, Failed, Merged, Merging
 from lup_dev.policy.holds import unified
 from lup_dev.policy.reviewed import Mark, Reviews
+from lup_dev.policy.roles import matches
 from lup_dev.policy.worktrees import SessionIndex
 from lup_dev.private.found import in_prose
 from lup_dev.private.history import Commit, Spot
@@ -365,10 +378,20 @@ def short(ref: str) -> str:
     return ref.removeprefix("refs/heads/")
 
 
+class Joined(Model):
+    """A merge on a landing's first-parent line: its commit, and its first parent, the commit it merged onto."""
+
+    commit: str
+    onto: str
+
+
 class Branches(Model):
     """The local branches in a landing's history and not in the remote's: those it lands, each ref's full name with its tip, and those it leaves alone, why for each."""
 
     landed: dict[str, str] = {}
+    merges: dict[str, Joined] = {}
+    """By each tip a merge on the first-parent line merged, that merge: what
+    each branch it lands brings, against what it merged onto."""
     alone: list[str] = []
     """Those whose tip is one of the first-parent line's own commits: the
     landing merged nothing of theirs."""
@@ -409,12 +432,13 @@ def landed_branches(
     excluded = [] if old is None else [f"^{old}"]
     walked = git.text("rev-list", "--first-parent", "--parents", tip, *excluded)
     # Each tip merged on the line, with the merge that merged it.
-    merged = {
-        parent: merge
+    merges = {
+        parent: Joined(commit=merge, onto=parents[0])
         for line in walked.splitlines()
         for merge, *parents in [line.split()]
         for parent in parents[1:]
     }
+    merged = {parent: joined.commit for parent, joined in merges.items()}
     listed = git.run(
         "for-each-ref",
         "--format=%(refname)%00%(objectname)",
@@ -440,6 +464,7 @@ def landed_branches(
     }
     return Branches(
         landed=landed,
+        merges=merges,
         alone=[ref for ref, commit in rest.items() if commit not in merged],
         made={ref: others for ref, others in made.items() if others},
         shared=[
@@ -535,6 +560,158 @@ def text(found: bytes | None) -> str | None:
         return found.decode()
     except UnicodeDecodeError:
         return None
+
+
+class Deferral(Model):
+    """A `# lup: defer` comment a landing adds or removes: the file it's in, from the repository's root, the line it's on in the version that holds it, and what it says (`Identity`), its issue or condition and why."""
+
+    path: Path
+    line: int
+    identity: Identity
+
+    def same(self) -> Deferral:
+        """Return what tells it from another, whatever line it's on: itself at line 0."""
+        return self.model_copy(update={"line": 0})
+
+    def said(self) -> str:
+        """Say where it is and what it says, as a landing's answer lists it.
+
+        >>> said = Identity(text='defer(issue=155, why="w")', asked=False, defers=True)
+        >>> Deferral(path=Path("a.py"), line=3, identity=said).said()
+        'a.py:3: `# lup: defer(issue=155, why="w")`'
+        """
+        return f"{self.path}:{self.line}: `# lup: {self.identity.text}`"
+
+
+def uncounted(whole: list[Deferral], parts: list[Deferral]) -> list[Deferral]:
+    """Return those of `whole` that `parts` don't account for, each counted as many times as it's there, and the same on any line, as `missing` counts a file's comments.
+
+    >>> said = Identity(text='defer(issue=1, why="w")', asked=False, defers=True)
+    >>> one = Deferral(path=Path("a.py"), line=3, identity=said)
+    >>> uncounted([one, one], [one.model_copy(update={"line": 8})]) == [one]
+    True
+    """
+    counts = Counter(each.same() for each in parts)
+
+    def counted(index: int, each: Deferral) -> bool:
+        earlier = [other for other in whole[:index] if other.same() == each.same()]
+        return len(earlier) < counts[each.same()]
+
+    return [each for index, each in enumerate(whole) if not counted(index, each)]
+
+
+class Deferred(Model):
+    """The `# lup: defer` comments one part of a landing adds and removes against what it lands on: each added on its line where it lands, each removed on its line where it was."""
+
+    added: list[Deferral] = []
+    removed: list[Deferral] = []
+
+    def beyond(self, parts: list[Deferred]) -> Deferred:
+        """Return what of this none of `parts` accounts for: of a whole landing's, what its branches' merges, `parts`, don't."""
+        return Deferred(
+            added=uncounted(
+                self.added, [each for part in parts for each in part.added]
+            ),
+            removed=uncounted(
+                self.removed, [each for part in parts for each in part.removed]
+            ),
+        )
+
+    @property
+    def empty(self) -> bool:
+        """Whether it adds and removes none."""
+        return not self.added and not self.removed
+
+    def lines(self, whose: str, against: str, *, many: bool = False) -> list[str]:
+        r"""Say what `whose` adds and removes against `against`, a line each, under a line saying whose they are; `many` where `whose` names several commits.
+
+        >>> said = Identity(text='defer(issue=155, why="w")', asked=False, defers=True)
+        >>> added = Deferral(path=Path("a.py"), line=3, identity=said)
+        >>> print("\n".join(Deferred(added=[added]).lines("`feat`", "`dev`")))
+        The `# lup: defer` comments `feat` adds and removes, against `dev`:
+        - adds a.py:3: `# lup: defer(issue=155, why="w")`
+        """
+        adds, removes = ("add", "remove") if many else ("adds", "removes")
+        return [
+            (
+                f"The `# lup: defer` comments {whose} {adds} and {removes}, against "
+                f"{against}:"
+            ),
+            *(f"- adds {each.said()}" for each in self.added),
+            *(f"- removes {each.said()}" for each in self.removed),
+        ]
+
+
+def undeferring(whose: list[str], against: str, *, many: bool = False) -> list[str]:
+    """Say in one line that each of `whose` adds and removes no `# lup: defer` comment against `against`, or nothing where it names none; `many` where the one it names is several commits.
+
+    >>> undeferring(["`feat`"], "`dev`")
+    ['`feat` adds no `# lup: defer` comment and removes none, against `dev`.']
+    >>> undeferring(["`a`", "`b`", "`c`"], "`dev`")
+    ['`a`, `b` and `c` add no `# lup: defer` comment and remove none, against `dev`.']
+    """
+    if not whose:
+        return []
+    *first, last = whose
+    named = f"{', '.join(first)} and {last}" if first else last
+    adds, removes = ("add", "remove") if many or first else ("adds", "removes")
+    return [
+        (
+            f"{named} {adds} no `# lup: defer` comment and {removes} none, against "
+            f"{against}."
+        )
+    ]
+
+
+def deferred(
+    git: Git, parser: Parser, root: Path, before: str | None, after: str
+) -> Deferred:
+    """Return the `# lup: defer` comments the commit `after` adds and removes against the commit `before`, or against no files where it's none.
+
+    Each Python file they differ in is read from each version's parse alone by
+    `parser`, for the worktree at `root`, as trust's first reading reads a
+    change, and its deferrals compared as the judge compares a file's
+    directives (`added_deferrals`): one moved to another line is neither added
+    nor removed.
+    """
+    paths = [
+        path
+        for path in changed_files(git, before, after)
+        if matches(PurePath(path.name), PythonPaths().python)
+    ]
+    was = {
+        path: None if before is None else text(blob(git, before, path))
+        for path in paths
+    }
+    now = {path: text(blob(git, after, path)) for path in paths}
+    sources = list(
+        dict.fromkeys(
+            Source(path=path, content=content)
+            for path in paths
+            for content in [was[path], now[path]]
+            if content is not None
+        )
+    )
+    reports = parser.parsed(root, sources) if sources else []
+    read = dict(zip(sources, reports, strict=True))
+
+    def directives(path: Path, content: str | None) -> list[Directive]:
+        if content is None:
+            return []
+        return read[Source(path=path, content=content)].directives
+
+    def compared(
+        before: dict[Path, str | None], after: dict[Path, str | None]
+    ) -> list[Deferral]:
+        return [
+            Deferral(path=path, line=each.line, identity=each.identity())
+            for path in paths
+            for each in added_deferrals(
+                directives(path, before[path]), directives(path, after[path])
+            )
+        ]
+
+    return Deferred(added=compared(was, now), removed=compared(now, was))
 
 
 def stands(kept: ChangedFile, landed: bytes | None) -> bool:
@@ -732,6 +909,9 @@ class Lander(Model, arbitrary_types_allowed=True):
     """Runs one program on the host: `podman exec` into the launch's room."""
     turns: Turns
     """The lock a merge holds until its local branch moved, the service's."""
+    parser: Parser = Field(default_factory=EngineParser)
+    """Reads a file from its parse alone, on the host: each `# lup: defer`
+    comment a landing adds and removes (`deferrals`)."""
 
     @property
     def party(self) -> Conversation:
@@ -770,7 +950,10 @@ class Lander(Model, arbitrary_types_allowed=True):
         this call waits for their answers, which may take hours. Approved, it
         lands. Where they comment without approving, or decline, it returns
         their words and lands nothing: answer them, commit, and call it again;
-        what they approved stays approved. Once landed, it cleans up after each
+        what they approved stays approved. Once landed, it lists the
+        `# lup: defer` comments each branch it landed adds and removes against
+        `dev`, each with its file and line, or says there are none, so the work
+        left undone shows as it lands. Then it cleans up after each
         branch it landed: deletes its copy on the remote, removes its worktree
         where it's clean and nobody works in it, and deletes the local branch.
         A flagged write still waiting that's left nothing to hold, on a branch
@@ -881,6 +1064,11 @@ class Lander(Model, arbitrary_types_allowed=True):
             moved = [] if made.moved is None else [made.moved]
             return "\n".join([f"Not landed: {update.error}.{kept}{refusals}", *moved])
         untracked = await asyncio.to_thread(tracked, git, remote, onto, lands)
+        deferrals = await self.deferrals(
+            git,
+            Merge(onto=onto, remote=remote, old=old, branch=named, tip=lands),
+            branches,
+        )
         cleaned = await self.cleaned(git, remote, refs, branches.landed, onto)
         withdrawn = await self.withdrawn(git, onto, lands, branches.holding, changed)
         was = "new there" if old is None else f"which was at {old}"
@@ -891,6 +1079,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                 f"Landed {lands} on `{short(onto)}` at `{remote}`, {was}.",
                 *untracked,
                 *approvals(waited),
+                *deferrals,
                 *said(cleaned),
                 *withdrawals(short(onto), withdrawn),
                 *left_alone(named, branches),
@@ -1203,6 +1392,54 @@ class Lander(Model, arbitrary_types_allowed=True):
                 )
             ]
         return ["Still running or waiting to land:", *lines]
+
+    async def deferrals(
+        self, git: Git, landing: Merge, branches: Branches
+    ) -> list[str]:
+        """Say the `# lup: defer` comments `landing`, of its tip onto its gated branch, adds and removes, a line each: each of `branches` it landed's, by its merge against the commit that merged onto, those adding and removing none named in one line; then the gated branch's own commits', what the landing adds and removes against the gated branch's tip on the remote beyond its branches', where there's any, or that there's none where it merged no branch.
+
+        It's information, and refuses nothing: where they can't be read, it
+        says why.
+        """
+        merged = {
+            ref: joined
+            for ref, tip in branches.landed.items()
+            if ref != landing.onto and (joined := branches.merges.get(tip)) is not None
+        }
+        root = self.launch.worktree
+        try:
+            each = {
+                ref: await asyncio.to_thread(
+                    deferred, git, self.parser, root, joined.onto, joined.commit
+                )
+                for ref, joined in merged.items()
+            }
+            whole = await asyncio.to_thread(
+                deferred, git, self.parser, root, landing.old, landing.tip
+            )
+        except EngineError as unread:
+            return [f"lup couldn't read the `# lup: defer` comments it lands: {unread}"]
+        own = whole.beyond(list(each.values()))
+        gated = f"`{short(landing.onto)}`"
+        commits = f"{gated}'s own commits"
+        against = f"{gated} on `{landing.remote}`"
+        return [
+            *(
+                line
+                for ref, found in each.items()
+                if not found.empty
+                for line in found.lines(f"`{short(ref)}`", gated)
+            ),
+            *undeferring(
+                [f"`{short(ref)}`" for ref, found in each.items() if found.empty], gated
+            ),
+            *([] if own.empty else own.lines(commits, against, many=True)),
+            *(
+                undeferring([commits], against, many=True)
+                if own.empty and not merged
+                else []
+            ),
+        ]
 
     async def forward(
         self, remote: str, onto: str, source: str, tip: str, old: str | None
@@ -1973,6 +2210,9 @@ class LandingTools(Model, RoomTools, arbitrary_types_allowed=True):
     """Runs one program on the host: `podman exec` into a launch's room."""
     turns: Turns = Field(default_factory=Turns)
     """One landing's merge at a time in each repository, across every call."""
+    parser: Parser = Field(default_factory=EngineParser)
+    """Reads a file from its parse alone, on the host, for what a landing
+    says of its `# lup: defer` comments."""
 
     @override
     def specs(self) -> list[ToolSpec]:
@@ -2003,6 +2243,7 @@ class LandingTools(Model, RoomTools, arbitrary_types_allowed=True):
             integration=self.integration,
             run=self.run,
             turns=self.turns,
+            parser=self.parser,
         )
         [tool] = [tool for tool in bound(lander) if tool.spec().name == name]
         match await tool.call(arguments):
