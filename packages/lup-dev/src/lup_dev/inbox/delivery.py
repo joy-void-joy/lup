@@ -962,9 +962,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         quiet items (`Item.quiet`), and a call they hold learns their turn
         ended; a subagent's end held so keeps what they said there for their
         parent (`held_saying`), since their runtime hands on only the end it
-        lets through; an end let through leaves their main conversation idle,
-        and a subagent's ended (`ended`), their last words put before the
-        operator first where those words answer the operator's (`subagent_answered`). A subagent stopped, and a turn that failed on an error
+        lets through; lup's own words left for them (`left`) are told at a
+        call, a turn's start or their session's start, never at an end; an end
+        let through leaves their main conversation idle, and a subagent's ended
+        (`ended`), their last words put before the operator first where those
+        words answer the operator's (`subagent_answered`). A subagent stopped, and a turn that failed on an error
         from the model's API, the session's or a subagent's, are held for
         nothing, since nothing would read it. A turn's start whose prompt
         carries the token of what was pushed to it takes the push. A worktree
@@ -1005,19 +1007,20 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 return Posted()
             case SessionStarted():
                 presence.turning = False
-                return self.told(party, room, heard.fits, "start")
+                return self.worded(party, self.told(party, room, heard.fits, "start"))
             case TurnStarted():
                 presence.turning = True
                 taken = presence.pushed
                 if taken is not None and taken.token in (heard.prompt or ""):
                     self.taken(party, taken)
-                return self.told(party, room, heard.fits, "turn's start")
+                told = self.told(party, room, heard.fits, "turn's start")
+                return self.worded(party, told)
             case CallStarted() if heard.served:
                 presence.turning = True
                 return Posted()
             case CallStarted() | CallFinished():
                 presence.turning = True
-                return self.told(party, room, heard.fits, "call")
+                return self.worded(party, self.told(party, room, heard.fits, "call"))
             case WorktreeAsked():
                 return Posted()
 
@@ -1180,6 +1183,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 since=self.clock.now(),
                 parent=parent,
                 name=name,
+                words=[] if place is None else place.words,
+                felt_asked=place is not None and place.felt_asked,
             )
         )
 
@@ -1235,6 +1240,21 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             held=place.held,
         )
         await self.posted(news, party, place.parent, launch.worktree, quiet=True)
+
+    def left(self, party: Conversation, words: str) -> None:
+        """Leave lup's `words` for `party`, told beside their next call or at their next turn's or session's start, never holding their turn's end (`Whereabouts.words`); nothing where they were never heard."""
+        place = self.inbox.whereabouts.get(party.key())
+        if place is None:
+            return
+        self.inbox.placed(place.model_copy(update={"words": [*place.words, words]}))
+
+    def worded(self, party: Conversation, posted: Posted) -> Posted:
+        """Return what `posted` tells `party`, after lup's words left for them, which are taken: told once."""
+        place = self.inbox.whereabouts.get(party.key())
+        if place is None or not place.words:
+            return posted
+        self.inbox.placed(place.model_copy(update={"words": []}))
+        return posted.model_copy(update={"items": [*place.words, *posted.items]})
 
     def held_saying(self, party: Conversation, said: str | None) -> None:
         """Keep what subagent `party` said at an end of their turn held to tell them what waited, for their parent with their end (`Ended.held`): their runtime hands their parent only the words of the end it lets through, and nothing else would hand these on."""

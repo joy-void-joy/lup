@@ -1067,6 +1067,7 @@ class PostToolUse(Payload):
             event=events.CallFinished(call=self.tool_use_id, tool=self.tool_name),
             session=self.session_id,
             agent=self.agent_id or None,
+            served=self.tool_name.startswith(TOOL_PREFIX),
             judged=judging(self.tool_name),
             fits=fits,
         )
