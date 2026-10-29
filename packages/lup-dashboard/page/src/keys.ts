@@ -193,7 +193,7 @@ export function reviewKeys(kinds: readonly Kind[], verbs: readonly Verb[] = []):
             },
             {
                 keys: "^d ^u ^f ^b",
-                does: "half a page or a page down or up, as vim's, stopping on the next file's header it reaches, as a motion repeated by a key held down does, j among them; held there until a key is pressed afresh, which goes on",
+                does: "half a page or a page down or up, as vim's, but never showing two files or two items at once: one that would bring a file's end into view stops with it at the bottom, the next puts the next file's header at the top; back the same",
                 short: "page",
             },
             {

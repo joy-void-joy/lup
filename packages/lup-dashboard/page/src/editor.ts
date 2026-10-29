@@ -10,9 +10,12 @@
 // `[[` go to the next and previous item or turn, `]c` and `[c` to the next and
 // previous line that matters, where a view has some, `]f` and `[f` to the next
 // and previous file's header, `]n` and `[n` to the next and previous comment,
-// where the cursor last was in it. A motion repeated by a key held down, or a
-// page scroll, Ctrl+D, U, F or B, stops on the next file's header it reaches,
-// held there until the key is pressed afresh (`stopAt`). Ctrl+Enter in a comment ends
+// where the cursor last was in it. A motion repeated by a key held down stops on
+// the next file's header it reaches, held there until the key is pressed afresh
+// (`stopAt`); a page scroll, Ctrl+D, U, F or B, never shows two files or two
+// items at once where it can help it: one that would cross a file's or an
+// item's end stops with that end at the view's bottom, the next puts what
+// follows at its top, and back the same (`pageStop`). Ctrl+Enter in a comment ends
 // it, back on what it's about; elsewhere it sends. `u` and Ctrl+R undo and redo
 // any change to the draft, `g-` and `g+` go through its history in the order it
 // was made (`History`). Each fold is folded or open as the view lays it out
@@ -84,8 +87,12 @@ interface Actions {
     matter: (forward: boolean) => void;
     /** `]f` and `[f`: the next or previous file's header. */
     file: (forward: boolean) => void;
-    /** The start of each file's header line, in the text's order: where a key held down, or a page scroll, stops. */
+    /** The start of each file's header line, in the text's order: where a key held down stops. */
     stops: () => readonly number[];
+    /** Each file and each item, from its header's line to its last: whose ends a page scroll holds at (`pageStop`). */
+    units: () => readonly Span[];
+    /** How high what's pinned over the view's top is, in pixels. */
+    pinned: () => number;
     written: (forward: boolean) => void;
     /** `]q` and `[q`: the next or previous citation of the operator's words. */
     cite: (forward: boolean) => void;
@@ -136,7 +143,7 @@ interface Keyed {
     searching: boolean;
     /** Whether it's a key held down, repeated by the browser (`KeyboardEvent.repeat`), whose motion stops at a file. */
     repeat: boolean;
-    /** Whether it scrolls a page or half of one, Ctrl+D, U, F or B, whose motion stops at a file, pressed afresh or held. */
+    /** Whether it scrolls a page or half of one, Ctrl+D, U, F or B, which holds at a file's or an item's end (`pageStop`), pressed afresh or held. */
     paging: boolean;
     /** Whether a key held down stopped on a file's header, where it stays until a key is pressed afresh. */
     stopped: boolean;
@@ -767,6 +774,17 @@ const keys = Prec.highest(
                 event.preventDefault();
                 return true;
             }
+            // A page scroll held at a file's or an item's end, where it would cross one; else vim's own.
+            if (keyed.paging && !cm.state.vim.insertMode && !cm.state.vim.visualMode && cm.state.vim.inputState.keyBuffer.length === 0) {
+                const turned = paging(view, bound.actions?.units() ?? [], bound.actions?.pinned() ?? 0, event.key);
+                if (turned !== null) {
+                    view.dispatch({ selection: { anchor: turned.cursor }, annotations: reached.of(0) });
+                    // Flush with the edge, no margin showing a sliver of what's beyond it.
+                    scrollAfterKey(view, EditorView.scrollIntoView(turned.at, { y: turned.y, yMargin: 0 }));
+                    event.preventDefault();
+                    return true;
+                }
+            }
             if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
                 if (cm.state.vim.insertMode) {
                     bound.actions?.finish(cm);
@@ -1191,7 +1209,8 @@ const outOfFolds = EditorState.transactionFilter.of((transaction) => {
     const was = before.selection.main.head;
     const past = pastFolds(before, moved, was);
     const landed = past ?? moved;
-    const stop = keyed.repeat || keyed.paging ? stopping(before, landed, was, keyed) : null;
+    // A page scroll is held at a unit's end before vim has it (`paging`); a key held down stops at a file's header.
+    const stop = keyed.repeat ? stopping(before, landed, was, keyed) : null;
     if (stop !== null) {
         return [transaction, { selection: EditorSelection.single(stop) }];
     }
@@ -1201,11 +1220,127 @@ const outOfFolds = EditorState.transactionFilter.of((transaction) => {
 /** The keys that, with Ctrl, scroll half a page or a page, in vim: `^d` and `^u`, `^f` and `^b`. */
 const PAGES = ["d", "u", "f", "b"];
 
+/** A line as a page scroll reads it: where it starts, and its top and bottom in the document's height. */
+export interface Paged {
+    from: number;
+    top: number;
+    bottom: number;
+}
+
+/** A file or an item as a page scroll reads it: its header's line and its last line shown, a closed fold counting as its summary line; and where the line before its header and the line after its end start, none at the text's edges. */
+export interface Unit {
+    head: Paged;
+    end: Paged;
+    before: number | null;
+    after: number | null;
+}
+
+/** Where a page scroll goes, held at a unit's end: the line it puts at the view's top (`start`) or bottom (`end`). */
+export interface Held {
+    at: number;
+    y: "start" | "end";
+}
+
 /**
- * Return where a key held down, or a page scroll, leaves the cursor, its motion putting the selection at `landed` from
- * `was` (`keyed`): where a key held down stopped on a file's header, there, until a key is pressed afresh; else on the
- * first file's header the motion reaches or goes through (`stopAt`), held there; none where it goes on, or the
- * selection is a visual one, which runs past files as vim makes it.
+ * Return where a page scroll holds, `forward` or back, by `page` of the document's height, the view showing from `top`
+ * to `bottom` of it, so as never to show two of `units`, files and items in the text's
+ * order, at once where it can help it; none where it scrolls as vim's does.
+ *
+ * - Forward, of the first unit whose end's line starts at the view's top or below and that something follows: where its end shows, what
+ *   follows it at the top, the next file's header where one does; where the scroll would bring its end into view, its
+ *   end at the bottom.
+ * - Back, of the last unit whose header's line ends at the view's bottom or above and that something comes before: where its header
+ *   shows, what comes before it at the bottom, the end of the file before where one does; where the scroll would bring
+ *   its header into view, its header at the top.
+ *
+ * A unit longer than the view pages as vim's does between its header and its end. `slack` is how far off a line may be
+ * and still count as at an edge, a rounding's.
+ */
+export function pageStop(units: readonly Unit[], top: number, bottom: number, page: number, forward: boolean, slack: number = 2): Held | null {
+    if (forward) {
+        // An end whose line starts above the top, under what's pinned there, is passed.
+        const unit = units.filter((each) => each.end.top >= top - slack).sort((a, b) => a.end.top - b.end.top)[0];
+        if (unit === undefined || unit.after === null) {
+            return null;
+        }
+        if (unit.end.bottom <= bottom + slack) {
+            return { at: unit.after, y: "start" };
+        }
+        return unit.end.bottom <= bottom + page ? { at: unit.end.from, y: "end" } : null;
+    }
+    // A header whose line ends below the bottom is to come.
+    const unit = units.filter((each) => each.head.bottom <= bottom + slack).sort((a, b) => b.head.top - a.head.top)[0];
+    if (unit === undefined || unit.before === null) {
+        return null;
+    }
+    if (unit.head.top >= top - slack) {
+        return { at: unit.before, y: "end" };
+    }
+    return unit.head.top >= top - page ? { at: unit.head.from, y: "start" } : null;
+}
+
+/**
+ * Return where the page scroll of Ctrl and `key` goes in `view`, held at an end of `spans`, files and items from their
+ * header's line to their last (`pageStop`), the view's top under what's `pinned` over it, and where it leaves the
+ * cursor: on the line it puts at the top; else moved as far as the view, kept within the unit whose end it holds at;
+ * none where it scrolls as vim's does, or where what it holds at is where it would put it already, so a press never
+ * leaves the view as it was. A unit whose header a closed fold hides, or that shows as one line, holds nothing.
+ */
+function paging(view: EditorView, spans: readonly Span[], pinned: number, key: string): (Held & { cursor: number }) | null {
+    const scroller = view.scrollDOM.getBoundingClientRect();
+    const height = view.scrollDOM.clientHeight;
+    const top = scroller.top - view.documentTop + pinned;
+    const bottom = top - pinned + height;
+    const forward = key === "d" || key === "f";
+    const page = key === "f" || key === "b" ? height : height / 2;
+    const paged = (at: number): Paged => {
+        const block = view.lineBlockAt(at);
+        return { from: block.from, top: block.top, bottom: block.bottom };
+    };
+    const length = view.state.doc.length;
+    const units = spans.flatMap((span): Unit[] => {
+        if (hiddenAt(view.state, view.state.doc.lineAt(span.from).from)) {
+            return [];
+        }
+        const head = view.lineBlockAt(span.from);
+        const end = view.lineBlockAt(span.to);
+        if (end.from <= head.from) {
+            return [];
+        }
+        return [
+            {
+                head: { from: head.from, top: head.top, bottom: head.bottom },
+                end: { from: end.from, top: end.top, bottom: end.bottom },
+                before: head.from > 0 ? view.lineBlockAt(head.from - 1).from : null,
+                after: end.to < length ? end.to + 1 : null,
+            },
+        ];
+    });
+    // A header put at the top goes under what's pinned there, the view's scroll margins keeping it clear.
+    const held = pageStop(units, top, bottom, page, forward);
+    if (held === null) {
+        return null;
+    }
+    const target = view.lineBlockAt(held.at);
+    if (held.y === "start" ? Math.abs(target.top - top) < 2 : Math.abs(target.bottom - bottom) < 2) {
+        return null;
+    }
+    if (held.y === "start") {
+        return { ...held, cursor: held.at };
+    }
+    // Moved as far as the view moves, on a line of the unit whose end it holds at, or that end going back.
+    const end = paged(held.at);
+    const cursor = paged(view.state.selection.main.head);
+    const moved = forward ? end.bottom - bottom : 0;
+    const line = forward ? view.lineBlockAtHeight(Math.min(cursor.top + Math.max(moved, 0), end.top)).from : held.at;
+    return { ...held, cursor: line };
+}
+
+/**
+ * Return where a key held down leaves the cursor, its motion putting the selection at `landed` from `was` (`keyed`):
+ * where it stopped on a file's header, there, until a key is pressed afresh; else on the first file's header the motion
+ * reaches or goes through (`stopAt`), held there; none where it goes on, or the selection is a visual one, which runs
+ * past files as vim makes it.
  */
 function stopping(state: EditorState, landed: EditorSelection, was: number, keyed: Keyed): number | null {
     const { head } = landed.main;
@@ -1428,8 +1563,12 @@ export interface Own<C> {
     matter?: (forward: boolean) => void;
     /** Go to the next or previous file's header, as the review's `]f` and `[f` do; none where the view has none. */
     file?: (forward: boolean) => void;
-    /** The start of each file's header line, in the text's order, where a key held down or a page scroll stops (`stopAt`); none where the view has none. */
+    /** The start of each file's header line, in the text's order, where a key held down stops (`stopAt`); none where the view has none. */
     stops?: () => readonly number[];
+    /** Each file and each item, from its header's line to its last, in the text's order, whose ends a page scroll holds at (`pageStop`); none where the view has none. */
+    units?: () => readonly Span[];
+    /** How high what's pinned over the view's top is, in pixels, as the review's stack: the lines under it aren't seen. */
+    pinned?: () => number;
     /** Go to the next or previous citation of the operator's words, as the review's `]q` and `[q` do; none where the view has none. */
     cite?: (forward: boolean) => void;
     /** Follow a citation to what it cites, or back, as the review's `gd` does; none where the view has none. */
@@ -1872,6 +2011,8 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
             matter: (forward) => own.matter?.(forward),
             file: (forward) => own.file?.(forward),
             stops: () => own.stops?.() ?? [],
+            units: () => own.units?.() ?? [],
+            pinned: () => own.pinned?.() ?? 0,
             cite: (forward) => own.cite?.(forward),
             follow: () => own.follow?.(),
             written: (forward) => {

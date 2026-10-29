@@ -2052,6 +2052,54 @@ export function fileHeads(laidOut: Laid): number[] {
     return [...laidOut.regions, ...laidOut.drawers].flatMap((scope) => scope.filed.map((each) => each.from)).sort((a, b) => a - b);
 }
 
+/**
+ * Return each file of every change and "since you approved" drawer, and each item, from its header's line to its last,
+ * in the text's order: what a page scroll holds at the end of (`pageStop`, `page/src/editor.ts`), so it never shows two
+ * of them at once where it can help it.
+ */
+export function pageUnits(laidOut: Laid): Span[] {
+    const files = [...laidOut.regions, ...laidOut.drawers].flatMap((scope) => scope.filed.map((each) => ({ from: each.from, to: each.to })));
+    const items = (nodes: readonly Placed[]): Span[] => nodes.flatMap((each) => (each.kind === "item" ? [{ from: each.from, to: each.to }] : items(each.children)));
+    return [...files, ...items(laidOut.nodes)].sort((a, b) => a.from - b.from || b.to - a.to);
+}
+
+/**
+ * Return where Space `d` goes on to once it marks `blocks`, a file of a "since you approved" drawer, done in `draft`: the
+ * header of the next file of that drawer after it that's still to review, offering done and marked by nothing in the
+ * draft; none past the last, or where what was marked isn't one drawer's file, as the drawer whole.
+ */
+export function nextToReview(laidOut: Laid, blocks: readonly string[], draft: Draft): number | undefined {
+    const marked = blocks.flatMap((id) => {
+        const node = findPlaced(laidOut.nodes, id);
+        return node === undefined ? [] : [node];
+    });
+    const last = marked.at(-1);
+    const drawer = last === undefined ? undefined : laidOut.drawers.find((each) => each.kind === "since" && last.id.startsWith(`${each.view.id} `));
+    if (last === undefined || drawer === undefined || marked.length !== blocks.length || !marked.every((each) => drawer.files.some((file) => each.id === blockId(drawer.view.id, file.block)))) {
+        return undefined;
+    }
+    const next = drawer.files
+        .map((file) => findPlaced(laidOut.nodes, blockId(drawer.view.id, file.block)))
+        .filter((node): node is Placed => node !== undefined && node.from > last.from)
+        .sort((a, b) => a.from - b.from)
+        .find((node) => (node.block?.offers ?? []).some((each) => each.verb === "done") && !(draft.marks ?? []).some((mark) => mark.block === node.id));
+    return next?.from;
+}
+
+/** Return the part of `nodes` whose id is `id`, at any depth; none where none is. */
+function findPlaced(nodes: readonly Placed[], id: string): Placed | undefined {
+    for (const each of nodes) {
+        if (each.id === id) {
+            return each;
+        }
+        const found = findPlaced(each.children, id);
+        if (found !== undefined) {
+            return found;
+        }
+    }
+    return undefined;
+}
+
 /** Return the stop after the line starting at `line`, or before it, of `stops`, in the text's order; none past the last, or before the first. */
 export function stepped(stops: number[], line: number, forward: boolean): number | undefined {
     return forward ? stops.find((each) => each > line) : [...stops].reverse().find((each) => each < line);

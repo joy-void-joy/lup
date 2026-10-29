@@ -5,6 +5,7 @@ import { Vim, type CodeMirrorV } from "@replit/codemirror-vim";
 import { describe, expect, it } from "vitest";
 
 import type { Folding } from "./comments";
+import type { Unit } from "./editor";
 import {
     ahead,
     begun,
@@ -23,6 +24,7 @@ import {
     ownOf,
     pastFolds,
     scrollAfterKey,
+    pageStop,
     stopAt,
     pastHidden,
     reaching,
@@ -524,5 +526,54 @@ describe("what's typed in a comment, ahead of the layout", () => {
         }
         expect(foldCarried(own, changes).from).toBe(16);
         expect(changes.mapPos(own.from, 1)).toBe(16);
+    });
+});
+
+describe("a page scroll", () => {
+    // Three files of 20 lines each, a line 10 high and 100 long: a's from 0 to 200 high, b's from 200, c's from 400.
+    const unit = (head: number, lines: number): Unit => ({
+        head: { from: head * 100, top: head * 10, bottom: head * 10 + 10 },
+        end: { from: (head + lines - 1) * 100, top: (head + lines - 1) * 10, bottom: (head + lines) * 10 },
+        before: head === 0 ? null : (head - 1) * 100,
+        after: head + lines >= 60 ? null : (head + lines) * 100,
+    });
+    const files = [unit(0, 20), unit(20, 20), unit(40, 20)];
+
+    it("going on, stops with a file's end at the view's bottom where it would cross it, then puts the next file's header at the top", () => {
+        // The view shows 0 to 150, half a page is 75: the scroll would show b's header.
+        expect(pageStop(files, 0, 150, 75, true)).toEqual({ at: 1900, y: "end" });
+        // a's end at the bottom: the next press puts b's header at the top.
+        expect(pageStop(files, 50, 200, 75, true)).toEqual({ at: 2000, y: "start" });
+        // From b's header at the top, half a page goes on as vim's: b's end is past it.
+        expect(pageStop(files, 200, 350, 75, true)).toEqual({ at: 3900, y: "end" });
+        expect(pageStop(files, 200, 300, 75, true)).toBeNull();
+        // The last file pages as vim's does to the end.
+        expect(pageStop(files, 450, 600, 75, true)).toBeNull();
+        // An end whose line starts above the top, under what's pinned there, is passed: b's is held at instead.
+        expect(pageStop(files, 195, 345, 75, true)).toEqual({ at: 3900, y: "end" });
+    });
+
+    it("going back, stops with a file's header at the top where it would cross it, then puts the end before it at the bottom", () => {
+        expect(pageStop(files, 250, 400, 75, false)).toEqual({ at: 2000, y: "start" });
+        expect(pageStop(files, 200, 350, 75, false)).toEqual({ at: 1900, y: "end" });
+        // Far from b's header, back as vim's.
+        expect(pageStop(files, 300, 380, 75, false)).toBeNull();
+        // The first file pages as vim's does to the top.
+        expect(pageStop(files, 50, 200, 75, false)).toBeNull();
+        // A header whose line ends below the bottom is to come: b's is passed, a's held at instead.
+        expect(pageStop(files, 50, 205, 75, false)).toBeNull();
+        expect(pageStop(files, 250, 405, 75, false)).toEqual({ at: 2000, y: "start" });
+    });
+
+    it("never shows two files at once where it can help it, nor skips what's between them, as an item's lines after its last file", () => {
+        // The view shows a's last lines and b's first.
+        expect(pageStop(files, 150, 300, 75, true)).toEqual({ at: 2000, y: "start" });
+        expect(pageStop(files, 150, 300, 75, false)).toEqual({ at: 1900, y: "end" });
+        // An item from line 0 to 21 holds a file from line 1 to 18: the file's end first, then the item's lines after it.
+        const item: Unit = { head: { from: 0, top: 0, bottom: 10 }, end: { from: 2100, top: 210, bottom: 220 }, before: null, after: 2200 };
+        const held = [item, unit(1, 18), unit(22, 10)];
+        expect(pageStop(held, 0, 150, 75, true)).toEqual({ at: 1800, y: "end" });
+        expect(pageStop(held, 40, 190, 75, true)).toEqual({ at: 1900, y: "start" });
+        expect(pageStop(held, 190, 340, 75, true)).toEqual({ at: 2200, y: "start" });
     });
 });

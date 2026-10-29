@@ -31,6 +31,8 @@ import {
     heading,
     isLetter,
     fileHeads,
+    nextToReview,
+    pageUnits,
     laid,
     messages,
     news,
@@ -1467,7 +1469,7 @@ describe("the drawers under each agent's banner", () => {
         expect(out.groups[1]?.drawers).toEqual([]);
         const texts = out.drawers.map((each) => lines(each.header.from, each.folds.at(-1)!.to));
         expect(texts[0]).toEqual(["tasks 1/3", "✓ Write the sampler", "▶ Writing the models", "· Measure"]);
-        expect(texts[1]?.slice(0, 2)).toEqual(["since you approved · 1 to review · 1 flagged", "reader.py · created · 8 lines · new file"]);
+        expect(texts[1]?.slice(0, 2)).toEqual(["since you approved · 1 to review · 1 flagged · 0 of 1 reviewed", "reader.py · created · 8 lines · new file"]);
         expect(texts[2]).toEqual([
             "conversation · 7 steps · 2 new",
             "you: Build the reader.",
@@ -1513,7 +1515,7 @@ describe("the drawers under each agent's banner", () => {
             ["body", "Reader", true],
             ["body", "turns", true],
             ["file", "reader.py", false],
-            ["since", "since you approved · 1 to review · 1 flagged", true],
+            ["since", "since you approved · 1 to review · 1 flagged · 0 of 1 reviewed", true],
         ]);
         expect(foldKey(since.folds[1]!)).toBe(`since ${whose(S1)} body reader.py ["Reader","turns"]`);
         // The drawers under the banner, before the items, the group after them where it is.
@@ -1635,7 +1637,7 @@ describe("the drawers under each agent's banner", () => {
             "reader.py · created · 8 lines · held at landing: `feat` on `dev` · new file",
             "reader.py · created · 8 lines · new file",
         ]);
-        expect(lines.filter((each) => each.startsWith("feat in") || each.startsWith("fix in"))).toEqual(["feat in /w/feat · 1 held at landing", "fix in /w/fix · 1 to review"]);
+        expect(lines.filter((each) => each.startsWith("feat in") || each.startsWith("fix in"))).toEqual(["feat in /w/feat · 1 held at landing · 0 of 1 reviewed", "fix in /w/fix · 1 to review · 0 of 1 reviewed"]);
         const on = opened(first, first.text.indexOf("        a = 1")) as Remark;
         expect(on.code?.worktree).toBe("/w/feat");
         const draft: Draft = { ...EMPTY, remarks: [{ ...on, id: "why", text: "Why one?" }] };
@@ -1833,7 +1835,7 @@ describe("the drawers under each agent's banner", () => {
         expect(reaches(out, at("        a = 1"), "done")).toBe("reader.py: mark it reviewed");
         expect(reaches(out, at("reader.py · created"), "done")).toBe("reader.py: mark it reviewed");
         expect(reaches(out, at("reader.py · created"), "decline")).toBeNull();
-        expect(reaches(out, at("since you approved ·"), "done")).toBe("since you approved · 1 to review · 1 flagged: mark every file reviewed");
+        expect(reaches(out, at("since you approved ·"), "done")).toBe("since you approved · 1 to review · 1 flagged · 0 of 1 reviewed: mark every file reviewed");
         // A task list offers nothing of its own: done reaches the agent, its news and drawers. A conversation offers
         // marking it read, up to its last step, which done in it does.
         expect(reaches(out, at("✓ Write"), "done")).toBe("s1: mark their drawers done, @51 left");
@@ -1845,15 +1847,15 @@ describe("the drawers under each agent's banner", () => {
         expect(rowLabel("tasks", DATA)).toEqual({ text: "tasks 1/3", waiting: false });
         // A drawer its module answers says its own: none the page lays out.
         expect(rowLabel("conversation", DATA)).toBeNull();
-        expect(rowLabel("since", DATA)).toEqual({ text: "since you approved · 1 to review · 1 flagged", waiting: true });
+        expect(rowLabel("since", DATA)).toEqual({ text: "since you approved · 1 to review · 1 flagged · 0 of 1 reviewed", waiting: true });
         expect(sinceSummary(null)).toBe("since you approved · not read yet");
-        expect(sinceSummary(SINCE)).toBe("since you approved on feat · 1 to review · 1 flagged");
+        expect(sinceSummary(SINCE)).toBe("since you approved on feat · 1 to review · 1 flagged · 0 of 1 reviewed");
         expect(sinceSummary(onFeat([]))).toBe("since you approved on feat · nothing");
         const kept = { path: "a.py", version: "a1", flags: [], reviewed: "2026-10-17T12:00:00Z" };
-        expect(sinceSummary(onFeat([kept, ...SHOWN]))).toBe("since you approved on feat · 1 to review · 1 flagged · 1 reviewed");
+        expect(sinceSummary(onFeat([kept, ...SHOWN]))).toBe("since you approved on feat · 1 to review · 1 flagged · 1 of 2 reviewed");
         const unflagged = SHOWN.map((each) => ({ ...each, flags: [] }));
-        expect(sinceSummary(onFeat([kept, ...unflagged]))).toBe("since you approved on feat · 1 to review · 1 reviewed");
-        expect(sinceSummary({ ...SINCE, places: [{ ...FEAT, branch: null, files: [kept] }] })).toBe("since you approved · 1 reviewed");
+        expect(sinceSummary(onFeat([kept, ...unflagged]))).toBe("since you approved on feat · 1 to review · 1 of 2 reviewed");
+        expect(sinceSummary({ ...SINCE, places: [{ ...FEAT, branch: null, files: [kept] }] })).toBe("since you approved · 1 of 1 reviewed");
         const unread = (path: string, role: string) => ({
             path,
             file: { path, before: null, after: { kind: "text" as const, text: "x = 1\n" }, reading: { role, asks: [], findings: [] } },
@@ -1862,9 +1864,9 @@ describe("the drawers under each agent's banner", () => {
         });
         const tests = [unread("test_reader.py", "test"), unread("reader.test.ts", "test"), unread("fixture.json", "data")];
         expect(sinceSummary(onFeat([...SHOWN, ...tests, kept]))).toBe(
-            "since you approved on feat · 1 to review · 1 flagged · 2 tests · 1 data file · 1 reviewed",
+            "since you approved on feat · 1 to review · 1 flagged · 2 tests · 1 data file · 1 of 5 reviewed",
         );
-        expect(sinceSummary(onFeat(tests.slice(0, 1)))).toBe("since you approved on feat · 1 test");
+        expect(sinceSummary(onFeat(tests.slice(0, 1)))).toBe("since you approved on feat · 1 test · 0 of 1 reviewed");
     });
 
     it("folds each file reviewed under one line at the drawer's end, one with flagged writes waiting staying a line in its place, which Space d takes", () => {
@@ -1875,7 +1877,7 @@ describe("the drawers under each agent's banner", () => {
         const laidOut = laid([QUESTION], [S1], banner, header, EMPTY, NOTHING, [], new Map([[whose(S1), { ...DATA, since: shown }]]));
         const [, since] = laidOut.drawers;
         const text = laidOut.text.slice(since!.header.from, since!.folds.at(-1)!.to).split("\n");
-        expect(text.slice(0, 2)).toEqual(["since you approved · 1 to review · 2 flagged · 2 reviewed", "reader.py · created · 8 lines · new file"]);
+        expect(text.slice(0, 2)).toEqual(["since you approved · 1 to review · 2 flagged · 2 of 4 reviewed", "reader.py · created · 8 lines · new file"]);
         expect(text.slice(-4)).toEqual(["z.py · as you saw it in @12 · flagged @71", "2 reviewed", "a.py · reviewed at a1b2c3d", "b.py · deleted · reviewed"]);
         const on = (line: string) => laidOut.text.indexOf(line);
         expect(since!.reviewed.map((each) => each.file.file)).toEqual([seen, kept, also]);
@@ -1887,7 +1889,7 @@ describe("the drawers under each agent's banner", () => {
         expect(sinceFileAt(since!, on("z.py ·"))?.file).toBe(seen);
         // A settled file is reviewed already: done on it reaches the drawer, every file still to review or flagged; one
         // with flagged writes waiting is marked reviewed on its own line, which approves them.
-        expect(reaches(laidOut, on("a.py · reviewed"), "done")).toBe("since you approved · 1 to review · 2 flagged · 2 reviewed: mark every file reviewed");
+        expect(reaches(laidOut, on("a.py · reviewed"), "done")).toBe("since you approved · 1 to review · 2 flagged · 2 of 4 reviewed: mark every file reviewed");
         expect(reaches(laidOut, on("z.py ·"), "done")).toBe("z.py · as you saw it in @12 · flagged @71: mark it reviewed");
         // The header over the review names the file a reviewed line is, as it does one whose lines the cursor is on.
         const naming: Naming = { group: () => "g", item: (each) => `#${each.item.number}`, party: () => "" };
@@ -1903,12 +1905,42 @@ describe("the drawers under each agent's banner", () => {
             ["body", "turns", true],
             ["file", "reader.py", false],
             ["lines", "2 reviewed", true],
-            ["since", "since you approved · 1 to review · 2 flagged · 2 reviewed", true],
+            ["since", "since you approved · 1 to review · 2 flagged · 2 of 4 reviewed", true],
         ]);
         // None settled, no line for them.
         const none = laid([QUESTION], [S1], banner, header, EMPTY, NOTHING, [], new Map([[whose(S1), { ...DATA, since: onFeat([...SHOWN, seen]) }]]));
         expect(none.drawers[1]?.settled).toBeNull();
-        expect(none.text).not.toContain("reviewed\n");
+        expect(none.text).not.toMatch(/\n\d+ reviewed\n/);
+    });
+
+    it("goes on, once Space d marks a file reviewed, to the next file there still to review, and says where each file and item ends for a page scroll", () => {
+        const second = { path: "rooms.py", file: { path: "rooms.py", before: null, after: { kind: "text" as const, text: "ROOMS = 1\n" }, reading: null }, version: "r1", flags: [], since: null };
+        const third = { path: "zz.py", file: { path: "zz.py", before: null, after: { kind: "text" as const, text: "Z = 1\n" }, reading: null }, version: "z1", flags: [], since: null };
+        const shown = onFeat([...SHOWN, second, third]);
+        const laidOut = laid([QUESTION], [S1], banner, header, EMPTY, NOTHING, [], new Map([[whose(S1), { ...DATA, since: shown }]]));
+        const on = (line: string) => laidOut.text.indexOf(line);
+        const reach = reachOf(laidOut, on("        a = 1"), verb("done"), { called: (each) => each.session });
+        const blocks = reach.on === null ? [] : reach.acts.flatMap((each) => (each.kind === "mark" ? [each.block] : []));
+        const marked = marking(EMPTY, reach.on === null ? [] : reach.acts, "done");
+        expect(nextToReview(laidOut, blocks, marked)).toBe(on("rooms.py · created"));
+        // One marked already in the draft is passed over; past the last, nowhere.
+        const rooms = reachOf(laidOut, on("ROOMS = 1"), verb("done"), { called: (each) => each.session });
+        const both = marking(marked, rooms.on === null ? [] : rooms.acts, "done");
+        expect(nextToReview(laidOut, blocks, both)).toBe(on("zz.py · created"));
+        const zz = reachOf(laidOut, on("Z = 1"), verb("done"), { called: (each) => each.session });
+        expect(nextToReview(laidOut, zz.on === null ? [] : zz.acts.flatMap((each) => (each.kind === "mark" ? [each.block] : [])), both)).toBeUndefined();
+        // The drawer whole goes nowhere: each of its files is marked.
+        const whole = reachOf(laidOut, on("since you approved ·"), verb("done"), { called: (each) => each.session });
+        expect(nextToReview(laidOut, whole.on === null ? [] : whole.acts.flatMap((each) => (each.kind === "mark" ? [each.block] : [])), EMPTY)).toBeUndefined();
+        // Each file and each item, from its header's line to its last, for a page scroll to hold at the ends of.
+        const units = pageUnits(laidOut);
+        expect(units.map((each) => laidOut.text.slice(each.from, laidOut.text.indexOf("\n", each.from)))).toEqual([
+            "reader.py · created · 8 lines · new file",
+            "rooms.py · created · 1 line",
+            "zz.py · created · 1 line",
+            "── #51 ──",
+        ]);
+        expect(laidOut.text.slice(units[1]!.from, units[1]!.to)).toBe("rooms.py · created · 1 line\nROOMS = 1");
     });
 
     it("says where each file's header is, where ]f and [f go and a key held down stops: a test folded whole among them, never a reviewed file's line", () => {

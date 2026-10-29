@@ -339,8 +339,9 @@ export function sinceSummary(shown: Since | null): string {
 
 /**
  * What files of a "since you approved" drawer count, each in a few words: how many a landing waits on, held at landing;
- * how many to review; how many with flagged writes waiting on them; the tests and data files; and those settled,
- * reviewed. With how many wait on the operator, those held and those to review, and whether any does.
+ * how many to review; how many with flagged writes waiting on them; the tests and data files; and how many of them all
+ * are settled, reviewed, the drawer's progress (`3 of 7 reviewed`). With how many wait on the operator, those held and
+ * those to review, and whether any does.
  */
 function counts(files: readonly SinceFile[]): { parts: string[]; open: number; waiting: boolean } {
     const held = files.filter(isHeld).length;
@@ -361,7 +362,7 @@ function counts(files: readonly SinceFile[]): { parts: string[]; open: number; w
         ...(open === 0 ? [] : [`${open} to review`]),
         ...(flagged === 0 ? [] : [`${flagged} flagged`]),
         ...[...folded].map(([why, count]) => `${count} ${count === 1 ? FOLDED[why].one : FOLDED[why].many}`),
-        ...(kept === 0 ? [] : [`${kept} reviewed`]),
+        ...(files.length === 0 ? [] : [`${kept} of ${files.length} reviewed`]),
     ];
     return { parts: said, open: open + held, waiting: open > 0 || flagged > 0 || held > 0 };
 }

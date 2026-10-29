@@ -282,7 +282,7 @@ describe("the drawers under the banner", () => {
             ...UNREAD,
             since: { kind: "policy-since", version: "v", same: false, places: [{ worktree: "/w", branch: "feat", gone: false, files: [{ path: "a.py", version: "a1", flags: [], reviewed: AT }] }] },
         };
-        expect(rowLabel("since", since)).toEqual({ text: "since you approved · 1 reviewed", waiting: false });
+        expect(rowLabel("since", since)).toEqual({ text: "since you approved · 1 of 1 reviewed", waiting: false });
     });
 });
 
