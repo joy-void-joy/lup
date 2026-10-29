@@ -272,9 +272,9 @@ class World:
         finally:
             running.stop()
 
-    async def landing(self, launch: Register, refs: list[str]) -> None:
+    async def landing(self, launch: Register, updates: list[Update]) -> None:
         assert launch.launch == "one"
-        self.landed.append(refs)
+        self.landed.append([each.destination for each in updates])
 
     def room_git(self, *arguments: str) -> Ran:
         """Run git in the room's worktree, as the room runs it, whatever its status.

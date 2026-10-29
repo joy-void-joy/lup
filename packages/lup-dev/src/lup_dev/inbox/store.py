@@ -1542,6 +1542,11 @@ class Cites(Edge):
         """Replace each citation of an earlier reading."""
         return isinstance(earlier, Cites) and earlier.reading < self.reading
 
+    @override
+    def cites(self, part: int) -> bool:
+        """Say whether it names part `part` of the item it cites, which answers that part where it's moved into a thread (`lup_ledger.threads.answered`)."""
+        return self.part == part
+
 
 DRAFT = "inbox:draft"
 """The name of the operator's draft reply among the ledger's plain records."""

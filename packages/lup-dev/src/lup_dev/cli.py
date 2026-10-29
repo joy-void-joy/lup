@@ -57,6 +57,7 @@ from lup_dev.codescan.directives import (
     HostIssues,
     Issues,
     Trackers,
+    holding,
     without,
 )
 from lup_dev.codescan.engine import EngineChecker, EngineError
@@ -244,6 +245,7 @@ from lup_dev.listing import given, latest, many, unlisted
 from lup_dev.merging import Merging, merged
 from lup_dev.migration import HostRuntime, Migrating
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
+from lup_dev.policy.coming import Coming
 from lup_dev.policy.flags import InboxFlagging
 from lup_dev.policy.holds import InboxAnnouncing, Response, answer
 from lup_dev.policy.importers import BackgroundSpawner
@@ -263,7 +265,7 @@ from lup_dev.private.scanning import UNAPPROVED, UNSELECTED
 from lup_dev.private.scanning import scanned as read_for_values
 from lup_dev.private.withheld import Facts, HostFacts, Withheld, kept
 from lup_dev.remote.config import Gating
-from lup_dev.remote.protocol import Remotes
+from lup_dev.remote.protocol import Remotes, Update
 from lup_dev.remote.protocol import routes as remote_routes
 from lup_dev.settings import LupDevSettings, TerminalVariables
 from lup_dev.staging import Changed, Lines, StagingError
@@ -608,15 +610,24 @@ def host_serve(context: typer.Context) -> None:
         approved=partial(approved_command, layout),
     )
     asking = WorkersAsking(workers=workers)
+    coming = Coming(
+        delivery=delivery,
+        integration=settings.lup_integration_branch,
+        say=typer.echo,
+    )
+    delivery.starting = coming.started
     sweeping = Sweeping(
         layout=layout,
         host=host_client(),
         podman=podman,
         say=typer.echo,
         running=workers.commands,
+        coming=coming,
     )
     remotes = Remotes(
-        say=typer.echo, landed=partial(proposed_after, delivery), modules=workers
+        say=typer.echo,
+        landed=partial(after_push, delivery, coming),
+        modules=workers,
     )
     waits = Waits(changes=changes)
     delivery.landing = waits.holding
@@ -640,7 +651,9 @@ def host_serve(context: typer.Context) -> None:
             ModuleViews(asking=asking, changes=changes, say=typer.echo),
             waits=waits,
         ),
-        tools=room_tools(delivery, layout, remotes, workers, waits=waits),
+        tools=room_tools(
+            delivery, layout, remotes, workers, waits=waits, coming=coming
+        ),
         room_routes=[
             *remote_routes(remotes),
             *clipboard_routes(Desktop.of(settings)),
@@ -684,6 +697,14 @@ def typed_reading(
 ) -> list[ChangedFile]:
     """Read an approval's files wholly, types and lup's rules included, as trust in the worktree it was asked from reads them, on this machine (`Trust.typed`)."""
     return machine_trust(worktree, []).typed(approval.repository, files)
+
+
+async def after_push(
+    delivery: Delivery, coming: Coming, launch: Register, updates: list[Update]
+) -> None:
+    """Once a launch's push updated `updates`: put the approval of the host zone at the integration branch's tip in the operator's inbox where it moved there (`proposed_after`), and wake each thread parked until a commit it brings (`Coming.pushed`)."""
+    await proposed_after(delivery, launch, [each.destination for each in updates])
+    await coming.pushed(launch, updates)
 
 
 async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) -> None:
@@ -733,8 +754,9 @@ def room_tools(
     modules: LaunchModules,
     *,
     waits: Waits,
+    coming: Coming | None = None,
 ) -> list[RoomTools]:
-    """List the core's tools the host service serves each launched session: the inbox's; the judge's, reading lup's state at `layout` by the delivery's clock, and running `quiet` in each launch's repository's process (`modules`); and `land`, pushing through `remotes` onto the integration branch the settings name, each landing waiting kept in `waits`, which the drawers read."""
+    """List the core's tools the host service serves each launched session: the inbox's; the judge's, reading lup's state at `layout` by the delivery's clock, and running `quiet` in each launch's repository's process (`modules`); and `land`, pushing through `remotes` onto the integration branch the settings name, each landing waiting kept in `waits`, which the drawers read, waking through `coming` the threads parked until what it lands."""
     return [
         InboxTools(delivery=delivery),
         JudgeTools(layout=layout, clock=delivery.clock, modules=modules),
@@ -744,6 +766,7 @@ def room_tools(
             layout=layout,
             integration=LupDevSettings().lup_integration_branch,
             waits=waits,
+            coming=coming,
         ),
     ]
 
@@ -1819,7 +1842,7 @@ def swept(
 
 
 class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
-    """The sweep beside the host service: once it listens, then every `every`, so a launch whose launcher and container are gone is ended though no launch follows it (`swept`), and a repository's approved copy no process runs and none judges is removed (`lup_dev/copies.py`).
+    """The sweep beside the host service: once it listens, then every `every`, so a launch whose launcher and container are gone is ended though no launch follows it (`swept`), a repository's approved copy no process runs and none judges is removed (`lup_dev/copies.py`), and each thread parked until a time that came, a conversation that ended or a condition the gate found holding is woken (`Coming.swept`): the one moment the host looks of its own accord, whether a session runs or not.
 
     It asks the service as a launch does, from a thread, so the service goes on
     answering meanwhile; its end waits for a sweep under way, so none outlives
@@ -1836,6 +1859,9 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
     """The commands of the repositories' processes, running or starting, their
     links followed: the copies in use."""
     every: timedelta = timedelta(seconds=30)
+    coming: Coming | None = None
+    """What wakes the threads parked until what the sweep sees come; none wakes
+    none."""
     pause: Callable[[float], Awaitable[None]] = asyncio.sleep
     """Waits the seconds between two sweeps; a test gives its own."""
     stopping: asyncio.Event = Field(default_factory=asyncio.Event)
@@ -1876,6 +1902,17 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
             told = "".join(traceback.format_exception(failed))
             self.say(f"{failing}:\n{told}")
         await self.pruned()
+        self.woken()
+
+    def woken(self) -> None:
+        """Wake each thread parked until what the sweep sees come (`Coming.swept`), on the event loop, as the inbox is written; where it fails, say why, with its traceback, and the next sweep goes on."""
+        if self.coming is None:
+            return
+        try:
+            self.coming.swept()
+        except Exception as failed:
+            told = "".join(traceback.format_exception(failed))
+            self.say(f"Waking the threads parked until what came failed:\n{told}")
 
     async def pruned(self) -> None:
         """Remove each repository's copies no process runs and none judges, saying each; where one can't be, say why, and the next sweep tries again."""
@@ -2590,6 +2627,8 @@ class Scanned(Model):
     unread: list[Path] = []
     """The files left out, which resolve outside the worktree, its links
     followed: lup doesn't read them (`lup_dev.confined`)."""
+    held: list[str] = []
+    """The conditions the project declares that held, each asked once."""
 
 
 def scanned(paths: list[Path] | None, *, issues: bool) -> Scanned:
@@ -2654,9 +2693,8 @@ def scanned(paths: list[Path] | None, *, issues: bool) -> Scanned:
             else GitHubIssues(root=root)
         )
         unreachable = tracker.unreachable()
-    gate = Trackers(
-        issues=tracker if unreachable is None else None, conditions=conditions
-    )
+    held = holding(conditions)
+    gate = Trackers(issues=tracker if unreachable is None else None, held=held)
 
     def found(path: Path) -> list[Finding]:
         report = next(each for each in reports if each.path == path)
@@ -2676,7 +2714,11 @@ def scanned(paths: list[Path] | None, *, issues: bool) -> Scanned:
 
     findings = [each for path in files for each in found(path)]
     return Scanned(
-        files=files, findings=findings, unreachable=unreachable, unread=unread
+        files=files,
+        findings=findings,
+        unreachable=unreachable,
+        unread=unread,
+        held=held,
     )
 
 
@@ -2704,7 +2746,9 @@ def rules_check(
     paths, it checks every such file in the worktree, as the gate's `rules` step
     runs it. An `ignore` that keeps nothing fails it too, until `lup-dev rules
     fix` removes it. What came due is kept, over every file and where every
-    issue was asked, for a session to be told at their start.
+    issue was asked, for a session to be told at their start, with each
+    condition the project declares that held, which wakes a thread parked
+    until it.
     """
     found = scanned(paths, issues=True)
     if found.unread:
@@ -2714,7 +2758,9 @@ def rules_check(
         typer.echo("lup checked no files.")
         return
     failing = [each for each in found.findings if not each.reminder]
-    due = Due(reminders=[each for each in found.findings if each.reminder])
+    due = Due(
+        reminders=[each for each in found.findings if each.reminder], held=found.held
+    )
     for line in (line for each in failing for line in finding_lines(each, "")):
         typer.echo(line)
     if due.reminders:

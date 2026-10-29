@@ -28,6 +28,7 @@ from lup_dev.codescan.directives import (
     Note,
     Trackers,
     added_suppressions,
+    holding,
     missing,
 )
 
@@ -77,20 +78,16 @@ def test_an_ignore_keeps_any_owners_finding() -> None:
 def test_an_ignore_waiting_on_a_closed_issue_is_due_and_keeps_its_finding() -> None:
     waiting = ignore().model_copy(update={"issue": 12})
     fired = [Fired(rule="tuple-shape", line=3)]
-    closed = Checking(
-        fired=fired, gate=Trackers(issues=FakeIssues(closed=[12]), conditions={})
-    )
+    closed = Checking(fired=fired, gate=Trackers(issues=FakeIssues(closed=[12])))
     [problem] = waiting.problems(closed)
     assert (problem.rule, problem.line) == ("ignore-closed", 2)
     assert problem.reminder
     assert "issue #12 is closed" in problem.message
     assert waiting.keeps("tuple-shape", 3)
-    still_open = Checking(
-        fired=fired, gate=Trackers(issues=FakeIssues(), conditions={})
-    )
+    still_open = Checking(fired=fired, gate=Trackers(issues=FakeIssues()))
     assert waiting.problems(still_open) == []
     assert waiting.problems(Checking(fired=fired)) == []
-    unchecked = Checking(fired=fired, gate=Trackers(issues=None, conditions={}))
+    unchecked = Checking(fired=fired, gate=Trackers(issues=None))
     assert waiting.problems(unchecked) == []
 
 
@@ -139,7 +136,7 @@ def test_a_defer_names_a_declared_condition() -> None:
 
 
 def test_at_the_gate_a_closed_issue_is_reported() -> None:
-    gate = Trackers(issues=FakeIssues(closed=[12]), conditions={})
+    gate = Trackers(issues=FakeIssues(closed=[12]))
     [problem] = Defer(line=1, issue=12, why="x").problems(Checking(gate=gate))
     assert problem.rule == "defer-closed"
     assert problem.reminder
@@ -149,7 +146,7 @@ def test_at_the_gate_a_closed_issue_is_reported() -> None:
 def test_at_the_gate_an_issue_out_of_reach_goes_unchecked_and_a_due_condition_still_reports() -> (
     None
 ):
-    gate = Trackers(issues=None, conditions={"ready": Always(answer=True)})
+    gate = Trackers(issues=None, held=holding({"ready": Always(answer=True)}))
     checking = Checking(conditions=["ready"], gate=gate)
     assert Defer(line=1, issue=12, why="x").problems(checking) == []
     [problem] = Defer(line=1, issue=12, when="ready", why="x").problems(checking)
@@ -159,7 +156,7 @@ def test_at_the_gate_an_issue_out_of_reach_goes_unchecked_and_a_due_condition_st
 def test_at_the_gate_a_condition_that_holds_makes_the_defer_due() -> None:
     gate = Trackers(
         issues=FakeIssues(),
-        conditions={"ready": Always(answer=True), "later": Always(answer=False)},
+        held=holding({"ready": Always(answer=True), "later": Always(answer=False)}),
     )
     checking = Checking(conditions=["ready", "later"], gate=gate)
     [problem] = Defer(line=1, when="ready", why="x").problems(checking)

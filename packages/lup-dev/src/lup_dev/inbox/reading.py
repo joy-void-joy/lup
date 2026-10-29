@@ -450,7 +450,12 @@ class Reader(Model, arbitrary_types_allowed=True):
             timely, made_of, wanted.model_copy(update={"whole": True}).most()
         )
         placed = [each.node.number for each in shown if each.part is None]
-        said_whole = [self.member(each, thread, placed) for each in shown]
+        owed = [
+            PartId(item=each.node.number, part=each.part)
+            for each in concerns.standing(thread).unanswered
+            if each.part is not None
+        ]
+        said_whole = [self.member(each, thread, placed, owed) for each in shown]
         left = (
             unlisted(
                 len(timely) - len(shown),
@@ -506,8 +511,14 @@ class Reader(Model, arbitrary_types_allowed=True):
             *(["Elsewhere, naming it:", *refers] if refers else []),
         ]
 
-    def member(self, member: Member, thread: Thread, placed: list[int]) -> str:
-        """Say what's in `thread` whole under a heading: an item as `whole` does, the operator's words on it under it; a part of their words moved in, with who moved it; a check, and their answer to it where they gave one."""
+    def member(
+        self,
+        member: Member,
+        thread: Thread,
+        placed: list[int],
+        owed: list[PartId],
+    ) -> str:
+        """Say what's in `thread` whole under a heading: an item as `whole` does, the operator's words on it under it; a part of their words moved in, with who moved it, and whether it's answered, `owed` being those that aren't; a check, and their answer to it where they gave one."""
         node = member.node
         if member.part is not None:
             part = PartId(item=node.number, part=member.part)
@@ -528,8 +539,9 @@ class Reader(Model, arbitrary_types_allowed=True):
                 None,
             )
             by = "" if moved is None else f", moved here by {self.wrote(moved.by)}"
+            stands = "unanswered" if part in owed else "answered"
             return (
-                f"{part.cited()}  {clocked(made_of(member))}  the operator's words{by}:\n"
+                f"{part.cited()}  {clocked(made_of(member))}  the operator's words{by}, {stands}:\n"
                 + Tag(
                     name="part",
                     attributes={"id": part.said()},
@@ -826,7 +838,7 @@ class Reader(Model, arbitrary_types_allowed=True):
 
 
 def stood(standing: Standing) -> str:
-    """Say where a thread stands, in a few words: its state, what a parked one waits for or what to try on one done, and what in it waits on the operator, counted by what each is.
+    """Say where a thread stands, in a few words: its state, what a parked one waits for or what to try on one done, what in it waits on the operator, counted by what each is, how many parts of the operator's words moved in wait on whoever answers for it, and what came where it came due.
 
     >>> stood(Standing(state="working"))
     'working'
@@ -850,11 +862,26 @@ def stood(standing: Standing) -> str:
             state = standing.state
     kinds = [named(each) for each in standing.waiting]
     counted = ", ".join(many(kinds.count(each), each) for each in dict.fromkeys(kinds))
+    owed = (
+        []
+        if not standing.unanswered
+        else [
+            (
+                f"{many(len(standing.unanswered), 'part')} of the operator's "
+                "words unanswered"
+            )
+        ]
+    )
+    match standing.status:
+        case ledger.Reopened(by=Lup(), why=why):
+            owed = [*owed, f"came due: {why}"]
+        case _:
+            pass
     if not kinds:
-        return state
+        return "; ".join([state, *owed])
     if standing.state == "waiting on the operator":
-        return f"{state}: {counted}"
-    return f"{state}; waiting on the operator: {counted}"
+        return "; ".join([f"{state}: {counted}", *owed])
+    return "; ".join([f"{state}; waiting on the operator: {counted}", *owed])
 
 
 def made_of(member: Member) -> datetime:

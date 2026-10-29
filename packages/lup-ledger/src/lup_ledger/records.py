@@ -147,6 +147,15 @@ class Edge(Record):
         del earlier
         return False
 
+    def cites(self, part: int) -> bool:
+        """Say whether its source cites part `part` of its target: a part of the operator's words moved into a thread is answered once something in the thread cites it (`lup_ledger.threads.Standing`).
+
+        The base cites nothing: the kind that cites says so, as the inbox's
+        citation does.
+        """
+        del part
+        return False
+
 
 class Kinds(Model):
     """The classes the ledger reads its records as, each by the kind it declares.

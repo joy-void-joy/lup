@@ -2,15 +2,20 @@
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, override
 
 import pytest
 
+from lup_ledger.environment.layout import LedgerLayout
+from lup_ledger.environment.store import Ledger
+from lup_ledger.environment.threads import Threads
 from lup_ledger.errors import LupLedgerError
-from lup_ledger.parties import Conversation, Operator
-from lup_ledger.records import Node
+from lup_ledger.parties import Conversation, Lup, Operator
+from lup_ledger.records import Edge, Kinds, Node
 from lup_ledger.threads import (
+    KINDS,
     Answered,
+    BranchLanded,
     Check,
     Declined,
     Done,
@@ -26,8 +31,7 @@ from lup_ledger.threads import (
 )
 
 if TYPE_CHECKING:
-    from lup_ledger.environment.store import Ledger
-    from lup_ledger.environment.threads import Threads
+    from collections.abc import Generator
 
 REPOSITORY = Path("/work/lup.git")
 OTHER = Path("/work/other.git")
@@ -395,3 +399,128 @@ def test_a_thread_is_found_by_its_name_and_nothing_else_is(
     assert threads.named(REPOSITORY, "lag") == lag
     assert threads.named(REPOSITORY, "a-check") is None
     assert threads.named(OTHER, "lag") is None
+
+
+class Citing(Edge):
+    """A citation of a part, standing for the inbox's, whose kind the ledger doesn't declare."""
+
+    kind: Literal["test:cites"] = "test:cites"
+    source: int
+    part: int | None = None
+
+    @override
+    def cites(self, part: int) -> bool:
+        return self.part == part
+
+
+@pytest.fixture
+def citing(tmp_path: Path) -> Generator[Ledger]:
+    """A ledger reading `Citing` beside its own kinds."""
+    kinds = Kinds(nodes=KINDS.nodes, edges=[*KINDS.edges, Citing])
+    opened = Ledger.opened(LedgerLayout(home=tmp_path / "citing"), kinds)
+    yield opened
+    opened.close()
+
+
+def cite(ledger: Ledger, node: Node, cited: Node, part: int, minutes: int) -> None:
+    ledger.drawn(
+        Citing(
+            source=node.number,
+            target=cited.number,
+            part=part,
+            repository=REPOSITORY,
+            by=node.by,
+            at=at(minutes),
+        )
+    )
+
+
+def moved(ledger: Ledger, review: Node, thread: Thread, part: int) -> None:
+    ledger.drawn(
+        Moved(
+            source=review.number,
+            target=thread.number,
+            part=part,
+            repository=REPOSITORY,
+            by=MAIN,
+            at=at(1),
+        )
+    )
+
+
+def test_a_part_moved_into_a_thread_waits_on_whoever_answers_for_it_until_something_in_it_cites_it(
+    citing: Ledger,
+) -> None:
+    threads = Threads(ledger=citing)
+    main = opened(citing, "main", holder=MAIN)
+    lag = opened(citing, "lag", parent=main.number)
+    review = item(citing, Operator())
+    placed(citing, review, main)
+    moved(citing, review, lag, 3)
+    waiting = threads.standing(lag.number)
+    elsewhere = item(citing, REVIEWER)
+    placed(citing, elsewhere, main)
+    cite(citing, elsewhere, review, 3, minutes=2)
+    other = item(citing, WORKER)
+    placed(citing, other, lag)
+    cite(citing, other, review, 4, minutes=3)
+    still = threads.standing(lag.number)
+    worker = item(citing, REVIEWER)
+    placed(citing, worker, lag)
+    cite(citing, worker, review, 3, minutes=4)
+
+    assert [each.part for each in waiting.unanswered] == [3]
+    assert waiting.state == "working"
+    assert [each.part for each in still.unanswered] == [3]
+    assert threads.standing(lag.number).unanswered == []
+
+
+def test_a_citation_from_outside_a_thread_is_no_answer_whoever_answers_for_it(
+    citing: Ledger,
+) -> None:
+    threads = Threads(ledger=citing)
+    main = opened(citing, "main", holder=MAIN)
+    lag = opened(citing, "lag", parent=main.number, holder=None)
+    review = item(citing, Operator())
+    placed(citing, review, main)
+    moved(citing, review, lag, 3)
+    routed = item(citing, MAIN)
+    placed(citing, routed, main)
+    cite(citing, routed, review, 3, minutes=2)
+    outside = threads.standing(lag.number)
+    answer = item(citing, MAIN)
+    placed(citing, answer, lag)
+    cite(citing, answer, review, 3, minutes=3)
+
+    assert threads.answering(lag.number) == MAIN
+    assert [each.part for each in outside.unanswered] == [3]
+    assert threads.standing(lag.number).unanswered == []
+
+
+def test_the_threads_parked_are_those_whose_latest_status_parks_them(
+    ledger: Ledger, threads: Threads
+) -> None:
+    lag = opened(ledger, "lag")
+    page = opened(ledger, "page")
+    elsewhere = opened(ledger, "elsewhere", repository=OTHER)
+
+    def park(thread: Thread, minutes: int) -> Parked:
+        return ledger.drawn(
+            Parked(
+                target=thread.number,
+                repository=thread.repository,
+                by=WORKER,
+                at=at(minutes),
+                until=[BranchLanded(branch="feat")],
+            )
+        )
+
+    park(lag, 1)
+    ledger.drawn(
+        Reopened(target=lag.number, repository=REPOSITORY, by=Lup(), at=at(2), why="x")
+    )
+    paged = park(page, 3)
+    other = park(elsewhere, 4)
+
+    assert threads.parked(REPOSITORY) == [paged]
+    assert threads.parked() == [paged, other]
