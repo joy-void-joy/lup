@@ -1130,10 +1130,14 @@ export function Review({
 
     // What's drawn beside the text, as it's laid out now and as each agent is doing: how long each item has waited,
     // after when it came; what each agent is doing and for how long, after the core's words on their banner; and each
-    // span of a view's that ticks or measures, where it goes. Said again by the clock, not laid out.
+    // span of a view's that ticks or measures, where it goes. Said again by the clock, not laid out. Each is placed in
+    // the text laid out, so only once it's in the editor (`before`), and not while what's typed in a comment since waits
+    // to be laid out (`TYPED`): each is laid out again with it, when they're placed anew. Placed in another text, one
+    // past the editor's end would throw as the next change is mapped, and the page with it. The lengths say what's typed
+    // without reading the whole text again at each hook: what's typed and leaves them equal moves no tick.
     useEffect(() => {
         const current = view.current;
-        if (current === null) {
+        if (current === null || before.current !== laidOut || current.state.doc.length !== laidOut.text.length) {
             return;
         }
         const ticks: Tick[] = [
