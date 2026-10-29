@@ -86,6 +86,23 @@ def test_a_number_taken_is_never_taken_again_once_reopened(tmp_path: Path) -> No
     reopened.close()
 
 
+def test_a_copy_opens_as_the_ledger_it_was_taken_of_and_goes_its_own_way(
+    ledger: Ledger, tmp_path: Path
+) -> None:
+    kept = ledger.kept(thread(ledger, "one"))
+    copy = LedgerLayout(home=tmp_path / "copy")
+    copy.home.mkdir()
+    copy.database.write_bytes(ledger.copied())
+
+    copied = Ledger.opened(copy)
+    copied.kept(thread(copied, "two"))
+
+    assert copied.node(kept.number, Thread) == kept
+    assert [each.name for each in copied.nodes(REPOSITORY, Thread)] == ["one", "two"]
+    assert [each.name for each in ledger.nodes(REPOSITORY, Thread)] == ["one"]
+    copied.close()
+
+
 def test_a_node_kept_with_its_own_number_moves_the_sequence_past_it(
     ledger: Ledger,
 ) -> None:

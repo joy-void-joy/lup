@@ -90,6 +90,7 @@ from lup_dev.gate import (
 from lup_dev.gate import Ran as GateRan
 from lup_dev.git import Git, nul_separated
 from lup_dev.host.client import Detached, FromRoom, HostClient, RoomClient
+from lup_dev.host.copying import Copying
 from lup_dev.host.courier import (
     Courier,
     Heard,
@@ -637,6 +638,11 @@ def host_serve(context: typer.Context) -> None:
             *remote_routes(remotes),
             *clipboard_routes(Desktop.of(settings)),
             RoomRoute.to(OwnLaunches()),
+            RoomRoute.to(
+                Copying(
+                    layout=layout, ledger=delivery.inbox.ledger, recorded=recorded()
+                )
+            ),
         ],
         modules=workers,
         asking=asking,
