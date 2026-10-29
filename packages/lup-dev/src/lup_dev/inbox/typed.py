@@ -21,14 +21,8 @@ from typing import override
 from lup.types import MutableModel
 from lup_dev.host.service import Companion
 from lup_dev.inbox.delivery import Delivery
-from lup_dev.inbox.store import (
-    Approval,
-    ChangedFile,
-    InboxError,
-    Item,
-    Operator,
-    cited,
-)
+from lup_dev.inbox.store import Approval, ChangedFile, InboxError, Item, cited
+from lup_ledger.parties import Operator
 
 
 class TypeReader(MutableModel, Companion, arbitrary_types_allowed=True):

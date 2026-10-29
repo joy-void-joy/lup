@@ -122,6 +122,7 @@ from lup_dev.host.watch import Changes
 from lup_dev.host.workers import JudgeHook, WorkerJudge, Workers, WorkersAsking
 from lup_dev.inbox.bearings import RepositoryBearings
 from lup_dev.inbox.citations import plainly
+from lup_dev.inbox.conversion import converted, rehearsed
 from lup_dev.inbox.delivery import (
     Delivery,
     ItemKind,
@@ -154,6 +155,7 @@ from lup_dev.inbox.protocol import routes as inbox_routes
 from lup_dev.inbox.reading import Flags, by_agent, counted, landed
 from lup_dev.inbox.roster import ids
 from lup_dev.inbox.store import (
+    KINDS,
     Answer,
     Approval,
     ChangedFile,
@@ -167,7 +169,6 @@ from lup_dev.inbox.store import (
     InboxError,
     Item,
     Message,
-    Party,
     Question,
     Review,
     Ruling,
@@ -177,7 +178,6 @@ from lup_dev.inbox.store import (
     cited,
     item_number,
 )
-from lup_dev.inbox.store import Conversation as InboxConversation
 from lup_dev.inbox.tools import InboxTools
 from lup_dev.inbox.typed import TypeReader
 from lup_dev.launch.clis import CliCache
@@ -228,6 +228,7 @@ from lup_dev.layout import (
     CheckoutLayout,
     GitDirectoryLayout,
     HostLayout,
+    InboxLayout,
     LaunchLayout,
     Layout,
     RoomPaths,
@@ -261,6 +262,10 @@ from lup_dev.settings import LupDevSettings, TerminalVariables
 from lup_dev.staging import Changed, Lines, StagingError
 from lup_dev.stored import read_model, write_model
 from lup_dev.worker import RepositoryModules, worked
+from lup_ledger.environment.layout import LedgerLayout
+from lup_ledger.environment.store import Ledger
+from lup_ledger.parties import Conversation as InboxConversation
+from lup_ledger.parties import Party
 from lup_transcripts.environment import views
 
 if TYPE_CHECKING:
@@ -538,6 +543,18 @@ def control_routes(
     ]
 
 
+def ledger_opened(layout: Layout) -> Ledger:
+    """Open the ledger in lup's state at `layout`, the inbox's kinds among those it reads, converting the inbox's files of an earlier lup onto it where it keeps no item yet (`lup_dev.inbox.conversion`), and saying so."""
+    ledger = Ledger.opened(LedgerLayout.of(layout), KINDS)
+    kept = converted(ledger, layout.inbox)
+    if kept is not None and kept.items:
+        typer.echo(
+            f"lup: the inbox's files at {layout.inbox.home} are on the ledger at "
+            f"{ledger.layout.database}: {kept.said()}. The files stay as they were."
+        )
+    return ledger
+
+
 @host.callback(invoke_without_command=True)
 def host_serve(context: typer.Context) -> None:
     """Run the host service in the foreground, until it's stopped.
@@ -559,7 +576,7 @@ def host_serve(context: typer.Context) -> None:
     pushes = Pushes()
     dashboard = installed_dashboard(settings, layout.host)
     delivery = Delivery(
-        inbox=Inbox.opened(layout.inbox, changes),
+        inbox=Inbox.opened(ledger_opened(layout), changes),
         waker=wakers,
         pushes=pushes,
         layout=layout.host,
@@ -1505,6 +1522,38 @@ def inbox_done(
     """Take a message or a flagged write you've read off your list."""
     answering().ask(FinishItem(number=number), Shown)
     typer.echo(f"{cited(number)} is done.")
+
+
+@inbox.command("check-conversion")
+def inbox_check_conversion(
+    files: Annotated[
+        Path | None,
+        typer.Option(
+            "--inbox",
+            help=(
+                "The inbox's files to convert, read alone: a copy of them, or "
+                "lup's own, `$XDG_STATE_HOME/lup/inbox`, where left out."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Rehearse converting the inbox's files onto the ledger, in a scratch directory removed after, and compare them.
+
+    It reads the files alone, and writes only in the scratch directory: the
+    ledger lup's host service keeps, and the files, are left as they are. It
+    says how many of each it converted, how long the conversion, the inbox's
+    opening, a hook's lookup and a write each way took, and what differs, by
+    item number and field, never what an item says. It exits with 1 where
+    something differs.
+    """
+    layout = Layout.of(LupDevSettings())
+    rehearsal = rehearsed(
+        layout.inbox if files is None else InboxLayout(home=files.resolve())
+    )
+    for line in rehearsal.said():
+        typer.echo(line)
+    if rehearsal.differs:
+        raise typer.Exit(1)
 
 
 @inbox.command("send")

@@ -132,7 +132,6 @@ from lup_dev.inbox.store import (
     Binary,
     ChangedFile,
     Content,
-    Conversation,
     Decided,
     Item,
     Reading,
@@ -154,6 +153,7 @@ if TYPE_CHECKING:
 
     from lup_dev.catalog.gate import Step
     from lup_dev.declaration.resolve import Resolved
+    from lup_ledger.parties import Conversation
 
 
 class TrustError(LupDevError):

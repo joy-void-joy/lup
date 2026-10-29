@@ -9,6 +9,9 @@ dependencies = [
     # Renders a launched session's guidance from the modules' sections.
     "jinja2>=3.1",
     "lup",
+    # The ledger, which keeps the inbox's items and parties (`lup_dev.inbox.store`):
+    # its base alone, since `lup-dev` is the environment its `environment` extra brings.
+    "lup-ledger",
     # `Transcripts`, among lup's default modules: its base alone, since `lup-dev`
     # is the environment its `environment` extra brings.
     "lup-transcripts",
@@ -33,4 +36,5 @@ build-backend = "uv_build"
 
 [tool.uv.sources]
 lup = { workspace = true }
+lup-ledger = { workspace = true }
 lup-transcripts = { workspace = true }

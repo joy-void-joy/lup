@@ -180,7 +180,6 @@ from lup_dev.inbox.roster import ids
 from lup_dev.inbox.store import (
     AtLanding,
     ChangedFile,
-    Conversation,
     Decided,
     Done,
     Flagged,
@@ -222,6 +221,7 @@ from lup_dev.remote.protocol import (
     require,
 )
 from lup_dev.stored import read_model
+from lup_ledger.parties import Conversation
 
 
 class Landing(Model):

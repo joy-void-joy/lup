@@ -460,9 +460,11 @@ class LaunchSockets(Model):
 
 
 class InboxLayout(Model):
-    """Where lup's inbox keeps its items and its parties, one JSON file each (`docs/inbox.md`).
+    """Where an earlier lup's inbox kept its items and its parties, one JSON file each (`docs/inbox.md`, *Kept on the ledger*).
 
-    The host service is the only writer; no room mounts it.
+    The host service converts them onto the ledger the first time it starts on
+    one holding no item, and leaves them as they were (`lup_dev.inbox.conversion`);
+    no room mounts them.
     """
 
     home: Path
@@ -1001,7 +1003,7 @@ class Layout(Model):
 
     @property
     def inbox(self) -> InboxLayout:
-        """Where lup's inbox keeps its items and its parties, one per user."""
+        """Where an earlier lup's inbox kept its items and its parties, one per user, which the host service converts onto the ledger once."""
         return InboxLayout(home=self.state / "inbox")
 
     def module_data(self, module: str, repository: Path) -> Path:

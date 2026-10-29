@@ -84,6 +84,7 @@ from lup_dev.host.workers import (
 )
 from lup_dev.inbox import tools
 from lup_dev.inbox.bearings import Repository, RepositoryBearings, Unlanded
+from lup_dev.inbox.conversion import converted
 from lup_dev.inbox.delivery import SEPARATOR, Delivery, Waking, clocked, opening
 from lup_dev.inbox.marks import CORE, MarksMoved, MoveMarks, Moving, StoredMarks, seen
 from lup_dev.inbox.notices import Notices, NotifySend
@@ -124,6 +125,7 @@ from lup_dev.inbox.protocol import (
 from lup_dev.inbox.reading import Narrowing, Reader, by_agent
 from lup_dev.inbox.roster import Roster
 from lup_dev.inbox.store import (
+    KINDS,
     Answer,
     Answered,
     ApiChanged,
@@ -131,7 +133,6 @@ from lup_dev.inbox.store import (
     Binary,
     ChangedFile,
     Comment,
-    Conversation,
     Decided,
     Done,
     Draft,
@@ -148,7 +149,6 @@ from lup_dev.inbox.store import (
     Letter,
     Marked,
     Message,
-    Operator,
     Passage,
     Question,
     Quote,
@@ -218,6 +218,9 @@ from lup_dev.remote.protocol import Remotes
 from lup_dev.settings import LupDevSettings
 from lup_dev.stored import write_model
 from lup_dev.worker import HostExchanges, HostMarks, RepositoryModules
+from lup_ledger.environment.layout import LedgerLayout
+from lup_ledger.environment.store import Ledger
+from lup_ledger.parties import Conversation, Operator
 from lup_transcripts.environment.module import Transcripts
 
 if TYPE_CHECKING:
@@ -473,7 +476,7 @@ def inboxed(
     changes = Changes()
     pushes = Pushes()
     delivery = Watched(
-        inbox=Inbox.opened(machine.inbox, changes),
+        inbox=Inbox.opened(cli.ledger_opened(machine), changes),
         waker=wakers,
         pushes=pushes,
         layout=machine.host,
@@ -4364,11 +4367,16 @@ class Silent(Notices):
         pass
 
 
+def ledger(home: Path) -> Ledger:
+    """A ledger kept at `home`, reading the inbox's kinds, as the host service's does."""
+    return Ledger.opened(LedgerLayout(home=home), KINDS)
+
+
 def alone(tmp_path: Path, clock: FakeClock) -> Delivery:
     """A delivery over an inbox under `tmp_path`, outside any service."""
     known = cli.Adapters(known=cli.adapters())
     return Delivery(
-        inbox=Inbox.opened(InboxLayout(home=tmp_path / "inbox")),
+        inbox=Inbox.opened(ledger(tmp_path / "ledger")),
         waker=cli.Wakers(adapters=known),
         pushes=Pushes(),
         layout=Layout(state=tmp_path / "state", runtime=tmp_path / "run").host,
@@ -4460,12 +4468,25 @@ def test_an_items_kind_ranks_it_where_it_comes_and_whether_it_notifies() -> None
     assert Item.model_validate_json(item.model_dump_json()) == item
 
 
-def test_a_stored_item_that_doesnt_read_is_named(tmp_path: Path) -> None:
+def test_a_stored_item_that_doesnt_read_is_named_and_nothing_is_converted(
+    tmp_path: Path,
+) -> None:
+    """The inbox's files of an earlier lup, converted at the service's start: one that doesn't read stops it, naming the file, and keeps nothing."""
     layout = InboxLayout(home=tmp_path / "inbox")
     layout.items.mkdir(parents=True)
-    layout.item(1).write_text("{}")
-    with pytest.raises(InboxError, match=f"the inbox's {layout.item(1)} doesn't read"):
-        Inbox.opened(layout)
+    item = Item(
+        number=1,
+        reason=Message(kind="note", text="Kept."),
+        sender=Operator(),
+        recipient=Operator(),
+        made=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    layout.item(1).write_text(item.model_dump_json())
+    layout.item(2).write_text("{}")
+    kept = ledger(tmp_path / "ledger")
+    with pytest.raises(InboxError, match=f"the inbox's {layout.item(2)} doesn't read"):
+        converted(kept, layout)
+    assert Inbox.opened(kept).items == {}
 
 
 def test_a_friction_and_how_it_felt_kept_in_labelled_parts_or_as_how_it_went_read_as_shown(
@@ -4508,7 +4529,9 @@ def test_a_friction_and_how_it_felt_kept_in_labelled_parts_or_as_how_it_went_rea
         stored = {**json.loads(item.model_dump_json()), "reason": reason}
         layout.items.mkdir(parents=True, exist_ok=True)
         layout.item(number).write_text(json.dumps(stored))
-    inbox = Inbox.opened(layout)
+    kept = ledger(tmp_path / "ledger")
+    converted(kept, layout)
+    inbox = Inbox.opened(kept)
     read = [inbox.item(number) for number in (1, 2, 3, 4)]
     assert [each.reason for each in read] == [
         Friction(text="`ls` printed: Permission denied\nTrying: look for the config"),
@@ -4518,18 +4541,22 @@ def test_a_friction_and_how_it_felt_kept_in_labelled_parts_or_as_how_it_went_rea
         HowItFelt(text="Nothing notable."),
         HowItFelt(text="Heavy toward the end."),
     ]
-    # Kept again, each is kept as the one text, of its kind as it's called now,
+    # Converted, each is kept as the one text, of its kind as it's called now,
     # and reads back as it was.
-    inbox.kept(read[0])
-    inbox.kept(read[3])
-    rewritten = json.loads(layout.item(1).read_text())["reason"]
+    rewritten, renamed = [
+        json.loads(
+            kept.connection.execute(
+                "SELECT record FROM versions WHERE number = ?", (each,)
+            ).fetchone()[0]
+        )["reason"]
+        for each in (1, 4)
+    ]
     assert rewritten == {
         "reason": "friction",
         "text": "`ls` printed: Permission denied\nTrying: look for the config",
     }
-    renamed = json.loads(layout.item(4).read_text())["reason"]
     assert renamed == {"reason": "how it felt", "text": "Heavy toward the end."}
-    assert [Inbox.opened(layout).item(each) for each in (1, 4)] == [read[0], read[3]]
+    assert [Inbox.opened(kept).item(each) for each in (1, 4)] == [read[0], read[3]]
 
 
 def test_a_desktop_notice_goes_through_notify_send_where_its_installed(
@@ -6114,7 +6141,7 @@ def test_where_an_approvals_types_cant_be_read_its_first_reading_stays_and_it_sa
 def test_an_approval_left_with_its_first_reading_is_read_by_the_next_service(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    kept = Inbox.opened(machine.inbox)
+    kept = Inbox.opened(cli.ledger_opened(machine))
     for fingerprint in ["zone", "decided"]:
         approval = asking_approval(tmp_path, fingerprint, typing=True).approval()
         item = kept.made(approval, Operator(), Operator(), tmp_path, clock.now())
@@ -10053,7 +10080,7 @@ def test_the_listing_names_an_agent_no_launch_names_by_its_path(
 ) -> None:
     """The dashboard names an agent by the launches it lists, which name a launch's latest session alone: an earlier session's, and an ended one's, come by the listing's paths."""
     layout = Layout(state=tmp_path / "state", runtime=tmp_path / "run", data=tmp_path)
-    inbox = Inbox.opened(layout.inbox)
+    inbox = Inbox.opened(cli.ledger_opened(layout))
     names = Names(path=layout.host.names)
     names.keep("s1", "w")
     names.keep("s2", "w")
@@ -10101,7 +10128,7 @@ def test_a_subagent_is_named_as_its_end_was_told_where_its_whereabouts_keep_no_n
     tmp_path: Path, clock: FakeClock
 ) -> None:
     layout = Layout(state=tmp_path / "state", runtime=tmp_path / "run", data=tmp_path)
-    inbox = Inbox.opened(layout.inbox)
+    inbox = Inbox.opened(cli.ledger_opened(layout))
     Names(path=layout.host.names).keep("s1", "w")
     main = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
     parser = main.model_copy(update={"agent": "a1"})
@@ -10146,7 +10173,7 @@ def test_each_conversations_flagged_writes_are_one_entry_wherever_the_inbox_is_l
     tmp_path: Path, clock: FakeClock
 ) -> None:
     layout = Layout(state=tmp_path / "state", runtime=tmp_path / "run", data=tmp_path)
-    inbox = Inbox.opened(layout.inbox)
+    inbox = Inbox.opened(cli.ledger_opened(layout))
     main = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
     parser = main.model_copy(update={"agent": "a1"})
     inbox.placed(
@@ -10367,7 +10394,7 @@ def test_the_bearings_tell_the_session_what_is_its_and_leave_the_operators_items
     tmp_path: Path, clock: FakeClock
 ) -> None:
     layout = Layout(state=tmp_path / "state", runtime=tmp_path / "run", data=tmp_path)
-    inbox = Inbox.opened(layout.inbox)
+    inbox = Inbox.opened(cli.ledger_opened(layout))
     last = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
     worker = last.model_copy(update={"agent": "a1"})
     other = last.model_copy(update={"session": "s9"})

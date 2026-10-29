@@ -1,4 +1,4 @@
-"""Where the ledger keeps what it stores: one SQLite database, in lup's state on the host.
+"""Where the ledger keeps what it stores: one SQLite database, and the files its records attach, in lup's state on the host.
 
 The host service is its only writer, and no room mounts it, as with the inbox
 (`docs/inbox.md`, *Parties and items*).
@@ -28,3 +28,12 @@ class LedgerLayout(Model):
     def database(self) -> Path:
         """The database itself; SQLite keeps its write-ahead log and its index of it beside it."""
         return self.home / "ledger.sqlite3"
+
+    @property
+    def attachments(self) -> Path:
+        """What records attach, too large to hold in a row, such as an item's diff: a file each, named by its content's digest."""
+        return self.home / "attachments"
+
+    def attachment(self, digest: str) -> Path:
+        """Say where the attachment whose content's SHA-256 is `digest`, in hex, is kept."""
+        return self.attachments / digest

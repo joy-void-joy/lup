@@ -13,7 +13,6 @@ from lup_dev.inbox.store import (
     Answer,
     Answered,
     Citation,
-    Conversation,
     Decided,
     Done,
     Flagged,
@@ -21,7 +20,6 @@ from lup_dev.inbox.store import (
     Item,
     Letter,
     Message,
-    Operator,
     Question,
     Reason,
     Review,
@@ -31,6 +29,7 @@ from lup_dev.inbox.store import (
     Unresolved,
     Withdrawn,
 )
+from lup_ledger.parties import Conversation, Operator
 
 
 def at(minute: int) -> datetime:

@@ -28,9 +28,9 @@ from lup_dev.host.records import Call, Reader, Record, Recorded, Records, Transc
 from lup_dev.inbox.exchanges import Exchanges
 from lup_dev.inbox.marks import StoredMarks
 from lup_dev.inbox.protocol import Exchanged
-from lup_dev.inbox.store import Conversation
 from lup_dev.layout import Layout
 from lup_dev.worker import RepositoryModules
+from lup_ledger.parties import Conversation
 
 if TYPE_CHECKING:
     from lup.blocks import OfAgent

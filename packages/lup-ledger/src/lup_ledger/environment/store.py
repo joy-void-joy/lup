@@ -13,27 +13,35 @@
   versions by its number; an edge by the node it's drawn to or from. The first
   lup's ledger folded its whole log at every read, which hung on 85 MB.
 - **One connection, behind one lock,** since the host service answers each hook
-  in a thread of its own: a write is one transaction, and `together` holds the
-  lock across several reads so they see one state.
+  in a thread of its own: a write is one transaction, `writing` holds one
+  across several writes so they're kept together or not at all, and
+  `together` holds the lock across several reads so they see one state.
+- **Plain records** beside the graph: what's rewritten in place by its name,
+  with no version and no number (`plain`, `rewritten`), such as the operator's
+  draft, which changes at every pause in their typing.
+- **Attachments** beside the database: what a record carries that's too large
+  for a row, such as an item's diff, a file each, named by its content's digest
+  (`attached`, `attachment`), so one kept twice is one file.
 """
 
+import hashlib
 import sqlite3
+import tempfile
 import threading
 from contextlib import contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from lup.types import Model
+from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.errors import LupLedgerError
-from lup_ledger.records import Edge, Kinds, Node
+from lup_ledger.records import Edge, Kinds, Node, Record
 from lup_ledger.threads import KINDS
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Generator
-    from pathlib import Path
-
-    from lup_ledger.environment.layout import LedgerLayout
 
 SCHEMA = """
 CREATE TABLE sequence (next INTEGER NOT NULL);
@@ -64,15 +72,58 @@ CREATE TABLE edges (
 CREATE INDEX edges_to ON edges (target, drawn);
 CREATE INDEX edges_from ON edges (source, drawn);
 """
-"""The tables: the sequence's next number; each version of each node, in the
-order kept; each node's latest version, with what it's found by; each edge, in
-the order drawn."""
+"""The tables of version 1: the sequence's next number; each version of each
+node, in the order kept; each node's latest version, with what it's found by;
+each edge, in the order drawn."""
+
+SECOND = """
+CREATE INDEX nodes_kinds ON nodes (kind, number);
+CREATE INDEX edges_kinds ON edges (kind, drawn);
+CREATE TABLE records (name TEXT PRIMARY KEY, record TEXT NOT NULL);
+"""
+"""What version 2 adds to version 1: each node and each edge found by its kind,
+across repositories, so the host service reads every item at its start
+without walking the store; and the plain records, each by its name."""
 
 LATEST = (
     "SELECT versions.kind, versions.record FROM nodes "
     "JOIN versions ON versions.version = nodes.version"
 )
 """Each node's latest version, which a read narrows by what `nodes` indexes."""
+
+EDGES = "SELECT kind, record FROM edges"
+"""Each edge, which a read narrows by what `edges` indexes."""
+
+KINDS_HELD = "SELECT kind FROM nodes"
+"""The kind of each node, which a read narrows by what `nodes` indexes."""
+
+
+def upgrade(found: int) -> str | None:
+    """Return what makes a database at version `found` of the tables the one after it; none where no version follows.
+
+    >>> upgrade(1) == SECOND
+    True
+    """
+    match found:
+        case 0:
+            return SCHEMA
+        case 1:
+            return SECOND
+        case _:
+            return None
+
+
+def declared(
+    kind: type[Record], among: list[type[Node]] | list[type[Edge]]
+) -> list[str]:
+    """Return the kinds declared by `kind` and each of `among` derived from it: those a read of `kind` finds."""
+    return list(
+        dict.fromkeys(
+            name
+            for each in [kind, *among]
+            if issubclass(each, kind) and (name := each.declared()) is not None
+        )
+    )
 
 
 class Drawn(Model):
@@ -92,6 +143,8 @@ class Ledger(Model, arbitrary_types_allowed=True):
 
     connection: sqlite3.Connection
     kinds: Kinds
+    layout: LedgerLayout
+    """Where it's kept: the database, and the attachments beside it."""
     lock: threading.RLock = Field(default_factory=threading.RLock)
     """Held for each call, and across several by `together`; reentrant, so a
     kind's refusal reads the ledger while a write holds it."""
@@ -102,36 +155,47 @@ class Ledger(Model, arbitrary_types_allowed=True):
         layout: LedgerLayout,
         # lup: defer(issue=343, why="a module's own kinds join the ledger's here, once a module can declare them")
         kinds: Kinds = KINDS,
-        schema: int = 1,
+        schema: int = 2,
     ) -> Ledger:
         """Open the ledger kept at `layout`, making it where there's none, its records read as `kinds` declares them.
 
         `schema` is the version of the tables this code reads, kept in the
-        database's `user_version`. Raise `LupLedgerError` where the database is
-        at another.
+        database's `user_version`: a database at an earlier one is brought to
+        it, each version's tables after the last (`upgrade`), in one
+        transaction. Raise `LupLedgerError` where the database is at a later one.
+
+        Its write-ahead log is synced to the disk at each checkpoint rather than
+        at each transaction (`synchronous = NORMAL`): a transaction is lost to
+        a power cut, never to the service's crash, as the inbox's files were
+        written whole without a sync.
         """
         layout.home.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(
             layout.database, autocommit=True, check_same_thread=False
         )
         connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA synchronous = NORMAL")
         connection.execute("BEGIN IMMEDIATE")
         made = False
         try:
             found = connection.execute("PRAGMA user_version").fetchone()[0]
-            if found == 0:
-                connection.executescript(f"{SCHEMA}PRAGMA user_version = {schema};")
+            for version in range(found, schema):
+                script = upgrade(version)
+                if script is not None:
+                    connection.executescript(
+                        f"{script}PRAGMA user_version = {version + 1};"
+                    )
             made = True
         finally:
             connection.execute("COMMIT" if made else "ROLLBACK")
-        if found not in (0, schema):
+        if found > schema:
             connection.close()
             message = (
                 f"the ledger at {layout.database} is at version {found} of its "
                 f"tables, and this lup reads version {schema}"
             )
             raise LupLedgerError(message)
-        return cls(connection=connection, kinds=kinds)
+        return cls(connection=connection, kinds=kinds, layout=layout)
 
     def close(self) -> None:
         """Close the database; the ledger can't be used after."""
@@ -146,19 +210,32 @@ class Ledger(Model, arbitrary_types_allowed=True):
 
     @contextmanager
     def writing(self) -> Generator[sqlite3.Connection]:
-        """Hold the lock and a transaction across a write: committed where it ends, rolled back where it raises."""
+        """Hold the lock and a transaction across a write, or several: committed where it ends, rolled back where it raises.
+
+        Within another, it's a savepoint of that one: what's written inside is
+        undone alone where it raises, and kept or rolled back with the rest
+        where the outer one ends. So `with ledger.writing():` around several
+        writes keeps them together, or none of them.
+        """
         with self.lock:
-            self.connection.execute("BEGIN IMMEDIATE")
+            nested = self.connection.in_transaction
+            self.connection.execute(
+                "SAVEPOINT writing" if nested else "BEGIN IMMEDIATE"
+            )
             done = False
             try:
                 yield self.connection
                 done = True
             finally:
-                self.connection.execute("COMMIT" if done else "ROLLBACK")
+                if nested:
+                    if not done:
+                        self.connection.execute("ROLLBACK TO writing")
+                    self.connection.execute("RELEASE writing")
+                else:
+                    self.connection.execute("COMMIT" if done else "ROLLBACK")
 
     def numbered(self) -> int:
         """Take the sequence's next number, for a node about to be kept; none is ever taken twice."""
-        # lup: defer(issue=345, why="the inbox numbers its items itself until they're nodes; then they're numbered here, and the items already made keep their numbers, which `kept` moves the sequence past")
         with self.writing() as database:
             row = database.execute(
                 "UPDATE sequence SET next = next + 1 RETURNING next - 1"
@@ -238,6 +315,28 @@ class Ledger(Model, arbitrary_types_allowed=True):
                 ).fetchall()
         found = [self.node_read(each, record) for each, record in rows]
         return [each for each in found if isinstance(each, kind)]
+
+    def every[N: Node](self, kind: type[N]) -> list[N]:
+        """Return each node of `kind` as it stands, of every repository, by number: those of each kind it or a class the ledger reads derived from it declares."""
+        kinds = declared(kind, self.kinds.nodes)
+        marks = ", ".join("?" for _ in kinds)
+        with self.lock:
+            rows = self.connection.execute(
+                f"{LATEST} WHERE nodes.kind IN ({marks}) ORDER BY nodes.number",
+                kinds,
+            ).fetchall()
+        found = [self.node_read(each, record) for each, record in rows]
+        return [each for each in found if isinstance(each, kind)]
+
+    def keeps(self, kind: type[Node]) -> bool:
+        """Say whether the ledger keeps a node of `kind`, of any repository: of a kind it or a class the ledger reads derived from it declares."""
+        kinds = declared(kind, self.kinds.nodes)
+        marks = ", ".join("?" for _ in kinds)
+        with self.lock:
+            row = self.connection.execute(
+                f"{KINDS_HELD} WHERE kind IN ({marks}) LIMIT 1", kinds
+            ).fetchone()
+        return row is not None
 
     def cited(self, repository: Path, said: str) -> Node:
         """Return the node of `repository` that `said` names as `@` takes it: its number or its name, with `@` or without.
@@ -380,6 +479,17 @@ class Ledger(Model, arbitrary_types_allowed=True):
             held = [each for each in found if not current or self.holds(each)]
         return [each.edge for each in held if isinstance(each.edge, kind)]
 
+    def drawn_of[E: Edge](self, kind: type[E]) -> list[E]:
+        """Return every edge of `kind`, to any node of any repository, in the order drawn: those of each kind it or a class the ledger reads derived from it declares."""
+        kinds = declared(kind, self.kinds.edges)
+        marks = ", ".join("?" for _ in kinds)
+        with self.lock:
+            rows = self.connection.execute(
+                f"{EDGES} WHERE kind IN ({marks}) ORDER BY drawn", kinds
+            ).fetchall()
+        found = [self.edge_read(each, record) for each, record in rows]
+        return [each for each in found if isinstance(each, kind)]
+
     def later(self, source: int, place: int) -> list[Drawn]:
         """Return the edges drawn from node `source` after `place` in the order drawn, in that order."""
         rows = self.connection.execute(
@@ -400,3 +510,72 @@ class Ledger(Model, arbitrary_types_allowed=True):
         return not any(
             each.edge.replaces(drawn.edge) for each in self.later(source, drawn.place)
         )
+
+    def plain[M: BaseModel](self, name: str, model: type[M]) -> M | None:
+        """Return the plain record named `name`, as `model`; none where none is kept.
+
+        Raise `LupLedgerError` where the one kept doesn't read as `model`.
+        """
+        with self.lock:
+            row = self.connection.execute(
+                "SELECT record FROM records WHERE name = ?", (name,)
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            return model.model_validate_json(row[0])
+        except ValidationError as unread:
+            message = f"the ledger's record `{name}` doesn't read: {unread}"
+            raise LupLedgerError(message) from unread
+
+    def plains[M: BaseModel](self, prefix: str, model: type[M]) -> dict[str, M]:
+        """Return each plain record whose name starts with `prefix`, as `model`, by its name, in its name's order.
+
+        Its names are read as a range of the index, from `prefix` to `prefix`
+        followed by the last code point, so no read walks the table. Raise
+        `LupLedgerError` where one doesn't read as `model`.
+        """
+        beyond = f"{prefix}\U0010ffff"
+        with self.lock:
+            rows = self.connection.execute(
+                "SELECT name, record FROM records WHERE name >= ? AND name < ? "
+                "ORDER BY name",
+                (prefix, beyond),
+            ).fetchall()
+        try:
+            return {name: model.model_validate_json(record) for name, record in rows}
+        except ValidationError as unread:
+            message = f"a plain record named `{prefix}…` doesn't read: {unread}"
+            raise LupLedgerError(message) from unread
+
+    def rewritten(self, name: str, value: BaseModel) -> None:
+        """Keep `value` as the plain record named `name`, in place of the one before: no version of it stays."""
+        with self.writing() as database:
+            database.execute(
+                "INSERT INTO records (name, record) VALUES (?, ?) "
+                "ON CONFLICT (name) DO UPDATE SET record = excluded.record",
+                (name, value.model_dump_json()),
+            )
+
+    def attached(self, data: bytes) -> str:
+        """Keep `data` beside the database, once however many records attach it, and return its digest, which a record names it by.
+
+        Written whole under another name, then renamed into place, so an
+        attachment is never read half written.
+        """
+        digest = hashlib.sha256(data).hexdigest()
+        path = self.layout.attachment(digest)
+        if path.is_file():
+            return digest
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            dir=path.parent, prefix=f"{digest}.", delete=False
+        ) as partial:
+            partial.write(data)
+        Path(partial.name).replace(path)
+        return digest
+
+    def attachment(self, digest: str) -> bytes | None:
+        """Return the attachment named by `digest`; none where none is kept."""
+        path = self.layout.attachment(digest)
+        return path.read_bytes() if path.is_file() else None

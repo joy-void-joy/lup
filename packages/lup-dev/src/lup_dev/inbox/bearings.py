@@ -37,14 +37,12 @@ from lup_dev.git import Git, GitError, nul_separated
 from lup_dev.host.service import Bearings, Running
 from lup_dev.inbox.delivery import Delivery, clocked
 from lup_dev.inbox.reading import Reader
-from lup_dev.inbox.store import (
-    Conversation,
-    Item,
-)
 from lup_dev.listing import many
+from lup_ledger.parties import Conversation
 
 if TYPE_CHECKING:
     from lup_dev.host.protocol import Register
+    from lup_dev.inbox.store import Item
 
 
 class Unlanded(Model):

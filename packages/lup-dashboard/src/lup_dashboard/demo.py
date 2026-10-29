@@ -73,7 +73,6 @@ from lup_dev.inbox.store import (
     ChangedFile,
     Comment,
     Content,
-    Conversation,
     Decision,
     Done,
     Draft,
@@ -86,7 +85,6 @@ from lup_dev.inbox.store import (
     Item,
     Letter,
     Message,
-    Operator,
     Order,
     Question,
     Quote,
@@ -114,6 +112,7 @@ from lup_dev.policy.since import (
     ViewedFile,
 )
 from lup_dev.policy.waits import Awaited, LandingsWaiting, ShowLandings, Wait
+from lup_ledger.parties import Conversation, Operator
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator

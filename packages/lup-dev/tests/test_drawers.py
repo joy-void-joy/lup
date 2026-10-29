@@ -14,15 +14,13 @@ from lup_dev.declaration.resolve import Declaration
 from lup_dev.host.pushes import Pushes
 from lup_dev.inbox.delivery import Delivery, changed_since
 from lup_dev.inbox.notices import Notices
-from lup_dev.inbox.store import Asked as Ask
 from lup_dev.inbox.store import (
+    KINDS,
     ChangedFile,
-    Conversation,
     Decided,
     Flagged,
     Inbox,
     InboxError,
-    Operator,
     Quote,
     Quoted,
     Reading,
@@ -32,7 +30,8 @@ from lup_dev.inbox.store import (
     Waiting,
     Whereabouts,
 )
-from lup_dev.layout import InboxLayout, Layout
+from lup_dev.inbox.store import Asked as Ask
+from lup_dev.layout import Layout
 from lup_dev.policy.checkpoint import LastDeclaration
 from lup_dev.policy.landing import Baseline, Saw
 from lup_dev.policy.reviewed import Mark, Reviews
@@ -49,6 +48,9 @@ from lup_dev.policy.since import (
 from lup_dev.policy.worktrees import Holding as Worked
 from lup_dev.policy.worktrees import SessionIndex
 from lup_dev.stored import write_model
+from lup_ledger.environment.layout import LedgerLayout
+from lup_ledger.environment.store import Ledger
+from lup_ledger.parties import Conversation, Operator
 
 if TYPE_CHECKING:
     from conftest import FakeClock, Shell
@@ -66,7 +68,9 @@ def alone(tmp_path: Path, clock: FakeClock) -> Delivery:
     """A delivery over an inbox under `tmp_path`, outside any service."""
     known = cli.Adapters(known=cli.adapters())
     return Delivery(
-        inbox=Inbox.opened(InboxLayout(home=tmp_path / "inbox")),
+        inbox=Inbox.opened(
+            Ledger.opened(LedgerLayout(home=tmp_path / "ledger"), KINDS)
+        ),
         waker=cli.Wakers(adapters=known),
         pushes=Pushes(),
         layout=Layout(state=tmp_path / "state", runtime=tmp_path / "run").host,

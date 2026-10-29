@@ -72,7 +72,6 @@ from lup_dev.inbox import store as inbox
 from lup_dev.inbox.delivery import Delivery
 from lup_dev.inbox.store import (
     ChangedFile,
-    Conversation,
     Flagged,
     InboxError,
     Item,
@@ -96,6 +95,7 @@ from lup_dev.policy.store import Store
 from lup_dev.policy.waits import Declined, Wait, Waits
 from lup_dev.policy.worktrees import SessionIndex
 from lup_dev.stored import read_model
+from lup_ledger.parties import Conversation
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

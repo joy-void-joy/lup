@@ -1,12 +1,12 @@
 # The ledger: lup's typed graph, and threads
 
-The ledger keeps the work as a typed graph: nodes, the edges between them, and every version of every node. Threads are its first kind. A thread is one concern: what's in it (items, the operator's parts, checks) and where it stands. It's one of the core's submodules, always present. No one writes to it yet: the host service opens it once the inbox's items are its nodes (#345).
+The ledger keeps the work as a typed graph: nodes, the edges between them, and every version of every node. Threads are its first kind. A thread is one concern: what's in it (items, the operator's parts, checks) and where it stands. It's one of the core's submodules, always present. The host service opens it at its start, and keeps the inbox on it: each item a node, where it stands and what it answers edges (`docs/inbox.md`, *Kept on the ledger*). Nothing makes a thread yet (#345).
 
 ## Records
 
 `lup_ledger.records`:
 - **A node** (`Node`) has a number from one sequence shared by every node of every repository, cited `@12`. It also has its repository, who wrote it, when, and a name where its kind gives it one (`@dashboard-lag`), unique among its repository's nodes.
-  - Who wrote it is the operator or a conversation, the latter known by its runtime's ids (`lup_ledger.parties`). These are the inbox's own parties, field for field, so a record and an item say who they're from alike.
+  - Who wrote it is the operator, a conversation, or lup itself (`lup_ledger.parties`, `Writer`). A conversation is known by its runtime's ids. The operator and a conversation are the inbox's parties (`Party`), what an item is from and for, so a record and an item say who they're from alike; lup writes what it does of its own accord, such as an item told, and is no party.
   - A name holds a letter, so `@` takes a number or a name and never mistakes one for the other, or for a part's id (`@2159.3`).
 - **An edge** (`Edge`) is drawn to a node, either from another node or said of its target alone, as a thread settled is.
   - Both ends must be on the ledger, in the edge's repository.
@@ -54,20 +54,26 @@ A thread's sub-threads are read from its repository's threads by their `parent`,
 
 ## The store
 
-`Ledger` is one SQLite database, through Python's own `sqlite3`, holding every repository's records: `$XDG_STATE_HOME/lup/ledger/ledger.sqlite3` (`LedgerLayout`). The host service will be its only writer, and no room mounts it, as with the inbox (`docs/inbox.md`, *Parties and items*).
+`Ledger` is one SQLite database, through Python's own `sqlite3`, holding every repository's records: `$XDG_STATE_HOME/lup/ledger/ledger.sqlite3` (`LedgerLayout`). The host service is its only writer, and no room mounts it (`docs/inbox.md`, *Parties and items*).
 - **Numbers:** `numbered` takes the next one, never taken twice. `kept` given a number the sequence hasn't reached moves the sequence past it, so an item numbered before keeps its number.
 - **Versions:** `kept` appends a node's version, and `versions` reads them all. A version whose time isn't after the one before it is refused, so each version says when it was written, and a reader can tell when a thread was renamed or moved. The first lup's ledger copied a node's first time onto every later version, and nothing could tell when a task closed.
 - **Names:** `kept` refuses a name another node of the repository holds, and a new name among `taken`, the names of the repository's agents, which the host service knows.
+- **Plain records** beside the graph: what's rewritten in place by its name, with no version and no number (`plain`, `rewritten`), read one by its name or several by the start of their names (`plains`). The inbox keeps there:
+  - the operator's draft, rewritten at each pause in their typing, which versions would fill with keystrokes; once sent, it's an item. The review's order and what they write on a conversation they read are the same.
+  - each conversation's whereabouts, keyed by the conversation's runtime's ids: not numbered, because nothing cites a conversation by number, and the sequence is the operator's to read, where each subagent heard would skip one. A thread's holder is a conversation by those ids too (`Thread.holder`). Should threads need a conversation as a node, they make it one then (#345, piece 3), once threads move the numbers anyway.
+- **Attachments** beside the database: what a record carries that's too large for a row, such as an item's diff, a file each under `attachments/`, named by its content's SHA-256 (`attached`, `attachment`). A record names one by its digest, so the same content attached twice is one file, and an attachment a later version replaced stays, read through the version naming it.
 - **Indexed, so no read walks the store:**
-  - a node's latest version is one row of `nodes`, found by its number, by its repository and kind, or by its name;
+  - a node's latest version is one row of `nodes`, found by its number, by its repository and kind, by its kind across repositories (`every`, `keeps`), or by its name;
   - its versions are found by its number;
-  - an edge is found by the node it's drawn to or from.
+  - an edge is found by the node it's drawn to or from, or by its kind (`drawn_of`): the host service reads every item and where each stands so at its start.
 
   A test checks every query's plan. A log folded whole at every read hung on 85 MB in the first lup.
 - **Threads at once:** the host service answers each hook in a thread of its own. So the store keeps one connection, behind one reentrant lock:
   - each write is one transaction, rolled back where it's refused, so nothing of it is kept;
+  - `writing` holds one transaction across several writes, so they're kept together or not at all: within it, each write is a savepoint, undone alone where it's refused;
   - `together` holds the lock across several reads, so they see one state.
-- **Its tables' version** is kept in the database (`user_version`), and a database at another is refused.
+- **Synced at checkpoints:** in write-ahead mode with `synchronous = NORMAL`, a transaction reaches the disk at the log's next checkpoint, not at each commit. One is lost to a power cut, never to the service's crash, as the inbox's files, written whole without a sync, were. Syncing each commit would cost a sync at every hook that tells an item.
+- **Its tables' version** is kept in the database (`user_version`). A database at an earlier one is brought to this one at opening, in one transaction (`upgrade`); one at a later one is refused.
 
 ## Layout
 

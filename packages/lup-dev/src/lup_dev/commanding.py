@@ -35,7 +35,7 @@ from lup_dev.host.client import RoomClient
 from lup_dev.inbox.exchanges import Exchanges
 from lup_dev.inbox.marks import Key, Marks, MarksRead, ReadMarks, ReviewMark
 from lup_dev.inbox.protocol import Exchanged, ListItems
-from lup_dev.inbox.store import Conversation as Party
+from lup_ledger.parties import Conversation as Party
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence

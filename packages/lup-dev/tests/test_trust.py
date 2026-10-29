@@ -48,7 +48,6 @@ from lup_dev.inbox.store import (
     Asked,
     Binary,
     ChangedFile,
-    Conversation,
     Decided,
     Found,
     Inbox,
@@ -83,6 +82,7 @@ from lup_dev.launch.trust import (
 )
 from lup_dev.layout import CopyLayout, JudgeLayout, Layout
 from lup_dev.stored import read_model, write_model
+from lup_ledger.parties import Conversation
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -2151,7 +2151,7 @@ class Background:
         pushes = Pushes()
         wakers = cli.Wakers(adapters=known)
         self.delivery = Delivery(
-            inbox=Inbox.opened(machine.inbox),
+            inbox=Inbox.opened(cli.ledger_opened(machine)),
             waker=wakers,
             pushes=pushes,
             layout=machine.host,

@@ -5,15 +5,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lup_dev.inbox.store import (
-    ApiChanged,
-    Asked,
-    ChangedFile,
-    Conversation,
-    Flagged,
-    Reading,
-    Text,
-)
+from lup_dev.inbox.store import ApiChanged, Asked, ChangedFile, Flagged, Reading, Text
 from lup_dev.policy.before import Decision, Overwrite, Proposal, Replacement, before
 from lup_dev.policy.checkpoint import (
     CallFinished,
@@ -27,6 +19,7 @@ from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.policy.worktrees import Place, place
 from lup_dev.private.withheld import Held, Withheld, kept
 from lup_dev.stored import read_model, write_model
+from lup_ledger.parties import Conversation
 
 if TYPE_CHECKING:
     from conftest import Dying, Kit, Shell
