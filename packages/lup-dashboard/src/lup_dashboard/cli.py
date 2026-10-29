@@ -9,16 +9,22 @@ import json
 import secrets
 import socket
 import sys
+import tempfile
 from ipaddress import IPv6Address, ip_address
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
 import typer
 import uvicorn
 
+from lup_dashboard.copied import Asking, taken
 from lup_dashboard.demo import Demo
-from lup_dashboard.host import Sockets
-from lup_dashboard.layout import DashboardLayout
-from lup_dashboard.server import Access, application
+from lup_dashboard.errors import CopyError
+from lup_dashboard.host import Host, Sockets
+from lup_dashboard.layout import CopyLayout, DashboardLayout, checkout
+from lup_dashboard.server import Access, OfCopy, application
+from lup_dev.cli import adapters
+from lup_dev.host.protocol import HostError
 from lup_dev.layout import Layout
 from lup_dev.settings import LupDevSettings
 
@@ -99,6 +105,7 @@ async def until_closed(server: uvicorn.Server, sockets: list[socket.socket]) -> 
 def demo(
     port: int = 8767,
     address: str = "127.0.0.1",
+    *,
     size: Annotated[
         int | None,
         typer.Option(
@@ -128,6 +135,19 @@ def demo(
             )
         ),
     ] = 0,
+    copy: Annotated[
+        bool,
+        typer.Option(
+            "--copy",
+            help=(
+                "Serve a copy of the operator's dashboard state in place of the "
+                "stand-ins, every repository's, taken from the host through the "
+                "launch's request socket into a directory of the demo's own, removed "
+                "as it stops, and answered by this checkout's code: what's done on "
+                "the page changes the copy alone. In a launched session only."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Serve the dashboard over stand-in data on `address` and `port`, until stopped, printing where to open it.
 
@@ -135,19 +155,68 @@ def demo(
     it (`lup_dashboard/demo.py`): for looking at a view while it's built, and
     trying one before it lands, at a busy day's size (`--size`), with an
     approval of lup's own code at size (`--approval-lines`) and, with
-    `--hooks`, under a busy day's watch answers.
+    `--hooks`, under a busy day's watch answers. With `--copy`, over a copy of
+    the operator's dashboard state instead (`lup_dashboard/copied.py`).
     """
-    token = secrets.token_urlsafe(16)
-    listening = socket.create_server((address, port))
-    bound = listening.getsockname()[1]
+    if copy:
+        if size is not None or hooks or approval_lines:
+            message = (
+                "--copy serves the operator's state as it is: it takes none of "
+                "--size, --hooks or --approval-lines"
+            )
+            raise typer.BadParameter(message)
+        copied(port, address)
+        return
     host = Demo(hooks=hooks, approval_lines=approval_lines)
     if size is not None:
         host.size = size
-    served = application(
-        host, Access(token=token, port=bound), DashboardLayout().page, demo=True
+    served(host, port, address)
+
+
+def copied(port: int, address: str) -> None:
+    """Serve the dashboard over a copy of the operator's dashboard state, taken into a directory of its own removed as it stops, until stopped.
+
+    The checkout it runs in answers its repository's views by its own
+    declaration (`checkout`). What the copy can't be taken or read for is said,
+    and nothing is served.
+    """
+    root = checkout(Path.cwd())
+    if root is None:
+        message = (
+            f"--copy runs in a checkout, whose declaration answers its repository's "
+            f"views: {Path.cwd()} is in none"
+        )
+        raise typer.BadParameter(message)
+    readers = {adapter.runtime.name(): adapter.reader for adapter in adapters()}
+    with tempfile.TemporaryDirectory(prefix="lup-dashboard-copy-") as kept:
+        try:
+            host = taken(
+                CopyLayout(home=Path(kept)),
+                Asking(),
+                root,
+                readers,
+                say=lambda line: typer.echo(f"copy: {line}", err=True),
+            )
+        except (CopyError, HostError) as failed:
+            typer.echo(f"lup-dashboard: the copy can't be served: {failed}", err=True)
+            raise typer.Exit(1) from failed
+        served(host, port, address, OfCopy(defaults=host.views.by_defaults()))
+
+
+def served(host: Host, port: int, address: str, copied: OfCopy | None = None) -> None:
+    """Serve the demo over `host` on `address` and `port`, until stopped, printing where to open it, its token in the fragment."""
+    token = secrets.token_urlsafe(16)
+    listening = socket.create_server((address, port))
+    bound = listening.getsockname()[1]
+    app = application(
+        host,
+        Access(token=token, port=bound),
+        DashboardLayout().page,
+        demo=True,
+        copied=copied,
     )
     typer.echo(f"http://{address}:{bound}/#token={token}")
-    server = uvicorn.Server(uvicorn.Config(served, log_level="warning"))
+    server = uvicorn.Server(uvicorn.Config(app, log_level="warning"))
     asyncio.run(server.serve(sockets=[listening]))
 
 

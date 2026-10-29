@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { everyone, launches, ring, running, type Activity, type Agent, type Running } from "./agents";
-import { ask, type Asked, type Replied } from "./api";
+import { ask, type Asked, type OfCopy, type Replied } from "./api";
 import { cited } from "./comments";
 import { useNow, useSame, useViews, useWatched } from "./hooks";
 import { movedSaid, type Marked, type Moved } from "./grammar";
@@ -171,6 +171,10 @@ export function App() {
     }, []);
     const [said, setSaid] = useState<string | null>(null);
     const [demo, setDemo] = useState(false);
+    // What a demo serving a copy of the operator's dashboard state says of it (`About.copied`); none over stand-in data,
+    // and for the dashboard. Held in a ref too, for the drawers' reading, which says in a drawer why the copy refused it.
+    const [copied, setCopied] = useState<OfCopy | null>(null);
+    const copying = useRef(false);
     const [inserting, setInserting] = useState(false);
     // What the review's cursor is on and what each verb would do to it, and whether the list of every key is open: what the line of keys says.
     const [here, setHere] = useState<Here>({ on: "nothing waiting", reached: [] });
@@ -425,7 +429,10 @@ export function App() {
             .finally(() => setDraftRead(true));
         void fetch("/api/about").then(async (response) => {
             if (response.ok) {
-                setDemo(((await response.json()) as { demo: boolean }).demo);
+                const about = (await response.json()) as { demo: boolean; copied?: OfCopy | null };
+                setDemo(about.demo);
+                setCopied(about.copied ?? null);
+                copying.current = about.copied != null;
             }
         });
     }, []);
@@ -602,6 +609,8 @@ export function App() {
     // conversation; and the files of each being marked reviewed, each laid out as a reviewed line from the key's press
     // until the host answers.
     const shown = useRef(new Map<string, Since>());
+    // Why the host refused each drawer never read, by its conversation, which a copy's drawer says (`AgentDrawers.unread`).
+    const unread = useRef(new Map<string, string>());
     const marking = useRef(new Map<string, Marking[]>());
 
     /** Lay out the drawer of the agent whose conversation is `key` as the host last read it, each file being marked as its reviewed line. */
@@ -627,6 +636,14 @@ export function App() {
                 if (loud) {
                     setSaid(`Since you approved couldn't be read: ${reply.refused}`);
                 }
+                // In a copy of the operator's dashboard state, which reads no worktree, a drawer never read says why in its
+                // place: kept until the page knows it's a copy, where it doesn't yet.
+                if (was === null) {
+                    unread.current.set(key, reply.refused);
+                    if (copying.current) {
+                        drawn(key, (before) => ({ ...before, unread: reply.refused }));
+                    }
+                }
                 return;
             }
             const now = reply.shown;
@@ -634,10 +651,22 @@ export function App() {
                 return;
             }
             shown.current.set(key, now);
+            unread.current.delete(key);
+            drawn(key, (before) => ({ ...before, unread: null }));
             showSince(key);
         },
-        [showSince],
+        [drawn, showSince],
     );
+
+    // Once the page knows it's a copy, each drawer refused before says why.
+    useEffect(() => {
+        if (copied === null) {
+            return;
+        }
+        for (const [key, why] of unread.current) {
+            drawn(key, (before) => (before.since === null ? { ...before, unread: why } : before));
+        }
+    }, [copied, drawn]);
 
     // What each agent was last seen doing, by their conversation: a change is a hook of theirs the host heard.
     const seen = useRef(new Map<string, string>());
@@ -894,7 +923,7 @@ export function App() {
         <div className="layout">
             <header className="bar">
                 <span className="name">lup</span>
-                {demo ? <span className="demo">demo · stand-in data, nothing reaches an agent</span> : null}
+                {demo ? <span className="demo">{copied === null ? "demo · stand-in data, nothing reaches an agent" : copySaid(copied)}</span> : null}
                 <span className="connection" data-state={connection}>
                     {SAID[connection]}
                 </span>
@@ -1122,8 +1151,15 @@ function reviewedSaid(reviewed: string[], approved: number[], moved: string[], d
     return `reviewed ${files}${flags}${waiting === "" ? "" : `.${waiting}`}`;
 }
 
-/** Whether two of what's held of an agent's drawers say the same: their branch shown the same, and the same tasks and context. */
+/** Say what the demo serves, over a copy of the operator's dashboard state: that it's a copy, acting on itself alone, and which repositories' views lup's default modules answer, their declaration out of the room's reach. */
+function copySaid(copied: OfCopy): string {
+    const defaults = copied.defaults ?? [];
+    const by = defaults.length === 0 ? "" : ` · lup's default modules answer the views of ${defaults.map(last).join(", ")}`;
+    return `demo · a copy of the operator's dashboard, nothing reaches them or an agent${by}`;
+}
+
+/** Whether two of what's held of an agent's drawers say the same: their branch shown the same, or refused for the same reason, and the same tasks and context. */
 function sameDrawers(a: AgentDrawers, b: AgentDrawers): boolean {
     const sameSince = (x: Since | null, y: Since | null) => x === y || (x !== null && y !== null && sameShown(x, y));
-    return sameSince(a.since, b.since) && JSON.stringify([a.tasks, a.usage]) === JSON.stringify([b.tasks, b.usage]);
+    return sameSince(a.since, b.since) && (a.unread ?? null) === (b.unread ?? null) && JSON.stringify([a.tasks, a.usage]) === JSON.stringify([b.tasks, b.usage]);
 }

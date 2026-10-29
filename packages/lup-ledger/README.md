@@ -72,6 +72,7 @@ A thread's sub-threads are read from its repository's threads by their `parent`,
   - `writing` holds one transaction across several writes, so they're kept together or not at all: within it, each write is a savepoint, undone alone where it's refused;
   - `together` holds the lock across several reads, so they see one state.
 - **Synced at checkpoints:** in write-ahead mode with `synchronous = NORMAL`, a transaction reaches the disk at the log's next checkpoint, not at each commit. One is lost to a power cut, never to the service's crash, as the inbox's files, written whole without a sync, were. Syncing each commit would cost a sync at every hook that tells an item.
+- **Copied whole, as one state** (`copied`): through SQLite's backup, under the lock, the write-ahead log folded in, so a copy taken beside the host service's writes opens as this one does; the host sends it to a room for the dashboard's demo to serve (`docs/host.md`, *Reading from a room*).
 - **Its tables' version** is kept in the database (`user_version`). A database at an earlier one is brought to this one at opening, in one transaction (`upgrade`); one at a later one is refused.
 
 ## Layout

@@ -41,6 +41,8 @@ export interface AgentDrawers {
     tasks: Task[];
     usage: Usage | null;
     since: Since | null;
+    /** Why the host refused what their branch changed, which their drawer says in its place, as a copy of the operator's dashboard state refuses it (`lup_dashboard/copied.py`); none where it answered, or hasn't yet. */
+    unread?: string | null;
 }
 
 /** Each agent's data, by `whose` their conversation is. */

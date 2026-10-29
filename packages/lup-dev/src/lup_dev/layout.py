@@ -294,6 +294,10 @@ class MarksLayout(Model):
         """Say where the lock module `module`'s marks are written under is held, so two writers never lose one's mark."""
         return self.home / f"{module}.lock"
 
+    def modules(self) -> list[Path]:
+        """List each module's marks kept here, the file of each (`module`), its lock left out."""
+        return sorted(self.home.glob("*.json")) if self.home.is_dir() else []
+
 
 class CheckoutLayout(Model):
     """The places inside a worktree that lup reads or writes."""
@@ -1046,9 +1050,14 @@ class Layout(Model):
         """Say where the store of the worktree at `worktree` lives."""
         return StoreLayout(home=self.worktrees / digest(worktree))
 
+    @property
+    def repositories(self) -> Path:
+        """What lup keeps about each repository, a directory each, named by its git directory's digest."""
+        return self.state / "repositories"
+
     def repository(self, repository: Path) -> Path:
         """Say where what lup keeps about a repository lives, by its git directory."""
-        return self.state / "repositories" / digest(repository)
+        return self.repositories / digest(repository)
 
     def verdicts(self, repository: Path) -> Path:
         """Say where the verdict log of a repository lives, by its git directory."""
@@ -1060,7 +1069,21 @@ class Layout(Model):
 
     def marks(self, repository: Path) -> MarksLayout:
         """Say where a repository's review marks are kept, by its git directory."""
-        return MarksLayout(home=self.repository(repository) / "marks")
+        return self.marks_in(self.repository(repository))
+
+    def marks_in(self, kept: Path) -> MarksLayout:
+        """Say where the review marks of the repository whose directory of lup's is `kept` (`repository`) are kept."""
+        return MarksLayout(home=kept / "marks")
+
+    def every_marks(self) -> list[MarksLayout]:
+        """Return where each repository lup keeps something of keeps its review marks, by the directory of lup's each has (`repositories`)."""
+        kept = self.repositories
+        found = (
+            sorted(each for each in kept.iterdir() if each.is_dir())
+            if kept.is_dir()
+            else []
+        )
+        return [self.marks_in(each) for each in found]
 
     def heads(self, repository: Path) -> Path:
         """Say where each worktree's `HEAD` at its last checkpoint is kept."""

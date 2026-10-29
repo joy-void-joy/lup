@@ -202,6 +202,20 @@ class Ledger(Model, arbitrary_types_allowed=True):
         with self.lock:
             self.connection.close()
 
+    def copied(self) -> bytes:
+        """Return the database whole, as one file's bytes, for a copy of it elsewhere, which `opened` reads as it reads this one; the attachments beside it apart.
+
+        Taken through SQLite's backup, under the lock, so it's one state, no
+        write landing halfway, and what the write-ahead log holds is in it.
+        """
+        with self.lock:
+            memory = sqlite3.connect(":memory:")
+            try:
+                self.connection.backup(memory)
+                return memory.serialize()
+            finally:
+                memory.close()
+
     @contextmanager
     def together(self) -> Generator[None]:
         """Hold the lock across several calls, so what they read is one state: none is written between them."""

@@ -18,7 +18,8 @@ which no request carries, and trades it for the cookie (`POST /api/session`).
 import asyncio
 import hashlib
 import secrets
-from typing import TYPE_CHECKING, Annotated
+from pathlib import Path
+from typing import Annotated
 
 from fastapi import (
     APIRouter,
@@ -53,9 +54,6 @@ from lup_dev.host.protocol import HostError
 from lup_dev.inbox.protocol import AnswerApproval, Reviewed, SendDraft, Settled
 from lup_dev.inbox.store import Approval, Item
 from lup_dev.settings import Address
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 class Access(Model):
@@ -93,10 +91,20 @@ class Access(Model):
         return [f"http://{host}:{self.port}" for host in self.hosts()]
 
 
+class OfCopy(Model):
+    """What a demo serving a copy of the operator's dashboard state says of it (`lup_dashboard/copied.py`): the repositories whose views lup's default modules answer, their declaration out of the room's reach."""
+
+    defaults: list[Path] = []
+    """Each by its git directory."""
+
+
 class About(Model):
-    """What the page is served by: the dashboard, or its demo over stand-in data, and which build of the page it serves."""
+    """What the page is served by: the dashboard, or its demo over stand-in data or over a copy of the operator's, and which build of the page it serves."""
 
     demo: bool
+    copied: OfCopy | None = None
+    """What the demo says of the copy it serves; none over stand-in data, and
+    for the dashboard."""
     build: str | None = None
     """The page's build as the dashboard serves it, a digest of its `index.html`, which
     names each of its assets by their content's hash; none where no page is
@@ -153,9 +161,14 @@ class Relay(MutableModel, arbitrary_types_allowed=True):
 
 
 def application(
-    host: Host, access: Access, page: Path | None, *, demo: bool = False
+    host: Host,
+    access: Access,
+    page: Path | None,
+    *,
+    demo: bool = False,
+    copied: OfCopy | None = None,
 ) -> FastAPI:
-    """Build the dashboard's server: its API relaying to `host`, open to `access`, and the built page in `page`; none serves the API alone, for its description. A demo says so (`GET /api/about`)."""
+    """Build the dashboard's server: its API relaying to `host`, open to `access`, and the built page in `page`; none serves the API alone, for its description. A demo says so, and what it says of the copy it serves, where it serves one (`GET /api/about`)."""
     app = FastAPI(
         title="lup's dashboard",
         openapi_url="/api/openapi.json",
@@ -198,7 +211,7 @@ def application(
             if index is None or not index.is_file()
             else hashlib.sha256(index.read_bytes()).hexdigest()
         )
-        return About(demo=demo, build=build)
+        return About(demo=demo, copied=copied, build=build)
 
     @api.post("/ask")
     async def ask(request: Asked) -> Replied:
