@@ -49,14 +49,25 @@ class Drawn extends WidgetType {
 }
 
 /** Return what's drawn of `ticks` as of `now`, each where it goes: a widget after the character before it. */
-function drawn(ticks: readonly Tick[], now: number, length: number): DecorationSet {
+function drawn(ticks: readonly Tick[], now: number): DecorationSet {
     const at = new Date(now);
     return Decoration.set(
-        ticks
-            .filter((each) => each.at >= 0 && each.at <= length)
-            .map((each) => Decoration.widget({ widget: new Drawn(each.said(at), each.look), side: 1 }).range(each.at)),
+        ticks.map((each) => Decoration.widget({ widget: new Drawn(each.said(at), each.look), side: 1 }).range(each.at)),
         true,
     );
+}
+
+/**
+ * Return `ticks` as the editor takes them, its text `length` long: each within it. One outside it was placed in
+ * another text, which the review only puts in once the editor holds it (`Review.tsx`); kept, it would throw as the next
+ * change is mapped, uncaught in an effect, which takes the page down, so it's left out and said.
+ */
+function within(ticks: readonly Tick[], length: number): readonly Tick[] {
+    const kept = ticks.filter((each) => each.at >= 0 && each.at <= length);
+    if (kept.length < ticks.length) {
+        console.error(`lup: ${ticks.length - kept.length} of what's drawn beside the review were placed outside its text; left out`);
+    }
+    return kept;
 }
 
 /** The things drawn, where each goes, carried with the text between layouts, and the time they're said as of. */
@@ -71,14 +82,14 @@ export const ticking = StateField.define<{ ticks: readonly Tick[]; now: number; 
         }
         for (const effect of transaction.effects) {
             if (effect.is(ticked)) {
-                ticks = effect.value;
+                ticks = within(effect.value, transaction.state.doc.length);
                 changed = true;
             } else if (effect.is(struck)) {
                 now = effect.value;
                 changed = true;
             }
         }
-        return changed ? { ticks, now, marks: drawn(ticks, now, transaction.state.doc.length) } : value;
+        return changed ? { ticks, now, marks: drawn(ticks, now) } : value;
     },
     provide: (field) => EditorView.decorations.from(field, (value) => value.marks),
 });

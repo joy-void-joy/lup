@@ -8,7 +8,8 @@
         "types": "openapi-typescript openapi.json --output src/generated/api.ts",
         "check": "tsc --noEmit",
         "test": "vitest run",
-        "build": "vite build"
+        "build": "vite build",
+        "drive": "tsc -p drive && vitest run --config drive/vitest.config.ts"
     },
     "dependencies": {
         "@codemirror/commands": "6.11.1",
@@ -29,6 +30,7 @@
         "react-dom": "19.3.1"
     },
     "devDependencies": {
+        "@types/node": "26.6.5",
         "@types/react": "19.3.0",
         "@types/react-dom": "19.3.0",
         "@vitejs/plugin-react": "6.1.2",

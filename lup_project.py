@@ -64,6 +64,12 @@ class LupDevelopment(Module):
     - Chromium is in the room alone, for sessions to drive the dashboard's page
       headless with Playwright, looking at what they build; nothing on the host
       needs it, so it's a package of the room's image rather than a requirement.
+    - The driver sessions drive it with (`page/drive/`, `docs/dashboard.md`,
+      *The demo*) is type-checked and tested against the demo in the room's
+      Chromium by a step of its own, after the page is built, so what it does
+      can't drift from the page as prose did. It builds nothing, so trust's
+      build of the copy the operator approves never runs it on the host, where
+      there's no Chromium.
     - A virtual display is beside it, so a windowed Chromium takes real key
       events, a keyboard layout's dead keys among them, which headless Chromium
       never sees and the DevTools protocol only imitates (#95). No input method:
@@ -143,6 +149,17 @@ class LupDevelopment(Module):
                 "packages/lup/src/lup/sessions/results.py",
                 "packages/lup/src/lup/tools/speaking.py",
                 "uv.lock",
+            ],
+        ),
+        Step(
+            name="drive",
+            command=[
+                "pnpm",
+                "--dir",
+                "packages/lup-dashboard/page",
+                "run",
+                "--silent",
+                "drive",
             ],
         ),
         before="rules",
