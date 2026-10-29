@@ -33,7 +33,7 @@ import { producerOf } from "./views/index";
 import { useNarrow } from "./Outline";
 import { Palette } from "./Palette";
 import { Review, type DrawerKind, type Jump } from "./Review";
-import { marked, sameShown, type Marking } from "./since";
+import { isPlace, marked, sameShown, type Marking } from "./since";
 import {
     UNREAD,
     changing,
@@ -57,6 +57,7 @@ import {
     type Keeping,
     type Since,
     type Viewed,
+    type Wait,
 } from "./review";
 
 /** How long the answers to items' contexts and files are gathered before the review is laid out with them, in milliseconds. */
@@ -91,6 +92,12 @@ const NO_ONE: InboxConversation[] = [];
 const FALLBACK = 60_000;
 
 /** A conversation running, as the review names them: with their launch's ids and their banner's parts. */
+/** One place of an agent's "since you approved" a marking names: its worktree and its branch, as the host answered them. */
+interface Placing {
+    worktree: string | null;
+    branch: string | null;
+}
+
 interface Live extends Running {
     conversation: InboxConversation;
     key: string;
@@ -275,6 +282,41 @@ export function App() {
     );
     const agentsRunning = useSame(
         useMemo(() => live.map((each) => each.conversation), [live]),
+        (list) => list.map(whose).join("\n"),
+    );
+    // The landings waiting on the operator, as the host keeps them while each call waits: each file of one held in its
+    // writer's "since you approved", and their banners saying it.
+    const landingsWatch = useWatched({ kind: "policy-show-landings" });
+    const landings = useSame(
+        useMemo<readonly Wait[]>(() => (landingsWatch.reply?.kind === "policy-landings" ? (landingsWatch.reply.waiting ?? []) : []), [landingsWatch.reply]),
+        (list) => JSON.stringify(list),
+    );
+    // Each agent not running whose drawer holds what waits on the operator: their flagged writes waiting, or files a
+    // landing waits on. They keep their group, ended or not, so what waits is answered where it's shown.
+    const holders = useSame(
+        useMemo(() => {
+            const found = new Map<string, InboxConversation>();
+            const items = inbox.reply?.kind === "inbox-items" ? inbox.reply.items : [];
+            for (const item of items) {
+                if (flag(item) && item.sender.party === "conversation") {
+                    found.set(whose(item.sender), item.sender);
+                }
+            }
+            for (const wait of landings) {
+                for (const file of wait.files ?? []) {
+                    for (const writer of file.writers ?? []) {
+                        found.set(whose(writer), writer);
+                    }
+                }
+            }
+            const runningKeys = new Set(live.map((each) => each.key));
+            return [...found.values()].filter((each) => !runningKeys.has(whose(each)));
+        }, [inbox.reply, landings, live]),
+        (list) => list.map(whose).join("\n"),
+    );
+    // Those the review gives a group with nothing to answer: each conversation running, then each holding what waits.
+    const agentsShown = useSame(
+        useMemo(() => [...agentsRunning, ...holders], [agentsRunning, holders]),
         (list) => list.map(whose).join("\n"),
     );
 
@@ -556,9 +598,9 @@ export function App() {
         [drawn],
     );
 
-    // What each agent's branch changed since the operator last saw it, as the host last read it, by their conversation;
-    // and the files of each being marked reviewed, each laid out as a reviewed line from the key's press until the
-    // host answers.
+    // What each agent's branches changed since the operator last saw them, as the host last read them, by their
+    // conversation; and the files of each being marked reviewed, each laid out as a reviewed line from the key's press
+    // until the host answers.
     const shown = useRef(new Map<string, Since>());
     const marking = useRef(new Map<string, Marking[]>());
 
@@ -573,11 +615,12 @@ export function App() {
         [drawn],
     );
 
-    /** Ask what `agent`'s branch changed since the operator last saw it, with the version shown, and lay out what's changed, live; `loud` says why it couldn't be read. */
+    /** Ask what the agent of `conversation` changed since the operator last saw it, with the version shown, and lay out what's changed, live; `loud` says why it couldn't be read. */
     const since = useCallback(
-        async (agent: Live, loud: boolean = false) => {
-            const was = shown.current.get(agent.key) ?? null;
-            const reply = await answered({ kind: "policy-show-since", conversation: agent.conversation, seen: was?.version ?? null }, (answer) =>
+        async (conversation: InboxConversation, loud: boolean = false) => {
+            const key = whose(conversation);
+            const was = shown.current.get(key) ?? null;
+            const reply = await answered({ kind: "policy-show-since", conversation, seen: was?.version ?? null }, (answer) =>
                 answer.kind === "policy-since" ? answer : null,
             );
             if (!("shown" in reply)) {
@@ -590,8 +633,8 @@ export function App() {
             if (now.same) {
                 return;
             }
-            shown.current.set(agent.key, now);
-            showSince(agent.key);
+            shown.current.set(key, now);
+            showSince(key);
         },
         [showSince],
     );
@@ -612,62 +655,97 @@ export function App() {
             void readRecord(agent);
             const was = before === undefined ? null : (JSON.parse(before) as Activity | null);
             if (before === undefined || (was?.state === "calling" && !was.lups)) {
-                void since(agent);
+                void since(agent.conversation);
             }
         }
     }, [live, readRecord, since]);
 
-    // A minute apart at most, each agent's record and branch are read again, for what no hook said.
+    // An agent not running whose flagged writes wait, or whose files a landing waits on, is read as they're first seen,
+    // and again as the landings waiting change: nothing of theirs comes at a hook.
+    const heldSeen = useRef(new Set<string>());
+    useEffect(() => {
+        for (const conversation of holders) {
+            const key = whose(conversation);
+            if (!heldSeen.current.has(key)) {
+                heldSeen.current.add(key);
+                void since(conversation);
+            }
+        }
+    }, [holders, since]);
+    // Each writer of a file a landing waits on, and each conversation landing, read again as the landings change, those
+    // of a landing done waiting among them: the drawers hold what waits, and the banners say it.
+    const landed = useRef<readonly Wait[]>([]);
+    useEffect(() => {
+        const touched = new Map<string, InboxConversation>();
+        for (const wait of [...landed.current, ...landings]) {
+            touched.set(whose(wait.lander), wait.lander);
+            for (const file of wait.files ?? []) {
+                for (const writer of file.writers ?? []) {
+                    touched.set(whose(writer), writer);
+                }
+            }
+        }
+        landed.current = landings;
+        for (const conversation of touched.values()) {
+            void since(conversation);
+        }
+    }, [landings, since]);
+
+    // A minute apart at most, each agent's record and branches are read again, for what no hook said.
     useEffect(() => {
         const asking = setInterval(() => {
             for (const agent of live) {
                 void readRecord(agent);
-                void since(agent);
+                void since(agent.conversation);
+            }
+            for (const conversation of holders) {
+                void since(conversation);
             }
         }, FALLBACK);
         return () => clearInterval(asking);
-    }, [live, readRecord, since]);
+    }, [live, holders, readRecord, since]);
 
-    /** Read what an agent's drawer shows as it opens: their branch for "since you approved"; a module's view is watched already. */
+    /** Read what an agent's drawer shows as it opens: their branches for "since you approved"; a module's view is watched already. */
     const opened = useCallback(
         (conversation: InboxConversation, kind: DrawerKind) => {
-            const agent = live.find((each) => each.key === whose(conversation));
-            if (agent !== undefined && kind === "since") {
-                void since(agent, true);
+            if (kind === "since") {
+                void since(conversation, true);
             }
         },
-        [live, since],
+        [since],
     );
 
     /**
-     * Mark files of an agent's branch reviewed at the versions shown, approving their flags where they stand so, as the
-     * reply is sent: each a reviewed line at once, the host's answer saying what came of it. Where the drawer stood as
-     * the page shows it, the answer is the drawer as it stands, taken in; else it's read anew, bringing back each file
-     * that moved since it was shown, its flags waiting. Refused, each is as it was. Return what came of it, and whether
-     * the host marked them.
+     * Mark files of one of an agent's places reviewed at the versions shown, approving their flags where they stand so,
+     * or, `decline`, declining their landing, as the reply is sent: each a reviewed line at once, the host's answer
+     * saying what came of it. Where the drawer stood as the page shows it, the answer is the drawer as it stands, taken
+     * in; else it's read anew, bringing back each file that moved since it was shown, its flags waiting. Refused, each
+     * is as it was. Return what came of it, and whether the host marked them.
      */
     const reviewSince = useCallback(
-        async (conversation: InboxConversation, files: Viewed[]): Promise<{ ok: boolean; said: string }> => {
+        async (conversation: InboxConversation, place: Placing, files: Viewed[], decline: boolean): Promise<{ ok: boolean; said: string }> => {
             const key = whose(conversation);
-            const agent = live.find((each) => each.key === key);
             const was = shown.current.get(key) ?? null;
             const at = new Date().toISOString();
-            const mine: Marking[] = files.map((each) => ({ path: each.path, version: each.version ?? null, at }));
+            const mine: Marking[] = files.map((each) => ({ worktree: place.worktree, branch: place.branch, path: each.path, version: each.version ?? null, at }));
             marking.current.set(key, [...(marking.current.get(key) ?? []), ...mine]);
             showSince(key);
-            const request: Asked = { kind: "policy-review-since", conversation, files, seen: was?.version ?? null };
+            const request: Asked = { kind: "policy-review-since", conversation, worktree: place.worktree, branch: place.branch, files, seen: was?.version ?? null, decline };
             const reply = await answered(request, (answer) => (answer.kind === "policy-reviewed" ? answer : null));
             let came: { ok: boolean; said: string };
             if ("refused" in reply) {
-                came = { ok: false, said: `not marked reviewed: ${reply.refused}` };
+                came = { ok: false, said: `${decline ? "landing not declined" : "not marked reviewed"}: ${reply.refused}` };
             } else {
                 const answer = reply.shown;
-                came = { ok: true, said: reviewedSaid(answer.reviewed, answer.approved ?? [], answer.moved ?? []) };
+                came = { ok: true, said: reviewedSaid(answer.reviewed, answer.approved ?? [], answer.moved ?? [], answer.declined ?? []) };
                 if (was !== null && answer.version != null && shown.current.get(key) === was) {
                     const marked = new Map((answer.files ?? []).map((each) => [each.path, each]));
-                    shown.current.set(key, { ...was, version: answer.version, files: (was.files ?? []).map((each) => marked.get(each.path) ?? each) });
-                } else if (agent !== undefined) {
-                    await since(agent, true);
+                    const places = (was.places ?? []).map((each) =>
+                        isPlace(each, place.worktree, place.branch) ? { ...each, files: (each.files ?? []).map((file) => marked.get(file.path) ?? file) } : each,
+                    );
+                    shown.current.set(key, { ...was, version: answer.version, places });
+                } else {
+                    await since(conversation, true);
                 }
             }
             const left = (marking.current.get(key) ?? []).filter((each) => !mine.includes(each));
@@ -679,7 +757,7 @@ export function App() {
             showSince(key);
             return came;
         },
-        [live, since, showSince],
+        [since, showSince],
     );
 
     /**
@@ -691,14 +769,17 @@ export function App() {
     async function applying(marks: readonly Marked[]): Promise<{ applied: string[]; said: string[] }> {
         const applied: string[] = [];
         const said: string[] = [];
-        const reviews = new Map<string, { conversation: InboxConversation; files: Viewed[]; ids: string[] }>();
+        const reviews = new Map<string, { conversation: InboxConversation; place: Placing; decline: boolean; files: Viewed[]; ids: string[] }>();
         const moving = new Map<string, { repository: string; module: string; marks: { key: Record<string, unknown>; up_to: string | null }[]; ids: string[] }>();
         for (const mark of marks) {
             switch (mark.action) {
                 case "policy-review-since": {
-                    const argument = mark.argument as { conversation: InboxConversation; files: Viewed[] };
-                    const key = whose(argument.conversation);
-                    const was = reviews.get(key) ?? { conversation: argument.conversation, files: [], ids: [] };
+                    const argument = mark.argument as { conversation: InboxConversation; worktree?: string | null; branch?: string | null; files: Viewed[]; decline?: boolean };
+                    const place = { worktree: argument.worktree ?? null, branch: argument.branch ?? null };
+                    const decline = argument.decline === true;
+                    // One asking for each agent's place, and for marking or declining there.
+                    const key = JSON.stringify([whose(argument.conversation), place.worktree, place.branch, decline]);
+                    const was = reviews.get(key) ?? { conversation: argument.conversation, place, decline, files: [], ids: [] };
                     const paths = new Set(was.files.map((each) => each.path));
                     // One file marked, at the version its mark says: a comment's, the version it was written on.
                     const version = mark.version ?? null;
@@ -726,7 +807,7 @@ export function App() {
             }
         }
         for (const each of reviews.values()) {
-            const came = await reviewSince(each.conversation, each.files);
+            const came = await reviewSince(each.conversation, each.place, each.files, each.decline);
             said.push(came.said);
             if (came.ok) {
                 applied.push(...each.ids);
@@ -834,7 +915,7 @@ export function App() {
                 <div className="review">
                     <Review
                         items={ready ? waiting : NONE}
-                        agents={ready ? agentsRunning : NO_ONE}
+                        agents={ready ? agentsShown : NO_ONE}
                         draft={draft}
                         typed={typed}
                         change={change}
@@ -866,6 +947,7 @@ export function App() {
                         keepOrder={whole ? keepOrder : null}
                         looks={looks}
                         running={runningNow}
+                        landings={landings}
                         remote={remote}
                         load={load}
                     />
@@ -971,12 +1053,14 @@ export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): 
     const citing = (list: readonly Item[]) => list.map((each) => cited(each.number)).join(", ");
     const read = items.filter((each) => !asked(each) && !commented.includes(each.number) && each.reason.reason !== "question");
     const reviewing = new Map<string, number>();
+    const declining = new Map<string, number>();
     const marked: string[] = [];
     for (const mark of draft.marks ?? []) {
         if (mark.action === "policy-review-since") {
-            const argument = mark.argument as { conversation: InboxConversation; files: Viewed[] };
+            const argument = mark.argument as { conversation: InboxConversation; files: Viewed[]; decline?: boolean };
             const who = naming.called(argument.conversation);
-            reviewing.set(who, (reviewing.get(who) ?? 0) + argument.files.length);
+            const counting = argument.decline === true ? declining : reviewing;
+            counting.set(who, (counting.get(who) ?? 0) + argument.files.length);
         } else if (mark.action === "set-holding") {
             const argument = mark.argument as { launch?: string; session?: string; agent?: string | null; on?: boolean };
             const who = naming.holder(argument) ?? "an agent no longer running";
@@ -993,6 +1077,7 @@ export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): 
         ...(approving.length === 0 ? [] : [`approving ${citing(approving)}`]),
         ...(declined.length === 0 ? [] : [`declining ${citing(declined)}`]),
         ...[...reviewing].map(([who, count]) => `${count === 1 ? "a file" : `${count} files`} of ${who} reviewed`),
+        ...[...declining].map(([who, count]) => `the landing of ${count === 1 ? "a file" : `${count} files`} of ${who} declined`),
         ...marked,
     ];
 }
@@ -1023,8 +1108,11 @@ function reviewSaid(answer: Extract<Replied, { kind: "inbox-reviewed" }>, called
     ];
 }
 
-/** Say what marking files reviewed came to: how many, the flagged writes approved with them, and those that changed since the version shown, whose flags wait. */
-function reviewedSaid(reviewed: string[], approved: number[], moved: string[]): string {
+/** Say what marking files reviewed came to: how many, the flagged writes approved with them, the files whose landing was declined, and those that changed since the version shown, whose flags wait. */
+function reviewedSaid(reviewed: string[], approved: number[], moved: string[], declined: string[] = []): string {
+    if (declined.length > 0) {
+        return `declined the landing of ${declined.length === 1 ? declined[0] : `${declined.length} files`}`;
+    }
     const files = reviewed.length === 1 ? (reviewed[0] ?? "") : `${reviewed.length} files`;
     const flags = approved.length === 0 ? "" : `, approving ${approved.map(cited).join(", ")}`;
     const waiting =

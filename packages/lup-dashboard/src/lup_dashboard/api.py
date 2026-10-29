@@ -53,6 +53,7 @@ from lup_dev.inbox.protocol import (
     Talked,
 )
 from lup_dev.policy.since import ReviewSince, ShowSince, Since, SinceReviewed
+from lup_dev.policy.waits import LandingsWaiting, ShowLandings
 
 type Asked = Annotated[
     ListLaunches
@@ -76,6 +77,7 @@ type Asked = Annotated[
     | KeepTalk
     | ShowSince
     | ReviewSince
+    | ShowLandings
     | MoveMarks
     | Viewing,
     Field(discriminator="kind"),
@@ -87,9 +89,9 @@ and sent, an approval or a held change answered and the files it changes read,
 an item's moment in its sender's conversation read, a conversation's record read
 from where the page left it for its task list and its context, the operator's
 draft reply shown, kept and sent, where their review lays out
-its groups shown and kept, what they write on a conversation shown and kept, what an agent's branch changed since they
-last saw it read and its files marked reviewed, review marks moved as a reply
-is sent, and a module's view, which the page draws from its blocks
+its groups shown and kept, what they write on a conversation shown and kept, what an agent's branches changed since they
+last saw them read and their files marked reviewed or their landing declined,
+the landings waiting on the operator, review marks moved as a reply is sent, and a module's view, which the page draws from its blocks
 (`docs/host.md`, *The views the dashboard shows*)."""
 
 type Replied = Annotated[
@@ -108,6 +110,7 @@ type Replied = Annotated[
     | Reviewed
     | Since
     | SinceReviewed
+    | LandingsWaiting
     | MarksMoved
     | Viewed
     | Refused,

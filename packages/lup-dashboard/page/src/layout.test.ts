@@ -138,7 +138,8 @@ describe("the review's tree", () => {
             [
                 `group group now ${whose(PARENT)}`,
                 [
-                    `banner group now ${whose(PARENT)} banner`,
+                    // Their task list says what they're working on, though they aren't running: a part saying something.
+                    [`banner group now ${whose(PARENT)} banner`, [`view ${instanceOf("/r/lup.git", "adapters", "banner", { runtime: "claude", session: "s1", agent: null })}`]],
                     [`view ${tasks}`, [`block ${blockId(tasks, "task 1")}`, `block ${blockId(tasks, "task 2")}`]],
                     [`view ${conversation}`, [`block ${blockId(conversation, "step 0")}`, `block ${blockId(conversation, "step 1")}`]],
                     [`item item 4`, [`header item 4 header`, [`view ${body(4)}`, [`block ${blockId(body(4), "text")}`]]]],
@@ -279,7 +280,7 @@ describe("the drawers under the banner", () => {
         expect(rowLabel("conversation", TASKED)).toBeNull();
         const since: AgentDrawers = {
             ...UNREAD,
-            since: { kind: "policy-since", worktree: "/w", branch: "feat", version: "v", same: false, files: [{ path: "a.py", version: "a1", flags: [], reviewed: AT }] },
+            since: { kind: "policy-since", version: "v", same: false, places: [{ worktree: "/w", branch: "feat", gone: false, files: [{ path: "a.py", version: "a1", flags: [], reviewed: AT }] }] },
         };
         expect(rowLabel("since", since)).toEqual({ text: "since you approved · 1 reviewed", waiting: false });
     });

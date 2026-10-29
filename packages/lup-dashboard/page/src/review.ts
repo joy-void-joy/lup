@@ -72,6 +72,7 @@ import {
     type Drawers,
     type Instance,
     type Mounted,
+    type PlacedFile,
     type Remote,
     type Running,
     type Shown,
@@ -97,7 +98,10 @@ export type { Quote } from "./comments";
 export type Context = components["schemas"]["Context"];
 export type Since = components["schemas"]["Since"];
 export type SinceFile = components["schemas"]["SinceFile"];
+export type SincePlace = components["schemas"]["SincePlace"];
 export type Viewed = components["schemas"]["ViewedFile"];
+export type Wait = components["schemas"]["Wait"];
+export type { PlacedFile };
 export type Task = components["schemas"]["Task"];
 export type Usage = components["schemas"]["Usage"];
 
@@ -313,6 +317,8 @@ export interface Arranging {
     parents?: ReadonlyMap<string, string> | null;
     looks?: Merged;
     running?: ReadonlyMap<string, Running>;
+    /** The landings waiting on the operator, which the judge's banner part says. */
+    landings?: readonly Wait[];
     remote?: Remote;
     /** The review as the page last laid it out, which each comment is followed from, through its block's change since (`placed`, `anchors.ts`); none as it's first laid out. */
     previous?: Laid | null;
@@ -369,15 +375,13 @@ export interface Drawer extends Scope {
     texts: Span[];
     /** What each fold its view says is set off under its summary line holds (`Fold.barred`), with the fold's kind: drawn set in, a bar in the kind's colour beside it. */
     bars: Bar[];
-    /** What its "since you approved" shows, by file, where it's that drawer. */
-    files: SinceFile[];
-    /** Where its "since you approved" says each file standing as the operator last saw it, in a line of its own: one with flagged writes still waiting in its place, the rest under `settled`. */
+    /** What its "since you approved" shows, each file with its place and the block it's in, where it's that drawer. */
+    files: PlacedFile[];
+    /** Where its "since you approved" says each file standing as the operator last saw it, in a line of its own: one with flagged writes still waiting or held at landing in its place, the rest under `settled`. */
     reviewed: ReviewedLine[];
     /** The line at the end of its "since you approved" that the files settled fold under, reviewed or as the operator saw them in an item with nothing waiting (`5 reviewed`); none where there's none. */
     settled: Span | null;
-    /** The worktree its files are in, for a remark on one; none before the host has answered. */
-    worktree: string | null;
-    /** Whether it holds what waits on the operator: files to review or flagged writes, in "since you approved". */
+    /** Whether it holds what waits on the operator: files to review, flagged writes or files held at landing, in "since you approved". */
     waiting: boolean;
 }
 
@@ -388,7 +392,7 @@ export interface Bar extends Span {
 
 /** A file standing as the operator last saw it, where its line is in "since you approved". */
 export interface ReviewedLine extends Span {
-    file: SinceFile;
+    file: PlacedFile;
 }
 
 /**
@@ -659,6 +663,11 @@ function fileLines(lines: FileLine[], given: string | null): Lines {
 /** Return whether a view's block is a file, a change's or one as it stands. */
 function isFiled(block: ViewBlock): block is Filed {
     return block.block === "diff" || block.block === "code";
+}
+
+/** Return each file `blocks` show whole, those in their folds given whole among them, in the order they're laid out. */
+function filedIn(blocks: readonly ViewBlock[]): Filed[] {
+    return blocks.flatMap((block) => (isFiled(block) ? [block] : block.block === "fold" && Array.isArray(block.content) ? filedIn(block.content) : []));
 }
 
 /** A group as it's laid out: what names it among the others, the agent it's of, what its banner names it by, and its items. */
@@ -1113,6 +1122,7 @@ const NOTHING_SHOWN: Shown = {
     beyond: { contexts: new Map(), files: new Map() },
     drawers: new Map(),
     running: new Map(),
+    landings: [],
     called: (party) => party.agent ?? party.session,
 };
 
@@ -1230,6 +1240,7 @@ export function laid(
         beyond: { contexts: around.contexts, files: around.files },
         drawers,
         running: arranging.running ?? new Map(),
+        landings: arranging.landings ?? [],
         called: name,
     };
     const now = grouped(items.filter((each) => !parked.includes(each.number)), (item) => banner({ item }, false, ""));
@@ -1354,10 +1365,19 @@ export function laid(
         const conversation = group.conversation;
         const repository = conversation?.repository ?? "";
         const of = conversation === null ? null : { runtime: conversation.runtime, session: conversation.session, agent: conversation.agent ?? null };
-        // The parts of its banner, each a view of its agent's, where they're running.
+        // The parts of its banner, each a view of its agent's, where they're running; and, where they're not, those that
+        // say something of them still, as an ended agent's files a landing waits on.
         const parts =
-            conversation !== null && of !== null && shown.running.has(group.key)
-                ? looks.banners(repository).map((each) => mount(repository, each.module, each.view, of, shown, remote))
+            conversation !== null && of !== null
+                ? looks
+                      .banners(repository)
+                      .map((each) => mount(repository, each.module, each.view, of, shown, remote))
+                      .filter(
+                          (each) =>
+                              shown.running.has(group.key) ||
+                              wording(each.answer?.blocks.summary ?? []).text !== "" ||
+                              (each.answer?.blocks.offers ?? []).length > 0,
+                      )
                 : [];
         // What each part says, its spans that tick or measure drawn beside the words rather than written.
         const told = parts.flatMap((each) => {
@@ -1728,8 +1748,10 @@ export function laid(
             }
         };
         walk(blocks);
-        // A remark on a file's lines goes under the line it's on, each file's block its own.
-        const topFiles = blocks.filter(isFiled);
+        // A remark on a file's lines goes under the line it's on, each file's block its own, a file in a fold of the
+        // view's, as a place of "since you approved", among them, in the order they're laid out.
+        const topFiles = filedIn(blocks);
+        const counted = new Set<string>(topFiles.map((each) => each.id));
         const ofLine = new OfBlocks();
         const firstOf = new Map<string, number>();
         const shownFiles: FileLine[] = [];
@@ -1817,7 +1839,8 @@ export function laid(
         stands(blocks);
         const fileOf = (remark: Written) => ("quote" in remark ? (remark.quote?.block ?? "") : "").slice(`${view.id} file `.length);
         const orphans = placed.get(null) ?? [];
-        const under = (path: string) => orphans.filter((each) => standing.has(`reviewed ${path}`) && fileOf(each) === path);
+        // By what follows `reviewed ` in the line's id, its path and its place's.
+        const under = (key: string) => orphans.filter((each) => standing.has(`reviewed ${key}`) && fileOf(each) === key);
         for (const comment of orphans.filter((each) => !standing.has(`reviewed ${fileOf(each)}`))) {
             writeWritten(comment, into.blocks, children);
         }
@@ -1831,8 +1854,8 @@ export function laid(
                         const lines = filedOnce(block);
                         const before = into.filed.length;
                         layCode(w, into, of, lines, first, starts, writeBlocks, () => id);
-                        first += top ? lines.length : 0;
-                        diffs.set(block.path, block);
+                        first += counted.has(block.id) ? lines.length : 0;
+                        diffs.set(block.id, block);
                         const span = into.filed[before];
                         if (span !== undefined) {
                             within.push(part(id, "block", span.from, span.to, { block }));
@@ -1855,7 +1878,7 @@ export function laid(
                         const file = answer.files?.get(block.id);
                         if (file !== undefined) {
                             reviewed.push({ from: aside.from, to: aside.to, file });
-                            for (const comment of under(file.path)) {
+                            for (const comment of under(block.id.slice("reviewed ".length))) {
                                 writeWritten(comment, into.blocks, children);
                             }
                         }
@@ -1903,8 +1926,8 @@ export function laid(
                             }
                         }
                         const last = w.at - 1;
-                        if (top && block.kind === "lines") {
-                            settled = { from: head.from, to: head.to };
+                        if (block.kind === "lines" && block.id.startsWith("reviewed")) {
+                            settled ??= { from: head.from, to: head.to };
                         }
                         if (last > head.to) {
                             into.folds.push({ of, kind: block.kind, name: block.id, label: line.text, closed: !(block.open ?? false), summary: { from: head.from, to: head.to }, from: head.to, to: last, unread });
@@ -1934,7 +1957,6 @@ export function laid(
             byMarks.add(drawerFold);
         }
         const node = part(view.id, "view", summary.from, last, { view, children });
-        const since = answer.since;
         return {
             kind,
             conversation,
@@ -1944,10 +1966,9 @@ export function laid(
             toned,
             texts,
             bars,
-            files: since?.files ?? [],
+            files: [...(answer.files?.values() ?? [])],
             reviewed,
             settled,
-            worktree: since?.worktree ?? null,
             waiting: answer.blocks.waiting ?? false,
             of,
             header: summary,
@@ -2185,7 +2206,7 @@ export function heading(laidOut: Laid, head: number, writing: boolean, wrote: Wr
         return [...going, { kind: "group", text: naming.group(group) }];
     }
     // A file's path: from its lines, or from its line in "since you approved" once it stands as the operator last saw it.
-    const file = scope.filed.find((each) => head >= each.from && head <= each.to)?.file.path ?? (isDrawer(scope) ? reviewedAt(scope, head)?.file.path : undefined);
+    const file = scope.filed.find((each) => head >= each.from && head <= each.to)?.file.path ?? (isDrawer(scope) ? reviewedAt(scope, head)?.file.file.path : undefined);
     const inner = around(scope.folds, head).filter((each) => each.kind !== "file" && each.of !== scope.of || (each.kind !== "item" && each.kind !== "file" && kindOf(each.kind)?.drawer !== true));
     const named: Where = isRegion(scope) ? { kind: "item", text: naming.item(scope) } : { kind: (scope as Drawer).kind, text: (scope as Drawer).kind };
     return [
@@ -2261,13 +2282,18 @@ export function reviewedAt(drawer: Drawer, position: number): ReviewedLine | und
     return drawer.reviewed.find((each) => position >= each.from && position <= each.to);
 }
 
-/** Return the file of a "since you approved" `drawer` that `position` is on, by its lines or by its line standing as the operator last saw it; none where it's on none. */
-export function sinceFileAt(drawer: Drawer, position: number): SinceFile | undefined {
+/** Return the file of a "since you approved" `drawer` that `position` is on, by its lines or by its line standing as the operator last saw it, with its place and block; none where it's on none. */
+export function sinceFileAt(drawer: Drawer, position: number): PlacedFile | undefined {
     const coded = codeAt(drawer, position);
     if (coded !== undefined) {
-        return drawer.files.find((each) => each.file != null && each.path === coded.file.path);
+        return shownAs(drawer, coded.file);
     }
     return reviewedAt(drawer, position)?.file;
+}
+
+/** Return the file of a "since you approved" `drawer` shown whole as `filed`, with its place and block; none where it shows none so. */
+export function shownAs(drawer: Drawer, filed: Filed): PlacedFile | undefined {
+    return drawer.files.find((each) => each.file.file != null && drawer.diffs.get(each.block) === filed);
 }
 
 /** Return the line of a changed file shown at `position`, where it's on one. */
@@ -2337,13 +2363,15 @@ function quotedCode(drawer: Drawer, lines: Line[]): NonNullable<Remark["code"]> 
         return found === undefined ? [] : [found];
     });
     const file = coded[0]?.file;
-    const shown = file === undefined ? undefined : drawer.files.find((each) => each.file != null && each.path === file.path);
+    const placed = file === undefined ? undefined : shownAs(drawer, file);
+    const shown = placed?.file;
+    const worktree = placed?.place.worktree ?? null;
     const rows = coded.flatMap((each) => (each.file === file && each.row !== null && each.row.side === "after" ? [each.row] : []));
     const first = rows[0];
-    if (shown === undefined || shown.version == null || drawer.worktree === null || first === undefined) {
+    if (shown === undefined || shown.version == null || worktree === null || first === undefined) {
         return null;
     }
-    return { worktree: drawer.worktree, path: shown.path, version: shown.version, first: first.number, lines: rows.map((each) => each.text) };
+    return { worktree, path: shown.path, version: shown.version, first: first.number, lines: rows.map((each) => each.text) };
 }
 
 /**

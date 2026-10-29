@@ -22,7 +22,7 @@ import shutil
 import sys
 import traceback
 import webbrowser
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
@@ -151,7 +151,7 @@ from lup_dev.inbox.protocol import (
     Whole,
 )
 from lup_dev.inbox.protocol import routes as inbox_routes
-from lup_dev.inbox.reading import Flags, by_agent, counted
+from lup_dev.inbox.reading import Flags, by_agent, counted, landed
 from lup_dev.inbox.roster import ids
 from lup_dev.inbox.store import (
     Answer,
@@ -245,6 +245,8 @@ from lup_dev.policy.report import finding_lines
 from lup_dev.policy.since import routes as since_routes
 from lup_dev.policy.tools import JudgeTools, judge_call
 from lup_dev.policy.verdicts import VerdictLog
+from lup_dev.policy.waits import Waits
+from lup_dev.policy.waits import routes as waits_routes
 from lup_dev.private.building import listed
 from lup_dev.private.module import Private
 from lup_dev.private.protocol import Scanned as Read
@@ -522,12 +524,15 @@ def control_routes(
     dashboard: DashboardProcess | None,
     layout: Layout,
     views: ModuleViews | None = None,
+    *,
+    waits: Waits,
 ) -> list[Route]:
-    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; the dashboard's, `dashboard`'s address; the drawer's, what a branch changed since the operator approved it, read from lup's state at `layout`; the review marks, kept there; and a module's view the dashboard shows, through `views`, watched at its own triggers, where it's given."""
+    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; the dashboard's, `dashboard`'s address; the drawer's, what a branch changed since the operator approved it, read from lup's state at `layout`, each file a landing waits on in `waits` held there; the landings waiting; the review marks, kept there; and a module's view the dashboard shows, through `views`, watched at its own triggers, where it's given."""
     return [
         *inbox_routes(delivery, recorded, layout),
         Route.to(dashboard_shown(dashboard)),
-        *since_routes(delivery, layout, LupDevSettings().lup_integration_branch),
+        *since_routes(delivery, layout, LupDevSettings().lup_integration_branch, waits),
+        *waits_routes(waits),
         *marks_routes(layout, delivery.clock, delivery.inbox.changes),
         *([] if views is None else [Route.reading(views, watch=views.watched)]),
     ]
@@ -589,6 +594,8 @@ def host_serve(context: typer.Context) -> None:
     remotes = Remotes(
         say=typer.echo, landed=partial(proposed_after, delivery), modules=workers
     )
+    waits = Waits(changes=changes)
+    delivery.landing = waits.holding
     service = HostService(
         layout=layout.host,
         answerer=known,
@@ -606,8 +613,9 @@ def host_serve(context: typer.Context) -> None:
             dashboard,
             layout,
             ModuleViews(asking=asking, changes=changes, say=typer.echo),
+            waits=waits,
         ),
-        tools=room_tools(delivery, layout, remotes, workers),
+        tools=room_tools(delivery, layout, remotes, workers, waits=waits),
         room_routes=[
             *remote_routes(remotes),
             *clipboard_routes(Desktop.of(settings)),
@@ -689,9 +697,14 @@ async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) 
 
 
 def room_tools(
-    delivery: Delivery, layout: Layout, remotes: Remotes, modules: LaunchModules
+    delivery: Delivery,
+    layout: Layout,
+    remotes: Remotes,
+    modules: LaunchModules,
+    *,
+    waits: Waits,
 ) -> list[RoomTools]:
-    """List the core's tools the host service serves each launched session: the inbox's; the judge's, reading lup's state at `layout` by the delivery's clock, and running `quiet` in each launch's repository's process (`modules`); and `land`, pushing through `remotes` onto the integration branch the settings name."""
+    """List the core's tools the host service serves each launched session: the inbox's; the judge's, reading lup's state at `layout` by the delivery's clock, and running `quiet` in each launch's repository's process (`modules`); and `land`, pushing through `remotes` onto the integration branch the settings name, each landing waiting kept in `waits`, which the drawers read."""
     return [
         InboxTools(delivery=delivery),
         JudgeTools(layout=layout, clock=delivery.clock, modules=modules),
@@ -700,6 +713,7 @@ def room_tools(
             remotes=remotes,
             layout=layout,
             integration=LupDevSettings().lup_integration_branch,
+            waits=waits,
         ),
     ]
 
@@ -721,6 +735,7 @@ def served_tools(resolved: Resolved) -> list[ToolSpec]:
             Layout.model_construct(),
             Remotes.model_construct(),
             Workers.model_construct(),
+            waits=Waits(),
         )
         for spec in tools.specs()
     ]
@@ -809,15 +824,21 @@ def reading() -> HostClient | FromRoom:
     return client
 
 
-def line(entry: Item | Flags, paths: Sequence[Pathed] = ()) -> str:
-    """Say an item in a line: its number, when it was made, what it is, from whom (by its name, where `paths` gives it) and, for a copy of a message between conversations, to whom, and its first line; for an approval, how to read it whole and answer it. A conversation's flagged writes are one line: each number, the latest's time, how many, and how many files on which branches (`Flags`)."""
+def line(
+    entry: Item | Flags,
+    paths: Sequence[Pathed] = (),
+    landings: Mapping[int, str] | None = None,
+) -> str:
+    """Say an item in a line: its number, when it was made, what it is, from whom (by its name, where `paths` gives it) and, for a copy of a message between conversations, to whom, and its first line; for an approval, how to read it whole and answer it. A conversation's flagged writes are one line: each number, the latest's time, how many, how many files on which branches (`Flags`), and each landing waiting on them, as `landings` names it by flag."""
     if isinstance(entry, Flags):
         last = entry.items[-1]
         where = "" if last.worktree is None else f" in {last.worktree}"
+        waiting = landings or {}
+        held = landed([waiting.get(each.number) for each in entry.items])
         return (
             f"{entry.cited():>5}  {clocked(entry.made)}  "
             f"{many(len(entry.items), 'flagged write')} from "
-            f"{called(entry.sender, paths)}{where}: {entry.said()}"
+            f"{called(entry.sender, paths)}{where}: {entry.said()}{held}"
         )
     item = entry
     where = "" if item.worktree is None else f" in {item.worktree}"
@@ -1237,7 +1258,7 @@ def inbox_list(
     entries = by_agent(items)
     shown = entries if limit is None else latest(entries, lambda each: each.made, limit)
     for each in shown:
-        typer.echo(line(each, listing.paths))
+        typer.echo(line(each, listing.paths, listing.landings))
     for left in unlisted(
         len(items) - counted(shown),
         "earlier item",

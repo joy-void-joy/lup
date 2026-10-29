@@ -231,6 +231,20 @@ def and_said(words: Sequence[str]) -> str:
     return f"{', '.join(first)} and {last}" if first else last
 
 
+def landed(landings: list[str | None]) -> str:
+    """Say what waits on a conversation's flagged writes, each landing waiting on one of them, as `Delivery.landing` names it, after their line: nothing where none waits.
+
+    >>> landed([None, "`feat` on `dev`", "`feat` on `dev`"])
+    '; the landing of `feat` on `dev` waits on them, in "since you approved"'
+    >>> landed([None])
+    ''
+    """
+    named = list(dict.fromkeys(each for each in landings if each is not None))
+    if not named:
+        return ""
+    return f'; the landing of {and_said(named)} waits on them, in "since you approved"'
+
+
 def by_agent(items: list[Item]) -> list[Item | Flags]:
     """Return `items`, oldest first, with each conversation's flagged writes as one entry (`Flags`), placed at its latest, and the rest as they are."""
     flagged = [item for item in items if isinstance(item.reason, Flagged)]
@@ -380,9 +394,10 @@ class Reader(Model, arbitrary_types_allowed=True):
         return waiting and (not self.mine or item.recipient == self.reader)
 
     def line(self, entry: Item | Flags) -> str:
-        """Say an item in a line: its number, when it was made, what it is, from whom to whom, where it stands, and its first line; a conversation's flagged writes, the files they flag."""
+        """Say an item in a line: its number, when it was made, what it is, from whom to whom, where it stands, and its first line; a conversation's flagged writes, the files they flag, and each landing waiting on them."""
         if isinstance(entry, Flags):
-            return f"{self.headed(entry)}: {entry.said()}"
+            held = landed([self.delivery.landing(item.number) for item in entry.items])
+            return f"{self.headed(entry)}: {entry.said()}{held}"
         return f"{self.headed(entry)}: {opening(entry)}"
 
     def headed(self, entry: Item | Flags) -> str:

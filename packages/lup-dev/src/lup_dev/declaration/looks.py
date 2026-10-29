@@ -16,19 +16,21 @@ one of their letters or names fails the load (`resolve.looked`):
 - the runtime adapters': an agent's task list, a drawer (`TASKS_DRAWER`, beside
   `Task` in `host/records.py`), and their banner's part, what they're working on
   and how full their context is;
-- the judge's: what an agent's branch changed since the operator approved it,
-  a drawer, the line of a file standing as the operator last saw it, and the agent's banner's
-  part, whether their flagged writes are held, and its verb, holding them. The
+- the judge's: what an agent's branches changed since the operator approved
+  them, a drawer, each place of it where the agent worked in several, a fold
+  kind, the line of a file standing as the operator last saw it, and the agent's
+  banner's part, whether their flagged writes are held and what landings wait
+  on, and its verb, holding them. The
   judge's code sits above the declaration in `lup_dev`'s layers, so its parts
   are declared here.
 
-The verbs and the shell's fold kinds are fields of `Core` (`verbs`, `folds`),
-the shell's, the judge's and the runtime adapters' verbs alike, so a person's
+The verbs and the fold kinds are fields of `Core` (`verbs`, `folds`), the
+shell's, the judge's and the runtime adapters' alike, so a person's
 layer gives one another key; the rest is the core's own until each moves into
 its module.
 """
 
-from lup.blocks import SHELL_TONES, Drawer, Tone, Verb
+from lup.blocks import SHELL_TONES, Drawer, FoldKind, Tone, Verb
 from lup_dev.host.protocol import Bannered, Drawn, Looks
 from lup_dev.host.records import TASK_TONE, TASKS_DRAWER
 
@@ -52,6 +54,19 @@ SINCE = Drawn(
 )
 """What an agent's branch changed since the operator approved it, the judge's
 drawer (`lup_dev/policy/since.py`)."""
+BRANCH_FOLD = FoldKind(
+    name="branch",
+    letter="p",
+    called="branches",
+    one="the branch",
+    level=1,
+    colour="warn",
+)
+"""One place of "since you approved", a worktree with the branch it has checked
+out or a branch alone, where the agent worked in several: its files under it,
+its line saying which and what it holds (`lup_dev/policy/since.py`). `Core`
+declares it beside the shell's (`Core.folds`) until the judge is a module, so a
+person's layer changes it as it does theirs."""
 REVIEWED_TONE = Tone(name="reviewed", like="muted")
 """A file of "since you approved" standing as the operator last saw it: a line
 of its own, with nothing under it."""
@@ -71,4 +86,4 @@ CORE_LOOKS = Looks(
 )
 """The core's looks, the shell's, the runtime adapters' and the judge's, in the
 order the page lays them out: before each repository's modules'. The shell's
-fold kinds are `Core`'s, first among the modules'."""
+fold kinds are `Core`'s, first among the modules', the judge's with them."""

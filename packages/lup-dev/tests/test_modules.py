@@ -38,7 +38,7 @@ from lup_dev import (
 from lup_dev.approval import Approval, ReleaseTool
 from lup_dev.cli import module_command
 from lup_dev.declaration.kinds import Folds, Mounted, Tones, Verbs
-from lup_dev.declaration.looks import CORE_LOOKS
+from lup_dev.declaration.looks import BRANCH_FOLD, CORE_LOOKS
 from lup_dev.declaration.resolve import resolve
 from lup_dev.declaration.serving import Operator
 from lup_dev.errors import LupDevError
@@ -943,7 +943,7 @@ def test_a_view_placed_in_a_drawer_resolves_with_its_letter_after_the_core_s(
         *(tone.name for tone in CORE_LOOKS.tones),
         "warm",
     ]
-    assert looks.folds == SHELL_FOLDS
+    assert looks.folds == [*SHELL_FOLDS, BRANCH_FOLD]
 
 
 def test_the_core_s_looks_are_the_shell_s_the_runtime_adapters_and_the_judge_s() -> (
@@ -959,6 +959,7 @@ def test_the_core_s_looks_are_the_shell_s_the_runtime_adapters_and_the_judge_s()
         "body",
         "lines",
         "context",
+        "branch",
     ]
     assert [
         (each.module, each.view, each.place.letter) for each in CORE_LOOKS.drawers

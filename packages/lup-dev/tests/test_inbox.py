@@ -128,7 +128,6 @@ from lup_dev.inbox.store import (
     Answered,
     ApiChanged,
     Approval,
-    AtLanding,
     Binary,
     ChangedFile,
     Comment,
@@ -153,12 +152,13 @@ from lup_dev.inbox.store import (
     Passage,
     Question,
     Quote,
+    Quoted,
     Rank,
     Reading,
     Reason,
+    Remark,
     Review,
     Sent,
-    Superseded,
     Talk,
     TalkComment,
     Text,
@@ -199,8 +199,17 @@ from lup_dev.policy.holds import (
 )
 from lup_dev.policy.landing import LandingTools, detached, landed_felt
 from lup_dev.policy.reviewed import Mark, Reviews
+from lup_dev.policy.since import (
+    ReviewSince,
+    ShowSince,
+    Since,
+    SincePlace,
+    SinceReviewed,
+    ViewedFile,
+)
 from lup_dev.policy.tools import JudgeTools, stands
 from lup_dev.policy.verdicts import Verdict, VerdictLog
+from lup_dev.policy.waits import LandingsWaiting, ShowLandings, Waits
 from lup_dev.policy.worktrees import Holding as Worked
 from lup_dev.policy.worktrees import SessionIndex
 from lup_dev.private.withheld import Withheld
@@ -475,6 +484,8 @@ def inboxed(
         queues=queues or {},
         glance=timedelta(milliseconds=5),
     )
+    waits = Waits(changes=changes)
+    delivery.landing = waits.holding
 
     def saying(line: str) -> None:
         said.append(line)
@@ -493,7 +504,9 @@ def inboxed(
             if bearings
             else None
         ),
-        routes=cli.control_routes(delivery, recorded or {}, None, judging or machine),
+        routes=cli.control_routes(
+            delivery, recorded or {}, None, judging or machine, waits=waits
+        ),
         tools=[
             each.model_copy(
                 update={
@@ -508,6 +521,7 @@ def inboxed(
                 judging or machine,
                 Remotes(say=said.append) if remotes is None else remotes(delivery),
                 Predating() if modules is None else modules,
+                waits=waits,
             )
         ],
         judge=judge or Quiet(),
@@ -7950,7 +7964,7 @@ def test_land_removes_worktrees_in_the_container_the_launch_has_when_it_cleans_u
         landings.launched("claude")
         mcp = machine.host.launch("one").mcp
         send(machine.host.launch("one").hook, started("claude"))
-        landings.flag(path, rooms, session)
+        flag = landings.flag(path, rooms, session)
         landing = pool.submit(call, mcp, "land", {})
         assert delivery.holding.wait(timeout=60)
         # While the landing waits on the operator, the session renames themselves,
@@ -7959,12 +7973,7 @@ def test_land_removes_worktrees_in_the_container_the_launch_has_when_it_cleans_u
             "You're `review-and-plan` now.",
             False,
         )
-        [hold] = [
-            each
-            for each in delivery.inbox.waiting(Operator())
-            if isinstance(each.reason, HeldChange)
-        ]
-        inbox("answer", str(hold.number), "--approve", "--comment", "")
+        inbox("done", str(flag))
         answer, error = landing.result(timeout=60)
     assert not error
     assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
@@ -8212,8 +8221,38 @@ def test_land_refuses_a_branch_without_a_pass_of_the_gate_one_behind_the_remote_
     assert landings.ran == []
 
 
+def drawer(
+    machine: Layout, clock: FakeClock, party: Conversation, branch: str
+) -> SincePlace:
+    """Read `party`'s "since you approved" as the dashboard does, and return its place on `branch`."""
+    since = client(machine.host, clock).ask(ShowSince(conversation=party), Since)
+    [place] = [each for each in since.places if each.branch == branch]
+    return place
+
+
+def answering(
+    machine: Layout,
+    clock: FakeClock,
+    party: Conversation,
+    place: SincePlace,
+    path: str,
+    *,
+    decline: bool = False,
+) -> SinceReviewed:
+    """Mark the file at `path` of `party`'s drawer's `place` reviewed at the version shown, as Space `d` does, or decline its landing, as Space `x` does."""
+    [shown] = [each for each in place.files if each.path == Path(path)]
+    asked = ReviewSince(
+        conversation=party,
+        worktree=place.worktree,
+        branch=place.branch,
+        files=[ViewedFile(path=shown.path, version=shown.version)],
+        decline=decline,
+    )
+    return client(machine.host, clock).ask(asked, SinceReviewed)
+
+
 @pytest.mark.parametrize("runtime", ["claude", "codex"])
-def test_a_landing_waits_on_each_file_flagged_on_what_it_lands_as_a_hold_and_lands_once_approved(
+def test_a_landing_waits_on_each_file_flagged_on_what_it_lands_held_in_its_writers_drawer_and_lands_once_marked_reviewed(
     runtime: str,
     landings: Landings,
     machine: Layout,
@@ -8251,45 +8290,62 @@ def test_a_landing_waits_on_each_file_flagged_on_what_it_lands_as_a_hold_and_lan
         inbox("done", str(flags[4]))
         landing = pool.submit(call, machine.host.launch("one").mcp, "land", {})
         assert delivery.holding.wait(timeout=60)
-        [hold] = [
+        [wait] = (
+            client(machine.host, clock).ask(ShowLandings(), LandingsWaiting).waiting
+        )
+        listed = inbox()
+        place = drawer(machine, clock, session, "feat")
+        items = [
             each
-            for each in delivery.inbox.waiting(Operator())
+            for each in delivery.inbox.items.values()
             if isinstance(each.reason, HeldChange)
         ]
-        files = client(machine.host, clock).ask(ShowFiles(number=hold.number), Files)
-        inbox("answer", str(hold.number), "--approve", "--comment", "")
+        answered = answering(machine, clock, session, place, "src/pkg/rooms.py")
         answer, error = landing.result(timeout=60)
         states = [delivery.inbox.item(each).state for each in flags]
+        after = client(machine.host, clock).ask(ShowLandings(), LandingsWaiting).waiting
     assert not error
-    assert hold.sender == session
-    assert hold.rank.name == "waiting on you"
-    assert hold.reason == HeldChange(
-        text=(
-            "Let `src/pkg/rooms.py` land on `dev`? It's flagged on `feat`, and the "
-            f"landing of {tip} waits on your approval."
-        ),
-        summary=(
-            "src/pkg/rooms.py is a new production file\n"
-            f"Shown from `dev`'s tip on the remote, {old}: you've seen none of it."
-        ),
-        worktree=landings.feat,
-        landing=AtLanding(
-            onto="refs/heads/dev",
-            tip=tip,
-            path=Path("src/pkg/rooms.py"),
-            branches=["feat"],
-            flags=flags[:2],
-        ),
+    assert items == []
+    assert (wait.lander, wait.onto, wait.old, wait.tip, wait.branches) == (
+        session,
+        "refs/heads/dev",
+        old,
+        tip,
+        ["feat"],
     )
-    [file] = files.files
-    assert (file.before, file.after) == (None, Text(text=rooms))
-    assert file.reading == Reading(
+    assert [(each.path, each.flags, each.writers) for each in wait.files] == [
+        (Path("src/pkg/rooms.py"), flags[:2], [session, worker])
+    ]
+    [file] = [each for each in place.files if each.path == Path("src/pkg/rooms.py")]
+    version = landings.shell.git(landings.dev, "rev-parse", f"{tip}:src/pkg/rooms.py")
+    assert file.held is not None
+    assert (file.held.key, file.held.tip, file.held.named) == (
+        wait.key,
+        tip,
+        "`feat` on `dev`",
+    )
+    assert file.version == version
+    assert file.file is not None
+    assert (file.file.before, file.file.after) == (None, Text(text=rooms))
+    assert file.file.reading == Reading(
         role="production", asks=[Ask(name="new-file", taken="flagged")]
     )
-    assert any("held change" in each for each in notices.raised)
+    assert file.flags == flags[:2]
+    assert answered.approved == flags[:2]
+    assert (
+        listed.count(
+            '; the landing of `feat` on `dev` waits on them, in "since you approved"\n'
+        )
+        == 2
+    )
+    [notice] = [each for each in notices.raised if "landing" in each]
+    assert notice == (
+        "lup: `one`'s landing of `feat` on `dev` waits on 1 file\nsrc/pkg/rooms.py\n"
+        'Answer each in "since you approved" of `one`, `one/a1`.'
+    )
     assert answer.startswith(
         f"Landed {tip} on `dev` at `origin`, which was at {old}.\n"
-        f"The operator approved @{hold.number} (`src/pkg/rooms.py`).\n"
+        "The operator approved `src/pkg/rooms.py`.\n"
         "`feat` adds no `# lup: defer` comment and removes none, against `dev`.\n"
         "Cleaned up after it:\n"
     )
@@ -8304,6 +8360,7 @@ def test_a_landing_waits_on_each_file_flagged_on_what_it_lands_as_a_hold_and_lan
         at=clock.now(), why=f"`feat` landed on `dev` at {tip}, and is gone since"
     )
     assert states == [approved, approved, Waiting(), withdrawn, approved]
+    assert after == []
 
 
 def test_land_withdraws_each_flag_left_nothing_to_hold_on_a_branch_gone_or_a_file_it_leaves_unchanged_and_no_later_landing_holds_on_it(
@@ -8396,7 +8453,7 @@ def test_land_withdraws_each_flag_left_nothing_to_hold_on_a_branch_gone_or_a_fil
     assert after == states
 
 
-def test_a_comment_on_a_hold_lands_nothing_and_the_next_hold_shows_what_changed_since(
+def test_a_held_file_declined_with_a_comment_lands_nothing_and_its_next_landing_shows_what_changed_since(
     landings: Landings,
     machine: Layout,
     clock: FakeClock,
@@ -8407,7 +8464,7 @@ def test_a_comment_on_a_hold_lands_nothing_and_the_next_hold_shows_what_changed_
     feat, path = landings.feat, "src/pkg/rooms.py"
     landings.wrote(feat, path, first)
     old = landings.on_forge("refs/heads/dev")
-    tip = landings.merged()
+    landings.merged()
     session = lander(landings, "claude")
     with (
         inboxed(
@@ -8420,75 +8477,73 @@ def test_a_comment_on_a_hold_lands_nothing_and_the_next_hold_shows_what_changed_
         flag = landings.flag(path, first, session)
         landing = pool.submit(call, machine.host.launch("one").mcp, "land", {})
         assert delivery.holding.wait(timeout=60)
-        commented = flag + 1
+        place = drawer(machine, clock, session, "feat")
+        [shown] = [each for each in place.files if each.path == Path(path)]
+        assert shown.version is not None
+        # The comment on its line is sent with the reply, then its decline, which
+        # the comment implies on a file held at landing, applied.
+        quote = Quote(text=f"{path}:1\n+{first.strip()}", start=0, end=1)
+        code = Quoted(
+            worktree=feat,
+            path=Path(path),
+            version=shown.version,
+            first=1,
+            lines=[first.strip()],
+        )
         drafting(
             machine,
             clock,
-            Draft(comments=[Comment(item=commented, text="Call them chambers.")]),
+            Draft(
+                remarks=[
+                    Remark(
+                        to=session, quote=quote, text="Call them chambers.", code=code
+                    )
+                ]
+            ),
         )
         sending(machine, clock)
+        declined = answering(machine, clock, session, place, path, decline=True)
         held_back, _ = landing.result(timeout=60)
-        # The agent answers it, and lands again: while that waits, they land again on another tip.
+        # The agent answers it, later, and lands again: the file is shown from the
+        # version declined, and the words sent before this landing are no answer to it.
+        clock.sleep(60)
         landings.wrote(feat, path, second)
-        again = landings.merged()
-        delivery.holding.clear()
-        waiting = pool.submit(call, machine.host.launch("one").mcp, "land", {})
-        assert delivery.holding.wait(timeout=60)
-        landings.wrote(feat, "README.md", "# Work, with chambers\n")
         latest = landings.merged()
         delivery.holding.clear()
         landing = pool.submit(call, machine.host.launch("one").mcp, "land", {})
-        superseded, _ = waiting.result(timeout=60)
         assert delivery.holding.wait(timeout=60)
-        [hold] = [
-            each
-            for each in delivery.inbox.waiting(Operator())
-            if isinstance(each.reason, HeldChange)
-        ]
-        diff = inbox("show", str(hold.number), "--diff")
-        inbox("answer", str(hold.number), "--decline", "--comment", "Not yet.")
-        declined, _ = landing.result(timeout=60)
+        again = drawer(machine, clock, session, "feat")
+        answering(machine, clock, session, again, path, decline=True)
+        refused, _ = landing.result(timeout=60)
         flag_state = delivery.inbox.item(flag).state
-        replaced = delivery.inbox.item(commented + 2).state
-    assert held_back == (
+    assert declined.declined == [Path(path)]
+    assert declined.approved == []
+    # The session landing wrote the file, so the remark reaches them as well, told after.
+    assert held_back.startswith(
         "Not landed: the operator didn't approve each file it waits on.\n"
-        f"- @{commented} (`{path}`): commented on, not approved\n"
+        f"- `{path}`: declined, saying:\n"
+        f"  {path}:1\n"
+        f"  +{first.strip()}\n"
+        "  Call them chambers.\n"
         "What they approved stays approved. Answer what they said, commit, and call "
         "`land` again: each file left is held again, shown from the version they "
-        "last saw.\n"
-        f'<message item="{commented + 1}" from="operator" kind="note">\nThe '
-        f"operator commented on it without approving it: @{commented}, the hold on "
-        f"`{path}` at the landing of {tip} on `dev`. Their comment:\n"
-        "Call them chambers.\n</message>"
+        'last saw.\n<review item="'
     )
-    first_again = commented + 2
-    assert superseded.startswith(
+    [file] = [each for each in again.files if each.path == Path(path)]
+    assert file.held is not None
+    assert file.held.tip == latest
+    assert file.reviewed is not None
+    assert file.file is not None
+    assert (file.file.before, file.file.after) == (Text(text=first), Text(text=second))
+    assert refused.startswith(
         "Not landed: the operator didn't approve each file it waits on.\n"
-        f"- @{first_again} (`{path}`): superseded by @{hold.number}, another "
-        "landing's hold on the file\n"
+        f"- `{path}`: declined\n"
     )
-    assert replaced == Superseded(at=clock.now(), by=hold.number)
-    assert isinstance(hold.reason, HeldChange)
-    assert hold.reason.landing is not None
-    assert (hold.reason.landing.tip, hold.reason.landing.since) == (latest, commented)
-    assert hold.reason.summary.endswith(
-        f"Shown since @{commented}, the version of it you last saw."
-    )
-    assert '-"""Rooms."""\n+"""Chambers."""' in diff
-    assert declined.startswith(
-        "Not landed: the operator didn't approve each file it waits on.\n"
-        f"- @{hold.number} (`{path}`): declined\n"
-    )
-    assert declined.endswith(
-        f"The operator declined it: @{hold.number}, the hold on `{path}` at the "
-        f"landing of {latest} on `dev`. Their comment:\nNot yet.\n</message>"
-    )
-    assert again != latest
     assert landings.on_forge("refs/heads/dev") == old
     assert flag_state == Waiting()
 
 
-def test_a_hold_at_landing_starts_from_the_version_the_operator_marked_reviewed(
+def test_a_file_held_at_landing_is_shown_from_the_version_the_operator_marked_reviewed(
     landings: Landings,
     machine: Layout,
     clock: FakeClock,
@@ -8516,27 +8571,19 @@ def test_a_hold_at_landing_starts_from_the_version_the_operator_marked_reviewed(
         landings.flag(path, second, session)
         landing = pool.submit(call, machine.host.launch("one").mcp, "land", {})
         assert delivery.holding.wait(timeout=60)
-        [hold] = [
-            each
-            for each in delivery.inbox.waiting(Operator())
-            if isinstance(each.reason, HeldChange)
-        ]
-        diff = inbox("show", str(hold.number), "--diff")
-        inbox("answer", str(hold.number), "--approve", "--comment", "")
+        place = drawer(machine, clock, session, "feat")
+        answering(machine, clock, session, place, path)
         answer, error = landing.result(timeout=60)
     assert not error
-    assert isinstance(hold.reason, HeldChange)
-    assert hold.reason.landing is not None
-    assert (hold.reason.landing.since, hold.reason.landing.reviewed) == (None, mark.at)
-    assert hold.reason.summary.endswith(
-        "Shown since the version you last marked reviewed in its agent's drawer, "
-        f"{version}."
-    )
-    assert '-"""Rooms."""\n+"""Chambers."""' in diff
+    [file] = [each for each in place.files if each.path == Path(path)]
+    assert file.held is not None
+    assert (file.since, file.reviewed) == (None, mark.at)
+    assert file.file is not None
+    assert (file.file.before, file.file.after) == (Text(text=first), Text(text=second))
     assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
 
 
-def test_a_land_sent_again_across_a_restart_holds_on_its_holds_again_and_lands_once_approved(
+def test_a_land_sent_again_across_a_restart_waits_again_and_lands_once_its_flag_is_approved_from_the_terminal(
     landings: Landings,
     machine: Layout,
     clock: FakeClock,
@@ -8565,12 +8612,10 @@ def test_a_land_sent_again_across_a_restart_holds_on_its_holds_again_and_lands_o
         delivery.holding.clear()
         landing = pool.submit(call, mcp, "land", stamped)
         assert delivery.holding.wait(timeout=60)
-        [hold] = [
-            each
-            for each in delivery.inbox.waiting(Operator())
-            if isinstance(each.reason, HeldChange)
-        ]
-        inbox("answer", str(hold.number), "--approve", "--comment", "")
+        waiting = (
+            client(machine.host, clock).ask(ShowLandings(), LandingsWaiting).waiting
+        )
+        inbox("done", str(flag))
         answer, error = landing.result(timeout=60)
         holds = [
             item.number
@@ -8578,10 +8623,10 @@ def test_a_land_sent_again_across_a_restart_holds_on_its_holds_again_and_lands_o
             if isinstance(item.reason, HeldChange)
         ]
     assert not error
+    assert [[each.path for each in wait.files] for wait in waiting] == [[Path(path)]]
     assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
-    assert f"The operator approved @{hold.number} (`{path}`)." in answer
-    assert (hold.call, hold.number) == ("l1", flag + 1)
-    assert holds == [hold.number]
+    assert f"The operator approved `{path}`" in answer
+    assert holds == []
     assert landings.on_forge("refs/heads/dev") == tip
 
 
@@ -8750,20 +8795,15 @@ def test_land_leaves_alone_each_branch_at_a_tip_merged_that_another_shares_and_t
         landings.launched("claude")
         mcp = machine.host.launch("one").mcp
         send(machine.host.launch("one").hook, started("claude"))
-        landings.flag(path, rooms, session)
+        flag = landings.flag(path, rooms, session)
         landing = pool.submit(call, mcp, "land", {})
         assert delivery.holding.wait(timeout=60)
-        [hold] = [
-            each
-            for each in delivery.inbox.waiting(Operator())
-            if isinstance(each.reason, HeldChange)
-        ]
-        inbox("answer", str(hold.number), "--approve", "--comment", "")
+        inbox("done", str(flag))
         answer, error = landing.result(timeout=60)
     assert not error, answer
     assert answer == (
         f"Landed {tip} on `dev` at `origin`, which was at {old}.\n"
-        f"The operator approved @{hold.number} (`{path}`).\n"
+        f"The operator approved `{path}`.\n"
         "`dev`'s own commits add no `# lup: defer` comment and remove none, against `dev` on `origin`.\n"
         "Left alone, at a tip `dev` merged that another branch points at too, so "
         "which of them was merged can't be told: `feat`, `next`.\n"
@@ -9437,7 +9477,7 @@ def test_land_ends_on_the_subagents_lup_hasn_t_heard_end_and_the_branches_off_de
     )
 
 
-def test_a_hold_declined_after_a_merge_leaves_it_on_dev_here_and_says_so(
+def test_a_held_file_declined_after_a_merge_leaves_it_on_dev_here_and_says_so(
     landings: Landings,
     machine: Layout,
     clock: FakeClock,
@@ -9460,19 +9500,15 @@ def test_a_hold_declined_after_a_merge_leaves_it_on_dev_here_and_says_so(
         landings.flag(path, rooms, session)
         landing = pool.submit(merging, landings, mcp)
         assert delivery.holding.wait(timeout=60)
-        [hold] = [
-            each
-            for each in delivery.inbox.waiting(Operator())
-            if isinstance(each.reason, HeldChange)
-        ]
-        inbox("answer", str(hold.number), "--decline", "--comment", "Not yet.")
+        place = drawer(machine, clock, session, "feat")
+        answering(machine, clock, session, place, path, decline=True)
         answer = landing.result(timeout=60)
     merge = landings.shell.git(landings.dev, "rev-parse", "HEAD")
-    assert f"- @{hold.number} (`{path}`): declined\n" in answer
-    assert (
+    assert f"- `{path}`: declined\n" in answer
+    assert answer.endswith(
         f"`dev` here holds the merge, {merge}, which `origin`'s doesn't yet: the "
-        "next `land` lands it.\n"
-    ) in answer
+        "next `land` lands it."
+    )
     assert landings.on_forge("refs/heads/dev") == old
     assert merge != old
 

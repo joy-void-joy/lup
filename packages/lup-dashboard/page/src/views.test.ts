@@ -9,17 +9,19 @@ import { producerOf } from "./views/index";
 type Item = components["schemas"]["Item"];
 type Conversation = components["schemas"]["Conversation"];
 type Since = components["schemas"]["Since"];
+type Wait = components["schemas"]["Wait"];
 
 /**
  * What a fixture gives a view, as JSON, so its module's Python, once it answers the view itself, is given the same:
- * the items waiting, each item's files as the host answered them, each agent's data, each conversation running, and
- * each conversation's path as the operator reads them named.
+ * the items waiting, each item's files as the host answered them, each agent's data, each conversation running, the
+ * landings waiting, and each conversation's path as the operator reads them named.
  */
 interface Given {
     items?: Item[];
     files?: Record<string, Answered<ChangedFile[]>>;
     drawers?: Record<string, Partial<AgentDrawers>>;
     running?: Record<string, Running>;
+    landings?: Wait[];
     paths?: Record<string, string>;
 }
 
@@ -44,6 +46,7 @@ function shownOf(given: Given): Shown {
             ]),
         ),
         running: new Map(Object.entries(given.running ?? {})),
+        landings: given.landings ?? [],
         called: (party) => paths.get(whose(party)) ?? party.agent ?? party.session,
     };
 }
@@ -101,18 +104,63 @@ const FIRST = item(
     { party: "operator" },
 );
 
+const SESSION: Conversation = { ...PARSER, agent: null };
+const HELD_AT = { key: "w1", lander: SESSION, named: "`feat` on `dev`", tip: "c0ffee", declined: false };
+
 const SINCE: Since = {
     kind: "policy-since",
-    worktree: "/w/feat",
-    branch: "feat",
     version: "v3",
     same: false,
-    files: [
-        { path: "reader.py", version: "b1", flags: [59], file: { ...FILES[0]!, reading: { role: "production", asks: [{ name: "new-file", taken: "flagged", side: "after" }], findings: [] }, before: null } },
-        { path: "test_reader.py", version: "b2", flags: [], file: FILES[1]! },
-        { path: "clock.py", version: "b3", flags: [60], since: 12 },
-        { path: "notes.md", version: "b4", flags: [], reviewed: AT },
+    places: [
+        {
+            worktree: "/w/feat",
+            branch: "feat",
+            gone: false,
+            files: [
+                { path: "reader.py", version: "b1", flags: [59], file: { ...FILES[0]!, reading: { role: "production", asks: [{ name: "new-file", taken: "flagged", side: "after" }], findings: [] }, before: null } },
+                { path: "test_reader.py", version: "b2", flags: [], file: FILES[1]! },
+                { path: "clock.py", version: "b3", flags: [60], since: 12 },
+                { path: "notes.md", version: "b4", flags: [], reviewed: AT },
+            ],
+        },
     ],
+};
+
+/** The parser's branch with its new module held at landing, and a fix on a branch alone, no worktree of theirs having it checked out, and the flags on a branch gone. */
+const HELD_SINCE: Since = {
+    kind: "policy-since",
+    version: "v4",
+    same: false,
+    places: [
+        {
+            worktree: "/w/feat",
+            branch: "feat",
+            gone: false,
+            files: [
+                { path: "reader.py", version: "b1", flags: [59], held: HELD_AT, file: { ...FILES[0]!, reading: { role: "production", asks: [{ name: "new-file", taken: "flagged", side: "after" }], findings: [] }, before: null } },
+                { path: "clock.py", version: "b3", flags: [60], reviewed: AT, held: { ...HELD_AT, declined: true } },
+            ],
+        },
+        { worktree: null, branch: "fix", gone: false, files: [{ path: "reader.py", version: "c1", flags: [], file: { path: "reader.py", before: text("a = 1\n"), after: text("a = 2\n") } }] },
+        { worktree: null, branch: "old", gone: true, files: [{ path: "gone.py", flags: [61] }] },
+    ],
+};
+
+/** A landing of the session's waiting on the parser's module, and on one of the session's own. */
+const WAIT: Wait = {
+    key: "w1",
+    repository: REPOSITORY,
+    lander: SESSION,
+    onto: "refs/heads/dev",
+    old: "0ld",
+    tip: "c0ffee",
+    branches: ["feat"],
+    files: [
+        { path: "reader.py", flags: [59], writers: [PARSER] },
+        { path: "hall.py", flags: [63], writers: [SESSION] },
+        { path: "clock.py", flags: [60], writers: [PARSER], declined: { at: AT, words: "" } },
+    ],
+    began: AT,
 };
 
 /** The cases each of the page's own views is pinned by, by its module and its name. */
@@ -129,11 +177,20 @@ const CASES: Record<string, Case[]> = {
     "judge flagged": [{ name: "a write that landed flagged", repository: REPOSITORY, argument: { number: 59 }, given: { items: [FLAGGED], files: { "59": { shown: FILES.slice(0, 1) } } } }],
     "judge since": [
         { name: "a branch's files since the operator approved it", repository: REPOSITORY, argument: AGENT, given: { drawers: { [whose(PARSER)]: { since: SINCE } } } },
-        { name: "a branch that changed nothing", repository: REPOSITORY, argument: AGENT, given: { drawers: { [whose(PARSER)]: { since: { ...SINCE, files: [] } } } } },
+        { name: "a branch that changed nothing", repository: REPOSITORY, argument: AGENT, given: { drawers: { [whose(PARSER)]: { since: { ...SINCE, places: [] } } } } },
+        { name: "a file held at landing, one declined, and three places", repository: REPOSITORY, argument: AGENT, given: { drawers: { [whose(PARSER)]: { since: HELD_SINCE } } } },
     ],
     "judge banner": [
         { name: "an agent whose flagged writes are held", repository: REPOSITORY, argument: AGENT, given: { running: { [whose(PARSER)]: { launch: "l1", holding: true } } } },
         { name: "an agent whose flagged writes land", repository: REPOSITORY, argument: AGENT, given: { running: { [whose(PARSER)]: { launch: "l1", holding: false } } } },
+        { name: "an agent ended, whose file a landing waits on", repository: REPOSITORY, argument: AGENT, given: { drawers: { [whose(PARSER)]: { since: HELD_SINCE } } } },
+        {
+            name: "a session landing, waiting on files in their subagent's drawer and their own",
+            repository: REPOSITORY,
+            argument: { ...AGENT, agent: null },
+            given: { running: { [whose(SESSION)]: { launch: "l1", holding: false } }, landings: [WAIT], paths: { [whose(PARSER)]: "lup-impl/parser" } },
+        },
+        { name: "an agent ended, nothing of theirs waiting", repository: REPOSITORY, argument: AGENT, given: {} },
     ],
     "inbox message": [
         { name: "a note", repository: REPOSITORY, argument: { number: 62 }, given: { items: [item(62, { reason: "message", passages: [], answers: [], ending: false, kind: "note", text: "Read the records.\n\nFour kinds." })] } },
@@ -218,12 +275,48 @@ describe("the views the page lays out itself", () => {
         expect(blocks?.blocks.map((each) => each.id)).toEqual(["file reader.py", "file test_reader.py", "reviewed clock.py", "reviewed"]);
         expect(blocks?.count).toBe(1);
         expect(blocks?.waiting).toBe(true);
-        expect(blocks?.blocks[0]?.offers[0]?.argument).toEqual({ conversation: PARSER, files: [{ path: "reader.py", version: "b1" }] });
+        expect(blocks?.blocks[0]?.offers[0]?.argument).toEqual({ conversation: PARSER, worktree: "/w/feat", branch: "feat", files: [{ path: "reader.py", version: "b1" }] });
         // A file reviewed already, settled under the drawer's last fold, offers nothing, and the drawer whole leaves it out.
         expect(blocks?.offers[0]?.argument).toMatchObject({ files: [{ path: "reader.py" }, { path: "test_reader.py" }, { path: "clock.py" }] });
         const settled = blocks?.blocks.at(-1);
         expect(settled?.block === "fold" && Array.isArray(settled.content) ? settled.content.map((each) => each.offers) : null).toEqual([[]]);
         expect([...(since?.files?.keys() ?? [])]).toEqual(["file reader.py", "file test_reader.py", "reviewed clock.py", "reviewed notes.md"]);
+    });
+
+    it("holds a file a landing waits on: marked reviewed to let it land, declined, a comment implying that; each place a fold, its files named by it", () => {
+        const since = producerOf("judge", "since")?.answer(AGENT as never, shownOf(CASES["judge since"]![2]!.given), REPOSITORY);
+        const blocks = since?.blocks;
+        expect((blocks?.summary ?? []).map((each) => each.text).join("")).toBe("since you approved · 1 held at landing · 1 to review · 2 flagged");
+        expect([blocks?.count, blocks?.waiting]).toEqual([2, true]);
+        expect(blocks?.blocks.map((each) => [each.id, each.block === "fold" ? each.kind : each.block])).toEqual([
+            ["place", "branch"],
+            ["place on fix", "branch"],
+            ["place on old", "branch"],
+        ]);
+        const [feat, fix, old] = (blocks?.blocks ?? []).map((each) => (each.block === "fold" && Array.isArray(each.content) ? each.content : []));
+        const held = feat?.[0];
+        expect(held?.block === "diff" ? held.says?.[0] : null).toBe("held at landing: `feat` on `dev`");
+        expect(held?.offers.map((each) => [each.verb, each.commented, each.says, each.argument.decline ?? false])).toEqual([
+            ["done", false, "mark it reviewed, letting it land", false],
+            ["decline", true, "decline its landing", true],
+        ]);
+        // Declined, it offers nothing: the landing answers.
+        expect(feat?.[1]?.offers).toEqual([]);
+        expect(feat?.[1]?.block === "line" ? feat[1].spans[0]?.text : null).toBe("clock.py · reviewed at b3 · flagged @60 · landing declined: `feat` on `dev`");
+        expect(fix?.map((each) => each.id)).toEqual(["file reader.py on fix"]);
+        expect(fix?.[0]?.offers[0]?.argument).toMatchObject({ worktree: null, branch: "fix" });
+        expect(old?.[0]?.block === "line" ? old[0].spans[0]?.text : null).toBe("gone.py · flagged @61");
+        expect([...(since?.files?.keys() ?? [])]).toEqual(["file reader.py", "reviewed clock.py", "file reader.py on fix", "reviewed gone.py on old"]);
+    });
+
+    it("says on a banner how many files a landing waits on in the agent's drawer, and on the lander's what they land and in whose drawers", () => {
+        const ended = producerOf("judge", "banner")?.answer(AGENT as never, shownOf(CASES["judge banner"]![2]!.given), REPOSITORY)?.blocks;
+        expect([(ended?.summary ?? []).map((each) => each.text).join(""), ended?.offers.length, ended?.waiting]).toEqual(["landing waits on 1 file", 0, true]);
+        const lander = producerOf("judge", "banner")?.answer({ ...AGENT, agent: null } as never, shownOf(CASES["judge banner"]![3]!.given), REPOSITORY)?.blocks;
+        expect((lander?.summary ?? []).map((each) => each.text).join("")).toBe("landing `feat` on `dev` waits on 2 files in lup-impl/parser's drawer");
+        expect(lander?.summary.find((each) => each.conversation != null)?.conversation).toEqual(AGENT);
+        expect(lander?.offers.map((each) => each.verb)).toEqual(["hold"]);
+        expect(producerOf("judge", "banner")?.answer(AGENT as never, shownOf(CASES["judge banner"]![4]!.given), REPOSITORY)).toBeNull();
     });
 });
 

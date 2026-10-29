@@ -31,6 +31,17 @@ describe("marking the draft", () => {
         expect([twice.done, twice.marks]).toEqual([[], []]);
     });
 
+    it("marks a file held at landing reviewed or its landing declined, never both: the later key replaces the other's mark", () => {
+        const argument = { conversation: { party: "conversation", repository: "/r.git", runtime: "claude", session: "s1" }, worktree: "/w", branch: "feat", files: [{ path: "a.py", version: "a1" }] };
+        const review: Offer = { action: "policy-review-since", argument, verb: "done", chord: null, runs: "send", commented: false, says: "mark it reviewed, letting it land" };
+        const decline: Offer = { ...review, argument: { ...argument, decline: true }, verb: "decline", commented: true, says: "decline its landing" };
+        const done = marking(EMPTY, [{ kind: "mark", offer: review, block: "file a.py", version: "a1" }], "done");
+        const declined = marking(done, [{ kind: "mark", offer: decline, block: "file a.py", version: "a1" }], "decline");
+        expect(declined.marks?.map((each) => [each.verb, each.says])).toEqual([["decline", "decline its landing"]]);
+        // Pressed again, it's taken off, and nothing's marked.
+        expect(marking(declined, [{ kind: "mark", offer: decline, block: "file a.py", version: "a1" }], "decline").marks).toEqual([]);
+    });
+
     it("marks what's left unmarked where only some of it is, rather than taking the rest off", () => {
         const acts: Act[] = [
             { kind: "item", number: 51, list: "done" },

@@ -9,8 +9,8 @@
 // its end; and its part of an agent's banner, whether their flagged writes are held. Pure.
 import type { ChangedFile, Diff, Mark } from "../code";
 import type { components } from "../generated/api";
-import { reviewedLine } from "../since";
-import { conversationOf, whose, type Answer, type Blocks, type Line, type OfAgent, type Offer, type Shown, type View } from "../views";
+import { filesOf, heldSaid, isHeld, placeSaid, reviewedLine } from "../since";
+import { conversationOf, whose, type Answer, type Blocks, type Line, type OfAgent, type Offer, type PlacedFile, type Shown, type Span, type View } from "../views";
 
 type Item = components["schemas"]["Item"];
 type Reading = components["schemas"]["Reading"];
@@ -18,6 +18,8 @@ type Asked = components["schemas"]["Asked"];
 type ApiChanged = components["schemas"]["ApiChanged"];
 type Since = components["schemas"]["Since"];
 type SinceFile = components["schemas"]["SinceFile"];
+type SincePlace = components["schemas"]["SincePlace"];
+type Conversation = components["schemas"]["Conversation"];
 type Taken = Mark["taken"];
 
 /** The most changes to the public API a header names: the rest are on their lines. */
@@ -319,24 +321,30 @@ export const FLAGGED: View<OfItem> = {
 };
 
 /**
- * Say a "since you approved" drawer's summary line: on which branch, how many files changed since the operator last saw
- * them are to review, how many have flagged writes waiting on them, which the branch's landing waits on, how many are
- * tests or data files, folded whole and left out of what's to review (`foldedOf`), and how many stand as they saw them,
- * reviewed: the agent's flags in one line, as the inbox lists them.
+ * Say a "since you approved" drawer's summary line: on which branch, where it reads one, how many files a landing
+ * waits on, how many changed since the operator last saw them are to review, how many have flagged writes waiting on
+ * them, which their branch's landing waits on, how many are tests or data files, folded whole and left out of what's
+ * to review (`foldedOf`), and how many stand as they saw them, reviewed: the agent's flags in one line, as the inbox
+ * lists them.
  */
 export function sinceSummary(shown: Since | null): string {
     if (shown === null) {
         return "since you approved · not read yet";
     }
-    const { parts } = sinceCounts(shown);
-    const branch = shown.branch == null ? "" : ` on ${shown.branch}`;
+    const { parts } = counts(filesOf(shown));
+    const branches = (shown.places ?? []).flatMap((each) => (each.branch == null ? [] : [each.branch]));
+    const branch = branches.length === 0 ? "" : ` on ${branches.join(", ")}`;
     return `since you approved${branch} · ${parts.length === 0 ? "nothing" : parts.join(" · ")}`;
 }
 
-/** What a "since you approved" drawer counts, each in a few words, how many files it has to review, and whether any waits on the operator. */
-function sinceCounts(shown: Since): { parts: string[]; open: number; waiting: boolean } {
-    const files = shown.files ?? [];
-    const changedFiles = files.flatMap((each) => (each.file == null ? [] : [each.file]));
+/**
+ * What files of a "since you approved" drawer count, each in a few words: how many a landing waits on, held at landing;
+ * how many to review; how many with flagged writes waiting on them; the tests and data files; and those settled,
+ * reviewed. With how many wait on the operator, those held and those to review, and whether any does.
+ */
+function counts(files: readonly SinceFile[]): { parts: string[]; open: number; waiting: boolean } {
+    const held = files.filter(isHeld).length;
+    const changedFiles = files.flatMap((each) => (each.file == null || isHeld(each) ? [] : [each.file]));
     const folded = new Map<Folded, number>();
     for (const each of changedFiles) {
         const why = foldedOf(each, false);
@@ -346,36 +354,121 @@ function sinceCounts(shown: Since): { parts: string[]; open: number; waiting: bo
     }
     const open = changedFiles.length - [...folded.values()].reduce((sum, each) => sum + each, 0);
     // Reviewed, settled: those standing as the operator saw them with no flagged write waiting, which fold at the end.
-    const kept = files.filter((each) => each.file == null && (each.flags ?? []).length === 0).length;
-    const flagged = files.filter((each) => (each.flags ?? []).length > 0).length;
+    const kept = files.filter((each) => each.file == null && (each.flags ?? []).length === 0 && each.held == null).length;
+    const flagged = files.filter((each) => (each.flags ?? []).length > 0 && !isHeld(each)).length;
     const said = [
+        ...(held === 0 ? [] : [`${held} held at landing`]),
         ...(open === 0 ? [] : [`${open} to review`]),
         ...(flagged === 0 ? [] : [`${flagged} flagged`]),
         ...[...folded].map(([why, count]) => `${count} ${count === 1 ? FOLDED[why].one : FOLDED[why].many}`),
         ...(kept === 0 ? [] : [`${kept} reviewed`]),
     ];
-    return { parts: said, open, waiting: open > 0 || flagged > 0 };
+    return { parts: said, open: open + held, waiting: open > 0 || flagged > 0 || held > 0 };
 }
 
-/** Return what marking `files` of the agent `conversation` names reviewed at the versions shown offers, Space d on a file or on the drawer, as the reply is sent. */
-function reviewing(conversation: components["schemas"]["Conversation"], files: SinceFile[], says: string): Offer {
+/** Return what marking `files` of the place `place` of the agent `conversation` names reviewed at the versions shown offers, Space d on a file or on the drawer, as the reply is sent; a comment on one implying it where `commented`. */
+function reviewing(conversation: Conversation, place: SincePlace, files: SinceFile[], says: string, commented: boolean = true): Offer {
     return {
         action: "policy-review-since",
-        argument: { conversation, files: files.map((each) => ({ path: each.path, version: each.version ?? null })) },
+        argument: {
+            conversation,
+            worktree: place.worktree ?? null,
+            branch: place.branch ?? null,
+            files: files.map((each) => ({ path: each.path, version: each.version ?? null })),
+        },
         verb: "done",
         chord: null,
         runs: "send",
-        commented: true,
+        commented,
         says,
     };
 }
 
 /**
- * "Since you approved", the agent's drawer: its summary line (`sinceSummary`), bold where it has files to review or
- * flagged writes, the files to review counted for the overview; in the files' order, each changed since the operator
- * saw it, whole, a new module's bodies folded to show its design, each offering to be marked reviewed; each standing as
- * they saw it with flagged writes still waiting on it, a line of its own in its place; then those settled, folded
- * under one line saying how many, out of the way of what's left. None where its branch changed nothing, or isn't read.
+ * Return what declining the landing of `files` of the place `place` offers, Space x on a file held at landing, as the
+ * reply is sent: each marked reviewed at the version shown, its flags left waiting, and the landing told no, with the
+ * operator's words on it; a comment on one implying it, as one on a hold at landing holds it back.
+ */
+function declining(conversation: Conversation, place: SincePlace, files: SinceFile[]): Offer {
+    const offer = reviewing(conversation, place, files, "decline its landing");
+    return { ...offer, argument: { ...offer.argument, decline: true }, verb: "decline" };
+}
+
+/** What a file held at landing offers: marking it reviewed, which lets it land, and declining its landing, a comment implying that; nothing once declined, the landing answering. */
+function heldOffers(conversation: Conversation, place: SincePlace, file: SinceFile): Offer[] {
+    if (file.held?.declined === true) {
+        return [];
+    }
+    return [reviewing(conversation, place, [file], "mark it reviewed, letting it land", false), declining(conversation, place, [file])];
+}
+
+/** Return the words naming `place` in its blocks' ids: none for the drawer's first place, so its files keep the ids they had before it had others; its branch, else its worktree. */
+function placeKey(place: SincePlace, first: boolean): string {
+    if (first) {
+        return "";
+    }
+    return ` on ${place.branch ?? place.worktree ?? "a detached HEAD"}`;
+}
+
+/**
+ * Return the blocks of one place of a "since you approved" drawer, `first` where it's the drawer's first, each file it
+ * shows put in `each` by its block's id: in the files' order, each changed since the operator saw it, whole, a new
+ * module's bodies folded to show its design, each offering to be marked reviewed, one held at landing saying so in
+ * its header and offering its landing declined too; each standing as they saw it with flagged writes still waiting on
+ * it, or held at landing, a line of its own in its place; then those settled, folded under one line saying how many.
+ */
+function placed(conversation: Conversation, place: SincePlace, first: boolean, each: Map<string, PlacedFile>): Blocks["blocks"] {
+    const files = place.files ?? [];
+    const key = placeKey(place, first);
+    // A file standing as the operator last saw it offers marking it reviewed only while flagged writes wait on it,
+    // which marking it approves, or a landing waits on it: one settled is reviewed already.
+    const line = (file: SinceFile): Line => {
+        const id = `reviewed ${file.path}${key}`;
+        each.set(id, { file, place, block: id });
+        const offers =
+            file.held != null
+                ? heldOffers(conversation, place, file)
+                : (file.flags ?? []).length > 0
+                  ? [reviewing(conversation, place, [file], "mark it reviewed")]
+                  : [];
+        return { block: "line", id, version: file.version ?? null, offers, spans: [{ text: reviewedLine(file), tone: "reviewed" }] };
+    };
+    const left = files.flatMap((file): Blocks["blocks"] => {
+        if (file.file == null) {
+            return (file.flags ?? []).length > 0 || file.held != null ? [line(file)] : [];
+        }
+        const diff = withKey(judged(file.file, false, file.file.before == null, file.version ?? null), key);
+        const offers = file.held != null ? heldOffers(conversation, place, file) : [reviewing(conversation, place, [file], "mark it reviewed")];
+        const offered: Diff = withOffers(file.held == null ? diff : heldDiff(diff, file), offers);
+        each.set(offered.id, { file, place, block: offered.id });
+        return [offered];
+    });
+    const settled = files.filter((file) => file.file == null && (file.flags ?? []).length === 0 && file.held == null);
+    const done: Blocks["blocks"] =
+        settled.length === 0
+            ? []
+            : [
+                  {
+                      block: "fold",
+                      id: `reviewed${key}`,
+                      version: null,
+                      offers: [],
+                      kind: "lines",
+                      summary: [{ text: `${settled.length} reviewed`, tone: "summary" }],
+                      open: false,
+                      barred: false,
+                      content: settled.map(line),
+                  },
+              ];
+    return [...left, ...done];
+}
+
+/**
+ * "Since you approved", the agent's drawer: its summary line (`sinceSummary`), bold where it has files to review,
+ * flagged writes or files held at landing, the files held and to review counted for the overview; each place the
+ * agent worked laid out (`placed`), alone as the drawer's own, or, where they worked in several, each a fold of the
+ * judge's `branch` kind, open, its line saying which and what it counts. None where their branches changed nothing, or
+ * aren't read.
  */
 export const SINCE: View<OfAgent> = {
     module: "judge",
@@ -383,63 +476,89 @@ export const SINCE: View<OfAgent> = {
     answer: (of, shown, repository) => {
         const conversation = conversationOf(repository, of);
         const since = shown.drawers.get(whose(conversation))?.since ?? null;
-        const files = since?.files ?? [];
+        const files = since === null ? [] : filesOf(since);
         if (since === null || files.length === 0) {
             return null;
         }
-        const { parts, open, waiting } = sinceCounts(since);
+        const { parts, open, waiting } = counts(files);
         // The drawer's line leaves out the branch its summary names: the banner over it says where the agent works.
         const label = ["since you approved", ...(parts.length === 0 ? ["nothing"] : parts)].join(" · ");
-        const each = new Map<string, SinceFile>();
-        // A file standing as the operator last saw it offers marking it reviewed only while flagged writes wait on it,
-        // which marking it approves: one settled is reviewed already.
-        const line = (file: SinceFile): Line => {
-            const id = `reviewed ${file.path}`;
-            each.set(id, file);
-            const offers = (file.flags ?? []).length > 0 ? [reviewing(conversation, [file], "mark it reviewed")] : [];
-            return { block: "line", id, version: file.version ?? null, offers, spans: [{ text: reviewedLine(file), tone: "reviewed" }] };
-        };
-        const left = files.flatMap((file): Blocks["blocks"] => {
-            if (file.file == null) {
-                return (file.flags ?? []).length > 0 ? [line(file)] : [];
-            }
-            const diff = judged(file.file, false, file.file.before == null, file.version ?? null);
-            const offered: Diff = withOffers(diff, [reviewing(conversation, [file], "mark it reviewed")]);
-            each.set(offered.id, file);
-            return [offered];
-        });
-        const settled = files.filter((file) => file.file == null && (file.flags ?? []).length === 0);
-        const done: Blocks["blocks"] =
-            settled.length === 0
-                ? []
-                : [
-                      {
+        const each = new Map<string, PlacedFile>();
+        const places = since.places ?? [];
+        const showing = places.filter((place) => (place.files ?? []).length > 0);
+        const [only] = showing;
+        const blocks: Blocks["blocks"] =
+            showing.length === 1 && only !== undefined && only === places[0]
+                ? placed(conversation, only, true, each)
+                : showing.map((place) => {
+                      const first = place === places[0];
+                      const said = counts(place.files ?? []).parts;
+                      return {
                           block: "fold",
-                          id: "reviewed",
+                          id: `place${placeKey(place, first)}`,
                           version: null,
                           offers: [],
-                          kind: "lines",
-                          summary: [{ text: `${settled.length} reviewed`, tone: "summary" }],
-                          open: false,
+                          kind: "branch",
+                          summary: [{ text: [placeSaid(place), ...(said.length === 0 ? ["nothing"] : said)].join(" · "), tone: "summary" }],
+                          open: true,
                           barred: false,
-                          content: settled.map(line),
-                      },
-                  ];
-        // On the drawer as a whole, every file to review or with flagged writes waiting, those settled left out.
-        const reviewable = files.filter((file) => file.file != null || (file.flags ?? []).length > 0);
+                          content: placed(conversation, place, first, each),
+                      };
+                  });
+        // On the drawer as a whole, every file to review, with flagged writes waiting or held at landing, of its first
+        // place: those settled left out. Space d on its line reaches each file of every place, each offering it.
+        const first = places[0];
+        const reviewable = (first?.files ?? []).filter((file) => (file.file != null || (file.flags ?? []).length > 0) && file.held?.declined !== true);
         return {
             blocks: {
                 summary: [{ text: label, tone: "plain" }],
                 waiting,
                 count: open,
-                offers: reviewable.length === 0 ? [] : [reviewing(conversation, reviewable, "mark every file reviewed")],
-                blocks: [...left, ...done],
+                offers: first === undefined || reviewable.length === 0 ? [] : [reviewing(conversation, first, reviewable, "mark every file reviewed")],
+                blocks,
             },
             files: each,
             since,
         };
     },
 };
+
+/** Each file's `Diff` with its id naming its place, made once for each, so the file's layout is kept with it. */
+const keyed = new WeakMap<Diff, Map<string, Diff>>();
+
+/** Return `diff` with its id naming its place, `key`, made once and kept; itself for the drawer's first place. */
+function withKey(diff: Diff, key: string): Diff {
+    if (key === "") {
+        return diff;
+    }
+    const kept = keyed.get(diff) ?? new Map<string, Diff>();
+    const found = kept.get(key);
+    if (found !== undefined) {
+        return found;
+    }
+    const made = { ...diff, id: `${diff.id}${key}` };
+    keyed.set(diff, kept.set(key, made));
+    return made;
+}
+
+/** Each held file's `Diff`, its header saying it's held at landing, open: made once for each landing. */
+const holding = new WeakMap<Diff, Map<string, Diff>>();
+
+/** Return `diff` as a file held at landing shows it: its header saying so first, open, made once and kept. */
+function heldDiff(diff: Diff, file: SinceFile): Diff {
+    const [said] = heldSaid(file);
+    if (said === undefined) {
+        return diff;
+    }
+    const kept = holding.get(diff) ?? new Map<string, Diff>();
+    const found = kept.get(said);
+    if (found !== undefined) {
+        return found;
+    }
+    const made = { ...diff, says: [said, ...(diff.says ?? [])], open: true, automatic: false };
+    holding.set(diff, kept.set(said, made));
+    return made;
+}
 
 /** Each file's `Diff` with its offers, made once for each list offered, so the file's layout is kept with it. */
 const offered = new WeakMap<Diff, Map<string, Diff>>();
@@ -457,24 +576,64 @@ function withOffers(diff: Diff, offers: Offer[]): Diff {
     return made;
 }
 
-/** The judge's part of an agent's banner: `holding` where the operator holds each of the agent's flagged writes, and holding or letting them land again, Space h, as the reply is sent. */
+/**
+ * The judge's part of an agent's banner: `holding` where the operator holds each of the agent's flagged writes, and
+ * holding or letting them land again, Space h, as the reply is sent, for an agent running; how many files of their
+ * drawer a landing waits on (`landing waits on 2 files`); and, for an agent landing, each landing of theirs waiting and
+ * whose drawers hold its files (`landing `feat` on `dev` waits on 2 files in parser's drawer`), each writer's name a
+ * span naming them, which `gd` goes to.
+ */
 export const BANNER: View<OfAgent> = {
     module: "judge",
     view: "banner",
     answer: (of, shown, repository) => {
-        const running = shown.running.get(whose(conversationOf(repository, of)));
-        if (running === undefined) {
+        const conversation = conversationOf(repository, of);
+        const key = whose(conversation);
+        const running = shown.running.get(key);
+        const since = shown.drawers.get(key)?.since ?? null;
+        const held = since === null ? 0 : filesOf(since).filter(isHeld).length;
+        const landing = shown.landings.filter((each) => whose(each.lander) === key);
+        const parts: Span[][] = [
+            ...(running?.holding === true ? [[{ text: "holding", tone: "plain" }]] : []),
+            ...(held === 0 ? [] : [[{ text: `landing waits on ${held} file${held === 1 ? "" : "s"}`, tone: "strong" }]]),
+            ...landing.map((wait) => landingSaid(wait, key, shown)),
+        ];
+        if (running === undefined && parts.length === 0) {
             return null;
         }
-        const hold: Offer = {
-            action: "set-holding",
-            argument: { launch: running.launch, session: of.session, agent: of.agent ?? null, on: !running.holding },
-            verb: "hold",
-            chord: null,
-            runs: "send",
-            commented: false,
-            says: running.holding ? "let their flagged writes land" : "hold their flagged writes",
-        };
-        return { blocks: { summary: running.holding ? [{ text: "holding", tone: "plain" }] : [], waiting: false, count: 0, offers: [hold], blocks: [] } };
+        const hold: Offer[] =
+            running === undefined
+                ? []
+                : [
+                      {
+                          action: "set-holding",
+                          argument: { launch: running.launch, session: of.session, agent: of.agent ?? null, on: !running.holding },
+                          verb: "hold",
+                          chord: null,
+                          runs: "send",
+                          commented: false,
+                          says: running.holding ? "let their flagged writes land" : "hold their flagged writes",
+                      },
+                  ];
+        const summary = parts.flatMap((each, at) => (at === 0 ? each : [{ text: " · ", tone: "plain" }, ...each]));
+        return { blocks: { summary, waiting: held > 0, count: 0, offers: hold, blocks: [] } };
     },
 };
+
+/** Say a landing of the agent `lander`'s waiting, as their banner says it: what lands where, how many files it waits on still, and in whose drawers, each writer but the lander named by a span `gd` follows to their drawer. */
+function landingSaid(wait: components["schemas"]["Wait"], lander: string, shown: Shown): Span[] {
+    const left = (wait.files ?? []).filter((each) => each.declined == null);
+    const writers = [...new Map(left.flatMap((each) => each.writers ?? []).map((each) => [whose(each), each])).values()];
+    const others = writers.filter((each) => whose(each) !== lander);
+    const named = wait.branches.map((each) => `\`${each}\``).join(", ");
+    const onto = wait.onto.replace(/^refs\/heads\//, "");
+    const head: Span = { text: `landing ${named} on \`${onto}\` waits on ${left.length} file${left.length === 1 ? "" : "s"}`, tone: "strong" };
+    if (others.length === 0) {
+        return [head];
+    }
+    const drawers = others.flatMap((each, at): Span[] => [
+        ...(at === 0 ? [] : [{ text: ", ", tone: "plain" }]),
+        { text: shown.called(each), tone: "strong", conversation: { runtime: each.runtime, session: each.session, agent: each.agent ?? null } },
+    ]);
+    return [head, { text: " in ", tone: "strong" }, ...drawers, { text: `'s drawer${others.length === 1 ? "" : "s"}`, tone: "strong" }];
+}

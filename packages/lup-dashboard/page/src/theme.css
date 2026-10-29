@@ -401,6 +401,12 @@ kbd {
     text-decoration-color: var(--muted);
 }
 
+/* Declined, as a file held at landing whose landing is declined: struck through in the error colour. */
+.buffer .cm-line.is-marked.mark-decline {
+    text-decoration: line-through;
+    text-decoration-color: var(--err);
+}
+
 .buffer .cm-line.is-marked[data-mark]::after {
     content: "  ⏎ " attr(data-mark);
     color: var(--warn);
