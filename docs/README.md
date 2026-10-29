@@ -17,3 +17,4 @@ Each describes a piece as it's built: what it's for, how to use it, and the reas
 
 A module in a distribution of its own has its doc in its directory:
 - `packages/lup-transcripts/README.md`: `Transcripts`, every session's record kept, and read with `lup-dev transcripts`.
+- `packages/lup-ledger/README.md`: the ledger, lup's typed graph of nodes and edges, every version kept, and threads, its first kind.

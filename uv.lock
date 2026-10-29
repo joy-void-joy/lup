@@ -11,6 +11,7 @@ members = [
     "lup",
     "lup-dashboard",
     "lup-dev",
+    "lup-ledger",
     "lup-transcripts",
 ]
 
@@ -558,6 +559,28 @@ requires-dist = [
     { name = "tenacity", specifier = ">=9.1.4" },
     { name = "typer", specifier = ">=0.27.2" },
 ]
+
+[[package]]
+name = "lup-ledger"
+version = "0.1.0"
+source = { editable = "packages/lup-ledger" }
+dependencies = [
+    { name = "lup" },
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+environment = [
+    { name = "lup-dev" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "lup", editable = "packages/lup" },
+    { name = "lup-dev", marker = "extra == 'environment'", editable = "packages/lup-dev" },
+    { name = "pydantic", specifier = ">=2.12" },
+]
+provides-extras = ["environment"]
 
 [[package]]
 name = "lup-transcripts"

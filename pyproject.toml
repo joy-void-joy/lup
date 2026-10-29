@@ -148,7 +148,7 @@ addopts = [
 ]
 
 [tool.importlinter]
-root_packages = ["lup", "lup_dev", "lup_transcripts"]
+root_packages = ["lup", "lup_dev", "lup_transcripts", "lup_ledger"]
 # Lets a contract name a package outside `root_packages`, such as `lup_dashboard`.
 include_external_packages = true
 
@@ -180,6 +180,23 @@ ignore_imports = ["lup_transcripts.environment.** -> lup_dev.**"]
 name = "only lup_dev imports lup_transcripts' environment side"
 type = "protected"
 protected_modules = ["lup_transcripts.environment"]
+allowed_importers = ["lup_dev"]
+
+# The ledger's own (`packages/lup-ledger/README.md`, *Layout*): its library side,
+# `lup_ledger`, imports neither lup's environment nor its own environment side,
+# `lup_ledger.environment`, the store the host service runs, which `lup_dev`
+# alone imports.
+[[tool.importlinter.contracts]]
+name = "lup_ledger's library side never imports lup_dev or lup_dashboard"
+type = "forbidden"
+source_modules = ["lup_ledger"]
+forbidden_modules = ["lup_dev", "lup_dashboard"]
+ignore_imports = ["lup_ledger.environment.** -> lup_dev.**"]
+
+[[tool.importlinter.contracts]]
+name = "only lup_dev imports lup_ledger's environment side"
+type = "protected"
+protected_modules = ["lup_ledger.environment"]
 allowed_importers = ["lup_dev"]
 
 [[tool.importlinter.contracts]]

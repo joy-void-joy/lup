@@ -1,0 +1,20 @@
+[project]
+name = "lup-ledger"
+version = "0.1.0"
+description = "lup's typed graph of nodes and edges, every version kept, and threads, its first kind."
+requires-python = ">=3.14"
+dependencies = ["lup", "pydantic>=2.12"]
+
+# The environment side, `lup_ledger.environment`, runs in lup's environment,
+# which this extra brings, so code importing the library side alone doesn't pull it
+# in (`packages/lup-ledger/README.md`, *Layout*).
+[project.optional-dependencies]
+environment = ["lup-dev"]
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+lup = { workspace = true }
+lup-dev = { workspace = true }
