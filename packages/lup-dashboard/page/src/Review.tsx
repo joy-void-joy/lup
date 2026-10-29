@@ -687,7 +687,11 @@ export function Review({
         () => ({ items: itemsGiven, agents: agentsGiven, banner: bannerGiven, called: calledGiven, around: aroundGiven, drawers: drawersGiven, seeing: seeingGiven, order: orderGiven, parents, looks, running, remote }),
         [itemsGiven, agentsGiven, bannerGiven, calledGiven, aroundGiven, drawersGiven, seeingGiven, orderGiven, parents, looks, running, remote],
     );
-    const { items, agents, banner, called, around, drawers, seeing, order, ...arrangedBy } = usePaced(answered, () => Math.min(PACED_MOST, Math.max(PACED_LEAST, 4 * cost.current)));
+    // While a comment is being typed, what's typed laid out once typing pauses, the host's answers wait as long as
+    // they may, so the keys aren't held up behind a layout: what came meanwhile is laid out with what was typed.
+    const { items, agents, banner, called, around, drawers, seeing, order, ...arrangedBy } = usePaced(answered, () =>
+        typed.current !== null ? PACED_MOST : Math.min(PACED_MOST, Math.max(PACED_LEAST, 4 * cost.current)),
+    );
     const arranging = useMemo(() => arrangedBy, [arrangedBy.parents, arrangedBy.looks, arrangedBy.running, arrangedBy.remote]);
     // The review as it was last laid out into the editor, which each comment is followed from (`Arranging.previous`).
     const before = useRef<Laid | null>(null);
