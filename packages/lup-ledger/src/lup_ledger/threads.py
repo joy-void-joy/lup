@@ -268,9 +268,9 @@ class Parked(Status):
 
     kind: Literal["ledger:parked"] = "ledger:parked"
     stands: ClassVar[State] = "parked"
-    # lup: defer(issue=345, why="nothing yet sees a trigger come due, which wakes the thread with a `Reopened`: the host a landing, an end and a time; `gh` an issue; the gate a condition")
     until: Annotated[list[Trigger], Field(min_length=1)]
-    """What wakes it."""
+    """What wakes it: the first to come draws a `Reopened` by lup, each seen
+    where lup already looks (`lup_dev.policy.coming`)."""
     why: str = ""
 
 

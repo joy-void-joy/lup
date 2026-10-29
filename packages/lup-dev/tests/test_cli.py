@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Literal, Self
 from typer.testing import CliRunner
 
 from lup_dev import Requirement, Rules, cli
+from lup_dev.codescan.conditions import Condition
 from lup_dev.codescan.contract import Due
 from lup_dev.codescan.directives import GitHubIssues, IssueRef, Issues
 from lup_dev.codescan.engine import EngineChecker
@@ -404,6 +405,46 @@ def test_rules_check_over_every_file_keeps_what_came_due_for_a_session(
     assert kept is not None
     assert [each.rule for each in kept.reminders] == ["defer-closed"]
     assert cleared == Due()
+
+
+class Counted(Condition):
+    """A condition that holds as `answer` says, keeping a mark in `asked` each time it's asked."""
+
+    answer: bool
+    asked: list[bool] = []
+
+    def holds(self) -> bool:
+        self.asked.append(self.answer)
+        return self.answer
+
+
+def test_rules_check_over_every_file_asks_each_declared_condition_once_and_keeps_those_that_held(
+    fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "src" / "pkg" / "core.py").write_text(
+        'x = 1  # lup: defer(when=ready, why="read the TTL")\n'
+        'y = 2  # lup: defer(when=ready, why="and its unit")\n'
+    )
+    ready = Counted(answer=True)
+    later = Counted(answer=False)
+
+    def conditions(root: Path, modules: list[str]) -> dict[str, Condition]:
+        return {"ready": ready, "later": later}
+
+    def issues(root: Path) -> Issues:
+        return Closed()
+
+    monkeypatch.setattr(cli, "loaded", conditions)
+    monkeypatch.setattr(cli, "GitHubIssues", issues)
+    monkeypatch.chdir(repo)
+    result = runner.invoke(cli.app, ["rules", "check"])
+    kept = read_model(repo / ".git" / "lup" / "due.json", Due)
+
+    assert result.exit_code == 0, result.output
+    assert kept is not None
+    assert kept.held == ["ready"]
+    assert [each.rule for each in kept.reminders] == ["defer-due", "defer-due"]
+    assert (ready.asked, later.asked) == ([True], [False])
 
 
 def test_rules_check_lists_an_ignore_whose_issue_closed_and_keeps_it_for_a_session(

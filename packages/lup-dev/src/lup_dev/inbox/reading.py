@@ -838,7 +838,7 @@ class Reader(Model, arbitrary_types_allowed=True):
 
 
 def stood(standing: Standing) -> str:
-    """Say where a thread stands, in a few words: its state, what a parked one waits for or what to try on one done, what in it waits on the operator, counted by what each is, and how many parts of the operator's words moved in wait on whoever answers for it.
+    """Say where a thread stands, in a few words: its state, what a parked one waits for or what to try on one done, what in it waits on the operator, counted by what each is, how many parts of the operator's words moved in wait on whoever answers for it, and what came where it came due.
 
     >>> stood(Standing(state="working"))
     'working'
@@ -872,6 +872,11 @@ def stood(standing: Standing) -> str:
             )
         ]
     )
+    match standing.status:
+        case ledger.Reopened(by=Lup(), why=why):
+            owed = [*owed, f"came due: {why}"]
+        case _:
+            pass
     if not kinds:
         return "; ".join([state, *owed])
     if standing.state == "waiting on the operator":

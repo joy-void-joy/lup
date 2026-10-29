@@ -134,13 +134,22 @@ class Threads(Model, arbitrary_types_allowed=True):
         return None if thread is None else thread.holder
 
     def parked(self, repository: Path | None = None) -> list[Parked]:
-        """Return what each parked thread waits for, the status it stands at, of `repository`, or of every one where it's none, in the order each was parked."""
+        """Return what each parked thread waits for, the status it stands at, of `repository`, or of every one where it's none, in the order each was parked.
+
+        Only the latest `Parked` drawn to each thread is read against its
+        status, so a thread parked many times costs one read.
+        """
         with self.ledger.together():
-            return [
+            found = [
                 each
                 for each in self.ledger.drawn_of(Parked)
-                if (repository is None or each.repository == repository)
-                and self.status(each.target) == each
+                if repository is None or each.repository == repository
+            ]
+            latest = {each.target: place for place, each in enumerate(found)}
+            return [
+                found[place]
+                for place in sorted(latest.values())
+                if self.status(found[place].target) == found[place]
             ]
 
     def status(self, number: int) -> Status | None:

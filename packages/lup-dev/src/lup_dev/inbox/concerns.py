@@ -59,7 +59,7 @@ from lup_dev.inbox.texts import body, kind, opening, what, written
 from lup_dev.inbox.threads import cue, parts_of, spoken
 from lup_ledger.environment.threads import Threads
 from lup_ledger.errors import LupLedgerError
-from lup_ledger.parties import Conversation, Operator
+from lup_ledger.parties import Conversation, Lup, Operator
 from lup_ledger.records import Edge
 from lup_ledger.threads import (
     Answered,
@@ -87,7 +87,7 @@ if TYPE_CHECKING:
     from datetime import datetime
     from pathlib import Path
 
-    from lup_ledger.parties import Party
+    from lup_ledger.parties import Writer
     from lup_ledger.records import Node
 
 ROOT = "a main session's root thread"
@@ -703,7 +703,7 @@ class Concerns(Model, arbitrary_types_allowed=True):
         thread: Thread,
         status: Parked | Done | Settled | Declined | Reopened,
         line: str,
-        by: Party,
+        by: Writer,
     ) -> Thread:
         """Draw `status` on `thread`, and tell whoever answers for it `line`, unless it's `by`, who said it. Return the thread."""
         self.drawn(status)
@@ -783,6 +783,63 @@ class Concerns(Model, arbitrary_types_allowed=True):
             f": {why}" if why else "."
         )
         return self.stated(thread, status, line, Operator())
+
+    def came(self, parked: Parked, trigger: Trigger) -> Thread:
+        """Reopen the thread `parked` parks, as lup does where `trigger`, one of what it waits for, came: drawing `Reopened`, saying what came, and telling whoever answers for it a line, with what it was parked until and why. Return the thread."""
+        thread = self.thread(parked.target)
+        what = self.happened(trigger)
+        status = Reopened(
+            target=thread.number,
+            repository=thread.repository,
+            by=Lup(),
+            at=self.now(),
+            why=what,
+        )
+        why = parked.why.strip()
+        said = f": {why}" if why else ""
+        stop = "" if said.endswith((".", "!", "?")) else "."
+        line = (
+            f"lup: @{thread.name} came due: {what}. It was parked until "
+            f"{triggers(parked.until)}{said}{stop}"
+        )
+        return self.stated(thread, status, line, Lup())
+
+    def due(
+        self, repository: Path | None, came: Callable[[Parked, Trigger], bool]
+    ) -> list[Thread]:
+        """Reopen each thread of `repository`, or of every one where it's none, parked until something `came` says came, given what parks it (`came`), the first such of its triggers saying what came. Return those reopened, in the order each was parked."""
+
+        def first(parked: Parked) -> Trigger | None:
+            return next((each for each in parked.until if came(parked, each)), None)
+
+        return [
+            self.came(parked, trigger)
+            for parked in self.threads.parked(repository)
+            if (trigger := first(parked)) is not None
+        ]
+
+    def happened(self, trigger: Trigger) -> str:
+        """Say that `trigger` came, in a few words, as `issue #12 closed` says an issue closing.
+
+        >>> from lup_ledger.threads import BranchLanded
+        >>> Concerns.model_construct().happened(BranchLanded(branch="feat"))
+        '`feat` landed'
+        """
+        match trigger:
+            case IssueClosed(issue=str() as issue):
+                return f"issue {issue} closed"
+            case IssueClosed(issue=issue):
+                return f"issue #{issue} closed"
+            case BranchLanded(branch=branch):
+                return f"`{branch}` landed"
+            case CommitLanded(commit=commit):
+                return f"commit {commit} landed"
+            case ConversationEnded(conversation=conversation):
+                return f"{self.roster.who(conversation)} ended"
+            case TimeCame(at=at):
+                return f"{at:%Y-%m-%d %H:%M %Z} came"
+            case ConditionHeld(when=when):
+                return f"`{when}` holds"
 
     def checks(
         self, party: Conversation, thread: Thread, lines: list[str]

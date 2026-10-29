@@ -125,7 +125,7 @@ import asyncio
 import difflib
 import secrets
 import textwrap
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Coroutine, Generator
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Literal, override
 
@@ -144,6 +144,7 @@ from lup.types import Model, MutableModel
 from lup_dev.clock import Clock
 from lup_dev.host.courier import Failure, Heard, Post, Posted, Waker
 from lup_dev.host.names import Names
+from lup_dev.host.protocol import Register
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Queued, Queues, Queuing
 from lup_dev.inbox.citations import failing, resolved, unresolved
@@ -202,13 +203,13 @@ from lup_dev.inbox.threads import (
     spoken,
 )
 from lup_dev.layout import HostLayout
+from lup_ledger import threads as ledger
 from lup_ledger.parties import Conversation, Operator, Party
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from lup_dev.host.courier import Conversation as Caller
-    from lup_dev.host.protocol import Register
     from lup_ledger.threads import Thread
 
 SEPARATOR = "\n\n"
@@ -773,6 +774,13 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     rostered: Roster | None = None
     """The roster last made (`roster`), in memory: made again once the inbox
     or a session's name changes."""
+    starting: Callable[[Register], Coroutine[None, None, None]] | None = None
+    """What the host looks at as a session's own conversation starts in a
+    launch, apart, so their start waits on nothing: whether each issue a
+    thread of their repository is parked until has closed, through GitHub
+    (`lup_dev.policy.coming`); none looks at nothing."""
+    looks: list[asyncio.Task[None]] = []
+    """Each look `starting` began, kept until it's done."""
 
     def presence(self, conversation: Conversation) -> Presence:
         """Return what the service knows of `conversation` while it serves."""
@@ -849,6 +857,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 return Posted()
             case SessionStarted():
                 presence.turning = False
+                if party.agent is None and self.starting is not None:
+                    task = asyncio.create_task(self.starting(launch))
+                    self.looks = [
+                        *(each for each in self.looks if not each.done()),
+                        task,
+                    ]
                 return self.worded(party, self.told(party, room, heard.fits, "start"))
             case TurnStarted():
                 presence.turning = True
@@ -1084,6 +1098,13 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             self.inbox.placed(
                 place.model_copy(update={"ended": self.clock.now(), "held": []})
             )
+        self.concerns().due(
+            party.repository,
+            lambda _, trigger: (
+                isinstance(trigger, ledger.ConversationEnded)
+                and trigger.conversation == party
+            ),
+        )
         main = party.main()
         for item in self.inbox.waiting(party):
             self.inbox.kept(

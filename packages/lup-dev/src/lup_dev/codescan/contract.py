@@ -77,13 +77,17 @@ class Finding(Model):
 
 
 class Due(Model):
-    """The deferred work a repository's gate last found due: each reminder, where it is and what came due.
+    """The deferred work a repository's gate last found due: each reminder, where it is and what came due; and the conditions that held.
 
     `lup-dev rules check` over every file writes it, where it could ask about
     every issue a `# lup:` comment waits on; a session's start tells it (`GitDirectoryLayout.due`).
     """
 
     reminders: list[Finding] = []
+    held: list[str] = []
+    """The conditions the project declares that held, by the names its
+    conditions modules bind them, each asked once: a thread parked until one
+    holds is woken by it (`lup_dev.policy.coming`)."""
 
     def told(self) -> str:
         """Say the reminders to a session, or nothing where there are none."""
