@@ -14,12 +14,12 @@ were keys there.
   (`container_name`), so `podman ps` says which session each runs, and renamed
   with it. A name whose container another launch's holds is held too: `lup`'s
   `dashboard-dev` and `lup-dashboard`'s `dev` would name one container.
-- **A session's name** is kept by the runtime's id for it each time its launch
-  is named or renamed, in lup's state (`SessionNames`), so a later launch
-  resuming it takes the name back where it's free.
-- **A session's title in its runtime, as lup last left it,** is kept beside its
-  name: the one lup gave it, once the answer giving it was written, else the
-  one lup found there. A title the runtime reports other than that one is the
+- **A session's name** is kept by the runtime's id for them each time their
+  launch is named or renamed, in lup's state (`SessionNames`), so a later launch
+  resuming them takes the name back where it's free.
+- **A session's title in their runtime, as lup last left it,** is kept beside
+  their name: the one lup gave them, once the answer giving it was written, else
+  the one lup found there. A title the runtime reports other than that one is the
   operator's, which becomes the session's name; that one is lup's own, which
   the session's name outranks: a resume carries the title lup gave at an
   earlier start, and an answer that never reached its hook leaves the runtime
@@ -39,7 +39,7 @@ CONTAINED = string.ascii_letters + string.digits + "_."
 
 
 class SessionNames(Model):
-    """The name each session's launch last had, and its title in its runtime as lup last left it, each by the runtime's id for the session."""
+    """The name each session's launch last had, and their title in their runtime as lup last left it, each by the runtime's id for the session."""
 
     names: dict[str, Name] = {}
     titles: dict[str, str] = {}
@@ -129,7 +129,7 @@ class Names(Model):
     path: Path
 
     def last(self, session: str) -> str | None:
-        """Return the name `session`'s launch last had, or none where it was never heard."""
+        """Return the name `session`'s launch last had, or none where they were never heard."""
         kept = read_model(self.path, SessionNames) or SessionNames()
         return kept.names.get(session)
 
@@ -143,12 +143,12 @@ class Names(Model):
         )
 
     def title(self, session: str) -> str | None:
-        """Return `session`'s title in its runtime as lup last left it; none where lup never gave or found one."""
+        """Return `session`'s title in their runtime as lup last left it; none where lup never gave or found one."""
         kept = read_model(self.path, SessionNames) or SessionNames()
         return kept.titles.get(session)
 
     def titled(self, session: str, title: str) -> None:
-        """Keep `title` as `session`'s title in its runtime as lup leaves it; the file is left as it is where it was already."""
+        """Keep `title` as `session`'s title in their runtime as lup leaves it; the file is left as it is where it was already."""
         kept = read_model(self.path, SessionNames) or SessionNames()
         if kept.titles.get(session) == title:
             return
@@ -158,6 +158,6 @@ class Names(Model):
         )
 
     def all(self) -> dict[str, str]:
-        """Return every session's last name, by the runtime's id for it."""
+        """Return every session's last name, by the runtime's id for them."""
         kept = read_model(self.path, SessionNames) or SessionNames()
         return kept.names

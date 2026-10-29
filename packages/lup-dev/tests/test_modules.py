@@ -884,7 +884,7 @@ class ViewerServing(ModuleServing):
 
     @lup.view
     async def remembered(self, viewed: lup.OfAgent) -> lup.Blocks:
-        """Say how far the operator read the agent, by its review mark, and offer reading it all."""
+        """Say how far the operator read the agent, by their review mark, and offer reading it all."""
         key = {"session": viewed.session}
         mark = await self.marks.mark(key)
         said = "nothing read" if mark is None else f"read to {mark.up_to}"
@@ -895,7 +895,7 @@ class ViewerServing(ModuleServing):
 
     @lup.view(place=lup.Banner())
     async def mood(self, viewed: lup.OfAgent) -> lup.Blocks:
-        """Say the agent's mood on its banner."""
+        """Say the agent's mood on their banner."""
         return lup.Blocks(
             summary=[lup.Span(text=f"{viewed.session} is glad", tone="warm")]
         )

@@ -676,7 +676,7 @@ class Judge(Model, arbitrary_types_allowed=True):
         """Return lup's findings once `ignore`s apply, and the directives' problems.
 
         A problem `lup-dev rules fix` removes, an unused `ignore`, isn't among
-        them: the session landing the work removes it, as it applies ruff's safe
+        them: the session landing the work removes it, as they apply ruff's safe
         fixes.
         """
         if versions.after is None:

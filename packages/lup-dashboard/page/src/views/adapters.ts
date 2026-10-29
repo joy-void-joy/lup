@@ -1,7 +1,7 @@
 // The runtime adapters' views, which the page lays out until the adapters are a module (#113, step 4; `views.ts`): an
-// agent's task list, as its runtime keeps it, a drawer under its banner, each entry marked done, in progress or to do;
-// and their part of its banner, the current entry of its task list and its context's ring, the tokens in use against
-// its model's window (`◔ 112k/1M`). Each from what the page last read of the agent's record. Pure.
+// agent's task list, as their runtime keeps it, a drawer under their banner, each entry marked done, in progress or to
+// do; and the adapters' part of the agent's banner, the current entry of their task list and their context's ring, the
+// tokens in use against their model's window (`◔ 112k/1M`). Each from what the page last read of the agent's record. Pure.
 import { ring } from "../agents";
 import type { components } from "../generated/api";
 import { conversationOf, whose, type Line, type OfAgent, type Span, type View } from "../views";
@@ -20,7 +20,7 @@ export function currentTask(tasks: Task[]): string | null {
     return tasks.find((each) => each.status === "pending")?.subject ?? null;
 }
 
-/** The agent's task list: `tasks 1/3` under its banner, each entry a line, what it says while in progress for the one in progress; none where its runtime keeps no list. */
+/** The agent's task list: `tasks 1/3` under their banner, each entry a line, what it says while in progress for the one in progress; none where their runtime keeps no list. */
 export const TASKS: View<OfAgent> = {
     module: "adapters",
     view: "tasks",
@@ -38,7 +38,7 @@ export const TASKS: View<OfAgent> = {
     },
 };
 
-/** The adapters' part of an agent's banner: `▶` its current task, then its context's ring, measured; none of either the record hasn't said. */
+/** The adapters' part of an agent's banner: `▶` their current task, then their context's ring, measured; none of either the record hasn't said. */
 export const BANNER: View<OfAgent> = {
     module: "adapters",
     view: "banner",

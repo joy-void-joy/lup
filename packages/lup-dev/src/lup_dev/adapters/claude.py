@@ -17,7 +17,7 @@ it and they approved it, with their comment, or denied (`deny`) with it: Claude
 Code's own prompt isn't used, so a hold is answered the same way on every
 runtime. The agent hears what deferred work came due as `additionalContext` of
 `SessionStart`, a checkpoint's report as `additionalContext` beside the call's
-result, and what a turn's end tells it, the session's or a subagent's, as
+result, and what a turn's end tells them, the session's or a subagent's, as
 `additionalContext` of `Stop` or `SubagentStop`, which holds the turn: it goes
 on, the text shown as hook feedback rather than a hook error.
 `stop_hook_active` says a turn's end follows such a hold. An end that doesn't
@@ -29,24 +29,24 @@ A worktree Claude Code would make, for a session entering one
 (`EnterWorktree`), lup makes instead (`WorktreeCreate`; `docs/judging-writes.md`,
 *A worktree the runtime asks for*): Claude Code's own starts from the
 repository's `HEAD`, a bare repository's default branch however far the work is
-from it, and a worker switching to its branch there had the judge read the
-switch as its writes. A subagent asked to work apart (`isolation: "worktree"`)
-lup isolates itself, where Claude Code's isolation would guard its shell,
+from it, and a worker switching to their branch there had the judge read the
+switch as their writes. A subagent asked to work apart (`isolation: "worktree"`)
+lup isolates itself, where Claude Code's isolation would guard their shell,
 refusing git aimed at another worktree and every compound command (`PreToolUse.spawn`;
 *A subagent lup isolates*): the `Agent` call goes on without `isolation`, lup
-makes the subagent's worktree and tells it so in its prompt, its shell's
-commands start there (`PreToolUse.commanded`), and a write of its file tools
-in the worktree Claude Code names as its working directory, another
+makes the subagent's worktree and tells them so in their prompt, their shell's
+commands start there (`PreToolUse.commanded`), and a write of their file tools
+in the worktree Claude Code names as their working directory, another
 conversation's, is refused (`apart`, `policy/checkpoint.py`). A subagent's hooks
-carry nothing linking it to its spawn but its record, written before its first
-call (`spawned_by`), and a spawn's result, which names it (`PostToolUse`).
+carry nothing linking them to their spawn but their record, written before their first
+call (`spawned_by`), and a spawn's result, which names them (`PostToolUse`).
 
 In a launched room (`docs/host.md`, *The one hook*), Claude Code runs the room's
 hook on `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse` and
 `PostToolUseFailure` for every call, `WorktreeCreate`, `Stop`, `SubagentStop`
 and `StopFailure` (`hooks`), so the host service hears each conversation's
-start, each turn's start and the prompt it starts on, its calls' starts and
-finishes, each worktree it asks for, and its turn's ends, one failing on an
+start, each turn's start and the prompt it starts on, their calls' starts and
+finishes, each worktree they ask for, and their turn's ends, one failing on an
 error from the model's API among them
 (`docs/inbox.md`, *How an agent is told*). The judge reads every one of them
 (`heard`) but the calls `judging` leaves out: those to lup's own tools, and to a
@@ -97,7 +97,7 @@ hold, the session's or a subagent's, carries `stop_hook_active`, so the next
 end is let through.
 
 **The session's title in Claude Code,** the one `/rename` sets, is heard and
-given at its start and at each prompt of its own conversation (`docs/launch.md`,
+given at their start and at each prompt of their own conversation (`docs/launch.md`,
 *Names*): the payload's `session_title` is read (`Heard.title`), so a title the
 operator gave becomes the launch's name, and the service gives the launch's name
 back as `sessionTitle` where the two differ, so a rename through lup reaches
@@ -121,7 +121,7 @@ message (`pushed`, `CHANNEL`), which the launch loads with
 a channel's `notifications/claude/channel` as a prompt, `<channel source="lup"
 wake="…">` around its `content`, with no line saying it came from another
 session, at priority `next`: an idle session starts a turn on it, a busy one
-takes it after its running call, and it fires `UserPromptSubmit` with the whole
+takes it after their running call, and it fires `UserPromptSubmit` with the whole
 tag as `prompt` either way, as it arrives, its `wake` attribute the push's
 token. It registers
 a server as a channel only where the server declares
@@ -132,9 +132,9 @@ for the account and not blocked by its organization; one it doesn't drops what
 the server pushes, saying nothing to the server (`docs/field-notes.md`,
 *Channels*). Taken mid-turn, a channel's message comes with "IMPORTANT: This is
 NOT from your user", so lup pushes only to a session it takes for idle, and
-tells a busy one at its hooks.
+tells a busy one at their hooks.
 
-Where a push isn't taken, the session is woken through its own messaging
+Where a push isn't taken, the session is woken through their own messaging
 socket (`woken`), which the launch puts in the room's socket directory: Claude
 Code "starts a new turn with the message" when the receiving session is idle,
 and closes a connection that hasn't sent a complete line within 30 seconds, so
@@ -215,13 +215,13 @@ What its judging relies on, from Claude Code's hooks reference
 - a `command` hook's timeout defaults to 600 seconds, and "a timed-out command
   ... hook doesn't block the tool call", so a judgement must answer within it;
 - a subagent's hooks carry `agent_id`, "Present only when the hook fires inside a
-  subagent call", beside its session's `session_id` (seen in #32), and
+  subagent call", beside their session's `session_id` (seen in #32), and
   `SubagentStop` "Runs when a Claude Code subagent has finished responding";
 - a hook's `cwd` is the "Current working directory when the hook is invoked",
   and "Subagent sessions never carry over working directory changes" (the tools
-  reference, *Bash tool behavior*): a subagent's hooks report the directory its
-  session works in, whatever worktree the subagent works on, as its records do
-  (`docs/field-notes.md`, *Judging writes*), so a subagent works where its file
+  reference, *Bash tool behavior*): a subagent's hooks report the directory their
+  session works in, whatever worktree the subagent works on, as their records do
+  (`docs/field-notes.md`, *Judging writes*), so a subagent works where their file
   tools write (`Holding.works`, `policy/worktrees.py`);
 - `Stop`'s `stop_hook_active` "is `true` when Claude Code is already continuing as
   a result of a stop hook"; `SubagentStop` takes "the same decision control format
@@ -345,7 +345,7 @@ hooks name it, and `Task`, as 2.1.310's own list of its tools does (its
 type Commanding = Literal["Bash", "Monitor"]
 """The tools that run a shell command, which starts in the session's working
 directory whoever calls it: one of a conversation working apart is rewritten to
-start in its worktree. Measured on 2.1.310 (`docs/field-notes.md`, *lup's own
+start in their worktree. Measured on 2.1.310 (`docs/field-notes.md`, *lup's own
 isolation*): each takes the command as `command`."""
 
 type Reading = Literal[
@@ -378,7 +378,7 @@ are absent by default, and Claude searches with `find` and `grep` through
 
 type FreshStart = Literal["startup", "clear"]
 """The starts (`SessionStart`'s `source`) whose conversation begins empty: a
-session started, or cleared with `/clear`, which gives it an id of its own; a
+session started, or cleared with `/clear`, which gives them an id of their own; a
 resume, a compaction or a fork carries a conversation on (`Heard.fresh`)."""
 
 type ForgettingStart = Literal["compact", "clear"]
@@ -485,7 +485,7 @@ type TurnEnd = Literal["Stop", "SubagentStop"]
 
 
 class StopAnswer(Output):
-    """What `Stop` or `SubagentStop` tells the conversation, which holds its turn's end: it goes on, told it as hook feedback, not a hook error."""
+    """What `Stop` or `SubagentStop` tells the conversation, which holds their turn's end: they go on, told it as hook feedback, not a hook error."""
 
     hook_event_name: TurnEnd
     additional_context: str
@@ -600,7 +600,7 @@ def titled(said: Said, event: str, title: str | None) -> Said:
 
 
 def held(event: TurnEnd, told: str) -> Specific:
-    """Return the answer holding a conversation's turn's end at `event`, telling it `told`."""
+    """Return the answer holding a conversation's turn's end at `event`, telling them `told`."""
     answer = StopAnswer(hook_event_name=event, additional_context=told)
     return Specific(hook_specific_output=answer)
 
@@ -618,7 +618,7 @@ class Payload(Model, ABC):
     agent_id: str = ""
     """The subagent the hook fires for; absent for the session's own conversation."""
     transcript_path: Path | None = None
-    """The session's transcript: its subagents' records are beside it."""
+    """The session's transcript: their subagents' records are beside it."""
 
     @abstractmethod
     def answer(self, bench: Bench) -> Output | None:
@@ -638,13 +638,13 @@ class SessionStart(Payload):
 
     hook_event_name: Literal["SessionStart"]
     source: str | None = None
-    """How it started: `startup`, `resume`, `clear`, `compact` or `fork`."""
+    """How the session started: `startup`, `resume`, `clear`, `compact` or `fork`."""
     session_title: str | None = None
     """The session's custom title, where one is set (`--name`, `/rename`, a
     hook's `sessionTitle`); not the title Claude Code generates."""
 
     def heard(self, fits: int) -> Heard:
-        """Read the session's start and its title in Claude Code, a start `sessionTitle` applies at (`TitledStart`) taking a new one, and whether its conversation begins empty (`FreshStart`): the judge reads it."""
+        """Read the session's start and their title in Claude Code, a start `sessionTitle` applies at (`TitledStart`) taking a new one, and whether their conversation begins empty (`FreshStart`): the judge reads it."""
         return Heard(
             event=events.SessionStarted(),
             session=self.session_id,
@@ -658,13 +658,13 @@ class SessionStart(Payload):
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
-        """Tell the conversation its items as it starts, and title the session as its launch is named, where the service says to."""
+        """Tell the conversation their items as they start, and title the session as their launch is named, where the service says to."""
         told = context(said, self.hook_event_name, telling.items)
         return titled(told, self.hook_event_name, telling.title)
 
     @override
     def answer(self, bench: Bench) -> Output | None:
-        """Begin the session again in each worktree it holds, and tell its conversation what came due as it starts; the service adds its items and title after (`told`)."""
+        """Begin the session again in each worktree they hold, and tell their conversation what came due as they start; the service adds their items and title after (`told`)."""
         reply = SessionStarted(
             session=self.session_id,
             agent=self.agent_id,
@@ -715,7 +715,7 @@ class UserPromptSubmit(Payload):
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
-        """Tell the conversation its items beside the prompt, and title the session as its launch is named, where the service says to."""
+        """Tell the conversation their items beside the prompt, and title the session as their launch is named, where the service says to."""
         told = context(said, self.hook_event_name, telling.items)
         return titled(told, self.hook_event_name, telling.title)
 
@@ -801,7 +801,7 @@ class Spawn(Model, extra="allow"):
     """What the subagent is for, in a few words."""
     prompt: str = ""
     isolation: str | None = None
-    """`worktree` to have it work apart, in a worktree of its own."""
+    """`worktree` to have them work apart, in a worktree of their own."""
 
 
 class Command(Model, extra="allow"):
@@ -854,7 +854,7 @@ class PreToolUse(Payload):
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
-        """Tell the conversation its items beside the call, and stamp a call to lup's tools with its caller.
+        """Tell the conversation their items beside the call, and stamp a call to lup's tools with its caller.
 
         The stamp is `updatedInput` with no decision added, so the call goes
         through the session's own permission mode as it would have. A call the
@@ -889,7 +889,7 @@ class PreToolUse(Payload):
     def started(self, launch: Register | None) -> CallStarted:
         """Return the event of this call starting, the spawn of its subagent read in the home `launch`, the launch whose room ran the hook, registered.
 
-        A call running a subagent (`Agent`) isn't counted: its own calls are.
+        A call running a subagent (`Agent`) isn't counted: their own calls are.
         One asking `isolation: "worktree"` asks for its conversation to work
         apart, in a worktree named after its `description`.
         """
@@ -908,7 +908,7 @@ class PreToolUse(Payload):
         )
 
     def spawn(self, bench: Bench, started: CallStarted) -> Output | None:
-        """Give the conversation this call spawns the worktree it works apart in, where it does, in lup's place: Claude Code's own isolation is dropped, and the conversation is told where it works before its first move (`docs/judging-writes.md`, *A subagent lup isolates*).
+        """Give the conversation this call spawns the worktree they work apart in, where they do, in lup's place: Claude Code's own isolation is dropped, and the conversation is told where they work before their first move (`docs/judging-writes.md`, *A subagent lup isolates*).
 
         Measured on 2.1.310 (`docs/field-notes.md`, *lup's own isolation*): an
         `updatedInput` without `isolation`, with no decision, has Claude Code
@@ -950,7 +950,7 @@ class PreToolUse(Payload):
         call, and a command rewritten as `cd -- <root> || exit 1`, a newline,
         then the command, runs whole in that one shell, compound commands,
         redirects, pipes, heredocs and a background command among them; the
-        transcript keeps the model's own, and it's told only the output.
+        transcript keeps the model's own, and they're told only the output.
         """
         if away is None or self.tool_name not in get_args(Commanding.__value__):
             return None
@@ -965,11 +965,11 @@ class PreToolUse(Payload):
     def answer(self, bench: Bench) -> Output | None:
         """Judge a file tool's write before it lands, and count the call as running; a write held and declined never runs, so it isn't counted.
 
-        A call spawning a subagent gives it the worktree it works apart in,
-        where it does (`spawn`). A conversation working apart has its shell's
-        commands start in its worktree (`commanded`), and a write of its in the
-        worktree Claude Code names as its working directory, another
-        conversation's, refused, saying the path in its own (`apart`).
+        A call spawning a subagent gives them the worktree they work apart in,
+        where they do (`spawn`). A conversation working apart has their shell's
+        commands start in their worktree (`commanded`), and a write of theirs in the
+        worktree Claude Code names as their working directory, another
+        conversation's, refused, saying the path in their own (`apart`).
         """
         started = self.started(bench.launch)
         if started.spawns:
@@ -1039,7 +1039,7 @@ class PreToolUse(Payload):
 
 
 class AgentResult(Model, extra="ignore", alias_generator=to_camel):
-    """An `Agent` call's result, as far as the subagent it names: `agentId`, at its launch in the background as at its end (measured on 2.1.310, `docs/field-notes.md`, *lup's own isolation*)."""
+    """An `Agent` call's result, as far as the subagent it names: `agentId`, at their launch in the background as at their end (measured on 2.1.310, `docs/field-notes.md`, *lup's own isolation*)."""
 
     agent_id: str | None = None
 
@@ -1067,12 +1067,13 @@ class PostToolUse(Payload):
             event=events.CallFinished(call=self.tool_use_id, tool=self.tool_name),
             session=self.session_id,
             agent=self.agent_id or None,
+            served=self.tool_name.startswith(TOOL_PREFIX),
             judged=judging(self.tool_name),
             fits=fits,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
-        """Tell the conversation its items beside the call's result."""
+        """Tell the conversation their items beside the call's result."""
         return context(said, self.hook_event_name, telling.items)
 
     @override
@@ -1114,7 +1115,7 @@ class PostToolUse(Payload):
 
 
 class Stop(Payload):
-    """`Stop`: the session's own conversation ends its turn.
+    """`Stop`: the session's own conversation ends their turn.
 
     What the turn's end tells the agent holds it, as `additionalContext`, which
     the hooks reference says means "The conversation continues so Claude can act
@@ -1171,7 +1172,7 @@ class Stop(Payload):
 
 
 class SubagentStop(Payload):
-    """`SubagentStop`: a subagent's conversation ends its turn, or was stopped.
+    """`SubagentStop`: a subagent's conversation ends their turn, or was stopped.
 
     The hooks reference: it takes "the same decision control format as Stop
     hooks, including `hookSpecificOutput.additionalContext` with `hookEventName`
@@ -1181,29 +1182,29 @@ class SubagentStop(Payload):
     Read in the 2.1.308 and 2.1.309 binaries (`docs/field-notes.md`, *A
     subagent's end*): the input carries `last_assistant_message`, as `Stop`'s
     does, when the subagent's turn ends; and a subagent whose run broke off,
-    stopped by the operator or its parent or by an exception, runs
-    `SubagentStop` once more as it's cleaned up ("SubagentStop on interrupted
+    stopped by the operator or their parent or by an exception, runs
+    `SubagentStop` once more as Claude Code cleans up after them ("SubagentStop on interrupted
     query"), within 5 seconds and with no message, so one without a message is
     taken as stopped: a turn ending with no text is rare (2 of 2,507 `Stop`s,
-    *The end after a held end*), and taken so its end is held for nothing, and
-    its time at work ends whatever it would tell (`ConversationEnded.final`),
+    *The end after a held end*), and taken so their end is held for nothing, and
+    their time at work ends whatever it would tell (`ConversationEnded.final`),
     since nothing reads that hook's answer. One whose turn ends on an error
     from the model's API runs `StopFailure` instead (`StopFailure`).
     """
 
     hook_event_name: Literal["SubagentStop"]
     stop_hook_active: bool = False
-    """Whether the subagent goes on because a `SubagentStop` hook blocked it already."""
+    """Whether the subagent goes on because a `SubagentStop` hook held their turn's end already."""
     last_assistant_message: str | None = None
-    """Its last message of the turn; absent where its run broke off."""
+    """Their last message of the turn; absent where their run broke off."""
 
     @property
     def stopped(self) -> bool:
-        """Say whether the subagent was stopped before it ended its turn: its run broke off, so the hook carries no message."""
+        """Say whether the subagent was stopped before they ended their turn: their run broke off, so the hook carries no message."""
         return self.last_assistant_message is None
 
     def heard(self, fits: int) -> Heard:
-        """Read a subagent's turn's end, or its stop where it carries no message: the judge reads it."""
+        """Read a subagent's turn's end, or their stop where it carries no message: the judge reads it."""
         return Heard(
             event=events.ConversationEnded(),
             session=self.session_id,
@@ -1216,7 +1217,7 @@ class SubagentStop(Payload):
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
-        """Hold the subagent's turn's end on its items, after anything it tells already."""
+        """Hold the subagent's turn's end on their items, after anything it tells already."""
         return context(said, self.hook_event_name, telling.items)
 
     @override
@@ -1256,13 +1257,13 @@ class StopFailure(Payload):
     `max_output_tokens`, `cloud_credential_error`, or `unknown`", and its
     `last_assistant_message` "the API error string itself", not the agent's
     words. Measured on 2.1.309 (`docs/field-notes.md`, *A subagent's end*): a
-    subagent's carries its `agent_id` and `agent_type` and runs no
+    subagent's carries their `agent_id` and `agent_type` and runs no
     `SubagentStop` after; the session's carries neither and runs no `Stop`.
 
-    A subagent's is its conversation's end, failed: its parent is told the
-    error's kind, and the judge ends it as at `SubagentStop`, its time at work
+    A subagent's is their conversation's end, failed: their parent is told the
+    error's kind, and the judge ends it as at `SubagentStop`, their time at work
     over whatever it would tell (`ConversationEnded.final`). The session's is
-    its turn's end, so the service knows it's idle, and is put before the
+    their turn's end, so the service knows they're idle, and is put before the
     operator in lup's words, the error's kind and Claude Code's text for it,
     rather than as the agent's last message, which it isn't; the judge doesn't
     read it, since what it told would reach no one, and the next turn's end
@@ -1295,7 +1296,7 @@ class StopFailure(Payload):
 
     @override
     def answer(self, bench: Bench) -> Output | None:
-        """End the subagent's conversation as `SubagentStop` does, whatever its end would tell; for the session's own, nothing, which its next turn's end judges."""
+        """End the subagent's conversation as `SubagentStop` does, whatever their end would tell; for the session's own, nothing, which their next turn's end judges."""
         if self.agent_id:
             ConversationEnded(
                 session=self.session_id,
@@ -1332,11 +1333,11 @@ class WorktreeCreate(Payload):
     branch lands (`docs/judging-writes.md`, *Landing a branch*).
 
     Measured on 2.1.310 (`docs/field-notes.md`, *A worktree for an isolated
-    subagent*): a subagent's `name` is `agent-<its agent_id>`; the input carries
+    subagent*): a subagent's `name` is `agent-<their agent_id>`; the input carries
     the session's `session_id` and `transcript_path`, a `prompt_id`, and as
     `cwd` the spawning conversation's working directory, never an `agent_id`,
     so it names the session alone; the subagent runs in the directory printed,
-    each hook of its own carrying it as `cwd`, so its first call reaches it.
+    each hook of their own carrying it as `cwd`, so their first call reaches it.
     """
 
     hook_event_name: Literal["WorktreeCreate"]
@@ -1388,9 +1389,9 @@ class SubagentRecord(Model, extra="ignore", alias_generator=to_camel):
 
     Undocumented, read as measured on 2.1.301 and 2.1.302
     (`docs/field-notes.md`, *Subagents' records*): the subagent's type, the
-    name its parent gave it, and the subagent that spawned it, where one did;
+    name their parent gave them, and the subagent who spawned them, where one did;
     and, measured on 2.1.310 (*lup's own isolation*), the id of the `Agent`
-    call that spawned it, written after `SubagentStart` and before its first
+    call that spawned them, written after `SubagentStart` and before their first
     call.
     """
 
@@ -1411,11 +1412,11 @@ class Subagented(Model, extra="ignore"):
 
 # lup: defer(issue=52, why="Claude Code's spelling of a fork's agent type, a module constant until a `Spellings` each adapter implements gives it its home")
 FORK = "fork"
-"""The type of a subagent spawned with the conversation so far: its record's
+"""The type of a subagent spawned with the conversation so far: their record's
 `agentType` (measured on 2.1.303, `docs/field-notes.md`, *Subagents' records*).
 A fork "sees the same system prompt, tools, model, and message history as the
-main session" (the `sub-agents` docs, *Fork the current conversation*), so it
-reads the session's guidance, which the system prompt carries."""
+main session" (the `sub-agents` docs, *Fork the current conversation*), so they
+read the session's guidance, which the system prompt carries."""
 
 
 def subagent_record(
@@ -1449,35 +1450,35 @@ def subagent_record(
 
 
 def spawned_by(payload: Payload, launch: Register | None) -> str | None:
-    """Return the id of the call that spawned the subagent `payload` is of, as its record in `launch`'s home says; none for the session's own conversation, before the record is written, at `SubagentStart`, or for a hook no launch's room ran."""
+    """Return the id of the call that spawned the subagent `payload` is of, as their record in `launch`'s home says; none for the session's own conversation, before the record is written, at `SubagentStart`, or for a hook no launch's room ran."""
     record = subagent_record(payload.transcript_path, payload.agent_id, launch)
     return None if record is None else record.tool_use_id
 
 
 def spawned(raw: str, launch: Register) -> Spawned | None:
-    """Return how the subagent a Claude Code hook of `launch`'s fires for was spawned, from its record beside the session's transcript, in the home `launch` registered; none for the session's own conversation.
+    """Return how the subagent a Claude Code hook of `launch`'s fires for was spawned, from their record beside the session's transcript, in the home `launch` registered; none for the session's own conversation.
 
-    A subagent whose record isn't there is said by its type alone; one with
+    A subagent whose record isn't there is said by their type alone; one with
     neither is Claude Code's own (`Spawned.internal`), which writes no record:
     its prompt suggestions and `/btw`, heard only at `SubagentStop`, and the
-    fork of a background subagent's conversation that summarizes its progress
-    every 30 seconds, heard at that alone where it answers in words, and where
-    it calls a tool anyway, at that call's `PreToolUse` alone, Claude Code
-    denying the call and running no other hook for it, so nothing ends it
-    (measured on 2.1.309, `docs/field-notes.md`, *A runtime's own agents*).
-    A type is taken as a spawn's even without its record, which is written
+    fork of a background subagent's conversation that summarizes their progress
+    every 30 seconds, heard at that alone where they answer in words, and where
+    they call a tool anyway, at that call's `PreToolUse` alone, Claude Code
+    denying the call and running no other hook for it, so nothing ends their
+    conversation (measured on 2.1.309, `docs/field-notes.md`, *A runtime's own agents*).
+    A type is taken as a spawn's even without the subagent's record, which is written
     only after `SubagentStart`: taking a spawn for Claude Code's own would
-    hide it and lose its end to its parent.
+    hide them and lose their end to their parent.
 
     Only a fork reads the session's guidance: every other subagent's system
     prompt is "the agent's own prompt plus environment details that Claude
     Code appends, not the Claude Code system prompt" (the `sub-agents` docs,
     *What loads at startup*), which lup's guidance is appended to.
 
-    Claude Code hands every subagent's last message to its parent itself
+    Claude Code hands every subagent's last message to their parent itself
     (`Spawned.handed`): the result of a foreground `Agent` call, or a
     background one's task notification, its `<result>` whole, beside the
-    parent's next call's result or starting its turn (`docs/field-notes.md`,
+    parent's next call's result or starting their turn (`docs/field-notes.md`,
     *A subagent's end*).
     """
     payload = Subagented.model_validate_json(raw)
@@ -1599,7 +1600,7 @@ class Frame(Model):
 
 # lup: defer(issue=244, why="the frame's details, a non-empty `content`, a `session_id` other than the session's own dropped and a missing `priority` interrupting nothing, are read from the binary, owed live on the version a launch runs")
 def woken(session: str, text: str) -> str:
-    """Return the line that starts a turn of the idle Claude Code session `session` with `text`, on its messaging socket.
+    """Return the line that starts a turn of the idle Claude Code session `session` with `text`, on their messaging socket.
 
     >>> woken("s1", "hi")
     '{"type":"user","message":{"role":"user","content":"hi"},"session_id":"s1"}'
@@ -1643,7 +1644,7 @@ def hooks(
     call to lup's tools stamped with its caller; `WorktreeCreate`, a worktree
     asked for, which lup makes; `PostToolUse` and
     `PostToolUseFailure` on every call, the checkpoint after it; `Stop` and
-    `SubagentStop`, each conversation's turn's end, which clears the calls it
+    `SubagentStop`, each conversation's turn's end, which clears the calls they
     left that no finish reported and judges what the turn left; and
     `StopFailure`, registered with `Stop` (`spelled`, `lup.adapters.claude.terminal`),
     a turn's end on an error from the model's API, which ends a subagent's
@@ -1728,7 +1729,7 @@ class ClaudeChannel(Channel):
 
 
 class Located(Model, extra="ignore"):
-    """One line of a Claude Code session's record, for the directory it ran in, where it says."""
+    """One line of a Claude Code session's record, for the directory they ran in, where it says."""
 
     cwd: Path | None = None
 
@@ -1746,7 +1747,7 @@ class ClaudeRecords(Model, Records):
     (`lup_dev.migration`). Each record is read as data alone
     (`lup_dev.host.records`).
 
-    A launched session's is in the home its launch registered alone, as the
+    A launched session's is in the home their launch registered alone, as the
     host service kept it (`lup_dev.host.homes`), and any other's in the
     operator's directory alone, so a room can't have one read from its own
     home under another session's id. Rooms write a home, so the record is
@@ -2237,19 +2238,19 @@ class AssistantMessage(Model, extra="ignore"):
 
 
 class AssistantLine(Model, extra="ignore", alias_generator=to_camel):
-    """An `assistant` line: the agent's text, and the tools it called."""
+    """An `assistant` line: the agent's text, and the tools they called."""
 
     type: Literal["assistant"]
     message: AssistantMessage
     timestamp: datetime | None = None
     is_sidechain: bool = False
     requested_model: str | None = None
-    """The model the conversation asked for, `[1m]` after it where it chose
+    """The model the conversation asked for, `[1m]` after it where they chose
     the long variant; none in a record before Claude Code 2.1.295."""
 
 
 class QueuedCommand(Model, extra="ignore", alias_generator=to_camel):
-    """A message that arrived while the agent worked, given to it at its next step."""
+    """A message that arrived while the agent worked, given to them at their next step."""
 
     type: Literal["queued_command"]
     prompt: str
@@ -2412,7 +2413,7 @@ class ClaudeTranscripts(Model, Reader):
 
         A model with the long window natively reads it, and one that reaches it
         only through its `[1m]` variant reads it where the conversation asked
-        for that variant, which its record says from Claude Code 2.1.295 on
+        for that variant, which their record says from Claude Code 2.1.295 on
         (`requested_model`). Every model reads the standard window where
         `shortened`, the long one turned off; none where that can't be read.
 
@@ -2444,7 +2445,7 @@ class ClaudeTranscripts(Model, Reader):
         A session recorded in a room's home started with none of it: a room's
         settings leave the operator's `env` out (`ClaudeHome.blocked`).
 
-        A session applies its settings' `env` as it starts, so a change made
+        A session applies their settings' `env` as they start, so a change made
         after reads here before the session has it. `/model` never writes it, as it
         writes the model the record names instead (#282), so it changes only
         where the operator edits it. A launched room's environment carries the
@@ -2521,7 +2522,7 @@ def tasks(lines: list[Line]) -> list[Task]:
     """Replay the task list from the calls that wrote it, and return it as it stands at the record's end.
 
     `TaskCreate` adds an entry, numbered by its result (`TaskMade`), so a
-    subagent's, which shares its session's list, takes the number the list
+    subagent's, sharing their session's list, takes the number the list
     gave it; `TaskUpdate` changes one, `deleted` taking it off; `TodoWrite`
     replaces the whole list, its entries numbered in order.
     """
@@ -2569,7 +2570,7 @@ def saved(
 
     The session's folder is `<session>/` beside its record, and a subagent's
     record is in its `subagents/` folder, so it's the folder holding that. A
-    room's session names its saved output under its launch's own runtime
+    room's session names their saved output under their launch's own runtime
     directory, which is read as the same place in the home it registered
     (`lup_dev.host.homes.translated`). This is the host reading a record it
     keeps, not answering a hook, and a session resumed in a later launch has
@@ -2637,7 +2638,7 @@ def resulted(record: Path, calls: list[str], root: Path | None = None) -> list[s
 
 
 def named(lines: list[Line]) -> str | None:
-    """Return a session's name: the last one the operator or lup gave it, else its last agent name, else Claude Code's last title; none where it has none."""
+    """Return a session's name: the last one the operator or lup gave them, else their last agent name, else Claude Code's last title; none where they have none."""
     custom = [each.custom_title for each in lines if isinstance(each, CustomTitle)]
     agents = [each.agent_name for each in lines if isinstance(each, AgentName)]
     titles = [each.ai_title for each in lines if isinstance(each, AiTitle)]
@@ -2645,7 +2646,7 @@ def named(lines: list[Line]) -> str | None:
 
 
 def entries(line: Line, *, sidechain: bool = False) -> list[Entry]:
-    """Return the steps one line of a record holds: the operator's words, the agent's text, the tools it called; the agent's on the record's own line, its main one or, in a subagent's record, its `sidechain`."""
+    """Return the steps one line of a record holds: the operator's words, the agent's text, the tools they called; the agent's on the record's own line, its main one or, in a subagent's record, its `sidechain`."""
     match line:
         case UserLine(timestamp=at) as user:
             words = user.operators()
@@ -2671,7 +2672,7 @@ def entries(line: Line, *, sidechain: bool = False) -> list[Entry]:
 
 
 def said_by_agent(block: Block, at: datetime | None) -> Entry | None:
-    """Return the step a part of the agent's message is: its text, or a tool it called; none for any other part."""
+    """Return the step a part of the agent's message is: its text, or a tool they called; none for any other part."""
     match block:
         case TextBlock(text=text):
             return Spoken(by="agent", text=text, at=at)
@@ -2682,7 +2683,7 @@ def said_by_agent(block: Block, at: datetime | None) -> Entry | None:
 
 
 class QueueOperation(Model, extra="ignore"):
-    """A line saying what Claude Code did with its session's queue, which holds what reaches a conversation once its running call returns: `enqueue` puts a prompt there; `dequeue` hands the oldest to an idle session as its turn's prompt; `remove` takes one out by its text, absorbed into a running turn; `popAll` takes the operator's typed words back into the input to edit."""
+    """A line saying what Claude Code did with its session's queue, which holds what reaches a conversation once their running call returns: `enqueue` puts a prompt there; `dequeue` hands the oldest to an idle session as their turn's prompt; `remove` takes one out by its text, absorbed into a running turn; `popAll` takes the operator's typed words back into the input to edit."""
 
     type: Literal["queue-operation"]
     operation: Literal["enqueue", "dequeue", "remove", "popAll"]
@@ -2719,7 +2720,7 @@ class Attributes(Model, extra="ignore"):
     source: str | None = None
     """A channel's: the server that pushed it."""
     from_name: str | None = Field(default=None, alias="from-name")
-    """Another session's message: the name of the session that sent it."""
+    """Another session's message: the name of the session who sent it."""
 
 
 class Opening(HTMLParser):
@@ -2839,10 +2840,10 @@ class ClaudeQueues(MutableModel, Queues, arbitrary_types_allowed=True):
 
     Measured on 2.1.311: a session has one queue, written in its own record as
     `queue-operation` lines whoever it's for, a subagent's background command
-    among it; what a subagent absorbs is written in its own record only once
-    it has. So the queue is replayed from the session's record (`Following`),
+    among it; what a subagent absorbs is written in their own record only once
+    they have. So the queue is replayed from the session's record (`Following`),
     and a prompt is a subagent's where the task or the call it names was
-    started by that subagent's own calls, as its record says; the operator's
+    started by that subagent's own calls, as their record says; the operator's
     words, a subagent's report and another session's message, which name
     none, are the session's own conversation's.
     """
@@ -3070,7 +3071,7 @@ class ClaudeWritten(Model):
 
     Each item read in the `claude-directory` docs (2026-10-27) and the 2.1.311
     binary: the settings, memory and what a session loads; what a session runs
-    before its commands; the background sessions' supervisor's state; the mods
+    before their commands; the background sessions' supervisor's state; the mods
     sessions made; the record folders whose name and sessions disagree; and the
     login every room could read.
     """
@@ -3078,7 +3079,7 @@ class ClaudeWritten(Model):
     directory: Path
     """The operator's Claude Code directory, `~/.claude` or `CLAUDE_CONFIG_DIR`."""
     loaded: list[str] = ["agents", "commands", "output-styles", "rules", "workflows"]
-    """The directories whose files a host session loads, beside its skills and
+    """The directories whose files a host session loads, beside their skills and
     plugins."""
     configuration: list[str] = [
         "settings.json",
@@ -3190,7 +3191,7 @@ class ClaudeWritten(Model):
         return written.Checked(fine=[first])
 
     def memory(self) -> list[str]:
-        """Say the memory every host session reads, and each directory whose files it loads."""
+        """Say the memory every host session reads, and each directory whose files they load."""
         memory = written.read(self.directory / "CLAUDE.md")
         loaded = [
             f"`{name}/` ({written.counted(len(found), 'file', 'files')})"
@@ -3287,7 +3288,7 @@ class ClaudeWritten(Model):
         ]
 
     def run_before(self, places: written.Places) -> list[str]:
-        """Say what a host session runs before its commands, which rooms could have written: its shell snapshot and its session's environment."""
+        """Say what a host session runs before their commands, which rooms could have written: their shell snapshot and their session's environment."""
         snapshots = written.listed(self.directory / "shell-snapshots").files
         environments = self.directory / "session-env"
         each = (
@@ -3302,10 +3303,10 @@ class ClaudeWritten(Model):
                 [
                     (
                         f"`shell-snapshots/`: {written.counted(len(snapshots), 'snapshot', 'snapshots')}. "
-                        "A host session runs its own before each command, and a room "
+                        "A host session runs their own before each command, and a room "
                         "could have written any: with no host session running, "
-                        f"`rm {shown}/shell-snapshots/*`; a session makes a new one as it "
-                        "starts."
+                        f"`rm {shown}/shell-snapshots/*`; a session makes a new one as they "
+                        "start."
                     )
                 ]
                 if snapshots
@@ -3316,7 +3317,7 @@ class ClaudeWritten(Model):
                     (
                         f"`session-env/`: {written.counted(len(each), 'session', 'sessions')}' "
                         f"environments, {len(holding)} holding a file, which a session "
-                        "runs before each of its commands, a resumed one too: with no "
+                        "runs before each of their commands, a resumed one too: with no "
                         f"host session running, `rm -r {shown}/session-env/*`."
                     )
                 ]

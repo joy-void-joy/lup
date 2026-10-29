@@ -1,6 +1,6 @@
 [
   {
-    "name": "an agent at work, its context measured",
+    "name": "an agent at work, their context measured",
     "repository": "/r/lup.git",
     "argument": {
       "runtime": "claude",

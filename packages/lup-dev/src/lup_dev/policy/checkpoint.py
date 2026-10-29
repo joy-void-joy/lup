@@ -6,32 +6,32 @@ with what the judge reads of it, the runtime's ids for its conversation among
 it, and what the judge does at it (`Reported.apply`; `docs/judging-writes.md`,
 *After a call: the checkpoint*).
 
-A session holds one or more worktrees of its repository (`worktrees.py`), and a
+A session holds one or more worktrees of their repository (`worktrees.py`), and a
 call counts as running in each worktree its conversation works in when it starts
-(`Holding.works`), so a worker busy in its own worktree holds back no checkpoint
+(`Holding.works`), so a worker busy in their own worktree holds back no checkpoint
 in another's, and two conversations working in one wait on each other. A
 checkpoint runs in each of those worktrees whenever a call finishes and no call of
 the session counted there is running, another session's calls there holding none
-of its checkpoints back, and again in each worktree the session holds when its
-turn ends. It snapshots the worktree into the store, compares it with the accepted
+of their checkpoints back, and again in each worktree the session holds when
+their turn ends. It snapshots the worktree into the store, compares it with the accepted
 tree, sets aside what was committed elsewhere or merged from it, judges a move of
 `HEAD` once as its commits', judges the rest as an edit is judged, holds what asks
 in place until the operator answers, puts back what they decline with the agent's
 version saved, and moves the accepted tree on.
 
 A call that runs a subagent isn't counted as running: the subagent's own calls
-are, so its writes are judged as it makes them rather than when it ends. The
+are, so their writes are judged as they make them rather than when they end. The
 files changed are re-checked for the type errors of the files importing them, in
 one background pass per worktree (`importers.py`), which the session's turn's end
 waits for.
 
-The session's turn's end holds only on what's left in the files its own
+The session's turn's end holds only on what's left in the files their own
 conversation touched, and in the files importing them where the pass found errors
-(#41). A subagent's end never holds on what's left in its files: every worker
-passes the gate before it hands back. A file tool's write is the conversation's
+(#41). A subagent's end never holds on what's left in their files: every worker
+passes the gate before they hand back. A file tool's write is the conversation's
 that made it; anything else a checkpoint lands is every conversation's whose
 calls finished since the last one, since the checkpoint sees files, not who
-wrote them. A subagent is at work from its first call to the end of its
+wrote them. A subagent is at work from their first call to the end of their
 conversation, and while one is, the session's end doesn't hold on a file they
 both touched, which may be the subagent's in progress (#32).
 """
@@ -182,14 +182,14 @@ class Reply(Model):
     context: str = ""
     """Told beside the call's result."""
     block: str = ""
-    """Why the conversation can't end yet; empty lets it end."""
+    """Why the conversation can't end yet; empty lets them end."""
     made: Making | None = None
     """Where a worktree is asked for, the one lup makes, which the room's hook
     makes and names to the runtime (`WorktreeAsked`), or a call spawns a
-    conversation to work apart (`CallStarted`), the one lup makes for it."""
+    conversation to work apart (`CallStarted`), the one lup makes for them."""
     given: Given | None = None
-    """Where a call spawns a conversation lup isolates, where it works, which
-    it's told before its first move (`CallStarted`)."""
+    """Where a call spawns a conversation lup isolates, where they work, which
+    they're told before their first move (`CallStarted`)."""
 
 
 def over(
@@ -202,7 +202,7 @@ def over(
     started `lifetime` ago is over, though no hook reported its end. What has
     no start recorded, kept by a judge that didn't record one, counts as over
     too: a session running across the upgrade loses the count of a call once,
-    and its turn's start or end clears the rest.
+    and their turn's start or end clears the rest.
     """
     return started is None or now - started >= lifetime
 
@@ -347,14 +347,14 @@ class Checked(Model):
 
 
 class Mail(Model):
-    """A report waiting for a conversation other than the one a checkpoint ran for, its findings those it wasn't told."""
+    """A report waiting for a conversation other than the one a checkpoint ran for, its findings those they weren't told."""
 
     agent: str
     checked: Checked = Checked()
 
 
 type ByConversation[T] = dict[str, list[T]]
-"""Kept for each conversation of a session: `""` for its own, a subagent's id else."""
+"""Kept for each conversation of a session: `""` for their own, a subagent's id else."""
 
 
 class Session(MutableModel):
@@ -366,10 +366,10 @@ class Session(MutableModel):
     approved: list[Path] = []
     """Paths the operator approved, whose design asks are covered from then on."""
     touched: ByConversation[Path] = {}
-    """Files each conversation changed, which must be clean when its turn ends."""
+    """Files each conversation changed, which must be clean when their turn ends."""
     watched: ByConversation[Path] = {}
     """Files importing what each conversation changed that had type errors, checked
-    when its turn ends."""
+    when their turn ends."""
     removed: dict[Path, list[RemovedNote]] = {}
     """By file, the notes present at the session's start that are gone since."""
     listed: list[RemovedNote] = []
@@ -381,13 +381,13 @@ class Session(MutableModel):
     mail: list[Mail] = []
     flagging: ByConversation[Path] = {}
     """Files each conversation wrote flagged, whose item in the operator's
-    inbox may still gather its writes to them: a later write to one refreshes
+    inbox may still gather their writes to them: a later write to one refreshes
     that item, whatever it flags, until the inbox says none gathers them
     (`policy/flags.py`). A write to any other file asks the inbox nothing."""
     known: ByConversation[Known] = {}
     """The findings in this worktree's files each conversation was told and
-    that still stand, so it isn't told them again (`news`); forgotten when its
-    conversation is compacted or cleared."""
+    that still stand, so they aren't told them again (`news`); forgotten when
+    their conversation is compacted or cleared."""
 
     def news(self, agent: str, looks: list[Look]) -> list[Finding]:
         """Return what of `looks` conversation `agent` wasn't told, and remember it told."""
@@ -400,17 +400,17 @@ class Session(MutableModel):
         self.pending = [each for each in self.pending if not over(each.judged, now)]
 
     def files(self, agent: str) -> list[Path]:
-        """Return the files conversation `agent` touched, and those it watches."""
+        """Return the files conversation `agent` touched, and those they watch."""
         return list(
             dict.fromkeys([*self.touched.get(agent, []), *self.watched.get(agent, [])])
         )
 
     def flagged(self, agent: str, paths: list[Path]) -> None:
-        """Note that conversation `agent` wrote `paths` flagged, each in an item of the operator's that gathers its writes to it."""
+        """Note that conversation `agent` wrote `paths` flagged, each in an item of the operator's that gathers their writes to it."""
         self.flagging = kept_by(self.flagging, {path: [agent] for path in paths})
 
     def unflagged(self, agent: str, paths: list[Path]) -> None:
-        """Forget `paths` of conversation `agent`'s, whose item the inbox says gathers its writes to them no more."""
+        """Forget `paths` of conversation `agent`'s, whose item the inbox says gathers their writes to them no more."""
         kept = [path for path in self.flagging.get(agent, []) if path not in paths]
         self.flagging = {**self.flagging, agent: kept}
 
@@ -778,7 +778,7 @@ class Worktree(Model):
             return Finished(counted=counted, idle=running.idle(session))
 
     def clear(self, session: str, agent: str, now: datetime) -> Finished:
-        """Forget the calls conversation `agent` left running, by `now`; say whether one counted here, and whether none of its session's is left."""
+        """Forget the calls conversation `agent` left running, by `now`; say whether one counted here, and whether none of their session's is left."""
         with self.calls_lock():
             running = self.running()
             counted = any(each.of(session, agent) for each in running.calls)
@@ -804,11 +804,11 @@ def begin(bench: Bench, worktree: Worktree, key: str, made: str | None = None) -
     pull or another session's, and is accepted unjudged, and the worktree's `HEAD`
     is recorded with it. A file under an open hold isn't: it keeps its accepted
     content, left to the hold's answer, and the session starts from that. While a
-    call of the session runs there (one left running as it resumes), the accepted
+    call of the session runs there (one left running as they resume), the accepted
     tree stays, and that call's checkpoint judges what it writes. A resumed
     session keeps the tree it started from.
 
-    A worktree lup made for the session at its runtime's asking is new, so
+    A worktree lup made for the session at their runtime's asking is new, so
     nothing in it is the operator's: it's accepted as `made`, the commit it was
     made at, has it, and that commit is recorded as its `HEAD`, so what was
     written there before the session reached it is judged at its next
@@ -857,17 +857,18 @@ def holding(
     starts: bool = False,
     spawned_by: str | None = None,
 ) -> Holding | None:
-    """Return a session's repository and the worktrees it holds, reaching more.
+    """Return a session's repository and the worktrees they hold, reaching more.
 
-    The worktree its working directory is in is reached, since a hook's working
+    The worktree their working directory is in is reached, since a hook's working
     directory follows the session, and so is `written`'s, where a file tool
     writes; conversation `agent` is noted to work in each (`Holding.works`).
-    A conversation lup isolates is linked first to the worktree its spawn was
-    given, by the call that spawned it (`spawned_by`), and the worktree it works
-    apart in stands for its working directory, which its hooks don't report.
+    A conversation lup isolates is linked first to the worktree their spawn was
+    given, by the call that spawned them (`spawned_by`), and the worktree they
+    work apart in stands for their working directory, which their hooks don't
+    report.
     Reaching a worktree begins the session there, from the commit it was made
     at where lup made it at the runtime's asking (`Holding.made`); a session
-    that `starts`, or resumes, begins again in every worktree it holds. A
+    that `starts`, or resumes, begins again in every worktree they hold. A
     worktree whose root is gone isn't held. A session first seen outside every
     repository isn't judged.
     """
@@ -927,7 +928,7 @@ class Planned(Model):
 
     path: Path
     change: Change | None = None
-    """The session's change, judged as an edit is; none where it made none."""
+    """The session's change, judged as an edit is; none where they made none."""
     decide: bool = True
     """Whether its outcome decides what happens; else it was judged already."""
     told: bool = False
@@ -1332,7 +1333,7 @@ def checkpoint(
 
     What landed flagged, the conversation's writes and what a move brought, is
     put before the operator once the store is released (`flagged`), with the
-    conversation's writes to a file an item of its may gather, which refresh
+    conversation's writes to a file an item of theirs may gather, which refresh
     that item (`Session.flagging`). Holds are
     waited on then, settled, and the checkpoint runs again for what the
     operator approved.
@@ -1510,7 +1511,7 @@ def writers(
     operator approved, is the conversation's that made it. The checkpoint sees
     files, not who wrote them, so anything else is every conversation's whose
     calls finished since the last checkpoint, and the one it runs for: holding a
-    conversation's end on a file it didn't write is the safe side (#41).
+    conversation's end on a file they didn't write is the safe side (#41).
     """
     anyone = list(dict.fromkeys([*session.participants, agent]))
     last = {each.path: each.blob for each in session.judged}
@@ -1587,9 +1588,9 @@ def remember(
 
     The report goes to the conversation the checkpoint ran for, and waits as mail
     for the others whose calls finished since the last one: the checkpoint sees
-    files, not who wrote them. Each is told only the findings it wasn't told
-    yet (`Session.news`), and none of a kind its quiet holds (`quiet`, by
-    conversation): those it isn't told, it doesn't learn. Each file landed is
+    files, not who wrote them. Each is told only the findings they weren't
+    told yet (`Session.news`), and none of a kind their quiet holds (`quiet`, by
+    conversation): those they aren't told, they don't learn. Each file landed is
     touched by the conversations `wrote` names for it. `told` is what a move of
     `HEAD` brought, which is no session's, and `moved` the files it brought,
     judged: their type errors are the files changed's, which a quiet may hold.
@@ -1741,7 +1742,7 @@ def settle(
     and approved (`approval`); a decline, or no answer in time, puts it back
     with the agent's version saved. A call its runtime ended while it waited
     (`Bench.interrupted`) gives up as on no answer, its conversation told at
-    its next call, since nothing hears this one's answer. The call holds its
+    their next call, since nothing hears this one's answer. The call holds its
     lock while it waits (`Holds.waiting`); a hold settled meanwhile with no
     call waiting on it (`orphans`) is a later checkpoint's to tell.
     """
@@ -1919,31 +1920,32 @@ def first_warning(layout: Layout, session: str, failure: str) -> bool:
 
 
 class Conversations(MutableModel):
-    """What a conversation's turn's end needs to know of the others (#32, #41), and of its own ends before; and what each asked not to be told."""
+    """What a conversation's turn's end needs to know of the others (#32, #41), and of their own ends before; and what each asked not to be told."""
 
     working: list[str] = []
-    """The subagents at work, each from its first call to its conversation's end."""
+    """The subagents at work, each from their first call to their conversation's end."""
     passed: ByConversation[Finding] = {}
     """What each conversation's turn last ended past: findings that hold none of
-    its later ends (`inbox/ends.py`)."""
+    their later ends (`inbox/ends.py`)."""
     quiet: ByConversation[Kind] = {}
-    """The kinds of findings each quiet conversation isn't told after its calls
-    (`Quiet`), until it lifts the quiet or its conversation ends."""
+    """The kinds of findings each quiet conversation isn't told after their calls
+    (`Quiet`), until they lift the quiet or their conversation ends."""
 
     def quieted(self, agent: str) -> Quiet:
-        """Return what conversation `agent` asked not to be told; nothing where it isn't quiet."""
+        """Return what conversation `agent` asked not to be told; nothing where they aren't quiet."""
         return Quiet(kinds=self.quiet.get(agent, []))
 
 
 class ConversationRecord(Model):
-    """Where a session keeps its `Conversations`, under a lock its hooks share.
+    """Where a session keeps their `Conversations`, under a lock their hooks share.
 
-    A subagent shares its session's id, and may touch a file another conversation
-    of the session touched too (#32). It's known to be at work from its first call
-    to the end of its conversation, on every runtime: a runtime that reported no
-    end for it leaves it at work until the session starts again. A conversation's
-    quiet lasts across its session's starts again, a compaction or a resume, and
-    ends with a subagent's conversation: the session's own has no end its
+    A subagent shares their session's id, and may touch a file another
+    conversation of the session touched too (#32). They're known to be at work
+    from their first call to the end of their conversation, on every runtime: a
+    runtime that reported no end for them leaves them at work until the session
+    starts again. A conversation's quiet lasts across their session's starts
+    again, a compaction or a resume, and
+    ends with a subagent's conversation: the session's own has no end their
     runtime reports, and a cleared one starts under an id of its own.
     """
 
@@ -1966,7 +1968,7 @@ class ConversationRecord(Model):
         write_model(self.layout.conversations(self.session), conversations)
 
     def opened(self, agent: str) -> None:
-        """Note that subagent `agent` is at work, since it made a call."""
+        """Note that subagent `agent` is at work, since they made a call."""
         with self.lock():
             kept = self.read()
             if agent in kept.working:
@@ -1975,7 +1977,7 @@ class ConversationRecord(Model):
             self.keep(kept)
 
     def closed(self, agent: str) -> None:
-        """Note that subagent `agent`'s conversation ended, and its quiet with it."""
+        """Note that subagent `agent`'s conversation ended, and their quiet with it."""
         with self.lock():
             kept = self.read()
             if agent not in kept.working and agent not in kept.quiet:
@@ -1989,8 +1991,8 @@ class ConversationRecord(Model):
     def restarted(self) -> None:
         """Forget the subagents at work: the session starts, or starts again.
 
-        A subagent still at work is noted again at its next call. What its turns
-        ended past is kept, so a resumed session isn't held again on it, and so
+        A subagent still at work is noted again at their next call. What their
+        turns ended past is kept, so a resumed session isn't held again on it, and so
         is each conversation's quiet.
         """
         with self.lock():
@@ -1998,12 +2000,12 @@ class ConversationRecord(Model):
             self.keep(Conversations(passed=kept.passed, quiet=kept.quiet))
 
     def quiet(self, agent: str) -> Quiet:
-        """Return what conversation `agent` asked not to be told; nothing where it isn't quiet."""
+        """Return what conversation `agent` asked not to be told; nothing where they aren't quiet."""
         with self.lock():
             return self.read().quieted(agent)
 
     def quieting(self, agent: str, kinds: list[Kind]) -> Quiet:
-        """Hold `kinds` back from conversation `agent` from now on, none lifting its quiet, and return what it held before."""
+        """Hold `kinds` back from conversation `agent` from now on, none lifting their quiet, and return what it held before."""
         with self.lock():
             kept = self.read()
             before = kept.quieted(agent)
@@ -2109,8 +2111,8 @@ class Ended(Model):
     checked: Checked
     remaining: list[Finding]
     """What's left in the files the conversation touched, and in those importing
-    them, which holds its end: none in a file a subagent at work touched too,
-    which may be its in progress (#32), and none at a subagent's end."""
+    them, which holds their end: none in a file a subagent at work touched too,
+    which may be theirs in progress (#32), and none at a subagent's end."""
 
 
 def ended(
@@ -2125,15 +2127,15 @@ def ended(
     """Run conversation `agent`'s turn's end in one worktree the session holds.
 
     The checkpoint; then, at the session's own end, the importers pass waited on,
-    and what's left in the files its conversation touched and in those importing
-    them. What's left in a file a subagent in `working` touched too isn't
+    and what's left in the files their conversation touched and in those
+    importing them. What's left in a file a subagent in `working` touched too isn't
     counted: it may be the subagent's in progress. A subagent's end finds
     nothing, so runs no check and doesn't wait for the pass, which the next
     checkpoint or the session's end collects: every worker passes the gate
-    before it hands back. A file under an open hold isn't anyone's until the
+    before they hand back. A file under an open hold isn't anyone's until the
     operator answers, so it holds no end. Without `judging`,
     no checkpoint: another conversation's call is running there, whose finish
-    runs it, so its writes in progress aren't judged as this one's, put back
+    runs it, so their writes in progress aren't judged as this one's, put back
     under it, or told to a conversation that didn't make them.
     """
     services = bench.services
@@ -2182,17 +2184,17 @@ def end_turn(
     after_block: bool,
     listing: bool,
 ) -> Reply:
-    """End conversation `event.agent`'s turn in each worktree its session holds.
+    """End conversation `event.agent`'s turn in each worktree their session holds.
 
     In each, a checkpoint where `judging` names its root; at the session's own
-    end, the importers pass waited on, and what's left in the files its
+    end, the importers pass waited on, and what's left in the files their
     conversation touched (`ended`), which a subagent's end never holds on. Those
     hold the session's end once per finding, across turns (`holding`, the
     inbox's `ends.py`): except in a file a subagent at work touched too, which
-    may be its in progress (#32); not at an end following a hold (`after_block`),
+    may be theirs in progress (#32); not at an end following a hold (`after_block`),
     which ends whatever's left; and not for a finding an earlier turn ended
     past, until it's gone and comes back. What doesn't hold isn't told: the
-    agent heard each finding as its write was judged, and an end held on it
+    agent heard each finding as their write was judged, and an end held on it
     just before told it again. What a turn's end must tell still blocks, at
     either end: each is told once. With `listing`, the notes present at the
     session's start and removed since are listed, once. A block too long for
@@ -2268,7 +2270,7 @@ class Reported(Model, ABC):
 
 
 def reached(bench: Bench, event: Reported, *, starts: bool = False) -> Holding | None:
-    """Return the session's repository and the worktrees it holds, reaching where `event`'s conversation works (`holding`)."""
+    """Return the session's repository and the worktrees they hold, reaching where `event`'s conversation works (`holding`)."""
     return holding(
         bench,
         event.session,
@@ -2280,19 +2282,20 @@ def reached(bench: Bench, event: Reported, *, starts: bool = False) -> Holding |
 
 
 class SessionStarted(Reported, events.SessionStarted):
-    """A session started, or resumed: it begins again in each worktree it holds.
+    """A session started, or resumed: they begin again in each worktree they hold.
 
-    Its record of the subagents at work starts again too, and its main
-    conversation is told the deferred work its repository's gate last found due
+    Their record of the subagents at work starts again too, and their main
+    conversation is told the deferred work their repository's gate last found due
     (`Due`), once at each start, since the gate doesn't fail on it. A
-    conversation whose runtime compacted or cleared it forgets the findings it
-    knew, so what still stands is told again at its next call. One still quiet
-    is told so, since what a compaction keeps may leave out that it asked.
+    conversation whose context their runtime compacted or cleared forgets the
+    findings they knew, so what still stands is told again at their next call.
+    One still quiet is told so, since what a compaction keeps may leave out that
+    they asked.
     """
 
     forgotten: bool = False
-    """Whether the conversation holds none of what it was told before: its
-    runtime compacted it, or cleared it."""
+    """Whether the conversation holds none of what they were told before: their
+    runtime compacted or cleared the conversation."""
 
     @override
     def apply(self, bench: Bench) -> Reply:
@@ -2330,7 +2333,7 @@ def counted(bench: Bench, session: str) -> list[Call]:
 
 
 class TurnStarted(Reported, events.TurnStarted):
-    """A turn of conversation `agent` starts, or a prompt arrives in its turn: the calls of its session the runtime shows are over stop counting as running.
+    """A turn of conversation `agent` starts, or a prompt arrives in their turn: the calls of their session the runtime shows are over stop counting as running.
 
     A call the runtime never reports finishing, one the operator interrupts
     among them, holds back the checkpoints where it counts until its
@@ -2392,11 +2395,11 @@ class CallStarted(Reported, events.CallStarted):
     spawns: bool = False
     """Whether the call runs a subagent, whose own calls count instead."""
     apart: bool = False
-    """Whether the conversation it spawns is to work apart, in a worktree of its
+    """Whether the conversation it spawns is to work apart, in a worktree of their
     own lup makes (`docs/judging-writes.md`, *A subagent lup isolates*)."""
     purpose: str = ""
     """What the call says the conversation it spawns is for, which names a
-    worktree lup makes for it."""
+    worktree lup makes for them."""
     turn: str | None = None
     """The runtime's id for the turn it runs in; none where it names none."""
 
@@ -2486,16 +2489,16 @@ def kept(
 
 
 def given(bench: Bench, call: CallStarted, held: Holding) -> Reply:
-    """Give the conversation `call` spawns the worktree it works apart in, where it does; tell it where before its first move (`docs/judging-writes.md`, *A subagent lup isolates*).
+    """Give the conversation `call` spawns the worktree they work apart in, where they do; tell them where before their first move (`docs/judging-writes.md`, *A subagent lup isolates*).
 
-    Asked to work apart, it gets a worktree lup makes from the commit the
-    spawning conversation's worktree is at, its own where it works apart: on a
-    new branch named after what the call says it's for (`branch_named`), or
-    `agent-<the call's id>` where that's empty or taken. Spawned without asking
-    by a conversation working apart, it works in that conversation's
-    worktree, as the runtime's own isolation would pass it on. Otherwise it
-    works where its runtime puts it, and nothing is given. Raise
-    `WorktreeRefusedError` where lup can't make the worktree.
+    Asked to work apart, they get a worktree lup makes from the commit the
+    spawning conversation's worktree is at, the spawner's own where the spawner
+    works apart: on a new branch named after what the call says they're for
+    (`branch_named`), or `agent-<the call's id>` where that's empty or taken.
+    Spawned without asking by a conversation working apart, they work in that
+    conversation's worktree, as the runtime's own isolation would pass it on.
+    Otherwise they work where their runtime puts them, and nothing is given.
+    Raise `WorktreeRefusedError` where lup can't make the worktree.
     """
     own = held.apart.get(call.agent)
     if not call.apart and own is None:
@@ -2546,13 +2549,13 @@ def given(bench: Bench, call: CallStarted, held: Holding) -> Reply:
 
 
 def apart(bench: Bench, event: Reported, writes: Path | None = None) -> Apart | None:
-    """Return where `event`'s conversation works apart, linking it first to the worktree its spawn was given (`Holding.link`); none where it works where its runtime puts it.
+    """Return where `event`'s conversation works apart, linking them first to the worktree their spawn was given (`Holding.link`); none where they work where their runtime puts them.
 
-    A write it makes (`writes`) in the worktree its runtime names as its
+    A write they make (`writes`) in the worktree their runtime names as their
     working directory, which is another conversation's, is refused, saying the
-    same file in its own worktree: the runtime resolves a path it gives
-    relative there, and its file tools would land there unseen by it. Every
-    other worktree it may write, and read.
+    same file in their own worktree: the runtime resolves a path they give
+    relative there, and their file tools would land there unseen by them.
+    Every other worktree they may write, and read.
     """
     if not event.agent:
         return None
@@ -2589,7 +2592,7 @@ class WorktreeAsked(Reported, events.WorktreeAsked):
     session is judged there from that commit where it first reaches it
     (`Holding.made`, `begin`). The hook names the session alone, never the
     conversation asking, so no conversation is noted to work anywhere here:
-    the one given the worktree is, at its own first call there.
+    the one given the worktree is, at their own first call there.
 
     Raise `WorktreeRefusedError` where lup doesn't make it: the asking
     conversation works in no worktree, its worktree has no commit, the name
@@ -2624,8 +2627,8 @@ class CallFinished(Reported, events.CallFinished):
     another session's calls there don't hold it back. One that never started (a
     runtime can report a command's end on a later call) leaves the calls running
     as they are, and a checkpoint still runs where none is. A call that spawned
-    a conversation to work apart links it, where its result names it, to the
-    worktree it was given, which a spawn launched in the background ends
+    a conversation to work apart links them, where its result names them, to
+    the worktree they were given, which a spawn launched in the background ends
     before its conversation's first call (`Holding.settle`).
     """
 
@@ -2633,7 +2636,7 @@ class CallFinished(Reported, events.CallFinished):
     """Whether the call ran a subagent."""
     spawned: str | None = None
     """The runtime's id for the conversation it spawned, where its result
-    names it."""
+    names them."""
 
     @override
     def apply(self, bench: Bench) -> Reply:
@@ -2672,11 +2675,11 @@ class CallFinished(Reported, events.CallFinished):
 
 
 class TurnEnded(Reported, events.TurnEnded):
-    """The session's own conversation ended its turn.
+    """The session's own conversation ended their turn.
 
-    In each worktree the session holds, its calls that never reported finishing
-    are cleared, a checkpoint runs, the importers pass is waited on, and the turn
-    can't end while the files it touched have type errors or ruff's findings
+    In each worktree the session holds, their calls that never reported
+    finishing are cleared, a checkpoint runs, the importers pass is waited on,
+    and the turn can't end while the files they touched have type errors or ruff's findings
     (`end_turn`). The notes present at the session's start and removed since are
     listed once. Another conversation's calls are left running, and a worktree
     one counts in, one a subagent works in, gets no checkpoint: that call's
@@ -2711,24 +2714,24 @@ class TurnEnded(Reported, events.TurnEnded):
 
 
 class ConversationEnded(Reported, events.ConversationEnded):
-    """A subagent's conversation ended its turn; the session's own goes on.
+    """A subagent ended their turn; the session's own conversation goes on.
 
-    Its calls are cleared in each worktree the session holds, and a checkpoint
-    runs in each it works in or one of its calls counted in, where none of the
-    session's is left running: what it left elsewhere is the session's turn's
-    end's to judge. Its end holds on
-    what it must be told, each told once (`end_turn`): a refusal, a move, a
-    checkpoint's notice, mail. It never holds on the type errors and ruff's
-    findings left in its files: every worker passes the gate before it hands
-    back. Its end ends its time at work, unless it's blocked, which keeps the
-    subagent going; an end its runtime reads no answer to (`final`) ends it
-    whatever it tells.
+    Their calls are cleared in each worktree the session holds, and a
+    checkpoint runs in each they work in or one of their calls counted in,
+    where none of the session's is left running: what they left elsewhere is
+    the session's turn's end's to judge. Their end holds on what they must be
+    told, each told once (`end_turn`): a refusal, a move, a checkpoint's
+    notice, mail. It never holds on the type errors and ruff's findings left in
+    their files: every worker passes the gate before they hand back. Their end
+    ends their time at work, unless it's blocked, which keeps the subagent
+    going; an end their runtime reads no answer to (`final`) ends it whatever
+    it tells.
     """
 
     final: bool = False
-    """Whether its runtime reads nothing its end answers, as where it was stopped
-    or its turn failed on an error from the model's API: no block keeps it
-    going, so its time at work ends."""
+    """Whether their runtime reads nothing their end answers, as where they were
+    stopped or their turn failed on an error from the model's API: no block
+    keeps them going, so their time at work ends."""
 
     @override
     def apply(self, bench: Bench) -> Reply:

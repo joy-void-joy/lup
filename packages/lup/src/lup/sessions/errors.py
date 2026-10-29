@@ -43,7 +43,7 @@ class OutputMissingError(TurnError):
 
     `rejected` holds every refused attempt in full: what was submitted, and why it
     was refused. `notes`, `frictions` and `how_it_felt` hold what the agent said
-    beside its attempts, and `usage` what the turn used, where the runtime
+    beside their attempts, and `usage` what the turn used, where the runtime
     reported it.
     """
 
@@ -69,8 +69,8 @@ class OutputMissingError(TurnError):
 class BlockedError(TurnError):
     """The agent stopped without an answer, saying the work can't go on and what's wrong.
 
-    `problem` is its words; `notes`, `frictions` and `how_it_felt` what it said
-    before stopping; `usage` what the turn used, where the runtime reported it.
+    `problem` is their words; `notes`, `frictions` and `how_it_felt` what they
+    said before stopping; `usage` what the turn used, where the runtime reported it.
     It isn't retried: asking again gets the same problem.
     """
 
@@ -83,7 +83,7 @@ class BlockedError(TurnError):
         how_it_felt: list[HowItFelt],
         usage: Usage | None,
     ) -> None:
-        """Record the agent's problem, what it said before it, and the turn's usage."""
+        """Record the agent's problem, what they said before it, and the turn's usage."""
         super().__init__(f"the agent is blocked and didn't answer: {problem}")
         self.problem = problem
         self.notes = notes
@@ -93,11 +93,11 @@ class BlockedError(TurnError):
 
 
 class StoppedError(TurnError):
-    """The agent stopped without an answer by its own choice, saying why.
+    """The agent stopped without an answer by their own choice, saying why.
 
-    It's done and nothing more is worth doing, or it would rather not go on: not
-    a failure, nor `BlockedError`'s "it can't". `why` is its words; `notes`,
-    `frictions` and `how_it_felt` what it said before stopping; `usage` what the
+    They're done and nothing more is worth doing, or they'd rather not go on:
+    not a failure, nor `BlockedError`'s "they can't". `why` is their words;
+    `notes`, `frictions` and `how_it_felt` what they said before stopping; `usage` what the
     turn used, where the runtime reported it. It isn't retried.
     """
 
@@ -110,7 +110,7 @@ class StoppedError(TurnError):
         how_it_felt: list[HowItFelt],
         usage: Usage | None,
     ) -> None:
-        """Record why the agent stopped, what it said before it, and the turn's usage."""
+        """Record why the agent stopped, what they said before it, and the turn's usage."""
         super().__init__(f"the agent chose to stop without an answer: {why}")
         self.why = why
         self.notes = notes

@@ -3,23 +3,23 @@
 // one, empty or not; their comments written into it, each under the line it's
 // on: Space `c` opens one on the item whole; `o` or Space `c` on a banner, a
 // message to its agent, under the banner; `o` in an agent's drawer, a remark to
-// it. Ctrl+Enter elsewhere than in a comment or a message sends. Space and a
+// them. Ctrl+Enter elsewhere than in a comment or a message sends. Space and a
 // verb's key acts on the innermost thing at the cursor it applies to, as a
 // mark in the draft (`grammar.ts`): Space `d` marks an item read, approves an
 // approval or a held change, marks a file of "since you approved" reviewed,
 // Space `x` declines, Space `s` leaves an item for later, Space `h` holds an
-// agent's flagged writes from anywhere in its group; `]]` and `[[` go to the next and
+// agent's flagged writes from anywhere in their group; `]]` and `[[` go to the next and
 // previous item, landing on its first line that matters, `]a` and `[a` to the
 // next and previous item to answer, in the order they came, `]c` and `[c` to the
 // next and previous such line. Under an approval or a held change, each file it
 // changes, whole, its lines numbered, marked and highlighted as they come into
 // view, each line that matters by the judge's reading barred and saying what it
 // triggered; the item's header counts its files by why each is open; under each
-// item, its context. Under each agent's banner, its drawers
-// (`review.ts`): its tasks, what its branch changed since the operator last saw
-// it, live, where Space `d` marks a file reviewed at the version shown and, on
+// item, its context. Under each agent's banner, their drawers
+// (`review.ts`): their tasks, what their branch changed since the operator last
+// saw it, live, where Space `d` marks a file reviewed at the version shown and, on
 // the drawer's line, every file shown, each line changed since they last looked at its file
-// marked (`since.ts`), and its conversation, each call's input and output read
+// marked (`since.ts`), and their conversation, each call's input and output read
 // as its fold opens. Each fold has a kind, its letter in the margin beside its summary
 // line, in the column of its depth, each scope a bar its full height, labelled
 // (`rails.ts`); the context, each run of unchanged lines, each test, data and
@@ -134,7 +134,7 @@ import type { Instance, Offer, Remote, Running, Span as ViewSpan } from "./views
 const PACED_LEAST = 250;
 const PACED_MOST = 2000;
 
-/** Where the page asks the review to go: an agent's group, by its conversation, numbered so the same one asked twice goes twice. */
+/** Where the page asks the review to go: an agent's group, by their conversation, numbered so the same one asked twice goes twice. */
 export interface Jump {
     to: Conversation;
     number: number;
@@ -149,13 +149,13 @@ interface Props {
     typed: { readonly current: Draft | null };
     /** Change the draft; `typed` where it's only what's typed in a comment, which the editor shows already (`Config.change`). */
     change: (draft: Draft, typed?: boolean) => void;
-    /** Name a group: the agent that sent its items, or the one it's of, and where; what it's doing; its context. */
+    /** Name a group: the agent who sent its items, or the one it's of, and where; what they're doing; their context. */
     banner: (head: Head) => string;
     /** Name a conversation as it's called, as whom a comment goes to. */
     called: (party: Conversation) => string;
     /** What the host has answered of each item beyond its own text: its context, and each file it changes, an approval's or a held change's. */
     around: Around;
-    /** What the host has answered of each agent, for its banner and its drawers. */
+    /** What the host has answered of each agent, for their banner and their drawers. */
     drawers: Drawers;
     send: () => void;
     /** Told each drawer the operator opens, so the page reads what it shows. */
@@ -178,11 +178,11 @@ interface Props {
     seeing: Seeing;
     /** Told the marks the operator's comments imply, a comment counting as a review (`implied`), as the review is laid out. */
     implying: (marks: Marked[]) => void;
-    /** What each conversation running is doing, by `whose` it is, drawn on its banner as the time passes (`ticking.ts`). */
+    /** What each conversation running is doing, by `whose` they are, drawn on their banner as the time passes (`ticking.ts`). */
     activities: ReadonlyMap<string, Activity | null>;
-    /** Each conversation's parent, by `whose` each is: what nests a subagent's group under its parent's. */
+    /** Each conversation's parent, by `whose` each is: what nests a subagent's group under their parent's. */
     parents: ReadonlyMap<string, string>;
-    /** What each conversation running is doing, by `whose` it is, for the overview's marks. */
+    /** What each conversation running is doing, by `whose` they are, for the overview's marks. */
     states: ReadonlyMap<string, string | null>;
     /** Whether the overview pane is shown: beside the review, or over it on a narrow screen. */
     overview: boolean;
@@ -196,7 +196,7 @@ interface Props {
     keepOrder: ((keeping: Keeping) => void) | null;
     /** How the views look, every repository's merged (`looks.ts`): the kinds of fold the keys take, and each repository's drawers. */
     looks: Merged;
-    /** Each conversation running, by `whose` it is: its banner's parts, and what holding its writes asks. */
+    /** Each conversation running, by `whose` they are: their banner's parts, and what holding their writes asks. */
     running: ReadonlyMap<string, Running>;
     /** What the host answered of each view the page doesn't lay out itself, by its instance's id (`views.ts`). */
     remote: Remote;
@@ -289,7 +289,7 @@ function painted(laidOut: Laid, from: number, to: number, fresh: Freshness): Ran
 /**
  * Return what of the review is written in Markdown (`markdown.ts`): each item's own text, its lines whole and the
  * comments under them left out; the agent's words in a context, each run of them one; each Markdown block of a
- * drawer's, as the agent's words in its conversation, the remarks under them left out; and each comment, message and
+ * drawer's, as the agent's words in their conversation, the remarks under them left out; and each comment, message and
  * remark.
  */
 function sourcesOf(laidOut: Laid): Source[] {
@@ -385,7 +385,7 @@ type Ends = (group: Group) => string;
 
 /**
  * Mark where each item and each group ends: the blank line after an item ruled, and a group's last line saying whose
- * end it is, a subagent's with its parent's where they end together, set in as the innermost is.
+ * end it is, a subagent's with their parent's where they end together, set in as the innermost is.
  */
 function endings(laidOut: Laid, ends: Ends): { from: number; to: number; value: Decoration }[] {
     const text = laidOut.text;
@@ -1089,7 +1089,7 @@ export function Review({
     }, [laidOut, withImplied, seeing]);
 
     // What's drawn beside the text, as it's laid out now and as each agent is doing: how long each item has waited,
-    // after when it came; what each agent is doing and for how long, after the core's words on its banner; and each
+    // after when it came; what each agent is doing and for how long, after the core's words on their banner; and each
     // span of a view's that ticks or measures, where it goes. Said again by the clock, not laid out.
     useEffect(() => {
         const current = view.current;
@@ -1281,7 +1281,7 @@ export function Review({
     function commentSays(at: number): { says: string; on: string | null } | null {
         const group = groupAt(laidOut, at);
         if (group !== undefined) {
-            return group.conversation === null ? null : { says: "write to it", on: called(group.conversation) };
+            return group.conversation === null ? null : { says: "write to them", on: called(group.conversation) };
         }
         const drawer = drawerAt(laidOut, at);
         if (drawer !== undefined) {

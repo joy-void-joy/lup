@@ -35,7 +35,7 @@ export type Act =
 /** Where a verb lands at the cursor: what it's on, as the line of keys names it, the part of the review it is, what it does there, and its acts; or why nothing there takes it. */
 export type Reach = { on: string; node: Placed; says: string; acts: Act[] } | { on: null; says: null; why: string };
 
-/** How the walk names what a verb lands on, an agent by its conversation as it's called, and whether an item is new to the operator, its group not seen since it came (`fresh`): none new where it doesn't say. */
+/** How the walk names what a verb lands on, an agent by their conversation as it's called, and whether an item is new to the operator, its group not seen since it came (`fresh`): none new where it doesn't say. */
 export interface Naming {
     called: (conversation: Conversation) => string;
     fresh?: (item: Item) => boolean;
@@ -61,7 +61,7 @@ export function seenAct(conversation: Conversation, block: string, upTo: number)
         chord: null,
         runs: "send",
         commented: false,
-        says: "mark it seen",
+        says: "mark them seen",
     };
     return { kind: "mark", offer, block, version: null };
 }
@@ -330,15 +330,15 @@ function groupReach(laidOut: Laid, node: Placed, group: Group, verb: Verb, namin
             const seen = unseen && conversation !== null ? [seenAct(conversation, node.id, newest)] : [];
             const acts = [...seen, ...items, ...drawers];
             const what = [
-                ...(seen.length === 0 ? [] : ["it seen"]),
-                ...(items.length === 0 ? [] : ["its news read"]),
-                ...(drawers.length === 0 ? [] : ["its drawers done"]),
+                ...(seen.length === 0 ? [] : ["them seen"]),
+                ...(items.length === 0 ? [] : ["their news read"]),
+                ...(drawers.length === 0 ? [] : ["their drawers done"]),
             ].join(", ");
             const leaving = left.length === 0 ? "" : `, ${left.join(" ")} left`;
             return acts.length === 0 ? null : { on, node, says: `mark ${what}${leaving}`, acts };
         }
         case CORE.comment:
-            return conversation === null ? null : { on, node, says: "write to it", acts: [{ kind: "comment" }] };
+            return conversation === null ? null : { on, node, says: "write to them", acts: [{ kind: "comment" }] };
         default:
             return null;
     }

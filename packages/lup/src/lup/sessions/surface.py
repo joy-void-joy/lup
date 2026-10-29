@@ -1,7 +1,7 @@
 """`Agent`: what code that shouldn't care which runtime it gets holds.
 
 Every declaration is an `Agent`, as is anything else a project writes to stand in
-for one, so a function can take an agent without naming its runtime.
+for one, so a function can take an agent without naming their runtime.
 """
 
 from abc import ABC, abstractmethod
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 
 class Agent(ABC):
-    """An agent that answers a prompt, typed or as text."""
+    """An agent who answers a prompt, typed or as text."""
 
     @overload
     # lup: ignore("interface-shape", why="an `@overload` stub is a signature the type checker reads, not concrete behaviour, which the rule counts it as", issue=49)

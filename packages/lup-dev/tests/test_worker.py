@@ -363,15 +363,15 @@ def test_a_repository_s_process_runs_quiet_for_the_conversation_calling(
     held, lifted = asyncio.run(exercised())
     assert isinstance(held, Called)
     assert held.answer.text.startswith(
-        "This conversation is quiet: lup doesn't tell it type errors in the files "
-        "importing what changed after its calls"
+        "You're quiet: lup doesn't tell you type errors in the files importing "
+        "what changed after your calls"
     )
     assert lifted == Called(
         answer=Answer(
             text=(
-                "lup's quiet is lifted: it tells this conversation every finding "
-                "after its calls again. Nothing stands in the files it touched that "
-                "it wasn't told."
+                "lup's quiet is lifted: it tells you every finding after your calls "
+                "again. Nothing stands in the files you touched that you weren't "
+                "told."
             )
         )
     )

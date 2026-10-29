@@ -1,7 +1,7 @@
 """Each item one conversation exchanged, with its line as a view of the conversation shows it: the core words it, so no module names the inbox's kinds.
 
 `docs/inbox.md`, *A conversation's items in its view*. A view of a conversation
-(`Transcripts`' drawer) weaves in each item of lup's inbox it sent or was sent,
+(`Transcripts`' drawer) weaves in each item of lup's inbox they sent or were sent,
 a line where it happened (`→ @51 question to you · answered by @53`). The
 line is made here, for the conversation it's in (`lined`): what the item's
 kind says of it (`said`), then what the core says around it: whom it went to,
@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 
 type Piece = str | Conversation
 """A run of an item's line: its own words, or a conversation it names, said as
-the conversation is called and referring to it."""
+the conversation is called and referring to them."""
 
 
 class Lined(Model):
@@ -57,8 +57,8 @@ class Lined(Model):
     sent: bool
     """Whether the conversation sent it, rather than was sent it."""
     line: list[Span]
-    """Its line, each conversation it names a span of its own referring to it
-    by its runtime's ids, said by its path (`Span.conversation`)."""
+    """Its line, each conversation it names a span of their own referring to
+    them by their runtime's ids, said by their path (`Span.conversation`)."""
     at: datetime
     """When it reached the conversation: when it was told it, else made."""
     comment: str = ""
@@ -109,28 +109,28 @@ def said(item: Item) -> list[Piece]:
 
 
 def lups(item: Item) -> bool:
-    """Say whether `item` is lup's word to the conversation that sent the item it's about, told to it though it's its own: on its citations that named no passage."""
+    """Say whether `item` is lup's word to the conversation that sent the item it's about, told to them though it's their own: on their citations that named no passage."""
     return isinstance(item.reason, Unresolved)
 
 
 def told(party: Conversation, item: Item) -> bool:
-    """Say whether `party` was sent `item`, rather than sent it: one from another party, or lup's word to it."""
+    """Say whether `party` was sent `item`, rather than sent it: one from another party, or lup's word to them."""
     return item.sender != party or lups(item)
 
 
 def lined(
     party: Conversation, items: list[Item], named: Callable[[Conversation], str]
 ) -> list[Lined]:
-    """Return each of `items`, those `party` sent, then those it was sent, with its line as a view of `party` shows it.
+    """Return each of `items`, those `party` sent, then those they were sent, with its line as a view of `party` shows it.
 
-    One it sent says `→`, what it is (`said`), whom to, and where it stands:
+    One they sent says `→`, what it is (`said`), whom to, and where it stands:
     withdrawn, decided, superseded, answered and by what, not told yet, waiting
-    on the operator, unread, or read. One it was sent says `←`, what it is,
+    on the operator, unread, or read. One they were sent says `←`, what it is,
     from whom, for whom where it was passed on from a subagent that had ended,
     or, in that subagent's own view, where it went on to, and whether it's told
     yet. Each conversation a line names is a span of its own, said as `named`
-    calls it, referring to it by its runtime's ids (`Span.conversation`), which
-    never change as it's renamed.
+    calls them, referring to them by their runtime's ids (`Span.conversation`),
+    which never change as they're renamed.
     """
     received = [each for each in items if told(party, each)]
 

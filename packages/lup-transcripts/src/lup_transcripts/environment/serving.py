@@ -85,11 +85,11 @@ GROWING = lup.Watch(
 """When a view of a conversation as it grows is answered again, shown: at its
 agent's turns and calls, and a minute apart at most. The drawer's, and an
 exchange's, since what came before the agent's last words in the latest one
-moves on with each of its words."""
+moves on with each of their words."""
 
 
 def drawn(viewed: OfAgent) -> JsonObject:
-    """Return the key of the review mark on the conversation `viewed` names: its runtime's ids, which a rename never changes."""
+    """Return the key of the review mark on the conversation `viewed` names: their runtime's ids, which a rename never changes."""
     return OfAgent(
         runtime=viewed.runtime, session=viewed.session, agent=viewed.agent
     ).model_dump(mode="json")
@@ -400,9 +400,9 @@ class TranscriptsServing(ModuleServing):
     async def show(self, asked: Chosen, by: Operator | Room) -> str:
         """Show what you said in a session, each time after what the agent last said before it; or, with `--all`, the whole conversation.
 
-        What you typed in its terminal is its record's alone. What reached a
-        session through lup, your reviews and answers among it, and what it
-        said to you, is its exchange in lup's inbox, which this leaves out:
+        What you typed in their terminal is their record's alone. What reached
+        a session through lup, your reviews and answers among it, and what they
+        said to you, is their exchange in lup's inbox, which this leaves out:
         where the inbox holds some, the last line says how many items, and the
         `lup-dev inbox --conversation` that reads them; where the host service
         can't be asked, the last line says so.
@@ -451,7 +451,7 @@ class TranscriptsServing(ModuleServing):
         watch=GROWING,
     )
     async def conversation(self, viewed: OfAgent) -> lup.Blocks:
-        """Show an agent's whole conversation from its runtime's record, live: everything since you last read it open, by its review mark or your last words, each earlier exchange folded under your words that opened it, each run of calls under one line, and the items of lup's inbox it sent and was sent where they happened."""
+        """Show an agent's whole conversation from their runtime's record, live: everything since you last read it open, by its review mark or your last words, each earlier exchange folded under your words that opened it, each run of calls under one line, and the items of lup's inbox they sent and were sent where they happened."""
         read = await asyncio.to_thread(
             self.recording.read,
             self.recorded,

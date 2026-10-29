@@ -73,7 +73,8 @@ class Declaration(Model, Agent, ABC):
         The model and effort are spelled as the runtime spells them, each only
         where the declaration gives it, so the person's own choice holds. A terminal
         session is the runtime's coding agent, which an empty prompt would leave
-        without its tools' guidance, so with no `system_prompt` it keeps its own.
+        without their tools' guidance, so with no `system_prompt` they keep their
+        own.
         """
 
 
@@ -171,7 +172,7 @@ class Asking(Model, arbitrary_types_allowed=True):
 
         Every turn serves the speaking tools (`lup.tools.speaking`); a typed one
         serves `submit`, the output tool, too. A turn the agent ended with
-        `blocked` raises `BlockedError`, and one it ended with `stop`
+        `blocked` raises `BlockedError`, and one they ended with `stop`
         `StoppedError`, answered or not.
         """
         layers = self.declaration.layers

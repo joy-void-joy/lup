@@ -6,7 +6,7 @@
 // is, each header saying why (`Folded`). Then the views of its own items, a held change and a write that landed
 // flagged, each a summary saying what it is and how its files read, and a body, its text and its files; "since you
 // approved", what an agent's branch changed since the operator last saw it, each file whole, what's settled folded at
-// its end; and its part of an agent's banner, whether its flagged writes are held. Pure.
+// its end; and its part of an agent's banner, whether their flagged writes are held. Pure.
 import type { ChangedFile, Diff, Mark } from "../code";
 import type { components } from "../generated/api";
 import { reviewedLine } from "../since";
@@ -457,7 +457,7 @@ function withOffers(diff: Diff, offers: Offer[]): Diff {
     return made;
 }
 
-/** The judge's part of an agent's banner: `holding` where the operator holds each of its flagged writes, and holding or letting them land again, Space h, as the reply is sent. */
+/** The judge's part of an agent's banner: `holding` where the operator holds each of the agent's flagged writes, and holding or letting them land again, Space h, as the reply is sent. */
 export const BANNER: View<OfAgent> = {
     module: "judge",
     view: "banner",
@@ -473,7 +473,7 @@ export const BANNER: View<OfAgent> = {
             chord: null,
             runs: "send",
             commented: false,
-            says: running.holding ? "let its flagged writes land" : "hold its flagged writes",
+            says: running.holding ? "let their flagged writes land" : "hold their flagged writes",
         };
         return { blocks: { summary: running.holding ? [{ text: "holding", tone: "plain" }] : [], waiting: false, count: 0, offers: [hold], blocks: [] } };
     },

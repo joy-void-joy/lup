@@ -94,15 +94,15 @@ no `alwaysLoad`.
 **A server that pushes** is loaded as a channel: Claude Code queues each
 `notifications/claude/channel` it sends as a prompt, `<channel source="<name>">`
 around its `content`, which starts a turn of the idle session and reaches a busy
-one after its running call (`docs/field-notes.md`, *Channels*). A server on no
+one after their running call (`docs/field-notes.md`, *Channels*). A server on no
 allowlist takes `--dangerously-load-development-channels`, which shows a warning
 the operator confirms at each start and is ignored under `-p`; the flag takes
 several entries, so it comes before `--strict-mcp-config`, never last, where it
 would take a prompt for one.
 
 **The messaging socket**, where the settings place it, is the session's own
-cross-session inbox, through which a message reaches it between calls, or
-starts a turn when it's idle. A session that bypasses permission prompts, as a
+cross-session inbox, through which a message reaches them between calls, or
+starts their turn when they're idle. A session that bypasses permission prompts, as a
 launched one does, holds each incoming message for approval unless
 `crossSessionInbound` is `"accept"`, which lup's file then sets; the operator's
 other Claude Code sessions can then start a turn in the room too.

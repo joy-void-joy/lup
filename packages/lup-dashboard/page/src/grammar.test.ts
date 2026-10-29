@@ -5,7 +5,7 @@ import { chainAt, isMarked, listed, marking, movedSaid, seenAct, type Act } from
 import { EMPTY, type Conversation, type Placed } from "./review";
 import type { Offer } from "./views";
 
-const HOLD: Offer = { action: "set-holding", argument: { launch: "l1", session: "s1", agent: null, on: true }, verb: "hold", chord: null, runs: "send", commented: false, says: "hold its flagged writes" };
+const HOLD: Offer = { action: "set-holding", argument: { launch: "l1", session: "s1", agent: null, on: true }, verb: "hold", chord: null, runs: "send", commented: false, says: "hold their flagged writes" };
 
 describe("marking the draft", () => {
     it("puts an item in one list of the draft at most, done, declined or left for later, and takes it out of every one", () => {
@@ -24,7 +24,7 @@ describe("marking the draft", () => {
         ];
         const once = marking(EMPTY, acts, "done");
         expect(once.done).toEqual([51]);
-        expect(once.marks?.map((each) => [each.action, each.verb, each.block, each.says, each.argument])).toEqual([["set-holding", "done", "banner of s1", "hold its flagged writes", HOLD.argument]]);
+        expect(once.marks?.map((each) => [each.action, each.verb, each.block, each.says, each.argument])).toEqual([["set-holding", "done", "banner of s1", "hold their flagged writes", HOLD.argument]]);
         expect(once.marks?.[0]?.id).not.toBe("");
         expect(acts.every((each) => isMarked(once, each, "done"))).toBe(true);
         const twice = marking(once, acts, "done");
@@ -68,7 +68,7 @@ describe("review marks", () => {
         const act = seenAct(parser, "group 0", 57);
         const draft = marking(EMPTY, [act], "done");
         const [mark] = draft.marks ?? [];
-        expect(mark).toMatchObject({ action: "review-mark", verb: "done", block: "group 0", says: "mark it seen" });
+        expect(mark).toMatchObject({ action: "review-mark", verb: "done", block: "group 0", says: "mark them seen" });
         expect(mark?.argument).toEqual({ repository: "/r/.git", module: "core", key: { runtime: "claude", session: "s1", agent: "a1" }, up_to: "57" });
         expect(movedSaid(mark!, called)).toBe("s1/a1 seen");
     });

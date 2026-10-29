@@ -680,7 +680,7 @@ def test_claude_codes_window_is_the_standard_one_where_the_operators_env_turns_t
 def test_a_room_s_session_keeps_the_long_window_the_operators_env_would_turn_off(
     tmp_path: Path,
 ) -> None:
-    """A room's settings carry nothing of the operator's `env`, so a session recorded in a room's home ran with the long window wherever its model has one."""
+    """A room's settings carry nothing of the operator's `env`, so a session recorded in a room's home ran with the long window wherever their model has one."""
     layout = Layout(state=tmp_path / "state", data=tmp_path / "data")
     record = (
         layout.homes.project(tmp_path / "work" / ".git", "claude")
@@ -1301,7 +1301,7 @@ def test_codexs_calls_read_as_a_line_each_and_whole_on_asking(tmp_path: Path) ->
 def test_a_saved_output_is_read_in_its_home_never_through_a_folder_a_room_repointed(
     tmp_path: Path, homes: Homes
 ) -> None:
-    """A room's session names a call's saved output under its launch's own runtime directory: the host reads it as the same place in the home, and nothing through a session's folder the room swapped for a link."""
+    """A room's session names a call's saved output under their launch's own runtime directory: the host reads it as the same place in the home, and nothing through a session's folder the room swapped for a link."""
     launch = homes.registered()
     named, record = launch.record("projects/-w/s1.jsonl")
     saved = record.with_suffix("") / "tool-results"

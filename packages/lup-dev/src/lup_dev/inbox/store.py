@@ -1,10 +1,10 @@
 """lup's inbox: its items and its parties, kept one JSON file each in lup's state.
 
 `docs/inbox.md`, *Parties and items*. Every party has an inbox: the
-operator, and each conversation of each session, its main one or one of its
-subagents. A conversation is keyed by its runtime, its session's id and its own,
-within a repository, rather than by the launch it runs in, so a session resumed
-in a launch of its own finds what waited for it there.
+operator, and each conversation of each session, their main one or one of their
+subagents. A conversation is keyed by their runtime, their session's id and their
+own, within a repository, rather than by the launch they run in, so a session
+resumed in a launch of their own finds what waited for them there.
 
 An item has a number, one sequence per user, cited `@12` wherever it's named
 (`cited`), so the operator answers `@12`, or `12`; a reason (a message with its
@@ -13,11 +13,11 @@ or no; a friction, how it felt, or a stop by choice, each as the
 agent's tool took it; a change held, or a write that landed flagged, as the
 judge put it), whose kind ranks it (`ranked`); a sender and a recipient; when
 it was made; and its state: waiting, told (when, and how), answered, done, or
-for an approval decided. An item for a conversation that has ended goes to its
+for an approval decided. An item for a conversation that has ended goes to their
 session's main conversation, saying whose it was. A subagent's end, and a copy
-of what it says of its work, go to the conversation that spawned it, which its
-whereabouts keep: quiet items, told at a call and never holding a turn's end.
-A message one conversation sends another, its parent or one of its own
+of what they say of their work, go to the conversation that spawned them, which
+their whereabouts keep: quiet items, told at a call and never holding a turn's end.
+A message one conversation sends another, their parent or one of their own
 subagents, is that other's, and the operator reads a copy (`Message.to`).
 
 An approval is trust on launch's: the launch's own question, put to the
@@ -79,7 +79,7 @@ class Operator(Model):
 
 
 class Conversation(Model):
-    """A conversation of a session, within a repository: the session's main one, or one of its subagents."""
+    """A conversation of a session, within a repository: the session's main one, or one of their subagents."""
 
     party: Literal["conversation"] = "conversation"
     repository: Path
@@ -134,16 +134,16 @@ class Message(Model):
     conversation's order: told before its words, each quoted with their reply."""
     ending: bool = False
     """Whether lup made it at a session's turn's end rather than the agent
-    sending it: its last words, or, where its turn ended on an error from the
-    model's API, that error in lup's words. The conversation already shows
-    either among its steps, the error as its runtime's text for it."""
+    sending it: their last words, or, where their turn ended on an error from
+    the model's API, that error in lup's words. The conversation already shows
+    either among its steps, the error as the runtime's text for it."""
     to: Conversation | None = None
     """The conversation it was sent to, where it's the operator's copy of a
     message one conversation sent another (`send`), which they read as news
     whatever its kind; none where its recipient is whom it was sent to."""
     answers: list[int] = []
     """For a turn's last words, the operator's items told to the conversation
-    since its last such words, which they answer: a review, a message, an
+    since their last such words, which these words answer: a review, a message, an
     answer. The dashboard shows their words above the agent's (`docs/inbox.md`,
     *A turn's last message*)."""
 
@@ -173,12 +173,12 @@ class Labelled(Model):
     felt: str = ""
 
     def friction(self) -> str:
-        """Say a friction as the operator read it: what got in the way, then what the agent was trying and would change, where it said."""
+        """Say a friction as the operator read it: what got in the way, then what the agent was trying and would change, where they said."""
         parts = {"Trying": self.trying, "Would change": self.would_change}
         return labelled(self.got_in_the_way, parts)
 
     def how_it_felt(self) -> str:
-        """Say how it felt as the operator read it: each part the agent filled, after its label; "Nothing notable." where it filled none."""
+        """Say how it felt as the operator read it: each part the agent filled, after its label; "Nothing notable." where they filled none."""
         parts = {
             "Got in the way": self.got_in_the_way,
             "Smooth": self.smooth,
@@ -189,7 +189,7 @@ class Labelled(Model):
 
 
 class Friction(results.Friction):
-    """What got in a conversation's way, which it told the operator at the moment it did (`friction`), in its own words: news to read, never a question."""
+    """What got in a conversation's way, which they told the operator at the moment it did (`friction`), in their own words: news to read, never a question."""
 
     reason: Literal["friction"] = "friction"
 
@@ -231,7 +231,7 @@ class HowItFelt(results.HowItFelt):
 
 
 class Stop(speaking.Stop):
-    """A conversation ending its work by its own choice, saying why (`stop`): news to read, where being blocked is a problem."""
+    """A conversation ending their work by their own choice, saying why (`stop`): news to read, where being blocked is a problem."""
 
     reason: Literal["stop"] = "stop"
 
@@ -242,53 +242,55 @@ class Stop(speaking.Stop):
 
 
 class Ended(Model):
-    """A subagent's end, for the conversation that spawned it: its name, whether it ended its turn, was stopped or failed, its last message where its runtime doesn't hand that to its parent itself, and what it said at each end lup held, which no runtime hands on."""
+    """A subagent's end, for the conversation that spawned them: their name, whether they ended their turn, were stopped or failed, their last message where their runtime doesn't hand that to their parent itself, and what they said at each end lup held, which no runtime hands on."""
 
     reason: Literal["ended"] = "ended"
     name: str
-    """How lup calls it: its own name, or its kind and its runtime's id."""
+    """How lup calls them: their own name, or their kind and their runtime's id."""
     stopped: bool = False
-    """Whether it was stopped before it ended its turn, rather than ending it."""
+    """Whether they were stopped before they ended their turn, rather than ending it."""
     failed: str | None = None
-    """Where its turn ended on an error from the model's API, the error's kind
-    in its runtime's word (`rate_limit`), which says whether trying again makes
-    sense; none where it ended its turn or was stopped. The error's own words
-    are its runtime's to hand on (`handed`), so lup doesn't tell them twice."""
+    """Where their turn ended on an error from the model's API, the error's kind
+    in their runtime's word (`rate_limit`), which says whether trying again
+    makes sense; none where they ended their turn or were stopped. The error's
+    own words are their runtime's to hand on (`handed`), so lup doesn't tell
+    them twice."""
     handed: bool = False
-    """Whether its runtime hands its last message to its parent itself, so lup
-    leaves it out rather than tell it twice."""
+    """Whether their runtime hands their last message to their parent itself,
+    so lup leaves it out rather than tell it twice."""
     said: str | None = None
-    """Its last message, whole, where its runtime doesn't hand it on; none where
-    it does, or the subagent left none."""
+    """Their last message, whole, where their runtime doesn't hand it on; none
+    where it does, or the subagent left none."""
     held: list[str] = []
-    """What it said at each end of its turn lup held to tell it what waited,
-    oldest first, whole: its report, often. Each runtime hands a parent only
-    the words of the end it lets through, the next one's (`docs/field-notes.md`,
-    *A subagent's end*), so lup hands these on whoever hands the last."""
+    """What they said at each end of their turn lup held to tell them what
+    waited, oldest first, whole: their report, often. Each runtime hands a
+    parent only the words of the end it lets through, the next one's
+    (`docs/field-notes.md`, *A subagent's end*), so lup hands these on whoever
+    hands the last."""
 
     @property
     def kept(self) -> list[str]:
-        """Return what it said at each end lup held, as lup hands it on: those saying something."""
+        """Return what they said at each end lup held, as lup hands it on: those saying something."""
         return [each for each in self.held if each.strip()]
 
     @property
     def earlier(self) -> str | None:
-        """Say what comes before what it said at each end lup held, where it held one that said something; none where it held none.
+        """Say what comes before what they said at each end lup held, where it held one that said something; none where it held none.
 
         >>> Ended(name="parser", held=["Done."]).earlier
-        'Before that, lup held an end of its turn to tell it what waited, and no runtime hands you what it said there:'
+        'Before that, lup held an end of their turn to tell them what waited, and no runtime hands you what they said there:'
         """
         if not self.kept:
             return None
         ends = "an end" if len(self.kept) == 1 else "ends"
         return (
-            f"Before that, lup held {ends} of its turn to tell it what waited, and "
-            "no runtime hands you what it said there:"
+            f"Before that, lup held {ends} of their turn to tell them what waited, "
+            "and no runtime hands you what they said there:"
         )
 
     @property
     def passed(self) -> str | None:
-        """Return its last message as lup hands it on; none where it was stopped or failed, its runtime hands it on, or it left none."""
+        """Return their last message as lup hands it on; none where they were stopped or failed, their runtime hands it on, or they left none."""
         if self.stopped or self.failed is not None or self.handed:
             return None
         if self.said is None or not self.said.strip():
@@ -297,35 +299,37 @@ class Ended(Model):
 
     @property
     def heading(self) -> str:
-        """Say how it ended, in lup's words, and where its last message is.
+        """Say how they ended, in lup's words, and where their last message is.
 
         >>> Ended(name="parser", failed="rate_limit", handed=True).heading
-        "It failed on an error from the model's API (rate_limit). Your runtime's notice of its end says more."
+        "They failed on an error from the model's API (rate_limit). Your runtime's notice of their end says more."
         """
         if self.failed is not None:
-            failed = f"It failed on an error from the model's API ({self.failed})."
-            told = " Your runtime's notice of its end says more." if self.handed else ""
+            failed = f"They failed on an error from the model's API ({self.failed})."
+            told = (
+                " Your runtime's notice of their end says more." if self.handed else ""
+            )
             return failed + told
         if self.stopped:
-            return "It was stopped before it ended its turn."
+            return "They were stopped before they ended their turn."
         if self.handed:
-            return "It ended its turn. Its last message reaches you from your runtime."
+            return "They ended their turn. Their last message reaches you from your runtime."
         if self.passed is None:
-            return "It ended its turn, with no last message."
-        return "It ended its turn. Its last message:"
+            return "They ended their turn, with no last message."
+        return "They ended their turn. Their last message:"
 
     @property
     def text(self) -> str:
-        """Say it as lup tells the parent: how it ended, its last message where lup hands that on, then what it said at each end lup held.
+        """Say it as lup tells the parent: how they ended, their last message where lup hands that on, then what they said at each end lup held.
 
         >>> print(Ended(name="parser", said="Done: three call sites.").text)
-        It ended its turn. Its last message:
+        They ended their turn. Their last message:
         Done: three call sites.
         >>> print(Ended(name="parser", handed=True, said="Done.").text)
-        It ended its turn. Its last message reaches you from your runtime.
+        They ended their turn. Their last message reaches you from your runtime.
         >>> print(Ended(name="parser", handed=True, said="Done.", held=["Parsed."]).text)
-        It ended its turn. Its last message reaches you from your runtime.
-        Before that, lup held an end of its turn to tell it what waited, and no runtime hands you what it said there:
+        They ended their turn. Their last message reaches you from your runtime.
+        Before that, lup held an end of their turn to tell them what waited, and no runtime hands you what they said there:
         Parsed.
         """
         last = [] if self.passed is None else [self.passed]
@@ -372,7 +376,7 @@ class Citation(Model):
 
 
 class Unresolved(Model):
-    """lup's word to a conversation that citations in an item it sent the operator named no passage, or several: told at once, holding its turn's end once, so it can fix them with `edit` (`docs/inbox.md`, *Citing the operator's words*)."""
+    """lup's word to a conversation that citations in an item they sent the operator named no passage, or several: told at once, holding their turn's end once, so they can fix them with `edit` (`docs/inbox.md`, *Citing the operator's words*)."""
 
     reason: Literal["unresolved"] = "unresolved"
     of: int
@@ -611,7 +615,7 @@ class Quoted(Model):
 
 
 class Remark(Model):
-    """A comment of the operator's in one of an agent's drawers in the review (`docs/dashboard.md`, *The drawers*): on a passage of its conversation, or on lines of its branch's code since they approved it, as they stood when it was written."""
+    """A comment of the operator's in one of an agent's drawers in the review (`docs/dashboard.md`, *The drawers*): on a passage of the agent's conversation, or on lines of their branch's code since the operator approved it, as the lines stood when it was written."""
 
     id: str = ""
     """What names it among what's drafted, as a comment's does (`Comment.id`)."""
@@ -632,8 +636,8 @@ class Remark(Model):
 class Review(Model):
     """The operator's reply, as they wrote it while reading: their comments on the items it covers, their messages to agents, and their remarks in the agents' drawers.
 
-    Every conversation it's sent to gets all of it, reading its own message
-    and items first and the rest as context (`docs/dashboard.md`, *The
+    Every conversation it's sent to gets all of it, reading their own
+    message and items first and the rest as context (`docs/dashboard.md`, *The
     review*).
     """
 
@@ -915,7 +919,7 @@ def ranked(reason: Reason) -> Rank:
     question, asked. A copy of one a conversation sent another is news of any
     kind, since it waits on that other, not on them. The operator's own items,
     an answer and a review, go to agents, so neither the review nor a notice
-    reads theirs; nor a subagent's end, which goes to its parent, nor lup's word
+    reads theirs; nor a subagent's end, which goes to their parent, nor lup's word
     on citations, which goes to the conversation that wrote them.
 
     >>> ranked(Stop(why="Done."))
@@ -989,9 +993,9 @@ class Item(Model):
     sender's record; none where no agent's call did (`ShowContext`)."""
     quiet: bool = False
     """Whether it waits for a call of its recipient's, never holding a turn's end
-    to be told nor waking an idle session: a subagent's news for its parent,
-    which its runtime wakes for the subagent's end already, so that each end
-    costs no turn of its own."""
+    to be told nor waking an idle session: a subagent's news for their parent,
+    whom their runtime wakes for the subagent's end already, so that each end
+    costs no turn of their own."""
     made: datetime
     state: State = Waiting()
 
@@ -1049,31 +1053,39 @@ def item_number(typed: str) -> int:
 
 
 class Whereabouts(Model):
-    """Where a conversation was last heard: the launch its session runs in, and whether it has ended."""
+    """Where a conversation was last heard: the launch their session runs in, and whether they have ended."""
 
     conversation: Conversation
     launch: str
     worktree: Path
     since: datetime
-    """When it was first heard in that launch."""
+    """When they were first heard in that launch."""
     ended: datetime | None = None
-    """When its conversation ended, at its `conversation-ended` hook; none while
-    it goes on."""
+    """When the conversation ended, at their `conversation-ended` hook; none
+    while they go on."""
     parent: Conversation | None = None
-    """The conversation that spawned it, for a subagent a conversation spawned,
-    which hears of its end and of what it says of its work; none for a session's
-    own. The runtime's own agents never reach the inbox (`Spawned.internal`)."""
+    """The conversation that spawned them, for a subagent a conversation
+    spawned, who hears of their end and of what they say of their work; none for
+    a session's own. The runtime's own agents never reach the inbox (`Spawned.internal`)."""
     held: list[str] = []
-    """What it said at each end of its turn lup held to tell it what waited,
-    since it was heard there, oldest first: handed to its parent with its end
-    (`Ended.held`), since its runtime hands on only the end it lets through.
-    Kept here rather than in memory, so a restart of the service between the
-    two ends loses none."""
+    """What they said at each end of their turn lup held to tell them what
+    waited, since they were heard there, oldest first: handed to their parent
+    with their end (`Ended.held`), since their runtime hands on only the end it
+    lets through. Kept here rather than in memory, so a restart of the service
+    between the two ends loses none."""
+    words: list[str] = []
+    """lup's own words left for them, oldest first: told beside their next call
+    or at their next turn's or session's start, and never holding their turn's
+    end (`Delivery.left`). Kept here, so a restart of the service loses none."""
+    felt_asked: bool = False
+    """Whether a landing of a branch they worked on has invited them to say how
+    the work felt (`Lander.invited`): one does once, whatever launch they're
+    heard in."""
     name: str | None = None
-    """A subagent's own name as its latest hook was heard, kept once its launch
-    has ended, so `inbox` reads it by its name then, and `send` reaches it by
-    it; none while it has none, and for a session's own conversation, named as
-    its launch (`SessionNames`, `host/names.py`)."""
+    """A subagent's own name as their latest hook was heard, kept once their
+    launch has ended, so `inbox` reads them by their name then, and `send`
+    reaches them by it; none while they have none, and for a session's own
+    conversation, named as their launch (`SessionNames`, `host/names.py`)."""
 
 
 def read[M: Model](path: Path, model: type[M]) -> M:
@@ -1107,7 +1119,7 @@ class Sent(Model):
 
 
 class Talk(Model):
-    """What the operator writes on one conversation they read, until it's sent, and the messages they sent it from there."""
+    """What the operator writes on one conversation they read, until it's sent, and the messages they sent the conversation from there."""
 
     comments: list[TalkComment] = []
     sent: list[Sent] = []
@@ -1306,7 +1318,7 @@ class Inbox(MutableModel):
     ) -> Item:
         """Make an item, numbered after every other, and keep it; `call` is the runtime's id for the agent's call that made it, where one did, and `quiet` says it waits for a call (`Item.quiet`).
 
-        One for a conversation that has ended goes to its session's main
+        One for a conversation that has ended goes to their session's main
         conversation, saying whose it was.
         """
         addressed = self.passed(recipient)
@@ -1324,7 +1336,7 @@ class Inbox(MutableModel):
         return self.kept(item)
 
     def passed(self, recipient: Party) -> Conversation | None:
-        """Return `recipient` where it's a conversation that has ended, whose items go to its session's main one; none else."""
+        """Return `recipient` where they're a conversation that has ended, whose items go to their session's main one; none else."""
         match recipient:
             case Conversation(agent=str()) as conversation:
                 place = self.whereabouts.get(conversation.key())
@@ -1370,7 +1382,7 @@ class Inbox(MutableModel):
         ]
 
     def exchanged(self, conversation: Conversation) -> list[Item]:
-        """Return the items `conversation` sent or was sent, oldest first, in every state: those for it passed on to its session's main conversation once it ended among them."""
+        """Return the items `conversation` sent or was sent, oldest first, in every state, including those for them passed on to their session's main conversation once they ended."""
         ordered = [self.items[number] for number in sorted(self.items)]
         return [
             item

@@ -3,12 +3,13 @@
 `docs/inbox.md`, *Reading an exchange*. What's listed is narrowed as every list
 lup answers is (`lup_dev.listing`: when each was made, the latest up to a limit,
 what's left out said with what reads it), and further:
-- **one conversation's exchange** (`conversation`): the items it sent and was
-  sent, and with `subagents` those of each subagent below it. It's named by its
-  path (`flow-review/explore-auth`), its own name, or its runtime's id or the
-  id's start (`Reader.matching`). A session's name is its launch's as lup last
-  kept it (`SessionNames`), a subagent's as its whereabouts last heard it, or,
-  from before they kept it, as its end was told to its parent. Names repeat
+- **one conversation's exchange** (`conversation`): the items they sent and
+  were sent, and with `subagents` those of each subagent below them. They're
+  named by their path (`flow-review/explore-auth`), their own name, or their
+  runtime's id or the id's start (`Reader.matching`). A session's name is their
+  launch's as lup last kept it (`SessionNames`), a subagent's as their
+  whereabouts last heard it, or, from before whereabouts kept it, as it was told
+  to their parent when they ended. Names repeat
   over time, a branch's above all, so a name several conversations had reads
   the one last heard, and the answer names the others by id;
 - **the kinds** of item (`kinds`), as a tag's `kind` names them;
@@ -78,9 +79,9 @@ class Narrowing(Span):
     conversation: str | None = Field(
         default=None,
         description=(
-            "Only one conversation's exchange: the items it sent and was sent. A "
-            "session by its name (`flow-review`), a subagent by its path "
-            "(`flow-review/explore-auth`) or its own name, or either by its "
+            "Only one conversation's exchange: the items they sent and were sent. "
+            "A session by their name (`flow-review`), a subagent by their path "
+            "(`flow-review/explore-auth`) or their own name, or either by their "
             "runtime's id or the id's start. Where a name was several "
             "conversations', the one last heard is read, and the answer names "
             "the others by id. Left out, every conversation's."
@@ -89,8 +90,8 @@ class Narrowing(Span):
     subagents: bool = Field(
         default=False,
         description=(
-            "With `conversation`, its subagents' items too, and theirs' below "
-            "them; left out, its own alone."
+            "With `conversation`, their subagents' items too, and theirs' below "
+            "them; left out, their own alone."
         ),
     )
     kinds: list[ItemKind] | None = Field(
@@ -268,7 +269,7 @@ class Reader(Model, arbitrary_types_allowed=True):
 
     @property
     def roster(self) -> Roster:
-        """The conversations the inbox knows, each by the name lup calls it (`Delivery.roster`)."""
+        """The conversations the inbox knows, each by the name lup calls them (`Delivery.roster`)."""
         return self.delivery.roster()
 
     def read(self, items: list[Item], wanted: Narrowing) -> Read:
@@ -287,7 +288,7 @@ class Reader(Model, arbitrary_types_allowed=True):
                 text=(
                     f"No conversation{self.where} is `{conversation}`: "
                     f"`{self.spelling.conversation}` takes a session's name, a "
-                    "subagent's path or its own name, or the runtime's id for "
+                    "subagent's path or their own name, or the runtime's id for "
                     "either, or the id's start, as `inbox` lines name them."
                 )
             )
@@ -385,7 +386,7 @@ class Reader(Model, arbitrary_types_allowed=True):
         return f"{self.headed(entry)}: {opening(entry)}"
 
     def headed(self, entry: Item | Flags) -> str:
-        """Say an item's heading: its number, when it was made, what it is, from whom to whom, and where it stands; each conversation by its name (`called`), and the operator's copy of a message between conversations to whom it was sent. A conversation's flagged writes are headed as one: each number, the latest's time, and how many."""
+        """Say an item's heading: its number, when it was made, what it is, from whom to whom, and where it stands; each conversation by their name (`called`), and the operator's copy of a message between conversations to whom it was sent. A conversation's flagged writes are headed as one: each number, the latest's time, and how many."""
         if isinstance(entry, Flags):
             latest = entry.items[-1]
             return (
@@ -408,7 +409,7 @@ class Reader(Model, arbitrary_types_allowed=True):
         )
 
     def whole(self, entry: Item | Flags, placed: list[int]) -> str:
-        """Say an item whole under its heading: a conversation's as it wrote it, saying which of the operator's items a turn's end answers, the operator's words on it under it, with any reply copies before kept on them; any other's as it was told to whom it was for, what it says on the items `placed` told under them, and a review's context left out. A conversation's flagged writes under one heading, each whole."""
+        """Say an item whole under its heading: a conversation's as they wrote it, saying which of the operator's items a turn's end answers, the operator's words on it under it, with any reply copies before kept on them; any other's as it was told to whom it was for, what it says on the items `placed` told under them, and a review's context left out. A conversation's flagged writes under one heading, each whole."""
         heading = self.headed(entry)
         each = entry.items if isinstance(entry, Flags) else [entry]
         tags = [self.tagged(item, placed) for item in each]
@@ -516,14 +517,14 @@ class Reader(Model, arbitrary_types_allowed=True):
         below: list[Conversation],
         wanted: Narrowing,
     ) -> str:
-        """Say whose exchange is read, the conversation by its path and its runtime's ids, and what of it."""
-        subagents = f" and its {many(len(below), 'subagent')}" if below else ""
+        """Say whose exchange is read, the conversation by their path and their runtime's ids, and what of it."""
+        subagents = f" and their {many(len(below), 'subagent')}" if below else ""
         state = "every item" if wanted.every else "what still waits"
         window = wanted.window(self.delivery.clock.now()).said()
         return f"The exchange of {self.titled(found)}{subagents}: {state}{window}, oldest first."
 
     def titled(self, conversation: Conversation) -> str:
-        """Name a conversation by its path, where lup knows it, then by its runtime's ids, which read it whatever it's named since."""
+        """Name a conversation by their path, where lup knows it, then by their runtime's ids, which read them whatever they're named since."""
         path = self.roster.path(conversation)
         return ids(conversation) if path is None else f"`{path}` ({ids(conversation)})"
 
@@ -534,7 +535,7 @@ class Reader(Model, arbitrary_types_allowed=True):
         others: list[Conversation],
         items: list[Item],
     ) -> list[str]:
-        """Say, first, that `wanted` names several conversations: that this reads `found`, the one last heard, and the others, each by its runtime's ids and when it was last heard, which `conversation` reads by id; nothing where it names one.
+        """Say, first, that `wanted` names several conversations: that this reads `found`, the one last heard, and the others, each by their runtime's ids and when they were last heard, which `conversation` reads by id; nothing where it names one.
 
         Said before what's read, since a reader who never reaches an answer's
         last line would take one session for another.
@@ -555,7 +556,7 @@ class Reader(Model, arbitrary_types_allowed=True):
         ]
 
     def called(self, party: Party) -> str:
-        """Name a party for the reader: "you" for the reader, else as lup calls it (`Roster.who`): the operator, or a conversation by its name, with its runtime's ids where another shares it or it has none."""
+        """Name a party for the reader: "you" for the reader, else as lup calls them (`Roster.who`): the operator, or a conversation by their name, with their runtime's ids where another shares it or they have none."""
         if party == self.reader:
             return "you"
         return self.roster.who(party)
@@ -581,7 +582,7 @@ class Reader(Model, arbitrary_types_allowed=True):
         return list(dict.fromkeys([*parties, *placed]))
 
     def matching(self, wanted: str, items: list[Item]) -> list[Conversation]:
-        """Return the conversations `wanted` names, the one last heard first: by its path or its own name, or by the runtime's id for it, or the id's start."""
+        """Return the conversations `wanted` names, the one last heard first: by their path or their own name, or by the runtime's id for them, or the id's start."""
 
         def named(conversation: Conversation) -> bool:
             own = (
@@ -600,7 +601,7 @@ class Reader(Model, arbitrary_types_allowed=True):
     def below(
         self, conversation: Conversation, items: list[Item]
     ) -> list[Conversation]:
-        """Return the subagents below `conversation` among those of `items`: for a session's own, every subagent of its session; for a subagent, each it spawned, and theirs."""
+        """Return the subagents below `conversation` among those of `items`: for a session's own, every subagent of their session; for a subagent, each they spawned, and theirs."""
         known = self.conversations(items)
         if conversation.agent is None:
             return [
@@ -614,7 +615,7 @@ class Reader(Model, arbitrary_types_allowed=True):
         ]
 
     def heard(self, conversation: Conversation, items: list[Item]) -> datetime:
-        """Return when `conversation` was last heard of: its latest item, or when its whereabouts were first kept where it has none."""
+        """Return when `conversation` was last heard of: their latest item, or when their whereabouts were first kept where they have none."""
         made = [
             item.made
             for item in items

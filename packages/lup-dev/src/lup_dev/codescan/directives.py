@@ -22,7 +22,7 @@ reported as a `Problem`, which the judge turns into a finding of its own rule:
 
 The last three are reminders (`Problem.reminder`): work that came due rather than
 something wrong with the code, which the gate lists without failing, and a
-session is told at its start.
+session is told at their start.
 """
 
 import io
@@ -252,6 +252,9 @@ class Identity(Model):
     a note's text, or a directive's call, written out."""
     asked: bool
     """Whether adding it asks the operator: true for an `ignore`."""
+    defers: bool = False
+    """Whether it marks work knowingly left undone: true for a `defer`, which
+    `land` lists as a branch adds or removes it (`added_deferrals`)."""
 
 
 class Comment(Model, ABC):
@@ -407,7 +410,7 @@ class Defer(Comment):
             *([f"when={self.when}"] if self.when is not None else []),
             f"why={json.dumps(self.why)}",
         ]
-        return Identity(text=f"defer({', '.join(fields)})", asked=False)
+        return Identity(text=f"defer({', '.join(fields)})", asked=False, defers=True)
 
 
 class Note(Comment):
@@ -507,6 +510,13 @@ def added_suppressions(
     """List the comments `after` adds to `before` that ask the operator: `ignore`s."""
     return [
         directive for directive in missing(before, after) if directive.identity().asked
+    ]
+
+
+def added_deferrals(before: list[Directive], after: list[Directive]) -> list[Directive]:
+    """List the comments `after` adds to `before` that mark work knowingly left undone: `defer`s; given the other way round, those it removes."""
+    return [
+        directive for directive in missing(before, after) if directive.identity().defers
     ]
 
 

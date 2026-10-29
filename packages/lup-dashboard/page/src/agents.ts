@@ -1,6 +1,6 @@
 // The agents the host serves, as the page shows them: each launch with its
 // session's conversation, and each subagent under the conversation that spawned
-// it; what each is doing, and the context ring its banner carries.
+// them; what each is doing, and the context ring its banner carries.
 import type { ReplyOf } from "./api";
 
 type Listed = ReplyOf<"listed">;
@@ -8,7 +8,7 @@ export type Register = Listed["launches"][number];
 export type Talker = NonNullable<Listed["talkers"]>[string][number];
 export type Activity = NonNullable<Talker["activity"]>;
 
-/** A conversation, with the subagents it spawned. */
+/** A conversation, with the subagents they spawned. */
 export interface Agent {
     talker: Talker;
     children: Agent[];
@@ -47,7 +47,7 @@ export function repositoryName(path: string): string {
     return last.endsWith(".git") ? last.slice(0, -".git".length) : last;
 }
 
-/** Arrange what the host listed into its launches, each conversation under its parent. */
+/** Arrange what the host listed into its launches, each conversation under their parent. */
 export function launches(listed: Listed): Launch[] {
     return listed.launches.map((launch) => {
         const talkers = listed.talkers?.[launch.launch] ?? [];
@@ -72,7 +72,7 @@ export function everyone(served: Launch[]): Agent[] {
 }
 
 /**
- * Whether a subagent's conversation is over: it ended, or no hook has been heard from it since the host began
+ * Whether a subagent's conversation is over: they ended, or no hook has been heard from them since the host began
  * keeping what each conversation does, at every hook, so one with nothing kept is from before and long over.
  */
 export function over(agent: Agent): boolean {
@@ -80,7 +80,7 @@ export function over(agent: Agent): boolean {
     return activity == null || activity.state === "ended";
 }
 
-/** A conversation running, with the launch it runs in. */
+/** A conversation running, with the launch they run in. */
 export interface Running {
     launch: Register;
     talker: Talker;
@@ -88,7 +88,7 @@ export interface Running {
 
 /**
  * Every conversation running, in the tree's order: each repository's launches, each session's own conversation,
- * then its subagents that aren't over, each under its parent, those running before those under one that's over.
+ * then their subagents who aren't over, each under their parent, those running before those under one that's over.
  */
 export function running(served: Launch[]): Running[] {
     function within(agent: Agent): Talker[] {

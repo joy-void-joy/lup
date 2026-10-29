@@ -22,4 +22,4 @@ class Exchanges(ABC):
 
     @abstractmethod
     async def exchanged(self, viewed: OfAgent) -> Exchanged:
-        """Return the items the conversation `viewed` names sent, as it wrote them, and those it was sent, as it's told them, each oldest first."""
+        """Return the items the conversation `viewed` names sent, as they wrote them, and those they were sent, as they're told them, each oldest first."""

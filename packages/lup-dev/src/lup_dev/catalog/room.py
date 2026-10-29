@@ -273,7 +273,7 @@ class SessionDefaults(Model):
     subagent_cache: CacheLifetime = "1h"
     """How long the prompt cache of a session's subagents lasts: an hour, as the
     main conversation's does on a subscription, so a worker that waits a while
-    doesn't pay to rebuild its context. Theirs is 5 minutes otherwise."""
+    doesn't pay to rebuild their context. Theirs is 5 minutes otherwise."""
     auto_memory: bool = False
     """Whether a runtime keeps its own memory across sessions: off, so every
     session starts from what the repository and its guidance say, and one
@@ -281,10 +281,10 @@ class SessionDefaults(Model):
     idle_compaction: bool = False
     """Whether a runtime compacts a long conversation while the session sits
     idle: off, so a session left waiting, on the operator or on a hold, comes
-    back to its conversation as it was rather than to a summary made
+    back to their conversation as it was rather than to a summary made
     meanwhile. Compaction when the context fills stays the runtime's own: off,
     a full session would stop."""
-    # lup: defer(issue=117, why="the native `SendMessage`, `ListAgents` and `Agent` stay off this list until lup's spawn exists: a session resumes a subagent it started through `SendMessage`")
+    # lup: defer(issue=117, why="the native `SendMessage`, `ListAgents` and `Agent` stay off this list until lup's spawn exists: a session resumes a subagent they started through `SendMessage`")
     removed_tools: list[str] = [
         "Artifact",
         "SendFeedback",
@@ -302,10 +302,10 @@ class SessionDefaults(Model):
       alone 55 KB;
     - `EnterWorktree` and `ExitWorktree` are the native worktree tools: a
       worktree for another agent's work is lup's spawn's to make (#117), and a
-      session makes its own with git.
+      session makes their own with git.
 
     The native messaging tools (`SendMessage`, `ListAgents`) stay until lup's
-    spawn exists, with the native `Agent`: a session resumes a subagent it
+    spawn exists, with the native `Agent`: a session resumes a subagent they
     started through `SendMessage`, so removing them alone would strand one.
 
     A runtime that can't remove a built-in tool by name removes none, and its
