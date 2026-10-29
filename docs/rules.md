@@ -1605,7 +1605,7 @@ def shown(rows: list[str], limit: int = 200) -> list[str]:
 
 ## `fixed-tool-limit`
 
-A tool that stops its answer at a bound its caller can't set hands the agent part of what it asked for, with no way to reach the rest.
+A tool that stops its answer at a bound its caller can't set hands the agent part of what they asked for, with no way to reach the rest.
 
 **Steer:** Make the bound a field of the tool's input, defaulting to the value it has, and say in the answer when it stopped short and how to reach the rest: a larger limit, or a narrower query. Where a format or an API forces the limit, keep it with an `ignore` that says so.
 

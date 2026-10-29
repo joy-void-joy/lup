@@ -382,7 +382,7 @@ def test_a_repository_s_sessions_move_into_its_rooms_home_and_the_rest_stay(
         (
             "A dry run: nothing moves until `lup-dev account migrate --move`. End "
             "every session of this repository first, in a room or on the host: one "
-            "still running writes on where its record was."
+            "still running writes on where their record was."
         ),
         (
             f"claude: 2 records of this repository's sessions, 2 files and {size} B, "
@@ -586,14 +586,14 @@ def test_claude_code_s_directory_is_checked_for_what_a_host_session_acts_on(
             "yours."
         ),
         (
-            "`shell-snapshots/`: 1 snapshot. A host session runs its own before each "
+            "`shell-snapshots/`: 1 snapshot. A host session runs their own before each "
             "command, and a room could have written any: with no host session "
             "running, `rm ~/.claude/shell-snapshots/*`; a session makes a new one as "
-            "it starts."
+            "they start."
         ),
         (
             "`session-env/`: 2 sessions' environments, 1 holding a file, which a "
-            "session runs before each of its commands, a resumed one too: with no "
+            "session runs before each of their commands, a resumed one too: with no "
             "host session running, `rm -r ~/.claude/session-env/*`."
         ),
         (
@@ -714,14 +714,14 @@ def test_codex_s_home_is_checked_for_what_a_host_session_acts_on(
         "`hooks.json` runs on the host `say done`. Each is yours only if you set it.",
         "`AGENTS.md`, 1 line, is read into every host session: check it's all yours.",
         (
-            "`rules/` (1 file): a host session loads each, and `rules/` can let it "
+            "`rules/` (1 file): a host session loads each, and `rules/` can let them "
             "run a command without asking: check they're yours."
         ),
         (
-            "`tmp/`: a host session runs its shell snapshot and the helpers it puts "
-            "first on its commands' `PATH` from them, and a room could have written "
+            "`tmp/`: a host session runs their shell snapshot and the helpers they put "
+            "first on their commands' `PATH` from there, and a room could have written "
             "any: with no host session running, `rm -r ~/.codex/tmp/*`; a session "
-            "makes its own as it starts."
+            "makes their own as they start."
         ),
         (
             "Your host login, `auth.json`, was readable by every room on Codex: on "

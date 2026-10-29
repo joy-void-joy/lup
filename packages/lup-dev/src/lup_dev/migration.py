@@ -624,7 +624,7 @@ class Migrating(Model, arbitrary_types_allowed=True):
         )
 
     def live(self) -> list[Register]:
-        """Return each launch of the repository still running, whose session would write on where its record was as it moves (`running_launches`)."""
+        """Return each launch of the repository still running, whose session would write on where their record was as it moves (`running_launches`)."""
         return running_launches(self.layout, self.repository)
 
     def refused(self, live: list[Register]) -> MigrationError:
@@ -632,7 +632,7 @@ class Migrating(Model, arbitrary_types_allowed=True):
         named = ", ".join(f"`{each.name or each.launch}`" for each in live)
         message = (
             f"a launch of this repository still runs, {named}, whose session "
-            "would write on where its record was: end each, and every session "
+            "would write on where their record was: end each, and every session "
             "of the repository on the host, then move"
         )
         return MigrationError(message)
@@ -655,7 +655,7 @@ class Migrating(Model, arbitrary_types_allowed=True):
                     (
                         "A dry run: nothing moves until `lup-dev account migrate "
                         "--move`. End every session of this repository first, in a room "
-                        "or on the host: one still running writes on where its record "
+                        "or on the host: one still running writes on where their record "
                         "was."
                     ),
                     *(
