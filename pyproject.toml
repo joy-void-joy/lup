@@ -146,6 +146,13 @@ addopts = [
     "--import-mode=importlib",
     "--ignore=packages/lup-dev/src/lup_dev/codescan/bundle",
 ]
+# A test stuck past 30 seconds has its threads dumped and its worker ended,
+# which xdist reports as that test failing, rather than the run waiting
+# silently for good: a thread pool left waiting on a held call once hung the
+# whole run for 25 minutes with nothing naming the test (#352). The slowest
+# test took 4.8 s on 2026-10-29, the whole suite 43 s with xdist.
+faulthandler_timeout = "30"
+faulthandler_exit_on_timeout = true
 
 [tool.importlinter]
 root_packages = ["lup", "lup_dev", "lup_transcripts", "lup_ledger"]
