@@ -7,8 +7,7 @@ from typing import Literal
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from lup_dev.inbox import store as inbox
-from lup_ledger.parties import Conversation, Operator, Party
+from lup_ledger.parties import Conversation, Lup, Operator, Party, Writer
 from lup_ledger.records import Edge, Kinds, Node
 from lup_ledger.threads import (
     KINDS,
@@ -87,19 +86,30 @@ def test_a_name_that_could_read_as_a_number_or_a_part_or_isnt_one_is_refused(
         Thread(number=1, repository=REPOSITORY, by=MAIN, at=AT, name=name, title="t")
 
 
-def test_parties_are_stored_as_the_inbox_stores_its_own() -> None:
-    worker = MAIN.model_copy(update={"agent": "a1"})
-    main = inbox.Conversation(repository=REPOSITORY, runtime="r", session="s1")
-    subagent = main.model_copy(update={"agent": "a1"})
-    theirs = [inbox.Operator(), main, subagent]
-    ours = [Operator(), MAIN, worker]
-
-    assert [each.model_dump_json() for each in ours] == [
-        each.model_dump_json() for each in theirs
+def test_parties_read_as_the_inbox_stored_its_own_and_keep_their_keys() -> None:
+    """The inbox's files of an earlier lup named each party so, and each conversation's whereabouts by its key."""
+    stored = [
+        '{"party":"operator"}',
+        '{"party":"conversation","repository":"/work/lup.git","runtime":"claude","session":"s1","agent":null}',
+        '{"party":"conversation","repository":"/work/lup.git","runtime":"claude","session":"s1","agent":"a1"}',
     ]
-    assert [MAIN.key(), worker.key()] == [main.key(), subagent.key()]
     party = TypeAdapter[Party](Party)
-    assert [party.validate_json(each.model_dump_json()) for each in theirs] == ours
+
+    read = [party.validate_json(each) for each in stored]
+
+    assert [each.model_dump_json() for each in read] == stored
+    assert [each.key() for each in read if isinstance(each, Conversation)] == [
+        "2e07ae0bea3110e3af11358b3fca149f3ac54e86bba431800c5e15b49af605cb",
+        "5cf8878928910a2a3afa25e82f15d00ea9b28df47acb1ed40a399e57f7f1f47e",
+    ]
+
+
+def test_lup_writes_records_and_is_no_party() -> None:
+    writer = TypeAdapter[Writer](Writer)
+
+    assert writer.validate_json('{"party":"lup"}') == Lup()
+    with pytest.raises(ValidationError):
+        TypeAdapter[Party](Party).validate_json('{"party":"lup"}')
 
 
 def test_only_the_operator_settles_and_only_an_agent_says_done() -> None:

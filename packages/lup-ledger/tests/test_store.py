@@ -11,7 +11,7 @@ import pytest
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
 from lup_ledger.errors import LupLedgerError
-from lup_ledger.parties import Conversation, Operator
+from lup_ledger.parties import Conversation, Lup, Operator
 from lup_ledger.records import Edge, Node
 from lup_ledger.threads import (
     Answered,
@@ -363,7 +363,7 @@ def test_nothing_is_kept_of_a_refused_write(ledger: Ledger) -> None:
     assert ledger.versions(2) == []
 
 
-def test_a_ledger_whose_tables_are_another_version_is_refused(tmp_path: Path) -> None:
+def test_a_ledger_whose_tables_are_a_later_version_is_refused(tmp_path: Path) -> None:
     layout = LedgerLayout(home=tmp_path)
     Ledger.opened(layout).close()
     with sqlite3.connect(layout.database) as database:
@@ -371,6 +371,24 @@ def test_a_ledger_whose_tables_are_another_version_is_refused(tmp_path: Path) ->
 
     with pytest.raises(LupLedgerError, match="version 7 of its tables"):
         Ledger.opened(layout)
+
+
+def test_a_ledger_at_the_first_version_is_brought_to_the_second_keeping_its_records(
+    tmp_path: Path,
+) -> None:
+    layout = LedgerLayout(home=tmp_path)
+    first = Ledger.opened(layout, schema=1)
+    kept = first.kept(thread(first, "lag"))
+    first.close()
+
+    second = Ledger.opened(layout)
+    second.rewritten("draft", Operator())
+
+    assert second.node(kept.number, Thread) == kept
+    assert second.every(Thread) == [kept]
+    assert second.plain("draft", Operator) == Operator()
+    assert second.connection.execute("PRAGMA user_version").fetchone()[0] == 2
+    second.close()
 
 
 def test_threads_of_the_host_keep_and_draw_at_once(ledger: Ledger) -> None:
@@ -451,6 +469,13 @@ def test_no_read_or_write_walks_the_store(ledger: Ledger, threads: Threads) -> N
     threads.standing(lag.number)
     threads.under(parent.number)
     threads.answering(lag.number)
+    ledger.every(Thread)
+    ledger.every(Node)
+    ledger.keeps(Check)
+    ledger.drawn_of(Edge)
+    ledger.rewritten("draft", lag)
+    ledger.plain("draft", Thread)
+    ledger.plains("dr", Thread)
     ledger.connection.set_trace_callback(None)
 
     plans = [
@@ -467,3 +492,107 @@ def test_no_read_or_write_walks_the_store(ledger: Ledger, threads: Threads) -> N
     ]
     assert plans
     assert walks == []
+
+
+def test_writes_held_together_are_kept_together_or_not_at_all(ledger: Ledger) -> None:
+    lag = ledger.kept(thread(ledger, "lag"))
+
+    def refused() -> None:
+        with ledger.writing():
+            ledger.kept(thread(ledger, "kept"))
+            ledger.kept(thread(ledger, "lag"))
+
+    with pytest.raises(LupLedgerError):
+        refused()
+    with ledger.writing():
+        cache = ledger.kept(thread(ledger, "cache"))
+        with pytest.raises(LupLedgerError):
+            ledger.kept(thread(ledger, "cache"))
+        voice = ledger.kept(thread(ledger, "voice"))
+
+    assert ledger.nodes(REPOSITORY, Thread) == [lag, cache, voice]
+
+
+def test_a_kind_is_read_across_repositories(ledger: Ledger) -> None:
+    assert not ledger.keeps(Thread)
+    lag = ledger.kept(thread(ledger, "lag"))
+    other = ledger.kept(thread(ledger, "lag", repository=OTHER))
+    found = check(ledger)
+    answered = ledger.drawn(
+        Answered(target=found.number, repository=REPOSITORY, by=Operator(), at=at(1))
+    )
+    moved = ledger.drawn(
+        In(
+            source=found.number,
+            target=lag.number,
+            repository=REPOSITORY,
+            by=MAIN,
+            at=at(2),
+        )
+    )
+
+    assert ledger.keeps(Thread)
+    assert ledger.every(Thread) == [lag, other]
+    assert ledger.every(Node) == [lag, other, found]
+    assert ledger.drawn_of(Answered) == [answered]
+    assert ledger.drawn_of(Edge) == [answered, moved]
+
+
+def test_lup_writes_what_it_does_of_its_own_accord(ledger: Ledger) -> None:
+    found = check(ledger)
+    answered = ledger.drawn(
+        Answered(target=found.number, repository=REPOSITORY, by=Operator(), at=at(1))
+    )
+    told = ledger.drawn(
+        Edge(
+            kind="inbox:told",
+            target=found.number,
+            source=None,
+            repository=REPOSITORY,
+            by=Lup(),
+            at=at(2),
+        )
+    )
+
+    assert ledger.drawn_to(found.number, Edge) == [answered, told]
+    assert told.by == Lup()
+
+
+def test_a_plain_record_is_rewritten_in_place(ledger: Ledger) -> None:
+    assert ledger.plain("draft", Thread) is None
+    ledger.rewritten("draft", thread(ledger, "one"))
+    ledger.rewritten("draft", thread(ledger, "two"))
+
+    found = ledger.plain("draft", Thread)
+
+    assert found is not None
+    assert found.name == "two"
+    assert ledger.connection.execute("SELECT count(*) FROM records").fetchone()[0] == 1
+    with pytest.raises(LupLedgerError, match="record `draft` doesn't read"):
+        ledger.plain("draft", Check)
+
+
+def test_plain_records_are_read_by_the_start_of_their_names(ledger: Ledger) -> None:
+    for name in ["talk:b", "talk:a", "talks", "talk", "draft"]:
+        ledger.rewritten(name, Operator())
+
+    assert list(ledger.plains("talk:", Operator)) == ["talk:a", "talk:b"]
+    assert list(ledger.plains("talk", Operator)) == [
+        "talk",
+        "talk:a",
+        "talk:b",
+        "talks",
+    ]
+    assert ledger.plains("order:", Operator) == {}
+
+
+def test_an_attachment_is_kept_once_by_its_content(ledger: Ledger) -> None:
+    diff = b"+ a line\n" * 1000
+
+    first = ledger.attached(diff)
+    second = ledger.attached(diff)
+
+    assert first == second
+    assert ledger.attachment(first) == diff
+    assert ledger.attachment("0" * 64) is None
+    assert [each.name for each in ledger.layout.attachments.iterdir()] == [first]

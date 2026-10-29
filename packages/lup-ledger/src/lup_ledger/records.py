@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Annotated, Self
 from pydantic import AfterValidator, AwareDatetime, Field, model_validator
 
 from lup.types import Model
-from lup_ledger.parties import Party
+from lup_ledger.parties import Writer
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -66,8 +66,8 @@ class Record(Model, extra="allow"):
     """Its kind's name, namespaced by whoever declares it: `ledger:thread`."""
     repository: Path
     """The git directory of the repository it's of."""
-    by: Party
-    """Who wrote it."""
+    by: Writer
+    """Who wrote it: a party, or lup."""
     at: AwareDatetime
     """When it was written: for a node, this version of it."""
 

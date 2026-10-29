@@ -1,8 +1,10 @@
-"""Who writes the ledger's records: the operator, or a conversation of a session.
+"""Who writes the ledger's records: the operator, a conversation of a session, or lup itself.
 
-Each is the inbox's party of the same name, field for field and tag for tag, so a
-record and an item say who they're from alike, stored and sent, and a
-conversation's key (`Conversation.key`) names the same file either way.
+The operator and a conversation are the inbox's parties, what an item is from
+and for (`lup_dev.inbox.store` takes them from here), so a record and an item
+say who they're from alike, and a conversation's key (`Conversation.key`) is
+the one the inbox's files were named by. lup writes what it does of its own
+accord, such as telling an item, and is a writer, never a party.
 """
 
 import hashlib
@@ -14,7 +16,6 @@ from pydantic import Field
 from lup.types import Model
 
 
-# lup: defer(issue=345, why="the inbox keeps its own `Operator` and `Conversation` (`lup_dev.inbox.store`) until its items are nodes; then it imports these and drops its own")
 class Operator(Model):
     """The operator."""
 
@@ -51,4 +52,14 @@ class Conversation(Model):
 
 
 type Party = Annotated[Operator | Conversation, Field(discriminator="party")]
-"""Who wrote a record."""
+"""Who speaks: what an item is from and for, and who holds a thread."""
+
+
+class Lup(Model):
+    """lup itself, writing what it does of its own accord: an item told, put back, or taken back at a landing."""
+
+    party: Literal["lup"] = "lup"
+
+
+type Writer = Annotated[Operator | Conversation | Lup, Field(discriminator="party")]
+"""Who wrote a record: a party, or lup."""
