@@ -15,9 +15,16 @@ from lup_ledger.records import Edge, Node
 from lup_ledger.threads import In, Member, Moved, Refers, Standing, Thread
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from lup_ledger.parties import Conversation
+
+
+def holding(conversation: Conversation) -> bool:
+    """Say that `conversation` still holds what they hold: every holder does, where nothing says who has ended."""
+    del conversation
+    return True
 
 
 class Threads(Model, arbitrary_types_allowed=True):
@@ -46,13 +53,27 @@ class Threads(Model, arbitrary_types_allowed=True):
                 each for each in self.of(thread.repository) if each.parent == number
             ]
 
-    def answering(self, number: int) -> Conversation | None:
-        """Return who answers for thread `number`: its holder, or, where nobody holds it, the nearest thread above it that somebody holds; none where nobody does."""
+    def answering(
+        self, number: int, live: Callable[[Conversation], bool] = holding
+    ) -> Conversation | None:
+        """Return who answers for thread `number`: its holder, or, where nobody holds it, the nearest thread above it that somebody holds; none where nobody does.
+
+        A holder `live` says has ended holds nothing: whoever holds the thread
+        above answers for it.
+        """
+
+        def held(thread: Thread) -> Conversation | None:
+            return (
+                thread.holder
+                if thread.holder is not None and live(thread.holder)
+                else None
+            )
+
         with self.ledger.together():
             thread = self.thread(number)
-            while thread.holder is None and thread.parent is not None:
+            while held(thread) is None and thread.parent is not None:
                 thread = self.thread(thread.parent)
-        return thread.holder
+        return held(thread)
 
     def members(self, number: int) -> list[Member]:
         """Return what's in thread `number`, in the order it came in: each node in it, and each part moved into it, with the edges drawn to its node."""

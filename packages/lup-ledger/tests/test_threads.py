@@ -342,6 +342,16 @@ def test_sub_threads_and_who_answers_for_a_thread_nobody_holds(
     assert threads.of(OTHER)[0].name == "elsewhere"
 
 
+def test_a_holder_that_ended_holds_nothing_and_the_thread_above_answers(
+    ledger: Ledger, threads: Threads
+) -> None:
+    main = opened(ledger, "main", holder=MAIN)
+    held = opened(ledger, "held", parent=main.number)
+
+    assert threads.answering(held.number, live=lambda each: each != WORKER) == MAIN
+    assert threads.answering(held.number, live=lambda _: False) is None
+
+
 def test_a_thread_under_what_isn_t_a_thread_of_its_repository_or_under_itself_is_refused(
     ledger: Ledger,
 ) -> None:

@@ -1,6 +1,6 @@
 # The ledger: lup's typed graph, and threads
 
-The ledger keeps the work as a typed graph: nodes, the edges between them, and every version of every node. Threads are its first kind. A thread is one concern: what's in it (items, the operator's parts, checks) and where it stands. It's one of the core's submodules, always present. The host service opens it at its start, and keeps the inbox on it: each item a node, where it stands and what it answers edges (`docs/inbox.md`, *Kept on the ledger*). Nothing makes a thread yet (#345).
+The ledger keeps the work as a typed graph: nodes, the edges between them, and every version of every node. Threads are its first kind. A thread is one concern: what's in it (items, the operator's parts, checks) and where it stands. It's one of the core's submodules, always present. The host service opens it at its start, and keeps the inbox on it: each item a node, where it stands and what it answers edges (`docs/inbox.md`, *Kept on the ledger*). Agents open threads, work in them and are told what lands there through lup's tools (`docs/inbox.md`, *Threads*).
 
 ## Records
 
@@ -35,9 +35,8 @@ What's in it is edges drawn to it:
 - **its status** (`Status`), the latest one drawn:
   - parked until the first of its triggers comes: an issue closing, a branch or a commit landing, a conversation ending, a time, or a condition named as `defer`'s `when=` names one;
   - done, in an agent's word, with what to try;
-  - settled, which only the operator does;
-  - declined;
-  - reopened.
+  - settled, or declined, which only the operator does (`Settled.by`, `Declined.by`);
+  - reopened, by the operator, or by lup where what a parked thread waits for comes.
 
 `Standing.read` says three things:
 - **Where it stands:** as its status says. While it's working or reopened, it waits on the operator where a member does. A check waits until they answer it (`Answered`), and each kind of node answers for itself, so a new kind changes nothing in the reading.
@@ -47,7 +46,7 @@ What's in it is edges drawn to it:
 `Threads`, on the store, reads threads:
 - one, by its number or its name, or a repository's;
 - those under one;
-- who answers for one: its holder, or else the nearest thread above it that somebody holds;
+- who answers for one: its holder, or else the nearest thread above it that somebody holds, where a holder `live` says has ended holds nothing;
 - what's in one, the references to it, and where it stands.
 
 A thread's sub-threads are read from its repository's threads by their `parent`, so a read covers at most one repository's threads.
@@ -60,7 +59,7 @@ A thread's sub-threads are read from its repository's threads by their `parent`,
 - **Names:** `kept` refuses a name another node of the repository holds, and a new name among `taken`, the names of the repository's agents, which the host service knows.
 - **Plain records** beside the graph: what's rewritten in place by its name, with no version and no number (`plain`, `rewritten`), read one by its name or several by the start of their names (`plains`). The inbox keeps there:
   - the operator's draft, rewritten at each pause in their typing, which versions would fill with keystrokes; once sent, it's an item. The review's order and what they write on a conversation they read are the same.
-  - each conversation's whereabouts, keyed by the conversation's runtime's ids: not numbered, because nothing cites a conversation by number, and the sequence is the operator's to read, where each subagent heard would skip one. A thread's holder is a conversation by those ids too (`Thread.holder`). Should threads need a conversation as a node, they make it one then (#345, piece 3), once threads move the numbers anyway.
+  - each conversation's whereabouts, keyed by the conversation's runtime's ids: not numbered, because nothing cites a conversation by number, and the sequence is the operator's to read, where each subagent heard would skip one. A thread's holder is a conversation by those ids too (`Thread.holder`), and where each works is kept on their whereabouts, so threads need no conversation as a node (#353).
 - **Attachments** beside the database: what a record carries that's too large for a row, such as an item's diff, a file each under `attachments/`, named by its content's SHA-256 (`attached`, `attachment`). A record names one by its digest, so the same content attached twice is one file, and an attachment a later version replaced stays, read through the version naming it.
 - **Indexed, so no read walks the store:**
   - a node's latest version is one row of `nodes`, found by its number, by its repository and kind, by its kind across repositories (`every`, `keeps`), or by its name;
