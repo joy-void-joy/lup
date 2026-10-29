@@ -14,7 +14,7 @@ item, showing the file as it stands. One that flags nothing of its own joins it
 too, refreshing it, and makes none where the operator has read it; it asks the
 inbox only for a file the session's record says an item may gather
 (`Session.flagging`), so a write to any other file costs nothing. Where the
-operator holds each flagged write of a conversation, its writes are held
+operator holds each flagged write of a conversation, their writes are held
 instead (`Judge.holding`), and none is flagged.
 
 Each flag keeps the branch its worktree has checked out (`Flagged.branch`), and

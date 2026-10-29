@@ -944,7 +944,7 @@ def vacated(launch: LaunchLayout) -> None:
     """Remove a launch's room's home and the launch's own directory, with what the room wrote in either, once its room is gone.
 
     The room writes its home, and, in the launch's directory, what its session
-    writes for itself alone, mounted from there into its runtime's home
+    writes for themselves alone, mounted from there into their runtime's home
     (`lup.sessions.configuration.HomeLaunch.own`). Each directory in them is
     made its owner's to write first, since a room leaves read-only ones, as
     Go's module cache is, which `shutil.rmtree` can't empty. No link is

@@ -1,7 +1,7 @@
 // The review: everything waiting for the operator laid out as one text to read
 // and move through, in groups, one per agent, every agent running having one,
 // empty or not; their comments in it, each under the line it's on, and their
-// messages to each agent under its banner. A tree (`laid`, `Laid.nodes`): the
+// messages to each agent under the agent's banner. A tree (`laid`, `Laid.nodes`): the
 // core lays out the frame, the groups in the order they arrived, never sorted
 // again, each banner, each item's header and what's around its body (the
 // operator's words an answer answers, its edits, its citations' passages, the
@@ -10,16 +10,16 @@
 // and its files, each file whole (`code.ts`), its lines commented on as the
 // item's own are, the lines that matter in it, by the judge's reading
 // (`views/judge.ts`), kept in order for the keys to walk; under each agent's
-// banner, before its items, each drawer its repository's looks place
-// (`docs/dashboard.md`, *The drawers*), its task list, what its branch changed
-// since they approved it, each file laid out as an item's, and its whole
-// conversation, `Transcripts`' view of it, each a fold of its own kind under a
+// banner, before their items, each drawer their repository's looks place
+// (`docs/dashboard.md`, *The drawers*), their task list, what their branch
+// changed since the operator approved it, each file laid out as an item's, and
+// their whole conversation, `Transcripts`' view of it, each a fold of its own kind under a
 // short label, one under the other, folded until opened in place; a comment on
 // the agent's words in the conversation, a Markdown block of a drawer's, or on
 // the changed files is a remark to the agent, the one on code recording the
 // version it was written on. Each comment goes under the
 // last line it quotes of the block it's on, followed there as the block
-// changes (`anchors.ts`). A subagent's group under its parent's, each group
+// changes (`anchors.ts`). A subagent's group under their parent's, each group
 // folding whole under its banner. Each part keeps an id across layouts, and
 // each line is the innermost part's laid out on it, which the editor keeps the
 // buffer by (`reconcile.ts`). Their kind's rank, which the host gives, says only which
@@ -101,7 +101,7 @@ export type Viewed = components["schemas"]["ViewedFile"];
 export type Task = components["schemas"]["Task"];
 export type Usage = components["schemas"]["Usage"];
 
-/** What the operator writes in the review, as its editor holds it: a comment on an item, a message to an agent, or a remark in one of its drawers. */
+/** What the operator writes in the review, as its editor holds it: a comment on an item, a message to an agent, or a remark in one of their drawers. */
 export type Written = Comment | Letter | Remark;
 
 /**
@@ -287,7 +287,7 @@ export type Head = { item: Item } | { conversation: Conversation };
 export interface Group {
     /** The agent it's of; none for lup's approvals, which no message goes to. */
     conversation: Conversation | null;
-    /** The parts of its banner, each a view of its agent's, where it's running. */
+    /** The parts of its banner, each a view of its agent's, where they're running. */
     parts: Mounted[];
     /** What its banner names it by. */
     head: Head;
@@ -297,16 +297,16 @@ export interface Group {
     banner: Span;
     blocks: Block[];
     drawers: Drawer[];
-    /** How many groups it's laid out under, its subagent's under its parent's, where they're nested (`Arranging.parents`); 0 else. */
+    /** How many groups it's laid out under, a subagent's under their parent's, where they're nested (`Arranging.parents`); 0 else. */
     depth: number;
     /** Its fold whole, under its banner; none where nothing's under its banner. */
     fold: Fold | null;
 }
 
 /**
- * How the review's groups are arranged beyond the order items came in: each subagent's group under its parent's, by
- * `whose` each conversation is and its parent's; how the views look, which drawers and banner parts each repository's
- * agents have (`looks.ts`); each conversation running, which has its banner's parts; and what the host answered of
+ * How the review's groups are arranged beyond the order items came in: each subagent's group under their parent's, by
+ * `whose` each conversation is and their parent's; how the views look, which drawers and banner parts each repository's
+ * agents have (`looks.ts`); each conversation running, with their banner's parts; and what the host answered of
  * each view mounted that the page doesn't lay out itself (`views.ts`).
  */
 export interface Arranging {
@@ -1040,7 +1040,7 @@ function unplaced(quote: string, text: string): string {
 }
 
 /**
- * Return `groups` with each subagent's under its parent's, after it and the subagents laid under it before, each with
+ * Return `groups` with each subagent's under their parent's, after it and the subagents laid under it before, each with
  * how deep it's set in: under its nearest forebear with a group among them, by `parents`, each conversation's parent by
  * `whose` each is; those with none where they were. As they are, none set in, where `parents` is none.
  */
@@ -1156,16 +1156,16 @@ function namedBy(summary: readonly { text: string }[]): string {
  * one on the item whole under its header. Under its header, its body, its kind's view of it (`kindView`, `views/`): its
  * text, then each file it changes, its header then its lines, each run of unchanged ones folding under a summary line,
  * or a line saying why the host showed none; then the item's context, a summary line with the lines that fold under
- * it. Then, at the end of each agent's group but the parked ones, its drawers, each a view of the agent's in the order
- * its repository's looks list them (`layDrawer`), the draft's remarks in them each under its line, a conversation
- * among the items it exchanged called by `name`.
+ * it. Then, at the end of each agent's group but the parked ones, their drawers, each a view of the agent's in the
+ * order their repository's looks list them (`layDrawer`), the draft's remarks in them each under its line, a
+ * conversation among the items they exchanged called by `name`.
  *
  * An agent's item that answers the operator's (`Message.answers`) is laid out as the exchange it is: under its header,
  * their words it answers, after `you` and what each item of theirs is, folding under that line, open (`above`), then
  * the agent's name and its own words, each line followed by the comments on it, then the passages its citations on
  * that line cite, folded under it (`citedOn`); what its edits changed folds under a summary line before its words
  * (`editedOf`). An item kept with replies from before shows, after its own words, each of the operator's comments on
- * it after `you`, and the agent's replies after its name (`threadsOf`).
+ * it after `you`, and the agent's replies after their name (`threadsOf`).
  *
  * `places` are where the groups go (`Group.place`, in order), as this page laid them out and the host keeps them for
  * every page and across reloads (`ordered`): each among them keeps its place, items coming and going, and any other
@@ -1246,7 +1246,7 @@ export function laid(
     for (const group of kept(later, true)) {
         layGroup(group, true, 0);
     }
-    // Each group folds whole under its banner, up to the next as deep or shallower, a subagent's inside its parent's.
+    // Each group folds whole under its banner, up to the next as deep or shallower, a subagent's inside their parent's.
     {
         groups.forEach((group, at) => {
             const next = groups.findIndex((each, after) => after > at && each.depth <= group.depth);
@@ -1354,7 +1354,7 @@ export function laid(
         const conversation = group.conversation;
         const repository = conversation?.repository ?? "";
         const of = conversation === null ? null : { runtime: conversation.runtime, session: conversation.session, agent: conversation.agent ?? null };
-        // The parts of its banner, each a view of its agent's, where it's running.
+        // The parts of its banner, each a view of its agent's, where they're running.
         const parts =
             conversation !== null && of !== null && shown.running.has(group.key)
                 ? looks.banners(repository).map((each) => mount(repository, each.module, each.view, of, shown, remote))
@@ -1657,7 +1657,7 @@ export function laid(
      * Lay `conversation`'s drawer of `kind`, the view `view` of it, and return it; none where its view answers nothing,
      * or nothing under its label, as a task list none keeps, a branch with nothing since the operator approved it, or
      * one not read yet; its label its view's summary line, folded until the operator opens it. A Markdown block's lines
-     * are the drawer's own, as a file's are, which a remark may be on (the agent's words in its conversation). The
+     * are the drawer's own, as a file's are, which a remark may be on (the agent's words in their conversation). The
      * remarks to its agent on one of its blocks go under the line they're on; one on a block not laid out now, as one
      * under a fold not read yet, under its summary line. One drafted before quotes named their block, on the agent's
      * words at a step or on a file's lines, is anchored to it once its block is laid out, else, where what it was on
@@ -1979,7 +1979,7 @@ export function laid(
     }
 }
 
-/** Return `groups`' parts, each subagent's inside its parent's, where its range is inside the parent's, as their folds nest. */
+/** Return `groups`' parts, each subagent's inside their parent's, where its range is inside the parent's, as their folds nest. */
 function nestedNodes(groups: Placed[]): Placed[] {
     const roots: Placed[] = [];
     const holding: Placed[] = [];
@@ -2147,7 +2147,7 @@ export interface Naming {
     party: (conversation: Conversation) => string;
 }
 
-/** Return the conversation a comment on `item` goes to: the session whose push asked an approval, none where none did; the agent that sent any other. */
+/** Return the conversation a comment on `item` goes to: the session whose push asked an approval, none where none did; the agent who sent any other. */
 export function recipient(item: Item): Conversation | null {
     if (item.reason.reason === "approval") {
         return item.reason.pushed_by ?? null;
@@ -2349,8 +2349,8 @@ function quotedCode(drawer: Drawer, lines: Line[]): NonNullable<Remark["code"]> 
 /**
  * Return where a comment opened on the line at `position` goes: on that line of its item, or on the item whole from
  * its header or an empty line of its own; on a line of a changed file, or its header, empty or not; in a drawer, a
- * remark to its agent on the agent's words in its conversation, or on a line of a file since they approved it,
- * which records the file's version. On a group's banner, a message to its agent, laid out under its group among those
+ * remark to its agent on the agent's words in their conversation, or on a line of a file since the operator approved
+ * it, which records the file's version. On a group's banner, a message to its agent, laid out under its group among those
  * to answer now, from the banner of what's left for later too. None on a line no comment is on, or on the banner of
  * lup's approvals.
  */
@@ -2382,7 +2382,7 @@ function onLines(laidOut: Laid, first: OwnLine, last: OwnLine, start: number, en
     return lines === undefined ? null : quoting(last.block, lines, first.line, last.line, start, end, text);
 }
 
-/** Return the remark opened on the line at `position` of `drawer`: on a line of its own, a Markdown block's, as the agent's words in its conversation, or a file's, which records the file's version; none on any other line, nor on a blank one of a Markdown block's. */
+/** Return the remark opened on the line at `position` of `drawer`: on a line of its own, a Markdown block's, as the agent's words in their conversation, or a file's, which records the file's version; none on any other line, nor on a blank one of a Markdown block's. */
 function openedIn(laidOut: Laid, drawer: Drawer, position: number): Remark | undefined {
     const line = lineAt(drawer, position);
     const shown = line === undefined ? "" : laidOut.text.slice(line.from, line.to);

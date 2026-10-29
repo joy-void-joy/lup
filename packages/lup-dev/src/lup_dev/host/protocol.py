@@ -62,7 +62,7 @@ def handle(name: str, longest: int = 64) -> str:
 
 
 type Name = Annotated[str, AfterValidator(handle)]
-"""A launch's name: how the operator, lup's commands and the session itself call it.
+"""A launch's name: how the operator, lup's commands and the session themselves call it.
 
 Unique among the launches the service serves, and changeable while it runs;
 nothing is kept by it, so a rename takes effect wherever the name is next used.
@@ -281,7 +281,7 @@ class Rename(Request, reads=False):
 
 
 class SetHolding(Request, reads=False):
-    """Turn the operator's switch for one conversation on or off: whether each flagged write of it is held."""
+    """Turn the operator's switch for one conversation on or off: whether each flagged write of theirs is held."""
 
     kind: Literal["set-holding"] = "set-holding"
     launch: LaunchId
@@ -351,41 +351,41 @@ class Renamed(Reply):
 
 
 class Activity(Model):
-    """What a conversation is doing, as its latest hook said, and since when."""
+    """What a conversation is doing, as their latest hook said, and since when."""
 
     state: Literal["calling", "idle", "ended"]
-    """Running a call; between calls, its turn running or ended; or ended, a
+    """Running a call; between calls, their turn running or ended; or ended, a
     subagent whose conversation is over."""
     since: datetime
     tool: str | None = None
-    """The tool its running call calls, by its runtime's name; none between calls."""
+    """The tool their running call calls, by their runtime's name; none between calls."""
     lups: bool = False
-    """Whether its running call is to one of lup's tools, which may hold it
+    """Whether their running call is to one of lup's tools, which may hold it
     until the operator answers."""
 
 
 class Talker(Model):
-    """A conversation of a launch, as the operator is shown it: how it's called, the runtime's ids, its kind, its parent and what it's doing."""
+    """A conversation of a launch, as the operator is shown them: how they're called, the runtime's ids, their kind, their parent and what they're doing."""
 
     path: str
-    """Its launch's name, then each subagent's down to it (`dev/explore-auth`);
-    an unnamed subagent by its kind and id."""
+    """Their launch's name, then each subagent's down to them
+    (`dev/explore-auth`); an unnamed subagent by their kind and id."""
     own: str
-    """Its own part of `path`: its launch's name for the session's own
-    conversation, a subagent's name, or its kind and id."""
+    """Their own part of `path`: their launch's name for the session's own
+    conversation, a subagent's name, or their kind and id."""
     session: str
     agent: str | None = None
     """The runtime's id for the subagent; none for the session's own conversation."""
     kind: str | None = None
     parent: str | None = None
-    """Its parent's path; none for the session's own conversation."""
+    """Their parent's path; none for the session's own conversation."""
     depth: int = 0
-    """How many spawns below its session's own conversation it is: 0 for that
+    """How many spawns below their session's own conversation they are: 0 for that
     conversation, 1 for a subagent it spawned."""
     activity: Activity | None = None
-    """None until one of its hooks is heard."""
+    """None until one of their hooks is heard."""
     holding: bool = False
-    """Whether the operator holds each flagged write of it."""
+    """Whether the operator holds each flagged write of theirs."""
 
 
 class Drawn(Model):
@@ -432,7 +432,7 @@ class Listed(Reply):
     sent an item."""
     talkers: dict[str, list[Talker]] = {}
     """By launch id, its latest session's conversations: the session's own
-    first, then each subagent under its parent."""
+    first, then each subagent under their parent."""
     running: dict[str, bool] | None = None
     """By launch id, whether its container runs, as the host's podman says: for
     a room, which has no podman to ask; none for the operator's terminal, which

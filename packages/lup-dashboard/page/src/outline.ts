@@ -1,10 +1,10 @@
 // The overview beside the review (`Outline.tsx`; `docs/dashboard.md`, *The
 // review*), read from the review as it's laid out, never a second source, in
-// its order: each agent, a subagent under its parent as the review nests it,
+// its order: each agent, a subagent under their parent as the review nests them,
 // and each agent's items, a repository named where it changes, each with a mark of how it stands (waiting on the operator, news,
 // parked) and apart, in the draft's colour, what the next Ctrl+Enter does with
 // it (a comment goes, it's read, it's approved); an agent's files to review in
-// its "since you approved" counted beside it. What's in view is bracketed and
+// their "since you approved" counted beside them. What's in view is bracketed and
 // the cursor's entry highlighted as the view moves. Pure.
 import type { Span } from "./comments";
 import {
@@ -49,7 +49,7 @@ export interface OutlineRow extends Span {
     /** Whether it's new to the operator: its group not seen since it came, nor commented on in a reply sent. */
     fresh: boolean;
     at: number;
-    /** What waits beside it: an agent's files to review in its "since you approved", `◇3`; none else. */
+    /** What waits beside it: an agent's files to review in their "since you approved", `◇3`; none else. */
     tag: string | null;
 }
 
@@ -57,7 +57,7 @@ export interface OutlineRow extends Span {
 export interface Reading {
     draft: Draft;
     seeing: Seeing;
-    /** What each conversation running is doing, by `whose` it is. */
+    /** What each conversation running is doing, by `whose` they are. */
     states: ReadonlyMap<string, string | null>;
     called: (party: Conversation) => string;
 }

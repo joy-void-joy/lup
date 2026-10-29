@@ -1,13 +1,14 @@
-"""A conversation's quiet: the kinds of findings it isn't told after its calls for a while, and what stands that it wasn't told, once it lifts.
+"""A conversation's quiet: the kinds of findings they aren't told after their calls for a while, and what stands that they weren't told, once it lifts.
 
 `docs/judging-writes.md`, *Quiet*, and `DESIGN.md`, *Quiet*. During a wide
 change, a refactor across sixty files or several edits in a row to one, an agent
-knows its work is broken and will fix it later, so being told each finding as
-it appears is noise. It asks, with lup's tool `quiet`, not to be told some kinds
-(`Kind`): what a report would tell of them it doesn't, and doesn't remember as
-told (`Look.held`, `news`), while what it was told before stays known. When it
-lifts the quiet, it's told once what stands now that it wasn't told: not each
-state in between, but the files as they stand, read against what it knows.
+knows their work is broken and will fix it later, so being told each finding as
+it appears is noise. They ask, with lup's tool `quiet`, not to be told some
+kinds (`Kind`): what a report would tell of them it doesn't, and doesn't
+remember as told (`Look.held`, `news`), while what they were told before stays
+known. When they lift the quiet, they're told once what stands now that they
+weren't told: not each state in between, but the files as they stand, read
+against what they know.
 
 What's held is kept with the session's conversations (`Conversations.quiet`), so
 every hook of the session reads it, whichever worktree it judges in. The tool is
@@ -46,13 +47,13 @@ class Unheard(Model):
     """What stands in one worktree that a conversation wasn't told, each file by its absolute path."""
 
     touched: list[Finding] = []
-    """lup's findings, type errors and ruff's findings in the files it touched."""
+    """lup's findings, type errors and ruff's findings in the files they touched."""
     importers: list[Finding] = []
-    """Type errors in the files importing them that it watches."""
+    """Type errors in the files importing them that they watch."""
 
 
 def quieted(bench: Bench, session: str, agent: str, kinds: list[Kind]) -> str:
-    """Hold `kinds` back from conversation `agent` of `session` from now on, and say what that does; no kinds lifts its quiet, telling what stands that it wasn't told (`lifted`)."""
+    """Hold `kinds` back from conversation `agent` of `session` from now on, and say what that does; no kinds lifts their quiet, telling what stands that they weren't told (`lifted`)."""
     held = list(dict.fromkeys(kinds))
     record = ConversationRecord(layout=bench.services.layout, session=session)
     before = record.quieting(agent, held)
@@ -73,9 +74,9 @@ def quieted(bench: Bench, session: str, agent: str, kinds: list[Kind]) -> str:
     return " ".join(
         [
             (
-                f"This conversation is quiet: lup doesn't tell it {quiet.said()} "
-                "after its calls, until `quiet` with no kinds lifts it and tells "
-                "what stands then that it wasn't told."
+                f"You're quiet: lup doesn't tell you {quiet.said()} after your "
+                "calls, until `quiet` with no kinds lifts it and tells you what "
+                "stands then that you weren't told."
             ),
             *later,
             EVER_TOLD,
@@ -84,19 +85,18 @@ def quieted(bench: Bench, session: str, agent: str, kinds: list[Kind]) -> str:
 
 
 def lifted(bench: Bench, session: str, agent: str, *, quiet: Quiet) -> str:
-    """Tell conversation `agent` of `session`, whose quiet held `quiet` before it lifted, what stands that it wasn't told, and remember it told.
+    """Tell conversation `agent` of `session`, whose quiet held `quiet` before it lifted, what stands that they weren't told, and remember it told.
 
-    In each worktree its session holds: in the files it touched, lup's findings,
+    In each worktree their session holds: in the files they touched, lup's findings,
     type errors and ruff's; in the files importing them where the importers pass
     found errors, pyright's, once the pass it may be running is done, as a
     turn's end waits for it. A report too long for a tool's answer is fitted as
     a hook's is (`Bench.said`).
     """
     opening = (
-        "lup's quiet is lifted: it tells this conversation every finding after its "
-        "calls again."
+        "lup's quiet is lifted: it tells you every finding after your calls again."
         if quiet.kinds
-        else "This conversation wasn't quiet: lup tells it every finding after its calls."
+        else "You weren't quiet: lup tells you every finding after your calls."
     )
     index = SessionIndex(layout=bench.services.layout)
     with index.lock(session):
@@ -113,8 +113,10 @@ def lifted(bench: Bench, session: str, agent: str, *, quiet: Quiet) -> str:
         [found for each in unheard for found in each.importers],
     )
     if held is None or not parts:
-        return f"{opening} Nothing stands in the files it touched that it wasn't told."
-    heading = f"{opening} What stands in the files it touched that it wasn't told:"
+        return (
+            f"{opening} Nothing stands in the files you touched that you weren't told."
+        )
+    heading = f"{opening} What stands in the files you touched that you weren't told:"
     return bench.said(held.repository, [Part(whole=heading), *parts])
 
 
@@ -123,7 +125,7 @@ def unheard_in(bench: Bench, worktree: Worktree, session: str, agent: str) -> Un
 
     A file under an open hold is nobody's until the operator answers, so it's
     left out, as a turn's end leaves it; so is one the engine doesn't read, gone
-    or of a role nothing checks, whose findings it was told stay known.
+    or of a role nothing checks, whose findings they were told stay known.
     """
     services = bench.services
     worktree.importers().wait(

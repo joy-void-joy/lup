@@ -73,7 +73,7 @@ class Finding(Model):
     code: a deferral whose issue closed or whose condition holds, or an
     `ignore` whose issue closed. The gate lists
     it without failing, so its verdict depends on the files alone, and a
-    session is told it at its start."""
+    session is told it at their start."""
 
 
 class Due(Model):

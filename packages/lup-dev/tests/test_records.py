@@ -1,4 +1,4 @@
-"""Each runtime's records of a repository's sessions: which of them are the repository's, and what a running session's runtime holds queued for each of its conversations.
+"""Each runtime's records of a repository's sessions: which of them are the repository's, and what a running session's runtime holds queued for each of their conversations.
 
 The runtimes' homes here are directories the tests write, laid out as Claude Code
 and Codex lay out their own: no test reads the operator's. Keeping a copy of them

@@ -10,7 +10,7 @@ judge couldn't with the answerer (`docs/launch.md`); `hook` answers through it.
 `trust` approves what the host runs for a repository, the check a launch makes
 first (`docs/trust.md`). `launch` opens a runtime's session in
 a room for the worktree (*The command*). `host` runs the host service, handed
-the inbox as what each conversation is told at its hooks, its tools and its
+the inbox as what each conversation is told at their hooks, their tools and their
 requests; `inbox` is the operator's face on it (`docs/inbox.md`, *The operator's face*).
 `stage` stages the hunks of a file an agent names, which `git add -p` would ask
 at a terminal (`docs/judging-writes.md`, *Staging part of a file*).
@@ -705,7 +705,7 @@ def room_tools(
 
 
 def served_tools(resolved: Resolved) -> list[ToolSpec]:
-    """List what a launched session is told of each of lup's tools, which its guidance lists: the core's, then its modules'.
+    """List what a launched session is told of each of lup's tools, which their guidance lists: the core's, then its modules'.
 
     The core's are read from the tools the service is handed, made over a
     delivery with nothing but its clock, and a layout, remotes and repositories'
@@ -840,7 +840,7 @@ def line(entry: Item | Flags, paths: Sequence[Pathed] = ()) -> str:
 
 
 def called(party: Party, paths: Sequence[Pathed]) -> str:
-    """Say who `party` is, as lup names them: the operator; a conversation by its path among `paths`, its runtime's ids beside it where another shares the path (`Pathed`), else by those ids."""
+    """Say who `party` is, as lup names them: the operator; a conversation by their path among `paths`, their runtime's ids beside it where another shares the path (`Pathed`), else by those ids."""
     match party:
         case InboxConversation():
             found = next((each for each in paths if each.conversation == party), None)
@@ -889,7 +889,7 @@ def hold_answered(
 
 
 def shown(item: Item, paths: Sequence[Pathed] = ()) -> str:
-    """Say an item whole, for the operator, each conversation by its name where `paths` gives it: an approval by its summary, its whole diff on request."""
+    """Say an item whole, for the operator, each conversation by their name where `paths` gives it: an approval by its summary, its whole diff on request."""
     match item.reason:
         case (
             Message(text=text)
@@ -992,13 +992,13 @@ def sessions(
         ),
     ] = False,
 ) -> None:
-    """List the sessions the host service serves, each with its subagents under it.
+    """List the sessions the host service serves, each with their subagents under them.
 
     Each launch by its name, its runtime, its worktree, its id, and its
     container, running or not as podman has it; under it, its session and each
-    subagent beneath the conversation that spawned it, by its path
-    (`dev/explore-auth`) and its kind; an unnamed one by its kind and its id,
-    until it names itself. The subagents that ended under a conversation are
+    subagent beneath the conversation who spawned them, by their path
+    (`dev/explore-auth`) and their kind; an unnamed one by their kind and their id,
+    until they name themselves. The subagents that ended under a conversation are
     counted, as the dashboard folds them; `--all` lists them, each said ended.
     It only reads, so an agent's session runs it too: on the host, listing
     every launch; in a room, its repository's alone, whose containers the host
@@ -1026,11 +1026,11 @@ def sessions(
 
 
 def conversations(talkers: list[Talker], *, every: bool) -> list[str]:
-    """Return a launch's conversations as `lup-dev sessions` lists them: each under the one that spawned it, by its path and its kind.
+    """Return a launch's conversations as `lup-dev sessions` lists them: each under the one who spawned them, by their path and their kind.
 
     The subagents over under a conversation are counted after those that
     aren't, unless `every`, which lists them in their place, each said ended.
-    A subagent is over where it ended, or where nothing it did is kept, as
+    A subagent is over where they ended, or where nothing they did is kept, as
     from before the host kept it: as the dashboard folds them (`over`,
     `agents.ts`).
     """
@@ -1135,16 +1135,16 @@ def inbox_list(
         str | None,
         typer.Option(
             help=(
-                "Only one conversation's exchange, what it sent and was sent: a "
-                "session by its name, a subagent by its path (flow-review/explore) "
-                "or its own name, or either by its id or the id's start."
+                "Only one conversation's exchange, what they sent and were sent: a "
+                "session by their name, a subagent by their path (flow-review/explore) "
+                "or their own name, or either by their id or the id's start."
             )
         ),
     ] = None,
     subagents: Annotated[
         bool,
         typer.Option(
-            "--subagents", help="With --conversation, its subagents' items too."
+            "--subagents", help="With --conversation, their subagents' items too."
         ),
     ] = False,
     kinds: Annotated[
@@ -1387,8 +1387,8 @@ def inbox_answer(
     the answer.
 
     A write that landed flagged takes your reply in words, as a message does,
-    for the agent that made it: the write has landed, and your reply comes to
-    it as "yes, but".
+    for the agent who made it: the write has landed, and your reply comes to
+    them as "yes, but".
     """
     client = answering()
     approvals = InboxApprovals(host=client)
@@ -1493,13 +1493,13 @@ def inbox_send(
         typer.Argument(
             help=(
                 "The launch, by its name, its id or its worktree; or one of its "
-                "subagents, by its path (`dev/explore-auth`)."
+                "subagents, by their path (`dev/explore-auth`)."
             )
         ),
     ],
-    text: Annotated[str, typer.Argument(help="What to tell it.")],
+    text: Annotated[str, typer.Argument(help="What to tell them.")],
 ) -> None:
-    """Send a message to the session a launch runs, its main conversation; or to one of its subagents, by its path."""
+    """Send a message to the session a launch runs, their main conversation; or to one of their subagents, by their path."""
     client = answering()
     listed = client.listed()
     subagents = [
@@ -1526,7 +1526,7 @@ def inbox_send(
 
 
 class Addressed(Model):
-    """A subagent a message is sent to: the launch its session runs in, and the runtime's id for it."""
+    """A subagent a message is sent to: the launch their session runs in, and the runtime's id for them."""
 
     launch: str
     agent: str
@@ -1566,8 +1566,8 @@ def rename(
     """Rename a running launch: how you, lup's commands and its session call it.
 
     Run it yourself, in your own terminal. A name another launch holds is
-    refused, saying whose. The session hears its name at its next start, where
-    its runtime takes it as its own title, where the runtime has a way.
+    refused, saying whose. The session hears the name at their next start, where
+    their runtime takes it as their own title, where the runtime has a way.
     """
     client = answering()
     launch = the_launch(client.launches(), to)
@@ -2583,7 +2583,7 @@ def rules_check(
     paths, it checks every such file in the worktree, as the gate's `rules` step
     runs it. An `ignore` that keeps nothing fails it too, until `lup-dev rules
     fix` removes it. What came due is kept, over every file and where every
-    issue was asked, for a session to be told at its start.
+    issue was asked, for a session to be told at their start.
     """
     found = scanned(paths, issues=True)
     if found.unread:

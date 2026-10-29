@@ -1,18 +1,18 @@
 // The page: everything waiting for the operator as one review in groups, one
 // per agent, every agent running having one, its banner saying what the agent
-// is doing, what it's working on and its context, its drawers at the group's end
-// holding its tasks, what its branch changed since the operator approved it and
-// its whole conversation; the operator's reply written into it,
+// is doing, what they're working on and their context, its drawers at the
+// group's end holding their tasks, their whole conversation and what their branch
+// changed since the operator approved it; the operator's reply written into it,
 // their messages to agents and their remarks in the drawers among it, and what
 // they mark, and a line saying what the next Ctrl+Enter sends, to each agent it
 // reaches, each getting all of it, and what it marks; Ctrl+Enter sends the
 // inbox's part, then applies each other mark (`sent`). The palette (Ctrl+K) goes to an agent's
-// group. Each agent's record is read at each of its hooks the host hears, which
-// the listing watched says (`Talker.activity`), and as its conversation drawer
-// opens, for its banner and its drawers, each call read whole as its fold opens,
-// again as the record grows where it hadn't returned; what its branch changed
-// since the operator last saw it as a call of its that may have written ends and
-// as its drawer opens, with the version shown, so the host answers without the
+// group. Each agent's record is read at each of their hooks the host hears, which
+// the listing watched says (`Talker.activity`), and as their conversation drawer
+// opens, for their banner and their drawers, each call read whole as its fold
+// opens, again as the record grows where it hadn't returned; what their branch
+// changed since the operator last saw it as a call of theirs that may have written
+// ends and as their drawer opens, with the version shown, so the host answers without the
 // files where nothing changed, and laid out as it comes, live; each a minute
 // apart at most; a file marked reviewed there, as the reply is sent, a line at
 // once, as the host's answer confirms or brings it back (`docs/dashboard.md`,
@@ -83,7 +83,7 @@ const NO_ONE: InboxConversation[] = [];
 /** How long the page lets each agent's record and branch go unread with no hook heard, in milliseconds: a record written just after its hook, or a write no hook said, is read all the same. */
 const FALLBACK = 60_000;
 
-/** A conversation running, as the review names it: with its launch's ids and its banner's parts. */
+/** A conversation running, as the review names them: with their launch's ids and their banner's parts. */
 interface Live extends Running {
     conversation: InboxConversation;
     key: string;
@@ -128,7 +128,7 @@ export function App() {
     const around = useMemo(() => ({ contexts, files, answers, commented: onItems }), [contexts, files, answers, onItems]);
     // How far the operator has seen each group, and the items they commented on in a reply sent: what's new to them.
     const seeing = useMemo(() => seeingOf(inbox.reply?.kind === "inbox-items" ? inbox.reply : null), [inbox.reply]);
-    // What the host has answered of each agent, for its banner and its drawers, by its conversation.
+    // What the host has answered of each agent, for their banner and their drawers, by their conversation.
     const [drawers, setDrawers] = useState<Drawers>(new Map());
     // The items whose context, and whose files, were asked for, so each is asked once: an approval's files once
     // more when the judge has read their types (`typing`), each asking keyed by its number and how far along it was.
@@ -196,14 +196,15 @@ export function App() {
         (list) => list.map((each) => `${each.session} ${each.agent ?? ""} ${each.path}`).join("\n"),
     );
 
-    // Each conversation the inbox's items name, with its path as the host names it, by `whose` it is: what names an
-    // agent that isn't running, or isn't its launch's latest session, which no launch listed names.
+    // Each conversation the inbox's items name, with their path as the host names it, by `whose` they are: what names
+    // an agent who isn't running, or isn't their launch's latest session, which no launch listed names.
     const paths = useMemo(
         () => new Map((inbox.reply?.kind === "inbox-items" ? (inbox.reply.paths ?? []) : []).map((each) => [whose(each.conversation), each])),
         [inbox.reply],
     );
-    // A party as it's called: a conversation by its path, as its launch names it while it runs, else as the host does,
-    // its runtime's ids beside it where another conversation shares the path; by those ids where it has none.
+    // A party as they're called: a conversation by their path, as their launch names it while they run, else as the
+    // host does, their runtime's ids beside it where another conversation shares the path; by those ids where they have
+    // none.
     const called = useCallback(
         (party: Item["sender"]) => {
             if (party.party === "operator") {
@@ -239,7 +240,7 @@ export function App() {
             }),
         [served],
     );
-    // Each conversation's parent, by `whose` each is, as the host's tree has it: what nests a subagent's group under its parent's.
+    // Each conversation's parent, by `whose` each is, as the host's tree has it: what nests a subagent's group under their parent's.
     const parents = useSame(
         useMemo(() => {
             const found = new Map<string, string>();
@@ -260,7 +261,7 @@ export function App() {
         }, [served]),
         (map) => JSON.stringify([...map]),
     );
-    // What each conversation running is doing, by `whose` it is, for the overview's marks.
+    // What each conversation running is doing, by `whose` they are, for the overview's marks.
     const states = useSame(
         useMemo(() => new Map(live.map((each) => [each.key, each.talker.activity?.state ?? null])), [live]),
         (map) => JSON.stringify([...map]),
@@ -270,25 +271,26 @@ export function App() {
         (list) => list.map(whose).join("\n"),
     );
 
-    // What each agent's banner says, by its conversation, kept the same object while every banner says the same
-    // (`useSame`): where it is, which changes only as it moves, so the review is laid out anew for it alone then.
+    // What each agent's banner says, by their conversation, kept the same object while every banner says the same
+    // (`useSame`): where they are, which changes only as they move, so the review is laid out anew for them alone then.
     const bannered = useSame(
         useMemo(() => new Map(live.map((agent) => [agent.key, bannerOf(agent)])), [live]),
         (map) => JSON.stringify([...map]),
     );
-    // What each agent's doing, by its conversation, which its banner draws beside its words as the time passes
+    // What each agent's doing, by their conversation, which their banner draws beside its words as the time passes
     // (`ticking.ts`): a hook changes it, and lays nothing out.
     const activities = useSame(
         useMemo(() => new Map(live.map((agent) => [agent.key, agent.talker.activity ?? null])), [live]),
         (map) => JSON.stringify([...map]),
     );
 
-    // Each conversation running, by `whose` it is: which of its banner's parts its views say, and what holding its writes asks.
+    // Each conversation running, by `whose` they are: which of their banner's parts their views say, and what holding
+    // their writes asks.
     const runningNow = useSame(
         useMemo(() => new Map(live.map((agent) => [agent.key, { launch: agent.launch.launch, holding: agent.talker.holding === true }])), [live]),
         (map) => JSON.stringify([...map]),
     );
-    // Each view of an agent's the page doesn't lay out itself, a drawer its repository's modules place, asked of the
+    // Each view of an agent's the page doesn't lay out itself, a drawer their repository's modules place, asked of the
     // host for each agent running; and each a fold of theirs reads as it opens, once opened.
     const [loads, setLoads] = useState<Instance[]>([]);
     const placed = useMemo(
@@ -307,12 +309,13 @@ export function App() {
         const id = instanceOf(view.repository, view.module, view.view, view.argument);
         setLoads((before) => (before.some((each) => instanceOf(each.repository, each.module, each.view, each.argument) === id) ? before : [...before, view]));
     }, []);
-    // What the banner says of an agent beyond its name: where it is, the core's, what it's doing drawn after it; what it's
-    // working on, its context and whether its flagged writes are held are its banner's parts, which its views say (`views/`).
+    // What the banner says of an agent beyond their name: where they are, the core's, what they're doing drawn after it;
+    // what they're working on, their context and whether their flagged writes are held are their banner's parts, which
+    // their views say (`views/`).
     const banner = useCallback(
         (head: Head) => {
             if ("conversation" in head) {
-                // A conversation that isn't running, written to all the same, by its runtime's ids where it isn't known.
+                // A conversation that isn't running, written to all the same, by their runtime's ids where they aren't known.
                 return bannered.get(whose(head.conversation)) ?? [last(head.conversation.repository), called(head.conversation)].join(" · ");
             }
             const item = head.item;
@@ -342,12 +345,12 @@ export function App() {
     );
     const main = useRef<HTMLElement>(null);
 
-    /** Return the conversation running the switch `argument` turns is of, by its launch, session and subagent; none for one not running. */
+    /** Return the conversation running the switch `argument` turns is of, by their launch, session and subagent; none for one not running. */
     function holderOf(argument: { launch?: string; session?: string; agent?: string | null }): Live | undefined {
         return live.find((each) => each.launch.launch === argument.launch && each.talker.session === argument.session && (each.talker.agent ?? null) === (argument.agent ?? null));
     }
 
-    /** Turn the operator's switch as the mark `argument` recorded asks (`set-holding`): whether each flagged write of an agent and its subagents is held. Return what came of it, and whether it was turned. */
+    /** Turn the operator's switch as the mark `argument` recorded asks (`set-holding`): whether each flagged write of an agent and their subagents is held. Return what came of it, and whether it was turned. */
     async function holding(argument: { launch?: string; session?: string; agent?: string | null; on?: boolean }): Promise<{ ok: boolean; said: string }> {
         const agent = holderOf(argument);
         if (agent === undefined) {
@@ -359,7 +362,7 @@ export function App() {
             return { ok: false, said: answer.error };
         }
         const path = agent.talker.path;
-        return { ok: true, said: on ? `each flagged write of ${path} and its subagents held for your answer` : `${path}'s flagged writes landing again, flagged` };
+        return { ok: true, said: on ? `each flagged write of ${path} and their subagents held for your answer` : `${path}'s flagged writes landing again, flagged` };
     }
 
     useEffect(() => {
@@ -483,13 +486,13 @@ export function App() {
         });
     }, []);
 
-    // How many steps of each agent's record the page has read, so each asking reads only what came since, for its task
-    // list and its context; and which agents' records are being read, each read again after where it was asked for
-    // meanwhile. Its conversation is `Transcripts`' view, watched on the host.
+    // How many steps of each agent's record the page has read, so each asking reads only what came since, for their
+    // task list and their context; and which agents' records are being read, each read again after where it was asked
+    // for meanwhile. Their conversation is `Transcripts`' view, watched on the host.
     const have = useRef(new Map<string, number>());
     const reading = useRef(new Map<string, boolean>());
 
-    /** Read `agent`'s record for its task list and its context, past the steps the page has read of it; once at a time, again where asked meanwhile. */
+    /** Read `agent`'s record for their task list and their context, past the steps the page has read of it; once at a time, again where asked meanwhile. */
     const readRecord = useCallback(
         async (agent: Live): Promise<void> => {
             const { conversation, key } = agent;
@@ -525,7 +528,7 @@ export function App() {
         [drawn],
     );
 
-    // What each agent's branch changed since the operator last saw it, as the host last read it, by its conversation;
+    // What each agent's branch changed since the operator last saw it, as the host last read it, by their conversation;
     // and the files of each being marked reviewed, each laid out as a reviewed line from the key's press until the
     // host answers.
     const shown = useRef(new Map<string, Since>());
@@ -565,11 +568,11 @@ export function App() {
         [showSince],
     );
 
-    // What each agent was last seen doing, by its conversation: a change is a hook of its the host heard.
+    // What each agent was last seen doing, by their conversation: a change is a hook of theirs the host heard.
     const seen = useRef(new Map<string, string>());
 
-    // At each hook of an agent's, its record is read; where the hook ended a call of its that may have written,
-    // a tool's that isn't lup's own, what its branch changed is read too; an agent first seen is read whole.
+    // At each hook of an agent's, their record is read; where the hook ended a call of theirs that may have written,
+    // a tool's that isn't lup's own, what their branch changed is read too; an agent first seen is read whole.
     useEffect(() => {
         for (const agent of live) {
             const now = JSON.stringify(agent.talker.activity ?? null);
@@ -597,7 +600,7 @@ export function App() {
         return () => clearInterval(asking);
     }, [live, readRecord, since]);
 
-    /** Read what an agent's drawer shows as it opens: its branch for "since you approved"; a module's view is watched already. */
+    /** Read what an agent's drawer shows as it opens: their branch for "since you approved"; a module's view is watched already. */
     const opened = useCallback(
         (conversation: InboxConversation, kind: DrawerKind) => {
             const agent = live.find((each) => each.key === whose(conversation));
@@ -886,12 +889,12 @@ function last(path: string): string {
     return name.endsWith(".git") ? name.slice(0, -".git".length) : name;
 }
 
-/** Say what the core says of an agent on its banner: where it is; what it's doing and for how long, drawn after it (`Review.tsx`), and its banner's parts, which its views say, come after. */
+/** Say what the core says of an agent on their banner: where they are; what they're doing and for how long, drawn after it (`Review.tsx`), and their banner's parts, which their views say, come after. */
 function bannerOf(agent: Live): string {
     return [last(agent.launch.repository), last(agent.launch.worktree), agent.talker.path].join(" · ");
 }
 
-/** How the line under the review names who a part of the reply reaches: a conversation as it's called, an item's sender, and the agent a switch is of, by its path. */
+/** How the line under the review names who a part of the reply reaches: a conversation as it's called, an item's sender, and the agent a switch is of, by their path. */
 interface Naming {
     called: (party: Item["sender"]) => string;
     named: (item: Item) => string;
@@ -900,8 +903,9 @@ interface Naming {
 
 /**
  * Say what the next Ctrl+Enter sends, by where each part goes (#264, as the page knows it): to each agent the reply
- * reaches, what reaches it, a message, a remark, the comments on its items, a question answered; then what's marked,
- * each item read, approved and declined, each agent's files of "since you approved" reviewed and its writes held.
+ * reaches, what reaches them, a message, a remark, the comments on their items, a question answered; then what's
+ * marked, each item read, approved and declined, each agent's files of "since you approved" reviewed and their writes
+ * held.
  * Nothing where nothing's drafted.
  */
 export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): string[] {
@@ -1000,7 +1004,7 @@ function reviewedSaid(reviewed: string[], approved: number[], moved: string[]): 
     return `reviewed ${files}${flags}${waiting === "" ? "" : `.${waiting}`}`;
 }
 
-/** Whether two of what's held of an agent's drawers say the same: its branch shown the same, and the same tasks and context. */
+/** Whether two of what's held of an agent's drawers say the same: their branch shown the same, and the same tasks and context. */
 function sameDrawers(a: AgentDrawers, b: AgentDrawers): boolean {
     const sameSince = (x: Since | null, y: Since | null) => x === y || (x !== null && y !== null && sameShown(x, y));
     return sameSince(a.since, b.since) && JSON.stringify([a.tasks, a.usage]) === JSON.stringify([b.tasks, b.usage]);

@@ -64,7 +64,7 @@ class StandInRecords(Model, Records):
         return Found(record=record, root=self.directory) if record.is_file() else None
 
     def place(self, session: str, agent: str | None) -> Path:
-        """Return where the record of `session`, or of its subagent `agent`, is written."""
+        """Return where the record of `session`, or of their subagent `agent`, is written."""
         return self.directory / session / f"{agent or session}.json"
 
 

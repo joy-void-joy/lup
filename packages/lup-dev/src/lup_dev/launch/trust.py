@@ -1968,7 +1968,7 @@ class Trust(Model, arbitrary_types_allowed=True):
         What a push that moves the integration branch starts, on the host
         (`cli.py`): nobody waits on the approval, and the terminal answering it
         acts on the answer (`settle`). `pushed_by` is the main conversation of
-        the session that pushed, which the operator's comment on their answer
+        the session who pushed, which the operator's comment on their answer
         is told to; none where no session's is known. An approval waiting about
         the same zone is joined, as a launch joins it.
         """

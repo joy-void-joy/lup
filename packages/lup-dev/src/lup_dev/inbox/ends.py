@@ -1,7 +1,7 @@
 """No turn that won't end: a turn's end held once per thing, across turns.
 
-`docs/inbox.md`, *No turn that won't end*. An agent can always end its
-turn, and nothing holds it again for what it's already been told. Every hold at
+`docs/inbox.md`, *No turn that won't end*. An agent can always end their
+turn, and nothing holds them again for what they've already been told. Every hold at
 a turn's end, the inbox's and the judge's alike, goes through `holding`:
 - **once, then the turn ends:** an end that follows a hold (`after_block`, from
   the runtime's `stop_hook_active` on both runtimes) is let through, whatever's

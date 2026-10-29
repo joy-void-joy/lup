@@ -1,6 +1,6 @@
 // The review's margin: its structure, one column for each depth folds nest to,
 // line for line with the text (`docs/dashboard.md`, *The review*). Each scope
-// the review is made of, an agent's group (a subagent's beside its parent's),
+// the review is made of, an agent's group (a subagent's beside their parent's),
 // an item, a drawer, a file, is a bar its full height in its kind's colour,
 // starting with its fold's letter, outlined where it's folded, then a short
 // label: the agent's name, `@55`, `since`, `records.py`, marked by how it stands

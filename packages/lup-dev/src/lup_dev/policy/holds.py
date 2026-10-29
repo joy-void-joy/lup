@@ -17,12 +17,12 @@ at a later checkpoint in its worktree, as its call would have settled it, and
 its session told (`docs/judging-writes.md`, *Asking the operator*). A call its
 runtime ends while it waits, the operator interrupting it, or whose launch ends
 meanwhile, gives up on the hold as on one unanswered in time, telling its
-conversation at its next call.
+conversation at their next call.
 
 What a move of `HEAD` asks is already committed, and isn't put back, so on every
 runtime it's kept as a hold no agent waits on, with the commit it came from
 (*A move's asks, after the fact*). Its answer is logged when it's given, and told
-to the session that found the move at its next checkpoint; a decline changes no
+to the session that found the move at their next checkpoint; a decline changes no
 file.
 
 Nobody answers their own hold: answering refuses to run inside an agent's session,
@@ -132,7 +132,7 @@ class Hold(Model):
     """Whether an answer given while no agent waited reached the session."""
 
     def waited(self) -> bool:
-        """Say whether an agent waits inside its hook for the answer, or did until its process ended."""
+        """Say whether an agent waits inside a hook for the answer, or did until its process ended."""
         return self.commit is None and not self.abandoned and not self.orphaned
 
 
@@ -423,7 +423,7 @@ def answer(
     if inside:
         message = (
             f"this runs inside a {inside[0]} session, and an agent doesn't answer "
-            "its own hold: answer from your own terminal"
+            "their own hold: answer from your own terminal"
         )
         raise HoldError(message)
     searched = (

@@ -93,7 +93,7 @@ class SessionStarted(Event):
 
 
 class TurnStarted(Event):
-    """A conversation's turn started on a prompt, the operator's or one a tool server pushed, or a prompt arrived in its turn."""
+    """A conversation's turn started on a prompt, the operator's or one a tool server pushed, or a prompt arrived in their turn."""
 
 
 class CallStarted(Event):
@@ -122,11 +122,11 @@ class CallFinished(Event):
 
 
 class TurnEnded(Event):
-    """The session's own conversation ended its turn."""
+    """The session's own conversation ended their turn."""
 
 
 class ConversationEnded(Event):
-    """A subagent's conversation ended its turn; the session's own goes on."""
+    """A subagent's conversation ended their turn; the session's own goes on."""
 
 
 type SessionEvent = (

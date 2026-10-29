@@ -7,7 +7,7 @@ typed tree*). One pass at a time per worktree, and the turn's end waits for it, 
 no type error surfaces after the session.
 
 Each request names the conversations that wrote what changed, and what the pass
-finds comes back with them, so a conversation's end holds only on what its own
+finds comes back with them, so a conversation's end holds only on what their own
 changes broke (#41). The pass re-checks what's pending as one batch, so what it
 finds goes to every conversation that wrote into that batch.
 """
@@ -68,7 +68,7 @@ class BackgroundSpawner(Spawner, Model):
 
 
 class Conversation(Model):
-    """One conversation of a session: its own, or one of its subagents'."""
+    """One conversation of a session: their own, or one of their subagents'."""
 
     session: str
     agent: str = ""

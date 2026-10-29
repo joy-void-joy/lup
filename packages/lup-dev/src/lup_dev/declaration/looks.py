@@ -2,8 +2,8 @@
 
 `docs/declaration.md`, *Views and blocks*. The dashboard lays out some views
 itself until each moves into its module (#113, step 4): an item's body by its
-kind's, an agent's task list, what its branch changed since the operator
-approved it, and the parts of its banner. Each is declared here as its owner's,
+kind's, an agent's task list, what their branch changed since the operator
+approved it, and the parts of their banner. Each is declared here as its owner's,
 so the page holds no fold kind, drawer or tone of its own, and a module taking
 one of their letters or names fails the load (`resolve.looked`):
 - the shell's tones, which every module's spans may name
@@ -14,11 +14,11 @@ one of their letters or names fails the load (`resolve.looked`):
   `Core`'s field (`Core.folds`, `lup.SHELL_FOLDS`), so a person's layer
   changes them;
 - the runtime adapters': an agent's task list, a drawer (`TASKS_DRAWER`, beside
-  `Task` in `host/records.py`), and its banner's part, what it's working on
-  and how full its context is;
+  `Task` in `host/records.py`), and their banner's part, what they're working on
+  and how full their context is;
 - the judge's: what an agent's branch changed since the operator approved it,
-  a drawer, the line of a file standing as they last saw it, and its banner's
-  part, whether its flagged writes are held, and its verb, holding them. The
+  a drawer, the line of a file standing as the operator last saw it, and the agent's banner's
+  part, whether their flagged writes are held, and its verb, holding them. The
   judge's code sits above the declaration in `lup_dev`'s layers, so its parts
   are declared here.
 
@@ -41,8 +41,8 @@ REFUSED_TONE = Tone(name="refused", like="muted")
 TASKS = Drawn(module="adapters", view="tasks", place=TASKS_DRAWER)
 """An agent's task list, the runtime adapters' drawer."""
 WORKING = Bannered(module="adapters", view="banner")
-"""The runtime adapters' part of an agent's banner: the current entry of its
-task list, and its context's ring, the tokens in use against its model's
+"""The runtime adapters' part of an agent's banner: the current entry of their
+task list, and their context's ring, the tokens in use against their model's
 window."""
 
 SINCE = Drawn(
@@ -57,9 +57,9 @@ REVIEWED_TONE = Tone(name="reviewed", like="muted")
 of its own, with nothing under it."""
 HOLDING = Bannered(module="judge", view="banner")
 """The judge's part of an agent's banner: whether the operator holds each of
-its flagged writes for their answer (`set-holding`)."""
+the agent's flagged writes for their answer (`set-holding`)."""
 HOLD = Verb(name="hold", key="h", called="hold")
-"""The judge's verb: holding each flagged write of an agent and its subagents
+"""The judge's verb: holding each flagged write of an agent and their subagents
 for the operator's answer, which its banner offers. `Core` declares it until
 the judge is a module (#113, step 4), so a person's layer may give it another
 key."""

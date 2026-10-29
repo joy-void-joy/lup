@@ -13,7 +13,7 @@ an approval and in "since you approved" alike; and says how far in its own terms
 conversation's step).
 
 A repository's marks are kept in lup's state on the host, one file of each
-module's (`MarkStore`), which no room mounts, so an agent never marks its own
+module's (`MarkStore`), which no room mounts, so an agent never marks their own
 work reviewed. Moving one is the operator's alone (`MoveMarks`), as their reply
 is sent; reading them is the operator's and, for its own repository, a room's
 (`ReadMarks`), so a view's command in a room folds where the operator's page

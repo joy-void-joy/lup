@@ -229,13 +229,13 @@ def render(
     lent: list[Lent] | None = None,
     rules: list[Rule] | None = None,
 ) -> str:
-    """Render the session's guidance from `resolved`'s sections, the tools it's served, and the other repositories it may read.
+    """Render the session's guidance from `resolved`'s sections, the tools they're served, and the other repositories they may read.
 
     The project's own sections are read in `project`, a directory holding the
     project's files at the commit its declaration was read from, and the
     person's own in `worktree`, the worktree launched. The sections go in the
     order the declaration gives them, then lup's `tools` (`listed`), then the
-    other repositories named for it, as the launch found them
+    other repositories named for them, as the launch found them
     (`repositories`), then the directories lent to this launch
     (`lent_here`), then the person's own, where there's one. Raise
     `GuidanceError` naming the section that can't be read, or doesn't render.

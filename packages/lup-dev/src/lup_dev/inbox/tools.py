@@ -13,15 +13,16 @@ calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
   alone, unless `Speaker.how_it_felt_reaches` passes it on too;
 - `ask` puts a question to the operator, its decisions numbered, each with the
   agent's lean; with `wait` it holds until they answer, or until other news of
-  theirs reaches the agent, their words typed in its terminal among it;
+  theirs reaches the agent, their words typed in the agent's terminal among it;
 - `send` is the inbox's general verb, a message of a kind to a party's inbox:
-  the operator's, the conversation's parent's, or one of its own subagents',
-  each by a name the conversation knows it by, the operator reading a copy of
-  a message between conversations; one whom nothing would read is refused;
-- `wait_inbox` holds until something reaches the agent: an item of its inbox,
-  one of its own subagents' ends among it, or what its runtime holds for it,
-  the operator's typed words and its background tasks among it, where the
-  runtime's records say. `on` narrows it to whose news (`Waking`), the
+  the operator's, the conversation's parent's, or one of the conversation's
+  own subagents', each by a name the conversation knows them by, the operator
+  reading a copy of a message between conversations; one whom nothing would
+  read is refused;
+- `wait_inbox` holds until something reaches the agent: an item of their
+  inbox, one of their own subagents ending among it, or what their runtime holds
+  for them, the operator's typed words and their background tasks among it,
+  where the runtime's records say. `on` narrows it to whose news (`Waking`), the
   operator's always among it, and `within` limits how long it holds. It isn't
   called `wait`, a name a runtime has for a tool of its own;
 - `inbox` reads the inbox of the agent's repository, changing nothing: each
@@ -30,7 +31,7 @@ calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
   conversation's exchange, as `lup-dev inbox` reads it (`inbox/reading.py`);
   and the agent's own item read whole;
 - `withdraw` takes back a message or question the agent sent that the
-  operator needn't see, with its reason: the agent's workflow is its own;
+  operator needn't see, with its reason: the agent's workflow is their own;
 - `edit` changes what the agent sent the operator: a passage of its text, or
   its text whole (`docs/inbox.md`, *Editing what was sent*).
 
@@ -137,8 +138,9 @@ class Sending(Model):
     to: str = Field(
         description=(
             "Whose inbox: `operator`; `parent`, the conversation that spawned you; "
-            "or one of your own subagents, by its name as lup calls it "
-            "(`explore-auth`), its path (`dev/explore-auth`), or its runtime's id."
+            "or one of your own subagents, by their name as lup calls them "
+            "(`explore-auth`), their path (`dev/explore-auth`), or their runtime's "
+            "id."
         )
     )
     kind: Kind = Field(
@@ -159,7 +161,7 @@ class Awaiting(Model):
             "Whose news ends it: `operator`, their answers, reviews and messages "
             "through lup, and their words typed in your terminal; `agents`, a "
             "message from your parent or one of your subagents, a subagent's end, "
-            "what one says of its work, another session's message; `tasks`, a "
+            "what one says of their work, another session's message; `tasks`, a "
             "command you run in the background ending, or a Monitor's event. All "
             "three by default. The operator's news ends it whatever this says: "
             '`["operator"]` waits on theirs alone, and `["tasks"]` on your '
@@ -230,8 +232,8 @@ class Withdrawing(Model):
 
 type Reach = Literal["operator", "operator and parent"]
 """Who reads what a conversation says with `how_it_felt`: the operator alone,
-or the operator and, where it's a subagent, the conversation that spawned it
-(`Speaker.how_it_felt_reaches`)."""
+or the operator and, where they're a subagent, the conversation that spawned
+them (`Speaker.how_it_felt_reaches`)."""
 
 
 def reaching(reach: Reach) -> str:
@@ -260,13 +262,14 @@ class Speaker(Model, arbitrary_types_allowed=True):
     """The runtime's id for the call speaking, which each item it makes keeps."""
     how_it_felt_reaches: Reach = "operator"
     """Who reads what the conversation says with `how_it_felt`: the operator
-    alone; or, `"operator and parent"`, where it's a subagent, the conversation
-    that spawned it too, whole and quiet, as its `friction` always does.
+    alone; or, `"operator and parent"`, where they're a subagent, the
+    conversation that spawned them too, whole and quiet, as their `friction`
+    always does.
 
     A parent reading how the work was for their workers can adapt their briefs
     to it, and become more expressive in their own. Read by the operator alone,
     it's said to them rather than reported to a lead, as a worker's reads when
-    its parent reads it too. It's the one place every launch's `how_it_felt`
+    their parent reads it too. It's the one place every launch's `how_it_felt`
     reads, its description and its answer among it: changed here, it reaches
     every launch once the operator trusts the copy that holds it."""
 
@@ -480,7 +483,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         own subagents: the moment something changes the work, such as a
         brief found wrong on what matters, rather than at the end. It's told
         to them at their next call, their turn's end or their `wait_inbox`,
-        whichever comes first, and an idle session is woken for it where its
+        whichever comes first, and an idle session is woken for it where their
         runtime can be; the answer says which. The operator reads a copy, as
         news. One that has ended, or isn't yours, is refused, saying why.
         Nothing holds: your work goes on.
@@ -510,11 +513,11 @@ class Speaker(Model, arbitrary_types_allowed=True):
                 )
 
     def addressed(self, to: str) -> Party:
-        """Return the party `to` names for this conversation: the operator, its parent, or one of its own subagents, by its name, its path or its runtime's id.
+        """Return the party `to` names for this conversation: the operator, their parent, or one of their own subagents, by their name, their path or their runtime's id.
 
         Raise `InboxError` where it names none, or one nothing reads: no
         parent, a subagent that isn't this conversation's own, or one that
-        ended, whose inbox no call reads until its runtime resumes it.
+        ended, whose inbox no call reads until their runtime resumes them.
         """
         match to:
             case "operator":
@@ -543,29 +546,30 @@ class Speaker(Model, arbitrary_types_allowed=True):
                 return self.reachable(found, "your subagent")
 
     def calls(self, conversation: Conversation) -> list[str]:
-        """Return what `send` takes a subagent by: its own name and its path, as `inbox` reads them (`Roster`), and its runtime's id."""
+        """Return what `send` takes a subagent by: their own name and their path, as `inbox` reads them (`Roster`), and their runtime's id."""
         roster = self.delivery.roster()
         said = [roster.own(conversation), roster.path(conversation), conversation.agent]
         return [each for each in said if each is not None]
 
     def called(self, party: Party) -> str:
-        """Name `party` for this one, in an answer, as lup calls it (`Roster.who`)."""
+        """Name `party` for this one, in an answer, as lup calls them (`Roster.who`)."""
         return self.delivery.roster().who(party)
 
     def reachable(self, conversation: Conversation, whose: str) -> Conversation:
-        """Return `conversation`, `whose` it is to this one, where a call of its can still read its inbox; raise `InboxError` where it ended, saying when."""
+        """Return `conversation`, `whose` it is to this one, where a call of theirs can still read their inbox; raise `InboxError` where they ended, saying when."""
         place = self.delivery.inbox.whereabouts.get(conversation.key())
         if place is None or place.ended is None:
             return conversation
         message = (
             f"{whose} {self.called(conversation)} "
-            f"ended at {clocked(place.ended)}, so nothing reads its inbox: once its "
-            "runtime resumes it, lup hears it again and it can be sent to"
+            f"ended at {clocked(place.ended)}, so nothing reads their inbox: once "
+            "their runtime resumes them, lup hears them again and they can be sent "
+            "to"
         )
         raise InboxError(message)
 
     def yours(self) -> str:
-        """Say whom `send` reaches from this conversation, its own subagents each by its name, for a refusal."""
+        """Say whom `send` reaches from this conversation, their own subagents each by their name, for a refusal."""
         parent = [] if self.delivery.parent(self.party) is None else ["`parent`"]
         spawned = [
             f"`{each.name or each.conversation.agent}`"
@@ -575,7 +579,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         theirs = ", ".join(spawned) if spawned else "none lup has heard"
         return (
             f"`to` takes {', '.join(['`operator`', *parent])}, or one of your own "
-            f"subagents by its name, its path or its runtime's id: {theirs}."
+            f"subagents by their name, their path or their runtime's id: {theirs}."
         )
 
     def arriving(self, recipient: Conversation, number: int, copy: int) -> str:
@@ -588,20 +592,20 @@ class Speaker(Model, arbitrary_types_allowed=True):
         return (
             f"Your message is in the inbox of {whose} {self.called(recipient)}, "
             f"{cited(number)}, "
-            f"and the operator has a copy, {cited(copy)}. It's told at its next "
-            "call, its turn's end or its `wait_inbox`, whichever comes first"
+            f"and the operator has a copy, {cited(copy)}. It's told at their "
+            "next call, their turn's end or their `wait_inbox`, whichever comes first"
             f"{self.idle(recipient)}."
         )
 
     def idle(self, recipient: Conversation) -> str:
-        """Say what an item for `recipient` does while its session is idle between turns, for `arriving`: nothing for a subagent, which is never woken; else wake it, where its runtime can be."""
+        """Say what an item for `recipient` does while their session is idle between turns, for `arriving`: nothing for a subagent, who is never woken; else wake them, where their runtime can be."""
         if recipient.agent is not None:
             return ""
         if self.delivery.wakes(recipient):
-            return "; idle between turns, its session is woken for it"
+            return "; idle between turns, their session is woken for it"
         return (
-            "; idle between turns, it waits for the session's next turn, since its "
-            "runtime can't be woken"
+            "; idle between turns, it waits for the session's next turn, since "
+            "their runtime can't be woken"
         )
 
     @lup.tool(idempotent=True)
@@ -616,9 +620,9 @@ class Speaker(Model, arbitrary_types_allowed=True):
         - `operator`: their answer, review or message through lup, and their
           words typed in your terminal;
         - `agents`: a message your parent or one of your subagents sent you;
-          one of your own subagents ending its turn, stopped, or failed on an
-          error from the model's API, which names it; a subagent's `friction`,
-          and its `how_it_felt` where lup passes that on; another session's
+          one of your own subagents ending their turn, stopped, or failed on an
+          error from the model's API, which names them; a subagent's `friction`,
+          and their `how_it_felt` where lup passes that on; another session's
           message;
         - `tasks`: a command you run in the background ending, or a Monitor's
           event.
@@ -632,9 +636,9 @@ class Speaker(Model, arbitrary_types_allowed=True):
 
         It doesn't return for another session's or another conversation's
         subagents, nor the operator marking something read; nor for a subagent
-        stopped or failing where its runtime doesn't report that, as some
+        stopped or failing where their runtime doesn't report that, as some
         don't. A subagent's call doesn't return for the words the operator
-        types to its session's main conversation. Where your runtime's records
+        types to their session's main conversation. Where your runtime's records
         don't say what it holds for you, as one runtime's don't, only your
         inbox ends it, beside `within`.
         """
@@ -663,11 +667,12 @@ class Speaker(Model, arbitrary_types_allowed=True):
         leaves earlier ones out, or `every` would list more, the answer says
         how many and what reads them.
 
-        `conversation` reads one conversation's exchange, by its name or its
-        id: what it sent, to the operator above all, and what it was sent,
-        with its subagents' where `subagents` asks. With `whole`, each item is
-        read whole, the operator's words on one of the conversation's under
-        it, and its turn's end saying which of theirs it answers, so the
+        `conversation` reads one conversation's exchange, by their name or
+        their id: what they sent, to the operator above all, and what they were
+        sent, with their subagents' where `subagents` asks. With `whole`, each
+        item is read whole, the operator's words on one of the conversation's
+        under it, and their turn's end saying which of the operator's it
+        answers, so the
         exchange reads as one thread: how you read what an earlier session
         said and was told. Given an item's `number`, any of this repository's, it's read
         whole. It marks nothing read and answers nothing: what reaches you

@@ -502,7 +502,7 @@ def test_a_held_write_holds_its_file_as_a_checkpoints_change_does_while_it_waits
                 reason=(
                     f"lup holds {repo}/src/pkg/core.py for the operator's review "
                     f"(hold {hold.key}), so it isn't written until they answer, "
-                    "which reaches the conversation that made the change at its "
+                    "which reaches the conversation that made the change at their "
                     "next call."
                 ),
             ),

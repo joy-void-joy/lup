@@ -1,38 +1,39 @@
-"""Telling each conversation what waits in its inbox, once: at its hooks, by a held call, and by starting a turn of its idle session.
+"""Telling each conversation what waits in their inbox, once: at their hooks, by a held call, and by starting a turn of their idle session.
 
 `docs/inbox.md`, *How an agent is told*. Every item waiting for a
 conversation is told together, oldest first, by whichever comes first:
-- **its next call,** beside it, as the hook's context (`telling`, which the host
+- **their next call,** beside it, as the hook's context (`telling`, which the host
   service asks at every hook, the `Post` it's handed); but not at the start of a
   call to lup's own tools (`Heard.served`), whose result tells it: told beside
   `wait_inbox`, an item would reach the model only once the call returned, and
   the call would wait for the next;
-- **its turn's end,** where some are still waiting: the end is held once, the
+- **their turn's end,** where some are still waiting: the end is held once, the
   items its reason, so they never hold an end again (`inbox/ends.py`);
 - **`wait_inbox`,** or `ask` with `wait`, a call held until something arrives,
   whose result is the items (`held`). It ends too on what the conversation's
-  runtime holds for it, which it hands the agent once the call returns, where
-  its records say (`Queues`): what the operator typed in its terminal, a task
-  it runs in the background, a subagent's end, each by whose news it is
+  runtime holds for them, which it hands the agent once the call returns, where
+  its records say (`Queues`): what the operator typed in their terminal, a task
+  they run in the background, a subagent ending, each by whose news it is
   (`Waking`), as the call's `on` asks; `within` limits how long it holds;
-- **its session's start or resumption,** in the start's answer;
-- **its turn's start,** beside the prompt it starts on (`turn-started`);
-- **its idle session starting a turn,** for an item the operator's own act made,
-  or a message one of its subagents sent it (`send`), to an idle session: one
-  whose turn ended, one just started, or one the
-  service hasn't heard since it started. A session in its turn is told at its
-  next call, or its turn's end, instead. Where its runtime takes a push (the
+- **their session's start or resumption,** in the start's answer;
+- **their turn's start,** beside the prompt it starts on (`turn-started`);
+- **their idle session starting a turn,** for an item the operator's own act
+  made, or a message one of their subagents sent them (`send`), to an idle
+  session: one whose turn ended, one just started, or one the
+  service hasn't heard since it started. A session in their turn is told at
+  their next call, or their turn's end, instead. Where their runtime takes a
+  push (the
   waker's `pushed`), the items themselves are pushed through lup's tool
   server on the session's own connection (`pushed`, `Pushes`), held back from
-  every other way while the push is pending (`tellable`); its turn's start
+  every other way while the push is pending (`tellable`); their turn's start
   carrying the push's token takes it, counting them told (`taken`), and where
   none does within `patience`, they're told as anything waiting is, said once,
-  its launch woken through its messaging socket from then on (`unless_taken`). Through the
+  their launch woken through its messaging socket from then on (`unless_taken`). Through the
   socket (the waker's `woken`, `rung`) what's written is a doorbell, what
   waits and that `wait_inbox` reads it (`doorbell`), never the items: the
   socket takes any local session's message, and the runtime says so of each.
   An idle session starts a turn with either; one the service misjudged as idle
-  takes it at its next boundary. It wakes once until the session's next hook.
+  takes it at their next boundary. It wakes once until the session's next hook.
   Where a runtime has no way, the item waits for the session's next turn, a
   gap its adapter declares.
 
@@ -45,7 +46,7 @@ call's result, or when a push carrying it is taken, and never again:
   waits for the next hook, so the items stay in order;
 - a held call whose conversation's turn ended while it held (seen where a
   runtime runs a held call as a pending cell the model can leave) doesn't count
-  what arrives as told: it says the items reach the agent at its next call, and
+  what arrives as told: it says the items reach the agent at their next call, and
   they're told there;
 - what a hook gone before its answer would have told is put back (`returned`).
 
@@ -56,43 +57,45 @@ answers. What the operator said on an agent's item is `<on item kind>`: a
 passage they quoted as `<quote part>`, cut to its first line where the part's
 id finds the rest (`inbox/threads.py`), with their `<reply id>` under it; a
 comment on the whole item as `<comment id>` after the item's first line as
-`<opening>`; their message to the agent and their remarks in its drawers each
-with its id too, which a citation of their words names (`inbox/citations.py`).
+`<opening>`; their message to the agent and their remarks in the agent's drawers
+each with its id too, which a citation of their words names (`inbox/citations.py`).
 Items only marked read are one `<read items>`. A review's words on other
 agents' items and to other agents sit in its `<context>`, each other item named
 and never repeated. The doorbell, an announcement and lup's word on citations
 that didn't resolve (`<unresolved>`) are tags too. The dashboard shows what's
 inside an item's tag (`words`), as its agent reads it.
 
-**A turn's end** (`concluded`, `ended_saying`) is the agent's answer: its last
-words, put before the operator with the operator's items told to it since its
-last turn's end (`answering`), which the dashboard shows above them; a
-subagent's too where the operator's words reached it, since its last words are
-otherwise its parent's alone (`subagent_answered`). Its citations of the
-operator's words are read as any of an agent's words to them are (`cited`);
-where one names no passage, the conversation is told so, an item that holds its
-turn's end once, so it can `edit` what it sent (`edited`).
+**A turn's end** (`concluded`, `ended_saying`) is the agent's answer: their
+last words, put before the operator with the operator's items told to them since
+their last turn's end (`answering`), which the dashboard shows above those
+words; a subagent's too where the operator's words reached them, since their
+last words are otherwise their parent's alone (`subagent_answered`). Their
+citations of the operator's words are read as any of an agent's words to the
+operator are (`cited`); where one names no passage, the conversation is told so,
+an item that holds their turn's end once, so they can `edit` what they sent
+(`edited`).
 
-**An item for a conversation that has ended** goes to its session's main
-conversation, saying whose it was: one made for it then (`Inbox.made`), and
-those still waiting when it ends.
+**An item for a conversation that has ended** goes to their session's main
+conversation, saying whose it was: one made for them then (`Inbox.made`), and
+those still waiting when they end.
 
 **A message between conversations** (`send`, from a subagent to the
-conversation that spawned it, or to one of its own subagents) is an item for
-its recipient, told as the operator's are: at its next call, its turn's end,
-by `wait_inbox`, or waking its idle session where it's a main conversation.
+conversation that spawned them, or to one of their own subagents) is an item
+for its recipient, told as the operator's are: at their next call, their turn's
+end, by `wait_inbox`, or waking their idle session where they're a main
+conversation.
 The operator reads a copy, news whatever its kind (`Message.to`), from its
 sender, which a review's comment answers as any message's.
 
-**A subagent's end, and what it says of its work,** reach the conversation that
-spawned it (`Whereabouts.parent`): which subagent ended and how, with its last
-message where its runtime doesn't hand that on (`ended`); a copy of each
+**A subagent's end, and what they say of their work,** reach the conversation
+that spawned them (`Whereabouts.parent`): which subagent ended and how, with
+their last message where their runtime doesn't hand that on (`ended`); a copy of each
 `friction`, and of each `how_it_felt` where lup passes those on
 (`Speaker.how_it_felt_reaches`). Each is quiet (`Item.quiet`): told at the
-parent's next call, its turn's or session's start, or by `wait_inbox`, but never
-holding a turn's end nor waking an idle session, since its runtime wakes an idle
-parent for its subagent's end already, and each end would otherwise cost the
-parent a turn of its own. Told beside another item that holds an end or wakes
+parent's next call, their turn's or session's start, or by `wait_inbox`, but
+never holding a turn's end nor waking an idle session, since their runtime wakes
+an idle parent for their subagent's end already, and each end would otherwise
+cost the parent a turn of their own. Told beside another item that holds an end or wakes
 the session, it goes with it.
 
 The operator hears of each item that reaches them waiting on them through the
@@ -114,7 +117,7 @@ saying which approval and the answer (`commented`); one a launch asked at its
 terminal has no session to tell.
 
 What the service knows of a conversation while it serves (whether a call of
-its runs, the calls it holds) is in memory: a service started again knows of
+theirs runs, the calls it holds) is in memory: a service started again knows of
 no call running, and wakes.
 """
 
@@ -301,7 +304,7 @@ def body(item: Item) -> str:
 
 
 def written(item: Item) -> str:
-    """Return the text of an item a conversation sent, whole: as it wrote it, a question with its decisions and leans; a change held from it, with what's held and why, or one that landed flagged, with what's flagged."""
+    """Return the text of an item a conversation sent, whole: as they wrote it, a question with its decisions and leans; a change held from them, with what's held and why, or one that landed flagged, with what's flagged."""
     match item.reason:
         case (
             HeldChange(text=text, summary=summary) | Flagged(text=text, summary=summary)
@@ -495,7 +498,7 @@ def remarked(item: Item, comment: Comment, anchor: Anchor | None) -> list[Tag | 
     """Tag one of the operator's comments on `item`, as a review tells it: a passage's quote then their reply to it, or their comment on the item whole; each with the id of its part of the review, `anchor`'s, where the review is the reader's own.
 
     A quote names the part it starts in (`located`) and is cut to a cue of
-    its first line (`cue`), the agent having its own words; one no part
+    its first line (`cue`), the agent having their own words; one no part
     holds, as a changed file's lines, is quoted whole. On a reply of the
     agent's (`Comment.on`), the quote is of that reply, which its id names.
     """
@@ -648,7 +651,7 @@ def answered_hold(item: Item, did: str, comment: str) -> str:
 
 
 def editable(item: Item, party: Conversation, roster: Roster) -> str:
-    """Return the text of `item` its sender `party` may edit (`Delivery.edited`): its own words to the operator, a message's, a question's, a friction's, how it felt's or a stop's; refuse any other, saying why, each party as `roster` names it."""
+    """Return the text of `item` its sender `party` may edit (`Delivery.edited`): their own words to the operator, a message's, a question's, a friction's, how it felt's or a stop's; refuse any other, saying why, each party as `roster` names it."""
     match item:
         case Item(sender=sender) if sender != party:
             message = f"{cited(item.number)} is {what(item)} from {roster.who(sender)}: only its sender edits it"
@@ -694,7 +697,7 @@ class Dispatched(Model):
     """What sending the operator's draft did: the reviews it was sent as, the items it took off the list read, what it approved and declined, and what it did with comments on approvals and holds at landing it left unapproved."""
 
     reviews: list[Item] = []
-    """One to each conversation with a comment on its messages or questions, a question among them, or a message to it."""
+    """One to each conversation with a comment on their messages or questions, a question among them, or a message to them."""
     read: list[int] = []
     """The messages it took off the list marked read with no comment of their
     own, which tells their senders nothing, by number."""
@@ -761,8 +764,8 @@ def announcement(item: Item, size: int, roster: Roster) -> str:
 type Waking = Literal["operator", "agents", "tasks"]
 """Whose news ends a held call: the operator's, an answer, a review or a message
 through lup, or their words typed in the terminal; another agent's, a message
-from the conversation's parent or one of its subagents, a subagent's end or
-what it said of its work, another session's message; or a task the
+from the conversation's parent or one of their subagents, a subagent's end or
+what they said of their work, another session's message; or a task the
 conversation started in the background, a command ending or a Monitor's
 event."""
 
@@ -802,7 +805,7 @@ def waking(kind: Queuing) -> Waking:
 
 
 def queue(held: list[Queued]) -> str:
-    """Say what a conversation's runtime holds for it, which reaches the agent from the runtime as its held call returns: each by what it is, in the runtime's words where it says.
+    """Say what a conversation's runtime holds for them, which reaches the agent from the runtime as their held call returns: each by what it is, in the runtime's words where it says.
 
     >>> gate = 'Background command "gate" completed (exit code 0)'
     >>> print(queue([Queued(id="1", kind="typed"), Queued(id="2", kind="task", summary=gate)]))
@@ -852,7 +855,7 @@ class Choice(Model):
 
 
 class Held(MutableModel, arbitrary_types_allowed=True):
-    """A call of a conversation's held until something reaches its inbox."""
+    """A call of a conversation's held until something reaches their inbox."""
 
     arrived: asyncio.Event
     ended: bool = False
@@ -861,27 +864,27 @@ class Held(MutableModel, arbitrary_types_allowed=True):
 
 
 class Presence(MutableModel):
-    """What the service knows of a conversation while it serves: whether a call of its runs, whether it was woken since its last hook, and the calls it holds."""
+    """What the service knows of a conversation while it serves: whether a call of theirs runs, whether they were woken since their last hook, and the calls it holds."""
 
     turning: bool = False
-    """Whether its turn runs, as its hooks last said: from a call's start until
-    its turn's end is let through, its next call or its turn's end telling what
-    waits. One just started, or that the service hasn't heard since it started,
+    """Whether their turn runs, as their hooks last said: from a call's start
+    until their turn's end is let through, their next call or their turn's end
+    telling what waits. One just started, or that the service hasn't heard since it started,
     is idle."""
     woken: bool = False
-    """Whether it was woken since its last hook: the turn the wake starts tells
+    """Whether they were woken since their last hook: the turn the wake starts tells
     what arrives meanwhile at its first call."""
     held: list[Held] = []
     queued: list[str] = []
-    """What its runtime holds for it that a held call told, by each one's id,
+    """What their runtime holds for them that a held call told, by each one's id,
     of those it still holds, so none is told twice."""
     pushed: Pushed | None = None
-    """What was last pushed to its session, until a turn's start carries its
+    """What was last pushed to their session, until a turn's start carries its
     token, or its wait runs out."""
 
 
 class Pushed(Model):
-    """What was pushed to an idle session through lup's tool server: the token its turn's prompt carries, and the items it told."""
+    """What was pushed to an idle session through lup's tool server: the token their turn's prompt carries, and the items it told."""
 
     token: str
     numbers: list[int]
@@ -892,7 +895,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
     inbox: Inbox
     waker: Waker
-    """Spells how an idle session is woken, where its runtime has a way."""
+    """Spells how an idle session is woken, where their runtime has a way."""
     pushes: Pushes
     """Each launch's open connections to lup's tool server, which a push to its
     session goes through."""
@@ -905,12 +908,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     """How long a push waits for the turn's start carrying its token, after
     which what it told is put back and the session's messaging socket rings."""
     queues: dict[str, Queues] = {}
-    """What each runtime holds for a conversation while its call runs, by the
+    """What each runtime holds for a conversation while their call runs, by the
     runtime's name, which ends a held call (`held`); a runtime without, a gap
     its adapter declares, ends one on its inbox alone."""
     glance: timedelta = timedelta(seconds=1)
     """How often a held call looks at what its conversation's runtime holds
-    for it, and at its time limit: a look at a record that hasn't grown is a
+    for them, and at its time limit: a look at a record that hasn't grown is a
     file's size, and one that has reads only what it gained."""
     unpushed: list[str] = []
     """The launches whose session took no push in time: said once, and woken
@@ -937,7 +940,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return self.presences[key]
 
     def tellable(self, party: Conversation) -> list[Item]:
-        """Return what waits for `party` that a hook or a held call may tell: all of it but what's pushed to its session and not yet taken."""
+        """Return what waits for `party` that a hook or a held call may tell: all of it but what's pushed to their session and not yet taken."""
         pushed = self.presence(party).pushed
         pending = [] if pushed is None else pushed.numbers
         return [
@@ -953,15 +956,15 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         heard: Heard,
         room: int,
     ) -> Posted:
-        """Note where the conversation is heard, and the conversation that spawned it, `parent`; and tell it what waits.
+        """Note where the conversation is heard, and the conversation that spawned them, `parent`; and tell them what waits.
 
-        At its turn's end, what waits holds the end once (`holding`), but for
-        quiet items (`Item.quiet`), and a call it holds learns its turn ended;
-        a subagent's end held so keeps what it said there for its parent
-        (`held_saying`), since its runtime hands on only the end it lets through;
-        an end let through leaves its main conversation idle, and a subagent's
-        ended (`ended`), its last words put before the operator first where
-        they answer the operator's (`subagent_answered`). A subagent stopped, and a turn that failed on an error
+        At their turn's end, what waits holds the end once (`holding`), but for
+        quiet items (`Item.quiet`), and a call they hold learns their turn
+        ended; a subagent's end held so keeps what they said there for their
+        parent (`held_saying`), since their runtime hands on only the end it
+        lets through; an end let through leaves their main conversation idle,
+        and a subagent's ended (`ended`), their last words put before the
+        operator first where those words answer the operator's (`subagent_answered`). A subagent stopped, and a turn that failed on an error
         from the model's API, the session's or a subagent's, are held for
         nothing, since nothing would read it. A turn's start whose prompt
         carries the token of what was pushed to it takes the push. A worktree
@@ -1022,17 +1025,17 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     async def concluded(
         self, launch: Register, conversation: Caller, heard: Heard
     ) -> None:
-        """Put a session's turn's end in the operator's inbox, as a note from it that lup made (`Message.ending`): its last message, so they read what it ended its turn saying there without it sending it again, with the operator's items it answers (`answering`); or where its turn ended on an error from the model's API, that, in lup's words, with the error's kind and its runtime's text for it. One end makes one note at most, and one saying neither makes none.
+        """Put a session's turn's end in the operator's inbox, as a note from them that lup made (`Message.ending`): their last message, so the operator reads what they ended their turn saying there without them sending it again, with the operator's items it answers (`answering`); or where their turn ended on an error from the model's API, that, in lup's words, with the error's kind and their runtime's text for it. One end makes one note at most, and one saying neither makes none.
 
         An end held to tell what waits makes its note too, as its message
         stands: the turn goes on to another end, with words of its own. A failed
         turn has no words of its own: the conversation shows the runtime's text
         for the error among its steps, and the note says what it is. A reply to
-        either reaches the session, which a failure leaves idle, so it's woken.
+        either reaches the session, whom a failure leaves idle, so they're woken.
         """
         match heard:
             case Heard(failed=Failure(kind=kind, said=said)):
-                opening = f"Its turn ended on an error from the model's API ({kind})"
+                opening = f"Their turn ended on an error from the model's API ({kind})"
                 shown = said is not None and bool(said.strip())
                 text = f"{opening}:\n{said}" if shown else f"{opening}."
             case Heard(said=str() as said) if said.strip():
@@ -1049,7 +1052,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         *,
         telling: bool = True,
     ) -> Item:
-        """Put `party`'s last words of a turn, `text`, before the operator as its turn's end, with the operator's items it answers (`answering`) and its citations of their words read (`cited`); where some name no passage and `telling` says it can still be told, tell `party` so, which holds its turn's end once (`docs/inbox.md`, *Citing the operator's words*)."""
+        """Put `party`'s last words of a turn, `text`, before the operator as their turn's end, with the operator's items it answers (`answering`) and its citations of the operator's words read (`cited`); where some name no passage and `telling` says they can still be told, tell `party` so, which holds their turn's end once (`docs/inbox.md`, *Citing the operator's words*)."""
         answers = self.answering(party)
         note = await self.posted(
             Message(kind="note", text=text, ending=True, answers=answers),
@@ -1067,11 +1070,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     async def subagent_answered(
         self, party: Conversation, launch: Register, heard: Heard
     ) -> None:
-        """Put a subagent's last words before the operator as its turn's end, where the operator's words were told to it since it last did (`answering`): what answers them, which its parent alone would read otherwise. None for a subagent stopped or failing, or one leaving no words.
+        """Put a subagent's last words before the operator as their turn's end, where the operator's words were told to them since they last did (`answering`): what answers those words, which their parent alone would read otherwise. None for a subagent stopped or failing, or one leaving no words.
 
-        Its citations naming no passage are told to it only where its end can
-        still be held for them: one let through after a hold ends, and what
-        waits for it would go to its session, which can't edit its words.
+        Their citations naming no passage are told to them only where their end
+        can still be held for those citations: one let through after a hold
+        ends, and what waits for them would go to their session, which can't
+        edit the subagent's words.
         """
         said = heard.said
         if party.agent is None or heard.stopped or heard.failed is not None:
@@ -1083,7 +1087,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         )
 
     def answering(self, party: Conversation) -> list[int]:
-        """Return the operator's items told to `party` since its last turn's end that lup put before the operator, and not among those that end answers: what its next turn's end answers, oldest first."""
+        """Return the operator's items told to `party` since their last turn's end that lup put before the operator, and not among those that end answers: what their next turn's end answers, oldest first."""
         ordered = [self.inbox.items[number] for number in sorted(self.inbox.items)]
         last = next(
             (
@@ -1111,7 +1115,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         ]
 
     def said_to(self, party: Conversation) -> list[Anchor]:
-        """Return every part of the operator's words addressed to `party`, oldest first: what its citations of their words are read against (`spoken`)."""
+        """Return every part of the operator's words addressed to `party`, oldest first: what their citations of the operator's words are read against (`spoken`)."""
         ordered = [self.inbox.items[number] for number in sorted(self.inbox.items)]
         return [
             anchor
@@ -1160,7 +1164,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         parent: Conversation | None,
         name: str | None = None,
     ) -> None:
-        """Note that `party` is heard in `launch`: where it runs, that it goes on, the conversation that spawned it, `parent`, and a subagent's own `name`, which `inbox` reads it by once its launch has ended."""
+        """Note that `party` is heard in `launch`: where they run, that they go on, the conversation that spawned them, `parent`, and a subagent's own `name`, which `inbox` reads them by once their launch has ended."""
         place = self.inbox.whereabouts.get(party.key())
         if place is not None and place.launch == launch.launch and place.ended is None:
             if place.parent != parent or place.name != name:
@@ -1180,7 +1184,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         )
 
     def parent(self, party: Conversation) -> Conversation | None:
-        """Return the conversation that spawned `party`, where it's a subagent a conversation spawned; none else."""
+        """Return the conversation that spawned `party`, where they're a subagent a conversation spawned; none else."""
         place = self.inbox.whereabouts.get(party.key())
         return None if place is None else place.parent
 
@@ -1199,15 +1203,15 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     async def ended(
         self, party: Conversation, launch: Register, conversation: Caller, heard: Heard
     ) -> None:
-        """Note that a subagent's conversation ended, pass what waits for it to its session's main conversation, and tell the conversation that spawned it.
+        """Note that a subagent ended, pass what waits for them to their session's main conversation, and tell the conversation that spawned them.
 
-        Its parent is told quietly (`Item.quiet`) which subagent it was, whether
-        it ended its turn, was stopped, or failed on an error from the model's
-        API, its last message where its runtime doesn't hand that on, and what
-        it said at each end lup held, which no runtime hands on (`Ended`): at
-        the parent's next call, or by
-        `wait_inbox`, which returns on it, since the runtime wakes an idle
-        parent for its subagent's end already.
+        Their parent is told quietly (`Item.quiet`) which subagent it was,
+        whether they ended their turn, were stopped, or failed on an error from
+        the model's API, their last message where their runtime doesn't hand
+        that on, and what they said at each end lup held, which no runtime
+        hands on (`Ended`): at the parent's next call, or by `wait_inbox`,
+        which returns on it, since the runtime wakes an idle parent for their
+        subagent's end already.
         """
         place = self.inbox.whereabouts.get(party.key())
         if place is not None:
@@ -1233,7 +1237,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         await self.posted(news, party, place.parent, launch.worktree, quiet=True)
 
     def held_saying(self, party: Conversation, said: str | None) -> None:
-        """Keep what subagent `party` said at an end of its turn held to tell it what waited, for its parent with its end (`Ended.held`): its runtime hands its parent only the words of the end it lets through, and nothing else would hand these on."""
+        """Keep what subagent `party` said at an end of their turn held to tell them what waited, for their parent with their end (`Ended.held`): their runtime hands their parent only the words of the end it lets through, and nothing else would hand these on."""
         place = self.inbox.whereabouts.get(party.key())
         if place is None or place.parent is None or said is None or not said.strip():
             return
@@ -1248,7 +1252,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return inside(self.tagged(item).parts)
 
     def roster(self) -> Roster:
-        """Return the conversations the inbox knows, each by the name lup calls it (`inbox/roster.py`): made anew once the inbox, or a session's name, changed since the last."""
+        """Return the conversations the inbox knows, each by the name lup calls them (`inbox/roster.py`): made anew once the inbox, or a session's name, changed since the last."""
         names = Names(path=self.layout.names).all()
         kept = self.rostered
         if (
@@ -1406,11 +1410,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         under: list[int] | None = None,
         context: bool = True,
     ) -> list[Tag | str]:
-        """Tag a review for the conversation it's for: the operator's message to it, their remarks in its drawers (`remarking`) and its own items they commented on first, each with the id of its part among `parts`, the review's (`spoken`; `remarked`); its items read with nothing to add in one line; then, in its context, the other agents' items they commented on, each named and never repeated, and their messages and remarks to other agents, each saying whom it was for.
+        """Tag a review for the conversation it's for: the operator's message to them, the operator's remarks in their drawers (`remarking`) and their own items the operator commented on first, each with the id of its part among `parts`, the review's (`spoken`; `remarked`); their items read with nothing to add in one line; then, in its context, the other agents' items the operator commented on, each named and never repeated, and the operator's messages and remarks to other agents, each saying whom it was for.
 
-        Its comments on each of its own items among `under` are told under that
-        item instead, where an exchange is read whole, a line saying so; its
-        context is left out where `context` is false.
+        Its comments on each of the conversation's own items among `under` are
+        told under that item instead, where an exchange is read whole, a line
+        saying so; its context is left out where `context` is false.
         """
         under_items = [] if under is None else under
         items = [self.inbox.item(each) for each in review.covers]
@@ -1567,16 +1571,16 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 raise InboxError(message)
 
     async def reviewed(self) -> Dispatched:
-        """Send the operator's draft as one reply: to each conversation with a comment on its messages or questions, a question among them, or a message to it, the whole of it; its items answered or done; each approval and held change it covers answered by its own rule; and the draft left with what's parked.
+        """Send the operator's draft as one reply: to each conversation with a comment on their messages or questions, a question among them, or a message to them, the whole of it; its items answered or done; each approval and held change it covers answered by its own rule; and the draft left with what's parked.
 
-        Each conversation is told the operator's message to it and its own
+        Each conversation is told the operator's message to them and their own
         items first, with the comments on them or read with nothing to add,
         then what was said on the others' items and to other agents for
         context (`reviewing`): the operator answers related items together,
         across agents and repositories, and sends what's drafted on moving to
         something unrelated. A question is answered by the reply its asker
         gets, which lets a held `ask` go. A message only marked read tells its
-        sender nothing, nor wakes it: it's taken off the list, and told as read
+        sender nothing, nor wakes them: it's taken off the list, and told as read
         only to a conversation the reply reaches anyway.
 
         An approval or a held change marked done is approved, the comments
@@ -1617,7 +1621,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         if not covered and not draft.written() and not draft.remarked():
             message = (
                 "the draft answers no item and writes to no agent: comment on an "
-                "item, take one off the list, or write to an agent under its banner"
+                "item, take one off the list, or write to an agent under their banner"
             )
             raise InboxError(message)
         asked = [
@@ -1788,7 +1792,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return [Tag(name="asked", parts=[text]), *rulings, *whole]
 
     def told(self, party: Conversation, room: int, fits: int, how: How) -> Posted:
-        """Tell `party` what waits for it, oldest first, in `room` bytes at most: each whole where a hook carries it whole (`fits`), else announced.
+        """Tell `party` what waits for them, oldest first, in `room` bytes at most: each whole where a hook carries it whole (`fits`), else announced.
 
         One already announced is left for `wait_inbox`. The first that doesn't
         fit in what's left waits, with all after it, for the next hook.
@@ -1827,7 +1831,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         )
 
     def whole(self, party: Conversation, how: How) -> str:
-        """Tell `party` everything waiting for it, each whole, oldest first; empty where nothing is."""
+        """Tell `party` everything waiting for them, each whole, oldest first; empty where nothing is."""
         waiting = self.tellable(party)
         told = Told(at=self.clock.now(), how=how)
         for item in waiting:
@@ -1843,15 +1847,15 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         home: Path | None,
         within: timedelta | None = None,
     ) -> str:
-        """Hold a call of `party`'s until `until()`, checked again at each arrival; until its runtime holds for it news of whoever `on` names; or until `within` passes, by the delivery's clock, where it's given. Then tell it everything waiting, and what its runtime holds for it.
+        """Hold a call of `party`'s until `until()`, checked again at each arrival; until their runtime holds for them news of whoever `on` names; or until `within` passes, by the delivery's clock, where it's given. Then tell them everything waiting, and what their runtime holds for them.
 
         What the runtime holds is looked at each `glance`, and as the call
         returns, and told once: it reaches the agent from the runtime as the
         call returns, so the call says only what it is (`queue`). It's read
-        in `home` alone, the home `party`'s launch registered, since its hook
-        named the session (`Queues.queued`). Where its
-        turn ended while the call held, nothing is counted told: it says what
-        waits reaches the agent at its next call. A call cancelled while it
+        in `home` alone, the home `party`'s launch registered, since their hook
+        named the session (`Queues.queued`). Where their turn ended while the
+        call held, nothing is counted told: it says what waits reaches the agent
+        at their next call. A call cancelled while it
         holds, its connection gone, leaves everything waiting.
         """
         presence = self.presence(party)
@@ -1891,7 +1895,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return f"Nothing reached you within {spelled(within)}, this call's `within`."
 
     async def queued(self, party: Conversation, home: Path | None) -> list[Queued]:
-        """Return what `party`'s runtime holds for it that no held call told yet, oldest first: none where its runtime's records don't say (`queues`), or its record isn't in `home`, the one its launch registered (`Queues.queued`).
+        """Return what `party`'s runtime holds for them that no held call told yet, oldest first: none where their runtime's records don't say (`queues`), or their record isn't in `home`, the one their launch registered (`Queues.queued`).
 
         What a call told is kept while the runtime holds it, and forgotten
         once it doesn't, so the list stays as short as the runtime's queue.
@@ -1934,7 +1938,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return item
 
     async def delivered(self, item: Item) -> None:
-        """Tell the recipient that `item` reached its inbox: the operator through a desktop notice, a conversation through its held calls, or by waking it where the item isn't quiet: the operator's own, or a message another conversation sent it."""
+        """Tell the recipient that `item` reached their inbox: the operator through a desktop notice, a conversation through their held calls, or by waking them where the item isn't quiet: the operator's own, or a message another conversation sent them."""
         match item.recipient:
             case Operator():
                 await self.noticed(item)
@@ -1944,7 +1948,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     await self.wake(conversation)
 
     def wakes(self, party: Conversation) -> bool:
-        """Say whether `party`'s session can be woken idle at all: its runtime spells a push or a line for its messaging socket (`Waker`); not where its adapter declares neither."""
+        """Say whether `party`'s session can be woken idle at all: their runtime spells a push or a line for its messaging socket (`Waker`); not where its adapter declares neither."""
         return (
             self.waker.pushed(party.runtime, "", "") is not None
             or self.waker.woken(party.runtime, party.session, "") is not None
@@ -1960,17 +1964,17 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         await self.notices.notify(summary, body)
 
     async def wake(self, party: Conversation) -> None:
-        """Start a turn of an idle `party`'s session on what waits for it: pushed through lup's tool server, where its runtime takes a push, else its doorbell rung through its messaging socket.
+        """Start a turn of an idle `party`'s session on what waits for them: pushed through lup's tool server, where their runtime takes a push, else their doorbell rung through the session's messaging socket.
 
-        Only a session's main conversation is woken, only while it's idle, and
-        never for quiet items alone (`Item.quiet`), which a wake for another
-        carries with it. One in its turn (`Presence.turning`) is told at its
-        next call, or its turn's end; a call it holds is given it; a wake since
-        its last hook started a turn whose first call tells it; and a runtime
-        with no way waits for its next hook. An idle session starts a turn with
-        it; one the service took for idle, unknown since the service started
-        again or since the operator interrupted it, takes it at its next
-        boundary, as measured on the runtime that has a way
+        Only a session's main conversation is woken, only while they're idle,
+        and never for quiet items alone (`Item.quiet`), which a wake for another
+        carries with it. One in their turn (`Presence.turning`) is told at their
+        next call, or their turn's end; a call they hold is given it; a wake
+        since their last hook started a turn whose first call tells it; and a
+        runtime with no way waits for their next hook. An idle session starts a
+        turn with it; one the service took for idle, unknown since the service
+        started again or since the operator interrupted them, takes it at their
+        next boundary, as measured on the runtime that has a way
         (`docs/field-notes.md`, *Waking a session*, *Channels*).
         """
         presence = self.presence(party)
@@ -2016,7 +2020,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return True
 
     def taken(self, party: Conversation, pushed: Pushed) -> None:
-        """Count what `pushed` told `party` as told, its session having started a turn on it."""
+        """Count what `pushed` told `party` as told, their session having started a turn on it."""
         self.presence(party).pushed = None
         told = Told(at=self.clock.now(), how="wake")
         for number in pushed.numbers:
@@ -2029,7 +2033,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     async def unless_taken(
         self, party: Conversation, place: Whereabouts, pushed: Pushed
     ) -> None:
-        """Wait `patience` for `party`'s session to take `pushed`; where it doesn't, leave what it told to be told as anything waiting is, say so once, and wake the session through its messaging socket from then on."""
+        """Wait `patience` for `party`'s session to take `pushed`; where they don't, leave what it told to be told as anything waiting is, say so once, and wake the session through its messaging socket from then on."""
         await asyncio.sleep(self.patience.total_seconds())
         presence = self.presence(party)
         if presence.pushed != pushed:
@@ -2039,19 +2043,19 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         self.unpushed = [*self.unpushed, place.launch]
         self.say(
             f"{place.launch}: {self.roster().who(party)} took nothing lup pushed within "
-            f"{self.patience.total_seconds():g} seconds, so it's woken through its "
-            "messaging socket from now on: its runtime may not have loaded lup's "
-            "server to push (docs/inbox.md, *How an agent is told*)"
+            f"{self.patience.total_seconds():g} seconds, so they're woken through "
+            "their messaging socket from now on: their runtime may not have loaded "
+            "lup's server to push (docs/inbox.md, *How an agent is told*)"
         )
         await self.wake(party)
 
     async def rung(
         self, party: Conversation, place: Whereabouts, waiting: list[Item]
     ) -> None:
-        """Ring idle `party`'s session's doorbell through its messaging socket: what waits, for `wait_inbox` to read, where its runtime has a way.
+        """Ring idle `party`'s session's doorbell through its messaging socket: what waits, for `wait_inbox` to read, where their runtime has a way.
 
         The items stay waiting, told once by whichever reaches the agent first:
-        `wait_inbox`, its next call's hook, or its turn's end; where the
+        `wait_inbox`, their next call's hook, or their turn's end; where the
         session's messaging socket can't be reached, that's said.
         """
         line = self.waker.woken(
@@ -2072,7 +2076,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             presence.woken = False
             self.say(
                 f"{place.launch}: {self.roster().who(party)} wasn't woken through "
-                f"{socket}, so what waits for it is told at its next call: {unreached}"
+                f"{socket}, so what waits for them is told at their next call: {unreached}"
             )
             return
         numbers = ", ".join(cited(item.number) for item in waiting)
@@ -2348,7 +2352,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         agent: str | None = None,
         passages: list[Passage] | None = None,
     ) -> Item:
-        """Send the operator's message to a conversation of the session `launch` runs: its main one, or its subagent `agent`; with the passages of its words they replied to, where they send it from reading it."""
+        """Send the operator's message to a conversation of the session `launch` runs: their main one, or their subagent `agent`; with the passages of the conversation's words the operator replied to, where they send it from reading it."""
         conversation = self.main_of(launch).model_copy(update={"agent": agent})
         message = Message(kind="note", text=text, passages=passages or [])
         return await self.posted(message, Operator(), conversation, None)

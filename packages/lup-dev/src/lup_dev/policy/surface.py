@@ -9,8 +9,8 @@ operator reviews the shape of a module, not every parameter.
 
 The session is the baseline: a name is added where the version before this
 change and the file at the session's start both lack it, and removed where both
-have it, so a name the session itself created comes and goes freely once asked,
-and a name it took out can go back. A file being created asks nothing of its
+have it, so a name the session themselves created comes and goes freely once
+asked, and a name they took out can go back. A file being created asks nothing of its
 names: the operator sees them with the file. The engine reports each version's
 surface, each name placed on its line; this compares them, and places each change
 on the line naming what it changes, which the review marks.

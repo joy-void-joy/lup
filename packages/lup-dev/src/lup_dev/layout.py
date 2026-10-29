@@ -385,7 +385,7 @@ class GitDirectoryLayout(Model):
 
     @property
     def due(self) -> Path:
-        """The deferred work the gate last found due, which a session is told at its start (`codescan.contract.Due`)."""
+        """The deferred work the gate last found due, which a session is told at their start (`codescan.contract.Due`)."""
         return self.common / "lup" / "due.json"
 
     @property
@@ -455,7 +455,7 @@ class LaunchSockets(Model):
 
     @property
     def messages(self) -> Path:
-        """Where the session's own messaging socket is put, through which the host service starts a turn of an idle session, where its runtime has one."""
+        """Where the session's own messaging socket is put, through which the host service starts a turn of an idle session, where their runtime has one."""
         return self.directory / "messages.sock"
 
 
@@ -560,11 +560,11 @@ class HostLayout(Model):
 
     @property
     def names(self) -> Path:
-        """The name each session last had, by the runtime's id for it, kept in lup's state so a session resumed in a later launch takes it back."""
+        """The name each session last had, by the runtime's id for them, kept in lup's state so a session resumed in a later launch takes it back."""
         return self.state / "session-names.json"
 
     def home_of(self, runtime: str, session: str) -> Path:
-        """Say where the home a launched session of `runtime` keeps its record in is kept, by the runtime's id for the session: written once, from the launch the service first heard the session from, so a room naming another's session later can't move it (`lup_dev.launch.homes.kept`)."""
+        """Say where the home a launched session of `runtime` keeps their record in is kept, by the runtime's id for the session: written once, from the launch the service first heard the session from, so a room naming another's session later can't move it (`lup_dev.launch.homes.kept`)."""
         return self.state / "homes" / runtime / session
 
     @property
@@ -1037,7 +1037,7 @@ class Layout(Model):
 
     @property
     def session_index(self) -> Path:
-        """Each session's repository and the worktrees it holds, by session id."""
+        """Each session's repository and the worktrees they hold, by session id."""
         return self.state / "session-index"
 
     def store(self, worktree: Path) -> StoreLayout:
@@ -1083,7 +1083,7 @@ class Layout(Model):
         return exports / f"{commit}-{hashlib.sha256(local.encode()).hexdigest()}"
 
     def session(self, session: str) -> Path:
-        """Say where a session's repository and the worktrees it holds are kept."""
+        """Say where a session's repository and the worktrees they hold are kept."""
         return self.session_index / f"{session}.json"
 
     def warned(self, session: str) -> Path:
@@ -1091,7 +1091,7 @@ class Layout(Model):
         return self.session_index / f"{session}.warned.json"
 
     def conversations(self, session: str) -> Path:
-        """Say where a session's subagents at work, and its last block, are kept."""
+        """Say where a session's subagents at work, and their last block, are kept."""
         return self.session_index / f"{session}.conversations.json"
 
     def approved(self, repository: Path) -> Path:

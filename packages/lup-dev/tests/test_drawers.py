@@ -1,4 +1,4 @@
-"""The drawers under an agent's banner: what its branch changed since the operator last saw it, read as the worktree stands, its files marked reviewed; and a remark on its code telling which quoted lines changed since."""
+"""The drawers under an agent's banner: what their branch changed since the operator last saw it, read as the worktree stands, its files marked reviewed; and a remark on their code telling which quoted lines changed since."""
 
 import asyncio
 from datetime import UTC, datetime, timedelta

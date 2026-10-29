@@ -125,7 +125,7 @@ describe("what the palette runs", () => {
 
 describe("searching the palette", () => {
     it("finds an entry by every word, those in its keys and short name first, never by letters scattered through its words", () => {
-        const pause = searched("␣p pause · Answering", "next item", ["pause the agent at its next call until it's resumed"]);
+        const pause = searched("␣p pause · Answering", "next item", ["pause the agent at their next call until they're resumed"]);
         const items = searched("]] [[ items · Moving", "next item", ["next and previous item, on its first line that matters"]);
         expect(pause).toBe(0);
         expect(items).toBeGreaterThan(0.5);

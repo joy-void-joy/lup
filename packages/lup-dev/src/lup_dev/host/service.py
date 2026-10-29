@@ -14,7 +14,7 @@ on. It holds three sockets:
   judge reads it. One it reads is put to the launch's judge (`LaunchJudge`): its
   repository's approved copy of `lup-dev`, in the repository's process, which
   stays running and answers each hook as `lup-dev hook <runtime>` would, so each
-  session is judged by the code approved for its repository without paying a
+  session is judged by the code approved for their repository without paying a
   start of Python and an import of `lup-dev` at each hook (`host/workers.py`).
   One it doesn't read is answered by the service itself, without asking the
   judge, as no decision, which is never nothing (`UNDECIDED`). Every answer
@@ -510,7 +510,7 @@ def relayed(modules: LaunchModules, launch: Register, kind: str) -> Route:
 def switched(
     conversations: Conversations, conversation: Conversation, depth: int = 0
 ) -> bool:
-    """Say whether the operator's switch holds each flagged write of `conversation`: its own on, or that of a conversation above it among `conversations`, since the switch covers a conversation and its subagents; `depth` counts the conversations climbed, which never pass how many there are.
+    """Say whether the operator's switch holds each flagged write of `conversation`: their own on, or that of a conversation above them among `conversations`, since the switch covers a conversation and their subagents; `depth` counts the conversations climbed, which never pass how many there are.
 
     >>> known = Conversations(known=[
     ...     Conversation(id="m", session="s1", holding=True),
@@ -534,7 +534,7 @@ def switched(
 
 
 class Noted(Model):
-    """A hook's conversation as it stands once what the hook says of subagents is noted, and what it's told of lup's tools and of names."""
+    """A hook's conversation as it stands once what the hook says of subagents is noted, and what they're told of lup's tools and of names."""
 
     conversation: Conversation
     said: list[str] = []
@@ -559,7 +559,7 @@ def named_here(name: str) -> str:
 
 
 def renamed_there(name: str) -> str:
-    """Tell a session the operator renamed it in its runtime, which lup took as its launch's name."""
+    """Tell a session the operator renamed them in their runtime, which lup took as their launch's name."""
     return (
         f"lup: the operator renamed you `{name}`: how they, lup's commands and "
         "other sessions call you from now on. Keep the name they gave."
@@ -571,8 +571,8 @@ class Named(Model):
 
     name: str
     told: list[str] = []
-    """What the conversation is told of its name: at a start, the name; at a
-    prompt, that the operator renamed it, where they did."""
+    """What the conversation is told of their name: at a start, the name; at a
+    prompt, that the operator renamed them, where they did."""
     title: str | None = None
     """The title the hook's answer gives the runtime: the name, where the hook
     takes a title and the runtime's own differs; none otherwise."""
@@ -587,11 +587,11 @@ class Titled(Model):
 
 
 def introduction(tools: list[ToolSpec]) -> str:
-    """Tell a subagent the tools lup serves it, which its session's guidance lists and it doesn't read: each by its name and summary, as the guidance lists them (`summaries`).
+    """Tell a subagent the tools lup serves them, which their session's guidance lists and they don't read: each by its name and summary, as the guidance lists them (`summaries`).
 
-    What a subagent's hooks say names its type, not its tools, and a type's
-    name doesn't fix them (a project's agent of the same name replaces a
-    built-in one), so it's told some types go without lup's.
+    What a subagent's hooks say names their type, not their tools, and a
+    type's name doesn't fix the tools (a project's agent of the same name
+    replaces a built-in one), so they're told some types go without lup's.
 
     >>> from lup.tools.speaking import friction, how_it_felt
     >>> print(introduction([friction.spec(), how_it_felt.spec()]))
@@ -626,17 +626,17 @@ class Running(Model):
 
 
 class Bearings(ABC):
-    """What a new main session is told, once, as it starts, of where its repository stands (`inbox/bearings.py`)."""
+    """What a new main session is told, once, as they start, of where their repository stands (`inbox/bearings.py`)."""
 
     @abstractmethod
     async def told(
         self, launch: Register, session: str, running: list[Running]
     ) -> str | None:
-        """Return what session `session`'s own conversation, starting anew in `launch`, is told; `running` being the main conversations the service serves, its own among them. None tells nothing."""
+        """Return what session `session`'s own conversation, starting anew in `launch`, is told; `running` being the main conversations the service serves, their own among them. None tells nothing."""
 
 
 class Spoken(Model):
-    """What a hook prints, what it tells the conversation from its inbox, the title it gives the session's runtime, and the conversation it touched."""
+    """What a hook prints, what it tells the conversation from their inbox, the title it gives the session's runtime, and the conversation it touched."""
 
     answer: str
     posted: Posted = Posted()
@@ -777,7 +777,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     say: Callable[[str], None]
     names: Names
     """The name each session last had, so a session resumed takes it back, and
-    its title in its runtime as lup last left it, so a title the operator gave
+    their title in their runtime as lup last left it, so a title the operator gave
     there is told from lup's own."""
     spawns: Spawns | None = None
     """How each runtime recorded its subagents' spawns; none reads nothing, so
@@ -787,8 +787,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     record the operator's own directory holds is never kept as a launch's
     (`lup_dev.host.homes.kept`). A runtime missing here is checked for none."""
     bearings: Bearings | None = None
-    """What a new main session is told of where its repository stands as it
-    starts; none tells nothing."""
+    """What a new main session is told of where their repository stands as
+    they start; none tells nothing."""
     refresh: Callable[[Register], list[Path]] | None = None
     """Brings the programs a recorded launch's room runs up to this copy's,
     returning those it rewrote; none leaves them as the launch wrote them."""
@@ -1136,25 +1136,27 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         """Return what one hook prints: the judge's answer where it reads the hook, none where it doesn't, with what the courier adds.
 
         The conversation the hook names gets lup's id here the first time, and
-        is told what the post says waits for it, in what room the judge's answer
-        leaves; the post hears of the conversation that spawned it too, where a
-        conversation did (`Conversations.spawner`), which hears of its end. The
+        is told what the post says waits for them, in what room the judge's
+        answer leaves; the post hears of the conversation that spawned them too,
+        where a conversation did (`Conversations.spawner`), who hears of their
+        end. The
         launch's conversations are kept, with what each is doing, so a service
         started again knows them. One of the runtime's own agents
-        (`Conversation.internal`) is answered with nothing once it's linked: no
-        judge reads its hooks, so none of its calls counts as running or holds;
-        no module hears of it; nothing is told it, and what it's doing isn't
-        kept, since it's no conversation of the operator's: its runtime runs it
-        for its own features, each adapter saying how it's told apart
+        (`Conversation.internal`) is answered with nothing once they're linked: no
+        judge reads their hooks, so none of their calls counts as running or
+        holds; no module hears of them; nothing is told them, and what they're
+        doing isn't kept, since they're no conversation of the operator's: their
+        runtime runs them for its own features, each adapter saying how they're
+        told apart
         (`Spawned.internal`).
 
-        A session's own turn's end puts its last message, or the error from
+        A session's own turn's end puts their last message, or the error from
         the model's API it ended on, before the operator (`Post.concluded`)
         before anything is told, so the note is theirs to read whether the end
         is held or let through. A session's own
-        start, and its own prompt where the hook takes a title, name its launch
-        (`named_at`); a session's own conversation starting anew is told its
-        bearings beside its name (`Bearings`), once. A payload the courier can't read goes to the judge as it
+        start, and their own prompt where the hook takes a title, name their
+        launch (`named_at`); a session's own conversation starting anew is told
+        their bearings beside their name (`Bearings`), once. A payload the courier can't read goes to the judge as it
         is, which answers it or says it couldn't; where the courier can't add to
         the judge's answer, the answer goes out as the judge gave it, and what
         it would have told is put back. Either is said.
@@ -1388,21 +1390,21 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         heard: Heard,
         payload: str,
     ) -> Noted:
-        """Note what a hook says of subagents, and return the conversation as it stands, with what it's told of lup's tools and of names.
+        """Note what a hook says of subagents, and return the conversation as it stands, with what they're told of lup's tools and of names.
 
-        A subagent heard the first time is linked to its spawn as its runtime
-        recorded it (`Spawns`, `Conversations.linked`): its parent, its kind,
-        the name its parent gave, whether it reads its session's guidance, and
-        whether it's one of the runtime's own agents, which no spawn links to
-        and which is told nothing (`Conversation.internal`); one with no name
-        is asked to name itself, beside a call, never as the reason its turn's
-        end is held.
-        A subagent that doesn't read the guidance is told once, at its first
-        hook that isn't its turn's end, the tools lup serves it, which the
-        guidance lists (`introduction`). Not at its end, which would hold it to
-        read them.
-        The conversation spawning one isn't asked to name it: the subagent
-        knows its task, and what a spawning call is told comes beside its
+        A subagent heard the first time is linked to their spawn as their
+        runtime recorded it (`Spawns`, `Conversations.linked`): their parent,
+        their kind, the name their parent gave, whether they read their
+        session's guidance, and whether they're one of the runtime's own agents,
+        whom no spawn links to and who is told nothing
+        (`Conversation.internal`); one with no name is asked to name themselves,
+        beside a call, never as the reason their turn's end is held.
+        A subagent that doesn't read the guidance is told once, at their first
+        hook that isn't their turn's end, the tools lup serves them, which the
+        guidance lists (`introduction`). Not at their end, which would hold them
+        to read the list.
+        The conversation spawning one isn't asked to name them: the subagent
+        knows their task, and what a spawning call is told comes beside its
         result, once the subagent has started.
         """
         first = heard.agent is not None and not conversation.linked
@@ -1430,7 +1432,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         return Noted(conversation=conversation, said=[*introducing, *naming])
 
     def subagent_renamed(self, launch: str, subagent: Conversation, name: str) -> str:
-        """Rename `subagent`, a subagent of launch `launch`, and return how it's called: its launch's name, then each name down to it.
+        """Rename `subagent`, a subagent of launch `launch`, and return how they're called: their launch's name, then each name down to them.
 
         Raise `HostError` where another subagent of the launch has the name,
         saying which.
@@ -1448,7 +1450,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         renamed = conversations.kept(subagent.model_copy(update={"name": name}))
         write_model(self.layout.conversations(launch), conversations)
         path = conversations.path(renamed, named)
-        self.say(f"{launch}: a subagent named itself `{path}`")
+        self.say(f"{launch}: a subagent named themselves `{path}`")
         return path
 
     def held(self, request: SetHolding) -> bool:
@@ -1485,9 +1487,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     def holding(self, request: ShowHolding, repository: Path | None = None) -> bool:
         """Say whether the operator holds each flagged write of a conversation of `request`'s runtime, in whichever launch serves it, of `repository` alone where one's given; not where none does.
 
-        The switch covers a conversation and its subagents: one is held where
-        its own switch is on, or that of any conversation above it, up to its
-        session's own.
+        The switch covers a conversation and their subagents: one is held where
+        their own switch is on, or that of any conversation above them, up to
+        their session's own.
         """
         return any(
             switched(served.conversations, each)
@@ -1499,7 +1501,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         )
 
     def talkers(self, served: Served) -> list[Talker]:
-        """Return a launch's conversations as the operator is shown them: its latest session's own, then each of its subagents under its parent, in the order heard; none before any hook named one.
+        """Return a launch's conversations as the operator is shown them: its latest session's own, then each of its subagents under their parent, in the order heard; none before any hook named one.
 
         The runtime's own agents (`Conversation.internal`) aren't among them:
         no conversation spawned them, so they're no subagent of the operator's
@@ -1625,7 +1627,7 @@ class NewName(Model):
 
 
 class Namer(Model, arbitrary_types_allowed=True):
-    """One conversation of a launch's session, renaming itself: the session's own, or a subagent."""
+    """One conversation of a launch's session, renaming themselves: the session's own, or a subagent."""
 
     launches: Launches
     launch: str
@@ -1664,7 +1666,7 @@ class Namer(Model, arbitrary_types_allowed=True):
 
 
 class Naming(Model, RoomTools, arbitrary_types_allowed=True):
-    """The tool a session renames itself with, which the service serves beside the inbox's."""
+    """The tool a session renames themselves with, which the service serves beside the inbox's."""
 
     launches: Launches
 
@@ -1681,7 +1683,7 @@ class Naming(Model, RoomTools, arbitrary_types_allowed=True):
         caller: Conversation,
         call: str | None,
     ) -> Answer:
-        """Rename `caller`, a conversation of `launch`, as it asks; arguments that don't validate are refused, saying why."""
+        """Rename `caller`, a conversation of `launch`, as they ask; arguments that don't validate are refused, saying why."""
         namer = Namer(launches=self.launches, launch=launch.launch, caller=caller.id)
         [tool] = [tool for tool in namer.tools() if tool.spec().name == name]
         match await tool.call(arguments):
@@ -1884,8 +1886,8 @@ class HostService(Model, arbitrary_types_allowed=True):
     courier: Courier
     """Reads each runtime's hooks, and adds to their answers."""
     post: Post | None = None
-    """What each conversation is told at its hooks, from its inbox; none tells
-    nothing."""
+    """What each conversation is told at their hooks, from their inbox; none
+    tells nothing."""
     say: Callable[[str], None]
     """Where the service tells what it does: the terminal, or its log."""
     judge: LaunchJudge
@@ -1925,8 +1927,8 @@ class HostService(Model, arbitrary_types_allowed=True):
     """Each runtime's records on this machine, by its name, for whether the
     operator's own directory holds a session (`Launches.operators`)."""
     bearings: Bearings | None = None
-    """What a new main session is told of where its repository stands as it
-    starts (`inbox/bearings.py`, which `cli.py` gives); none tells nothing."""
+    """What a new main session is told of where their repository stands as they
+    start (`inbox/bearings.py`, which `cli.py` gives); none tells nothing."""
     refresh: Callable[[Register], list[Path]] | None = None
     """Brings the programs a recorded launch's room runs up to this copy's when
     the service serves it again, returning those it rewrote: git's remote

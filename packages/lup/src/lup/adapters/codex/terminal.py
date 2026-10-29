@@ -105,13 +105,14 @@ to turn off: its compaction runs when the context passes
 `model_auto_compact_token_limit`, and at a turn's end past
 `model_post_turn_compact_threshold_percent`, off unless set
 (`config/src/config_toml.rs`; the 0.162.1 binary names no other setting for
-it), both left to the operator. And nothing reaches a session idle between its
+it), both left to the operator. And nothing reaches a session idle between their
 turns, so `messages` and a tool server's `pushes` have nothing to compile to:
 what a server sends unprompted is only logged
 (`rmcp-client/src/logging_client_handler.rs`), and the app-server that could
 start a turn (`turn/start`) runs inside the terminal's own process under
 `--no-daemon`, out of reach. A message waits for the session's next call; the
-operator typing in its terminal starts one, whose `UserPromptSubmit` tells it.
+operator typing in the session's terminal starts one, whose `UserPromptSubmit`
+tells the session.
 
 **TOML.** Each `-c` value and the requirements file are TOML, written by
 `tomlkit`: a `-c` value on one line, its tables inline, and the requirements file

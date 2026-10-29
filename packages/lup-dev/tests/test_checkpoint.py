@@ -1754,7 +1754,7 @@ def test_a_call_counts_in_every_worktree_its_conversation_works_in(
 def edits_in(
     kit: Kit, cwd: Path, root: Path, key: str, *, agent: str, old: str = "def helper"
 ) -> None:
-    """Conversation `agent` edits `old` in `CORE` in the worktree at `root` with a file tool, its hooks reporting `cwd`, as a subagent's report the session's."""
+    """Conversation `agent` edits `old` in `CORE` in the worktree at `root` with a file tool, their hooks reporting `cwd`, as a subagent's report the session's."""
     edit = Replacement(call=key, tool="Edit", path=root / CORE, old=old, new=f"{old}_")
     before(kit.bench, edit, SESSION, cwd, agent=agent)
     call(kit, cwd, key, tool="Edit", agent=agent)
@@ -1765,8 +1765,8 @@ def edits_in(
 def test_a_subagent_busy_in_its_worktree_holds_back_checkpoints_there_alone(
     kit: Kit, repo: Path, linked: Path
 ) -> None:
-    """A worker's hooks report the session's worktree, where its calls start;
-    once its file tools wrote in its own, its calls count there alone."""
+    """A worker's hooks report the session's worktree, where their calls start;
+    once their file tools wrote in their own, their calls count there alone."""
     start(kit, repo)
     edits_in(kit, repo, linked, "w1", agent="worker")
     call(kit, repo, "w2", agent="worker")
@@ -2531,11 +2531,11 @@ def test_a_report_past_what_a_hook_tells_whole_is_kept_and_told_short(
 
 
 # Quiet: a conversation asks not to be told some kinds of findings, and is told
-# once, as it lifts the quiet, what stands that it wasn't told.
+# once, as they lift the quiet, what stands that they weren't told.
 
 
 def quiet(kit: Kit, *kinds: Kind, agent: str = "") -> str:
-    """Hold `kinds` back from conversation `agent`, none lifting its quiet, as `quiet` does in the repository's process."""
+    """Hold `kinds` back from conversation `agent`, none lifting their quiet, as `quiet` does in the repository's process."""
     return quieted(kit.bench, SESSION, agent, list(kinds))
 
 
@@ -2552,14 +2552,14 @@ def test_a_quiet_conversation_isnt_told_what_it_holds_and_is_told_it_as_it_lifts
     start(kit, repo)
     held = quiet(kit, "changed")
     assert held.startswith(
-        "This conversation is quiet: lup doesn't tell it type errors and ruff's "
-        "findings in the files changed after its calls"
+        "You're quiet: lup doesn't tell you type errors and ruff's findings in "
+        "the files changed after your calls"
     )
     assert shell_write(kit, repo, "c1", CORE, with_a_type_error(repo)).context == ""
     lifted = quiet(kit)
     assert lifted.startswith(
-        "lup's quiet is lifted: it tells this conversation every finding after its "
-        "calls again. What stands in the files it touched that it wasn't told:"
+        "lup's quiet is lifted: it tells you every finding after your calls again. "
+        "What stands in the files you touched that you weren't told:"
     )
     assert f"{repo}/src/pkg/core.py:11:" in lifted
     touched = (repo / CORE).read_text() + "\n"
@@ -2642,8 +2642,8 @@ def test_a_finding_told_before_a_quiet_isnt_told_again_as_it_lifts(
     touched = (repo / CORE).read_text() + "\n"
     assert shell_write(kit, repo, "c2", CORE, touched).context == ""
     assert quiet(kit) == (
-        "lup's quiet is lifted: it tells this conversation every finding after its "
-        "calls again. Nothing stands in the files it touched that it wasn't told."
+        "lup's quiet is lifted: it tells you every finding after your calls again. "
+        "Nothing stands in the files you touched that you weren't told."
     )
 
 
@@ -2656,7 +2656,7 @@ def test_a_finding_fixed_while_quiet_isnt_told_as_it_lifts(
     shell_write(kit, repo, "c1", CORE, with_a_type_error(repo))
     shell_write(kit, repo, "c2", CORE, clean)
     assert quiet(kit).endswith(
-        "Nothing stands in the files it touched that it wasn't told."
+        "Nothing stands in the files you touched that you weren't told."
     )
 
 
@@ -2668,7 +2668,7 @@ def test_lifting_a_quiet_that_wasnt_tells_what_stands_unheard(
     SessionStarted(session=SESSION, cwd=repo, forgotten=True).apply(kit.bench)
     lifted = quiet(kit)
     assert lifted.startswith(
-        "This conversation wasn't quiet: lup tells it every finding after its calls."
+        "You weren't quiet: lup tells you every finding after your calls."
     )
     assert f"{repo}/src/pkg/core.py:11:" in lifted
 
@@ -2736,10 +2736,10 @@ def test_a_quiet_conversation_compacted_stays_quiet_and_is_told_so_as_it_starts(
     shell_write(kit, repo, "c1", CORE, with_a_type_error(repo))
     started = SessionStarted(session=SESSION, cwd=repo, forgotten=True).apply(kit.bench)
     assert started.context == (
-        "This conversation is still quiet: lup doesn't tell it type errors and "
-        "ruff's findings in the files changed, and type errors in the files "
-        "importing what changed after its calls. `quiet` with no kinds lifts it, "
-        "and tells what stands that it wasn't told."
+        "You're still quiet: lup doesn't tell you type errors and ruff's "
+        "findings in the files changed, and type errors in the files importing "
+        "what changed after your calls. `quiet` with no kinds lifts it, and tells "
+        "you what stands that you weren't told."
     )
     touched = (repo / CORE).read_text() + "\n"
     assert shell_write(kit, repo, "c2", CORE, touched).context == ""

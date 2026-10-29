@@ -39,7 +39,7 @@ type Effort = Literal[
 
 
 class Codex(Declaration):
-    """An agent on Codex: its model, system prompt, reasoning effort and layers."""
+    """An agent on Codex: their model, system prompt, reasoning effort and layers."""
 
     runtime = "codex"
     effort: Effort | None = None

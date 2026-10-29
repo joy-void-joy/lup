@@ -1346,7 +1346,7 @@ describe("an answer in a turn's last words", () => {
         expect(following(citationsOf(out), out.text.indexOf("Splitting"))).toBeUndefined();
     });
 
-    it("numbers the operator's words as the host does, after replies kept from before, and shows an agent the parts that were its own", () => {
+    it("numbers the operator's words as the host does, after replies kept from before, and shows an agent the parts that were their own", () => {
         const kept: Item = { ...REVIEW, replies: [{ number: 3, to: { item: 70, part: 1 }, text: "Old.", at: AT }] };
         expect(spokenOf(REVIEW).map((each) => [each.id.part, each.text])).toEqual([
             [1, "Every one? Even a stray byte?"],
@@ -1420,7 +1420,7 @@ describe("waited and fresh", () => {
 });
 
 describe("the drawers under each agent's banner", () => {
-    // Its conversation is `Transcripts`' answer of its record (`fixtures/conversation.json`): the operator's words
+    // Their conversation is `Transcripts`' answer of their record (`fixtures/conversation.json`): the operator's words
     // `Build the reader.` opening an earlier exchange, the agent's `Reading the records.` and two calls in it, read as its
     // fold opens; then their words `Ask me first.`, the agent's two paragraphs, and a call.
     const S1 = from("s1", "a1");
@@ -1456,7 +1456,7 @@ describe("the drawers under each agent's banner", () => {
         since: SINCE,
     };
     const drawers: Drawers = new Map([[whose(S1), DATA]]);
-    // What the host answered of the agent's views the page doesn't lay out itself: its conversation, and its earlier exchange.
+    // What the host answered of the agent's views the page doesn't lay out itself: their conversation, and its earlier exchange.
     const remote = ANSWERED;
     const out = laid([QUESTION, NOTE], [S1], banner, header, EMPTY, NOTHING, [], drawers, undefined, { remote });
     const at = (text: string) => out.text.indexOf(text);
@@ -1652,7 +1652,7 @@ describe("the drawers under each agent's banner", () => {
         expect(placed.converted?.map((each) => ("quote" in each ? [each.quote?.block.endsWith(" step 1"), each.quote?.line] : "letter"))).toEqual([[true, 0]]);
     });
 
-    it("keeps a remark drafted before quotes named their block on a step of no words of the agent's as a message to it", () => {
+    it("keeps a remark drafted before quotes named their block on a step of no words of the agent's as a message to them", () => {
         const old: Remark = { id: "", to: S1, quote: keptQuote("Ask me first.", 0, 13), text: "And?", step: 4 };
         const wrote = laid([QUESTION, NOTE], [S1], banner, header, { ...EMPTY, remarks: [old] }, NOTHING, [], drawers, undefined, { remote });
         expect(wrote.converted).toEqual([{ id: "kept remark 0", to: S1, text: "> Ask me first.\nAnd?" }]);
@@ -1772,7 +1772,7 @@ describe("the drawers under each agent's banner", () => {
         }
     });
 
-    it("marks an agent's own news read and its drawers done from its banner, what asks something left and named", () => {
+    it("marks an agent's own news read and their drawers done from their banner, what asks something left and named", () => {
         const acted = (reach: ReturnType<typeof reachOf>) =>
             reach.on === null ? [] : reach.acts.map((each) => (each.kind === "item" ? `item ${each.number} ${each.list}` : each.kind === "mark" ? `mark ${each.offer.action} ${each.block}` : each.kind));
         const reach = reachOf(out, at("━━ s1"), verb("done"), { called: (each) => each.session });
@@ -1783,11 +1783,11 @@ describe("the drawers under each agent's banner", () => {
             ...findNode(out.nodes, since.view.id)!.children.filter((each) => each.kind === "block").map((each) => `mark policy-review-since ${each.id}`),
             `mark review-mark ${conversation.view.id}`,
         ]);
-        expect(reach.says).toBe("mark its drawers done, @51 left");
+        expect(reach.says).toBe("mark their drawers done, @51 left");
         // Holding an item new to the operator, it's marked seen too, up to the last item the review shows.
         const fresh = reachOf(out, at("━━ s1"), verb("done"), { called: (each) => each.session, fresh: () => true });
         expect(acted(fresh)[0]).toBe(`mark review-mark group ${out.groups[0]?.place}`);
-        expect(fresh.says).toBe("mark it seen, its drawers done, @51 left");
+        expect(fresh.says).toBe("mark them seen, their drawers done, @51 left");
         const seen = fresh.on === null ? undefined : fresh.acts[0];
         expect(seen?.kind === "mark" ? seen.offer.argument : null).toEqual({
             repository: "/r/.git",
@@ -1798,7 +1798,7 @@ describe("the drawers under each agent's banner", () => {
         // Its news, a note ranked so, read from its banner.
         const told = laid([QUESTION, { ...NOTE, rank: NEWS }], [S1], banner, header, EMPTY, NOTHING, [], drawers, undefined, { remote });
         const news = reachOf(told, told.text.indexOf("━━ s2"), verb("done"), { called: (each) => each.session });
-        expect(news.on === null ? null : [news.says, news.acts]).toEqual(["mark its news read", [{ kind: "item", number: 52, list: "done" }]]);
+        expect(news.on === null ? null : [news.says, news.acts]).toEqual(["mark their news read", [{ kind: "item", number: 52, list: "done" }]]);
     });
 
     it("says what each verb reaches in a drawer: a file of since you approved, the drawer on its line, the agent elsewhere", () => {
@@ -1808,7 +1808,7 @@ describe("the drawers under each agent's banner", () => {
         expect(reaches(out, at("since you approved ·"), "done")).toBe("since you approved · 1 to review · 1 flagged: mark every file reviewed");
         // A task list offers nothing of its own: done reaches the agent, its news and drawers. A conversation offers
         // marking it read, up to its last step, which done in it does.
-        expect(reaches(out, at("✓ Write"), "done")).toBe("s1: mark its drawers done, @51 left");
+        expect(reaches(out, at("✓ Write"), "done")).toBe("s1: mark their drawers done, @51 left");
         expect(reaches(out, at("Twenty"), "done")).toBe("conversation · 7 steps · 2 new: mark it read");
     });
 

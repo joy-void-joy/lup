@@ -26,7 +26,7 @@ class UnscriptedAskError(LupError):
 
 
 class Saying(Model):
-    """What the agent says beside its answer, before giving it, as it would call each tool."""
+    """What the agent says beside their answer, before giving it, as they would call each tool."""
 
     notes: list[str] = []
     frictions: list[Friction] = []
@@ -147,7 +147,7 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
         frictions: list[Friction] | None = None,
         how_it_felt: list[HowItFelt] | None = None,
     ) -> None:
-        """Queue the agent saying it's blocked, instead of an answer, for the next ask of `output`."""
+        """Queue the agent saying they're blocked, instead of an answer, for the next ask of `output`."""
         blocking = Blocking(
             problem=problem,
             notes=notes or [],

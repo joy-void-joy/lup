@@ -79,7 +79,7 @@ class Asker(Model):
 
 
 class Agent(Asker):
-    """A conversation of a launch's session, calling one of its tools: the session's own, or one of its subagents'."""
+    """A conversation of a launch's session, calling one of its tools: the session's own, or one of their subagents'."""
 
     launch: Register
     """The launch whose session calls, as the host service recorded it."""
