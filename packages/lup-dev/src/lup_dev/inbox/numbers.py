@@ -18,11 +18,13 @@ from typing import TYPE_CHECKING
 from markdown_it import MarkdownIt
 
 from lup.types import Model
-from lup_dev.inbox.citations import Said, opens, placed, scanned
+from lup_dev.inbox.citations import Said, opens, placed, ruled, scanned
 from lup_dev.inbox.parts import Lines
 
 if TYPE_CHECKING:
     from markdown_it.rules_inline import StateInline
+
+    from lup_dev.inbox.citations import Asked
 
 
 class Number(Model):
@@ -49,13 +51,12 @@ def runs_on(src: str, at: int) -> bool:
     return src[at] == "." and at + 1 < len(src) and src[at + 1].isdigit()
 
 
-# lup: ignore("FBT001", why="markdown-it calls each inline rule as `rule(state, silent)`, its flag positional")
-def numbering(state: StateInline, silent: bool) -> bool:
+def numbering(state: StateInline, asked: Asked) -> bool:
     """Read an item's number at the inline position `state` is at, as markdown-it's inline rules do: `@`, the item's number, and a part's after a dot.
 
     The token it leaves says what it read, and how many times the same is
     written before it in the inline text (`Said`), so it's placed in the text
-    whole; where `silent`, markdown-it only asks whether one is there, and none
+    whole; where it's `seen`, markdown-it only asks whether one is there, and none
     is left.
     """
     src, start = state.src, state.pos
@@ -71,7 +72,7 @@ def numbering(state: StateInline, silent: bool) -> bool:
         part, at = f".{read.text}", read.at
     if runs_on(src, at):
         return False
-    if not silent:
+    if asked == "read":
         said = f"@{item.text}{part}"
         token = state.push("item_number", "", 0)
         token.content = said
@@ -83,7 +84,7 @@ def numbering(state: StateInline, silent: bool) -> bool:
 def reader() -> MarkdownIt:
     """Return the Markdown reader items' numbers are read with: as citations are read (`inbox/citations.py`), with the inline rule reading an item's number (`numbering`)."""
     made = MarkdownIt("commonmark").enable(["table", "strikethrough"])
-    made.inline.ruler.push("item_number", numbering)
+    made.inline.ruler.push("item_number", ruled(numbering))
     return made
 
 
