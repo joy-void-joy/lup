@@ -190,6 +190,9 @@ describe("the page's timings, in headless Chromium", () => {
         await timingsInPalette(dashboard);
         await dashboard.keys.press(["Enter"]);
         expect(await dashboard.page.evaluate(() => localStorage.getItem("lup-timings"))).toBeNull();
+        // The palette closed, the keyboard back in the review, so the key is the review's: a motion, never other.
+        const reviewed = await dashboard.review();
+        await reviewed.until("the keyboard back in the review", (view) => view.hasFocus);
         await dashboard.keys.press(["j"]);
         await aSecondOn(dashboard.page);
         await hide(dashboard.page);
