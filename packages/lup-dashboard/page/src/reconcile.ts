@@ -96,19 +96,27 @@ interface Pair {
  * keeping as many of its lines as can be, a line only as one of the same part's, its weight its part's (`weight`): each
  * part's lines kept by their own diff (`hunks`), and of those, the most weighed that stay in order; the rest changed,
  * each run of them between lines kept by the fewest changes, a line replaced by one in its place by what differs within
- * it. Applied to `doc`, they make `text` exactly.
+ * it. Applied to `doc`, they make `text` exactly. The lines both start with, and those both end with, each the same
+ * part's, are kept as they are, and only what's between them is matched: a mark, a comment opened or a host's answer
+ * changes a stretch of a large review, and matching it whole cost as much as laying it out (#341).
  */
 export function reconcile(doc: Text, before: readonly string[], text: string, after: readonly string[], weight: (owner: string) => number): Reconciled {
-    const old = doc.toString().split("\n");
+    // The buffer's lines as it keeps them, never joined into one string, which a review's size makes costly.
+    const old = doc.toJSON();
     const now = text.split("\n");
+    const { head, tail } = alike(old, now, before, after);
     const owners = new Map<string, { old: number[]; now: number[] }>();
     const of = (owner: string) => {
         const found = owners.get(owner) ?? { old: [], now: [] };
         owners.set(owner, found);
         return found;
     };
-    old.forEach((_, at) => of(before[at] ?? "").old.push(at));
-    now.forEach((_, at) => of(after[at] ?? "").now.push(at));
+    for (let at = head; at < old.length - tail; at += 1) {
+        of(before[at] ?? "").old.push(at);
+    }
+    for (let at = head; at < now.length - tail; at += 1) {
+        of(after[at] ?? "").now.push(at);
+    }
     const pairs: Pair[] = [];
     for (const [owner, lines] of owners) {
         if (lines.old.length === 0 || lines.now.length === 0) {
@@ -138,7 +146,25 @@ export function reconcile(doc: Text, before: readonly string[], text: string, af
         }
     }
     const kept = heaviest(pairs.sort((x, y) => x.old - y.old), now.length);
-    return made(old, now, before, after, kept);
+    return made(old, now, before, after, kept, head, tail);
+}
+
+/**
+ * Return how many lines `old` and `now` start with alike, and how many more they end with alike, each the same text
+ * and the same part's by `before` and `after`: those a layout keeps as they are, the rest between them.
+ */
+function alike(old: readonly string[], now: readonly string[], before: readonly string[], after: readonly string[]): { head: number; tail: number } {
+    const most = Math.min(old.length, now.length);
+    const same = (a: number, b: number) => old[a] === now[b] && (before[a] ?? "") === (after[b] ?? "");
+    let head = 0;
+    while (head < most && same(head, head)) {
+        head += 1;
+    }
+    let tail = 0;
+    while (tail < most - head && same(old.length - 1 - tail, now.length - 1 - tail)) {
+        tail += 1;
+    }
+    return { head, tail };
 }
 
 /** Return the most weighed of `pairs`, in their old order, that stay in order in the new one too, of `count` lines: by a tree of the best found up to each new line. */
@@ -258,11 +284,11 @@ function matchedRuns(a: readonly Owned[], b: readonly Owned[]): [number, number]
  * Return the changes that make lines `old` into lines `now`, `kept` kept, and what arrived, whose each line is by
  * `before` and `after`: between two lines kept, each part's lines there that both have are changed apart, by their own
  * diff, and the rest, a part's that went or came, replaced together, so a change of one part's lines never takes in
- * another's, nor a cursor in one lands in another.
+ * another's, nor a cursor in one lands in another. The first `head` lines and the last `tail` of both are kept too.
  */
-function made(old: readonly string[], now: readonly string[], before: readonly string[], after: readonly string[], kept: readonly Pair[]): Reconciled {
-    const text = old.join("\n");
+function made(old: readonly string[], now: readonly string[], before: readonly string[], after: readonly string[], kept: readonly Pair[], head: number, tail: number): Reconciled {
     const oldStarts = startsOf(old);
+    const length = (oldStarts.at(-1) ?? 1) - 1;
     const newStarts = startsOf(now);
     const changes: ChangeSpec[] = [];
     const arrived: { from: number; to: number }[] = [];
@@ -320,11 +346,11 @@ function made(old: readonly string[], now: readonly string[], before: readonly s
             }
             return;
         }
-        changes.push(lineChange(text, old.length, oldStarts, hunk.from, hunk.to, now.slice(hunk.into, hunk.until)));
+        changes.push(lineChange(length, old.length, oldStarts, hunk.from, hunk.to, now.slice(hunk.into, hunk.until)));
     };
-    let lastOld = -1;
-    let lastNew = -1;
-    for (const each of [...kept, { old: old.length, now: now.length, weight: 0 }]) {
+    let lastOld = head - 1;
+    let lastNew = head - 1;
+    for (const each of [...kept, { old: old.length - tail, now: now.length - tail, weight: 0 }]) {
         if (each.old > lastOld + 1 || each.now > lastNew + 1) {
             gap(lastOld + 1, each.old, lastNew + 1, each.now);
         }

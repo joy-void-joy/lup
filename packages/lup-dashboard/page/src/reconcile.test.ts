@@ -1,7 +1,14 @@
 import { ChangeSet, EditorState, Text } from "@codemirror/state";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { hunks } from "./comments";
 import { arrivedLines, arriving, owned, owning, ownersOf, readBy, reconcile, runsOf, settled, type Reading } from "./reconcile";
+
+// Each diff reconcile asks for, read by the tests of what it matches, made as it is.
+vi.mock("./comments", async (original) => {
+    const made = await original<typeof import("./comments")>();
+    return { ...made, hunks: vi.fn(made.hunks) };
+});
 
 /** Lines, each with whose it is, as a layout lays them out: `owner:text`. */
 function layout(...lines: string[]): { text: string; owners: string[] } {
@@ -108,6 +115,41 @@ describe("a layout made from what the editor holds", () => {
     it("says what arrived but the operator's own words", () => {
         const after = layout("file:a = 1", "file:b = 2", "written c1:Why b?", "written c2:And c?", "file:c = 3", "end:");
         expect(laidOver(before, after).arrived).toEqual([]);
+    });
+
+    it("matches only the lines between those both start and end with, each the same part's: a comment opened in a large review diffs no part whole (#341)", () => {
+        // A review of 5,000 lines of one file's, and a comment opened under its 2,500th, as `S` opens one.
+        const code = Array.from({ length: 5000 }, (_, at) => `file:line ${at % 7}`);
+        const large = layout(...code, "end:");
+        const opened = layout(...code.slice(0, 2500), "written c1:", ...code.slice(2500), "end:");
+        const diffed = vi.mocked(hunks);
+        diffed.mockClear();
+        const made = laidOver(large, opened);
+        expect(made.doc).toBe(opened.text);
+        expect(made.arrived).toEqual([]);
+        // Nothing was matched but the stretch between: no diff of the file's 5,000 lines, nor of anything as long.
+        expect(Math.max(0, ...diffed.mock.calls.map(([a, b]) => Math.max(a.length, b.length)))).toBeLessThan(10);
+    });
+
+    it("makes the text laid out exactly, whatever's left between the lines alike at both ends", () => {
+        for (const [doc, after] of [
+            // Lines put in between, where nothing was.
+            [layout("a:1", "a:2", "end:"), layout("a:1", "b:x", "b:y", "a:2", "end:")],
+            // All that was between taken out.
+            [layout("a:1", "b:x", "b:y", "a:2", "end:"), layout("a:1", "a:2", "end:")],
+            // The same line again and again, one taken out or put in at either end.
+            [layout("a:1", "a:1", "a:1"), layout("a:1", "a:1")],
+            [layout("a:1", "a:1"), layout("a:1", "a:1", "a:1")],
+            [layout("a:1", "a:1", "end:"), layout("end:")],
+            [layout("end:"), layout("a:1", "end:")],
+            // Alike to the end but for a last line.
+            [layout("a:1", "a:2"), layout("a:1", "a:2", "a:3")],
+            [layout("a:1", "a:2", "a:3"), layout("a:1", "a:2")],
+            // The same text, another part's.
+            [layout("a:1", "a:2", "end:"), layout("a:1", "b:2", "end:")],
+        ] as const) {
+            expect(laidOver(doc, after).doc).toBe(after.text);
+        }
     });
 });
 
