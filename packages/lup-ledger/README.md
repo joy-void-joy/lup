@@ -17,7 +17,7 @@ The ledger keeps the work as a typed graph: nodes, the edges between them, and e
 - **A kind refuses what it can't be:**
   - a node, as it's kept (`Node.refused`);
   - an edge, which alone sees both its ends, as it's drawn (`Edge.refused`);
-  - either, in its types: `Settled.by` is the operator.
+  - either, in its types: `Declined.by` is the operator.
 - **Where a node stands is read from the edges drawn to it, never stored:** a status kept on a record outlives what justified it. Each node says whether it waits on the operator, given the edges drawn to it (`Node.waiting`).
 
 ## Threads
@@ -35,7 +35,8 @@ What's in it is edges drawn to it:
 - **its status** (`Status`), the latest one drawn:
   - parked until the first of its triggers comes: an issue closing, a branch or a commit landing, a conversation ending, a time, or a condition named as `defer`'s `when=` names one;
   - done, in an agent's word, with what to try;
-  - settled, or declined, which only the operator does (`Settled.by`, `Declined.by`);
+  - settled (`Settled`): by the operator; or by lup, saying why, where it made a thread of a past conversation and nothing in it waited on them (`docs/inbox.md`, *Threads*), its act and never put in their name. Never by an agent: the request settling one is the operator's (`inbox-settle-thread`), and nothing an agent reaches, the `thread` tool among it, settles one;
+  - declined, which only the operator does (`Declined.by`);
   - reopened, by the operator, or by lup where what a parked thread waits for comes.
 
 `Standing.read` says three things, where it stands said once for any reader (`stood`):

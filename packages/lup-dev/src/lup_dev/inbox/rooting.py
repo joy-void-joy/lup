@@ -12,8 +12,9 @@ is and kept as their root on their whereabouts, so they go on there. A
 subagent's items go to their session's root too, as a subagent starts on their
 parent's thread and lands there unless they open another.
 
-A root opened for a past conversation is settled, as the operator settles one,
-unless something in it still waits on them, or its session goes on: one that
+A root opened for a past conversation is settled, by lup, saying why
+(`CONVERTED`): its act, never put in the operator's name; unless something in
+it still waits on them, or its session goes on: one that
 asks them stays open, and so does one whose session is still at work, whose
 next items land there. A later session taking its name takes it reopened
 (`Concerns.took`). Nobody is told: what's put there is past.
@@ -43,6 +44,10 @@ from lup_ledger.threads import In, Settled, Thread
 if TYPE_CHECKING:
     from lup_dev.layout import Layout
     from lup_ledger.environment.layout import LedgerLayout
+
+
+CONVERTED = "nothing waited when threads came: converted"
+"""Why lup settles a root it opens for a past conversation."""
 
 
 def loose(inbox: Inbox) -> list[Item]:
@@ -101,7 +106,7 @@ class Rooted(Model):
 
 
 def rooted(concerns: Concerns) -> Rooted | None:
-    """Put each item that lands in a thread and lies in none in its session's root, in one transaction: their own, or one opened for them, settled unless something in it waits on the operator or the session goes on; and say what it did. None where no item lies outside every thread.
+    """Put each item that lands in a thread and lies in none in its session's root, in one transaction: their own, or one opened for them, settled by lup unless something in it waits on the operator or the session goes on; and say what it did. None where no item lies outside every thread.
 
     Raise `InboxError` where the ledger refuses a thread or an edge, keeping
     none of it.
@@ -153,8 +158,9 @@ def rooted(concerns: Concerns) -> Rooted | None:
             Settled(
                 target=thread.number,
                 repository=thread.repository,
-                by=Operator(),
+                by=Lup(),
                 at=concerns.now(),
+                why=CONVERTED,
             )
         )
         return "settled"

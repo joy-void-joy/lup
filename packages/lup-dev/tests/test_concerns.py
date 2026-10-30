@@ -653,6 +653,11 @@ def test_a_settled_root_a_later_session_takes_by_its_name_is_reopened_by_lup(
     assert delivery.concerns().standing(root).status == standing.status
 
 
+def test_no_tool_an_agent_calls_settles_or_declines_a_thread() -> None:
+    fields = set(Threading.model_fields)
+    assert not fields & {"settle", "settled", "decline", "declined", "reopen"}
+
+
 def test_a_title_makes_a_name_with_a_letter() -> None:
     assert slugged("Tabs vanish") == "tabs-vanish"
     assert slugged("2025") == "thread-2025"

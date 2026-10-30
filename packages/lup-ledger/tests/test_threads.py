@@ -5,9 +5,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import ValidationError
 
 from lup_ledger.errors import LupLedgerError
-from lup_ledger.parties import Conversation, Operator
+from lup_ledger.parties import Conversation, Lup, Operator
 from lup_ledger.records import Node
 from lup_ledger.threads import (
     Answered,
@@ -183,6 +184,27 @@ def test_a_thread_stands_as_its_latest_status_says(
     assert standing.state == state
     assert standing.status == said
     assert len(standing.waiting) == 1
+
+
+def test_lup_settles_a_thread_saying_why_and_an_agent_never_does() -> None:
+    by_lup = Settled(
+        target=1,
+        repository=REPOSITORY,
+        by=Lup(),
+        at=at(1),
+        why="nothing waited when threads came: converted",
+    )
+    assert Settled.model_validate_json(by_lup.model_dump_json()) == by_lup
+    assert Settled(target=1, repository=REPOSITORY, by=Operator(), at=at(1)).why == ""
+    with pytest.raises(ValidationError):
+        Settled.model_validate(
+            {
+                "target": 1,
+                "repository": REPOSITORY,
+                "by": WORKER.model_dump(),
+                "at": at(1),
+            }
+        )
 
 
 def test_reopening_a_thread_brings_it_back_to_what_its_members_say(

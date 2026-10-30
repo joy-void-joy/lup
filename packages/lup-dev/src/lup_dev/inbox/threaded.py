@@ -28,7 +28,7 @@ it, every repository's, and the operator settles, declines and reopens them:
 
 Where the operator last read a thread is their review mark on it, the core's,
 keyed by the thread's node (`marks.on_node`), up to the last of what's in it
-the page showed; or, later, their settling or declining it. What came before
+the page showed; or, later, their settling or declining it, never lup's. What came before
 either is read; what came after is new, but an item they've answered or marked
 read. A thread with no mark is read from its start: what they've answered or
 read already is still read.
@@ -65,7 +65,7 @@ from lup_dev.inbox.store import (
 from lup_dev.inbox.texts import what
 from lup_dev.inbox.threads import anchors
 from lup_ledger.environment.store import Written
-from lup_ledger.parties import Conversation
+from lup_ledger.parties import Conversation, Operator
 from lup_ledger.threads import (
     Answered,
     Check,
@@ -440,7 +440,7 @@ class Readings(Model, arbitrary_types_allowed=True):
     def read_to(
         self, members: list[Joined], mark: ReviewMark | None, status: Stated | None
     ) -> ReadTo:
-        """Return how far what's in a thread was last read: up to what its review `mark` names, or, where that's moved out of it since, what came by when the mark was moved; or what came by when it was settled or declined, `status`, where that's further."""
+        """Return how far what's in a thread was last read: up to what its review `mark` names, or, where that's moved out of it since, what came by when the mark was moved; or what came by when the operator settled or declined it, `status`, where that's further: lup's settling isn't their reading."""
         marked = ReadTo()
         if mark is not None and mark.up_to is not None and mark.up_to.isdecimal():
             named = int(mark.up_to)
@@ -456,7 +456,7 @@ class Readings(Model, arbitrary_types_allowed=True):
             )
         closed = (
             ReadTo.by(members, status.at)
-            if isinstance(status, Settled | Declined)
+            if isinstance(status, Settled | Declined) and status.by == Operator()
             else ReadTo()
         )
         return marked if marked.members >= closed.members and marked.at else closed

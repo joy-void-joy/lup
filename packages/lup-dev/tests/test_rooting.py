@@ -11,7 +11,14 @@ from lup_dev import cli
 from lup_dev.conversions import checked, inbox_opened, snapshot
 from lup_dev.host.names import Names
 from lup_dev.inbox.concerns import ROOT
-from lup_dev.inbox.rooting import Rooted, concerned, loose, rooted, rooted_rehearsed
+from lup_dev.inbox.rooting import (
+    CONVERTED,
+    Rooted,
+    concerned,
+    loose,
+    rooted,
+    rooted_rehearsed,
+)
 from lup_dev.inbox.store import (
     KINDS,
     Done,
@@ -20,6 +27,7 @@ from lup_dev.inbox.store import (
     Question,
     Whereabouts,
 )
+from lup_dev.inbox.threaded import Ledgered, Readings
 from lup_dev.layout import Layout
 from lup_dev.settings import LupDevSettings
 from lup_ledger.environment.layout import LedgerLayout
@@ -139,8 +147,11 @@ def test_each_past_item_goes_to_its_session_s_root_each_opened_root_settled_but_
     assert concerns.containing(past.answer.number) is None
     # `dev` ended and nothing in it waits: settled, by the operator. `docs` asks
     # them; `dev-again` goes on: each left open.
+    settling = concerns.standing(dev).status
     assert concerns.standing(dev).state == "settled"
-    assert isinstance(concerns.standing(dev).status, Settled)
+    # Settled by lup, saying why: never put in the operator's name.
+    assert isinstance(settling, Settled)
+    assert (settling.by, settling.why) == (Lup(), CONVERTED)
     assert concerns.standing(docs).state == "waiting on the operator"
     assert concerns.standing(again).state == "working"
     # Each session works there from now on, their root kept on their whereabouts.
@@ -149,6 +160,29 @@ def test_each_past_item_goes_to_its_session_s_root_each_opened_root_settled_but_
     # Nothing lies outside a thread, so nothing happens again.
     assert loose(past.inbox) == []
     assert rooted(concerns) is None
+
+
+def test_lup_s_settling_of_a_past_root_isn_t_where_the_operator_read_it(
+    machine: Layout, clock: FakeClock
+) -> None:
+    past = Past(machine, clock)
+    concerns = concerned(past.inbox, machine)
+    rooted(concerns)
+    dev = concerns.containing(past.read[0].number)
+    assert dev is not None
+    readings = Readings(concerns=concerns, ledgered=Ledgered.read(concerns))
+    read = readings.read(dev.number)
+    assert (read.section, read.state, read.new, read.earlier) == (
+        "every thread",
+        "settled",
+        [],
+        0,
+    )
+    # The operator settling it is: what came before is read.
+    clock.sleep(60)
+    concerns.settled(dev)
+    again = Readings(concerns=concerns, ledgered=Ledgered.read(concerns))
+    assert again.read(dev.number).earlier == read.members
 
 
 def test_a_session_with_a_root_already_has_its_earlier_items_put_there_its_status_as_it_stands(

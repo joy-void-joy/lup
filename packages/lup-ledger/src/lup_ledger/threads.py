@@ -37,7 +37,8 @@ type State = Literal[
 ]
 """Where a thread stands: worked on; waiting on the operator, for a check or
 an item of theirs to answer; parked until something comes; done in an agent's
-word, for the operator to confirm; settled by the operator; or declined."""
+word, for the operator to confirm; settled, by the operator, or by lup on a
+thread it made of what came before threads; or declined."""
 
 
 def thread_only(edge: Edge, target: Node) -> str | None:
@@ -283,11 +284,13 @@ class Done(Status):
 
 
 class Settled(Status):
-    """A thread settled: only the operator settles one."""
+    """A thread settled: by the operator; or by lup, saying why, where it made a thread of what came before threads and nothing in it waited on them. Never by an agent."""
 
     kind: Literal["ledger:settled"] = "ledger:settled"
     stands: ClassVar[State] = "settled"
-    by: Operator
+    by: Annotated[Operator | Lup, Field(discriminator="party")]
+    why: str = ""
+    """Why lup settled it; the operator's says nothing."""
 
 
 class Declined(Status):
