@@ -1393,6 +1393,16 @@ export function Review({
         current.dispatch({ effects: ticked.of(ticks) });
     }, [laidOut, activities, banner, view]);
 
+    // The line of keys says what each verb would do as the draft stands, which a mark changes where the cursor stays:
+    // Space d on a thread's banner reads its news, then settles it.
+    useEffect(() => {
+        if (choosing.current === null) {
+            placed(hereAt(editor.head()));
+        }
+        // Said again only as the draft changes; the cursor moving says it as it moves.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [given]);
+
     // Asked to go to an agent's group, as from the palette: onto its banner.
     const jumped = useRef<number>(0);
     useEffect(() => {
@@ -1426,9 +1436,14 @@ export function Review({
         if (known === undefined) {
             return;
         }
-        const reach = reachOf(laidOut, editor.head(), known, { called, fresh: isFresh });
+        const reach = reachOf(laidOut, editor.head(), known, { called, fresh: isFresh, draft: editor.latest.current });
         if (reach.on === null) {
             say(`␣${known.key} ${known.called}: ${reach.why}.`);
+            return;
+        }
+        // What it would do, held back, as a thread with something waiting on the operator isn't settled: said why.
+        if (reach.acts.length === 0) {
+            say(`␣${known.key} ${known.called}: ${reach.says}.`);
             return;
         }
         if (moves(reach.acts, known.key, name)) {
@@ -1471,7 +1486,7 @@ export function Review({
         if (known === undefined) {
             return;
         }
-        const acts = reachedIn(laidOut, folds, known, { called, fresh: isFresh });
+        const acts = reachedIn(laidOut, folds, known, { called, fresh: isFresh, draft: editor.latest.current });
         if (acts.length === 0) {
             say(`␣${known.key} ${known.called}: nothing selected takes it.`);
             return;
@@ -1569,7 +1584,7 @@ export function Review({
                 const said = commentSays(at);
                 return said === null ? [] : [{ keys: `␣${each.key}`, ...said }];
             }
-            const reach = reachOf(laidOut, at, each, { called, fresh: isFresh });
+            const reach = reachOf(laidOut, at, each, { called, fresh: isFresh, draft: editor.latest.current });
             if (reach.on === null) {
                 // Decline on a flagged write says why it doesn't, the write having landed (#247).
                 const drawer = each.name === "decline" ? drawerAt(laidOut, at) : undefined;
@@ -1594,7 +1609,7 @@ export function Review({
             if (each.name === "comment") {
                 return [];
             }
-            const acts = reachedIn(laidOut, folds, each, { called, fresh: isFresh });
+            const acts = reachedIn(laidOut, folds, each, { called, fresh: isFresh, draft: editor.latest.current });
             return acts.length === 0 ? [] : [{ keys: `␣${each.key}${BARE.has(each.key) ? ` ${each.key}` : ""}`, says: `${each.called} ${acts.length}`, on: null }];
         });
         return { on: `${what}: ${folds.length} selected`, reached: [{ keys: "za zo zc", says: "toggle, open or close them", on: null }, ...verbs] };

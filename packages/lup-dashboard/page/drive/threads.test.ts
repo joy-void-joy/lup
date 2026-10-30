@@ -96,9 +96,12 @@ describe("the review grouped by thread, in headless Chromium", () => {
         expect(await line()).toMatch(/^── @51 question/);
     });
 
-    it("settles a thread done with Space d on its header, ticks a check with Space d, and writes on a thread, Space s sending it to no one and back", async () => {
+    it("reads a thread done's news with Space d on its header, then settles it, ticks a check with Space d, and writes on a thread, Space s sending it to no one and back", async () => {
         await review.goTo("━━ @guidance-voice");
-        expect(await keys()).toContain("␣d settle it: it works");
+        expect(await keys()).toContain("␣d mark its news read");
+        await dashboard.keys.press([" ", "d"]);
+        await says("@guidance-voice read");
+        await dashboard.page.waitForFunction(() => document.querySelector(".keys")?.textContent?.includes("␣d settle it: it works") === true);
         await dashboard.keys.press([" ", "d"]);
         await says("@guidance-voice settled");
         await review.goTo("◆ check @311");

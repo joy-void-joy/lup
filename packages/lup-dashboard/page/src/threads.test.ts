@@ -20,6 +20,7 @@ import {
     threadPlace,
     pileTitle,
     placeIn,
+    ROOT_TITLE,
     UNSEEN,
     type Around,
     type Conversation,
@@ -289,19 +290,91 @@ describe("the review grouped by thread", () => {
         expect(by("comment")).toMatchObject({ says: "write on it, to s1/a1" });
     });
 
-    it("marks a thread read up to the last item shown with Space d on its banner, its news with it, what asks left", () => {
+    it("marks a thread's news read with Space d on its banner where there's some, then settles it, never where something waits on the operator", () => {
         const out = lay();
-        const done = adopted().verbs.find((each) => each.name === "done");
-        const reader = out.groups.find((each) => each.thread?.thread.name === "reader");
-        const reach = done === undefined || reader === undefined ? null : reachOf(out, reader.banner.from, done, { called });
-        expect(reach).toMatchObject({
-            says: "mark it read, 1 left to answer",
-            whole: "mark it read, @51 left to answer",
-            acts: [{ kind: "mark", offer: { action: "review-mark", argument: { module: "core", key: { node: 302 }, up_to: "51" } } }],
+        const verbs = adopted().verbs;
+        const done = verbs.find((each) => each.name === "done");
+        const decline = verbs.find((each) => each.name === "decline");
+        const on = (name: string, verb: typeof done, draft: Draft = EMPTY) => {
+            const group = out.groups.find((each) => each.thread?.thread.name === name);
+            return verb === undefined || group === undefined ? null : reachOf(out, group.banner.from, verb, { called, draft });
+        };
+        // The reader asks a question and a check, and has no news: it isn't settled, nor declined, and says why.
+        expect(on("reader", done)).toMatchObject({ says: "not settled while 2 wait on you", acts: [] });
+        expect(on("reader", decline)).toMatchObject({ says: "not declined while 2 wait on you", acts: [] });
+        // Each answered in the draft, the question marked done and the check ticked, it settles.
+        const answered: Draft = { ...EMPTY, done: [51], marks: [{ id: "c", action: "inbox-check-answer", argument: { number: 311 }, verb: "done", says: "tried", block: "check 311", version: null }] };
+        expect(on("reader", done, answered)).toMatchObject({ says: "settle it", acts: [{ kind: "mark", offer: { action: "inbox-settle-thread", argument: { number: 302 } } }] });
+        // The survey has news: Space d reads it, up to the newest, its news item with it; marked so, Space d settles it.
+        const fresh = on("auth", done);
+        expect(fresh).toMatchObject({
+            says: "mark its news read, each item with it",
+            acts: [{ kind: "mark", offer: { action: "review-mark", argument: { key: { node: 303 }, up_to: "70" } } }, { kind: "item", number: 70, list: "done" }],
         });
-        const auth = out.groups.find((each) => each.thread?.thread.name === "auth");
-        const fresh = done === undefined || auth === undefined ? null : reachOf(out, auth.banner.from, done, { called });
-        expect(fresh).toMatchObject({ says: "mark it read, its news with it", acts: [{ kind: "mark" }, { kind: "item", number: 70, list: "done" }] });
+        const read = fresh === null || fresh.on === null ? EMPTY : marking(EMPTY, fresh.acts, "done");
+        expect(on("auth", done, read)).toMatchObject({ says: "settle it", acts: [{ kind: "mark", offer: { action: "inbox-settle-thread", argument: { number: 303 } } }] });
+        // Decline on it whenever, nothing waiting; settled, it's declined no more, the one taking the other's place.
+        const declining = on("auth", decline);
+        expect(declining).toMatchObject({ says: "decline it: nothing more will be done", acts: [{ kind: "mark", offer: { action: "inbox-decline-thread" } }] });
+        const settling = on("auth", done, read);
+        const settled = settling === null || settling.on === null ? read : marking(read, settling.acts, "done");
+        const instead = declining === null || declining.on === null ? settled : marking(settled, declining.acts, "decline");
+        expect((instead.marks ?? []).filter((each) => each.action.startsWith("inbox-")).map((each) => each.action)).toEqual(["inbox-decline-thread"]);
+        // A thread settled already takes neither.
+        expect(on("cache", done)?.on).toBeNull();
+    });
+
+    it("lists the roots of sessions that have ended in open after the others, under a line Space d settles them from", () => {
+        const gone = from("s7");
+        const root = (number: number, name: string, read: Partial<ThreadRead> = {}) => {
+            const made = thread(number, name, { holder: gone, answering: null, ...read } as Partial<ThreadRead>);
+            return { ...made, thread: { ...made.thread, title: ROOT_TITLE, holder: gone, by: gone }, answering: null } as ThreadRead;
+        };
+        const idle = root(320, "old-session");
+        const asked = root(321, "older-session", { state: "waiting on the operator", section: "waiting on you", asks: [{ node: 51, what: "a question", came: AT }] });
+        const under = { ...thread(322, "kept-on", {}), thread: { ...thread(322, "kept-on", {}).thread, parent: 320 } } as ThreadRead;
+        const threads = threading();
+        const reads = { ...threads.read, threads: [...threads.read.threads, idle, asked, under] };
+        const out = laid([QUESTION, LATE], [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called, { threads: { ...threads, read: reads } });
+        const text = lines(out);
+        const open = text.indexOf("open · 8");
+        const ended = text.indexOf("ended · 2");
+        expect(open).toBeGreaterThan(0);
+        expect(ended).toBeGreaterThan(open);
+        // Each root its own thread, a line each, after every other; a thread under one stays with the others.
+        expect(text.slice(ended + 1).filter((line) => line.startsWith("━━ ")).slice(0, 2)).toEqual([
+            "━━ @old-session · the session's own · its session has ended · working ━━",
+            "━━ @older-session · the session's own · its session has ended · working · 1 waiting ━━",
+        ]);
+        expect(text.slice(open, ended).some((line) => line.startsWith("━━ @kept-on"))).toBe(true);
+        // No thread's fold holds the line.
+        const before = out.groups.filter((each) => each.banner.from < out.text.indexOf("ended · 2"));
+        expect(before.every((each) => each.end < out.text.indexOf("ended · 2"))).toBe(true);
+        // On it, Space d settles each, but one where something waits on the operator, counted; Space x declines.
+        const at = out.text.indexOf("ended · 2");
+        const verbs = adopted().verbs;
+        const by = (name: string) => {
+            const verb = verbs.find((each) => each.name === name);
+            return verb === undefined ? null : reachOf(out, at, verb, { called });
+        };
+        expect(by("done")).toMatchObject({
+            on: "ended sessions' roots",
+            says: "settle it, 1 left: something in it waits on you",
+            acts: [{ kind: "mark", offer: { action: "inbox-settle-thread", argument: { number: 320 } } }],
+        });
+        expect(by("decline")).toMatchObject({ says: "decline it, 1 left: something in it waits on you", acts: [{ kind: "mark", offer: { action: "inbox-decline-thread", argument: { number: 320 } } }] });
+        expect(out.ended?.threads.map((each) => each.thread.name)).toEqual(["old-session", "older-session"]);
+        // The overview says the line too, set in under open, the roots after it.
+        const rows = outlineOf(out, { draft: EMPTY, seeing: UNSEEN, states: new Map(), called }).map((each) => `${each.depth} ${each.text}`);
+        expect(rows.slice(rows.indexOf("1 ended"), rows.indexOf("1 ended") + 3)).toEqual(["1 ended", "1 @old-session", "1 @older-session"]);
+    });
+
+    it("settles a working thread whose holder has ended, its news none", () => {
+        const out = lay(EMPTY, false);
+        const done = adopted().verbs.find((each) => each.name === "done");
+        const ticks = out.groups.find((each) => each.thread?.thread.name === "docs");
+        const reach = done === undefined || ticks === undefined ? null : reachOf(out, ticks.banner.from, done, { called });
+        expect(reach).toMatchObject({ on: "@docs", says: "settle it", acts: [{ kind: "mark", offer: { action: "inbox-settle-thread", argument: { number: 304 } } }] });
     });
 
     it("keeps a thread's banner to one row, a long title cut at a word, whole in the overview", () => {
@@ -326,7 +399,7 @@ describe("the review grouped by thread", () => {
         const reader = out.groups.find((each) => each.thread?.thread.name === "reader");
         expect(out.regions.some((each) => each.item.number === 51)).toBe(true);
         const reach = done === undefined || reader === undefined ? null : reachOf(out, reader.banner.from, done, { called });
-        expect(reach).toMatchObject({ says: "mark it read, its news with it" });
+        expect(reach).toMatchObject({ says: "mark its news read, each item with it" });
     });
 
     it("lays a part of the operator's words moved in after who wrote it, open, and writes on a thread to whoever answers for it", () => {

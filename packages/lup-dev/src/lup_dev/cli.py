@@ -1714,14 +1714,14 @@ def thread_stated(stated: ThreadStated, did: str) -> str:
 
 @inbox.command("settle-thread")
 def inbox_settle_thread(number: ThreadNumber) -> None:
-    """Settle a thread, as Space d on the banner of one done, to confirm, does in the review: it folds into every thread, and whoever answers for it is told."""
+    """Settle a thread, any, as Space d on its banner does in the review once nothing on it is new: it folds into what's settled, and whoever answers for it is told."""
     stated = answering().ask(SettleThread(number=number), ThreadStated)
     typer.echo(thread_stated(stated, "settled"))
 
 
 @inbox.command("decline-thread")
 def inbox_decline_thread(number: ThreadNumber, why: Why = "") -> None:
-    """Decline a thread, as Space x on the banner of one done, to confirm, does in the review: nothing more will be done about it, and whoever answers for it is told why."""
+    """Decline a thread, any, as Space x on its banner does in the review: nothing more will be done about it, and whoever answers for it is told why."""
     stated = answering().ask(DeclineThread(number=number, why=why), ThreadStated)
     typer.echo(thread_stated(stated, "declined"))
 

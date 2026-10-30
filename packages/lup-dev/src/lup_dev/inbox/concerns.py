@@ -28,7 +28,10 @@
 - **A holder that has ended holds nothing** (`live`): a subagent ended, a
   session cleared in their launch, or one whose launch has ended. It's read at
   each read rather than written as they end, so a session resumed under the
-  same ids holds their threads again.
+  same ids holds their threads again. Their end settles nothing: their root
+  stays open until the operator settles it, and one settled or declined is
+  reopened by lup once they, resumed, send into it again (`resumed`), as it is
+  for a session taking it by its name (`took`).
 
 What an agent says of a thread besides sending into it is the `thread` tool's
 (`inbox/tools.py`): open, join, hold, hand, move into, park, say done. Settling,
@@ -483,6 +486,7 @@ class Concerns(Model, arbitrary_types_allowed=True):
         )
         if not isinstance(item.reason, HowItFelt):
             self.referred(item, landing)
+        self.resumed(landing, sender)
         reach = told(item)
         self.telling(
             landing,
@@ -493,6 +497,23 @@ class Concerns(Model, arbitrary_types_allowed=True):
             others=reach.others != "none",
         )
         return landing
+
+    def resumed(self, thread: Thread, sender: Conversation) -> None:
+        """Reopen `thread`, by lup, where it's a root settled or declined and `sender`, its holder or a subagent of theirs, sent into it: a session resumed under the same ids goes on in their root, which the operator may have settled while they'd ended, as one taking it by its name does (`took`). Any other thread stands as it stood."""
+        main = sender.main()
+        if thread.parent is not None or thread.title != ROOT or thread.holder != main:
+            return
+        status = self.threads.standing(thread.number).status
+        if isinstance(status, Settled | Declined):
+            self.drawn(
+                Reopened(
+                    target=thread.number,
+                    repository=thread.repository,
+                    by=Lup(),
+                    at=self.now(),
+                    why=f"{self.roster.who(main)} went on in it",
+                )
+            )
 
     def copied(self, item: Item) -> list[Conversation]:
         """Return the agent a message between agents went to, where `item` is the operator's copy of it: they have its words already; none else."""

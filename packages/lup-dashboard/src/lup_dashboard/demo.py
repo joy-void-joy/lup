@@ -549,7 +549,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         return stated
 
     def stand_in_threads(self) -> StandInThreads:
-        """Return the demo's threads, over its items (`every`): each session's root, held by them; the lup-impl session's work under theirs, the parser's reader with its question, a check and the parser's exchange with their subagent, explore-auth's survey new with its exchange with the session, the clock's ticks whose landing waits on a file, the legacy reader's cache settled, the reader's names parked; the voice session's root done, to confirm, with a part of the operator's words moved under it; zoetrope's render, its problem asking; and each worker's module, of a busy day."""
+        """Return the demo's threads, over its items (`every`): each session's root, held by them; the lup-impl session's work under theirs, the parser's reader with its question, a check and the parser's exchange with their subagent, explore-auth's survey new with its exchange with the session, the clock's ticks whose landing waits on a file, the legacy reader's cache settled, the reader's names parked; the voice session's root done, to confirm, with a part of the operator's words moved under it; zoetrope's render, its problem asking; the docs pass, the root of a session that has ended, its last note read, which its end settles not; and each worker's module, of a busy day."""
         first, second = self.runtimes
         lup = Path("/home/op/lup.git")
         zoetrope = Path("/home/op/zoetrope.git")
@@ -560,6 +560,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         survey = session.model_copy(update={"agent": "a04"})
         clock = session.model_copy(update={"agent": FIX_CLOCK})
         voice = Conversation(repository=lup, runtime=first, session="s2")
+        docs = Conversation(repository=lup, runtime=first, session="s4")
         main = Conversation(repository=zoetrope, runtime=second, session="s3")
         frames = main.model_copy(update={"agent": "th-7"})
         items = {each.number: each for each in self.every()}
@@ -575,8 +576,9 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             zoetrope_root,
             past,
             reached,
-        ) = range(self.first_thread, self.first_thread + 11)
-        workers_from = self.first_thread + 11
+            docs_root,
+        ) = range(self.first_thread, self.first_thread + 12)
+        workers_from = self.first_thread + 12
 
         def came(number: int) -> Joined:
             item = items.get(number)
@@ -730,6 +732,10 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 members=[came(53)],
             ),
             StoodIn(thread=thread(past, "dev", root, holder=None, minutes=2880)),
+            StoodIn(
+                thread=thread(docs_root, "docs-pass", root, holder=docs, minutes=240),
+                members=[came(43)],
+            ),
             *workers,
         ]
         return StandInThreads(
@@ -767,7 +773,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             },
             every=self.every,
             pathed=self.paths,
-            ended=lambda: [survey, clock],
+            ended=lambda: [survey, clock, docs],
             marks=self.views.marks,
             working=[
                 Working(conversation=session, thread=lup_root),
@@ -1585,13 +1591,14 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         ]
 
     def every(self) -> list[Item]:
-        """Return every stand-in item, by number: those waiting for the operator; the parser subagent's note they replied to, at the call that sent it; an ended subagent's note whose reply went to their session; the voice session's note the operator reviewed, edited since, and their review, which the session answers in the last words of a turn (`answer`); the parser subagent's late question, once it has arrived (`arrives`); and the messages sent from the page. Each a draft sent covered is done."""
+        """Return every stand-in item, by number: those waiting for the operator; the parser subagent's note they replied to, at the call that sent it; an ended subagent's note whose reply went to their session; the docs session's last note, read, their session ended since; the voice session's note the operator reviewed, edited since, and their review, which the session answers in the last words of a turn (`answer`); the parser subagent's late question, once it has arrived (`arrives`); and the messages sent from the page. Each a draft sent covered is done."""
         first, second = self.runtimes
         lup = Path("/home/op/lup.git")
         parser = Conversation(repository=lup, runtime=first, session="s1", agent="a02")
         session = Conversation(repository=lup, runtime=first, session="s1")
         survey = session.model_copy(update={"agent": "a04"})
         voice = Conversation(repository=lup, runtime=first, session="s2")
+        docs = Conversation(repository=lup, runtime=first, session="s4")
         zoetrope = Conversation(
             repository=Path("/home/op/zoetrope.git"), runtime=second, session="s3"
         )
@@ -1650,6 +1657,21 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         reader = Path("packages/lup/src/lup/transcripts/reader.py")
         clock = Path("packages/lup-dev/src/lup_dev/clock.py")
         settled = [
+            Item(
+                number=43,
+                reason=Message(
+                    kind="note",
+                    text=(
+                        "The docs pass is done: each page says what's built, and "
+                        "nothing more. I'm ending here."
+                    ),
+                ),
+                sender=docs,
+                recipient=Operator(),
+                worktree=lup / "tree" / "docs-pass",
+                made=self.ago(200),
+                state=Done(at=self.ago(190)),
+            ),
             Item(
                 number=44,
                 reason=Message(

@@ -94,11 +94,11 @@ describe("every line of the page on one row, at the demo's width, in headless Ch
     });
 
     it("says what's left to answer on a thread's banner by its count, each by its number in the palette", async () => {
-        await review.goTo("━━ @transcript-reader · The transcript reader · lup-impl/parser holds · a question, a check");
-        expect(await keys()).toContain("␣d mark it read, 1 left to answer");
+        await review.goTo("━━ @lup-impl · the session's own · lup-impl holds · a held change, landing waits on 1 file");
+        expect(await keys()).toContain("␣d mark its news read, 1 left to answer");
         await dashboard.keys.press(["?"]);
         await dashboard.page.waitForSelector(".keys-palette [cmdk-group-heading]");
-        expect(await dashboard.page.locator(".keys-palette [cmdk-group]").first().innerText()).toContain("mark it read, @51 left to answer");
+        expect(await dashboard.page.locator(".keys-palette [cmdk-group]").first().innerText()).toContain("mark its news read, @55 left to answer");
         await dashboard.keys.press(["Escape"]);
         await dashboard.page.waitForSelector(".keys-palette", { state: "detached" });
     });
