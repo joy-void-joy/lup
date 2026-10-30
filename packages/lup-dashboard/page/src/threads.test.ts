@@ -12,6 +12,7 @@ import {
     EMPTY,
     checkAt,
     groupAt,
+    headerClasses,
     heading,
     laid,
     opened,
@@ -318,6 +319,32 @@ describe("the review grouped by thread", () => {
         // Read once, whatever came since shows.
         const marked = { ...AUTH, mark: { key: { node: 303 }, up_to: "40", at: AT } } as ThreadRead;
         expect(untilCalled(never, marked).before).toEqual([]);
+    });
+
+    it("folds the whole of a thread they never read once nothing in it calls for them, what they answered never coming back", () => {
+        const answered = { ...NOTE, state: { state: "done", at: AT } } as Item;
+        const done = { ...LATE, state: { state: "done", at: AT } } as Item;
+        const quiet = { ...AUTH, section: "every thread", new: [] } as ThreadRead;
+        const never = shown(
+            quiet,
+            [
+                { spot: { node: 47 }, came: AT, member: true },
+                { spot: { node: 70 }, came: AT, member: true },
+            ] as ThreadShown["entries"],
+            [answered, done],
+        );
+        const split = untilCalled(never, quiet);
+        expect(split.before.map((each) => each.spot.node)).toEqual([47, 70]);
+        expect(split.after).toEqual([]);
+    });
+
+    it("strikes an item's header through only where the draft marks it, muting what no longer waits as the thread's history", () => {
+        const answered = { ...NOTE, state: { state: "done", at: AT } } as Item;
+        const classes = (item: Item, draft: Draft) => headerClasses(item, draft, UNSEEN).split(" ");
+        expect(classes(answered, EMPTY)).toContain("is-past");
+        expect(classes(answered, EMPTY)).not.toContain("is-done");
+        expect(classes(LATE, { ...EMPTY, done: [70] })).toContain("is-done");
+        expect(classes(LATE, EMPTY)).not.toContain("is-past");
     });
 
     it("folds each of the few read entries shown before what's new to its header, as context", () => {

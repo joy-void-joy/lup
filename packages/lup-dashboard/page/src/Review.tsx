@@ -73,6 +73,7 @@ import { source, sourced, without, type Source } from "./markdown";
 import {
     barsOf,
     aboutAt,
+    headerClasses,
     answerAfter,
     citationsOf,
     following,
@@ -97,7 +98,6 @@ import {
     isRegion,
     isRemark,
     laid,
-    news,
     opened,
     ordered,
     quoted,
@@ -564,15 +564,7 @@ function decorations(
             }
         } else {
             const region = scope as Region;
-            const number = region.item.number;
-            const states = [
-                "review-header",
-                fresh(region.item, seeing) ? "is-new" : "",
-                news(region.item) ? "is-news" : "",
-                (draft.done ?? []).includes(number) || !waits(region.item) ? "is-done" : "",
-                (draft.declined ?? []).includes(number) ? "is-declined" : "",
-                (draft.parked ?? []).includes(number) ? "is-parked" : "",
-            ].join(" ");
+            const states = headerClasses(region.item, draft, seeing);
             marks.push({ from: region.header.from, to: region.header.from, value: Decoration.line({ class: states }) });
         }
         const runs = new Set(scope.folds.filter((each) => each.kind === "lines").map((each) => each.summary.from));
@@ -1938,15 +1930,7 @@ export function Review({
                 if (region === undefined) {
                     return "review-header";
                 }
-                const number = region.item.number;
-                return [
-                    "review-header",
-                    fresh(region.item, seeing) ? "is-new" : "",
-                    news(region.item) ? "is-news" : "",
-                    (draft.done ?? []).includes(number) || !waits(region.item) ? "is-done" : "",
-                    (draft.declined ?? []).includes(number) ? "is-declined" : "",
-                    (draft.parked ?? []).includes(number) ? "is-parked" : "",
-                ].join(" ");
+                return headerClasses(region.item, draft, seeing);
             }
             case "drawer": {
                 const drawer = laidOut.drawers.find((each) => each.header.from === sticky.header.from);

@@ -389,6 +389,12 @@ kbd {
     text-decoration: line-through;
 }
 
+/* What no longer waits on the operator, answered, read or decided: a thread's history, muted, never struck through,
+   which says what the next Ctrl+Enter does with it. */
+.review-header.is-past {
+    color: var(--muted);
+}
+
 .review-header.is-parked {
     color: var(--muted);
 }
