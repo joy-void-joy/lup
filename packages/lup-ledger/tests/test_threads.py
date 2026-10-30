@@ -316,6 +316,68 @@ def test_a_part_moved_into_a_thread_is_in_it_while_its_item_stays_in_its_own(
     assert [each.part for each in threads.members(page.number)] == [4, 3]
 
 
+def test_an_item_moved_whole_into_a_thread_is_in_both_and_moves_again_alone(
+    ledger: Ledger, threads: Threads
+) -> None:
+    main = opened(ledger, "main", holder=MAIN)
+    lag = opened(ledger, "lag")
+    gate = opened(ledger, "gate", holder=REVIEWER)
+    friction = item(ledger, WORKER)
+    placed(ledger, friction, main)
+
+    def gathered(thread: Thread, minutes: int) -> Moved:
+        return ledger.drawn(
+            Moved(
+                source=friction.number,
+                target=thread.number,
+                repository=REPOSITORY,
+                by=Operator(),
+                at=at(minutes),
+            )
+        )
+
+    gathered(lag, 1)
+    first = [(each.node, each.part, each.moved) for each in threads.members(lag.number)]
+    gathered(gate, 2)
+
+    assert [(each.node, each.moved) for each in threads.members(main.number)] == [
+        (friction, False)
+    ]
+    assert first == [(friction, None, True)]
+    assert threads.members(lag.number) == []
+    assert [(each.node, each.moved) for each in threads.members(gate.number)] == [
+        (friction, True)
+    ]
+    standing = threads.standing(gate.number)
+    assert standing.on == [REVIEWER]
+    assert standing.unanswered == []
+
+
+def test_an_item_moved_in_whole_answers_no_part_of_the_operator_s_words(
+    citing: Ledger,
+) -> None:
+    threads = Threads(ledger=citing)
+    main = opened(citing, "main", holder=MAIN)
+    lag = opened(citing, "lag", parent=main.number)
+    review = item(citing, Operator())
+    placed(citing, review, main)
+    moved(citing, review, lag, 3)
+    friction = item(citing, REVIEWER)
+    placed(citing, friction, main)
+    cite(citing, friction, review, 3, minutes=2)
+    citing.drawn(
+        Moved(
+            source=friction.number,
+            target=lag.number,
+            repository=REPOSITORY,
+            by=Operator(),
+            at=at(3),
+        )
+    )
+
+    assert [each.part for each in threads.standing(lag.number).unanswered] == [3]
+
+
 def test_a_reference_from_another_thread_s_item_is_no_member(
     ledger: Ledger, threads: Threads
 ) -> None:

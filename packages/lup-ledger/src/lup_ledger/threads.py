@@ -5,7 +5,8 @@ name unique in its repository, a title, the thread it's under, and the one
 conversation holding it, or none. What's in it are edges drawn to it:
 - **a member,** a node in it by an `In` edge: an item, a check;
 - **a part** of an item moved into it by its id (`Moved`), the operator's
-  words, which counts as a member too;
+  words, or an item whole moved in by its number while it stays in its own,
+  as a friction the operator gathers there: each counts as a member too;
 - **a reference** from an item of another thread that touches it (`Refers`),
   which is no member;
 - **its status,** the latest of the edges saying where it stands (`Status`):
@@ -130,19 +131,23 @@ class In(Edge):
 
 
 class Moved(Edge):
-    """A part of an item moved into a thread by its id: the operator's words there, which the thread's holder answers.
+    """A part of an item moved into a thread by its id, the operator's words there, which the thread's holder answers; or an item whole moved in by its number, as a friction the operator gathers into a concern.
 
-    A part counts as a member of the thread it's moved into, while its item
-    stays in its own. A part is in one thread at a time, like a node. It waits
-    on whoever answers for the thread until a node in the thread answers it
-    (`Edge.answers`), whoever wrote that node (`answered`).
+    Either counts as a member of the thread it's moved into, while its item
+    stays in its own: where `In` takes a node out of its thread, this leaves it
+    there, its own thread's history whole. Each is in one thread at a time by
+    it, as a node is by `In`. A part waits on whoever answers for the thread
+    until a node in the thread answers it (`Edge.answers`), whoever wrote that
+    node (`answered`); an item whole waits on nobody, the thread being what
+    stays open until it's settled.
     """
 
     kind: Literal["ledger:moved"] = "ledger:moved"
     source: int
-    """The item whose part it is."""
-    part: Annotated[int, Field(ge=1)]
-    """The part's place in its item, from 1: its id is `<source>.<part>`, cited `@2159.3`."""
+    """The item whose part it is, or the item moved whole."""
+    part: Annotated[int, Field(ge=1)] | None = None
+    """The part's place in its item, from 1: its id is `<source>.<part>`, cited
+    `@2159.3`; none for the item whole."""
 
     @override
     def refused(self, source: Node | None, target: Node) -> str | None:
@@ -339,6 +344,9 @@ class Member(Model):
     node: SerializeAsAny[Node]
     part: int | None = None
     """The part moved into the thread, by its place in the node; none where the node itself is in it."""
+    moved: bool = False
+    """Whether it's in the thread as moved there (`Moved`), its node staying in
+    its own: a part always is, an item whole where it was moved whole."""
     drawn: list[SerializeAsAny[Edge]] = []
 
 
@@ -351,11 +359,11 @@ def answered(member: Member, members: list[Member]) -> bool:
     mover saying where they routed a part doesn't close it. A subagent's
     counts, since a subagent starts on their parent's thread and the work their
     parent handed them answers there. A node itself in the thread, never a
-    part, is what answers.
+    part, nor an item moved in whole from another, is what answers.
     """
     if member.part is None:
         return False
-    inside = [each.node.number for each in members if each.part is None]
+    inside = [each.node.number for each in members if not each.moved]
     return any(
         each.answers(member.part) and each.source in inside for each in member.drawn
     )
@@ -374,7 +382,8 @@ class Standing(Model):
     """The parts of the operator's words moved into it that nothing answers yet
     (`answered`), oldest first: each waits on whoever answers for the thread."""
     on: list[Conversation] = []
-    """Who's on it: its holder first, then each conversation that wrote what's in it."""
+    """Who's on it: its holder first, then each conversation that wrote what's
+    in it, but an item moved in whole from another, whose writer wrote it there."""
 
     @classmethod
     def read(cls, thread: Thread, drawn: list[Edge], members: list[Member]) -> Self:
@@ -389,7 +398,9 @@ class Standing(Model):
         state = stood(status, waiting=bool(waiting))
         holder = [] if thread.holder is None else [thread.holder]
         writers = [
-            each.node.by for each in members if isinstance(each.node.by, Conversation)
+            each.node.by
+            for each in members
+            if isinstance(each.node.by, Conversation) and not each.moved
         ]
         unanswered = [
             each

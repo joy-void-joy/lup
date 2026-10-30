@@ -85,21 +85,22 @@ class Threads(Model, arbitrary_types_allowed=True):
         return held(thread)
 
     def members(self, number: int) -> list[Member]:
-        """Return what's in thread `number`, in the order it came in: each node in it, and each part moved into it, with the edges drawn to its node that stand, none a later one replaced."""
+        """Return what's in thread `number`, in the order it came in: each node in it, and each part or item moved into it, with the edges drawn to its node that stand, none a later one replaced."""
         with self.ledger.together():
             entries = self.ledger.drawn_to(number, Edge, current=True)
 
             def member(entry: Edge) -> Member | None:
                 match entry:
                     case In(source=source):
-                        part = None
-                    case Moved(source=source, part=moved):
-                        part = moved
+                        part, moved = None, False
+                    case Moved(source=source, part=part):
+                        moved = True
                     case _:
                         return None
                 return Member(
                     node=self.ledger.node(source, Node),
                     part=part,
+                    moved=moved,
                     drawn=self.ledger.drawn_to(source, Edge, current=True),
                 )
 
