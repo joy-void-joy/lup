@@ -303,7 +303,7 @@ def test_a_thread_s_conversation_lays_each_reply_under_what_it_answers(
     assert {each.conversation for each in shown.paths} == {LEAD}
 
 
-def test_a_thread_s_conversation_from_its_mark_keeps_what_a_later_entry_is_under(
+def test_a_thread_s_conversation_from_its_mark_keeps_what_a_later_entry_is_under_and_what_asks(
     work: Work, clock: FakeClock
 ) -> None:
     clock.sleep(60)
@@ -323,11 +323,14 @@ def test_a_thread_s_conversation_from_its_mark_keeps_what_a_later_entry_is_under
 
     shown = work.shown(work.lag)
 
+    # The question, read, stays above the answer under it; the check, read too,
+    # stays for it still asks the operator.
     assert [(each.spot, each.earlier) for each in shown.entries] == [
         (Spot(node=work.question), True),
+        (Spot(node=work.check), True),
         (Spot(node=answer.number, part=1), False),
     ]
-    assert shown.left == 1
+    assert shown.left == 0
     assert shown.read.earlier == 2
     whole = work.shown(work.lag, whole=True)
     assert [each.spot for each in whole.entries] == [

@@ -35,7 +35,7 @@ from lup_dev.inbox.concerns import ROOT, Concerns
 from lup_dev.inbox.conversion import Differs
 from lup_dev.inbox.roster import Roster
 from lup_dev.inbox.store import KINDS, Inbox, Item, cited
-from lup_dev.inbox.threaded import Ledgered, Readings
+from lup_dev.inbox.threaded import Readings
 from lup_dev.listing import many
 from lup_ledger.environment.store import Ledger
 from lup_ledger.parties import Conversation, Lup, Operator
@@ -329,7 +329,7 @@ def rooted_rehearsed(layout: Layout, live: LedgerLayout) -> RootedRehearsal:
         done = rooted(concerns)
         converting = time.perf_counter() - started
         started = time.perf_counter()
-        readings = Readings(concerns=concerns, ledgered=Ledgered.read(concerns))
+        readings = Readings.of(concerns)
         listed = readings.listed()
         listing = time.perf_counter() - started
         largest = max(listed.threads, key=lambda each: each.members, default=None)

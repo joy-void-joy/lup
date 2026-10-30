@@ -15,7 +15,9 @@ it, every repository's, and the operator settles, declines and reopens them:
   its review mark; and who answers for it; and where each conversation going
   on works (`Working`), whose "since you approved" the page lays out there.
 - **`inbox-thread`** (`ShowThread`) reads one thread's conversation (`Entry`):
-  from where they read it, what came before counted, or whole; each item, check
+  from where they read it, what came before counted but what asks them and a
+  part of theirs nothing answers yet, which never fold away as read, or whole;
+  each item, check
   or part of their words moved in, in the order it came, and their own words on
   each, a review's comment, an answer's rulings, a reply, under what it's on;
   an item citing a part of their words moved in under that part, which stands
@@ -45,6 +47,7 @@ served changed (`ThreadReading`), since the page's watch asks again at each
 hook any agent makes.
 """
 
+from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Literal, override
 
@@ -57,7 +60,7 @@ from lup_dev.host.service import Handler, Reading, Route
 from lup_dev.inbox.concerns import Concerns
 from lup_dev.inbox.delivery import Delivery
 from lup_dev.inbox.marks import CORE, ReviewMark, on_node
-from lup_dev.inbox.protocol import Pathed, pathed
+from lup_dev.inbox.protocol import Pathed, named_by
 from lup_dev.inbox.store import (
     Friction,
     HowItFelt,
@@ -90,6 +93,7 @@ from lup_ledger.threads import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
 type Section = Literal["waiting on you", "new", "every thread"]
@@ -381,37 +385,76 @@ def pile(item: Item) -> bool:
     return isinstance(item.reason, Friction | HowItFelt)
 
 
-class Readings(Model, arbitrary_types_allowed=True):
-    """The threads, read once from the ledger (`Ledgered`), as the review reads each."""
+class Beside(Model):
+    """What a thread is read with beside the ledger's records: the operator's review mark on it, who answers for it, and the parts of their words moved in that nothing in it answers yet."""
+
+    mark: ReviewMark | None = None
+    """The operator's review mark on it, the core's (`on_node`); none where
+    they never read it."""
+    answering: Conversation | None = None
+    """Its holder where they go on, else the holder of the nearest thread
+    above it who does; none where nobody does."""
+    unanswered: list[Spot] = []
+    """In the order they came (`Standing.unanswered`)."""
+
+
+class ThreadSource(ABC):
+    """What the review's threads are read from beside the ledger's records (`Ledgered`): the inbox's items, what each thread is read with (`Beside`), and how each conversation is called.
+
+    The host's is its inbox (`Concerned`); the demo's, its stand-ins
+    (`lup_dashboard/demo.py`), so both read the threads alike.
+    """
+
+    @abstractmethod
+    def items(self) -> Mapping[int, Item]:
+        """Return every item, by its number."""
+
+    @abstractmethod
+    def beside(self, thread: Thread, *, moved: bool) -> Beside:
+        """Return what `thread` is read with: its unanswered parts only where a part was `moved` in, which is all that reads them."""
+
+    @abstractmethod
+    def paths(self, conversations: Sequence[Conversation]) -> list[Pathed]:
+        """Return each of `conversations` lup knows a path for, with it, once (`Pathed`)."""
+
+
+class Concerned(Model, ThreadSource, arbitrary_types_allowed=True):
+    """The host's threads' source: its inbox, through what it says of its threads (`Concerns`)."""
 
     concerns: Concerns
-    ledgered: Ledgered
 
-    def listed(self) -> ThreadsRead:
-        """List every thread as the review reads it, and each conversation they name by their path."""
-        threads = [self.read(each) for each in self.ledgered.threads]
-        named = [
-            each
-            for read in threads
-            for each in [read.thread.holder, read.answering]
-            if each is not None
-        ]
-        working = self.working()
-        return ThreadsRead(
-            threads=threads,
-            paths=[
-                Pathed(conversation=each, path=self.concerns.roster.called(each))
-                for each in dict.fromkeys(
-                    [*named, *(each.conversation for each in working)]
-                )
+    @override
+    def items(self) -> Mapping[int, Item]:
+        return self.concerns.inbox.items
+
+    @override
+    def beside(self, thread: Thread, *, moved: bool) -> Beside:
+        standing = self.concerns.threads.standing(thread.number) if moved else None
+        return Beside(
+            mark=self.concerns.inbox.marks.of(
+                thread.repository, CORE, on_node(thread.number)
+            ),
+            answering=self.concerns.answering(thread),
+            unanswered=[]
+            if standing is None
+            else [
+                Spot(node=each.node.number, part=each.part)
+                for each in standing.unanswered
             ],
-            working=working,
         )
 
+    @override
+    def paths(self, conversations: Sequence[Conversation]) -> list[Pathed]:
+        roster = self.concerns.roster
+        return [
+            Pathed(conversation=each, path=path, alike=bool(roster.alike(each)))
+            for each in dict.fromkeys(conversations)
+            if (path := roster.path(each)) is not None
+        ]
+
     def working(self) -> list[Working]:
-        """Return where each conversation going on works, read from their whereabouts alone, so reading makes no root: the thread they joined, hold or were handed, else their session's root, where it's open."""
+        """Return where each conversation going on works, from their whereabouts alone, so reading makes no root: the thread they joined, hold or were handed, else their session's root."""
         places = self.concerns.inbox.whereabouts
-        threads = self.ledgered.threads
 
         def root(conversation: Conversation) -> int | None:
             main = places.get(conversation.main().key())
@@ -422,15 +465,48 @@ class Readings(Model, arbitrary_types_allowed=True):
             for place in places.values()
             if self.concerns.live(place.conversation)
             and (number := place.thread or root(place.conversation)) is not None
-            and number in threads
         ]
         return sorted(found, key=lambda each: each.conversation.key())
+
+
+class Readings(Model, arbitrary_types_allowed=True):
+    """The threads, read once from the ledger (`Ledgered`) and their `source`, as the review reads each, and where each conversation going on works."""
+
+    source: ThreadSource
+    ledgered: Ledgered
+    working: list[Working] = []
+
+    @classmethod
+    def of(cls, concerns: Concerns) -> Readings:
+        """Read the threads of the inbox `concerns` holds."""
+        source = Concerned(concerns=concerns)
+        return cls(
+            source=source, ledgered=Ledgered.read(concerns), working=source.working()
+        )
+
+    def listed(self) -> ThreadsRead:
+        """List every thread as the review reads it, and each conversation they name by their path."""
+        threads = [self.read(each) for each in self.ledgered.threads]
+        named = [
+            each
+            for read in threads
+            for each in [read.thread.holder, read.answering]
+            if each is not None
+        ]
+        working = [
+            each for each in self.working if each.thread in self.ledgered.threads
+        ]
+        return ThreadsRead(
+            threads=threads,
+            paths=self.source.paths([*named, *(each.conversation for each in working)]),
+            working=working,
+        )
 
     def read(self, number: int) -> ThreadRead:
         """Read thread `number` as the review does."""
         ledgered = self.ledgered
         thread = ledgered.threads[number]
-        items = self.concerns.inbox.items
+        items = self.source.items()
         members = ledgered.members.get(number, [])
         status = ledgered.statuses.get(number)
 
@@ -455,7 +531,10 @@ class Readings(Model, arbitrary_types_allowed=True):
             return Ask(node=check.number, what="a check", came=member.came)
 
         asking = [ask for each in members if (ask := asked(each)) is not None]
-        mark = self.concerns.inbox.marks.of(thread.repository, CORE, on_node(number))
+        beside = self.source.beside(
+            thread, moved=any(each.part is not None for each in members)
+        )
+        mark = beside.mark
         read_to = self.read_to(members, mark, status)
 
         def unread(member: Joined) -> Item | None:
@@ -487,21 +566,12 @@ class Readings(Model, arbitrary_types_allowed=True):
             asks=asking,
             new=new,
             pile=[each.number for each in unreads if pile(each)],
-            unanswered=self.unanswered(number, members),
+            unanswered=beside.unanswered,
             members=len(members),
             earlier=read_to.members,
             mark=mark,
-            answering=self.concerns.answering(thread),
+            answering=beside.answering,
         )
-
-    def unanswered(self, number: int, members: list[Joined]) -> list[Spot]:
-        """Return the parts of the operator's words moved into thread `number` that nothing in it answers yet, as the ledger's reading of where it stands says (`Standing.unanswered`), read only where a part was moved in."""
-        if all(each.part is None for each in members):
-            return []
-        standing = self.concerns.threads.standing(number)
-        return [
-            Spot(node=each.node.number, part=each.part) for each in standing.unanswered
-        ]
 
     def read_to(
         self, members: list[Joined], mark: ReviewMark | None, status: Stated | None
@@ -554,7 +624,7 @@ class Readings(Model, arbitrary_types_allowed=True):
         read = self.read(number)
         ledgered = self.ledgered
         members = ledgered.members.get(number, [])
-        items = self.concerns.inbox.items
+        items = self.source.items()
         mark = read.mark
         read_to = self.read_to(members, mark, read.status)
         numbers = [each.node for each in members if each.part is None]
@@ -630,7 +700,22 @@ class Readings(Model, arbitrary_types_allowed=True):
         entries = sorted(
             [*(answering(each) for each in own), *said], key=lambda each: each.came
         )
-        kept = entries if whole else self.after(entries)
+        asking = {each.node: each for each in read.asks}
+        kept = (
+            entries
+            if whole
+            else self.after(
+                entries,
+                lambda each: (
+                    each.unanswered
+                    or (
+                        each.member
+                        and each.spot.part is None
+                        and each.spot.node in asking
+                    )
+                ),
+            )
+        )
         named = list(
             dict.fromkeys(
                 [
@@ -649,8 +734,6 @@ class Readings(Model, arbitrary_types_allowed=True):
         ]
         holder = [] if thread.holder is None else [thread.holder]
         on = list(dict.fromkeys([*holder, *writers]))
-        paths = pathed(self.concerns.roster, shown)
-        named = [each.conversation for each in paths]
         addressed = [each.to for each in kept if each.to is not None]
         return ThreadShown(
             read=read,
@@ -669,19 +752,14 @@ class Readings(Model, arbitrary_types_allowed=True):
                 if each.parent == number
             ],
             on=on,
-            paths=[
-                *paths,
-                *(
-                    Pathed(conversation=each, path=self.concerns.roster.called(each))
-                    for each in dict.fromkeys([*on, *addressed])
-                    if each not in named
-                ),
-            ],
+            paths=self.source.paths([*named_by(shown), *on, *addressed]),
         )
 
-    def after(self, entries: list[Entry]) -> list[Entry]:
-        """Return the entries after where the operator last read, and each earlier one an entry kept is under, at any depth, in order."""
-        later = [each for each in entries if not each.earlier]
+    def after(
+        self, entries: list[Entry], open_: Callable[[Entry], bool]
+    ) -> list[Entry]:
+        """Return the entries after where the operator last read, each earlier one still `open_`, as what asks them or a part of theirs nothing answers yet, which never folds away as read, and each earlier one an entry kept is under, at any depth, in order."""
+        later = [each for each in entries if not each.earlier or open_(each)]
         by_spot = {(each.spot.node, each.spot.part): each for each in entries}
 
         def above(entry: Entry, depth: int) -> list[Entry]:
@@ -721,8 +799,7 @@ class ThreadReading(MutableModel, arbitrary_types_allowed=True):
         )
         if self.readings is not None and self.made == made:
             return self.readings
-        concerns = delivery.concerns()
-        self.readings = Readings(concerns=concerns, ledgered=Ledgered.read(concerns))
+        self.readings = Readings.of(delivery.concerns())
         self.made = made
         return self.readings
 
@@ -738,18 +815,8 @@ class ThreadReading(MutableModel, arbitrary_types_allowed=True):
         """Return thread `number` as it stands, and who answers for it by their path."""
         readings = self.readings_now()
         read = readings.read(number)
-        answering = read.answering
-        return ThreadStated(
-            read=read,
-            paths=[]
-            if answering is None
-            else [
-                Pathed(
-                    conversation=answering,
-                    path=readings.concerns.roster.called(answering),
-                )
-            ],
-        )
+        answering = [] if read.answering is None else [read.answering]
+        return ThreadStated(read=read, paths=readings.source.paths(answering))
 
 
 class ThreadsListing(Model, Reading[ListThreads], arbitrary_types_allowed=True):
