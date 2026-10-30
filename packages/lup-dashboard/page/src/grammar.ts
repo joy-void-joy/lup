@@ -10,6 +10,7 @@
 // (`Marked`), which the page applies as the draft is sent (`App.tsx`). Undone with `u`, as any change to the draft. An
 // offer that runs at once (`Offer.runs`), a module's view key, is run as it's pressed. Pure.
 import { newId } from "./anchors";
+import { partSaid, type ReplyPart } from "./brief";
 import type { components } from "./generated/api";
 import { cited } from "./comments";
 import { EMPTY, isLetter, news, waits, writtenId, type Conversation, type Draft, type Group, type Item, type Laid, type Piled, type PileRun, type Placed, type Region, type ThreadRead } from "./review";
@@ -358,11 +359,12 @@ function endedReach(laidOut: Laid, node: Placed, verb: Verb, naming: Naming): Re
     }
     const draft = naming.draft ?? EMPTY;
     const settling = verb.name === CORE.done;
-    const [action, word] = settling ? [SETTLE, "settled"] : [DECLINE, "declined"];
+    const action = settling ? SETTLE : DECLINE;
+    const word = THREAD_DONE[action];
     const free = run.threads.filter((read) => asking(read, draft) === 0);
     const acts = free.flatMap((read) => {
         const group = laidOut.groups.find((each) => each.thread === read && each.banner.from > run.header.from);
-        return group === undefined ? [] : [threadAct(read, `group ${group.place}`, action, `@${read.thread.name} ${word}`)];
+        return group === undefined ? [] : [threadAct(read, `group ${group.place}`, action)];
     });
     const held = run.threads.length - free.length;
     const leaving = held === 0 ? "" : `, ${held} left: something in ${held === 1 ? "it waits" : "them waits"} on you`;
@@ -487,6 +489,12 @@ export const SETTLE = "inbox-settle-thread";
 export const DECLINE = "inbox-decline-thread";
 
 /**
+ * What a mark on a thread does to it, by its action, as the reply says it after the thread's name, `@auth settled`:
+ * the host's requests settling and declining it, and the core's review mark on its node, reading it.
+ */
+const THREAD_DONE = { [SETTLE]: "settled", [DECLINE]: "declined", "review-mark": "read" } as const;
+
+/**
  * Return how many things in thread `read` still wait on the operator, as the host reads them (`ThreadRead.asks`): a
  * question, an approval, a held change, a problem, a check; but those `draft` answers, each marked done or declined, or
  * commented on, a check ticked, which the reply settles.
@@ -506,8 +514,9 @@ function waitingSaid(count: number): string {
     return count === 1 ? "1 waits on you" : `${count} wait on you`;
 }
 
-/** Return an act on thread `read`, shown on its banner, `block`: `action`, the host's, settling or declining it, saying `says`. */
-function threadAct(read: ThreadRead, block: string, action: string, says: string): Act {
+/** Return an act on thread `read`, shown on its banner, `block`: `action`, the host's, settling or declining it, saying so, `@auth settled`. */
+function threadAct(read: ThreadRead, block: string, action: typeof SETTLE | typeof DECLINE): Act {
+    const says = partSaid({ kind: "thread", name: read.thread.name, done: THREAD_DONE[action] });
     const offer: Offer = { action, argument: { number: read.thread.number }, verb: null, chord: null, runs: "send", commented: false, says };
     return { kind: "mark", offer, block, version: null };
 }
@@ -524,7 +533,7 @@ export function readAct(read: ThreadRead, block: string, upTo: number): Act {
         chord: null,
         runs: "send",
         commented: false,
-        says: `@${read.thread.name} read`,
+        says: partSaid({ kind: "thread", name: read.thread.name, done: THREAD_DONE["review-mark"] }),
     };
     return { kind: "mark", offer, block, version: null };
 }
@@ -573,7 +582,7 @@ function threadReach(laidOut: Laid, node: Placed, group: Group, read: ThreadRead
             if (waiting > 0) {
                 return { on, node, says: `not settled while ${waitingSaid(waiting)}`, acts: [] };
             }
-            return { on, node, says: confirming ? "settle it: it works" : "settle it", acts: [threadAct(read, node.id, SETTLE, `${on} settled`)] };
+            return { on, node, says: confirming ? "settle it: it works" : "settle it", acts: [threadAct(read, node.id, SETTLE)] };
         }
         case CORE.decline:
             if (closed) {
@@ -582,7 +591,7 @@ function threadReach(laidOut: Laid, node: Placed, group: Group, read: ThreadRead
             if (waiting > 0) {
                 return { on, node, says: `not declined while ${waitingSaid(waiting)}`, acts: [] };
             }
-            return { on, node, says: "decline it: nothing more will be done", acts: [threadAct(read, node.id, DECLINE, `${on} declined`)] };
+            return { on, node, says: "decline it: nothing more will be done", acts: [threadAct(read, node.id, DECLINE)] };
         case CORE.comment:
             return { on, node, says: group.conversation === null ? "write on it, to no one" : `write on it, to ${naming.called(group.conversation)}`, acts: [{ kind: "comment" }] };
         default:
@@ -847,11 +856,20 @@ export interface Moved {
 }
 
 /**
- * Say what moving the review mark `mark` does, in the line under the review and once sent: an agent's group seen, the
- * core's; any other on what its key names, an agent where it names one, as its offer says it (`lup-impl/parser: mark it
- * read`).
+ * Return what the mark `mark` does, as a part of the reply, in the line under the review and once sent: a thread read,
+ * settled or declined, by its name as `thread` gives it, as it was marked where it gives none; an agent's group seen,
+ * the core's review mark; any other review mark on what its key names, an agent where it names one, as its offer says
+ * it (`lup-impl/parser: mark it read`); anything else as its offer says it.
  */
-export function movedSaid(mark: Marked, called: (conversation: Conversation) => string): string {
+export function markedPart(mark: Marked, called: (conversation: Conversation) => string, thread: (number: number) => string | null): ReplyPart {
+    const marked = threadMarked(mark);
+    const name = marked === null ? null : thread(marked.number);
+    if (marked !== null && name !== null) {
+        return { kind: "thread", name, done: marked.done };
+    }
+    if (mark.action !== "review-mark") {
+        return { kind: "said", text: mark.says };
+    }
     const argument = mark.argument as unknown as Moved;
     const key = argument.key;
     const agent =
@@ -859,9 +877,21 @@ export function movedSaid(mark: Marked, called: (conversation: Conversation) => 
             ? called({ party: "conversation", repository: argument.repository, runtime: key.runtime, session: key.session, agent: typeof key.agent === "string" ? key.agent : null })
             : null;
     if (argument.module === CORE_MODULE && agent !== null) {
-        return `${agent} seen`;
+        return { kind: "said", text: `${agent} seen` };
     }
-    return agent === null ? mark.says : `${agent}: ${mark.says}`;
+    return { kind: "said", text: agent === null ? mark.says : `${agent}: ${mark.says}` };
+}
+
+/** Return the thread `mark` marks, by its number, and what it does to it (`THREAD_DONE`); none where it marks no thread. */
+function threadMarked(mark: Marked): { number: number; done: string } | null {
+    const argument = mark.argument as { number?: unknown; module?: unknown; key?: { node?: unknown } };
+    if ((mark.action === SETTLE || mark.action === DECLINE) && typeof argument.number === "number") {
+        return { number: argument.number, done: THREAD_DONE[mark.action] };
+    }
+    if (mark.action === "review-mark" && argument.module === CORE_MODULE && typeof argument.key?.node === "number") {
+        return { number: argument.key.node, done: THREAD_DONE["review-mark"] };
+    }
+    return null;
 }
 
 /** Return the marks of `draft` shown on the block `block`. */

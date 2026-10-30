@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { MOVE, implied, isMarked, listed, marking, movedInto, reachOf, reachedIn, threadsRead, type Act } from "./grammar";
 import { toSend, waitingOn } from "./App";
+import { partSaid } from "./brief";
 import { outlineOf } from "./outline";
 import {
     EMPTY,
@@ -550,7 +551,7 @@ describe("the review grouped by thread", () => {
             comments: [{ id: "c1", item: 311, quote: null, text: "Found it." }],
         };
         const naming = { called: (party: Item["sender"]) => (party.party === "operator" ? "you" : called(party)), named: () => "", holder: () => null, thread: (number: number) => (number === 307 ? "voice" : "auth"), checks: new Set([311]) };
-        expect(toSend(draft, [], naming)).toEqual(["to s1/a1: a message on @voice", "to no one: a message on @auth", "to the check: answering @311"]);
+        expect(toSend(draft, [], naming).map(partSaid)).toEqual(["to s1/a1: a message on @voice", "to no one: a message on @auth", "to the check: answering @311"]);
     });
 
     it("goes from an agent's name to their own views among the agents with gd", () => {
@@ -730,7 +731,7 @@ describe("the pile to read", () => {
         const acts: Extract<Act, { kind: "move" }>[] = [80, 82].map((number) => ({ kind: "move", number, repository: REPOSITORY, block: `pile ${number}` }));
         const draft = listed(movedInto(EMPTY, acts, { title: "The gate hangs" }), 81, "done");
         const naming = { called: (party: Item["sender"]) => (party.party === "operator" ? "you" : called(party)), named: () => "", holder: () => null, checks: new Set<number>() };
-        expect(toSend(draft, [FELT], naming)).toEqual(["read @81", "2 moved into a new thread: The gate hangs"]);
+        expect(toSend(draft, [FELT], naming).map(partSaid)).toEqual(["read @81", "2 moved into a new thread: The gate hangs"]);
         const rows = outlineOf(out, { draft, seeing: UNSEEN, states: new Map(), called });
         const at = rows.findIndex((each) => each.key === "section to read");
         expect(rows.slice(at, at + 6).map((each) => [each.text, each.marks, each.draft])).toEqual([

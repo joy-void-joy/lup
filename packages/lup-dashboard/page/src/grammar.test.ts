@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import "./fixtures/looks";
-import { chainAt, isMarked, listed, marking, movedSaid, seenAct, type Act } from "./grammar";
+import { chainAt, isMarked, listed, marking, markedPart, seenAct, type Act, type Marked } from "./grammar";
 import { EMPTY, type Conversation, type Placed } from "./review";
 import type { Offer } from "./views";
 
@@ -74,6 +74,7 @@ describe("the parts the cursor is in", () => {
 describe("review marks", () => {
     const parser: Conversation = { party: "conversation", repository: "/r/.git", runtime: "claude", session: "s1", agent: "a1" };
     const called = (each: Conversation) => (each.agent === null ? each.session : `${each.session}/${each.agent}`);
+    const unnamed = () => null;
 
     it("marks an agent's group seen up to an item, the core's mark, said in the line under the review as its agent seen", () => {
         const act = seenAct(parser, "group 0", 57);
@@ -81,7 +82,7 @@ describe("review marks", () => {
         const [mark] = draft.marks ?? [];
         expect(mark).toMatchObject({ action: "review-mark", verb: "done", block: "group 0", says: "mark them seen" });
         expect(mark?.argument).toEqual({ repository: "/r/.git", module: "core", key: { runtime: "claude", session: "s1", agent: "a1" }, up_to: "57" });
-        expect(movedSaid(mark!, called)).toBe("s1/a1 seen");
+        expect(markedPart(mark!, called, unnamed)).toEqual({ kind: "said", text: "s1/a1 seen" });
     });
 
     it("says any other module's mark on an agent by the agent and its offer's words, one on nothing of an agent's by its words alone", () => {
@@ -95,8 +96,24 @@ describe("review marks", () => {
             says: "mark it read",
         };
         const [mark] = marking(EMPTY, [{ kind: "mark", offer: read, block: "drawer", version: null }], "done").marks ?? [];
-        expect(movedSaid(mark!, called)).toBe("s1: mark it read");
+        expect(markedPart(mark!, called, unnamed)).toEqual({ kind: "said", text: "s1: mark it read" });
         const other = { ...mark!, argument: { ...mark!.argument, key: { page: "a" } } };
-        expect(movedSaid(other, called)).toBe("mark it read");
+        expect(markedPart(other, called, unnamed)).toEqual({ kind: "said", text: "mark it read" });
+    });
+
+    it("says a thread read, settled or declined by its number, named as the page knows it, as it was marked where it doesn't", () => {
+        const mark = (action: string, argument: Marked["argument"], says: string): Marked => ({ id: action, action, argument, verb: "done", says, block: "group 1", version: null });
+        const read = mark("review-mark", { repository: "/r/.git", module: "core", key: { node: 307 }, up_to: "60" }, "@voice read");
+        const settled = mark("inbox-settle-thread", { number: 307 }, "@voice settled");
+        const declined = mark("inbox-decline-thread", { number: 307 }, "@voice declined");
+        const named = (number: number) => (number === 307 ? "voice-pass" : null);
+        expect([read, settled, declined].map((each) => markedPart(each, called, named))).toEqual([
+            { kind: "thread", name: "voice-pass", done: "read" },
+            { kind: "thread", name: "voice-pass", done: "settled" },
+            { kind: "thread", name: "voice-pass", done: "declined" },
+        ]);
+        expect(markedPart(settled, called, unnamed)).toEqual({ kind: "said", text: "@voice settled" });
+        // A check ticked marks no thread.
+        expect(markedPart(mark("inbox-check-answer", { number: 311 }, "tick it"), called, named)).toEqual({ kind: "said", text: "tick it" });
     });
 });
