@@ -700,6 +700,25 @@ def test_a_session_s_root_follows_their_name_and_a_root_nobody_holds_is_taken_by
     assert thread_of(delivery, 4) == taken
 
 
+def test_a_session_s_own_root_leaves_them_their_name_whoever_holds_it(
+    delivery: Delivery,
+) -> None:
+    register = launched(delivery, "dev", "s1")
+    lead = speaker(delivery, register, main("s1"))
+    said(lead.note(ThreadedRemark(remark="Go.")))
+    fixer = spawned(delivery, register, main("s1"), "a1", "fixer")
+    said(lead.thread(Threading(name="dev", hand="fixer")))
+    launched(delivery, "next", "s2")
+    roots = RootNames(delivery=delivery)
+
+    own = roots.refused(REPOSITORY, "dev", roots=True, session=main("s1"))
+    another = roots.refused(REPOSITORY, "dev", roots=True, session=main("s2"))
+
+    assert delivery.concerns().named(REPOSITORY, "dev").holder == fixer
+    assert own is None
+    assert another is not None
+
+
 def test_a_settled_root_a_later_session_takes_by_its_name_is_reopened_by_lup(
     delivery: Delivery,
 ) -> None:

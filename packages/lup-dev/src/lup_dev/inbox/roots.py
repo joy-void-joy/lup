@@ -7,7 +7,11 @@ other: a session renamed renames their root. A root nobody holds keeps its
 name, and a session that takes that name, as their launch's or by `rename`,
 takes that root as theirs: the next session called as an earlier one goes on
 with what it left, rather than being pushed to `dev-2`, `dev-3`… for good.
-Any other thread's name is no agent's (`refused`). The host service asks
+Their own root, as their whereabouts keep it, never refuses a session its name,
+whoever holds it: a launch served again as the host service starts asks
+its name knowing its session (`Launches.open`), so a root they hold, or one
+the service opened them as it started (`inbox/rooting.py`), leaves them their
+name. Any other thread's name is no agent's (`refused`). The host service asks
 through `Roots` (`host/service.py`), lowest of `lup_dev`'s layers.
 """
 
@@ -41,6 +45,11 @@ class RootNames(Model, Roots, arbitrary_types_allowed=True):
         concerns = self.delivery.concerns()
         node = concerns.inbox.ledger.named(repository, name)
         if node is None:
+            return None
+        place = (
+            None if session is None else concerns.inbox.whereabouts.get(session.key())
+        )
+        if place is not None and place.root == node.number:
             return None
         if roots and concerns.takeable(repository, name, session) is not None:
             return None

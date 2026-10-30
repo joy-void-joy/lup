@@ -7,7 +7,8 @@ is looked up each time it's used, so renaming it moves nothing (`docs/launch.md`
 were keys there.
 - **At registration** a launch takes the name it asks for: `--name` exactly, or
   refused where another holds it; otherwise its worktree's branch, `-2`, `-3`
-  added until it's free (`claimed`).
+  added until it's free (`claimed`). A record served again as the service
+  starts asks the name it had, which its session's own root leaves it.
 - **A rename** is refused where another launch holds the name, saying which
   (`held`).
 - **A launch's container** is named after its repository and its name

@@ -2772,6 +2772,68 @@ def test_a_subagents_name_and_place_outlast_a_restart_of_lups_host(
     assert shown == [("w", None, 0), ("w/parser", "w", 1)]
 
 
+def test_a_session_keeps_the_name_their_root_shares_across_a_restart_of_lups_host(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        _, title = named_at_start(send(hook, claude("SessionStart", source="startup")))
+        call(mcp, "rename", {"name": "inbox-scaling"})
+        # Their first note opens their root, named as they are.
+        call(mcp, "note", {"remark": "Go."})
+        title = given(send(hook, prompt(title)))
+    # The service started again serves the launch's record again: its own
+    # session's root doesn't take its name from it.
+    with inboxed(machine, clock, notices, said) as delivery:
+        listed = HostClient(
+            layout=machine.host, clock=clock, starter=Unstarted()
+        ).listed()
+        retitled = send(hook, prompt(title))
+        root = delivery.concerns().named(tmp_path / "w" / ".git", "inbox-scaling")
+    assert {each.launch: each.name for each in listed.launches} == {
+        "one": "inbox-scaling"
+    }
+    assert retitled == ""
+    assert root.holder == Conversation(
+        repository=tmp_path / "w" / ".git", runtime="claude", session="s1"
+    )
+
+
+def test_a_session_keeps_their_name_through_the_root_the_service_opens_them_as_it_starts(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    repository = tmp_path / "w" / ".git"
+    session = Conversation(repository=repository, runtime="claude", session="s1")
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        call(mcp, "rename", {"name": "inbox-scaling"})
+    # An item an earlier lup kept outside every thread, while the session goes
+    # on with no root yet: the service started again opens them one, named as
+    # they are, before it serves their launch again.
+    ledger = Ledger.opened(LedgerLayout.of(machine), KINDS)
+    past = Inbox.opened(ledger).made(
+        Message(kind="note", text="Built."),
+        session,
+        Operator(),
+        tmp_path / "w",
+        clock.now(),
+    )
+    ledger.close()
+    with inboxed(machine, clock, notices, said) as delivery:
+        listed = HostClient(
+            layout=machine.host, clock=clock, starter=Unstarted()
+        ).listed()
+        root = delivery.concerns().containing(past.number)
+    assert {each.launch: each.name for each in listed.launches} == {
+        "one": "inbox-scaling"
+    }
+    assert root is not None
+    assert (root.name, root.holder) == ("inbox-scaling", session)
+
+
 def test_conversations_kept_with_a_field_lup_since_dropped_load_at_a_restart(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
