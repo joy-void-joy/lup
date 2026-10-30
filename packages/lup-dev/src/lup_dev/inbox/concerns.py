@@ -59,7 +59,7 @@ from lup_dev.inbox.texts import body, kind, opening, what, written
 from lup_dev.inbox.threads import cue, parts_of, spoken
 from lup_ledger.environment.threads import Threads
 from lup_ledger.errors import LupLedgerError
-from lup_ledger.parties import Conversation, Operator
+from lup_ledger.parties import Conversation, Lup, Operator
 from lup_ledger.records import Edge
 from lup_ledger.threads import (
     Answered,
@@ -342,7 +342,7 @@ class Concerns(Model, arbitrary_types_allowed=True):
                 return None
 
     def took(self, main: Conversation, root: Thread) -> Thread:
-        """Make `root` the root thread of `main`, held by them, and return it."""
+        """Make `root` the root thread of `main`, held by them, and return it: reopened by lup where it was settled or declined, as an earlier session's root made from their past conversation is (`inbox/rooting.py`), since what `main` sends lands there."""
         held = (
             root
             if root.holder == main
@@ -352,6 +352,17 @@ class Concerns(Model, arbitrary_types_allowed=True):
             )
         )
         self.placed(main, root=held.number)
+        status = self.threads.standing(held.number).status
+        if isinstance(status, Settled | Declined):
+            self.drawn(
+                Reopened(
+                    target=held.number,
+                    repository=held.repository,
+                    by=Lup(),
+                    at=self.now(),
+                    why=f"{self.roster.who(main)} took it as their root",
+                )
+            )
         return held
 
     def working(self, party: Conversation) -> Thread:
