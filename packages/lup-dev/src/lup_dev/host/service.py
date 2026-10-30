@@ -677,7 +677,7 @@ class Roots(ABC):
         roots: bool,
         session: parties.Conversation | None = None,
     ) -> str | None:
-        """Say why an agent of `repository` can't take `name`: a node there has it; none where none does, or, where `roots`, the node is a root thread nobody holds but `session`, which a session taking the name takes as theirs."""
+        """Say why an agent of `repository` can't take `name`: a node there has it; none where none does, where the node is `session`'s own root, whoever holds it, or, where `roots`, it's a root thread nobody holds but `session`, which a session taking the name takes as theirs."""
 
     @abstractmethod
     def renamed(self, session: parties.Conversation, name: str) -> None:
@@ -866,7 +866,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
 
         Its name is the one it asks, made unique among those served (`claimed`),
         and its container is named after it (`container_name`), unless it names
-        its own, as a record served again does.
+        its own, as a record served again does. A record served again keeps the
+        name its session's root shares, since that root is their own
+        (`Roots.refused`), where the conversations kept beside it name them.
         A launch served already, running a runtime the answerer doesn't know,
         whose judge isn't there, or asking exactly a name another holds, is
         refused. A directory left by a service before
@@ -877,10 +879,17 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         if registering.launch in self.served or registering.launch in self.opening:
             message = f"a launch with the id `{registering.launch}` is served already"
             raise HostError(message)
+        kept = read_model(self.layout.conversations(registering.launch), Conversations)
+        conversations = kept or Conversations()
+        session = (
+            None
+            if conversations.session is None
+            else self.party(registering, conversations.session)
+        )
         name = claimed(
             registering,
             self.claims(),
-            lambda wanted: self.thread_named(registering.repository, wanted),
+            lambda wanted: self.thread_named(registering.repository, wanted, session),
         )
         container = registering.container or container_name(
             registering.repository, name
@@ -902,8 +911,6 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         sockets = self.layout.launch(request.launch)
         sockets.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         sockets.directory.chmod(0o700)
-        kept = read_model(self.layout.conversations(request.launch), Conversations)
-        conversations = kept or Conversations()
 
         def said(line: str) -> None:
             self.say(f"{request.launch}: {line}")
