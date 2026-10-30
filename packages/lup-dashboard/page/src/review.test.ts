@@ -520,9 +520,8 @@ describe("laid", () => {
         expect(reaches(out, at("━━ lup"), "done")).toBeNull();
         expect(reaches(out, at("━━ s3"), "done")).toBeNull();
         expect(reaches(laid([], [], banner, header, EMPTY, NOTHING), 0, "done")).toBeNull();
-        // Pause is declared, and nothing offers it: its key says so.
-        const paused = reachOf(out, at("Keep the cache"), verb("pause"), { called: (each) => each.session });
-        expect(paused.on === null ? paused.why : "").toBe("not built yet: its host side is designed beside #157");
+        // Pause is declared, but not built: no verb of the review's.
+        expect(LOOKS.verbs.some((each) => each.name === "pause")).toBe(false);
     });
 
     it("shows an approval's diff without git's colours", () => {
@@ -1814,11 +1813,13 @@ describe("the drawers under each agent's banner", () => {
             ...findNode(out.nodes, since.view.id)!.children.filter((each) => each.kind === "block").map((each) => `mark policy-review-since ${each.id}`),
             `mark review-mark ${conversation.view.id}`,
         ]);
-        expect(reach.says).toBe("mark their drawers done, @51 left");
+        expect(reach.says).toBe("mark their drawers done, 1 left to answer");
+        // The palette says which, by number.
+        expect(reach.on === null ? "" : reach.whole).toBe("mark their drawers done, @51 left to answer");
         // Holding an item new to the operator, it's marked seen too, up to the last item the review shows.
         const fresh = reachOf(out, at("━━ s1"), verb("done"), { called: (each) => each.session, fresh: () => true });
         expect(acted(fresh)[0]).toBe(`mark review-mark group ${out.groups[0]?.place}`);
-        expect(fresh.says).toBe("mark them seen, their drawers done, @51 left");
+        expect(fresh.says).toBe("mark them seen, their drawers done, 1 left to answer");
         const seen = fresh.on === null ? undefined : fresh.acts[0];
         expect(seen?.kind === "mark" ? seen.offer.argument : null).toEqual({
             repository: "/r/.git",
@@ -1839,7 +1840,7 @@ describe("the drawers under each agent's banner", () => {
         expect(reaches(out, at("since you approved ·"), "done")).toBe("since you approved · 1 to review · 1 flagged · 0 of 1 reviewed: mark every file reviewed");
         // A task list offers nothing of its own: done reaches the agent, its news and drawers. A conversation offers
         // marking it read, up to its last step, which done in it does.
-        expect(reaches(out, at("✓ Write"), "done")).toBe("s1: mark their drawers done, @51 left");
+        expect(reaches(out, at("✓ Write"), "done")).toBe("s1: mark their drawers done, 1 left to answer");
         expect(reaches(out, at("Twenty"), "done")).toBe("conversation · 7 steps · 2 new: mark it read");
     });
 

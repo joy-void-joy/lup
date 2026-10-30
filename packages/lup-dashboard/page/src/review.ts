@@ -155,6 +155,20 @@ export function about(thread: ThreadRead["thread"]): string {
 }
 
 /**
+ * Whether thread `read` is the root of a session that has ended: a root nobody answers for, its holder gone on no
+ * longer, or none holding it. A session's end never settles it: it's the operator's, under the line `ended` in open.
+ */
+export function endedRoot(read: ThreadRead): boolean {
+    return read.thread.parent == null && read.thread.title === ROOT_TITLE && (read.answering ?? null) === null;
+}
+
+/** The line in open the roots of sessions that have ended are listed under, after every other thread, and those roots. */
+export interface EndedRun extends Span {
+    header: Span;
+    threads: ThreadRead[];
+}
+
+/**
  * One friction or how it felt in the pile to read, where it's laid out: its line, what it is, its number, who sent it
  * and its title, its text folded under it; the item, and the thread it landed in.
  */
@@ -180,6 +194,21 @@ export function piled(item: Item): boolean {
 const TITLE_MOST = 80;
 
 /**
+ * The longest a thread's title is where a line of the review says it, its banner and its line in the pile, in
+ * characters: a banner is one row, its title whole in the overview's (`outline.ts`) and the thread palette's.
+ */
+export const ABOUT_MOST = 60;
+
+/** Return `text` cut at a word to `most` characters at most, `…` where it's cut. */
+export function cutAt(text: string, most: number): string {
+    if (text.length <= most) {
+        return text;
+    }
+    const cut = text.lastIndexOf(" ", most - 1);
+    return `${text.slice(0, cut > 0 ? cut : most - 1).trimEnd()}…`;
+}
+
+/**
  * Say an item of the pile by its title: a friction's own, else its text's first sentence, cut at a word to
  * `TITLE_MOST` characters at most, as how it felt has none, and a friction may leave it out.
  */
@@ -192,11 +221,7 @@ export function pileTitle(item: Item): string {
     const text = "text" in reason && typeof reason.text === "string" ? reason.text : "";
     const line = text.split("\n").find((each) => each.trim() !== "")?.trim() ?? "";
     const sentence = /^(.+?[.!?])(\s|$)/.exec(line)?.[1] ?? line;
-    if (sentence.length <= TITLE_MOST) {
-        return sentence;
-    }
-    const cut = sentence.lastIndexOf(" ", TITLE_MOST - 1);
-    return `${sentence.slice(0, cut > 0 ? cut : TITLE_MOST - 1).trimEnd()}…`;
+    return cutAt(sentence, TITLE_MOST);
 }
 
 /** One section of the review where it's laid out: its line, saying what it holds, and its fold whole under it. */
@@ -537,7 +562,7 @@ export interface ReviewedLine extends Span {
  */
 export interface Placed extends Span {
     id: string;
-    kind: "section" | "group" | "banner" | "item" | "header" | "frame" | "view" | "block" | "written" | "pile";
+    kind: "section" | "group" | "banner" | "item" | "header" | "frame" | "view" | "block" | "written" | "pile" | "ended";
     header: Span;
     children: Placed[];
     view?: Mounted;
@@ -586,6 +611,8 @@ export interface Laid {
     pointers: Pointer[];
     /** The pile to read, each thread's run of it, in the text's order; none grouped by agent. */
     pile: PileRun[];
+    /** The line in open the roots of sessions that have ended are under, and those roots; none where there's none, or grouped by agent. */
+    ended: EndedRun | null;
 }
 
 export const EMPTY: Draft = { comments: [], letters: [], remarks: [], done: [], declined: [], parked: [], marks: [] };
@@ -1461,6 +1488,10 @@ export function laid(
     // Each thread whose messages written on it are laid out, under the first of its headers.
     const lettered = new Set<number>();
     const pileRuns: PileRun[] = [];
+    // The line in open the ended sessions' roots are under, where there are some; and the lines a group's fold never
+    // reaches past, beside each section's, as that line, which no thread's fold holds.
+    let endedRun = null as EndedRun | null;
+    const breaks: number[] = [];
     // The groups whose fold starts closed, as each thread's of the front and of what's settled does, and those whose
     // conversation isn't read yet.
     const closedGroups = new Set<string>();
@@ -1483,7 +1514,7 @@ export function laid(
     {
         groups.forEach((group, at) => {
             const next = groups.findIndex((each, after) => after > at && each.depth <= group.depth);
-            const section = sections.find((each) => each.header.from > group.banner.from)?.header.from ?? w.at;
+            const section = Math.min(sections.find((each) => each.header.from > group.banner.from)?.header.from ?? w.at, breaks.find((each) => each > group.banner.from) ?? w.at);
             const end = Math.min(next < 0 ? w.at : (groups[next]?.banner.from ?? w.at), section) - 1;
             const id = `group ${group.place}`;
             if (end > group.banner.to) {
@@ -1496,6 +1527,16 @@ export function laid(
                 node.to = group.end;
             }
         });
+    }
+    // The line of ended sessions' roots holds them, to the last one's end.
+    if (endedRun !== null) {
+        const run = endedRun;
+        const last = groups.filter((each) => each.thread !== null && run.threads.includes(each.thread) && each.banner.from > run.header.from).at(-1);
+        run.to = Math.max(run.header.to, last?.end ?? run.header.to);
+        const node = nodes.find((each) => each.id === "ended");
+        if (node !== undefined) {
+            node.to = run.to;
+        }
     }
     // Each section folds whole under its line, up to the next.
     sections.forEach((section, at) => {
@@ -1542,6 +1583,7 @@ export function laid(
         loading,
         pointers,
         pile: pileRuns,
+        ended: endedRun,
     };
 
     /** Return `section` with each group laid out before in its place, any other after them, in its own order. */
@@ -1695,10 +1737,15 @@ export function laid(
             }
         });
         // The front: every thread still open, a line each, nested as threads nest, folded, its whole conversation read as
-        // it opens.
+        // it opens; the roots of sessions that have ended after the others, under a line of their own, `ended`, which
+        // Space d settles together, a thread under one staying with the others.
+        const ended = front.filter(endedRoot);
         layThreadSection("open", `${front.length}`, () => {
-            for (const { read, depth } of nestedThreads(front)) {
+            for (const { read, depth } of nestedThreads(front.filter((each) => !endedRoot(each)))) {
                 layWhole(read, depth, "open");
+            }
+            if (ended.length > 0) {
+                layEnded(ended.toSorted((a, b) => a.thread.number - b.thread.number));
             }
         });
         // The pile to read: each thread's frictions and how it felt not yet read, under a line naming the thread, the
@@ -1746,7 +1793,7 @@ export function laid(
                 ...(frictionsHere === 0 ? [] : [counted(frictionsHere, "friction")]),
                 ...(entries.length === frictionsHere ? [] : [`${entries.length - frictionsHere} how it felt`]),
             ].join(", ");
-            const header = w.line(`@${read.thread.name} · ${about(read.thread)} · ${counts}`, id);
+            const header = w.line(`@${read.thread.name} · ${cutAt(about(read.thread), ABOUT_MOST)} · ${counts}`, id);
             asides.push({ kind: "pile-thread", ...header });
             const node = part(id, "pile", header.from, header.to);
             nodes.push(node);
@@ -1771,6 +1818,18 @@ export function laid(
             node.to = w.at - 1;
             run.to = node.to;
             pileRuns.push(run);
+        }
+
+        /** Lay the line the roots of sessions that have ended are under, in open, then each of them, `roots`, a line each, folded. */
+        function layEnded(roots: readonly ThreadRead[]): void {
+            const header = w.line(`ended · ${roots.length}`, "ended");
+            asides.push({ kind: "ended", ...header });
+            breaks.push(header.from);
+            nodes.push(part("ended", "ended", header.from, header.to));
+            endedRun = { header, threads: [...roots], from: header.from, to: header.to };
+            for (const read of roots) {
+                layWhole(read, 0, "open");
+            }
         }
 
         /** Return `threads`, each under its parent among them, in the order each was opened, with how deep it's set in. */

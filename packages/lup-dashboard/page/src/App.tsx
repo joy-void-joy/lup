@@ -19,7 +19,7 @@
 // apart at most; a file marked reviewed there, as the reply is sent, a line at
 // once, as the host's answer confirms or brings it back (`docs/dashboard.md`,
 // *The review*, *The drawers*).
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { everyone, launches, ring, running, type Activity, type Agent, type Running } from "./agents";
 import { ApiError, ask, type Asked, type OfCopy, type Replied } from "./api";
@@ -34,6 +34,8 @@ import { instanceOf, type Instance } from "./views";
 import { producerOf } from "./views/index";
 import { useNarrow } from "./Outline";
 import { Palette } from "./Palette";
+import { Whole, type Said } from "./Whole";
+import { brief, partsSaid, shortened } from "./brief";
 import { Review, type DrawerKind, type Jump } from "./Review";
 import { isPlace, marked, sameShown, type Marking } from "./since";
 import { measure, modifierAlone, type Measuring } from "./timings";
@@ -176,7 +178,15 @@ export function App() {
             }
         }, GATHERED);
     }, []);
-    const [said, setSaid] = useState<string | null>(null);
+    // What was said last in the top bar, whole, and on its one line, a sentence of it unless given (`brief`).
+    const [saying, setSaying] = useState<{ whole: string; line: string } | null>(null);
+    const said = saying?.whole ?? null;
+    const setSaid = useCallback((text: string | null, line?: string) => setSaying(text === null ? null : { whole: text, line: line ?? brief(text) }), []);
+    // The lines of the page what was said is shown on, each a sentence of it, and whether one is cut at the window's edge.
+    const statusLine = useRef<HTMLDivElement>(null);
+    const saidLine = useRef<HTMLSpanElement>(null);
+    const errorLine = useRef<HTMLSpanElement>(null);
+    const [overflowing, setOverflowing] = useState(false);
     // Where the reply's sending stands, said under the review: being sent, or why the last Ctrl+Enter sent nothing.
     const [sending, setSending] = useState<Sending | null>(null);
     const inFlight = useRef(false);
@@ -190,6 +200,9 @@ export function App() {
     const [here, setHere] = useState<Here>({ on: "nothing waiting", reached: [] });
     const [listing, setListing] = useState(false);
     const openList = useCallback(() => setListing(true), []);
+    // Whether the panel of what was said, whole, is open (`g<`, `Whole.tsx`).
+    const [wholeOpen, setWholeOpen] = useState(false);
+    const openWhole = useCallback(() => setWholeOpen(true), []);
     // The keys of a chord begun in the review, whose following keys the line of keys shows.
     const [chord, setChord] = useState("");
     const [epoch, setEpoch] = useState(0);
@@ -224,15 +237,66 @@ export function App() {
         (list) => list.map((each) => `${each.session} ${each.agent ?? ""} ${each.path}`).join("\n"),
     );
 
-    // Each conversation the inbox's items name, with their path as the host names it, by `whose` they are: what names
-    // an agent who isn't running, or isn't their launch's latest session, which no launch listed names.
-    const paths = useMemo(
-        () => new Map((inbox.reply?.kind === "inbox-items" ? (inbox.reply.paths ?? []) : []).map((each) => [whose(each.conversation), each])),
-        [inbox.reply],
+    // The landings waiting on the operator, as the host keeps them while each call waits: each file of one held in its
+    // writer's "since you approved", and their banners saying it.
+    const landingsWatch = useWatched({ kind: "policy-show-landings" });
+    const landings = useSame(
+        useMemo<readonly Wait[]>(() => (landingsWatch.reply?.kind === "policy-landings" ? (landingsWatch.reply.waiting ?? []) : []), [landingsWatch.reply]),
+        (list) => JSON.stringify(list),
+    );
+    // The review's threads, as the host reads them for it (`docs/inbox.md`, *Threads in the review*): the same object
+    // while the host says the same of them, which it says again at every hook.
+    const threadsWatch = useWatched({ kind: "inbox-threads" });
+    const threadsRead = useSame(
+        useMemo(() => (threadsWatch.reply?.kind === "inbox-threads-read" ? threadsWatch.reply : null), [threadsWatch.reply]),
+        (each) => JSON.stringify(each),
+    );
+    // How many files a landing waits on in each thread, by the thread its lander works in: what asks the operator there.
+    const landingIn = useSame(
+        useMemo(() => {
+            const working = new Map((threadsRead?.working ?? []).map((each) => [whose(each.conversation), each.thread]));
+            const found = new Map<number, number>();
+            for (const wait of landings) {
+                const thread = working.get(whose(wait.lander));
+                if (thread !== undefined && (wait.files ?? []).length > 0) {
+                    found.set(thread, (found.get(thread) ?? 0) + (wait.files ?? []).length);
+                }
+            }
+            return found;
+        }, [threadsRead, landings]),
+        (map) => JSON.stringify([...map]),
+    );
+    // Each thread's conversation the review shows: each waiting on the operator or new, from where they last read it;
+    // and each they open, of the front or of what's settled, and read whole where they open what came before
+    // (`openThread`).
+    const [opening, setOpening] = useState<readonly ThreadAsked[]>([]);
+    const openThread = useCallback((number: number, whole: boolean) => {
+        setOpening((before) => (before.some((each) => each.number === number && each.whole === whole) ? before : [...before, { number, whole }]));
+    }, []);
+    const threadsAsked = useMemo(() => {
+        const shown = (threadsRead?.threads ?? []).filter((each) => each.section !== "every thread" || landingIn.has(each.thread.number)).map((each) => ({ number: each.thread.number, whole: false }));
+        return [...shown, ...opening.filter((each) => each.whole || !shown.some((one) => one.number === each.number))];
+    }, [threadsRead, landingIn, opening]);
+    const conversations = useThreads(threadsAsked);
+    // Each conversation the inbox's items and the threads read name, with their path as the host names it, by `whose`
+    // they are: what names an agent who isn't running, or isn't their launch's latest session, which no launch listed
+    // names, the sender of a thread's history among them, whose items no longer wait.
+    const paths = useSame(
+        useMemo(
+            () =>
+                new Map(
+                    [
+                        ...(threadsRead?.paths ?? []),
+                        ...[...conversations.shown.values(), ...conversations.whole.values()].flatMap((each: ThreadShown) => each.paths ?? []),
+                        ...(inbox.reply?.kind === "inbox-items" ? (inbox.reply.paths ?? []) : []),
+                    ].map((each) => [whose(each.conversation), each]),
+                ),
+            [inbox.reply, threadsRead, conversations],
+        ),
+        (map) => JSON.stringify([...map]),
     );
     // A party as they're called: a conversation by their path, as their launch names it while they run, else as the
-    // host does, their runtime's ids beside it where another conversation shares the path; by those ids where they have
-    // none.
+    // host does, the start of their runtime's id beside it where another conversation shares the path (`calledBy`).
     const called = useCallback(
         (party: Item["sender"]) => {
             if (party.party === "operator") {
@@ -242,12 +306,7 @@ export function App() {
                 (each) => each.session === party.session && (each.agent ?? null) === (party.agent ?? null),
             );
             const named = paths.get(whose(party));
-            const ids = `${party.runtime} ${party.session}${party.agent ? ` / ${party.agent}` : ""}`;
-            const path = talker?.path ?? named?.path;
-            if (path === undefined) {
-                return ids;
-            }
-            return named?.alike === true ? `${path} (${ids})` : path;
+            return calledBy(party, talker?.path ?? named?.path ?? null, named?.alike === true);
         },
         [talkers, paths],
     );
@@ -297,13 +356,6 @@ export function App() {
     const agentsRunning = useSame(
         useMemo(() => live.map((each) => each.conversation), [live]),
         (list) => list.map(whose).join("\n"),
-    );
-    // The landings waiting on the operator, as the host keeps them while each call waits: each file of one held in its
-    // writer's "since you approved", and their banners saying it.
-    const landingsWatch = useWatched({ kind: "policy-show-landings" });
-    const landings = useSame(
-        useMemo<readonly Wait[]>(() => (landingsWatch.reply?.kind === "policy-landings" ? (landingsWatch.reply.waiting ?? []) : []), [landingsWatch.reply]),
-        (list) => JSON.stringify(list),
     );
     // Each agent not running whose drawer holds what waits on the operator: their flagged writes waiting, or files a
     // landing waits on. They keep their group, ended or not, so what waits is answered where it's shown.
@@ -407,40 +459,6 @@ export function App() {
         [inbox.reply],
     );
 
-    // The review's threads, as the host reads them for it (`docs/inbox.md`, *Threads in the review*): the same object
-    // while the host says the same of them, which it says again at every hook.
-    const threadsWatch = useWatched({ kind: "inbox-threads" });
-    const threadsRead = useSame(
-        useMemo(() => (threadsWatch.reply?.kind === "inbox-threads-read" ? threadsWatch.reply : null), [threadsWatch.reply]),
-        (each) => JSON.stringify(each),
-    );
-    // How many files a landing waits on in each thread, by the thread its lander works in: what asks the operator there.
-    const landingIn = useSame(
-        useMemo(() => {
-            const working = new Map((threadsRead?.working ?? []).map((each) => [whose(each.conversation), each.thread]));
-            const found = new Map<number, number>();
-            for (const wait of landings) {
-                const thread = working.get(whose(wait.lander));
-                if (thread !== undefined && (wait.files ?? []).length > 0) {
-                    found.set(thread, (found.get(thread) ?? 0) + (wait.files ?? []).length);
-                }
-            }
-            return found;
-        }, [threadsRead, landings]),
-        (map) => JSON.stringify([...map]),
-    );
-    // Each thread's conversation the review shows: each waiting on the operator or new, from where they last read it;
-    // and each they open, of the front or of what's settled, and read whole where they open what came before
-    // (`openThread`).
-    const [opening, setOpening] = useState<readonly ThreadAsked[]>([]);
-    const openThread = useCallback((number: number, whole: boolean) => {
-        setOpening((before) => (before.some((each) => each.number === number && each.whole === whole) ? before : [...before, { number, whole }]));
-    }, []);
-    const threadsAsked = useMemo(() => {
-        const shown = (threadsRead?.threads ?? []).filter((each) => each.section !== "every thread" || landingIn.has(each.thread.number)).map((each) => ({ number: each.thread.number, whole: false }));
-        return [...shown, ...opening.filter((each) => each.whole || !shown.some((one) => one.number === each.number))];
-    }, [threadsRead, landingIn, opening]);
-    const conversations = useThreads(threadsAsked);
     const threading = useMemo<Omit<Threading, "banner"> | null>(
         () => (threadsRead === null ? null : { read: threadsRead, shown: conversations.shown, whole: conversations.whole, landing: landingIn }),
         [threadsRead, conversations, landingIn],
@@ -570,6 +588,28 @@ export function App() {
             }
         });
     }, []);
+
+    // An item of the pile to read left for later, as items were before the pile was there, is no longer: the pile is
+    // where a friction or how it felt is read, or moved into a thread, and a park on one only hid it from the count.
+    useEffect(() => {
+        // Never while a comment's typing waits to be laid out, which the draft as it stands here doesn't hold yet.
+        if (!ready || threadsRead === null || typed.current !== null) {
+            return;
+        }
+        const piled = new Set(threadsRead.threads.flatMap((each) => each.pile ?? []));
+        const parked = draft.parked ?? [];
+        if (!parked.some((each) => piled.has(each))) {
+            return;
+        }
+        const next = { ...draft, parked: parked.filter((each) => !piled.has(each)) };
+        setDraft(next);
+        setEpoch((before) => before + 1);
+        void ask({ kind: "inbox-keep-draft", draft: next }).then((answer) => {
+            if (answer.kind === "refused") {
+                setSaid(answer.error);
+            }
+        });
+    }, [ready, threadsRead, draft]);
 
     const change = useCallback((next: Draft, typedOnly: boolean = false) => {
         // What the last Ctrl+Enter said of a reply as it was goes with it; one being sent is said until it's sent.
@@ -1065,7 +1105,7 @@ export function App() {
             left = { ...left, comments: [...(left.comments ?? []), ...unanswered] };
             await ask({ kind: "inbox-keep-draft", draft: left });
         }
-        setSaid(`Sent: ${told.join("; ") || "nothing"}.`);
+        setSaid(`Sent: ${told.join("; ") || "nothing"}.`, `Sent: ${partsSaid(told, "; ") || "nothing"}.`);
         setDraft(left);
         setEpoch((before) => before + 1);
         return null;
@@ -1125,6 +1165,30 @@ export function App() {
         thread: (number) => threadsRead?.threads.find((each) => each.thread.number === number)?.thread.name ?? `${number}`,
         checks,
     });
+    // Whether a line of the page is cut at the window's edge, its whole in `g<`: read as what it says changes, and as the
+    // window's size does, never at each render.
+    const shownText = [reply?.kind === "refused" ? reply.error : "", said, sending?.text, going.join("\n"), draft.parked?.length].join("\n");
+    useLayoutEffect(() => {
+        const lines = [statusLine.current, saidLine.current, errorLine.current].filter((each) => each !== null);
+        const measure = () => setOverflowing(lines.some((each) => each.scrollWidth > each.clientWidth + 1));
+        measure();
+        const observer = new ResizeObserver(measure);
+        for (const each of lines) {
+            observer.observe(each);
+        }
+        return () => observer.disconnect();
+    }, [shownText]);
+    // The items left for later that still wait, by number: what the line under the review counts, and `g<` names.
+    const later = (draft.parked ?? []).filter((number) => waiting.some((each) => each.number === number));
+    // What was said, whole, where it was said, as `g<` shows it: each line of the page says a sentence of it.
+    const wholeSaid: Said[] = [
+        { heading: "The top bar", lines: [...(reply?.kind === "refused" ? [reply.error] : []), ...(said === null ? [] : [said])] },
+        { heading: "Under the review", lines: sending === null ? [] : [sending.text] },
+        { heading: "Your reply, as Ctrl+Enter sends it", lines: going },
+        { heading: "Left for later", lines: later.length === 0 ? [] : [later.map(cited).join(" ")] },
+    ];
+    // Whether a line of the page leaves out what was said: a sentence or a list of numbers, or cut at the window's edge.
+    const cut = overflowing || (saying !== null && saying.line !== saying.whole) || [reply?.kind === "refused" ? reply.error : "", sending?.text ?? ""].some(shortened) || partsSaid(going) !== going.join(" · ") || later.length > 0;
     return (
         <div className="layout">
             <header className="bar">
@@ -1133,8 +1197,16 @@ export function App() {
                 <span className="connection" data-state={connection}>
                     {SAID[connection]}
                 </span>
-                {reply?.kind === "refused" ? <span className="error">{reply.error}</span> : null}
-                {said === null ? null : <span className="said">{said}</span>}
+                {reply?.kind === "refused" ? (
+                    <span className="error" ref={errorLine} title={reply.error}>
+                        {brief(reply.error)}
+                    </span>
+                ) : null}
+                {said === null ? null : (
+                    <span className="said" ref={saidLine} title={said}>
+                        {saying?.line ?? said}
+                    </span>
+                )}
                 <span className="spacer" />
                 <span className="count">
                     {agents.length} {agents.length === 1 ? "agent" : "agents"} · {waitingOn(threadsRead, landingIn, waiting)} waiting on you
@@ -1171,6 +1243,7 @@ export function App() {
                         placed={setHere}
                         pending={setChord}
                         list={openList}
+                        whole={openWhole}
                         seeing={seeing}
                         implying={implying}
                         activities={activities}
@@ -1187,22 +1260,20 @@ export function App() {
                         load={load}
                         sizing={sizing}
                     />
-                    <div className="status">
+                    <div className="status" ref={statusLine} title={wholeSaid.slice(1).flatMap((part) => part.lines).join("\n")}>
                         {sending === null ? null : (
                             <span className={sending.state === "failed" ? "error" : "sending"} data-sending={sending.state}>
-                                {sending.text}{" "}
+                                {brief(sending.text)}{" "}
                             </span>
                         )}
                         {going.length === 0 ? (
                             <span className="muted">No reply drafted.</span>
                         ) : (
                             <span>
-                                Your reply: {going.join(" · ")}. <kbd>Ctrl</kbd> <kbd>Enter</kbd> sends.
+                                Your reply: {partsSaid(going)}. <kbd>Ctrl</kbd> <kbd>Enter</kbd> sends.
                             </span>
                         )}
-                        {(draft.parked ?? []).length === 0 ? null : (
-                            <span className="muted"> Later: {(draft.parked ?? []).map(cited).join(", ")}.</span>
-                        )}
+                        {later.length === 0 ? null : <span className="muted"> {later.length} for later.</span>}
                     </div>
                     <Keys
                         parts={parts}
@@ -1215,10 +1286,12 @@ export function App() {
                         setOpen={setListing}
                         pending={chord}
                         measuring={switching}
+                        cut={cut}
                     />
                 </div>
             </main>
             <Palette open={palette} setOpen={setPalette} agents={agents} select={goTo} now={now} />
+            <Whole open={wholeOpen} setOpen={setWholeOpen} said={wholeSaid} back={() => feed([])} />
         </div>
     );
 }
@@ -1248,15 +1321,32 @@ function keyKindOf(event: KeyboardEvent, paletteOpen: boolean, parts: readonly P
     return keyKind(parts, [...state.held.map(writtenVim), writtenKey(event)]);
 }
 
+/** How many characters of a runtime's id tell two conversations apart where they share a name, as git abbreviates a commit. */
+const ID_SHOWN = 8;
+
+/**
+ * Name a conversation, `party`, by `path`, their name as lup's commands call it, where one is known, with the start of
+ * their runtime's id after it where another conversation of their repository shares it (`alike`), their subagent's id
+ * for a subagent, so two are told apart: `dashboard-review c0fa70bc`. Where no name is known, by their runtime and the
+ * start of their ids alone: `claude c0fa70bc / a286754c`. Never by an id whole, which runs on.
+ */
+export function calledBy(party: InboxConversation, path: string | null, alike: boolean): string {
+    const short = (id: string) => id.slice(0, ID_SHOWN);
+    if (path === null) {
+        return `${party.runtime} ${short(party.session)}${party.agent ? ` / ${short(party.agent)}` : ""}`;
+    }
+    return alike ? `${path} ${short(party.agent ?? party.session)}` : path;
+}
+
 /** Where the reply's sending stands, as the line under the review says it: being sent, nothing to send, or not sent, and why. */
 interface Sending {
     state: "sending" | "nothing" | "failed";
     text: string;
 }
 
-/** Say a reply wasn't sent, and why: `why`, the host's refusal or why it couldn't be reached; the draft kept for the next Ctrl+Enter. */
+/** Say a reply wasn't sent, and why, in a sentence: `why`, the host's refusal or why it couldn't be reached; the draft kept for the next Ctrl+Enter. */
 export function notSent(why: string): string {
-    return `Not sent: ${why.replace(/[.\s]+$/, "")}. Your draft is kept: Ctrl+Enter sends it again.`;
+    return `Not sent, your draft kept: ${why.replace(/[.\s]+$/, "")}.`;
 }
 
 /**

@@ -127,7 +127,7 @@ kbd {
     height: 100vh;
 }
 
-/* The tabline. */
+/* The tabline: one row, what was said last cut at its end where it's too long, its whole in `g<` and its title. */
 .bar {
     grid-column: 1 / -1;
     display: flex;
@@ -135,6 +135,20 @@ kbd {
     gap: 0 2ch;
     padding: 0 1ch;
     border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+.bar > * {
+    flex-shrink: 0;
+}
+
+.bar .said,
+.bar .error,
+.bar .demo {
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .bar .name {
@@ -505,8 +519,23 @@ kbd {
     font-weight: 700;
 }
 
+/* The line under the review: one row, cut at its end where it's too long, its whole in `g<` and its title. */
 .status {
     border-top: 1px solid var(--border);
+    padding: 0 1ch;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* What was said, whole (`g<`): each line wrapped, as long as it is. */
+.whole-palette .whole-line {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.whole-palette .whole-none {
+    color: var(--muted);
     padding: 0 1ch;
 }
 
@@ -1112,17 +1141,9 @@ kbd {
         --columns: 5;
     }
 
-    /* The top line keeps to one row: the count of agents gives way, and the demo's badge is cut. */
+    /* The top line keeps to one row: the count of agents gives way. */
     .bar .count {
         display: none;
-    }
-
-    .bar .demo,
-    .bar .said {
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        min-width: 0;
     }
 
     .where {
@@ -1450,6 +1471,15 @@ kbd {
     border-bottom-color: var(--warn);
 }
 
+/* The line in open the roots of sessions that have ended are under: a section's within the front, quieter. */
+.buffer .cm-line.aside-ended {
+    color: var(--muted);
+    font-weight: 700;
+    padding-top: 0.3em;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
 /* A thread's banner: a thread waiting on the operator barred in their colour, one done for them to confirm too; one
    settled or declined dimmed. */
 .buffer .cm-line.thread-banner.state-waiting-on-the-operator,
@@ -1639,6 +1669,13 @@ kbd {
 .outline-hint {
     color: var(--muted);
     padding: 0.5em 1ch 0;
+}
+
+/* Each line of the hint one row, cut where the overview is narrow. */
+.outline-hint > div {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .outline-hint kbd {

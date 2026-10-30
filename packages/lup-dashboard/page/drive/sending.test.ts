@@ -82,7 +82,7 @@ describe("Ctrl+Enter, in headless Chromium", () => {
         // The dashboard gone with the host service, as while lup restarts.
         await dashboard.page.route("**/api/ask", (route) => route.abort("connectionrefused"));
         await dashboard.keys.press(["Control+Enter"]);
-        await says("Not sent: the dashboard can't be reached: the host is restarting, or out of reach. Your draft is kept: Ctrl+Enter sends it again.");
+        await says("Not sent, your draft kept: the dashboard can't be reached: the host is restarting, or out of reach.");
         expect(await status()).toContain("Your reply: read @62");
         // The dashboard there, the host behind it not.
         await dashboard.page.unrouteAll({ behavior: "ignoreErrors" });
@@ -90,7 +90,7 @@ describe("Ctrl+Enter, in headless Chromium", () => {
             route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "lup's host service isn't listening" }) }),
         );
         await dashboard.keys.press(["Control+Enter"]);
-        await says("Not sent: the host is restarting, or out of reach (lup's host service isn't listening). Your draft is kept");
+        await says("Not sent, your draft kept: the host is restarting, or out of reach (lup's host service isn't listening).");
         await dashboard.page.unrouteAll({ behavior: "ignoreErrors" });
         await dashboard.keys.press(["Control+Enter"]);
         await dashboard.page.waitForFunction(() => document.querySelector(".bar .said")?.textContent?.startsWith("Sent: read @62") === true);

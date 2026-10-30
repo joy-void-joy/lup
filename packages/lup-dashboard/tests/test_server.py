@@ -638,6 +638,7 @@ def test_the_demo_reads_its_threads_as_the_host_does_and_the_operator_settles_on
         "voice-branch": "every thread",
         "main": "waiting on you",
         "dev": "every thread",
+        "docs-pass": "every thread",
     }
     reader = read["transcript-reader"]
     assert [each.what for each in reader.asks] == ["a question", "a check"]

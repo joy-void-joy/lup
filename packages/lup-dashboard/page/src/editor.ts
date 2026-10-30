@@ -101,6 +101,8 @@ interface Actions {
     /** `gt`: go to the thread what the cursor is in is of, whole. */
     thread: () => void;
     list: () => void;
+    /** `g<`: open the panel of what was said, whole. */
+    whole: () => void;
     fold: (how: "toggle" | "open" | "close") => void;
     /** `zO` and `zC`: open or close the folds the cursor is in recursively, as vim's do (`recursive`). */
     foldRecursive: (opening: boolean) => void;
@@ -548,6 +550,7 @@ function mapKeys(): void {
     action("lupFollow", (actions) => actions.follow());
     action("lupThread", (actions) => actions.thread());
     action("lupKeys", (actions) => actions.list());
+    action("lupWhole", (actions) => actions.whole());
     // Vim's own fold keys, which its CodeMirror mode leaves unmapped, on CodeMirror's folds.
     action("lupFoldToggle", (actions) => actions.fold("toggle"));
     action("lupFoldOpen", (actions) => actions.fold("open"));
@@ -622,6 +625,8 @@ function mapKeys(): void {
     map("[q", "lupPreviousCitation", "normal");
     map("gd", "lupFollow", "normal");
     map("gt", "lupThread", "normal");
+    // As vim's own `g<` shows the last message whole: what each line of the page says a sentence of.
+    map("g<", "lupWhole", "normal");
 }
 
 /** The editor last made, which the palette gives the keys it runs (`feed`). */
@@ -1579,6 +1584,8 @@ interface Config<D, C> {
     shownNow: boolean;
     /** Open the list of every key (`?`). */
     list: () => void;
+    /** Open the panel of what was said, whole (`g<`). */
+    whole: () => void;
     /** Told the keys of a chord begun, as the list writes them (`␣`, `␣z`), each time they change: none once it's done. */
     pending?: (keys: string) => void;
     /** Told each fold the operator opens, by its keys or a click, as a view reads what a drawer shows on opening it. */
@@ -2075,6 +2082,7 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 editor.dispatch({ selection: { anchor: target }, effects, scrollIntoView: true, annotations: reached.of(effects.length) });
             },
             list: config.list,
+            whole: config.whole,
             fold: (how) => {
                 const editor = view.current;
                 const at = head();

@@ -803,6 +803,45 @@ def test_a_settled_root_a_later_session_takes_by_its_name_is_reopened_by_lup(
     assert delivery.concerns().standing(root).status == standing.status
 
 
+def test_a_settled_root_its_session_resumed_sends_into_is_reopened_by_lup_and_no_other_thread(
+    delivery: Delivery,
+) -> None:
+    register = launched(delivery, "dev", "s1")
+    lead = speaker(delivery, register, main("s1"))
+    said(lead.note(ThreadedRemark(remark="Go.")))
+    said(lead.thread(Threading(name="lag", title="Lag")))
+    concerns = delivery.concerns()
+    root = concerns.root(main("s1"))
+    lag = concerns.named(REPOSITORY, "lag")
+    # The session ended; the operator settled their root and declined the thread they'd opened.
+    delivery.layout.record("dev").unlink()
+    concerns.settled(root)
+    concerns.declined(lag, "")
+    ended = concerns.standing(root).state
+
+    # Resumed under the same ids, they go on: a subagent of theirs, then they, in their root, and in the other.
+    resumed = launched(delivery, "dev", "s1")
+    helper = spawned(delivery, resumed, main("s1"), "a1", "helper")
+    said(
+        speaker(delivery, resumed, helper).note(
+            ThreadedRemark(remark="Back.", thread="dev")
+        )
+    )
+    standing = delivery.concerns().standing(root)
+    said(
+        speaker(delivery, resumed, main("s1")).note(
+            ThreadedRemark(remark="On it.", thread="lag")
+        )
+    )
+
+    assert ended == "settled"
+    assert isinstance(standing.status, Reopened)
+    assert standing.status.by == Lup()
+    assert standing.status.why == "`dev` went on in it"
+    assert standing.state == "working"
+    assert delivery.concerns().standing(lag).state == "declined"
+
+
 def test_no_tool_an_agent_calls_settles_or_declines_a_thread() -> None:
     fields = set(Threading.model_fields)
     assert not fields & {"settle", "settled", "decline", "declined", "reopen"}

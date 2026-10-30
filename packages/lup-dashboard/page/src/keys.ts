@@ -25,11 +25,15 @@ export interface Part {
     keys: Key[];
 }
 
-/** What a verb would do where the cursor is: its keys, what it does there, and what it's on where that isn't what the cursor is on. */
+/**
+ * What a verb would do where the cursor is: its keys, what it does there, in a few words, and what it's on where that
+ * isn't what the cursor is on; and what it does whole, where the few words count what the palette names (`whole`).
+ */
 export interface Reached {
     keys: string;
     says: string;
     on: string | null;
+    whole?: string;
 }
 
 /** What the line of keys says where the cursor is: what it's on, and what each verb would do to it; or, writing, the keys that end the comment. */
@@ -106,8 +110,20 @@ const MARKS: Part[] = [
     },
 ];
 
-/** The keys of this list, which the line of keys says at its end, wherever the cursor is. */
-const LIST: Part[] = [{ title: "This palette", keys: [{ keys: "?", does: "open it, every key searchable, what applies where the cursor is first; ⏎ does the one chosen, Esc closes it", short: "all keys" }] }];
+/** The keys of this list, which the line of keys says at its end, wherever the cursor is; and of what was said, whole, which it says before them where a line left some out. */
+const LIST: Part[] = [
+    {
+        title: "This palette",
+        keys: [
+            { keys: "?", does: "open it, every key searchable, what applies where the cursor is first; ⏎ does the one chosen, Esc closes it", short: "all keys" },
+            {
+                keys: "g<",
+                does: "what was said, whole, as vim's g< shows the last message: the top bar's last words, an error's whole text among them, what your reply sends with every item's number, and what's left for later; each line of the page says a sentence of it; Esc closes it",
+                short: "in full",
+            },
+        ],
+    },
+];
 
 /**
  * What each verb lup's own modules declare does, whole, as the palette says it (`lup.SHELL_VERBS`, `Core.verbs`): on the
@@ -115,12 +131,11 @@ const LIST: Part[] = [{ title: "This palette", keys: [{ keys: "?", does: "open i
  * undone with u and sent with Ctrl+Enter, the key pressed again taking it off. A module's own verb says what it's called.
  */
 const VERBS: Readonly<Record<string, string>> = {
-    done: "mark it done: an item read; an approval or a held change approved, the comments under it going with it; a check ticked, you tried it; a file of \"since you approved\" reviewed at the version shown, approving its flagged writes where it still stands so; on the drawer's line, every file it shows; a conversation read up to its last step; on a thread's banner, the thread settled where it's done, for you to confirm, else read up to the last item shown, its news with it; on an agent's banner, the agent seen, their own items and drawers, their subagents' left as they are; in the pile to read, a friction or how it felt read, on a thread's line there each of its",
-    decline: "decline an approval or a held change, the comments under it going with it; on a thread's banner, the thread declined where it's done, for you to confirm; a comment never declines",
+    done: "mark it done: an item read; an approval or a held change approved, the comments under it going with it; a check ticked, you tried it; a file of \"since you approved\" reviewed at the version shown, approving its flagged writes where it still stands so; on the drawer's line, every file it shows; a conversation read up to its last step; on a thread's banner, its news read up to the last item shown where there's some, else the thread settled, any thread, its agent going on or ended, but while something in it waits on you; on the line ended in open, each ended session's root settled; on an agent's banner, the agent seen, their own items and drawers, their subagents' left as they are; in the pile to read, a friction or how it felt read, on a thread's line there each of its",
+    decline: "decline an approval or a held change, the comments under it going with it; on a thread's banner, the thread declined, nothing more to be done, but while something in it waits on you; on the line ended in open, each ended session's root; a comment never declines",
     send: "leave the item for later, folded, in its thread, or at the review's end grouped by agent, what's drafted on it staying drafted as the rest is sent; on one left for later, bring it back; on a message written on a thread, send it to no one, kept there as yours, or back to whoever answers for the thread; in the pile to read, move a friction or how it felt, a thread's there on its line, into a thread you name in a palette, one of its repository's or a new one you title, each staying where it landed, read, and whoever answers for that thread told it; pressed again, no longer moved",
     comment: "comment on it whole: an item; on a check, your answer in words; on a thread's banner, a message on the thread to whoever answers for it; on an agent's banner, a message to them, which their drawers' remarks go with; in a drawer, a remark on the line",
     hold: "from anywhere in an agent's group, hold each flagged write of the agent and their subagents for your answer, or let them land again",
-    pause: "pause the agent at their next call until they're resumed: not built yet, its host side designed beside #157",
 };
 
 /**

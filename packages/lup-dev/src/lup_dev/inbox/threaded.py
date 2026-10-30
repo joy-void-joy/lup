@@ -33,9 +33,10 @@ it, every repository's, and the operator settles, declines and reopens them:
   title, each staying where it landed and marked read, whoever answers for the
   thread told each whole (`Concerns.gathered`).
 - **`inbox-settle-thread`**, **`inbox-decline-thread`** and
-  **`inbox-reopen-thread`** are the operator's, as Space `d` and Space `x` on
-  a thread done, to confirm, are, and `lup-dev inbox settle-thread` and its
-  kin in their terminal (`Concerns.settled`, `declined`, `reopened`).
+  **`inbox-reopen-thread`** are the operator's, on any thread, its holder
+  going on or ended, as Space `d` and Space `x` on a thread's banner are, and
+  `lup-dev inbox settle-thread` and its kin in their terminal
+  (`Concerns.settled`, `declined`, `reopened`).
   A reply of theirs on what's in a thread done, to confirm, reopens it
   (`Delivery.reopening`).
 
@@ -387,14 +388,14 @@ class ShowThread(Request, reads=True):
 
 
 class SettleThread(Request, reads=False):
-    """Settle a thread, as the operator does: Space `d` on one done, to confirm."""
+    """Settle a thread, any, as the operator does: Space `d` on its banner, once it has no news left to read."""
 
     kind: Literal["inbox-settle-thread"] = "inbox-settle-thread"
     number: int
 
 
 class DeclineThread(Request, reads=False):
-    """Decline a thread, as the operator does, saying why: Space `x` on one done, to confirm."""
+    """Decline a thread, any, as the operator does, saying why: Space `x` on its banner."""
 
     kind: Literal["inbox-decline-thread"] = "inbox-decline-thread"
     number: int
