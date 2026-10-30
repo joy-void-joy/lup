@@ -501,6 +501,45 @@ def test_join_moves_where_an_agent_works_and_hold_takes_it_from_whoever_held_it(
     assert told(delivery, main("s1")) == ["lup: `dev/fixer` took @lag, which you held."]
 
 
+def test_a_subagent_stays_quiet_in_the_thread_they_started_on_wherever_they_go_and_so_do_theirs(
+    delivery: Delivery,
+) -> None:
+    register = launched(delivery, "dev", "s1")
+    lead = speaker(delivery, register, main("s1"))
+    said(lead.note(ThreadedRemark(remark="Go.")))
+    worker = spawned(delivery, register, main("s1"), "a1", "fixer")
+    work = speaker(delivery, register, worker)
+    said(work.note(ThreadedRemark(remark="Starting.")))
+    said(work.thread(Threading(name="lag", title="Lag", join=True)))
+    helper = spawned(delivery, register, worker, "a2", "helper")
+    said(speaker(delivery, register, helper).note(ThreadedRemark(remark="Looking.")))
+    review = asyncio.run(
+        delivery.posted(
+            Review(
+                covers=[1],
+                comments=[Comment(item=1, text="Ship it today.")],
+            ),
+            Operator(),
+            main("s1"),
+            None,
+        )
+    )
+
+    said(lead.thread(Threading(name="dev", move=[f"{review.number}.1"])))
+    said(lead.note(ThreadedRemark(remark="Typing fast moves it.", thread="lag")))
+
+    # The fixer wrote in the root before joining @lag, and never chose the
+    # root: the operator's words moved there are their parent's. @lag they
+    # joined, so its note reaches them; their own subagent, who started there,
+    # hears nothing of it.
+    assert told(delivery, worker) == [
+        "lup: in @lag, a note from `dev`, @7: Typing fast moves it."
+    ]
+    assert told(delivery, helper) == []
+    lag = delivery.concerns().named(REPOSITORY, "lag")
+    assert delivery.inbox.whereabouts[helper.key()].started == lag.number
+
+
 def test_a_holder_that_ended_holds_nothing_and_the_thread_above_answers(
     delivery: Delivery, clock: FakeClock
 ) -> None:

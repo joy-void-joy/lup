@@ -1036,8 +1036,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
         Heard again in another launch, or after they ended, as a session
         resumed, they keep the threads they work in, started on and hold as
-        their root. A subagent heard the first time starts on the thread their
-        parent works in (`Whereabouts.thread`).
+        their root, and whether they chose the one they started on. A subagent
+        heard the first time starts on the thread their parent works in
+        (`Whereabouts.thread`), hearing only what's addressed to them there
+        until they choose it (`Whereabouts.chose_start`).
         """
         place = self.inbox.whereabouts.get(party.key())
         if place is not None and place.launch == launch.launch and place.ended is None:
@@ -1060,6 +1062,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 felt_asked=place is not None and place.felt_asked,
                 thread=starting if place is None else place.thread,
                 started=starting if place is None else place.started,
+                chose_start=place is not None and place.chose_start,
                 root=None if place is None else place.root,
             )
         )

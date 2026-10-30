@@ -22,6 +22,9 @@
   conversations above them (`forebears`), who hear them through their
   runtime already, and whose context is what threads are meant to spare. How it felt is told to nobody, as it reaches the
   operator alone, nor a flag or a hold, the judge's, which its writer hears.
+  The mirror: a subagent hears only what's addressed to them in the thread
+  they started on, their parent's, until they join, hold or are handed it
+  (`quiet`), since what lands there is their parent's and their siblings'.
 - **A holder that has ended holds nothing** (`live`): a subagent ended, a
   session cleared in their launch, or one whose launch has ended. It's read at
   each read rather than written as they end, so a session resumed under the
@@ -282,8 +285,8 @@ class Concerns(Model, arbitrary_types_allowed=True):
         except LupLedgerError as refused:
             raise InboxError(str(refused)) from refused
 
-    def placed(self, party: Conversation, **fields: int | None) -> None:
-        """Keep `fields` on `party`'s whereabouts: where they work, started, or their root; nothing where they were never heard."""
+    def placed(self, party: Conversation, **fields: int | bool | None) -> None:
+        """Keep `fields` on `party`'s whereabouts: where they work, started, or their root, and whether they chose where they started; nothing where they were never heard."""
         place = self.inbox.whereabouts.get(party.key())
         if place is None:
             return
@@ -378,6 +381,30 @@ class Concerns(Model, arbitrary_types_allowed=True):
         number = None if place is None else place.started
         found = None if number is None else self.inbox.ledger.found(number)
         return found if isinstance(found, Thread) else self.root(party.main())
+
+    def start(self, party: Conversation) -> int | None:
+        """Return the number of the thread `party` started on, as `started_on` finds it, opening nothing: their session's root where that's where they started, none where it isn't opened yet."""
+        place = self.inbox.whereabouts.get(party.key())
+        if place is not None and place.started is not None:
+            return place.started
+        above = self.inbox.whereabouts.get(party.main().key())
+        return None if above is None else above.root
+
+    def quiet(self, party: Conversation, thread: Thread) -> bool:
+        """Say whether `party` hears only what's addressed to them in `thread`, never a line as one on it: a subagent's in the thread they started on, their parent's, until they join, hold or are handed it (`Whereabouts.chose_start`).
+
+        They're on it by working there and by what they send landing there,
+        yet nothing their parent is told there, nor their siblings' notes, is
+        for them: what is reaches them sent to them, or in a thread they chose.
+        """
+        if party.agent is None:
+            return False
+        place = self.inbox.whereabouts.get(party.key())
+        return (
+            place is not None
+            and not place.chose_start
+            and self.start(party) == thread.number
+        )
 
     def opened(
         self, party: Conversation, title: str, under: Thread, name: str | None = None
@@ -529,14 +556,18 @@ class Concerns(Model, arbitrary_types_allowed=True):
         holder: bool = True,
         others: bool = True,
     ) -> None:
-        """Tell who answers for `thread` `whole`, or `line` where it's none, where `holder` says; and everyone else on it `line`, where `others` says. Nobody among `having`, who has it already, is told."""
+        """Tell who answers for `thread` `whole`, or `line` where it's none, where `holder` says; and everyone else on it `line`, where `others` says, but a subagent in the thread they started on and never chose (`quiet`). Nobody among `having`, who has it already, is told."""
         answering = self.answering(thread)
         if holder and answering is not None and answering not in having:
             self.left(answering, whole or line)
         if not others:
             return
         for each in self.on(thread):
-            if each != answering and each not in having:
+            if (
+                each != answering
+                and each not in having
+                and not self.quiet(each, thread)
+            ):
                 self.left(each, line)
 
     def whole(self, item: Item, thread: Thread, by: Conversation | None = None) -> str:
@@ -574,8 +605,11 @@ class Concerns(Model, arbitrary_types_allowed=True):
         )
 
     def joined(self, party: Conversation, thread: Thread) -> None:
-        """Make `thread` where `party` works: what they send lands there where they name none."""
-        self.placed(party, thread=thread.number)
+        """Make `thread` where `party` works: what they send lands there where they name none. Where they're a subagent and it's the thread they started on, they chose it, and hear what lands there from then on (`quiet`)."""
+        chose = party.agent is not None and self.start(party) == thread.number
+        self.placed(
+            party, thread=thread.number, **({"chose_start": True} if chose else {})
+        )
 
     def held(self, party: Conversation, thread: Thread) -> Thread:
         """Make `party` the holder of `thread`, and work there; whoever held it and goes on is told, in a line, that `party` took it. Return it as it stands."""
