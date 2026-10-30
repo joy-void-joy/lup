@@ -1423,11 +1423,13 @@ kbd {
 
 /* A section of the review grouped by thread: its line, saying what it holds, set apart above it; what waits on the
    operator in their colour. */
+/* A line's room above is padding, never a margin: CodeMirror measures each line's height without its margins, and a
+   margin there threw vim's j, which moves by the heights measured, past the next line where two sections' lines met. */
 .buffer .cm-line.review-section {
     color: var(--fg);
     font-weight: 700;
     border-bottom: 1px solid var(--muted);
-    margin-top: 0.6em;
+    padding-top: 0.6em;
     text-transform: uppercase;
     letter-spacing: 0.05em;
 }

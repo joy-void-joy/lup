@@ -382,6 +382,11 @@ Behind `docs/dashboard.md`, *Its timings* (#350), through the driver (`page/driv
 - **What a layout carries:** the page's size first worked out at each layout, every drawer's own fold looked for among every fold of the review, took typing's key-to-frame median at 4x from 55 ms to 600 to 950 ms, the review laid out after each key at that pace; read as a key goes down instead, once a second at most, it's 62 and 70 ms beside the page without it, 55 and 58.
 - Not measured: Firefox, Safari and a phone, which the page now measures where the operator uses them; whether Firefox's `interactionId` groups a key's events, which nothing reads.
 
+## A line's margin in the review (Chromium 151 headless, CodeMirror 6.43, @replit/codemirror-vim 6.4.0, measured on the demo 2026-10-30)
+
+Behind the section lines of `docs/dashboard.md`, *The review* (#345), through the driver (`page/drive/lines.test.ts`), the demo at `--size 0`.
+- **vim's `j` and `k` move by the heights CodeMirror measured** (`findPosV`, `EditorView.moveVertically`), and CodeMirror measures a line's height without its CSS margins. A section's line drawn with `margin-top: 0.6em` made `j` from *to read*'s line, folded, land on *agents*', past *every thread*'s, and with every section open, each `j` from there on skip a line. Padding in its place, which CodeMirror measures, moved every `j` and `k` one line shown over the 668 lines and back, sections folded or open.
+
 ## A windowed Chromium on a virtual display (Chromium 151, xorg-server-xvfb 21.1.24, xorg-setxkbmap 1.3.5, xdotool 4.20260303, xkeyboard-config 2.48, measured in a room 2026-10-29)
 
 Behind `docs/dashboard.md`, *The demo*, and the driver's `display.ts` and `dashboard.ts` (#351): real key events, a dead key's among them, reach the page only through a window on an X display, which the room's `Xvfb` gives.

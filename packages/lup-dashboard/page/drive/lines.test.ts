@@ -1,0 +1,129 @@
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+
+import { open, type Dashboard } from "./dashboard.ts";
+import { demo, type Demo } from "./demo.ts";
+import type { Review } from "./review.ts";
+
+let served: Demo;
+let dashboard: Dashboard;
+let review: Review;
+
+beforeAll(async () => {
+    served = await demo({ size: 0 });
+    dashboard = await open(served.url);
+    review = await dashboard.review();
+    await review.holds("agents · ");
+    await review.settled(1500);
+});
+
+afterEach(() => {
+    expect(dashboard.thrown).toEqual([]);
+});
+
+afterAll(async () => {
+    await dashboard?.close();
+    await served?.close();
+});
+
+/** Each line shown, by its number, in order: a line under a closed fold isn't, the fold's summary line standing for it. */
+const shown = () =>
+    review.evaluate((view) => {
+        const doc = view.state.doc;
+        const lines: number[] = [];
+        for (let number = 1; number <= doc.lines; number += 1) {
+            const line = doc.line(number);
+            if (view.lineBlockAt(line.from).from === line.from) {
+                lines.push(number);
+            }
+        }
+        return lines;
+    });
+
+/** The line the cursor is on, by its number, and its text. */
+const here = () =>
+    review.evaluate((view) => {
+        const line = view.state.doc.lineAt(view.state.selection.main.head);
+        return { number: line.number, text: line.text };
+    });
+
+/** Say a line by its number and its words. */
+const said = (line: { number: number; text: string }) => `${line.number} "${line.text.slice(0, 50)}"`;
+
+/**
+ * Press `key` from the first line shown to the last, or back, each press moving the cursor exactly one line shown; return
+ * each step that moved otherwise, saying where from, where to, and where it should have gone.
+ */
+async function stepped(key: "j" | "k"): Promise<string[]> {
+    const lines = await shown();
+    const wrong: string[] = [];
+    const order = key === "j" ? lines : lines.toReversed();
+    for (const [at, next] of order.slice(1).entries()) {
+        const from = await here();
+        await dashboard.keys.press([key]);
+        const to = await here();
+        if (to.number !== next) {
+            const expected = await review.evaluate((view, number) => view.state.doc.line(number).text, next);
+            wrong.push(`${key} from ${said(from)} went to ${said(to)}, not ${said({ number: next, text: expected })} (step ${at + 1})`);
+            // Go on from where it should have been.
+            await review.evaluate((view, number) => view.dispatch({ selection: { anchor: view.state.doc.line(number).from } }), next);
+        }
+    }
+    return wrong;
+}
+
+/** Put the cursor on the review's first line, or its last. */
+const to = async (end: "first" | "last") => {
+    await dashboard.keys.press(end === "first" ? ["g", "g"] : ["G"]);
+};
+
+/** Open the fold of the section whose line starts with `name`, its line the cursor's. */
+async function opened(name: string): Promise<void> {
+    await review.goTo(`${name} · `);
+    await dashboard.keys.press(["z", "o"]);
+}
+
+describe("moving through the review grouped by thread, line by line, in headless Chromium", () => {
+    it("moves j and k exactly one line shown at a time from the first line to the last and back, the sections as they start", async () => {
+        await to("first");
+        expect(await stepped("j")).toEqual([]);
+        await to("last");
+        expect(await stepped("k")).toEqual([]);
+    });
+
+    it("goes ]g and [g to each group in turn across the sections, a closed fold's line standing for the groups under it", async () => {
+        const landings = await review.evaluate((view) => {
+            const doc = view.state.doc;
+            const found: number[] = [];
+            for (let number = 1; number <= doc.lines; number += 1) {
+                const line = doc.line(number);
+                if (line.text.startsWith("━━ ")) {
+                    found.push(doc.lineAt(view.lineBlockAt(line.from).from).number);
+                }
+            }
+            return [...new Set(found)];
+        });
+        await to("first");
+        const forward: number[] = [];
+        for (const _ of landings) {
+            await dashboard.keys.press(["]", "g"]);
+            forward.push((await here()).number);
+        }
+        expect(forward).toEqual(landings);
+        const back: number[] = [];
+        for (const _ of landings.slice(1)) {
+            await dashboard.keys.press(["[", "g"]);
+            back.push((await here()).number);
+        }
+        expect(back).toEqual(landings.toReversed().slice(1));
+    });
+
+    it("moves j and k exactly one line shown at a time with every section open", async () => {
+        for (const name of ["to read", "every thread", "agents"]) {
+            await opened(name);
+        }
+        await to("first");
+        expect(await stepped("j")).toEqual([]);
+        await to("last");
+        expect(await stepped("k")).toEqual([]);
+    });
+});
