@@ -36,6 +36,11 @@ export interface DemoOptions {
      * page's data, never instructions.
      */
     copy?: boolean;
+    /**
+     * Keep what the page measures of itself in this directory, laid out as the host keeps it, for `lup-dev dashboard
+     * timings --kept` to read; in the demo's own directory, gone as it stops, unless given.
+     */
+    timings?: string;
 }
 
 /** A demo running, until it's closed. */
@@ -68,6 +73,9 @@ export async function demo(options: DemoOptions = {}): Promise<Demo> {
     }
     if (options.copy === true) {
         args.push("--copy");
+    }
+    if (options.timings !== undefined) {
+        args.push("--timings", options.timings);
     }
     const served = await start("uv", args, { what: "`lup-dashboard demo`", cwd: ROOT });
     return { url: new URL(served.first).href, close: served.stop, [Symbol.asyncDispose]: served.stop };
