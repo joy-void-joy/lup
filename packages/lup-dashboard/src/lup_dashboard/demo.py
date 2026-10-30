@@ -37,7 +37,7 @@ from lup_dev.host.timings import KeepTimings, Report, TimingsKept, TimingsStore
 from lup_dev.host.workers import Viewed, Viewing
 from lup_dev.inbox import marks
 from lup_dev.inbox.citations import resolved
-from lup_dev.inbox.marks import CORE, MarksMoved, MarkStore, MoveMarks, ReviewMark
+from lup_dev.inbox.marks import CORE, MarksMoved, MoveMarks, ReviewMark
 from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.protocol import (
     Context,
@@ -415,17 +415,13 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         kept = TimingsStore(home=home).keep(report, self.clock.now())
         return TimingsKept(windows=len(kept))
 
-    def marked(self, repository: Path) -> MarkStore:
-        """Return the review marks of `repository`, kept as the host keeps them in the demo's own directory, which its modules' views read."""
-        return MarkStore(layout=self.views.layout.marks(repository))
-
     def moved(self, moving: MoveMarks) -> MarksMoved:
         """Move the review marks `moving` names at the demo's time, as the host does (`lup_dev.inbox.marks`); each watch answers again, a view that read one among them."""
         at = self.clock.now()
         marks = [
             ReviewMark(key=each.key, up_to=each.up_to, at=at) for each in moving.marks
         ]
-        self.marked(moving.repository).moved(moving.module, marks)
+        self.views.marks.moved(moving.repository, moving.module, marks)
         self.changed.set()
         self.changed = asyncio.Event()
         return MarksMoved(marks=marks)
@@ -449,10 +445,10 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     mark = ReviewMark(
                         key=marks.seen(sender), up_to=str(max(before)), at=self.ago(3)
                     )
-                    self.marked(sender.repository).moved(CORE, [mark])
+                    self.views.marks.moved(sender.repository, CORE, [mark])
 
         def of(sender: Conversation) -> Seen | None:
-            mark = self.marked(sender.repository).of(CORE, marks.seen(sender))
+            mark = self.views.marks.of(sender.repository, CORE, marks.seen(sender))
             if mark is None or mark.up_to is None:
                 return None
             return Seen(conversation=sender, item=int(mark.up_to), at=mark.at)

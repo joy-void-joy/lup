@@ -51,6 +51,7 @@ from lup_dev.adapters.claude import (
 from lup_dev.codescan.contract import FileReport, Parser, Source
 from lup_dev.codescan.engine import EngineError
 from lup_dev.commanding import RoomMarks
+from lup_dev.conversions import inbox_opened
 from lup_dev.declaration.package_managers.uv import Uv
 from lup_dev.declaration.resolve import resolve
 from lup_dev.declaration.serving import Operator as OperatorAsker
@@ -91,7 +92,15 @@ from lup_dev.inbox.delivery import (
     Waking,
     clocked,
 )
-from lup_dev.inbox.marks import CORE, MarksMoved, MoveMarks, Moving, StoredMarks, seen
+from lup_dev.inbox.marks import (
+    CORE,
+    MarksMoved,
+    MarkStore,
+    MoveMarks,
+    Moving,
+    StoredMarks,
+    seen,
+)
 from lup_dev.inbox.notices import Notices, NotifySend
 from lup_dev.inbox.parts import PartId, blocks
 from lup_dev.inbox.protocol import (
@@ -489,7 +498,7 @@ def inboxed(
     changes = Changes()
     pushes = Pushes()
     delivery = Watched(
-        inbox=Inbox.opened(cli.ledger_opened(machine), changes),
+        inbox=inbox_opened(machine, changes),
         waker=wakers,
         pushes=pushes,
         layout=machine.host,
@@ -6180,7 +6189,7 @@ def test_where_an_approvals_types_cant_be_read_its_first_reading_stays_and_it_sa
 def test_an_approval_left_with_its_first_reading_is_read_by_the_next_service(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    kept = Inbox.opened(cli.ledger_opened(machine))
+    kept = inbox_opened(machine)
     for fingerprint in ["zone", "decided"]:
         approval = asking_approval(tmp_path, fingerprint, typing=True).approval()
         item = kept.made(approval, Operator(), Operator(), tmp_path, clock.now())
@@ -7381,7 +7390,9 @@ def test_the_operators_list_says_how_far_they_have_seen_each_group_by_its_review
         call(mcp, "note", {"remark": "Second."})
         after = host.ask(ListInbox(), Items)
     assert before.seen == []
-    assert [item.number for item in after.items] == [1, 3]
+    # The core's first mark in the repository made the node its marks are drawn
+    # to, @3.
+    assert [item.number for item in after.items] == [1, 4]
     assert after.seen == [Seen(conversation=first.sender, item=1, at=clock.now())]
 
 
@@ -8623,7 +8634,7 @@ def test_a_file_held_at_landing_is_shown_from_the_version_the_operator_marked_re
     landings.wrote(feat, path, first)
     version = landings.shell.git(feat, "rev-parse", f"HEAD:{path}")
     mark = Mark(path=Path(path), version=version, at=clock.now())
-    reviews = Reviews.of(machine, landings.repository)
+    reviews = Reviews.of(machine, MarkStore.kept_in(machine), landings.repository)
     reviews.marked("feat", [mark], {version: first.encode()})
     landings.wrote(feat, path, second)
     tip = landings.merged()
@@ -10118,7 +10129,7 @@ def test_lup_dev_transcripts_show_says_how_much_of_the_exchange_lups_inbox_holds
         recorded=cli.recorded(),
         layout=Layout.of(LupDevSettings()),
         exchanges=HostExchanges(repository=common, layout=machine.host, clock=clock),
-        marks=StoredMarks(layout=Layout.of(LupDevSettings())),
+        marks=StoredMarks(store=MarkStore.kept_in(Layout.of(LupDevSettings()))),
     )
     app = commanding.commands(
         "transcripts", modules.resolved.served, modules.made, OperatorAsker
@@ -10186,7 +10197,7 @@ def test_the_listing_names_an_agent_no_launch_names_by_its_path(
 ) -> None:
     """The dashboard names an agent by the launches it lists, which name a launch's latest session alone: an earlier session's, and an ended one's, come by the listing's paths."""
     layout = Layout(state=tmp_path / "state", runtime=tmp_path / "run", data=tmp_path)
-    inbox = Inbox.opened(cli.ledger_opened(layout))
+    inbox = inbox_opened(layout)
     names = Names(path=layout.host.names)
     names.keep("s1", "w")
     names.keep("s2", "w")
@@ -10214,7 +10225,7 @@ def test_the_listing_names_an_agent_no_launch_names_by_its_path(
             clock.now(),
         )
     delivery = Delivery.model_construct(inbox=inbox, clock=clock, layout=layout.host)
-    listed = asyncio.run(Listing(delivery=delivery, layout=layout).answer(ListInbox()))
+    listed = asyncio.run(Listing(delivery=delivery).answer(ListInbox()))
     assert isinstance(listed, Items)
     assert listed.paths == [
         Pathed(conversation=earlier, path="w", alike=True),
@@ -10234,7 +10245,7 @@ def test_a_subagent_is_named_as_its_end_was_told_where_its_whereabouts_keep_no_n
     tmp_path: Path, clock: FakeClock
 ) -> None:
     layout = Layout(state=tmp_path / "state", runtime=tmp_path / "run", data=tmp_path)
-    inbox = Inbox.opened(cli.ledger_opened(layout))
+    inbox = inbox_opened(layout)
     Names(path=layout.host.names).keep("s1", "w")
     main = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
     parser = main.model_copy(update={"agent": "a1"})
@@ -10279,7 +10290,7 @@ def test_each_conversations_flagged_writes_are_one_entry_wherever_the_inbox_is_l
     tmp_path: Path, clock: FakeClock
 ) -> None:
     layout = Layout(state=tmp_path / "state", runtime=tmp_path / "run", data=tmp_path)
-    inbox = Inbox.opened(cli.ledger_opened(layout))
+    inbox = inbox_opened(layout)
     main = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
     parser = main.model_copy(update={"agent": "a1"})
     inbox.placed(
@@ -10509,7 +10520,7 @@ def test_the_bearings_tell_the_session_what_is_its_and_leave_the_operators_items
     tmp_path: Path, clock: FakeClock
 ) -> None:
     layout = Layout(state=tmp_path / "state", runtime=tmp_path / "run", data=tmp_path)
-    inbox = Inbox.opened(cli.ledger_opened(layout))
+    inbox = inbox_opened(layout)
     last = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
     worker = last.model_copy(update={"agent": "a1"})
     other = last.model_copy(update={"session": "s9"})

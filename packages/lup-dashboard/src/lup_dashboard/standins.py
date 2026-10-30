@@ -7,8 +7,8 @@ declaration, and asks them each view as the host would (`Viewing`). What a
 module reads is stood in for: each runtime's records are files the demo writes
 as its conversations stand, read back as written (`StandInRecords`,
 `StandInReader`), the items a conversation exchanged are the demo's
-(`StandInExchanges`), and the review marks are kept as the host keeps them, in
-the demo's own directory (`StoredMarks`). So the page draws the view the real module answers, its
+(`StandInExchanges`), and the review marks are kept as the host keeps them, on
+a ledger in the demo's own directory (`StoredMarks`). So the page draws the view the real module answers, its
 layout, its fold kinds and its tones, over the demo's data.
 """
 
@@ -26,7 +26,7 @@ from lup_dev.declaration.resolve import Resolved, resolve
 from lup_dev.host.homes import Found
 from lup_dev.host.records import Call, Reader, Record, Recorded, Records, Transcript
 from lup_dev.inbox.exchanges import Exchanges
-from lup_dev.inbox.marks import StoredMarks
+from lup_dev.inbox.marks import MarkStore, StoredMarks
 from lup_dev.inbox.protocol import Exchanged
 from lup_dev.layout import Layout
 from lup_dev.worker import RepositoryModules
@@ -128,8 +128,13 @@ class StandInViews(MutableModel, arbitrary_types_allowed=True):
 
     @cached_property
     def layout(self) -> Layout:
-        """Where the modules' own data is, and the review marks the demo keeps as the host does (`MarkStore`), moved as its drafts are sent."""
+        """Where the modules' own data is, and the ledger the demo keeps its review marks on."""
         return Layout(state=self.directory, data=self.directory / "data")
+
+    @cached_property
+    def marks(self) -> MarkStore:
+        """The review marks the demo keeps as the host does, on a ledger of its own (`MarkStore`), moved as its drafts are sent."""
+        return MarkStore.kept_in(self.layout)
 
     def records(self, runtime: str) -> StandInRecords:
         """Return `runtime`'s records."""
@@ -158,7 +163,7 @@ class StandInViews(MutableModel, arbitrary_types_allowed=True):
             exchanges=StandInExchanges(
                 repository=repository, exchanged_by=self.exchanged
             ),
-            marks=StoredMarks(layout=self.layout),
+            marks=StoredMarks(store=self.marks),
         )
         self.made = {**self.made, repository: made}
         return made

@@ -307,7 +307,7 @@ def test_the_drawer_reads_every_place_the_conversation_worked_each_its_own_and_m
     )
     assert (marked.approved, marked.moved) == ([fixed], [])
     assert marked.version is not None
-    reviews = Reviews.of(layout, bare)
+    reviews = Reviews.of(layout, reader.delivery.inbox.marks, bare)
     assert reviews.marks("fix").files == [
         Mark(path=fix_file.path, version=fix_file.version, at=clock.now())
     ]
@@ -579,7 +579,9 @@ def test_what_the_operator_last_saw_of_a_file_is_the_later_of_its_mark_and_an_it
     delivery = alone(tmp_path, clock)
     repository = tmp_path / "proj.git"
     party = Conversation(repository=repository, runtime="claude", session="s1")
-    reviews = Reviews.of(Layout(state=tmp_path / "state"), repository)
+    reviews = Reviews.of(
+        Layout(state=tmp_path / "state"), delivery.inbox.marks, repository
+    )
     baseline = Baseline(inbox=delivery.inbox, repository=repository, reviews=reviews)
     path = Path("src/a.py")
     assert baseline.saw(path, ["feat"]) is None

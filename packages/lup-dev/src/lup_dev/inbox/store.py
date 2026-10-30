@@ -57,6 +57,8 @@ from lup.tools import speaking
 from lup.types import Model, MutableModel
 from lup_dev.host.protocol import HostError
 from lup_dev.host.watch import Changes, Touched
+from lup_dev.inbox.marks import KINDS as MARKS
+from lup_dev.inbox.marks import MarkStore
 from lup_dev.inbox.parts import PartId
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
@@ -1304,11 +1306,9 @@ class ItemNode(Node):
 
     @override
     def waiting(self, drawn: list[Edge]) -> bool:
-        """Say whether it waits on the operator, given the edges drawn to it: theirs, of a kind that waits on them (`ranked`), and standing nowhere yet, or put back to wait, as the latest `Stands` says."""
-        if self.recipient != Operator() or ranked(self.reason).name != "waiting on you":
-            return False
-        states = [each for each in drawn if isinstance(each, Stands)]
-        return not states or isinstance(states[-1], StandsWaiting)
+        """Say whether it waits on the operator, given the edges drawn to it, where the latest `Stands` says it stands (`asks`)."""
+        states = [each.state for each in drawn if isinstance(each, Stands)]
+        return asks(self.recipient, self.reason, states[-1] if states else Waiting())
 
     def links(self, reading: int) -> list[Answers | Replies | Cites]:
         """Return the edges its fields say, from it, as it's written: what it answers, an answer its question and a turn's last words the operator's items they answer; the message it replies to; and each item it cites, of reading `reading` of its citations."""
@@ -1362,6 +1362,21 @@ class ItemNode(Node):
             ),
             *cited.values(),
         ]
+
+
+def asks(recipient: Party, reason: Reason, state: State) -> bool:
+    """Say whether an item for `recipient`, of `reason`, standing at `state`, waits on the operator: theirs, of a kind that waits on them (`ranked`), and waiting, standing nowhere yet or put back to wait.
+
+    >>> asks(Operator(), Question(text="Which?"), Waiting())
+    True
+    >>> asks(Operator(), Message(kind="note", text="Built."), Waiting())
+    False
+    """
+    return (
+        recipient == Operator()
+        and ranked(reason).name == "waiting on you"
+        and isinstance(state, Waiting)
+    )
 
 
 def linking(edge: Edge) -> str:
@@ -1579,9 +1594,10 @@ def talked_on(key: str) -> str:
 
 
 KINDS = Kinds(
-    nodes=[*THREADS.nodes, ItemNode],
+    nodes=[*THREADS.nodes, *MARKS.nodes, ItemNode],
     edges=[
         *THREADS.edges,
+        *MARKS.edges,
         StandsTold,
         StandsWaiting,
         StandsAnswered,
@@ -1594,7 +1610,7 @@ KINDS = Kinds(
         Cites,
     ],
 )
-"""The kinds the host service's ledger reads: the ledger's own, threads, and the inbox's."""
+"""The kinds the host service's ledger reads: the ledger's own, threads, review marks, and the inbox's."""
 
 
 class Inbox(MutableModel, arbitrary_types_allowed=True):
@@ -1612,6 +1628,9 @@ class Inbox(MutableModel, arbitrary_types_allowed=True):
     """By number."""
     whereabouts: dict[str, Whereabouts] = {}
     """By conversation's key."""
+    marks: MarkStore
+    """Every repository's review marks, each module's latest held, on the same
+    ledger (`lup_dev.inbox.marks`)."""
     changes: Changes | None = None
     """Told each time an item is written, so the host service's watches see it
     (`host/watch.py`); none tells nothing."""
@@ -1622,7 +1641,7 @@ class Inbox(MutableModel, arbitrary_types_allowed=True):
 
     @classmethod
     def opened(cls, ledger: Ledger, changes: Changes | None = None) -> Inbox:
-        """Read the inbox `ledger` holds, telling `changes` of each item written; one holding no item is empty.
+        """Read the inbox `ledger` holds, and the review marks beside it, telling `changes` of each item written; one holding no item is empty.
 
         Raise `InboxError` where a record doesn't read.
         """
@@ -1630,7 +1649,8 @@ class Inbox(MutableModel, arbitrary_types_allowed=True):
             nodes = ledger.every(ItemNode)
             states = {each.target: each.state for each in ledger.drawn_of(Stands)}
             places = ledger.plains(HEARD, Whereabouts)
-        except LupLedgerError as unread:
+            marks = MarkStore.opened(ledger)
+        except (LupLedgerError, HostError) as unread:
             message = f"the inbox on the ledger doesn't read: {unread}"
             raise InboxError(message) from unread
         return cls(
@@ -1640,6 +1660,7 @@ class Inbox(MutableModel, arbitrary_types_allowed=True):
                 for each in nodes
             },
             whereabouts={each.conversation.key(): each for each in places.values()},
+            marks=marks,
             changes=changes,
         )
 

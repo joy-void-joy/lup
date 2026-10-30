@@ -10,11 +10,14 @@ its kind (`lup_dev.host.service`, `.inbox.protocol`, `.inbox.marks`,
 own branch's page, server and views on the operator's real data, at its real
 size, and acts on it, the copy alone changing.
 
-**Nothing is converted** (`taken`). Each file copied is read with this
-checkout's models as the demo starts, the ledger's items among them; one that
-doesn't read stops it, naming the file and why, which is what the host would
-meet once this checkout is approved. An item's attachments, its diff and files,
-are read as the host reads them, as they're asked for.
+**What the host would convert, and nothing else** (`taken`). Each file copied
+is read with this checkout's models as the demo starts, the ledger's items
+among them; one that doesn't read stops it, naming the file and why, which is
+what the host would meet once this checkout is approved. The inbox is then
+opened as the host opens it at its start (`lup_dev.conversions.inbox_opened`),
+converting onto the copy's ledger what an earlier lup kept in files where the
+ledger keeps none of it yet, as the review marks. An item's attachments, its
+diff and files, are read as the host reads them, as they're asked for.
 
 **A conversation's record is read as it's asked for** (`HostRecords`): asked of
 the host through the same request, written into the copy, and read with this
@@ -88,6 +91,7 @@ from lup_dashboard.host import Host, read
 from lup_dashboard.layout import CopyLayout
 from lup_dev import Project
 from lup_dev.clock import Clock, SystemClock
+from lup_dev.conversions import inbox_opened
 from lup_dev.declaration.load import load
 from lup_dev.declaration.resolve import Resolved, resolve
 from lup_dev.errors import LupDevError
@@ -116,12 +120,13 @@ from lup_dev.host.watch import Changes
 from lup_dev.host.workers import LaunchJudge, RepositoryAsking, Viewing
 from lup_dev.inbox.delivery import Delivery
 from lup_dev.inbox.exchanges import Exchanges
-from lup_dev.inbox.marks import ModuleMarks, StoredMarks
+from lup_dev.inbox.marks import MarksFile, MarkStore, StoredMarks
 from lup_dev.inbox.marks import routes as marks_routes
 from lup_dev.inbox.notices import Notices
 from lup_dev.inbox.protocol import Exchanged, ItemsListing, ListItems
 from lup_dev.inbox.protocol import routes as inbox_routes
-from lup_dev.inbox.store import HeldChange, Inbox, InboxError
+from lup_dev.inbox.store import HeldChange
+from lup_dev.inbox.threaded import routes as threaded_routes
 from lup_dev.layout import Layout
 from lup_dev.policy.checkpoint import Conversations as Working
 from lup_dev.policy.checkpoint import Warned
@@ -338,6 +343,8 @@ class CopiedViews(MutableModel, RepositoryAsking, arbitrary_types_allowed=True):
     recorded: dict[str, Recorded]
     listing: ItemsListing
     """The copy's items, as the host's handler lists a conversation's."""
+    marks: MarkStore
+    """The copy's review marks, as the host holds them."""
     made: dict[Path, CopiedModules] = {}
 
     def modules(self, repository: Path) -> CopiedModules:
@@ -351,7 +358,7 @@ class CopiedViews(MutableModel, RepositoryAsking, arbitrary_types_allowed=True):
             recorded=self.recorded,
             layout=self.layout,
             exchanges=CopiedExchanges(repository=repository, listing=self.listing),
-            marks=StoredMarks(layout=self.layout),
+            marks=StoredMarks(store=self.marks),
         )
         self.made = {**self.made, repository: made}
         return made
@@ -497,7 +504,7 @@ def model_of(lup: Layout, path: Path) -> type[BaseModel] | None:
         lup.session(named): Holding,
         lup.conversations(named): Working,
         lup.warned(named): Warned,
-        **dict.fromkeys(marks, ModuleMarks),
+        **dict.fromkeys(marks, MarksFile),
     }
     return known.get(path)
 
@@ -545,8 +552,8 @@ def taken(
     found = checked(lup, [written(lup, each) for each in copy.files])
     changes = Changes()
     try:
-        inbox = Inbox.kept_in(lup, changes)
-    except InboxError as failed:
+        inbox = inbox_opened(lup, changes, say)
+    except HostError as failed:
         message = f"the inbox copied from the host doesn't read: {failed}"
         raise CopyError(message) from failed
     try:
@@ -614,6 +621,7 @@ def taken(
         layout=lup,
         recorded=recorded,
         listing=ItemsListing(delivery=delivery),
+        marks=inbox.marks,
     )
     module_views = ModuleViews(asking=views, changes=changes, say=say, clock=clock)
     routes = [
@@ -624,8 +632,9 @@ def taken(
         ),
         Route.to(Renaming(launches=launches)),
         Route.to(HoldingSetting(launches=launches)),
-        *inbox_routes(delivery, recorded, lup),
-        *marks_routes(lup, clock, changes),
+        *inbox_routes(delivery, recorded),
+        *marks_routes(inbox.marks, clock, changes),
+        *threaded_routes(delivery),
         *waits_routes(waits),
         *timings_routes(TimingsStore(home=timings or lup.host.timings), clock),
         *unread(Withholding()),

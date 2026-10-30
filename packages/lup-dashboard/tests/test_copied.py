@@ -50,9 +50,10 @@ from lup_dev.host.timings import (
 )
 from lup_dev.host.workers import Viewed, Viewing
 from lup_dev.inbox import marks
-from lup_dev.inbox.marks import MarksMoved, MarkStore, MoveMarks, Moving, ReviewMark
+from lup_dev.inbox.marks import MarksFile, MarksMoved, MoveMarks, Moving, ReviewMark
 from lup_dev.inbox.protocol import (
     AnswerApproval,
+    AnswerCheck,
     AnswerItem,
     Context,
     Conversed,
@@ -101,9 +102,20 @@ from lup_dev.inbox.store import (
     Text,
     Whereabouts,
 )
+from lup_dev.inbox.threaded import (
+    DeclineThread,
+    ListThreads,
+    ReopenThread,
+    SettleThread,
+    ShowThread,
+    ThreadShown,
+    ThreadsRead,
+    ThreadStated,
+)
 from lup_dev.layout import Layout
 from lup_dev.policy.since import ReviewSince, ShowSince, ViewedFile
 from lup_dev.policy.waits import LandingsWaiting, ShowLandings
+from lup_dev.stored import write_model
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
 from lup_ledger.parties import Conversation, Operator
@@ -401,8 +413,14 @@ def held_by_host(tmp_path: Path) -> tuple[Host, Standing]:
     )
     for each in [approval, approved, held, held_too, flag]:
         inbox.attached(each.number, "diff --git a/a.py b/a.py", changed())
-    MarkStore(layout=layout.marks(REPOSITORY)).moved(
-        "core", [ReviewMark(key=marks.seen(MAIN), up_to=str(note.number), at=AT)]
+    # An earlier lup's marks, a file of the module's, which the copy converts onto
+    # its ledger as the host would.
+    write_model(
+        layout.marks(REPOSITORY).module("core"),
+        MarksFile(
+            module="core",
+            marks=[ReviewMark(key=marks.seen(MAIN), up_to=str(note.number), at=AT)],
+        ),
     )
     layout.host.launches.mkdir(parents=True)
     for launch, worked, repository, sessions in [
@@ -549,6 +567,11 @@ def test_every_request_the_page_may_send_acts_on_the_copy_alone(tmp_path: Path) 
         assert ask(holding, Holding).on
         waiting = ask(ListInbox(), Items)
         assert standing.theirs in [each.number for each in waiting.items]
+        # The host's earlier marks file, converted onto the copy's ledger as the
+        # host would convert it once this checkout is approved.
+        assert [(each.conversation, each.item) for each in waiting.seen] == [
+            (MAIN, standing.note)
+        ]
         assert ask(ShowItem(number=standing.question), Shown).item.number == (
             standing.question
         )
@@ -606,6 +629,18 @@ def test_every_request_the_page_may_send_acts_on_the_copy_alone(tmp_path: Path) 
                 argument=of.model_dump(mode="json"),
             )
             assert ask(viewing, Viewed).blocks.blocks
+        # The copy's past conversations are threads, as the host would make them.
+        threads = ask(ListThreads(), ThreadsRead).threads
+        assert threads
+        first = threads[0].thread.number
+        assert ask(ShowThread(number=first, whole=True), ThreadShown).entries
+        assert ask(SettleThread(number=first), ThreadStated).read.state == "settled"
+        reopened = ask(ReopenThread(number=first, why="again"), ThreadStated)
+        assert reopened.read.state != "settled"
+        declined = ask(DeclineThread(number=first, why="no"), ThreadStated)
+        assert declined.read.state == "declined"
+        unchecked = ask(AnswerCheck(number=standing.note), Refused)
+        assert "isn't a check" in unchecked.error
         rulings = [Ruling(decision=1, verdict="leaning")]
         ask(AnswerItem(number=standing.question, rulings=rulings), Shown)
         ask(FinishItem(number=standing.note), Shown)

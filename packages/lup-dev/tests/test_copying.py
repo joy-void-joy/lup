@@ -15,8 +15,9 @@ from lup_dev.host.homes import kept
 from lup_dev.host.names import Names
 from lup_dev.host.protocol import HostError, Limits, Register
 from lup_dev.host.records import Recorded
-from lup_dev.inbox.marks import MarkStore, ReviewMark
+from lup_dev.inbox.marks import MarksFile, ReviewMark
 from lup_dev.inbox.store import KINDS, Inbox, Message
+from lup_dev.stored import write_model
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
 from lup_ledger.parties import Conversation, Operator
@@ -58,8 +59,11 @@ def test_a_copy_holds_the_files_it_names_and_nothing_else_of_lups_state(
     digest = ledger.attached(b"a diff")
     attachments = LedgerLayout.of(state).attachments
     (attachments / f"{digest}.partial").write_bytes(b"half")
-    MarkStore(layout=state.marks(tmp_path / "repo.git")).moved(
-        "core", [ReviewMark(key={"session": "s1"}, up_to="3", at=AT)]
+    write_model(
+        state.marks(tmp_path / "repo.git").module("core"),
+        MarksFile(
+            module="core", marks=[ReviewMark(key={"session": "s1"}, up_to="3", at=AT)]
+        ),
     )
     launch = registered(tmp_path, "one")
     state.host.launches.mkdir(parents=True)

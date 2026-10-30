@@ -37,7 +37,8 @@ type State = Literal[
 ]
 """Where a thread stands: worked on; waiting on the operator, for a check or
 an item of theirs to answer; parked until something comes; done in an agent's
-word, for the operator to confirm; settled by the operator; or declined."""
+word, for the operator to confirm; settled, by the operator, or by lup on a
+thread it made of what came before threads; or declined."""
 
 
 def thread_only(edge: Edge, target: Node) -> str | None:
@@ -284,11 +285,13 @@ class Done(Status):
 
 
 class Settled(Status):
-    """A thread settled: only the operator settles one."""
+    """A thread settled: by the operator; or by lup, saying why, where it made a thread of what came before threads and nothing in it waited on them. Never by an agent."""
 
     kind: Literal["ledger:settled"] = "ledger:settled"
     stands: ClassVar[State] = "settled"
-    by: Operator
+    by: Annotated[Operator | Lup, Field(discriminator="party")]
+    why: str = ""
+    """Why lup settled it; the operator's says nothing."""
 
 
 class Declined(Status):
@@ -318,6 +321,16 @@ KINDS = Kinds(
     edges=[In, Moved, Refers, Answered, Parked, Done, Settled, Declined, Reopened],
 )
 """The kinds the ledger declares itself."""
+
+
+def stood(status: Status | None, *, waiting: bool) -> State:
+    """Say where a thread stands given its latest `status`, none where nothing said one, and whether something in it `waiting` on the operator: as its status says, but for a thread working or reopened, which waits on the operator where something in it does.
+
+    >>> stood(None, waiting=True), stood(None, waiting=False)
+    ('waiting on the operator', 'working')
+    """
+    stands = "working" if status is None else status.stands
+    return "waiting on the operator" if stands == "working" and waiting else stands
 
 
 class Member(Model):
@@ -373,8 +386,7 @@ class Standing(Model):
         statuses = [each for each in drawn if isinstance(each, Status)]
         status = statuses[-1] if statuses else None
         waiting = [each for each in members if each.node.waiting(each.drawn)]
-        stands = "working" if status is None else status.stands
-        state = "waiting on the operator" if stands == "working" and waiting else stands
+        state = stood(status, waiting=bool(waiting))
         holder = [] if thread.holder is None else [thread.holder]
         writers = [
             each.node.by for each in members if isinstance(each.node.by, Conversation)

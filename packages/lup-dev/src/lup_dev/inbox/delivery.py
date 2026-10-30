@@ -1540,8 +1540,19 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         for item in messages:
             reviewable(item, roster)
         commented = [each.item for each in draft.comments if each.text.strip()]
+        reviews = self.reviews(draft, messages)
+        self.reopening(
+            [
+                *commented,
+                *(
+                    each.number
+                    for each in messages
+                    if isinstance(each.reason, Question)
+                ),
+            ]
+        )
         dispatched = Dispatched(
-            reviews=self.reviews(draft, messages),
+            reviews=reviews,
             read=[
                 item.number
                 for item in messages
@@ -1860,6 +1871,23 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             served=lambda launch: self.layout.record(launch).is_file(),
         )
 
+    def reopening(self, numbers: list[int]) -> list[Thread]:
+        """Reopen each thread done, for the operator to confirm, that holds one of the items `numbers` they replied on, or answered: a reply there says it isn't done, and it goes back to whoever held it, told so (`Concerns.reopened`). Return those reopened."""
+        concerns = self.concerns()
+        held = {
+            thread.number: thread
+            for each in numbers
+            if (thread := concerns.containing(each)) is not None
+        }
+        done = [
+            each
+            for each in held.values()
+            if concerns.standing(each).state == "done to confirm"
+        ]
+        for each in done:
+            concerns.reopened(each, "the operator replied there")
+        return done
+
     def landed(self, item: Item, thread: Thread | None = None) -> None:
         """Put `item` in `thread`, else where its sender works, and tell who's on it (`Concerns.landed`), where it's a conversation's to the operator: what lands in a thread; nothing else."""
         if isinstance(item.sender, Conversation) and isinstance(
@@ -2088,6 +2116,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         )
         answered = Answered(at=self.clock.now(), answer=answer.number)
         self.inbox.kept(item.model_copy(update={"state": answered}))
+        self.reopening([number])
         await self.delivered(answer)
         return answer
 
@@ -2119,6 +2148,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             self.inbox.kept(
                 item.model_copy(update={"state": Done(at=self.clock.now())})
             )
+        self.reopening([item.number])
         await self.delivered(reply)
         return reply
 

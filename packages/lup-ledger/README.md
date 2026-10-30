@@ -17,7 +17,7 @@ The ledger keeps the work as a typed graph: nodes, the edges between them, and e
 - **A kind refuses what it can't be:**
   - a node, as it's kept (`Node.refused`);
   - an edge, which alone sees both its ends, as it's drawn (`Edge.refused`);
-  - either, in its types: `Settled.by` is the operator.
+  - either, in its types: `Declined.by` is the operator.
 - **Where a node stands is read from the edges drawn to it, never stored:** a status kept on a record outlives what justified it. Each node says whether it waits on the operator, given the edges drawn to it (`Node.waiting`).
 
 ## Threads
@@ -35,10 +35,11 @@ What's in it is edges drawn to it:
 - **its status** (`Status`), the latest one drawn:
   - parked until the first of its triggers comes: an issue closing, a branch or a commit landing, a conversation ending, a time, or a condition named as `defer`'s `when=` names one;
   - done, in an agent's word, with what to try;
-  - settled, or declined, which only the operator does (`Settled.by`, `Declined.by`);
+  - settled (`Settled`): by the operator; or by lup, saying why, where it made a thread of a past conversation and nothing in it waited on them (`docs/inbox.md`, *Threads*), its act and never put in their name. Never by an agent: the request settling one is the operator's (`inbox-settle-thread`), and nothing an agent reaches, the `thread` tool among it, settles one;
+  - declined, which only the operator does (`Declined.by`);
   - reopened, by the operator, or by lup where what a parked thread waits for comes.
 
-`Standing.read` says four things:
+`Standing.read` says four things, where it stands said once for any reader (`stood`):
 - **Where it stands:** as its status says. While it's working or reopened, it waits on the operator where a member does. A check waits until they answer it (`Answered`), and each kind of node answers for itself, so a new kind changes nothing in the reading.
 - **What waits on the operator.**
 - **What waits on whoever answers for it:** each part moved in that nothing answers yet.
@@ -74,6 +75,7 @@ A thread's sub-threads are read from its repository's threads by their `parent`,
   - `writing` holds one transaction across several writes, so they're kept together or not at all: within it, each write is a savepoint, undone alone where it's refused;
   - `together` holds the lock across several reads, so they see one state.
 - **Synced at checkpoints:** in write-ahead mode with `synchronous = NORMAL`, a transaction reaches the disk at the log's next checkpoint, not at each commit. One is lost to a power cut, never to the service's crash, as the inbox's files, written whole without a sync, were. Syncing each commit would cost a sync at every hook that tells an item.
+- **How far it's written** (`written`): its latest version's and edge's places, which a reader holding what it made of the ledger compares to know whether to make it again, as the operator's review reads every thread (`docs/inbox.md`, *Threads in the review*).
 - **Copied whole, as one state** (`copied`): through SQLite's backup, under the lock, the write-ahead log folded in, so a copy taken beside the host service's writes opens as this one does; the host sends it to a room for the dashboard's demo to serve (`docs/host.md`, *Reading from a room*).
 - **Its tables' version** is kept in the database (`user_version`). A database at an earlier one is brought to this one at opening, in one transaction (`upgrade`); one at a later one is refused.
 

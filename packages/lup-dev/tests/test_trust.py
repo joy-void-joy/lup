@@ -25,6 +25,7 @@ from lup_dev import cli
 from lup_dev.approval import Approval, ReleaseTool, Tool, WorkspaceTool
 from lup_dev.codescan.contract import Checker, FileReport, Parser, Rule, Source
 from lup_dev.codescan.engine import EngineError
+from lup_dev.conversions import inbox_opened
 from lup_dev.copies import Copies
 from lup_dev.declaration.load import load
 from lup_dev.declaration.requirements import (
@@ -50,7 +51,6 @@ from lup_dev.inbox.store import (
     ChangedFile,
     Decided,
     Found,
-    Inbox,
     InboxError,
     Reading,
     Superseded,
@@ -2151,7 +2151,7 @@ class Background:
         pushes = Pushes()
         wakers = cli.Wakers(adapters=known)
         self.delivery = Delivery(
-            inbox=Inbox.opened(cli.ledger_opened(machine)),
+            inbox=inbox_opened(machine),
             waker=wakers,
             pushes=pushes,
             layout=machine.host,
@@ -2164,7 +2164,7 @@ class Background:
             answerer=known,
             courier=couriers,
             post=self.delivery,
-            routes=inbox_routes(self.delivery, {}, machine) if inboxed else [],
+            routes=inbox_routes(self.delivery, {}) if inboxed else [],
             judge=NoJudge(),
             say=self.said.append,
             waker=wakers,

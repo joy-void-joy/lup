@@ -5,7 +5,7 @@ The views it prints are `Transcripts`' (`packages/lup-transcripts/tests/`).
 
 import json
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
 from typer.testing import CliRunner
@@ -19,7 +19,7 @@ from lup_dev.host.homes import Found
 from lup_dev.host.records import Call, Called, Entry, Said, Transcript
 from lup_dev.inbox.context import moment
 from lup_dev.inbox.exchanges import Exchanges
-from lup_dev.inbox.marks import StoredMarks
+from lup_dev.inbox.marks import Key, Marks, ReviewMark
 from lup_dev.inbox.protocol import Exchanged
 from lup_dev.layout import Layout
 from lup_dev.settings import LupDevSettings
@@ -27,6 +27,7 @@ from lup_dev.worker import RepositoryModules
 from lup_transcripts.environment.module import Transcripts
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     import typer
@@ -45,6 +46,16 @@ class Unexchanged(Exchanges):
         return Exchanged(sent=[], received=[])
 
 
+class Unmarked(Marks):
+    """Where no review mark was ever made: for modules whose test reads none."""
+
+    @override
+    async def kept(
+        self, repository: Path, module: str, keys: Sequence[Key]
+    ) -> list[ReviewMark]:
+        return []
+
+
 def transcripts(repository: Path, exchanges: Exchanges) -> typer.Typer:
     """Return `Transcripts`' commands, as the command line runs them for the repository at `repository`, reading each runtime's records as lup does."""
     modules = RepositoryModules(
@@ -53,7 +64,7 @@ def transcripts(repository: Path, exchanges: Exchanges) -> typer.Typer:
         recorded=cli.recorded(),
         layout=Layout.of(LupDevSettings()),
         exchanges=exchanges,
-        marks=StoredMarks(layout=Layout.of(LupDevSettings())),
+        marks=Unmarked(),
     )
     return commanding.commands(
         "transcripts", modules.resolved.served, modules.made, Operator

@@ -38,7 +38,7 @@ from lup_dev.inbox.tools import (
 from lup_dev.layout import Layout
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
-from lup_ledger.parties import Conversation, Operator
+from lup_ledger.parties import Conversation, Lup, Operator
 from lup_ledger.threads import (
     Answered,
     Check,
@@ -47,6 +47,7 @@ from lup_ledger.threads import (
     Moved,
     Parked,
     Refers,
+    Reopened,
     Settled,
     Thread,
 )
@@ -697,6 +698,35 @@ def test_a_session_s_root_follows_their_name_and_a_root_nobody_holds_is_taken_by
     taken = delivery.concerns().thread(2)
     assert taken.holder == main("s2")
     assert thread_of(delivery, 4) == taken
+
+
+def test_a_settled_root_a_later_session_takes_by_its_name_is_reopened_by_lup(
+    delivery: Delivery,
+) -> None:
+    register = launched(delivery, "dev", "s1")
+    said(speaker(delivery, register, main("s1")).note(ThreadedRemark(remark="Go.")))
+    concerns = delivery.concerns()
+    root = concerns.root(main("s1"))
+    concerns.settled(root)
+    delivery.layout.record("dev").unlink()
+
+    later = launched(delivery, "dev-again", "s2")
+    Names(path=delivery.layout.names).keep("s2", "dev")
+    RootNames(delivery=delivery).renamed(main("s2"), "dev")
+
+    standing = delivery.concerns().standing(root)
+    assert delivery.concerns().thread(root.number).holder == main("s2")
+    assert isinstance(standing.status, Reopened)
+    assert standing.status.by == Lup()
+    assert standing.state == "working"
+    # Taken again, a root that stands open is left as it stands.
+    said(speaker(delivery, later, main("s2")).note(ThreadedRemark(remark="Back.")))
+    assert delivery.concerns().standing(root).status == standing.status
+
+
+def test_no_tool_an_agent_calls_settles_or_declines_a_thread() -> None:
+    fields = set(Threading.model_fields)
+    assert not fields & {"settle", "settled", "decline", "declined", "reopen"}
 
 
 def test_a_title_makes_a_name_with_a_letter() -> None:

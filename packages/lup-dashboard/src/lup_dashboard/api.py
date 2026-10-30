@@ -27,7 +27,9 @@ from lup_dev.host.workers import Viewed, Viewing
 from lup_dev.inbox.marks import MarksMoved, MoveMarks
 from lup_dev.inbox.protocol import (
     AnswerApproval,
+    AnswerCheck,
     AnswerItem,
+    CheckShown,
     Context,
     Conversed,
     Drafted,
@@ -52,6 +54,16 @@ from lup_dev.inbox.protocol import (
     ShowOrder,
     ShowTalk,
     Talked,
+)
+from lup_dev.inbox.threaded import (
+    DeclineThread,
+    ListThreads,
+    ReopenThread,
+    SettleThread,
+    ShowThread,
+    ThreadShown,
+    ThreadsRead,
+    ThreadStated,
 )
 from lup_dev.policy.since import ReviewSince, ShowSince, Since, SinceReviewed
 from lup_dev.policy.waits import LandingsWaiting, ShowLandings
@@ -80,6 +92,12 @@ type Asked = Annotated[
     | ReviewSince
     | ShowLandings
     | MoveMarks
+    | ListThreads
+    | ShowThread
+    | SettleThread
+    | DeclineThread
+    | ReopenThread
+    | AnswerCheck
     | Viewing
     | KeepTimings,
     Field(discriminator="kind"),
@@ -93,10 +111,12 @@ from where the page left it for its task list and its context, the operator's
 draft reply shown, kept and sent, where their review lays out
 its groups shown and kept, what they write on a conversation shown and kept, what an agent's branches changed since they
 last saw them read and their files marked reviewed or their landing declined,
-the landings waiting on the operator, review marks moved as a reply is sent, a module's view, which the page draws from its blocks
-(`docs/host.md`, *The views the dashboard shows*), and what the page measured of
-itself in the operator's browser, which the host keeps (`docs/host.md`, *A
-page's timings*)."""
+the landings waiting on the operator, review marks moved as a reply is sent,
+the threads as the review reads them and one's conversation, a thread
+settled, declined or reopened, a check answered, a module's view, which the
+page draws from its blocks (`docs/host.md`, *The views the dashboard shows*),
+and what the page measured of itself in the operator's browser, which the host
+keeps (`docs/host.md`, *A page's timings*)."""
 
 type Replied = Annotated[
     Listed
@@ -116,6 +136,10 @@ type Replied = Annotated[
     | SinceReviewed
     | LandingsWaiting
     | MarksMoved
+    | ThreadsRead
+    | ThreadShown
+    | ThreadStated
+    | CheckShown
     | Viewed
     | TimingsKept
     | Refused,

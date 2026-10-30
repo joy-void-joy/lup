@@ -23,7 +23,7 @@ import tokenize
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePath, PurePosixPath
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, override
 
 import pytest
 
@@ -72,7 +72,7 @@ from lup_dev.host.workers import (
     Sent,
 )
 from lup_dev.inbox.exchanges import Exchanges
-from lup_dev.inbox.marks import StoredMarks
+from lup_dev.inbox.marks import Key, Marks, ReviewMark
 from lup_dev.inbox.protocol import AskFlag, Exchanged, Gathering, ShowGathering
 from lup_dev.layout import Layout
 from lup_dev.policy.checkpoint import Bench, Services
@@ -86,7 +86,7 @@ from lup_dev.settings import LupDevSettings
 from lup_dev.worker import RepositoryModules
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterator, Sequence
 
     from lup.blocks import OfAgent
     from lup_dev.declaration.resolve import Selected
@@ -1013,6 +1013,16 @@ class NoRecords(Records):
         return None
 
 
+class Unmarked(Marks):
+    """Where no review mark was ever made: for modules whose test reads none."""
+
+    @override
+    async def kept(
+        self, repository: Path, module: str, keys: Sequence[Key]
+    ) -> list[ReviewMark]:
+        return []
+
+
 class InProcess(MutableModel, LaunchModules, arbitrary_types_allowed=True):
     """A repository's modules served in the test's own process, from a declaration resolved here: the worker's answers, without its process."""
 
@@ -1038,7 +1048,7 @@ class InProcess(MutableModel, LaunchModules, arbitrary_types_allowed=True):
             },
             layout=self.layout,
             exchanges=Exchanging(),
-            marks=StoredMarks(layout=self.layout),
+            marks=Unmarked(),
         )
 
     async def open(self, launch: Register) -> Offered:

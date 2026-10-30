@@ -549,7 +549,7 @@ class Reader(Model, arbitrary_types_allowed=True):
         return Baseline(
             inbox=inbox,
             repository=repository,
-            reviews=Reviews.of(self.layout, repository),
+            reviews=Reviews.of(self.layout, self.delivery.inbox.marks, repository),
             items=inbox.about(repository) if once else None,
         )
 

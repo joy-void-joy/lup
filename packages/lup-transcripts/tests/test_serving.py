@@ -8,7 +8,7 @@ import asyncio
 import json
 import os
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
 
@@ -25,9 +25,8 @@ from lup_dev.host.records import Call as RecordedCall
 from lup_dev.host.records import Reader as RecordsReader
 from lup_dev.host.records import Record, Recorded, Records, Transcript, Whose
 from lup_dev.inbox.exchanges import Exchanges
-from lup_dev.inbox.marks import ReviewMarks, StoredMarks
+from lup_dev.inbox.marks import Key, Marks, ReviewMark, ReviewMarks
 from lup_dev.inbox.protocol import Exchanged
-from lup_dev.layout import Layout
 from lup_transcripts.environment.conversation import EARLIER_KIND
 from lup_transcripts.environment.module import Transcripts
 from lup_transcripts.environment.serving import (
@@ -39,19 +38,28 @@ from lup_transcripts.environment.serving import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from lup.blocks import OfAgent
     from lup.publishing import Published, Refusal
     from lup_dev.host.courier import Conversation
     from lup_dev.host.homes import Found
 
 
+class Nowhere(Marks):
+    """Where no mark was ever made."""
+
+    @override
+    async def kept(
+        self, repository: Path, module: str, keys: Sequence[Key]
+    ) -> list[ReviewMark]:
+        return []
+
+
 def unmarked() -> ReviewMarks:
-    """Transcripts' review marks, none made: kept where nothing is."""
-    nowhere = Layout(state=Path("/nowhere"), data=Path("/nowhere"))
+    """Transcripts' review marks, none made."""
     return ReviewMarks(
-        marks=StoredMarks(layout=nowhere),
-        repository=Path("/r/.git"),
-        module="transcripts",
+        marks=Nowhere(), repository=Path("/r/.git"), module="transcripts"
     )
 
 
