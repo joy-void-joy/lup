@@ -24,8 +24,8 @@ import { ask, type Asked, type OfCopy, type Replied } from "./api";
 import { cited } from "./comments";
 import { useNow, useSame, useViews, useWatched } from "./hooks";
 import { movedSaid, type Marked, type Moved } from "./grammar";
-import { feed } from "./editor";
-import { reviewKeys, type Here } from "./keys";
+import { feed, keyState } from "./editor";
+import { keyKind, reviewKeys, writtenKey, writtenVim, type Here, type Part } from "./keys";
 import { Keys } from "./Keys";
 import { adopt, merged } from "./looks";
 import { instanceOf, type Instance } from "./views";
@@ -34,6 +34,7 @@ import { useNarrow } from "./Outline";
 import { Palette } from "./Palette";
 import { Review, type DrawerKind, type Jump } from "./Review";
 import { isPlace, marked, sameShown, type Marking } from "./since";
+import { measure, modifierAlone, type Measuring } from "./timings";
 import {
     UNREAD,
     changing,
@@ -456,6 +457,41 @@ export function App() {
             }
         });
     }, [connection]);
+
+    // What the page measures of itself in this browser as the operator uses it (`timings.ts`; `docs/dashboard.md`, *Its
+    // timings*): each key's kind named as it goes down, from the palettes open, the review's table of keys and what its
+    // editor holds; the review's size; sent to the host through the API, unless switched off in this browser from the
+    // palette of every key.
+    const sizing = useRef<(() => Readonly<Record<string, number>>) | null>(null);
+    const keying = useRef({ open: false, parts });
+    keying.current = { open: palette || listing, parts };
+    const [measuring, setMeasuring] = useState<Measuring | null>(null);
+    const [measured, setMeasured] = useState(false);
+    useEffect(() => {
+        const made = measure({
+            page: "dashboard",
+            build: () => build.current ?? null,
+            kind: (event) => keyKindOf(event, keying.current.open, keying.current.parts),
+            size: () => sizing.current?.() ?? {},
+            send: { address: "/api/ask", wrapped: (report): Asked => ({ kind: "page-timings-keep", report }) },
+        });
+        setMeasuring(made);
+        setMeasured(made.on);
+        return () => made.stop();
+    }, []);
+    const switching = useMemo(
+        () =>
+            measuring === null
+                ? null
+                : {
+                      on: measured,
+                      switched: (on: boolean) => {
+                          measuring.switched(on);
+                          setMeasured(on);
+                      },
+                  },
+        [measuring, measured],
+    );
 
     const pending = useRef<Draft | null>(null);
     // What's typed in a comment, the editor showing it already, not yet laid out: the review lays it out once typing
@@ -979,6 +1015,7 @@ export function App() {
                         landings={landings}
                         remote={remote}
                         load={load}
+                        sizing={sizing}
                     />
                     <div className="status">
                         {going.length === 0 ? (
@@ -1002,12 +1039,38 @@ export function App() {
                         open={listing}
                         setOpen={setListing}
                         pending={chord}
+                        measuring={switching}
                     />
                 </div>
             </main>
             <Palette open={palette} setOpen={setPalette} agents={agents} select={goTo} now={now} />
         </div>
     );
+}
+
+/**
+ * Name the kind of a key going down, as the page's timings group them (`keyKind`, `keys.ts`): the palette's where one is
+ * open; typing in a comment; a motion in vim's own prompt, as `/`'s query; else by the review's table of keys and what
+ * vim holds of a command begun; `other` where it goes elsewhere than the review; a modifier alone left out.
+ */
+function keyKindOf(event: KeyboardEvent, paletteOpen: boolean, parts: readonly Part[]): string | null {
+    if (modifierAlone(event)) {
+        return null;
+    }
+    if (paletteOpen) {
+        return "palette";
+    }
+    const state = keyState(event.target);
+    if (state === null) {
+        return "other";
+    }
+    if (state.inserting) {
+        return "typing";
+    }
+    if (state.prompt) {
+        return "motion";
+    }
+    return keyKind(parts, [...state.held.map(writtenVim), writtenKey(event)]);
 }
 
 /** Ask the host for more than the inbox's own text: what `shown` takes from its reply, or why it refused, or why it couldn't be asked. */

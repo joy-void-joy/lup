@@ -22,6 +22,7 @@ from lup_dev.host.protocol import (
     Renamed,
     SetHolding,
 )
+from lup_dev.host.timings import KeepTimings, TimingsKept
 from lup_dev.host.workers import Viewed, Viewing
 from lup_dev.inbox.marks import MarksMoved, MoveMarks
 from lup_dev.inbox.protocol import (
@@ -79,7 +80,8 @@ type Asked = Annotated[
     | ReviewSince
     | ShowLandings
     | MoveMarks
-    | Viewing,
+    | Viewing
+    | KeepTimings,
     Field(discriminator="kind"),
 ]
 """A request the page may send: the launches served and their conversations,
@@ -91,8 +93,10 @@ from where the page left it for its task list and its context, the operator's
 draft reply shown, kept and sent, where their review lays out
 its groups shown and kept, what they write on a conversation shown and kept, what an agent's branches changed since they
 last saw them read and their files marked reviewed or their landing declined,
-the landings waiting on the operator, review marks moved as a reply is sent, and a module's view, which the page draws from its blocks
-(`docs/host.md`, *The views the dashboard shows*)."""
+the landings waiting on the operator, review marks moved as a reply is sent, a module's view, which the page draws from its blocks
+(`docs/host.md`, *The views the dashboard shows*), and what the page measured of
+itself in the operator's browser, which the host keeps (`docs/host.md`, *A
+page's timings*)."""
 
 type Replied = Annotated[
     Listed
@@ -113,6 +117,7 @@ type Replied = Annotated[
     | LandingsWaiting
     | MarksMoved
     | Viewed
+    | TimingsKept
     | Refused,
     Field(discriminator="kind"),
 ]

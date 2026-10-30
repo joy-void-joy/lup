@@ -373,6 +373,15 @@ Behind `docs/dashboard.md`, *The review* (#341). The operator's inbox held 40 it
 - **Keys lost:** 45 keys typed 25 ms apart into a comment while the hooks came lost a key or the comment in 1 round of 6 before #341, 2 of 5 at 4x; none in 32 after.
 - Not measured: Firefox, a phone, and the operator's own dashboard, whose token no room reads.
 
+## A page's timings in Chromium (Chromium 151 headless, CodeMirror 6.43, React 19.3, a 32-core host, measured on the demo 2026-10-30)
+
+Behind `docs/dashboard.md`, *Its timings* (#350), through the driver (`page/drive/timings.test.ts`), the demo at the operator's size (`--approval-lines 30000`, 48,870 lines) unless said.
+- **What it reports:** `PerformanceObserver.supportedEntryTypes` has `event` and `long-animation-frame`. A key's `keydown` entry's `startTime` is its event's `timeStamp` exactly, so every key was matched (none `unmatched`).
+- **A tab closed** (`page.close()`) fires `visibilitychange`, hidden, then `pagehide`; a `fetch` with `keepalive` made then reaches the server after the page is gone. Sent at both, a report went twice; the windows in flight are now sent once.
+- **The page's own measure beside the driver's,** typing 30 keys 120 ms apart into a comment, twice: unslowed, Event Timing's typing p50 24 ms and most 528, the driver's sent-to-frame median 16 and most 523; 4x, 64 and 2,320, the driver's 64 and 2,322. At 4x the slowest twentieth waited 1,744 ms before the page's handlers began and spent 8 in them, and the long frames were the socket's messages (3.3 s), `input` (2.6 s) and `keydown` (1.8 s).
+- **What a layout carries:** the page's size first worked out at each layout, every drawer's own fold looked for among every fold of the review, took typing's key-to-frame median at 4x from 55 ms to 600 to 950 ms, the review laid out after each key at that pace; read as a key goes down instead, once a second at most, it's 62 and 70 ms beside the page without it, 55 and 58.
+- Not measured: Firefox, Safari and a phone, which the page now measures where the operator uses them; whether Firefox's `interactionId` groups a key's events, which nothing reads.
+
 ## A windowed Chromium on a virtual display (Chromium 151, xorg-server-xvfb 21.1.24, xorg-setxkbmap 1.3.5, xdotool 4.20260303, xkeyboard-config 2.48, measured in a room 2026-10-29)
 
 Behind `docs/dashboard.md`, *The demo*, and the driver's `display.ts` and `dashboard.ts` (#351): real key events, a dead key's among them, reach the page only through a window on an X display, which the room's `Xvfb` gives.

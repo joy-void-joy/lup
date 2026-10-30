@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { LOOKS } from "./fixtures/looks";
-import { ENDING, WRITING, chords, reviewKeys, runOf, searched, vimKeys } from "./keys";
+import { ENDING, WRITING, chords, keyKind, measuringSaid, reviewKeys, runOf, searched, vimKeys, writtenKey, writtenVim } from "./keys";
 
 const REVIEW_KEYS = reviewKeys(LOOKS.kinds, LOOKS.verbs);
 const KINDS = LOOKS.kinds;
@@ -135,5 +135,41 @@ describe("searching the palette", () => {
         expect(items).toBeGreaterThan(0.5);
         expect(searched("]f [f files · Moving", "next item", ["next and previous file's header"])).toBe(0);
         expect(searched("anything", "")).toBe(1);
+    });
+});
+
+describe("the kind of each key, as the page's timings group them", () => {
+    const kind = (...pressed: string[]) => keyKind(REVIEW_KEYS, pressed);
+
+    it("is the part of the table holding the keys whole: a verb, a motion, a fold, the palette", () => {
+        expect([kind("␣", "d"), kind("u"), kind("^⏎")]).toEqual(["verb", "verb", "verb"]);
+        expect([kind("]", "]"), kind("^d"), kind("/"), kind("^k")]).toEqual(["motion", "motion", "motion", "motion"]);
+        expect([kind("z", "a"), kind("z", "f", "i"), kind("␣", "f"), kind("z", "j")]).toEqual(["fold", "fold", "fold", "fold"]);
+        expect([kind("?"), kind("o"), kind("\\")]).toEqual(["palette", "other", "other"]);
+    });
+
+    it("is vim's own motion where the table leaves it to vim, a character after f and t among them", () => {
+        expect([kind("j"), kind("g", "g"), kind("$"), kind("f", "x"), kind("z", "z"), kind("↓")]).toEqual(Array(6).fill("motion"));
+    });
+
+    it("is the part of a key a chord begins, as Space a verb and z a fold", () => {
+        expect([kind("␣"), kind("z"), kind("]"), kind("f")]).toEqual(["verb", "fold", "motion", "motion"]);
+    });
+
+    it("is other for the rest", () => {
+        expect([kind("Esc"), kind("q"), kind("3")]).toEqual(["other", "other", "other"]);
+    });
+
+    it("reads a key going down, and a key vim holds, as the list writes them", () => {
+        expect([" ", "j", "Enter", "ArrowDown"].map((key) => writtenKey({ key, ctrlKey: false, metaKey: false }))).toEqual(["␣", "j", "⏎", "↓"]);
+        expect([writtenKey({ key: "D", ctrlKey: true, metaKey: false }), writtenKey({ key: "Enter", ctrlKey: true, metaKey: false })]).toEqual(["^d", "^⏎"]);
+        expect(["<Space>", "z", "<C-d>"].map(writtenVim)).toEqual(["␣", "z", "^d"]);
+    });
+});
+
+describe("what the palette says of the page's timings", () => {
+    it("says it's measuring and how to switch it off, or that it's switched off and how to switch it on", () => {
+        expect(measuringSaid(true).does).toMatch(/^measuring how long each key takes.*never what's typed or shown; ⏎ switches it off in this browser$/);
+        expect(measuringSaid(false).does).toMatch(/switched off in this browser; ⏎ switches it on again$/);
     });
 });

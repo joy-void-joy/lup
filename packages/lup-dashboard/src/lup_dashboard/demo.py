@@ -33,6 +33,7 @@ from lup_dev.host.protocol import (
     Talker,
 )
 from lup_dev.host.records import Call, Called, Entry, Said, Task, Transcript, Usage
+from lup_dev.host.timings import KeepTimings, Report, TimingsKept, TimingsStore
 from lup_dev.host.workers import Viewed, Viewing
 from lup_dev.inbox import marks
 from lup_dev.inbox.citations import resolved
@@ -260,6 +261,10 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     """The fix-clock subagent's new module, flagged, held at landing."""
     ticker_names: Path = Path("packages/lup-dev/src/lup_dev/ticker_names.py")
     """The fix-clock subagent's module on their other branch, `clock-names`."""
+    timings: Path | None = None
+    """Where what the page measured of itself is kept, laid out as the host keeps
+    it (`HostLayout.timings`), for `lup-dev dashboard timings --kept` to read;
+    none keeps it in the demo's own directory, gone as the demo stops."""
 
     @override
     async def ask(self, request: Asked) -> Replied:
@@ -351,6 +356,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 return self.moved(moving)
             case Viewing() as viewing:
                 return await self.viewed(viewing)
+            case KeepTimings(report=report):
+                return self.timed(report)
             case _:
                 return Refused(error=f"the demo doesn't answer `{request.kind}`")
 
@@ -401,6 +408,12 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             return await self.views.view(viewing)
         except LupDevError as refused:
             return Refused(error=str(refused))
+
+    def timed(self, report: Report) -> TimingsKept:
+        """Keep what the page measured of itself as the host keeps it, where `timings` says, else in the demo's own directory."""
+        home = self.timings or self.views.layout.host.timings
+        kept = TimingsStore(home=home).keep(report, self.clock.now())
+        return TimingsKept(windows=len(kept))
 
     def marked(self, repository: Path) -> MarkStore:
         """Return the review marks of `repository`, kept as the host keeps them in the demo's own directory, which its modules' views read."""
