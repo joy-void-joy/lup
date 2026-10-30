@@ -3,14 +3,15 @@
 // its end, but in a comment, `?`, which opens the palette of them all, searched
 // by what one would do, what applies where the cursor is first, then each part,
 // Enter running the one chosen where it's keys it runs (`runOf`), Esc closing
-// it, the keyboard back where it was. Once a chord is
+// it, the keyboard back where it was; at its end, whether the page's timings are measured in this browser, Enter
+// switching them off or on (`timings.ts`). Once a chord is
 // begun, as with Space, a panel over the line lists the keys that may follow
 // and what each does, after a moment, so a chord typed whole shows none
 // (`keys.ts`; `docs/dashboard.md`, *The keys*).
 import { Command } from "cmdk";
 import { useEffect, useState } from "react";
 
-import { ENDING, WRITING, WRITING_HERE, chords, runOf, searched, vimKeys, type Here, type Part } from "./keys";
+import { ENDING, WRITING, WRITING_HERE, chords, measuringSaid, runOf, searched, vimKeys, type Here, type Part } from "./keys";
 
 interface Props {
     parts: Part[];
@@ -27,9 +28,11 @@ interface Props {
     pending?: string;
     /** How long a chord begun waits before what may follow is shown, in milliseconds. */
     waits?: number;
+    /** Whether the page's timings are measured in this browser, and their switch (`timings.ts`); none before they're begun. */
+    measuring?: { on: boolean; switched: (on: boolean) => void } | null;
 }
 
-export function Keys({ parts, here, inserting, open, setOpen, run, pending = "", waits = 250 }: Props) {
+export function Keys({ parts, here, inserting, open, setOpen, run, pending = "", waits = 250, measuring = null }: Props) {
     // The chord whose following keys are shown, once it has waited.
     const [shown, setShown] = useState("");
     useEffect(() => {
@@ -145,6 +148,22 @@ export function Keys({ parts, here, inserting, open, setOpen, run, pending = "",
                             ))}
                         </Command.Group>
                     ))}
+                    {measuring === null ? null : (
+                        <Command.Group heading="This page's timings">
+                            <Command.Item
+                                value={`timings ${measuringSaid(measuring.on).short}`}
+                                keywords={[measuringSaid(measuring.on).does]}
+                                onSelect={() => {
+                                    measuring.switched(!measuring.on);
+                                    chose(null);
+                                }}
+                            >
+                                <span className="keys-entry">
+                                    <kbd>{measuringSaid(measuring.on).keys}</kbd> <span className="keys-does">{measuringSaid(measuring.on).does}</span>
+                                </span>
+                            </Command.Item>
+                        </Command.Group>
+                    )}
                 </Command.List>
             </Command.Dialog>
         </>

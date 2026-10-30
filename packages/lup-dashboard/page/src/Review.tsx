@@ -44,7 +44,7 @@
 import { foldedRanges } from "@codemirror/language";
 import { Compartment, RangeSetBuilder, StateEffect, type ChangeSet, type Range } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 import { tokensOf, within, type Filed, type Matter, type Taken } from "./code";
 import { cited, type Block, type Folding, type Span } from "./comments";
@@ -209,6 +209,8 @@ interface Props {
     remote: Remote;
     /** Told each view a fold reads as it opens, its module's, as the operator opens it, so the page asks it of the host. */
     load: (view: Instance) => void;
+    /** Given how to read the review's size, as the page's timings take it (`timings.ts`): its lines, the items, the drawers open. */
+    sizing?: RefObject<(() => Readonly<Record<string, number>>) | null>;
 }
 
 /** Return the classes a line under an item or in a drawer is drawn with: what it shows, and whether it's set in under a summary or a file's header, as a file's reviewed line isn't. */
@@ -704,6 +706,7 @@ export function Review({
     landings,
     remote,
     load,
+    sizing,
 }: Props) {
     // Where the cursor is, and whether a comment is being written: what the header says.
     const [head, setHead] = useState(0);
@@ -890,6 +893,22 @@ export function Review({
     // What's laid out now, which a click on a citation, or on the passage of the operator's words it answers, reads.
     const laidNow = useRef(laidOut);
     laidNow.current = laidOut;
+    // The review's size, as the page's timings take it, read as a key goes down, once a second at most: its lines, the
+    // items waiting, and the drawers open, each by its own fold, read among the drawer's own folds as it's asked. Nothing
+    // is worked out as the review is laid out, which a key typed waits on.
+    if (sizing !== undefined) {
+        sizing.current = () => {
+            const current = view.current;
+            if (current === null) {
+                return {};
+            }
+            const open = laidOut.drawers.filter((drawer) => {
+                const own = drawer.folds.find((each) => each.kind === drawer.kind && each.name === "");
+                return own !== undefined && !isFolded(current.state, editor.live(own));
+            });
+            return { lines: current.state.doc.lines, items: items.length, "drawers open": open.length };
+        };
+    }
 
     // A click on a citation's id opens or folds the passage it cites under its line; one on the passage it answers,
     // among the operator's words above, goes to the citation.

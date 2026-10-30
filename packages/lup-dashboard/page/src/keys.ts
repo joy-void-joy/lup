@@ -403,3 +403,90 @@ export function searched(named: string, search: string, keywords: readonly strin
     }
     return 0.5 + (0.5 * words.filter((each) => name.includes(each)).length) / words.length;
 }
+
+/**
+ * A kind of key, as the page's timings group them (`timings.ts`; `docs/dashboard.md`, *Its timings*): typing in a
+ * comment, a motion, a fold's key, a verb's, the palette's, and any other.
+ */
+export type KeyKind = "typing" | "motion" | "fold" | "verb" | "palette" | "other";
+
+/** The kind of the keys of each part of the table: the rest are `other`. */
+function partKind(title: string): KeyKind {
+    switch (title) {
+        case "Writing a comment":
+            return "typing";
+        case "Answering":
+            return "verb";
+        case "Moving":
+            return "motion";
+        case "Folds":
+            return "fold";
+        case "This palette":
+            return "palette";
+        default:
+            return "other";
+    }
+}
+
+/** vim's own motions, which the table leaves to vim, as it writes keys: the arrows, a page's keys and a scroll's among them. */
+const VIM_MOTIONS: readonly string[] = [
+    "h", "j", "k", "l", "w", "W", "b", "B", "e", "E", "ge", "gE", "0", "^", "$", "gg", "G", "{", "}", "(", ")", "H", "M",
+    "L", "%", ";", ",", "+", "-", "_", "|", "zt", "zz", "zb", "^e", "^y", "←", "→", "↑", "↓", "PageUp", "PageDown", "Home",
+    "End",
+];
+
+/** vim's motions to a character on the line, done by the character after them. */
+const TO_CHARACTER: readonly string[] = ["f", "F", "t", "T"];
+
+/**
+ * Return the kind of the key that ends `pressed`, the keys of a command typed so far outside a comment, as the list
+ * writes them (`␣`, `^d`, `z`): the part of the table holding those keys whole, else vim's own motion they make, else
+ * the part holding a key they begin, as Space begins a verb, else vim's motion they begin; any other key is `other`.
+ */
+export function keyKind(parts: readonly Part[], pressed: readonly string[]): KeyKind {
+    const keys = pressed.join("");
+    const ways = parts
+        .filter((part) => !WRITING.some((writing) => writing.title === part.title))
+        .flatMap((part) => part.keys.flatMap((key) => key.keys.split(" ").map((way) => ({ way, title: part.title }))));
+    const whole = ways.find((each) => each.way === keys);
+    if (whole !== undefined) {
+        return partKind(whole.title);
+    }
+    if (VIM_MOTIONS.includes(keys) || (pressed.length === 2 && TO_CHARACTER.includes(pressed[0] ?? ""))) {
+        return "motion";
+    }
+    const begun = ways.find((each) => each.way.startsWith(keys));
+    if (begun !== undefined) {
+        return partKind(begun.title);
+    }
+    return VIM_MOTIONS.some((each) => each.startsWith(keys)) || TO_CHARACTER.includes(keys) ? "motion" : "other";
+}
+
+/** Return a key going down as the list writes keys: `␣` for Space, `^` and the letter for Ctrl and one, `⏎`, `Esc`, the arrows. */
+export function writtenKey(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey">): string {
+    const named: Readonly<Record<string, string>> = { " ": "␣", Enter: "⏎", Escape: "Esc", ArrowLeft: "←", ArrowRight: "→", ArrowUp: "↑", ArrowDown: "↓" };
+    const key = named[event.key] ?? event.key;
+    return event.ctrlKey || event.metaKey ? `^${[...key].length === 1 ? key.toLowerCase() : key}` : key;
+}
+
+/** Return a key vim holds of a command begun, as its keymap names it (`<Space>`, `<C-d>`), as the list writes keys. */
+export function writtenVim(key: string): string {
+    const named: Readonly<Record<string, string>> = { "<Space>": "␣", "<CR>": "⏎", "<Esc>": "Esc" };
+    const control = /^<C-(.)>$/.exec(key);
+    return named[key] ?? (control === null ? key : `^${control[1]}`);
+}
+
+/** What the palette says of the page's timings in this browser, and what choosing it does: switch them off, or on again. */
+export function measuringSaid(on: boolean): Key {
+    return on
+        ? {
+              keys: "⏎",
+              does: "measuring how long each key takes to reach the screen in this browser, sent to the host every 5 minutes and as the tab is hidden, for agents to read with lup-dev dashboard timings: timings and sizes only, never what's typed or shown; ⏎ switches it off in this browser",
+              short: "measuring",
+          }
+        : {
+              keys: "⏎",
+              does: "not measuring how long keys take to reach the screen: switched off in this browser; ⏎ switches it on again",
+              short: "not measuring",
+          };
+}
