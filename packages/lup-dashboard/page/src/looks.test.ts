@@ -11,13 +11,13 @@ const OTHER: Looks = {
         { name: "episodes", letter: "e", called: "episodes", one: "the episode", level: 1, opens: "together", colour: "ok", chord: true, whole: false, counts: true, by_all: true },
         { name: "scenes", letter: "q", called: "scenes", one: "the scene", level: 2, opens: "together", colour: "purple", chord: true, whole: false, counts: true, by_all: true },
     ],
-    drawers: [...(STANDING.drawers ?? []), { module: "reels", view: "reel", place: { under: "agent", letter: "r", called: "the reel", colour: "cyan" } }],
+    drawers: [...(STANDING.drawers ?? []), { module: "reels", view: "reel", place: { under: "agent", letter: "y", called: "the reel", colour: "cyan" } }],
 };
 
 describe("the looks, merged across repositories", () => {
     it("knows each kind of fold by its name, the core's first, outermost first, a drawer's among them", () => {
         const looks = merged({}, STANDING);
-        expect(looks.kinds.map((each) => `${each.letter}${each.drawer ? "·" : ""}`).join(" ")).toBe("w a i t· s· v· o f p l e b u k c m d");
+        expect(looks.kinds.map((each) => `${each.letter}${each.drawer ? "·" : ""}`).join(" ")).toBe("w a i t· s· v· o r f p l e b u k c m d");
         expect(looks.kinds.find((each) => each.name === "item")).toMatchObject({ chord: false, whole: true, counts: true });
         expect(looks.kinds.find((each) => each.name === "lines")).toMatchObject({ counts: false });
         expect(looks.drawers("/r/any.git").map((each) => each.view)).toEqual(["tasks", "since", "conversation"]);

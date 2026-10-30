@@ -65,12 +65,14 @@ import { itemStanding } from "./outline";
 import { DRAFTED, GLYPHS } from "./Outline";
 import { linesOver, stickies, type Sticky } from "./stack";
 import { depths, levelled } from "./folds";
-import { chainAt, findNode, implied, isMarked, marking, marksOn, reachOf, reachedIn, type Act, type Marked } from "./grammar";
+import { chainAt, findNode, implied, isMarked, marking, marksOn, movedInto, reachOf, reachedIn, type Act, type Destination, type Marked } from "./grammar";
+import { ThreadPalette } from "./Palette";
 import type { DrawerKind, FoldKind, Here } from "./keys";
 import { kindOf, type Merged } from "./looks";
 import { markerEnd, outdated, unfound } from "./exchange";
 import { source, sourced, without, type Source } from "./markdown";
 import {
+    ROOT_TITLE,
     barsOf,
     aboutAt,
     answerAfter,
@@ -106,6 +108,7 @@ import {
     regionAt,
     sameId,
     scopeAt,
+    sectionAt,
     shownAt,
     shownAs,
     sinceFileAt,
@@ -286,9 +289,6 @@ function until(trigger: NonNullable<ThreadRead["status"]> extends infer S ? (S e
             return "what it waits for comes";
     }
 }
-
-/** What every root thread is titled, as the host titles it (`lup_dev.inbox.concerns.ROOT`): its banner says whose it is instead. */
-const ROOT_TITLE = "a main session's root thread";
 
 /** Say what of each kind there is, `a question` once, `2 questions` twice, in the order first said. */
 function tallyWords(whats: readonly string[]): string[] {
@@ -550,6 +550,12 @@ function decorations(
     }
     for (const aside of laidOut.asides) {
         marks.push({ from: aside.from, to: aside.from, value: Decoration.line({ class: `aside-${aside.kind} thread-line` }) });
+    }
+    // An item of the pile marked read, said on its line, as what else the draft marks is.
+    for (const entry of laidOut.pile.flatMap((each) => each.entries)) {
+        if ((draft.done ?? []).includes(entry.item.number)) {
+            marks.push({ from: entry.header.from, to: entry.header.from, value: Decoration.line({ class: "is-marked mark-done", attributes: { "data-mark": "read" } }) });
+        }
     }
     for (const scope of scopesOf(laidOut)) {
         if (isDrawer(scope)) {
@@ -841,6 +847,8 @@ export function Review({
     // The folds a fold-wise selection holds, while there's one: what the line of keys says the keys do to.
     const choosing = useRef<readonly Folding[] | null>(null);
     const [commenting, setCommenting] = useState(false);
+    // What Space s moves from the pile while the operator names the thread it goes to, in the palette over the review.
+    const [moving, setMoving] = useState<readonly Extract<Act, { kind: "move" }>[] | null>(null);
     // Where the groups go: as this page laid them out last, then as the host keeps them for those it didn't
     // (`ordered`), so each keeps its place, across reloads and on each page; and as it last told the host it laid
     // them out, none until it has, when what it doesn't lay out of the host's order is gone.
@@ -1378,6 +1386,9 @@ export function Review({
             say(`␣${known.key} ${known.called}: ${reach.why}.`);
             return;
         }
+        if (moves(reach.acts, known.key, name)) {
+            return;
+        }
         for (const each of reach.acts) {
             if (each.kind === "once") {
                 act(each.offer, each.conversation);
@@ -1420,6 +1431,9 @@ export function Review({
             say(`␣${known.key} ${known.called}: nothing selected takes it.`);
             return;
         }
+        if (moves(acts, known.key, name)) {
+            return;
+        }
         for (const each of acts) {
             if (each.kind === "once") {
                 act(each.offer, each.conversation);
@@ -1436,6 +1450,45 @@ export function Review({
         const off = acts.every((each) => isMarked(now, each, name));
         say(`␣${known.key} ${known.called}: ${off ? "unmarked" : "marked"} ${acts.length}, sent with Ctrl+Enter.`);
         editor.record(next);
+    }
+
+    /**
+     * Move what `acts` reach of the pile into a thread, as Space s, `key`, does there: where each is marked moved
+     * already, take the marks off; else ask the operator which thread, in the palette, where they're one repository's.
+     * Return whether `acts` were the pile's, which nothing else does.
+     */
+    function moves(acts: readonly Act[], key: string, name: string): boolean {
+        const pile = acts.filter((each): each is Extract<Act, { kind: "move" }> => each.kind === "move");
+        if (pile.length === 0) {
+            return false;
+        }
+        const now = editor.latest.current;
+        if (pile.every((each) => isMarked(now, each, name))) {
+            editor.record(marking(now, pile, name));
+            say(`␣${key}: ${pile.length === 1 ? "no longer moved" : `${pile.length} no longer moved`}.`);
+            return true;
+        }
+        const repositories = [...new Set(pile.map((each) => each.repository))];
+        if (repositories.length > 1) {
+            say(`␣${key}: these are of ${repositories.length} repositories, and a thread holds one's: move each repository's apart.`);
+            return true;
+        }
+        setMoving(pile);
+        return true;
+    }
+
+    /** Mark what's being moved from the pile moved into `to`, the thread the operator named in the palette, and go back to the review. */
+    function movedTo(to: Destination | null) {
+        const pile = moving;
+        setMoving(null);
+        // The keyboard back to the review once the palette has let it go.
+        requestAnimationFrame(() => view.current?.focus());
+        if (pile === null || to === null) {
+            return;
+        }
+        editor.record(movedInto(editor.latest.current, pile, to));
+        const into = "thread" in to ? `into @${to.name}` : `into a new thread, “${to.title}”`;
+        say(`␣s send to: ${pile.length === 1 ? "1 moved" : `${pile.length} moved`} ${into}, sent with Ctrl+Enter.`);
     }
 
     /** Forget how the operator left the fold of what `act` marks, an item's, a file's or a drawer's, so it folds as the layout says once marked or unmarked. */
@@ -1754,7 +1807,16 @@ export function Review({
                 return { from: scope.header.from, to: own?.to ?? scope.header.to };
             }
             const group = groupAt(laidOut, position);
-            return group === undefined ? undefined : { from: group.banner.from, to: group.fold?.to ?? group.banner.to };
+            if (group !== undefined) {
+                return { from: group.banner.from, to: group.fold?.to ?? group.banner.to };
+            }
+            // In the pile to read, the thread's run the cursor is in; on the section's line, the whole pile.
+            const run = laidOut.pile.find((each) => position >= each.from && position <= each.to);
+            if (run !== undefined) {
+                return { from: run.from, to: run.to };
+            }
+            const section = sectionAt(laidOut, position);
+            return section?.name === "to read" ? { from: section.header.from, to: section.fold?.to ?? section.header.to } : undefined;
         },
         move: (forward) => {
             const current = view.current;
@@ -1863,6 +1925,17 @@ export function Review({
         follow: () => {
             const current = view.current;
             const head = editor.head();
+            // On a thread's line in the pile to read, to that thread's group, where it's laid out.
+            const at = editor.toLaid(head);
+            const run = laidOut.pile.find((each) => at >= each.header.from && at <= each.header.to);
+            const home = run === undefined ? undefined : laidOut.groups.find((each) => each.thread?.thread.number === run.thread.thread.number);
+            if (current !== null && home !== undefined) {
+                const to = editor.fromLaid(home.banner.from);
+                const effects = reaching(current.state, to);
+                current.dispatch({ selection: { anchor: to }, effects, annotations: reached.of(effects.length) });
+                current.dispatch({ effects: EditorView.scrollIntoView(to, { y: "start" }) });
+                return;
+            }
             const target = current === null ? undefined : (following(citationsOf(laidOut), head) ?? namedDrawer(laidOut, head));
             // Grouped by thread, an agent's name goes to their own views among the agents: their conversation, opened.
             const agent = current === null || target !== undefined ? undefined : agentNamed(laidOut, editor.toLaid(head), called);
@@ -1926,6 +1999,19 @@ export function Review({
         item: (region: Region) => region.named,
         party: called,
     };
+    // The threads what's moved from the pile may go to: its repository's, neither settled nor declined, but each it
+    // landed in, in the order they were opened.
+    const movable = useMemo(() => {
+        if (moving === null || threads === null) {
+            return [];
+        }
+        const repository = moving[0]?.repository ?? "";
+        const numbers = new Set(moving.map((each) => each.number));
+        const landed = new Set(laidOut.pile.filter((run) => run.entries.some((each) => numbers.has(each.item.number))).map((run) => run.thread.thread.number));
+        return threads.read.threads
+            .filter((each) => each.thread.repository === repository && each.state !== "settled" && each.state !== "declined" && !landed.has(each.thread.number))
+            .toSorted((a, b) => a.thread.number - b.thread.number);
+    }, [moving, threads, laidOut.pile]);
     const where = <Heading parts={heading(laidOut, Math.min(head, laidOut.text.length), commenting, laidOut.written, naming)} tally={threads === null ? tallied(items, draft, seeing) : threadTally(laidOut)} />;
     // Each header pinned is drawn as the buffer draws its line.
     const classesOf = (sticky: Sticky): string => {
@@ -2004,6 +2090,7 @@ export function Review({
                     <Stack following={follower} roots={roots} text={laidOut.text} classesOf={classesOf} markOf={markOf} hintOf={hintOf} narrow={narrow} jump={jumpTo} />
                 </div>
             </div>
+            <ThreadPalette moving={moving === null ? null : moving.map((each) => each.number)} threads={movable} choose={movedTo} />
         </>
     );
 }

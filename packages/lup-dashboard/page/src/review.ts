@@ -146,6 +146,59 @@ export interface Threading {
     banner: (read: ThreadRead, landing: number) => string;
 }
 
+/** What every root thread is titled, the host's (`lup_dev.inbox.concerns.ROOT`): what it holds is whatever its session is given. */
+export const ROOT_TITLE = "a main session's root thread";
+
+/** Say what a thread is about: its title, a root its session's own. */
+export function about(thread: ThreadRead["thread"]): string {
+    return thread.parent == null && thread.title === ROOT_TITLE ? "the session's own" : thread.title;
+}
+
+/**
+ * One friction or how it felt in the pile to read, where it's laid out: its line, what it is, its number, who sent it
+ * and its title, its text folded under it; the item, and the thread it landed in.
+ */
+export interface Piled extends Span {
+    item: Item;
+    thread: ThreadRead;
+    header: Span;
+}
+
+/** One thread's run in the pile to read: its line naming the thread, and its frictions and how it felt under it, in the order they came. */
+export interface PileRun extends Span {
+    thread: ThreadRead;
+    header: Span;
+    entries: Piled[];
+}
+
+/** Whether an item is the pile's to read: a friction or how it felt. */
+export function piled(item: Item): boolean {
+    return item.reason.reason === "friction" || item.reason.reason === "how it felt";
+}
+
+/** The longest a title made of an item's text is, in characters: its text whole is under it. */
+const TITLE_MOST = 80;
+
+/**
+ * Say an item of the pile by its title: a friction's own, else its text's first sentence, cut at a word to
+ * `TITLE_MOST` characters at most, as how it felt has none, and a friction may leave it out.
+ */
+export function pileTitle(item: Item): string {
+    const reason = item.reason;
+    const title = reason.reason === "friction" ? reason.title.trim() : "";
+    if (title !== "") {
+        return title;
+    }
+    const text = "text" in reason && typeof reason.text === "string" ? reason.text : "";
+    const line = text.split("\n").find((each) => each.trim() !== "")?.trim() ?? "";
+    const sentence = /^(.+?[.!?])(\s|$)/.exec(line)?.[1] ?? line;
+    if (sentence.length <= TITLE_MOST) {
+        return sentence;
+    }
+    const cut = sentence.lastIndexOf(" ", TITLE_MOST - 1);
+    return `${sentence.slice(0, cut > 0 ? cut : TITLE_MOST - 1).trimEnd()}…`;
+}
+
 /** One section of the review where it's laid out: its line, saying what it holds, and its fold whole under it. */
 export interface Section {
     name: SectionName;
@@ -474,7 +527,7 @@ export interface ReviewedLine extends Span {
  */
 export interface Placed extends Span {
     id: string;
-    kind: "section" | "group" | "banner" | "item" | "header" | "frame" | "view" | "block" | "written";
+    kind: "section" | "group" | "banner" | "item" | "header" | "frame" | "view" | "block" | "written" | "pile";
     header: Span;
     children: Placed[];
     view?: Mounted;
@@ -519,6 +572,8 @@ export interface Laid {
     checks: CheckLine[];
     /** Each fold read from the host as it opens. */
     loading: Loading[];
+    /** The pile to read, each thread's run of it, in the text's order; none grouped by agent. */
+    pile: PileRun[];
 }
 
 export const EMPTY: Draft = { comments: [], letters: [], remarks: [], done: [], declined: [], parked: [], marks: [] };
@@ -846,6 +901,8 @@ interface Threaded {
     under?: boolean;
     words?: readonly ThreadEntry[];
     folded?: boolean;
+    /** What its header says of where it is beside its kind: moved here, moved to another thread, in the pile. */
+    note?: string;
 }
 
 /**
@@ -1397,6 +1454,7 @@ export function laid(
     const asides: Aside[] = [];
     const checkLines: CheckLine[] = [];
     const loading: Loading[] = [];
+    const pileRuns: PileRun[] = [];
     // The groups whose fold starts closed, as each thread's of the front and of what's settled does, and those whose
     // conversation isn't read yet.
     const closedGroups = new Set<string>();
@@ -1476,6 +1534,7 @@ export function laid(
         asides,
         checks: checkLines,
         loading,
+        pile: pileRuns,
     };
 
     /** Return `section` with each group laid out before in its place, any other after them, in its own order. */
@@ -1629,12 +1688,19 @@ export function laid(
                 layThread(read, depth, true);
             }
         });
-        const piled = new Map(items.map((each) => [each.number, each]));
-        const pile = reads.flatMap((each) => each.pile ?? []);
-        const frictions = pile.filter((each) => piled.get(each)?.reason.reason === "friction").length;
+        // The pile to read: each thread's frictions and how it felt not yet read, under a line naming the thread, the
+        // threads in the order their first came, each keeping its place as more come.
+        const waitingNow = new Map(items.map((each) => [each.number, each]));
+        const runs = reads
+            .map((read) => ({ read, entries: (read.pile ?? []).flatMap((number) => waitingNow.get(number) ?? []) }))
+            .filter((each) => each.entries.length > 0)
+            .toSorted((a, b) => (a.entries[0]?.number ?? 0) - (b.entries[0]?.number ?? 0));
+        const pile = runs.flatMap((each) => each.entries);
+        const frictions = pile.filter((each) => each.reason.reason === "friction").length;
         layThreadSection("to read", [`${frictions} ${frictions === 1 ? "friction" : "frictions"}`, `${pile.length - frictions} how it felt`].join(", "), () => {
-            const line = { kind: "summary" as const, ...w.line("frictions and how it felt, by their titles: piece 4c lists them here", "section to read pile") };
-            asides.push(line);
+            for (const run of runs) {
+                layPile(run.read, run.entries);
+            }
         });
         const declined = done.filter((each) => each.state === "declined").length;
         layThreadSection("settled", `${done.length - declined} settled · ${declined} declined`, () => {
@@ -1653,6 +1719,46 @@ export function laid(
                 layGroup(group, false, depth);
             }
         });
+
+        /**
+         * Lay thread `read`'s run of the pile to read: a line naming it, then each of `entries`, a friction or how it
+         * felt, on a line saying what it is, its number, who sent it and its title, its text under it, set in, folded
+         * (`pile`, `r`).
+         */
+        function layPile(read: ThreadRead, entries: readonly Item[]): void {
+            const number = read.thread.number;
+            const id = `pile thread:${number}`;
+            const frictionsHere = entries.filter((each) => each.reason.reason === "friction").length;
+            const counts = [
+                ...(frictionsHere === 0 ? [] : [counted(frictionsHere, "friction")]),
+                ...(entries.length === frictionsHere ? [] : [`${entries.length - frictionsHere} how it felt`]),
+            ].join(", ");
+            const header = w.line(`@${read.thread.name} · ${about(read.thread)} · ${counts}`, id);
+            asides.push({ kind: "pile-thread", ...header });
+            const node = part(id, "pile", header.from, header.to);
+            nodes.push(node);
+            const run: PileRun = { thread: read, header, entries: [], from: header.from, to: header.to };
+            for (const item of entries) {
+                const of = `pile ${item.number}`;
+                const what = item.reason.reason === "friction" ? "friction" : "how it felt";
+                const who = item.sender.party === "conversation" ? name(item.sender) : "you";
+                const line = w.line(`${what} ${cited(item.number)} · ${who} · ${pileTitle(item)}`, of);
+                asides.push({ kind: "pile", ...line });
+                const text = "text" in item.reason && typeof item.reason.text === "string" ? item.reason.text : "";
+                for (const each of text.trimEnd().split("\n")) {
+                    asides.push({ kind: "pile-text", ...w.line(`${SET_IN}${each}`, of) });
+                }
+                const end = w.at - 1;
+                if (end > line.to) {
+                    outer.push({ of, kind: "pile", name: "", label: w.lineFrom(line.from), closed: true, summary: line, from: line.to, to: end });
+                }
+                node.children.push(part(of, "pile", line.from, end));
+                run.entries.push({ item, thread: read, header: line, from: line.from, to: end });
+            }
+            node.to = w.at - 1;
+            run.to = node.to;
+            pileRuns.push(run);
+        }
 
         /** Return `threads`, each under its parent among them, in the order each was opened, with how deep it's set in. */
         function nestedThreads(threads: readonly ThreadRead[]): { read: ThreadRead; depth: number }[] {
@@ -1807,6 +1913,18 @@ export function laid(
      */
     function layEntries(entries: readonly ThreadEntry[], from: ThreadShown, number: number, within: Placed[]): void {
         const known = new Map(from.items.map((each) => [each.number, each]));
+        const threadNamed = (thread: number) => threading?.read.threads.find((each) => each.thread.number === thread)?.thread.name ?? `${thread}`;
+        // Where an item of the pile is beside its kind: moved here from where it landed, moved from here, or to read in
+        // the pile, where it's read rather than in its thread's conversation.
+        const noted = (entry: ThreadEntry, item: Item): string | undefined => {
+            if (entry.moved === true) {
+                return "moved here";
+            }
+            if (entry.went != null) {
+                return `moved to @${threadNamed(entry.went)}`;
+            }
+            return piled(item) && waits(item) ? "in the pile to read" : undefined;
+        };
         const checks = new Map((from.checks ?? []).map((each) => [each.check.number, each]));
         const byKey = new Map(entries.map((each) => [spotKey(each.spot), each]));
         const children = new Map<string, ThreadEntry[]>();
@@ -1831,8 +1949,17 @@ export function laid(
                 // A message between agents folds to its header, as does what no longer waits on the operator: answered,
                 // marked done, decided, which is the thread's history.
                 // And what's shown as context before what's new, read already (`ThreadEntry.seen`).
+                // An item of the pile folds too: it's read in the pile, or where it was moved.
                 const between = item.reason.reason === "message" && item.reason.to != null && item.sender.party === "conversation";
-                within.push(layItem(item, parked.includes(item.number), { under, words, folded: between || !waits(item) || entry.seen === true }));
+                const note = noted(entry, item);
+                within.push(
+                    layItem(item, parked.includes(item.number), {
+                        under,
+                        words,
+                        folded: between || !waits(item) || entry.seen === true || piled(item),
+                        ...(note === undefined ? {} : { note }),
+                    }),
+                );
                 for (const each of words) {
                     for (const child of children.get(spotKey(each.spot)) ?? []) {
                         walk(child, true);
@@ -2103,7 +2230,7 @@ export function laid(
         };
         const summary = answer?.summary ?? [];
         const spoken = wording(summary);
-        const head = header(item, isParked, spoken.text);
+        const head = header(item, isParked, threaded.note === undefined ? spoken.text : `${spoken.text} · ${threaded.note}`);
         const headed = w.line(head, `${id} header`);
         drawnIn(placedIn(headed, spoken.text, false), spoken.drawn);
         children.push(part(`${id} header`, "header", headed.from, headed.to));

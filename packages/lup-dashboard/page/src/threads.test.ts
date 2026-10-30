@@ -5,7 +5,7 @@
 import "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
-import { marking, reachOf } from "./grammar";
+import { MOVE, isMarked, listed, marking, movedInto, reachOf, reachedIn, type Act } from "./grammar";
 import { toSend, waitingOn } from "./App";
 import { outlineOf } from "./outline";
 import {
@@ -17,6 +17,7 @@ import {
     opened,
     scopeAt,
     threadPlace,
+    pileTitle,
     untilCalled,
     UNSEEN,
     type Around,
@@ -199,8 +200,9 @@ describe("the review grouped by thread", () => {
             ["━━ @cache · The cache · s1/a1 holds · settled ━━", 0],
             ["━━ agent ━━", 0],
         ]);
-        // The front is open, each of its threads folded to its banner; the pile, what's settled and the agents fold whole.
-        expect(out.sections.map((each) => each.fold?.closed ?? null)).toEqual([false, false, false, true, true, true]);
+        // The front is open, each of its threads folded to its banner; the pile, empty here, folds nothing; what's
+        // settled and the agents fold whole.
+        expect(out.sections.map((each) => each.fold?.closed ?? null)).toEqual([false, false, false, null, true, true]);
         expect(out.groups.filter((each) => ["docs", "names", "cache"].includes(each.thread?.thread.name ?? "")).map((each) => each.fold?.closed)).toEqual([true, true, true]);
     });
 
@@ -414,5 +416,156 @@ describe("the review grouped by thread", () => {
             "@cache",
             "agents",
         ]);
+    });
+});
+
+const FRICTION = item(80, WORKER, { reason: "friction", text: "The gate hung for four minutes.\nIt printed nothing.", title: "the gate hangs" } as Item["reason"]);
+const UNTITLED = item(82, WORKER, { reason: "friction", text: "Typing lags in long comments.", title: "" } as Item["reason"]);
+const FELT = item(81, LEAD, { reason: "how it felt", text: "Steady.\nThe brief named every file." } as Item["reason"]);
+
+/** The review with frictions and how it felt in the pile: two in the reader's thread, one in auth's, and how they came in its conversation. */
+function piling(draft: Draft = EMPTY): Laid {
+    const threads = threading();
+    // Auth read before, so its conversation shows whole.
+    const read = { ...AUTH, pile: [81], mark: { key: { node: 303 }, up_to: "40", at: AT } } as ThreadRead;
+    const reads = threads.read.threads.map((each) => (each.thread.number === 302 ? { ...each, pile: [80, 82] } : each.thread.number === 303 ? read : each));
+    const auth = shown(
+        read,
+        [
+            { spot: { node: 70 }, came: AT, member: true, new: true },
+            { spot: { node: 81 }, came: AT, member: true },
+            { spot: { node: 80 }, came: AT, member: true, moved: true },
+        ] as unknown as ThreadShown["entries"],
+        [LATE, FELT, FRICTION],
+    );
+    return laid([QUESTION, LATE, FRICTION, FELT, UNTITLED], [LEAD], banner, header, draft, NOTHING, [], new Map(), called, {
+        threads: { ...threads, read: { ...threads.read, threads: reads }, shown: new Map([...threads.shown, [303, auth]]) },
+    });
+}
+
+/** Return what `name`, a verb's, reaches at `at` in `out`. */
+function reaching(out: Laid, at: number, name: string) {
+    const verb = adopted().verbs.find((each) => each.name === name);
+    expect(verb).toBeDefined();
+    return verb === undefined ? null : reachOf(out, at, verb, { called });
+}
+
+describe("the pile to read", () => {
+    it("lists each thread's frictions and how it felt under a line naming it, each by its title, its text folded under it", () => {
+        const out = piling();
+        const text = lines(out);
+        const at = text.indexOf("to read · 2 frictions, 1 how it felt");
+        expect(text.slice(at, at + 12)).toEqual([
+            "to read · 2 frictions, 1 how it felt",
+            "@reader · The reader · 2 frictions",
+            "friction @80 · s1/a1 · the gate hangs",
+            "  The gate hung for four minutes.",
+            "  It printed nothing.",
+            "friction @82 · s1/a1 · Typing lags in long comments.",
+            "  Typing lags in long comments.",
+            "@auth · The auth · 1 how it felt",
+            "how it felt @81 · s1 · Steady.",
+            "  Steady.",
+            "  The brief named every file.",
+            "settled · 1 settled · 0 declined",
+        ]);
+        expect(out.pile.map((run) => [run.thread.thread.name, run.entries.map((each) => each.item.number)])).toEqual([
+            ["reader", [80, 82]],
+            ["auth", [81]],
+        ]);
+        const folds = out.outer.filter((each) => each.kind === "pile");
+        expect(folds.map((each) => [each.of, each.closed, out.text.slice(each.summary.from, each.summary.to)])).toEqual([
+            ["pile 80", true, "friction @80 · s1/a1 · the gate hangs"],
+            ["pile 82", true, "friction @82 · s1/a1 · Typing lags in long comments."],
+            ["pile 81", true, "how it felt @81 · s1 · Steady."],
+        ]);
+        expect(out.sections.find((each) => each.name === "to read")?.fold?.closed).toBe(true);
+    });
+
+    it("titles an item of the pile with none of its own by its text's first sentence, cut at a word", () => {
+        expect(pileTitle(FELT)).toBe("Steady.");
+        expect(pileTitle(UNTITLED)).toBe("Typing lags in long comments.");
+        const long = item(83, WORKER, { reason: "how it felt", text: "word ".repeat(30) } as Item["reason"]);
+        expect(pileTitle(long)).toBe(`${"word ".repeat(16).trimEnd()}…`);
+    });
+
+    it("folds an item of the pile to its header in its thread's conversation, saying where it's read or where it went", () => {
+        const out = piling();
+        const headers = out.regions.filter((each) => [80, 81].includes(each.item.number));
+        expect(headers.map((each) => [each.item.number, each.folds.find((fold) => fold.kind === "item")?.closed])).toEqual([
+            [81, true],
+            [80, true],
+        ]);
+        const said = (number: number) => out.text.slice(out.regions.find((each) => each.item.number === number)?.header.from ?? 0).split("\n")[0];
+        // The test's header says only the number; the core's says what the view and the note say, which `laid` gives it.
+        const told: string[] = [];
+        const marked = { ...AUTH, mark: { key: { node: 303 }, up_to: "40", at: AT } } as ThreadRead;
+        laid([FELT], [LEAD], banner, (shownItem, _, words) => {
+            told.push(`${shownItem.number}: ${words}`);
+            return header(shownItem);
+        }, EMPTY, NOTHING, [], new Map(), called, { threads: { ...threading(), shown: new Map([[303, shown(marked, [{ spot: { node: 81 }, came: AT, member: true }, { spot: { node: 80 }, came: AT, member: true, moved: true }, { spot: { node: 82 }, came: AT, member: true, went: 302 }] as unknown as ThreadShown["entries"], [FELT, FRICTION, UNTITLED])]]) } });
+        expect(told.map((each) => each.replace(/^(\d+): .*? · /, "$1: "))).toEqual(["81: in the pile to read", "80: moved here", "82: moved to @reader"]);
+        expect(said(81)).toBe("── @81 ──");
+    });
+
+    it("marks an item of the pile read with Space d, a thread's there each of its, and moves them with Space s into a thread named", () => {
+        const out = piling();
+        const entry = out.text.indexOf("friction @80");
+        const run = out.text.indexOf("@reader · The reader · 2 frictions");
+        expect(reaching(out, entry, "done")).toMatchObject({ on: "friction @80", says: "mark it read", acts: [{ kind: "item", number: 80, list: "done" }] });
+        expect(reaching(out, run, "done")).toMatchObject({ on: "@reader's pile", says: "mark its 2 read", acts: [{ number: 80 }, { number: 82 }] });
+        const moving = reaching(out, run, "send");
+        expect(moving).toMatchObject({ says: "move its 2 into a thread, which you name", acts: [{ kind: "move", number: 80, block: "pile 80" }, { kind: "move", number: 82 }] });
+        const acts = (moving !== null && moving.on !== null ? moving.acts : []).filter((each): each is Extract<Act, { kind: "move" }> => each.kind === "move");
+        // Nothing's marked until the operator names where they go; then each says it, read no longer marked.
+        const read = marking(EMPTY, [{ kind: "item", number: 80, list: "done" }], "done");
+        expect(marking(read, acts, "send")).toBe(read);
+        const moved = movedInto(read, acts, { thread: 303, name: "auth" });
+        expect(moved.done).toEqual([]);
+        expect((moved.marks ?? []).map((each) => [each.action, each.block, each.says, each.argument])).toEqual([
+            [MOVE, "pile 80", "into @auth", { numbers: [80], repository: REPOSITORY, thread: 303, title: null }],
+            [MOVE, "pile 82", "into @auth", { numbers: [82], repository: REPOSITORY, thread: 303, title: null }],
+        ]);
+        expect(acts.every((each) => isMarked(moved, each, "send"))).toBe(true);
+        // Moved again, into a new thread, each mark replaced; Space s again takes them off; read, one is no longer moved.
+        const opened = movedInto(moved, acts.slice(0, 1), { title: "The gate hangs" });
+        expect((opened.marks ?? []).map((each) => each.says)).toEqual(["into @auth", "into a new thread: The gate hangs"]);
+        expect(marking(moved, acts, "send").marks).toEqual([]);
+        expect((listed(moved, 82, "done").marks ?? []).map((each) => each.block)).toEqual(["pile 80"]);
+        const shownMoved = lines(piling(moved));
+        expect(shownMoved).toContain("friction @80 · s1/a1 · the gate hangs");
+    });
+
+    it("selects the pile's entries fold-wise, Space d reading each and Space s moving each", () => {
+        const out = piling();
+        const folds = out.outer.filter((each) => each.kind === "pile");
+        const verbs = adopted().verbs;
+        const done = verbs.find((each) => each.name === "done");
+        const send = verbs.find((each) => each.name === "send");
+        expect(done === undefined ? [] : reachedIn(out, folds, done, { called })).toEqual([
+            { kind: "item", number: 80, list: "done" },
+            { kind: "item", number: 82, list: "done" },
+            { kind: "item", number: 81, list: "done" },
+        ]);
+        expect((send === undefined ? [] : reachedIn(out, folds, send, { called })).map((each) => (each.kind === "move" ? each.number : null))).toEqual([80, 82, 81]);
+    });
+
+    it("says what's moved on the line under the review, and lists the pile in the overview, what the draft does with each", () => {
+        const out = piling();
+        const acts: Extract<Act, { kind: "move" }>[] = [80, 82].map((number) => ({ kind: "move", number, repository: REPOSITORY, block: `pile ${number}` }));
+        const draft = listed(movedInto(EMPTY, acts, { title: "The gate hangs" }), 81, "done");
+        const naming = { called: (party: Item["sender"]) => (party.party === "operator" ? "you" : called(party)), named: () => "", holder: () => null, checks: new Set<number>() };
+        expect(toSend(draft, [FELT], naming)).toEqual(["read @81", "2 moved into a new thread: The gate hangs"]);
+        const rows = outlineOf(out, { draft, seeing: UNSEEN, states: new Map(), called });
+        const at = rows.findIndex((each) => each.key === "section to read");
+        expect(rows.slice(at, at + 6).map((each) => [each.text, each.marks, each.draft])).toEqual([
+            ["to read", [], []],
+            ["@reader", ["news"], []],
+            ["@80 friction", [], ["move"]],
+            ["@82 friction", [], ["move"]],
+            ["@auth", ["news"], []],
+            ["@81 how it felt", [], ["read"]],
+        ]);
+        expect(rows[at + 6]?.text).toBe("settled");
     });
 });

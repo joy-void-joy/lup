@@ -1813,7 +1813,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                         "before the tests ran, printing nothing until then. I was "
                         "running the gate on the reader; a line saying the rebuild, "
                         "and how long it takes, would have kept me from killing it."
-                    )
+                    ),
+                    title="the gate rebuilds the engine without a word",
                 ),
                 sender=parser,
                 recipient=Operator(),
@@ -2637,7 +2638,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     f"`uv run lup-dev check` rebuilt the engine before worker {n}'s "
                     "tests ran, printing nothing until then; a line saying the rebuild "
                     "would have kept me from killing it."
-                )
+                ),
+                title="the gate's rebuild prints nothing",
             )
             return [
                 item(number, n, note, 400 - n),

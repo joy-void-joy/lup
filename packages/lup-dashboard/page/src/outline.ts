@@ -6,7 +6,8 @@
 // it (a comment goes, it's read, it's approved); an agent's files to review in
 // their "since you approved" counted beside them. What's in view is bracketed and
 // the cursor's entry highlighted as the view moves. Pure.
-import type { Span } from "./comments";
+import { cited, type Span } from "./comments";
+import { MOVE } from "./grammar";
 import {
     fresh,
     type Seeing,
@@ -32,10 +33,10 @@ export type OutlineMark = "waiting" | "news" | "parked" | "to-review" | "flagged
 
 /**
  * What the draft does with an item on the next Ctrl+Enter, all in the draft's colour: comments on it go, it's marked
- * read, it's approved, an approval or a held change marked done or read alone, or a held change commented on, or it's
- * declined.
+ * read, it's approved, an approval or a held change marked done or read alone, or a held change commented on, it's
+ * declined, or, of the pile to read, it's moved into a thread.
  */
-export type DraftMark = "comment" | "read" | "approve" | "decline";
+export type DraftMark = "comment" | "read" | "approve" | "decline" | "move";
 
 /** One entry: what it is, how deep it's set in, what it says, how it stands, what the draft does with it, where it is in the review, and where going to it lands. */
 export interface OutlineRow extends Span {
@@ -236,7 +237,49 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
             });
         });
     });
-    return rows;
+    // The pile to read, under its section's heading: each thread's run, and each friction and how it felt in it, news
+    // until the draft reads it or moves it.
+    const pileSection = laidOut.sections.find((each) => each.name === "to read");
+    if (pileSection !== undefined && laidOut.pile.length > 0) {
+        rows.push(heading("section to read", "to read", text.slice(pileSection.header.from, pileSection.header.to), pileSection.header.from));
+        for (const run of laidOut.pile) {
+            rows.push({
+                key: `pile thread:${run.thread.thread.number}`,
+                kind: "thread",
+                depth: 1,
+                text: `@${run.thread.thread.name}`,
+                title: text.slice(run.header.from, run.header.to),
+                marks: ["news"],
+                draft: [],
+                fresh: false,
+                from: run.from,
+                to: run.to,
+                at: run.header.from,
+                tag: null,
+            });
+            for (const entry of run.entries) {
+                const number = entry.item.number;
+                const read = (draft.done ?? []).includes(number);
+                const moved = (draft.marks ?? []).some((each) => each.action === MOVE && each.block === `pile ${number}`);
+                rows.push({
+                    key: `pile ${number}`,
+                    kind: "item",
+                    depth: 2,
+                    text: `${cited(number)} ${entry.item.reason.reason === "friction" ? "friction" : "how it felt"}`,
+                    title: text.slice(entry.header.from, entry.header.to),
+                    marks: read || moved ? [] : ["news"],
+                    draft: read ? ["read"] : moved ? ["move"] : [],
+                    fresh: false,
+                    from: entry.from,
+                    to: entry.to,
+                    at: entry.header.from,
+                    tag: null,
+                });
+            }
+        }
+    }
+    // In the review's order: the pile's among the groups', where its section is.
+    return rows.toSorted((a, b) => a.from - b.from);
 }
 
 /** Return the deepest entry holding `head`: the cursor's. */

@@ -25,7 +25,7 @@ import { everyone, launches, ring, running, type Activity, type Agent, type Runn
 import { ask, type Asked, type OfCopy, type Replied } from "./api";
 import { cited } from "./comments";
 import { useNow, useSame, useThreads, useViews, useWatched, type ThreadAsked } from "./hooks";
-import { movedSaid, type Marked, type Moved } from "./grammar";
+import { MOVE, movedSaid, type Marked, type Moved, type Moving } from "./grammar";
 import { feed, keyState } from "./editor";
 import { keyKind, reviewKeys, writtenKey, writtenVim, type Here, type Part } from "./keys";
 import { Keys } from "./Keys";
@@ -893,8 +893,17 @@ export function App() {
         const said: string[] = [];
         const reviews = new Map<string, { conversation: InboxConversation; place: Placing; decline: boolean; files: Viewed[]; ids: string[] }>();
         const moving = new Map<string, { repository: string; module: string; marks: { key: Record<string, unknown>; up_to: string | null }[]; ids: string[] }>();
+        // What's moved from the pile, by where it goes: one request each, a thread opened once for all of them.
+        const gathering = new Map<string, { thread: number | null; title: string | null; numbers: number[]; says: string; ids: string[] }>();
         for (const mark of marks) {
             switch (mark.action) {
+                case MOVE: {
+                    const argument = mark.argument as unknown as Moving;
+                    const key = JSON.stringify([argument.repository, argument.thread, argument.title]);
+                    const was = gathering.get(key) ?? { thread: argument.thread, title: argument.title, numbers: [], says: mark.says, ids: [] };
+                    gathering.set(key, { ...was, numbers: [...was.numbers, ...argument.numbers], ids: [...was.ids, mark.id] });
+                    break;
+                }
                 case "policy-review-since": {
                     const argument = mark.argument as { conversation: InboxConversation; worktree?: string | null; branch?: string | null; files: Viewed[]; decline?: boolean };
                     const place = { worktree: argument.worktree ?? null, branch: argument.branch ?? null };
@@ -954,6 +963,21 @@ export function App() {
             if (came.ok) {
                 applied.push(...each.ids);
             }
+        }
+        // What's moved from the pile, into each thread at once, saying who answers for it.
+        for (const each of gathering.values()) {
+            const request: Asked = { kind: MOVE, numbers: each.numbers, thread: each.thread, title: each.title };
+            const reply = await answered(request, (answer) => (answer.kind === "inbox-moved-into-thread" ? answer : null));
+            const count = each.numbers.length === 1 ? cited(each.numbers[0] ?? 0) : `${each.numbers.length} items`;
+            if ("refused" in reply) {
+                said.push(`${count} not moved ${each.says}: ${reply.refused}`);
+                continue;
+            }
+            applied.push(...each.ids);
+            const moved = reply.shown;
+            const answering = moved.read.answering ?? null;
+            const whom = answering === null ? "nobody answers for it yet" : `told to ${called(answering)}`;
+            said.push(`${count} moved into ${moved.opened === true ? "a new thread, " : ""}@${moved.read.thread.name}, ${whom}`);
         }
         // Each module's review marks of a repository moved together, as the host keeps them.
         for (const each of moving.values()) {
@@ -1269,6 +1293,8 @@ export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): 
     const read = items.filter((each) => !asked(each) && !commented.includes(each.number) && each.reason.reason !== "question");
     const reviewing = new Map<string, number>();
     const declining = new Map<string, number>();
+    // What's moved from the pile, by where it goes.
+    const gathering = new Map<string, number>();
     const marked: string[] = [];
     for (const mark of draft.marks ?? []) {
         if (mark.action === "policy-review-since") {
@@ -1282,9 +1308,14 @@ export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): 
             marked.push(argument.on === true ? `holding ${who}'s flagged writes` : `letting ${who}'s flagged writes land`);
         } else if (mark.action === "review-mark") {
             marked.push(movedSaid(mark, naming.called));
+        } else if (mark.action === MOVE) {
+            gathering.set(mark.says, (gathering.get(mark.says) ?? 0) + 1);
         } else {
             marked.push(mark.says);
         }
+    }
+    for (const [into, count] of gathering) {
+        marked.push(`${count === 1 ? "1 moved" : `${count} moved`} ${into}`);
     }
     return [
         ...[...to].map(([who, what]) => `to ${who}: ${what.join(", ")}`),
