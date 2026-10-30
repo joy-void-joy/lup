@@ -6,7 +6,7 @@
 //     await using served = await demo({ approvalLines: 30000 });
 //     await using dashboard = await open(served.url);
 //     const review = await dashboard.review();
-//     await review.goTo("── @58 how it felt");
+//     await review.goTo("── @66 note");
 //     await review.comment();
 //     const keys = await timed(dashboard.page, () => dashboard.keys.type("hello", 120));
 //

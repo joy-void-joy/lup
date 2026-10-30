@@ -474,7 +474,9 @@ function threadReach(laidOut: Laid, node: Placed, group: Group, read: ThreadRead
                 return reached === null || reached.on === null ? [] : reached.acts;
             });
             const left = regions.filter((each) => each.item.rank.name === "waiting on you").map((each) => cited(each.item.number));
-            const last = Math.max(0, ...regions.map((each) => each.item.number));
+            // An item laid out above, in waiting on you or new, is the thread's too, where its line points to it.
+            const pointed = laidOut.pointers.filter((each) => each.from > node.from && each.from <= node.to).map((each) => each.node);
+            const last = Math.max(0, ...regions.map((each) => each.item.number), ...pointed);
             const acts = [...(last === 0 ? [] : [readAct(read, node.id, last)]), ...items];
             const leaving = left.length === 0 ? "" : `, ${left.join(" ")} left`;
             return acts.length === 0 ? null : { on, node, says: `mark it read${items.length === 0 ? "" : ", its news with it"}${leaving}`, acts };
@@ -703,19 +705,23 @@ export function threadsRead(laidOut: Laid, draft: Draft): Marked[] {
         }
     }
     const marked: Marked[] = [];
-    for (const group of threads) {
-        const read = group.thread;
-        if (read === null || !acted.has(read.thread.number)) {
+    // A thread's headers, one a section it's laid out in, waiting on you, new, open: what each shows is the thread's.
+    for (const number of acted) {
+        const headers = threads.filter((each) => each.thread?.thread.number === number);
+        const [group] = headers;
+        const read = group?.thread ?? null;
+        if (group === undefined || read === null) {
             continue;
         }
         const node = findNode(laidOut.nodes, `group ${group.place}`);
         const shown = laidOut.regions
-            .filter((each) => threadAt(each.header.from) === group)
+            .filter((each) => headers.some((header) => threadAt(each.header.from) === header))
             .map((each) => each.item)
             .toSorted((a, b) => a.number - b.number);
         const unread = shown.findIndex((each) => news(each) && each.state.state === "waiting" && !items.has(each.number));
         const upTo = (unread < 0 ? shown : shown.slice(0, unread)).at(-1);
-        if (node === undefined || upTo === undefined || (draft.marks ?? []).some((each) => each.block === node.id && each.action === "review-mark")) {
+        const markedAlready = (draft.marks ?? []).some((each) => each.action === "review-mark" && headers.some((header) => each.block === `group ${header.place}`));
+        if (node === undefined || upTo === undefined || markedAlready) {
             continue;
         }
         const act = readAct(read, node.id, upTo.number);

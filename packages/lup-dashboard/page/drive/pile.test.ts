@@ -54,7 +54,10 @@ describe("the pile to read, in headless Chromium", () => {
             "@guidance-voice · the session's own · 1 how it felt",
         ]);
         expect(lines.filter((line) => line.startsWith("friction @") || line.startsWith("how it felt @"))).toHaveLength(8);
-        expect(lines.some((line) => line.startsWith("── @57 friction · in the pile to read · lup-impl/parser"))).toBe(true);
+        // In its thread's whole conversation, in open, read as it opens.
+        await review.goTo("━━ @transcript-reader · The transcript reader · lup-impl/parser holds · working");
+        await dashboard.keys.press(["z", "o"]);
+        await review.holds("── @57 friction · in the pile to read · lup-impl/parser");
     });
 
     it("marks one read with Space d, and goes from a thread's line in the pile to its group with gd", async () => {

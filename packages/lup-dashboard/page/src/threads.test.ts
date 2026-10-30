@@ -19,7 +19,7 @@ import {
     scopeAt,
     threadPlace,
     pileTitle,
-    untilCalled,
+    placeIn,
     UNSEEN,
     type Around,
     type Conversation,
@@ -30,7 +30,7 @@ import {
     type ThreadShown,
     type Threading,
 } from "./review";
-import { agentNamed, threadBanner } from "./Review";
+import { agentNamed, threadBanner, threadTarget } from "./Review";
 import { adopted } from "./looks";
 
 const AT = "2026-10-30T12:00:00Z";
@@ -158,7 +158,7 @@ const header = (shownItem: Item) => `── @${shownItem.number} ──`;
 const banner = () => "━━ agent ━━";
 const called = (party: Conversation) => (party.agent === null || party.agent === undefined ? party.session : `${party.session}/${party.agent}`);
 
-function threading(whole: boolean = false): Threading {
+function threading(whole: boolean = false, more: [number, ThreadShown][] = []): Threading {
     return {
         read: { kind: "inbox-threads-read", threads: [READER, VOICE, AUTH, DOCS_NOBODY, NAMES, CACHE], paths: [], working: [{ conversation: WORKER, thread: 302 }] },
         shown: new Map([
@@ -166,9 +166,9 @@ function threading(whole: boolean = false): Threading {
             [303, AUTH_SHOWN],
             [307, VOICE_SHOWN],
         ]),
-        whole: whole ? new Map([[302, READER_WHOLE]]) : new Map(),
+        whole: new Map([...(whole ? [[302, READER_WHOLE] as [number, ThreadShown]] : []), ...more]),
         landing: new Map(),
-        banner: (read, landing) => threadBanner(read, landing, called),
+        banner: (read, landing, section) => threadBanner(read, landing, called, section),
     };
 }
 
@@ -181,60 +181,84 @@ function lines(out: Laid): string[] {
 }
 
 describe("the review grouped by thread", () => {
-    it("lays out each section under its line: waiting on you, those blocked on the operator before those done, new, the front open, to read, settled and agents", () => {
+    it("lays out each section under its line: waiting on you, what asks under each thread's header, new, open, every thread still open, to read, settled and agents", () => {
         const out = lay();
         expect(out.sections.map((each) => out.text.slice(each.header.from, each.header.to))).toEqual([
             "waiting on you · 2",
             "new · 1",
-            "open · 2",
+            "open · 5",
             "to read · 0 frictions, 0 how it felt",
             "settled · 1 settled · 0 declined",
             "agents · 1",
         ]);
         expect(out.groups.map((each) => [out.text.slice(each.banner.from, each.banner.to), each.depth])).toEqual([
+            // Waiting on you: what asks the operator in each thread, under its header.
             ["━━ @reader · The reader · s1/a1 holds · a question, a check ━━", 0],
             ["━━ @voice · The voice · s1/a1 holds · done, to confirm ━━", 0],
+            // New: what's new in each.
             ["━━ @auth · The auth · s1/a1 holds · 1 new ━━", 0],
-            // The front: each thread still open, a line each, nested as threads nest, saying who holds it and where it stands.
+            // Open: every thread still open, always, a line each, nested as threads nest, saying who holds it, where it
+            // stands and how much of it waits on the operator or is new.
+            ["━━ @reader · The reader · s1/a1 holds · working · 2 waiting ━━", 0],
+            ["━━ @auth · The auth · s1/a1 holds · working · 1 new ━━", 0],
             ["━━ @docs · The docs · nobody holds it, s1 answers · working ━━", 0],
             ["━━ @names · The names · s1/a1 holds · parked until reader lands ━━", 1],
+            ["━━ @voice · The voice · s1/a1 holds · done, to confirm ━━", 0],
             ["━━ @cache · The cache · s1/a1 holds · settled ━━", 0],
             ["━━ agent ━━", 0],
         ]);
-        // The front is open, each of its threads folded to its banner; the pile, empty here, folds nothing; what's
-        // settled and the agents fold whole.
+        expect(out.groups.slice(0, 3).map((each) => each.place)).toEqual([placeIn("waiting", 302), placeIn("waiting", 307), placeIn("new", 303)]);
+        // Open is open, each of its threads folded to its line; the pile, empty here, folds nothing; settled and the
+        // agents fold whole.
         expect(out.sections.map((each) => each.fold?.closed ?? null)).toEqual([false, false, false, null, true, true]);
-        expect(out.groups.filter((each) => ["docs", "names", "cache"].includes(each.thread?.thread.name ?? "")).map((each) => each.fold?.closed)).toEqual([true, true, true]);
+        expect(out.groups.filter((each) => each.place === threadPlace(each.thread?.thread.number ?? 0)).map((each) => each.fold?.closed)).toEqual([true, true, true, true, true, true]);
     });
-
     it("keeps each thread where it was laid out, a later one after, however its since changes", () => {
-        const out = lay(EMPTY, false, [threadPlace(307), threadPlace(302)]);
+        const out = lay(EMPTY, false, [placeIn("waiting", 307), placeIn("waiting", 302)]);
         // Blocked on the operator first, whatever the order kept, then done; within each, the order kept.
         expect(out.groups.slice(0, 2).map((each) => each.thread?.thread.name)).toEqual(["reader", "voice"]);
     });
 
-    it("lays a thread's conversation from where the operator read it, what came before under one line read whole as it opens", () => {
+    it("lays what asks the operator under its thread's header, the thread whole in open read as it opens, each item laid out above a line pointing to it there", () => {
         const out = lay();
-        const text = lines(lay());
-        expect(text.slice(1, 4)).toEqual(["━━ @reader · The reader · s1/a1 holds · a question, a check ━━", "2 earlier, read", "reading…"]);
-        const earlier = out.outer.find((each) => each.kind === "read");
-        expect(earlier).toMatchObject({ closed: true, unread: true, label: "2 earlier" });
+        const text = lines(out);
+        expect(text.slice(1, 3)).toEqual(["━━ @reader · The reader · s1/a1 holds · a question, a check ━━", "── @51 ──"]);
+        expect(text).toContain("◆ check @311: Search a long record.");
+        // Each thread of open and settled is read whole as it opens.
         expect(out.loading.map((each) => [each.number, each.whole])).toEqual([
             [302, true],
-            [304, false],
-            [306, false],
-            [305, false],
+            [303, true],
+            [304, true],
+            [306, true],
+            [307, true],
+            [305, true],
         ]);
         const whole = lay(EMPTY, true);
         const read = lines(whole);
-        // The earlier entries, under the line: an item, the operator's words on it inside it, a message between
-        // agents folded to its header.
-        expect(read.slice(2, 9)).toEqual(["2 earlier, read", "── @47 ──", "Two readers, one each.", "you · @48.1", "  Keep the two apart.", "", "── @67 ──"]);
-        const between = whole.regions.find((each) => each.item.number === 67);
-        expect(between?.folds.find((each) => each.kind === "item")?.closed).toBe(true);
-        expect(whole.loading.map((each) => each.number)).toEqual([304, 306, 305]);
+        const at = read.indexOf("━━ @reader · The reader · s1/a1 holds · working · 2 waiting ━━");
+        // Its whole conversation in order: an item, the operator's words on it inside it, a message between agents
+        // folded to its header; what's laid out above a line pointing to it, which gd follows.
+        expect(read.slice(at + 1, at + 9)).toEqual([
+            "── @47 ──",
+            "Two readers, one each.",
+            "you · @48.1",
+            "  Keep the two apart.",
+            "",
+            "── @67 ──",
+            "Count each kind of line.",
+            "",
+        ]);
+        expect(read.slice(at + 9, at + 11)).toEqual(["↑ @51 question · in waiting on you · gd goes there", "↑ @311 check · in waiting on you · gd goes there"]);
+        expect(whole.pointers.map((each) => [each.node, each.section])).toEqual([
+            [51, "waiting on you"],
+            [311, "waiting on you"],
+        ]);
+        // Each item is laid out once: @51 in waiting on you alone.
+        expect(whole.regions.filter((each) => each.item.number === 51)).toHaveLength(1);
+        expect(whole.regions.find((each) => each.item.number === 67)?.folds.find((each) => each.kind === "item")?.closed).toBe(true);
+        expect(threadTarget(whole, 302, 51)).toBe(whole.pointers[0]?.from);
+        expect(threadTarget(whole, 302, null)).toBe(whole.groups.find((each) => each.place === threadPlace(302))?.banner.from);
     });
-
     it("lays a check where it came, what's to try waiting on the operator, Space d ticking it, a comment under it their answer in words", () => {
         const out = lay();
         const at = out.text.indexOf("◆ check @311: Search a long record.");
@@ -280,7 +304,7 @@ describe("the review grouped by thread", () => {
     });
 
     it("lays a part of the operator's words moved in after who wrote it, open, and writes on a thread to whoever answers for it", () => {
-        const out = lay();
+        const out = laid([QUESTION, LATE], [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called, { threads: threading(false, [[307, VOICE_SHOWN]]) });
         expect(lines(out)).toContain("you · @50.3 to s1, moved here · open: waits on s1/a1");
         const voice = out.groups.find((each) => each.thread?.thread.name === "voice");
         const at = voice?.banner.from ?? 0;
@@ -289,13 +313,14 @@ describe("the review grouped by thread", () => {
         expect(opened(out, at)).toEqual({ id: "", to: WORKER, thread: 307, text: "" });
         const written = laid([QUESTION, LATE], [LEAD, WORKER], banner, header, { ...EMPTY, letters: [{ id: "m1", to: WORKER, thread: 307, text: "It still lags." }] }, NOTHING, [], new Map(), called, { threads: threading() });
         const voiceAfter = written.groups.find((each) => each.thread?.thread.name === "voice");
+        // Under the first of its headers, waiting on you's.
         expect(written.text.slice(voiceAfter?.banner.from ?? 0).split("\n").slice(0, 2)).toEqual([
             "━━ @voice · The voice · s1/a1 holds · done, to confirm ━━",
             "It still lags.",
         ]);
         const block = voiceAfter?.blocks[0];
         expect(block).toBeDefined();
-        // Laid out once, on the thread, never again under the banner of whom it's to.
+        // Laid out once, under the first of its headers, never again under the banner of whom it's to.
         expect(written.text.split("It still lags.").length).toBe(2);
         const where = heading(written, block?.from ?? 0, true, written.written, { group: () => "", item: () => "", party: called });
         expect(where[0]).toEqual({ kind: "to", text: "to s1/a1" });
@@ -303,8 +328,7 @@ describe("the review grouped by thread", () => {
         const kept = nobody.groups.find((each) => each.thread?.thread.name === "voice")?.blocks[0];
         expect(heading(nobody, kept?.from ?? 0, true, nobody.written, { group: () => "", item: () => "", party: called })[0]).toEqual({ kind: "to", text: "to no one, kept in @voice" });
     });
-
-    it("shows only what calls for the operator in a thread they never read, with what it's under, the rest folding with what came before", () => {
+    it("shows in new what's new in a thread they never read, the few read before it as context, folded to its header", () => {
         const answered = { ...NOTE, state: { state: "done", at: AT } } as Item;
         const never = shown(
             AUTH,
@@ -315,14 +339,14 @@ describe("the review grouped by thread", () => {
             ] as ThreadShown["entries"],
             [answered, BETWEEN, LATE],
         );
-        const split = untilCalled(never, AUTH);
-        expect(split.before.map((each) => each.spot.node)).toEqual([47]);
-        expect(split.after.map((each) => each.spot.node)).toEqual([67, 70]);
-        // Read once, whatever came since shows.
-        const marked = { ...AUTH, mark: { key: { node: 303 }, up_to: "40", at: AT } } as ThreadRead;
-        expect(untilCalled(never, marked).before).toEqual([]);
+        const threads = threading();
+        const out = laid([LATE], [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called, { threads: { ...threads, shown: new Map([[303, never]]) } });
+        const text = lines(out);
+        const at = text.indexOf("━━ @auth · The auth · s1/a1 holds · 1 new ━━");
+        expect(text.slice(at + 1).filter((line) => line.startsWith("── @")).slice(0, 3)).toEqual(["── @47 ──", "── @67 ──", "── @70 ──"]);
+        const closed = (number: number) => out.regions.find((each) => each.item.number === number)?.folds.find((each) => each.kind === "item")?.closed;
+        expect([closed(47), closed(67), closed(70)]).toEqual([true, true, false]);
     });
-
     it("reads a thread up to what it shows as the operator acts in it, an item marked or commented on, a check ticked, a message on it, never past news left unread", () => {
         const upTo = (draft: Draft) =>
             threadsRead(lay(draft), draft).map((each) => {
@@ -350,23 +374,19 @@ describe("the review grouped by thread", () => {
         expect(implied(lay({ ...EMPTY, done: [70] }), { ...EMPTY, done: [70] }).map((each) => each.action)).toEqual(["review-mark"]);
     });
 
-    it("folds the whole of a thread they never read once nothing in it calls for them, what they answered never coming back", () => {
+    it("leaves what calls for nothing out of new, its thread in open alone", () => {
         const answered = { ...NOTE, state: { state: "done", at: AT } } as Item;
         const done = { ...LATE, state: { state: "done", at: AT } } as Item;
         const quiet = { ...AUTH, section: "every thread", new: [] } as ThreadRead;
-        const never = shown(
-            quiet,
-            [
-                { spot: { node: 47 }, came: AT, member: true },
-                { spot: { node: 70 }, came: AT, member: true },
-            ] as ThreadShown["entries"],
-            [answered, done],
-        );
-        const split = untilCalled(never, quiet);
-        expect(split.before.map((each) => each.spot.node)).toEqual([47, 70]);
-        expect(split.after).toEqual([]);
+        const threads = threading();
+        const reads = { ...threads.read, threads: threads.read.threads.map((each) => (each.thread.number === 303 ? quiet : each)) };
+        const out = laid([], [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called, {
+            threads: { ...threads, read: reads, shown: new Map([[302, READER_SHOWN], [303, shown(quiet, [{ spot: { node: 47 }, came: AT, member: true }, { spot: { node: 70 }, came: AT, member: true }] as ThreadShown["entries"], [answered, done])]]) },
+        });
+        const fresh = out.sections.find((each) => each.name === "new");
+        expect(fresh === undefined ? "" : out.text.slice(fresh.header.from, fresh.header.to)).toBe("new · 0");
+        expect(out.regions.map((each) => each.item.number)).toEqual([51]);
     });
-
     it("strikes an item's header through only where the draft marks it, muting what no longer waits as the thread's history", () => {
         const answered = { ...NOTE, state: { state: "done", at: AT } } as Item;
         const classes = (item: Item, draft: Draft) => headerClasses(item, draft, UNSEEN).split(" ");
@@ -392,22 +412,19 @@ describe("the review grouped by thread", () => {
         const out = laid([LATE], [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called, { threads: { ...threads, read: reads, shown: new Map([[303, seen]]) } });
         const text = lines(out);
         const at = text.indexOf("━━ @auth · The auth · s1/a1 holds · 1 new ━━");
-        expect(text.slice(at + 1, at + 4)).toEqual(["4 earlier, read", "reading…", "── @47 ──"]);
+        expect(text[at + 1]).toBe("── @47 ──");
         expect(out.regions.find((each) => each.item.number === 47)?.folds.find((each) => each.kind === "item")?.closed).toBe(true);
         expect(out.regions.find((each) => each.item.number === 70)?.folds.find((each) => each.kind === "item")?.closed).toBe(false);
     });
-
     it("folds what no longer waits in a thread's conversation to its header, its history", () => {
         const answered = { ...QUESTION, state: { state: "answered", at: AT, by: 60 } } as unknown as Item;
         const read = { ...READER, asks: [{ node: 311, what: "a check", came: AT }] } as ThreadRead;
-        const threads = threading();
-        const out = laid([], [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called, {
-            threads: { ...threads, shown: new Map([[302, shown(read, READER_SHOWN.entries, [answered], { checks: [CHECK] })]]) },
-        });
+        const threads = threading(false, [[302, shown(read, READER_WHOLE.entries, [NOTE, BETWEEN, answered], { checks: [CHECK] })]]);
+        const reads = { ...threads.read, threads: threads.read.threads.map((each) => (each.thread.number === 302 ? read : each)) };
+        const out = laid([], [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called, { threads: { ...threads, read: reads, shown: new Map([[302, shown(read, READER_SHOWN.entries, [answered], { checks: [CHECK] })]]) } });
         const region = out.regions.find((each) => each.item.number === 51);
         expect(region?.folds.find((each) => each.kind === "item")?.closed).toBe(true);
     });
-
     it("sends a message written on a thread to no one with Space s, and back to whoever answers for it", () => {
         const draft = { ...EMPTY, letters: [{ id: "m1", to: WORKER, thread: 307, text: "It still lags." }] };
         const out = lay(draft);
@@ -464,8 +481,11 @@ describe("the review grouped by thread", () => {
             "new",
             "@auth",
             "open",
+            "@reader",
+            "@auth",
             "@docs",
             "@names",
+            "@voice",
             "settled",
             "@cache",
             "agents",
@@ -492,8 +512,9 @@ function piling(draft: Draft = EMPTY): Laid {
         ] as unknown as ThreadShown["entries"],
         [LATE, FELT, FRICTION],
     );
+    // Its whole conversation read, as the operator opened it in open.
     return laid([QUESTION, LATE, FRICTION, FELT, UNTITLED], [LEAD], banner, header, draft, NOTHING, [], new Map(), called, {
-        threads: { ...threads, read: { ...threads.read, threads: reads }, shown: new Map([...threads.shown, [303, auth]]) },
+        threads: { ...threads, read: { ...threads.read, threads: reads }, shown: new Map([...threads.shown, [303, auth]]), whole: new Map([[303, auth]]) },
     });
 }
 
@@ -557,8 +578,9 @@ describe("the pile to read", () => {
         laid([FELT], [LEAD], banner, (shownItem, _, words) => {
             told.push(`${shownItem.number}: ${words}`);
             return header(shownItem);
-        }, EMPTY, NOTHING, [], new Map(), called, { threads: { ...threading(), read: { ...threading().read, threads: threading().read.threads.map((each) => (each.thread.number === 303 ? marked : each)) }, shown: new Map([[303, shown(marked, [{ spot: { node: 81 }, came: AT, member: true }, { spot: { node: 80 }, came: AT, member: true, moved: true }, { spot: { node: 82 }, came: AT, member: true, went: 302 }] as unknown as ThreadShown["entries"], [FELT, FRICTION, UNTITLED])]]) } });
-        expect(told.map((each) => each.replace(/^(\d+): .*? · /, "$1: "))).toEqual(["81: in the pile to read", "80: moved here", "82: moved to @reader"]);
+        }, EMPTY, NOTHING, [], new Map(), called, { threads: { ...threading(), read: { ...threading().read, threads: threading().read.threads.map((each) => (each.thread.number === 303 ? marked : each)) }, whole: new Map([[303, shown(marked, [{ spot: { node: 81 }, came: AT, member: true }, { spot: { node: 80 }, came: AT, member: true, moved: true }, { spot: { node: 82 }, came: AT, member: true, went: 302 }] as unknown as ThreadShown["entries"], [FELT, FRICTION, UNTITLED])]]) } });
+        // In @auth's whole conversation, beside what waits on the operator and what's new above.
+        expect(told.filter((each) => /^8\d: /.test(each)).map((each) => each.replace(/^(\d+): .*? · /, "$1: "))).toEqual(["81: in the pile to read", "80: moved here", "82: moved to @reader"]);
         expect(said(81)).toBe("── @81 ──");
     });
 

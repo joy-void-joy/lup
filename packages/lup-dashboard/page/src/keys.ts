@@ -208,8 +208,13 @@ export function reviewKeys(kinds: readonly Kind[], verbs: readonly Verb[] = []):
             },
             {
                 keys: "gd",
-                does: "on a citation, go to the passage of your words it cites, above the answer; on that passage, back to the citation; on a banner naming another agent's drawer, as a landing waiting on files there, to that drawer; on an agent's name, as a thread's banner or an item's header says it, to their own views among the agents, their conversation opened",
+                does: "on a citation, go to the passage of your words it cites, above the answer; on that passage, back to the citation; on a banner naming another agent's drawer, as a landing waiting on files there, to that drawer; on an agent's name, as a thread's banner or an item's header says it, to their own views among the agents, their conversation opened; in a thread's whole conversation, on a line pointing to an item above, to it there; on a thread's line in the pile, to the thread; ^o comes back",
                 short: "follow",
+            },
+            {
+                keys: "gt",
+                does: "from an item of waiting on you or new, or its thread's header there, to the thread whole in open, opened, on that item in its conversation, read from the host first where it isn't yet; ^o comes back",
+                short: "whole thread",
             },
             {
                 keys: "/ n N",
