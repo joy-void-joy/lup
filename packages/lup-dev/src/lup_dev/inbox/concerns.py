@@ -45,6 +45,7 @@ from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.roster import Roster
 from lup_dev.inbox.store import (
     Flagged,
+    Friction,
     HeldChange,
     HowItFelt,
     Inbox,
@@ -95,6 +96,13 @@ ROOT = "a main session's root thread"
 
 type Telling = Literal["whole", "line", "none"]
 """How an item landing in a thread is told: whole, in a line, or not at all."""
+
+
+class Gathered(Model):
+    """Frictions and how it felt the operator moved into a thread from the pile to read (`Concerns.gathered`): the thread, opened for them where it's new, and the items moved."""
+
+    thread: Thread
+    items: list[Item]
 
 
 class Reach(Model):
@@ -380,19 +388,23 @@ class Concerns(Model, arbitrary_types_allowed=True):
         return found if isinstance(found, Thread) else self.root(party.main())
 
     def opened(
-        self, party: Conversation, title: str, under: Thread, name: str | None = None
+        self,
+        party: Conversation | Operator,
+        title: str,
+        under: Thread,
+        name: str | None = None,
     ) -> Thread:
-        """Open a thread titled `title` under `under`, by `party`, held by nobody: named `name`, else after its title (`slugged`), made free where it's taken (`free`)."""
+        """Open a thread titled `title` under `under`, in its repository, by `party`, an agent or the operator, held by nobody: named `name`, else after its title (`slugged`), made free where it's taken (`free`)."""
         wanted = slugged(title) if name is None else name
         return self.kept(
             Thread(
                 number=self.inbox.ledger.numbered(),
-                repository=party.repository,
+                repository=under.repository,
                 by=party,
                 at=self.now(),
                 name=wanted
                 if name is not None
-                else self.free(party.repository, wanted),
+                else self.free(under.repository, wanted),
                 title=title,
                 parent=under.number,
             )
@@ -539,7 +551,9 @@ class Concerns(Model, arbitrary_types_allowed=True):
             if each != answering and each not in having:
                 self.left(each, line)
 
-    def whole(self, item: Item, thread: Thread, by: Conversation | None = None) -> str:
+    def whole(
+        self, item: Item, thread: Thread, by: Conversation | Operator | None = None
+    ) -> str:
         """Tell `item`, in `thread`, whole, as a tag saying what it is and whom it's from, and who moved it there where `by` did; a line saying how to read it where it's longer than `whole_up_to`."""
         attributes = {
             "thread": thread.name,
@@ -565,7 +579,9 @@ class Concerns(Model, arbitrary_types_allowed=True):
             ],
         ).written()
 
-    def line(self, item: Item, thread: Thread, by: Conversation | None = None) -> str:
+    def line(
+        self, item: Item, thread: Thread, by: Conversation | Operator | None = None
+    ) -> str:
         """Tell `item`, in `thread`, in one line: what it is, from whom, and its first words; who moved it there where `by` did."""
         moved = "" if by is None else f", moved there by {self.roster.who(by)}"
         return (
@@ -685,6 +701,96 @@ class Concerns(Model, arbitrary_types_allowed=True):
         self.telling(thread, [party], whole=whole, line=line)
         return wanted.cited()
 
+    def gathered(
+        self, numbers: list[int], thread: Thread | None, title: str | None
+    ) -> Gathered:
+        """Move the frictions and how it felt `numbers` whole into `thread`, or one the operator opens titled `title`, as they gather what got in agents' way, and how the work was for them, into one concern from the pile to read: each stays in the thread it landed in, a member of this one too (`Moved`); whoever answers for this one is told each whole, everyone else on it a line. Return the thread and the items moved.
+
+        How it felt is told as a friction is, though it reaches nobody as it
+        lands: the operator, its one reader, passes it on.
+
+        A new thread opens under the root above the thread the first landed
+        in, held by nobody, so whoever holds that root answers for it: the
+        session's main conversation, until spawn starts an agent on it.
+
+        Say where one is neither; where they're of several repositories, or of
+        another than the thread's; where one is in no thread, or in this one
+        already; and where the thread is settled or declined, where nobody
+        would look.
+        """
+        items = [self.inbox.item(each) for each in dict.fromkeys(numbers)]
+        if not items:
+            message = "name the frictions to move"
+            raise InboxError(message)
+        for item in items:
+            match item.reason:
+                case Friction() | HowItFelt():
+                    pass
+                case _:
+                    message = f"{cited(item.number)} is {what(item)}: only frictions and how it felt are moved from the pile to read"
+                    raise InboxError(message)
+        repositories = list(
+            dict.fromkeys(
+                each.sender.repository
+                for each in items
+                if isinstance(each.sender, Conversation)
+            )
+        )
+        if len(repositories) != 1:
+            message = f"the frictions are of {len(repositories)} repositories: move each repository's apart"
+            raise InboxError(message)
+        [repository] = repositories
+        landed = {each.number: self.containing(each.number) for each in items}
+        loose = [number for number, found in landed.items() if found is None]
+        if loose:
+            message = f"{cited(loose[0])} is in no thread"
+            raise InboxError(message)
+        if thread is None:
+            first = landed[items[0].number]
+            if first is None or title is None or not title.strip():
+                message = "name a thread, or a title to open one with"
+                raise InboxError(message)
+            thread = self.opened(Operator(), title.strip(), self.rooted(first))
+        if thread.repository != repository:
+            message = f"@{thread.name} is another repository's than the frictions'"
+            raise InboxError(message)
+        state = self.standing(thread).state
+        if state in ("settled", "declined"):
+            message = f"@{thread.name} is {state}: reopen it, or move them into another"
+            raise InboxError(message)
+        home = [
+            number
+            for number, found in landed.items()
+            if found is not None and found.number == thread.number
+        ]
+        if home:
+            message = f"{cited(home[0])} landed in @{thread.name} already"
+            raise InboxError(message)
+        for item in items:
+            self.drawn(
+                Moved(
+                    source=item.number,
+                    target=thread.number,
+                    repository=thread.repository,
+                    by=Operator(),
+                    at=self.now(),
+                )
+            )
+            self.telling(
+                thread,
+                [item.sender] if isinstance(item.sender, Conversation) else [],
+                whole=self.whole(item, thread, by=Operator()),
+                line=self.line(item, thread, by=Operator()),
+            )
+        return Gathered(thread=thread, items=items)
+
+    def rooted(self, thread: Thread) -> Thread:
+        """Return the root above `thread`, the thread at the top of its repository it's under, or itself where it's one."""
+        found = thread
+        while found.parent is not None:
+            found = self.thread(found.parent)
+        return found
+
     def moved_parts(self, repository: Path) -> list[PartId]:
         """Return each part of the operator's words moved into a thread of `repository`, in the order first moved."""
         drawn = self.inbox.ledger.drawn_of(Moved)
@@ -692,7 +798,7 @@ class Concerns(Model, arbitrary_types_allowed=True):
             dict.fromkeys(
                 PartId(item=each.source, part=each.part)
                 for each in drawn
-                if each.repository == repository
+                if each.repository == repository and each.part is not None
             )
         )
 

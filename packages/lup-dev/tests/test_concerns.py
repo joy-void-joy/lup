@@ -660,6 +660,27 @@ def test_a_thread_reads_whole_with_where_it_stands_what_s_under_and_what_names_i
     assert none == "No thread is `nothing`: `thread` takes a thread's name or number."
 
 
+def test_a_friction_the_operator_moved_reads_whole_in_the_thread_it_went_to_saying_so(
+    delivery: Delivery,
+) -> None:
+    register = launched(delivery, "dev", "s1")
+    lead = speaker(delivery, register, main("s1"))
+    said(lead.friction(ThreadedFriction(text="It hung.", title="the gate hangs")))
+    said(lead.thread(Threading(name="gate", title="The gate")))
+    concerns = delivery.concerns()
+    [friction] = delivery.inbox.items
+    concerns.gathered([friction], concerns.named(REPOSITORY, "gate"), None)
+    reader = Reader(delivery=delivery, reader=main("s1"))
+
+    read = reader.read(delivery.inbox.about(REPOSITORY), Narrowing(thread="gate"))
+
+    assert read.text.endswith(
+        "Moved here by the operator, from where it landed:\n"
+        f"@{friction}  2026-10-01 12:00  a friction from you to the operator, waiting:\n"
+        f'<item item="{friction}" kind="friction" from="dev">It hung.</item>'
+    )
+
+
 def test_a_session_s_root_follows_their_name_and_a_root_nobody_holds_is_taken_by_name(
     delivery: Delivery,
 ) -> None:

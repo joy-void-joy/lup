@@ -105,6 +105,7 @@ from lup_dev.inbox.store import (
 from lup_dev.inbox.threaded import (
     DeclineThread,
     ListThreads,
+    MoveIntoThread,
     ReopenThread,
     SettleThread,
     ShowThread,
@@ -641,6 +642,8 @@ def test_every_request_the_page_may_send_acts_on_the_copy_alone(tmp_path: Path) 
         assert declined.read.state == "declined"
         unchecked = ask(AnswerCheck(number=standing.note), Refused)
         assert "isn't a check" in unchecked.error
+        unmoved = ask(MoveIntoThread(numbers=[standing.note], thread=first), Refused)
+        assert "only frictions and how it felt" in unmoved.error
         rulings = [Ruling(decision=1, verdict="leaning")]
         ask(AnswerItem(number=standing.question, rulings=rulings), Shown)
         ask(FinishItem(number=standing.note), Shown)

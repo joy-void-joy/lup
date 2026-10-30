@@ -102,7 +102,11 @@ class StandInThreads(MutableModel, ThreadSource, arbitrary_types_allowed=True):
         """Return the parts of the operator's words moved into `thread` that nothing in it answers yet: an item there citing the part, or answering the item it's of."""
         stood = self.stood(thread.number)
         items = self.items()
-        members = [items[each.node] for each in stood.members if each.node in items]
+        members = [
+            items[each.node]
+            for each in stood.members
+            if each.node in items and not each.moved
+        ]
 
         def answered(part: Joined) -> bool:
             return any(
@@ -158,6 +162,12 @@ class StandInThreads(MutableModel, ThreadSource, arbitrary_types_allowed=True):
                 checks={each.number: each for each in self.checks},
                 answers=self.answers,
                 references={},
+                went={
+                    member.node: each.thread.number
+                    for each in self.threads
+                    for member in each.members
+                    if member.moved
+                },
             ),
             working=self.working,
         )
@@ -234,15 +244,51 @@ class StandInThreads(MutableModel, ThreadSource, arbitrary_types_allowed=True):
         return check
 
     def containing(self, number: int) -> Thread | None:
-        """Return the thread node `number` is in; none where it's in none."""
+        """Return the thread node `number` landed in, not one it was moved into whole; none where it's in none."""
         return next(
             (
                 each.thread
                 for each in self.threads
-                if any(member.node == number for member in each.members)
+                if any(
+                    member.node == number and not member.moved
+                    for member in each.members
+                )
             ),
             None,
         )
+
+    def rooted(self, thread: Thread) -> Thread:
+        """Return the root above `thread`, or itself where it's one."""
+        found = thread
+        while found.parent is not None:
+            found = self.stood(found.parent).thread
+        return found
+
+    def opened(self, thread: Thread) -> None:
+        """Keep `thread`, opened by the operator, with nothing in it yet."""
+        self.threads = [*self.threads, StoodIn(thread=thread)]
+
+    def gathered(self, numbers: Sequence[int], number: int, at: datetime) -> None:
+        """Move the items `numbers` whole into thread `number`, each staying in the thread it landed in, as the host does (`Concerns.gathered`): a member there moved, at `at`, out of any other it was moved into before."""
+        self.threads = [
+            each.model_copy(
+                update={
+                    "members": [
+                        *(
+                            member
+                            for member in each.members
+                            if not (member.moved and member.node in numbers)
+                        ),
+                        *(
+                            Joined(node=one, came=at, moved=True)
+                            for one in numbers
+                            if each.thread.number == number
+                        ),
+                    ]
+                }
+            )
+            for each in self.threads
+        ]
 
     def joined(self, number: int, member: Joined) -> None:
         """Put `member` in thread `number`, after what's in it: an item, or a part of the operator's words."""
