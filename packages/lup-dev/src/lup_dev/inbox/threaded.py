@@ -12,7 +12,8 @@ it, every repository's, and the operator settles, declines and reopens them:
   section, which the page orders by and keeps, never sorting again; what's
   new, what's in it for the pile to read, frictions and how it felt, which
   makes no thread new or waiting; how much came before where they read it;
-  its review mark; and who answers for it.
+  its review mark; and who answers for it; and where each conversation going
+  on works (`Working`), whose "since you approved" the page lays out there.
 - **`inbox-thread`** (`ShowThread`) reads one thread's conversation (`Entry`):
   from where they read it, what came before counted, or whole; each item, check
   or part of their words moved in, in the order it came, and their own words on
@@ -20,11 +21,14 @@ it, every repository's, and the operator settles, declines and reopens them:
   an item citing a part of their words moved in under that part, which stands
   open until one does, waiting on whoever answers for the thread and never on
   them (`Standing.unanswered`); an agent's last words under the latest of the
-  operator's words in the thread they answer; with the items, the checks, the items of other threads that name
-  it, and who's on it, whose places the thread's code is read from.
+  operator's words in the thread they answer; each part of the operator's
+  words with what they said there (`Entry.said`); with the items, the checks,
+  the items of other threads that name it, and who's on it, whose places the
+  thread's code is read from.
 - **`inbox-settle-thread`**, **`inbox-decline-thread`** and
   **`inbox-reopen-thread`** are the operator's, as Space `d` and Space `x` on
-  a thread done, to confirm, are (`Concerns.settled`, `declined`, `reopened`).
+  a thread done, to confirm, are, and `lup-dev inbox settle-thread` and its
+  kin in their terminal (`Concerns.settled`, `declined`, `reopened`).
   A reply of theirs on what's in a thread done, to confirm, reopens it
   (`Delivery.reopening`).
 
@@ -65,7 +69,7 @@ from lup_dev.inbox.store import (
     ranked,
 )
 from lup_dev.inbox.texts import what
-from lup_dev.inbox.threads import anchors
+from lup_dev.inbox.threads import Anchor, anchors, spoken
 from lup_ledger.environment.store import Written
 from lup_ledger.parties import Conversation, Operator
 from lup_ledger.threads import (
@@ -269,6 +273,13 @@ class Entry(Model):
     unanswered: bool = False
     """Whether it's a part of the operator's words moved in that nothing in the
     thread answers yet: open, waiting on whoever answers for it."""
+    said: str | None = None
+    """The operator's words there, where it's a part of an item of theirs: a
+    comment, a ruling, a message; none for an item or a check whole, which the
+    page reads from the item."""
+    to: Conversation | None = None
+    """Whom those words were written to, where they're a review's message or
+    remark (`Anchor.to`); none else."""
 
 
 class CheckRead(Model):
@@ -301,12 +312,23 @@ class ThreadShown(Reply):
     paths: list[Pathed] = []
 
 
+class Working(Model):
+    """Where a conversation works: the thread what they send lands in where they name none, by its number."""
+
+    conversation: Conversation
+    thread: int
+
+
 class ThreadsRead(Reply):
-    """Every thread as the review reads it, by number, and each conversation they name by their path."""
+    """Every thread as the review reads it, by number, each conversation they name by their path, and where each conversation going on works."""
 
     kind: Literal["inbox-threads-read"] = "inbox-threads-read"
     threads: list[ThreadRead]
     paths: list[Pathed] = []
+    working: list[Working] = []
+    """Where each conversation going on works, as far as it's known
+    (`Readings.working`): the thread whose group the page lays their "since you
+    approved" out at the end of."""
 
 
 class ListThreads(Request, reads=True):
@@ -347,10 +369,11 @@ class ReopenThread(Request, reads=False):
 
 
 class ThreadStated(Reply):
-    """A thread as it stands once the operator settled, declined or reopened it."""
+    """A thread as it stands once the operator settled, declined or reopened it, and who answers for it, by their path."""
 
     kind: Literal["inbox-thread-stated"] = "inbox-thread-stated"
     read: ThreadRead
+    paths: list[Pathed] = []
 
 
 def pile(item: Item) -> bool:
@@ -373,13 +396,35 @@ class Readings(Model, arbitrary_types_allowed=True):
             for each in [read.thread.holder, read.answering]
             if each is not None
         ]
+        working = self.working()
         return ThreadsRead(
             threads=threads,
             paths=[
                 Pathed(conversation=each, path=self.concerns.roster.called(each))
-                for each in dict.fromkeys(named)
+                for each in dict.fromkeys(
+                    [*named, *(each.conversation for each in working)]
+                )
             ],
+            working=working,
         )
+
+    def working(self) -> list[Working]:
+        """Return where each conversation going on works, read from their whereabouts alone, so reading makes no root: the thread they joined, hold or were handed, else their session's root, where it's open."""
+        places = self.concerns.inbox.whereabouts
+        threads = self.ledgered.threads
+
+        def root(conversation: Conversation) -> int | None:
+            main = places.get(conversation.main().key())
+            return None if main is None else main.root
+
+        found = [
+            Working(conversation=place.conversation, thread=number)
+            for place in places.values()
+            if self.concerns.live(place.conversation)
+            and (number := place.thread or root(place.conversation)) is not None
+            and number in threads
+        ]
+        return sorted(found, key=lambda each: each.conversation.key())
 
     def read(self, number: int) -> ThreadRead:
         """Read thread `number` as the review does."""
@@ -522,6 +567,15 @@ class Readings(Model, arbitrary_types_allowed=True):
             for each in members
             if each.part is not None
         ]
+
+        def words(member: Joined) -> Anchor | None:
+            item = None if member.part is None else items.get(member.node)
+            if item is None:
+                return None
+            return next(
+                (each for each in spoken(item) if each.id.part == member.part), None
+            )
+
         own = [
             Entry(
                 spot=Spot(node=each.node, part=each.part),
@@ -530,16 +584,19 @@ class Readings(Model, arbitrary_types_allowed=True):
                 new=each.node in read.new and each.part is None,
                 earlier=at <= read_to.members,
                 unanswered=Spot(node=each.node, part=each.part) in read.unanswered,
+                said=None if (anchor := words(each)) is None else anchor.text,
+                to=None if anchor is None else anchor.to,
             )
             for at, each in enumerate(members, start=1)
         ]
-        spoken = [
+        said = [
             Entry(
                 spot=Spot(node=item.number, part=anchor.id.part),
                 under=Spot(node=anchor.item),
                 came=item.made,
                 member=False,
                 earlier=earlier(item.made),
+                said=anchor.text,
             )
             for item in items.values()
             for anchor in anchors(item)
@@ -561,17 +618,17 @@ class Readings(Model, arbitrary_types_allowed=True):
             if not isinstance(item.reason, Message):
                 return entry
             answered = item.reason.answers
-            said = [
+            before = [
                 each
-                for each in spoken
+                for each in said
                 if each.spot.node in answered and each.came <= item.made
             ]
-            if not said:
+            if not before:
                 return entry
-            return entry.model_copy(update={"under": said[-1].spot})
+            return entry.model_copy(update={"under": before[-1].spot})
 
         entries = sorted(
-            [*(answering(each) for each in own), *spoken], key=lambda each: each.came
+            [*(answering(each) for each in own), *said], key=lambda each: each.came
         )
         kept = entries if whole else self.after(entries)
         named = list(
@@ -594,6 +651,7 @@ class Readings(Model, arbitrary_types_allowed=True):
         on = list(dict.fromkeys([*holder, *writers]))
         paths = pathed(self.concerns.roster, shown)
         named = [each.conversation for each in paths]
+        addressed = [each.to for each in kept if each.to is not None]
         return ThreadShown(
             read=read,
             entries=kept,
@@ -615,7 +673,7 @@ class Readings(Model, arbitrary_types_allowed=True):
                 *paths,
                 *(
                     Pathed(conversation=each, path=self.concerns.roster.called(each))
-                    for each in on
+                    for each in dict.fromkeys([*on, *addressed])
                     if each not in named
                 ),
             ],
@@ -676,6 +734,23 @@ class ThreadReading(MutableModel, arbitrary_types_allowed=True):
         """Return thread `number`; say where there's none."""
         return self.delivery.concerns().thread(number)
 
+    def stated(self, number: int) -> ThreadStated:
+        """Return thread `number` as it stands, and who answers for it by their path."""
+        readings = self.readings_now()
+        read = readings.read(number)
+        answering = read.answering
+        return ThreadStated(
+            read=read,
+            paths=[]
+            if answering is None
+            else [
+                Pathed(
+                    conversation=answering,
+                    path=readings.concerns.roster.called(answering),
+                )
+            ],
+        )
+
 
 class ThreadsListing(Model, Reading[ListThreads], arbitrary_types_allowed=True):
     """Answers `ListThreads`: every thread as the review reads it; the operator's alone."""
@@ -729,7 +804,7 @@ class ThreadStating(Model, Handler[SettleThread], arbitrary_types_allowed=True):
     async def answer(self, request: SettleThread) -> Reply:
         concerns = self.reading.delivery.concerns()
         concerns.settled(self.reading.thread(request.number))
-        return ThreadStated(read=self.reading.readings_now().read(request.number))
+        return self.reading.stated(request.number)
 
 
 class ThreadDeclining(Model, Handler[DeclineThread], arbitrary_types_allowed=True):
@@ -745,7 +820,7 @@ class ThreadDeclining(Model, Handler[DeclineThread], arbitrary_types_allowed=Tru
     async def answer(self, request: DeclineThread) -> Reply:
         concerns = self.reading.delivery.concerns()
         concerns.declined(self.reading.thread(request.number), request.why)
-        return ThreadStated(read=self.reading.readings_now().read(request.number))
+        return self.reading.stated(request.number)
 
 
 class ThreadReopening(Model, Handler[ReopenThread], arbitrary_types_allowed=True):
@@ -761,7 +836,7 @@ class ThreadReopening(Model, Handler[ReopenThread], arbitrary_types_allowed=True
     async def answer(self, request: ReopenThread) -> Reply:
         concerns = self.reading.delivery.concerns()
         concerns.reopened(self.reading.thread(request.number), request.why)
-        return ThreadStated(read=self.reading.readings_now().read(request.number))
+        return self.reading.stated(request.number)
 
 
 def routes(delivery: Delivery) -> list[Route]:

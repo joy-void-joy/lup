@@ -284,6 +284,14 @@ def test_a_thread_s_conversation_lays_each_reply_under_what_it_answers(
         (Spot(node=answer.number, part=2), Spot(node=work.question), False),
         (Spot(node=ending.number), Spot(node=answer.number, part=2), True),
     ]
+    # The operator's words are said on their entries; an item's, read from the item.
+    assert [each.said for each in shown.entries] == [
+        None,
+        None,
+        "Long ones.",
+        "Go on.",
+        None,
+    ]
     assert {each.number for each in shown.items} == {
         work.question,
         answer.number,
@@ -420,6 +428,7 @@ def test_a_part_moved_in_stands_open_until_an_item_there_cites_it_never_asking_t
         if each.spot == part
     ]
     assert moved.unanswered
+    assert moved.said == "And write it up in the docs."
 
     clock.sleep(60)
     cited = work.sent(
@@ -430,3 +439,31 @@ def test_a_part_moved_in_stands_open_until_an_item_there_cites_it_never_asking_t
     entries = {each.spot: each for each in work.shown(after.thread, whole=True).entries}
     assert not entries[part].unanswered
     assert entries[Spot(node=cited)].under == part
+
+
+def test_where_each_conversation_works_is_read_with_the_threads(work: Work) -> None:
+    listed = asyncio.run(ThreadsListing(reading=work.reading()).answer(ListThreads()))
+    assert isinstance(listed, ThreadsRead)
+    assert [(each.conversation, each.thread) for each in listed.working] == [
+        (LEAD, work.root.number)
+    ]
+    work.ran(work.lead.thread(Threading(name="lag", join=True)))
+    listed = asyncio.run(ThreadsListing(reading=work.reading()).answer(ListThreads()))
+    assert isinstance(listed, ThreadsRead)
+    assert [(each.conversation, each.thread) for each in listed.working] == [
+        (LEAD, work.lag.number)
+    ]
+    assert LEAD in {each.conversation for each in listed.paths}
+
+
+def test_settling_declining_or_reopening_a_thread_says_who_answers_for_it_by_their_path(
+    work: Work,
+) -> None:
+    stated = work.reading().stated(work.voice.number)
+    assert [(each.conversation, each.path) for each in stated.paths] == [(LEAD, "lead")]
+    said = cli.thread_stated(stated, "settled")
+    assert said.startswith("@voice (@")
+    assert (
+        '"Voice", settled: done to confirm; `lead` answers for it, and was told.'
+        in said
+    )
