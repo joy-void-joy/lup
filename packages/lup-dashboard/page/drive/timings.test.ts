@@ -111,6 +111,18 @@ async function timingsInPalette(dashboard: Dashboard): Promise<string> {
     return (await item.textContent()) ?? "";
 }
 
+/**
+ * Wait until the palette has closed and the review has the keys again: a key pressed as the palette goes away, before
+ * the review takes focus back, is counted as `other` rather than as the motion it is (#358).
+ */
+async function backInReview(dashboard: Dashboard): Promise<void> {
+    await dashboard.page.waitForFunction(
+        () => document.querySelector(".keys-palette") === null && document.activeElement?.closest(".review-buffer") != null,
+        undefined,
+        { polling: 20 },
+    );
+}
+
 describe("the page's timings, in headless Chromium", () => {
     it("measures each key in its kind, sending them as the tab is hidden, with the page's size, build and browser", async () => {
         await using dashboard = await open(served.url);
@@ -184,12 +196,14 @@ describe("the page's timings, in headless Chromium", () => {
         await (await dashboard.review()).holds(DEMO_ITEM);
         expect(await timingsInPalette(dashboard)).toMatch(/^⏎ not measuring how long keys take to reach the screen: switched off in this browser/);
         await dashboard.keys.press(["Escape"]);
+        await backInReview(dashboard);
         await dashboard.keys.press(["j", "k", "j", "k"], 50);
         await aSecondOn(dashboard.page);
         await hide(dashboard.page);
         await timingsInPalette(dashboard);
         await dashboard.keys.press(["Enter"]);
         expect(await dashboard.page.evaluate(() => localStorage.getItem("lup-timings"))).toBeNull();
+        await backInReview(dashboard);
         await dashboard.keys.press(["j"]);
         await aSecondOn(dashboard.page);
         await hide(dashboard.page);
