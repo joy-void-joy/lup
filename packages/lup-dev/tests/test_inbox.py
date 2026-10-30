@@ -205,6 +205,7 @@ from lup_dev.policy.checkpoint import (
     CallStarted,
     ConversationRecord,
 )
+from lup_dev.policy.coming import Coming
 from lup_dev.policy.flags import InboxFlagging
 from lup_dev.policy.holds import Answer as HoldAnswer
 from lup_dev.policy.holds import (
@@ -232,13 +233,15 @@ from lup_dev.policy.worktrees import Holding as Worked
 from lup_dev.policy.worktrees import SessionIndex
 from lup_dev.private.withheld import Withheld
 from lup_dev.private.withheld import kept as listed_at
-from lup_dev.remote.protocol import Remotes
+from lup_dev.remote.protocol import Remotes, Update
 from lup_dev.settings import LupDevSettings
 from lup_dev.stored import write_model
 from lup_dev.worker import HostExchanges, HostMarks, RepositoryModules
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
 from lup_ledger.parties import Conversation, Operator
+from lup_ledger.threads import BranchLanded, CommitLanded, Parked
+from lup_ledger.threads import Reopened as ThreadReopened
 from lup_transcripts.environment.module import Transcripts
 
 if TYPE_CHECKING:
@@ -486,8 +489,9 @@ def inboxed(
     parser: Parser | None = None,
     bearings: bool = False,
     queues: dict[str, Queues] | None = None,
+    coming: Callable[[Delivery], Coming] | None = None,
 ) -> Generator[Watched]:
-    """A host service with lup's inbox and the dashboard's kind, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter; containers asked of `podman`, where given; each hook answered by `judge`, else with nothing, and each launch's modules served by `modules`, where given; `land` pushing through the remotes `remotes` makes over the delivery, where given, else through remotes telling no one, running in a launch's room through `rooms`, and reading a file's parse through `parser`, where given; a new main session told its bearings where `bearings` asks, its integration branch `dev`; what each runtime holds for a conversation read by `queues`, where given, a held call looking at it, and at its time limit, every few milliseconds."""
+    """A host service with lup's inbox and the dashboard's kind, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter; containers asked of `podman`, where given; each hook answered by `judge`, else with nothing, and each launch's modules served by `modules`, where given; `land` pushing through the remotes `remotes` makes over the delivery, where given, else through remotes telling no one, running in a launch's room through `rooms`, reading a file's parse through `parser`, and waking parked threads through what `coming` makes over the delivery, where given; a new main session told its bearings where `bearings` asks, its integration branch `dev`; what each runtime holds for a conversation read by `queues`, where given, a held call looking at it, and at its time limit, every few milliseconds."""
     known = cli.Adapters(known=cli.adapters())
     couriers = cli.Couriers(adapters=known)
     wakers = cli.Wakers(adapters=known)
@@ -544,6 +548,7 @@ def inboxed(
                 Remotes(say=said.append) if remotes is None else remotes(delivery),
                 Predating() if modules is None else modules,
                 waits=waits,
+                coming=None if coming is None else coming(delivery),
             )
         ],
         judge=judge or Quiet(),
@@ -8778,6 +8783,71 @@ def test_land_merges_a_branch_onto_dev_in_the_room_gates_the_merge_and_moves_dev
             *["git", "worktree", "remove", str(feat)],
         ],
     ]
+
+
+def test_land_wakes_each_thread_parked_until_the_branch_it_lands_or_a_commit_its_push_brings(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    feat, dev, shell = landings.feat, landings.dev, landings.shell
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    branch = shell.git(dev, "rev-parse", "feat")
+    moved_on(landings)
+    made: dict[str, Coming] = {}
+
+    def coming(delivery: Delivery) -> Coming:
+        return made.setdefault(
+            "coming", Coming(delivery=delivery, integration="dev", say=said.append)
+        )
+
+    def remotes(delivery: Delivery) -> Remotes:
+        async def landed(launch: Register, updates: list[Update]) -> None:
+            await coming(delivery).pushed(launch, updates)
+
+        return Remotes(say=said.append, landed=landed)
+
+    waiting = {
+        "after-feat": BranchLanded(branch="feat"),
+        "after-commit": CommitLanded(commit=branch[:10]),
+        "after-other": BranchLanded(branch="other"),
+    }
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        rooms=landings.room,
+        parser=landings.parser,
+        remotes=remotes,
+        coming=coming,
+    ) as delivery:
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        party = lander(landings, "claude")
+        concerns = delivery.concerns()
+        root = concerns.root(party)
+        for name, trigger in waiting.items():
+            concerns.parked(
+                party, concerns.opened(party, name, root, name=name), [trigger], ""
+            )
+        merging(landings, machine.host.launch("one").mcp)
+        stands = {
+            name: concerns.standing(concerns.named(landings.repository, name)).status
+            for name in waiting
+        }
+    woken = {
+        name: status.why
+        for name, status in stands.items()
+        if isinstance(status, ThreadReopened)
+    }
+    assert woken == {
+        "after-feat": "`feat` landed",
+        "after-commit": f"commit {branch[:10]} landed",
+    }
+    assert isinstance(stands["after-other"], Parked)
 
 
 def test_land_of_a_branch_leaves_alone_one_made_from_its_tip_worktree_and_all(

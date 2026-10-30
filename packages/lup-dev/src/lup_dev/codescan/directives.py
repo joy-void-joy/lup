@@ -32,7 +32,7 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Literal, Self, override
+from typing import TYPE_CHECKING, Annotated, Literal, Self, override
 from urllib.parse import urlparse
 
 from pydantic import Field, model_validator
@@ -45,10 +45,12 @@ from tenacity import (
 
 from lup.programs import ProgramFailedError, ProgramMissingError, run
 from lup.types import Model
-from lup_dev.codescan.conditions import Condition
 from lup_dev.forge.protocol import IssueState, Stated
 from lup_dev.host.client import RoomClient
 from lup_dev.host.protocol import HostError
+
+if TYPE_CHECKING:
+    from lup_dev.codescan.conditions import Condition
 
 
 class IssueRef(Model):
@@ -191,8 +193,14 @@ class Trackers(Model, arbitrary_types_allowed=True):
     issues: Issues | None
     """None where the tracker can't be reached here, so a deferral's issue isn't
     checked; the gate says why."""
-    conditions: dict[str, Condition]
-    """The project's conditions, by the names its conditions module binds."""
+    held: list[str] = []
+    """The project's conditions that hold, by the names its conditions modules
+    bind, each asked once (`holding`)."""
+
+
+def holding(conditions: dict[str, Condition]) -> list[str]:
+    """Return the names of `conditions` that hold, each asked once, in their order: what a deferral naming one, and a thread parked until one, wait on."""
+    return [name for name, condition in conditions.items() if condition.holds()]
 
 
 class Fired(Model):
@@ -389,7 +397,7 @@ class Defer(Comment):
         if gate is None:
             return []
         issue = closed(self.issue, gate)
-        due = self.when is not None and gate.conditions[self.when].holds()
+        due = self.when is not None and self.when in gate.held
         finish = "finish the work here, or point at the issue tracking what's left"
         closing = [
             problem("defer-closed", f"issue {issue} is closed", finish).model_copy(

@@ -45,7 +45,11 @@ gated branch, `dev` by default:
    remote's URL, so the gated branch's remote-tracking ref is moved to what
    landed after it (`tracked`), as `git push <remote>` moves it: the judge
    counts what those refs name as judged;
-7. each conversation still going that worked on a branch it landed, and hasn't
+7. each thread parked until a branch it landed on the integration branch, or
+   until an issue that closed, is woken (`lup_dev.policy.coming`), its holder
+   told; a commit it lands wakes one at its push (step 6), as every push the
+   host makes does;
+   each conversation still going that worked on a branch it landed, and hasn't
    said how the work felt, is invited to, once, beside their next call
    (`invited`): the landing is where a branch's work ends;
 8. the answer says, for each branch it landed, the `# lup: defer` comments its
@@ -197,6 +201,7 @@ from lup_dev.inbox.store import (
 )
 from lup_dev.layout import CheckoutLayout, GitDirectoryLayout, HostLayout, Layout
 from lup_dev.merging import Conflicted, Failed, Merged, Merging
+from lup_dev.policy.coming import Coming
 from lup_dev.policy.reviewed import Mark, Reviews
 from lup_dev.policy.roles import matches
 from lup_dev.policy.waits import Awaited, Wait, Waits
@@ -954,6 +959,9 @@ class Lander(Model, arbitrary_types_allowed=True):
     waits: Waits
     """The landings waiting on the operator, the service's: this one's among
     them while it waits."""
+    coming: Coming | None = None
+    """What wakes the threads parked until a branch it lands or an issue
+    closing (`lup_dev.policy.coming`); none wakes none."""
 
     @property
     def party(self) -> Conversation:
@@ -1109,6 +1117,10 @@ class Lander(Model, arbitrary_types_allowed=True):
             moved = [] if made.moved is None else [made.moved]
             return "\n".join([f"Not landed: {update.error}.{kept}{refusals}", *moved])
         untracked = await asyncio.to_thread(tracked, git, remote, onto, lands)
+        if self.coming is not None:
+            await self.coming.landed(
+                self.launch, short(onto), [short(each) for each in branches.landed]
+            )
         await self.invited(git, branches.landed, onto)
         deferrals = await self.deferrals(
             git,
@@ -2514,6 +2526,9 @@ class LandingTools(Model, RoomTools, arbitrary_types_allowed=True):
     waits: Waits = Field(default_factory=Waits)
     """The landings waiting on the operator, which the drawers read: the
     service's, shared with them."""
+    coming: Coming | None = None
+    """What wakes the threads parked until what a landing brings; none wakes
+    none."""
 
     @override
     def specs(self) -> list[ToolSpec]:
@@ -2546,6 +2561,7 @@ class LandingTools(Model, RoomTools, arbitrary_types_allowed=True):
             turns=self.turns,
             parser=self.parser,
             waits=self.waits,
+            coming=self.coming,
         )
         [tool] = [tool for tool in bound(lander) if tool.spec().name == name]
         match await tool.call(arguments):

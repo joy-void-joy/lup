@@ -30,7 +30,7 @@ The ledger keeps the work as a typed graph: nodes, the edges between them, and e
 
 What's in it is edges drawn to it:
 - **a member** (`In`): an item, or a check (`Check`), something only the operator can try;
-- **a part** of an item, moved in by its id (`Moved`): the operator's words. It counts as a member while its item stays in its own thread;
+- **a part** of an item, moved in by its id (`Moved`): the operator's words. It counts as a member while its item stays in its own thread, and waits on whoever answers for the thread until a node in the thread cites it, whoever wrote it (`answered`); a citation from outside is a reference, no answer. Each kind of edge says whether it cites a part (`Edge.cites`), as the inbox's citation does, so the ledger reads one without knowing the inbox's kinds;
 - **a reference** (`Refers`): an item of another thread that touches this one, shown here as a line pointing at it, and no member;
 - **its status** (`Status`), the latest one drawn:
   - parked until the first of its triggers comes: an issue closing, a branch or a commit landing, a conversation ending, a time, or a condition named as `defer`'s `when=` names one;
@@ -39,15 +39,17 @@ What's in it is edges drawn to it:
   - declined, which only the operator does (`Declined.by`);
   - reopened, by the operator, or by lup where what a parked thread waits for comes.
 
-`Standing.read` says three things, where it stands said once for any reader (`stood`):
+`Standing.read` says four things, where it stands said once for any reader (`stood`):
 - **Where it stands:** as its status says. While it's working or reopened, it waits on the operator where a member does. A check waits until they answer it (`Answered`), and each kind of node answers for itself, so a new kind changes nothing in the reading.
 - **What waits on the operator.**
+- **What waits on whoever answers for it:** each part moved in that nothing answers yet.
 - **Who's on it:** its holder, then each conversation that wrote what's in it.
 
 `Threads`, on the store, reads threads:
 - one, by its number or its name, or a repository's;
 - those under one;
 - who answers for one: its holder, or else the nearest thread above it that somebody holds, where a holder `live` says has ended holds nothing;
+- the threads parked, each by the status that parks it (`parked`);
 - what's in one, the references to it, and where it stands.
 
 A thread's sub-threads are read from its repository's threads by their `parent`, so a read covers at most one repository's threads.

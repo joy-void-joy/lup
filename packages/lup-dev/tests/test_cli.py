@@ -3,13 +3,15 @@
 import json
 import socketserver
 import threading
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Self
 
+import pytest
 from typer.testing import CliRunner
 
 from lup_dev import Requirement, Rules, cli
+from lup_dev.codescan.conditions import Condition
 from lup_dev.codescan.contract import Due
 from lup_dev.codescan.directives import GitHubIssues, IssueRef, Issues
 from lup_dev.codescan.engine import EngineChecker
@@ -19,6 +21,16 @@ from lup_dev.forge.protocol import IssueState, Stated
 from lup_dev.host.client import RoomClient
 from lup_dev.host.dashboard import DashboardShown, ShowDashboard
 from lup_dev.host.protocol import HostError, Refused, Reply, Request
+from lup_dev.host.timings import (
+    Browser,
+    Latencies,
+    Measured,
+    Report,
+    ShowTimings,
+    Timings,
+    TimingsStore,
+    Window,
+)
 from lup_dev.launch.room import qr_code
 from lup_dev.policy.importers import Conversation, ImportersPass
 from lup_dev.policy.verdicts import Verdict, VerdictLog
@@ -27,7 +39,6 @@ from lup_dev.stored import read_model
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    import pytest
     from conftest import FakeClock, Kit, Shell
 
     from lup_dev.layout import Layout
@@ -406,6 +417,46 @@ def test_rules_check_over_every_file_keeps_what_came_due_for_a_session(
     assert cleared == Due()
 
 
+class Counted(Condition):
+    """A condition that holds as `answer` says, keeping a mark in `asked` each time it's asked."""
+
+    answer: bool
+    asked: list[bool] = []
+
+    def holds(self) -> bool:
+        self.asked.append(self.answer)
+        return self.answer
+
+
+def test_rules_check_over_every_file_asks_each_declared_condition_once_and_keeps_those_that_held(
+    fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "src" / "pkg" / "core.py").write_text(
+        'x = 1  # lup: defer(when=ready, why="read the TTL")\n'
+        'y = 2  # lup: defer(when=ready, why="and its unit")\n'
+    )
+    ready = Counted(answer=True)
+    later = Counted(answer=False)
+
+    def conditions(root: Path, modules: list[str]) -> dict[str, Condition]:
+        return {"ready": ready, "later": later}
+
+    def issues(root: Path) -> Issues:
+        return Closed()
+
+    monkeypatch.setattr(cli, "loaded", conditions)
+    monkeypatch.setattr(cli, "GitHubIssues", issues)
+    monkeypatch.chdir(repo)
+    result = runner.invoke(cli.app, ["rules", "check"])
+    kept = read_model(repo / ".git" / "lup" / "due.json", Due)
+
+    assert result.exit_code == 0, result.output
+    assert kept is not None
+    assert kept.held == ["ready"]
+    assert [each.rule for each in kept.reminders] == ["defer-due", "defer-due"]
+    assert (ready.asked, later.asked) == ([True], [False])
+
+
 def test_rules_check_lists_an_ignore_whose_issue_closed_and_keeps_it_for_a_session(
     fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -655,3 +706,77 @@ def test_dashboard_refuses_an_address_the_dashboard_doesnt_listen_on(
     assert str(result.exception) == (
         "the dashboard doesn't listen on 10.8.0.3: it listens on 127.0.0.1, 10.8.0.2"
     )
+
+
+class ShowsTimings:
+    """A host service answering `ShowTimings` with `timings`, keeping each request."""
+
+    def __init__(self, timings: Timings) -> None:
+        self.timings = timings
+        self.asked: list[Request] = []
+
+    def ask[R: Reply](self, request: Request, reply: type[R]) -> R:
+        self.asked.append(request)
+        return reply.model_validate(self.timings.model_dump())
+
+
+def timed_report(session: str, at: datetime) -> Report:
+    """A report of a dashboard's session `session`, of one window ending at `at`, its typing keys timed."""
+    window = Window(
+        sequence=1,
+        start=at - timedelta(minutes=5),
+        end=at,
+        size={"lines": 15_203, "items": 40},
+        keys={"typing": Latencies(painted={16: 3, 48: 1}, under=4)},
+    )
+    browser = Browser(name="Firefox", version="144", system="Linux", device="desktop")
+    return Report(
+        page="dashboard", session=session, build="b1", browser=browser, windows=[window]
+    )
+
+
+def test_dashboard_timings_asks_the_host_in_a_room_as_on_it(
+    monkeypatch: pytest.MonkeyPatch, clock: FakeClock
+) -> None:
+    monkeypatch.setattr(cli, "SystemClock", lambda: clock)
+    kept = timed_report("a1", clock.now()).measured(clock.now())
+    host = ShowsTimings(Timings(page="dashboard", measured=kept, days=14))
+    monkeypatch.setattr(cli, "reading", lambda: host)
+    result = runner.invoke(cli.app, ["dashboard", "timings", "--since", "PT2H"])
+    assert result.exit_code == 0, result.output
+    assert host.asked == [ShowTimings(since=clock.now() - timedelta(hours=2))]
+    lines = result.output.splitlines()
+    assert lines[0].startswith(
+        "The dashboard's timings, kept 14 days on the host: 1 build, 1 page session, "
+    )
+    assert lines[2].endswith(", 1 session: Firefox 144 on Linux, a desktop.")
+    assert lines[3:] == [
+        "  The page: 15,203 lines, 40 items.",
+        "  Each kind of key, from going down to the next paint, in ms:",
+        "    kind    keys  p50  p75  p95  p99  max  waited p95  handled p95",
+        "    typing     8  <16   16   48   48   48           -            -",
+    ]
+
+
+def test_dashboard_timings_reads_a_demos_directory_whole_or_by_session(
+    monkeypatch: pytest.MonkeyPatch, clock: FakeClock, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(cli, "SystemClock", lambda: clock)
+    monkeypatch.setattr(cli, "reading", lambda: pytest.fail("the host was asked"))
+    store = TimingsStore(home=tmp_path / "timings")
+    store.keep(timed_report("a1", clock.now()), clock.now())
+    store.keep(timed_report("a2", clock.now()), clock.now())
+    kept = ["dashboard", "timings", "--kept", str(tmp_path / "timings")]
+    whole = runner.invoke(cli.app, [*kept, "--json"])
+    assert whole.exit_code == 0, whole.output
+    read = [Measured.model_validate_json(each) for each in whole.output.splitlines()]
+    assert [each.session for each in read] == ["a1", "a2"]
+    by_session = runner.invoke(cli.app, [*kept, "--sessions"])
+    assert by_session.exit_code == 0, by_session.output
+    headings = [
+        each for each in by_session.output.splitlines() if each.startswith("Session")
+    ]
+    assert [each.split(",")[0] for each in headings] == ["Session a1", "Session a2"]
+    wrong = runner.invoke(cli.app, [*kept, "--since", "yesterday"])
+    assert wrong.exit_code == 2
+    assert "--since takes an ISO 8601 time" in wrong.output

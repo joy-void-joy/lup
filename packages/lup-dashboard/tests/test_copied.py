@@ -39,6 +39,15 @@ from lup_dev.host.protocol import (
     SetHolding,
 )
 from lup_dev.host.records import Recorded
+from lup_dev.host.timings import (
+    Browser,
+    KeepTimings,
+    Latencies,
+    Report,
+    TimingsKept,
+    TimingsStore,
+    Window,
+)
 from lup_dev.host.workers import Viewed, Viewing
 from lup_dev.inbox import marks
 from lup_dev.inbox.marks import MarksFile, MarksMoved, MoveMarks, Moving, ReviewMark
@@ -643,6 +652,20 @@ def test_every_request_the_page_may_send_acts_on_the_copy_alone(tmp_path: Path) 
         holding_answered = AnswerApproval(number=standing.held, approved=False)
         assert ask(holding_answered, Settled).here
         reviewed = ask(SendDraft(), Reviewed)
+        measured = Report(
+            page="dashboard",
+            session="a1b2c3",
+            browser=Browser(name="Firefox", version="144", device="desktop"),
+            windows=[
+                Window(
+                    sequence=1,
+                    start=AT,
+                    end=AT,
+                    keys={"typing": Latencies(painted={16: 3})},
+                )
+            ],
+        )
+        assert ask(KeepTimings(report=measured), TimingsKept).windows == 1
         watched = asyncio.run(anext(aiter(copied.watch(ListInbox()))))
     finally:
         REACH.watched = None
@@ -662,6 +685,10 @@ def test_every_request_the_page_may_send_acts_on_the_copy_alone(tmp_path: Path) 
         ("h2", True),
     ]
     assert withheld.notices == []
+    timed = TimingsStore(home=copy.lup.host.timings).read(
+        "dashboard", datetime.now(UTC)
+    )
+    assert [each.session for each in timed] == ["a1b2c3"]
     inbox = Inbox.opened(Ledger.opened(LedgerLayout.of(copy.lup), KINDS))
     assert isinstance(inbox.item(standing.question).state, Answered)
     assert isinstance(inbox.item(standing.note).state, Done)

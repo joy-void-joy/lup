@@ -351,9 +351,9 @@ def test_the_thread_tool_opens_holds_hands_moves_parks_and_says_done(
     assert lag.holder == worker
     assert delivery.inbox.whereabouts[worker.key()].thread == lag.number
     assert delivery.inbox.whereabouts[main("s1").key()].thread is None
-    assert (
-        standing
-        == '@lag, "The cursor jumps", under @dev, held by `dev/fixer`: working.'
+    assert standing == (
+        '@lag, "The cursor jumps", under @dev, held by `dev/fixer`: working; 1 '
+        "part of the operator's words unanswered."
     )
     assert told(delivery, worker) == [
         'lup: `dev` handed you @lag, "The cursor jumps": you hold it, and what you send lands there.',
@@ -372,6 +372,77 @@ def test_the_thread_tool_opens_holds_hands_moves_parks_and_says_done(
     assert done == "@lag is done, for the operator to confirm."
     assert isinstance(delivery.concerns().standing(lag).status, Done)
     assert told(delivery, main("s1")) == []
+
+
+def test_a_part_moved_into_a_thread_is_answered_by_an_item_in_that_thread_citing_it(
+    delivery: Delivery,
+) -> None:
+    register = launched(delivery, "dev", "s1")
+    lead = speaker(delivery, register, main("s1"))
+    said(lead.note(ThreadedRemark(remark="Go.")))
+    worker = spawned(delivery, register, main("s1"), "a1", "fixer")
+    other = spawned(delivery, register, main("s1"), "a2", "reviewer")
+    review = asyncio.run(
+        delivery.posted(
+            Review(
+                covers=[1],
+                comments=[Comment(item=1, text="The cursor jumps when I type.")],
+                letters=[Letter(to=main("s1"), text="And the voice branch.")],
+            ),
+            Operator(),
+            main("s1"),
+            None,
+        )
+    )
+    said(
+        lead.thread(
+            Threading(
+                name="lag",
+                title="The cursor jumps",
+                move=[f"{review.number}.1"],
+                hand="fixer",
+            )
+        )
+    )
+    said(
+        lead.thread(
+            Threading(name="voice", title="The voice", move=[f"{review.number}.2"])
+        )
+    )
+    concerns = delivery.concerns()
+    lag = concerns.named(REPOSITORY, "lag")
+    voice = concerns.named(REPOSITORY, "voice")
+    before = [len(concerns.standing(each).unanswered) for each in [lag, voice]]
+
+    said(
+        speaker(delivery, register, other).note(
+            ThreadedRemark(remark=f"On @{review.number}.1: it's the IME.")
+        )
+    )
+    said(
+        speaker(delivery, register, other).note(
+            ThreadedRemark(remark=f"On @{review.number}.2: later.", thread="dev")
+        )
+    )
+    outside = [len(concerns.standing(each).unanswered) for each in [lag, voice]]
+    said(
+        speaker(delivery, register, worker).note(
+            ThreadedRemark(remark=f"Fixed @{review.number}.1: the IME's composition.")
+        )
+    )
+    said(lead.note(ThreadedRemark(remark=f"Moved @{review.number}.2 into @voice.")))
+    routed = len(concerns.standing(voice).unanswered)
+    said(
+        lead.note(
+            ThreadedRemark(remark=f"@{review.number}.2: next week.", thread="voice")
+        )
+    )
+
+    assert before == [1, 1]
+    assert outside == [1, 1]
+    assert concerns.standing(lag).unanswered == []
+    assert routed == 1
+    assert concerns.standing(voice).unanswered == []
 
 
 def test_the_thread_tool_refuses_before_doing_anything(delivery: Delivery) -> None:

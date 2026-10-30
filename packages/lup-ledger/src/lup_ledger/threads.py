@@ -129,12 +129,13 @@ class In(Edge):
         return isinstance(earlier, In)
 
 
-# lup: defer(issue=345, why="a moved part reads as open until the thread's holder answers it, once their answer is a node that can be drawn to it")
 class Moved(Edge):
     """A part of an item moved into a thread by its id: the operator's words there, which the thread's holder answers.
 
     A part counts as a member of the thread it's moved into, while its item
-    stays in its own. A part is in one thread at a time, like a node.
+    stays in its own. A part is in one thread at a time, like a node. It waits
+    on whoever answers for the thread until a node in the thread cites it
+    (`Edge.cites`), whoever wrote that node (`answered`).
     """
 
     kind: Literal["ledger:moved"] = "ledger:moved"
@@ -267,9 +268,9 @@ class Parked(Status):
 
     kind: Literal["ledger:parked"] = "ledger:parked"
     stands: ClassVar[State] = "parked"
-    # lup: defer(issue=345, why="nothing yet sees a trigger come due, which wakes the thread with a `Reopened`: the host a landing, an end and a time; `gh` an issue; the gate a condition")
     until: Annotated[list[Trigger], Field(min_length=1)]
-    """What wakes it."""
+    """What wakes it: the first to come draws a `Reopened` by lup, each seen
+    where lup already looks (`lup_dev.policy.coming`)."""
     why: str = ""
 
 
@@ -341,6 +342,25 @@ class Member(Model):
     drawn: list[SerializeAsAny[Edge]] = []
 
 
+def answered(member: Member, members: list[Member]) -> bool:
+    """Say whether `member`, a part of the operator's words moved into a thread whose members are `members`, is answered: a node in the thread cites it (`Edge.cites`), whoever wrote it.
+
+    The answer is where the operator reads it, beside their words: whoever
+    answers for the thread from above answers into it, naming it as they
+    send. A citation from outside the thread is a reference, no answer, so a
+    mover saying where they routed a part doesn't close it. A subagent's
+    counts, since a subagent starts on their parent's thread and the work their
+    parent handed them answers there. A node itself in the thread, never a
+    part, is what answers.
+    """
+    if member.part is None:
+        return False
+    inside = [each.node.number for each in members if each.part is None]
+    return any(
+        each.cites(member.part) and each.source in inside for each in member.drawn
+    )
+
+
 class Standing(Model):
     """Where a thread stands, as read from the edges drawn to it and to what's in it."""
 
@@ -350,6 +370,9 @@ class Standing(Model):
     a parked thread waits for, what to try); none where nothing has."""
     waiting: list[Member] = []
     """What in it waits on the operator, oldest first, whatever its status."""
+    unanswered: list[Member] = []
+    """The parts of the operator's words moved into it that nothing answers yet
+    (`answered`), oldest first: each waits on whoever answers for the thread."""
     on: list[Conversation] = []
     """Who's on it: its holder first, then each conversation that wrote what's in it."""
 
@@ -368,9 +391,15 @@ class Standing(Model):
         writers = [
             each.node.by for each in members if isinstance(each.node.by, Conversation)
         ]
+        unanswered = [
+            each
+            for each in members
+            if each.part is not None and not answered(each, members)
+        ]
         return cls(
             state=state,
             status=status,
             waiting=waiting,
+            unanswered=unanswered,
             on=list(dict.fromkeys([*holder, *writers])),
         )

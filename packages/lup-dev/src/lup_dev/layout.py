@@ -578,6 +578,11 @@ class HostLayout(Model):
         """The token the dashboard's API wants (`host/dashboard.py`), kept in lup's state, which no room mounts, so a page left open outlasts a restart."""
         return self.state / "dashboard.token"
 
+    @property
+    def timings(self) -> Path:
+        """What pages measured of themselves in the operator's browser, the dashboard's among them (`host/timings.py`): a directory per page, kept 14 days in lup's state, which `host-copy` never copies."""
+        return self.state / "timings"
+
     def launch(self, launch: str) -> LaunchSockets:
         """Say where launch `launch`'s sockets are."""
         return LaunchSockets(directory=self.launches / launch)

@@ -57,6 +57,7 @@ from lup_dev.codescan.directives import (
     HostIssues,
     Issues,
     Trackers,
+    holding,
     without,
 )
 from lup_dev.codescan.engine import EngineChecker, EngineError
@@ -119,6 +120,13 @@ from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Called, Recorded
 from lup_dev.host.rooms import OwnLaunch, OwnLaunches, RoomRoute, ShowOwnLaunch
 from lup_dev.host.service import Answerer, Companion, HostService, Naming, Route
+from lup_dev.host.timings import (
+    ShowTimings,
+    Summary,
+    Timings,
+    TimingsStore,
+)
+from lup_dev.host.timings import routes as timings_routes
 from lup_dev.host.views import ModuleViews
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import JudgeHook, WorkerJudge, Workers, WorkersAsking
@@ -239,10 +247,11 @@ from lup_dev.layout import (
     Layout,
     RoomPaths,
 )
-from lup_dev.listing import given, latest, many, unlisted
+from lup_dev.listing import given, latest, many, moment, unlisted
 from lup_dev.merging import Merging, merged
 from lup_dev.migration import HostRuntime, Migrating
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
+from lup_dev.policy.coming import Coming
 from lup_dev.policy.flags import InboxFlagging
 from lup_dev.policy.holds import InboxAnnouncing, Response, answer
 from lup_dev.policy.importers import BackgroundSpawner
@@ -262,7 +271,7 @@ from lup_dev.private.scanning import UNAPPROVED, UNSELECTED
 from lup_dev.private.scanning import scanned as read_for_values
 from lup_dev.private.withheld import Facts, HostFacts, Withheld, kept
 from lup_dev.remote.config import Gating
-from lup_dev.remote.protocol import Remotes
+from lup_dev.remote.protocol import Remotes, Update
 from lup_dev.remote.protocol import routes as remote_routes
 from lup_dev.settings import LupDevSettings, TerminalVariables
 from lup_dev.staging import Changed, Lines, StagingError
@@ -287,6 +296,7 @@ app = typer.Typer(no_args_is_help=True, help="Develop a project with agents.")
 rules = typer.Typer(no_args_is_help=True, help="lup's code rules.")
 host = typer.Typer(help="lup's host service, which rooms call.")
 inbox = typer.Typer(help="What your agents tell and ask you, and your answers.")
+dashboard = typer.Typer()
 private = typer.Typer(
     no_args_is_help=True,
     help="What never leaves under your name: the `Private` module's values.",
@@ -298,6 +308,7 @@ account = typer.Typer(
 app.add_typer(rules, name="rules")
 app.add_typer(host, name="host")
 app.add_typer(inbox, name="inbox")
+app.add_typer(dashboard, name="dashboard")
 app.add_typer(private, name="private")
 app.add_typer(account, name="account")
 
@@ -536,7 +547,7 @@ def control_routes(
     *,
     waits: Waits,
 ) -> list[Route]:
-    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; the dashboard's, `dashboard`'s address; the drawer's, what a branch changed since the operator approved it, read from lup's state at `layout`, each file a landing waits on in `waits` held there; the landings waiting; the review marks, as `delivery`'s inbox holds them; the review's threads; and a module's view the dashboard shows, through `views`, watched at its own triggers, where it's given."""
+    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; the dashboard's, `dashboard`'s address; the drawer's, what a branch changed since the operator approved it, read from lup's state at `layout`, each file a landing waits on in `waits` held there; the landings waiting; the review marks, as `delivery`'s inbox holds them; the review's threads; what a page measured of itself, kept in lup's state; and a module's view the dashboard shows, through `views`, watched at its own triggers, where it's given."""
     return [
         *inbox_routes(delivery, recorded),
         Route.to(dashboard_shown(dashboard)),
@@ -544,6 +555,7 @@ def control_routes(
         *waits_routes(waits),
         *marks_routes(delivery.inbox.marks, delivery.clock, delivery.inbox.changes),
         *threaded_routes(delivery),
+        *timings_routes(TimingsStore(home=layout.host.timings), delivery.clock),
         *([] if views is None else [Route.reading(views, watch=views.watched)]),
     ]
 
@@ -594,15 +606,24 @@ def host_serve(context: typer.Context) -> None:
         approved=partial(approved_command, layout),
     )
     asking = WorkersAsking(workers=workers)
+    coming = Coming(
+        delivery=delivery,
+        integration=settings.lup_integration_branch,
+        say=typer.echo,
+    )
+    delivery.starting = coming.started
     sweeping = Sweeping(
         layout=layout,
         host=host_client(),
         podman=podman,
         say=typer.echo,
         running=workers.commands,
+        coming=coming,
     )
     remotes = Remotes(
-        say=typer.echo, landed=partial(proposed_after, delivery), modules=workers
+        say=typer.echo,
+        landed=partial(after_push, delivery, coming),
+        modules=workers,
     )
     waits = Waits(changes=changes)
     delivery.landing = waits.holding
@@ -626,7 +647,9 @@ def host_serve(context: typer.Context) -> None:
             ModuleViews(asking=asking, changes=changes, say=typer.echo),
             waits=waits,
         ),
-        tools=room_tools(delivery, layout, remotes, workers, waits=waits),
+        tools=room_tools(
+            delivery, layout, remotes, workers, waits=waits, coming=coming
+        ),
         room_routes=[
             *remote_routes(remotes),
             *clipboard_routes(Desktop.of(settings)),
@@ -670,6 +693,14 @@ def typed_reading(
 ) -> list[ChangedFile]:
     """Read an approval's files wholly, types and lup's rules included, as trust in the worktree it was asked from reads them, on this machine (`Trust.typed`)."""
     return machine_trust(worktree, []).typed(approval.repository, files)
+
+
+async def after_push(
+    delivery: Delivery, coming: Coming, launch: Register, updates: list[Update]
+) -> None:
+    """Once a launch's push updated `updates`: put the approval of the host zone at the integration branch's tip in the operator's inbox where it moved there (`proposed_after`), and wake each thread parked until a commit it brings (`Coming.pushed`)."""
+    await proposed_after(delivery, launch, [each.destination for each in updates])
+    await coming.pushed(launch, updates)
 
 
 async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) -> None:
@@ -719,8 +750,9 @@ def room_tools(
     modules: LaunchModules,
     *,
     waits: Waits,
+    coming: Coming | None = None,
 ) -> list[RoomTools]:
-    """List the core's tools the host service serves each launched session: the inbox's; the judge's, reading lup's state at `layout` by the delivery's clock, and running `quiet` in each launch's repository's process (`modules`); and `land`, pushing through `remotes` onto the integration branch the settings name, each landing waiting kept in `waits`, which the drawers read."""
+    """List the core's tools the host service serves each launched session: the inbox's; the judge's, reading lup's state at `layout` by the delivery's clock, and running `quiet` in each launch's repository's process (`modules`); and `land`, pushing through `remotes` onto the integration branch the settings name, each landing waiting kept in `waits`, which the drawers read, waking through `coming` the threads parked until what it lands."""
     return [
         InboxTools(delivery=delivery),
         JudgeTools(layout=layout, clock=delivery.clock, modules=modules),
@@ -730,6 +762,7 @@ def room_tools(
             layout=layout,
             integration=LupDevSettings().lup_integration_branch,
             waits=waits,
+            coming=coming,
         ),
     ]
 
@@ -1094,8 +1127,9 @@ def conversations(talkers: list[Talker], *, every: bool) -> list[str]:
     return [line for each in talkers if each.parent is None for line in shown(each, 1)]
 
 
-@app.command("dashboard")
+@dashboard.callback(invoke_without_command=True)
 def dashboard_open(
+    context: typer.Context,
     *,
     opened: Annotated[
         bool,
@@ -1123,8 +1157,11 @@ def dashboard_open(
     dashboard listens on an address of this machine's beyond localhost, as its
     WireGuard one (`LUP_DASHBOARD_ADDRESSES`), it prints that address instead,
     drawn as a QR code for your phone to scan where `qrencode` is installed:
-    the page, opened once, keeps the token as its cookie.
+    the page, opened once, keeps the token as its cookie. `timings` says how
+    long its keys took to reach the screen in the browsers you used it in.
     """
+    if context.invoked_subcommand is not None:
+        return
     shown = answering("the dashboard").ask(ShowDashboard(), DashboardShown)
     chosen = shown.chosen(address)
     typer.echo(chosen)
@@ -1136,6 +1173,84 @@ def dashboard_open(
         )
     if opened:
         webbrowser.open(shown.address)
+
+
+@dashboard.command("timings")
+def dashboard_timings(
+    *,
+    since: Annotated[
+        str | None,
+        typer.Option(
+            help=(
+                "Only what the host received from this time on: an ISO 8601 time, "
+                "such as 2026-10-30T09:30 (without a zone, this machine's), or an "
+                "ISO 8601 duration back from now, such as PT2H or P3D."
+            )
+        ),
+    ] = None,
+    sessions: Annotated[
+        bool,
+        typer.Option(
+            "--sessions",
+            help=(
+                "Each page session apart, a page loaded, with a line for each window "
+                "of it: the page's size then, and its keys' median and slowest."
+            ),
+        ),
+    ] = False,
+    as_json: Annotated[
+        bool,
+        typer.Option(
+            "--json", help="Each window as the host keeps it, a line of JSON each."
+        ),
+    ] = False,
+    kept: Annotated[
+        Path | None,
+        typer.Option(
+            help=(
+                "Read the timings kept in this directory, laid out as the host keeps "
+                "them in lup's state, as a demo keeps its page's "
+                "(`lup-dashboard demo --timings`), rather than asking the host."
+            )
+        ),
+    ] = None,
+) -> None:
+    """Say how long each key took to reach the screen in the browsers the dashboard was used in, by the page's build.
+
+    The page measures itself as it's used, from the browser's Event Timing
+    API, and sends what it measured every 5 minutes and as its tab is hidden;
+    the host keeps it 14 days (`docs/dashboard.md`, *Its timings*). Each
+    build of the page, oldest first, with the browsers it ran in, the page's
+    size, and for each kind of key how many and the percentiles of how long
+    each took from going down to the next paint, `<16` for one under the
+    browser's floor, with how long the slowest waited before the page handled
+    them and in its handlers; the long animation frames and what ran in them,
+    where the browser reports them; and what each browser couldn't measure.
+    Timings and sizes only, never what was typed or shown, so an agent's
+    session runs it too, in any room.
+    """
+    now = SystemClock().now()
+    try:
+        start = moment(given(since), now)
+    except ValueError as unread:
+        message = (
+            "--since takes an ISO 8601 time, such as 2026-10-30T09:30, or an ISO "
+            "8601 duration, such as PT2H"
+        )
+        raise typer.BadParameter(message) from unread
+    asked = ShowTimings(since=start)
+    if kept is None:
+        timings = reading().ask(asked, Timings)
+    else:
+        store = TimingsStore(home=kept)
+        measured = store.read(asked.page, now, asked.since)
+        timings = Timings(page=asked.page, measured=measured, days=store.days)
+    if as_json:
+        for each in timings.measured:
+            typer.echo(each.model_dump_json())
+        return
+    for line in Summary().said(timings, by_session=sessions):
+        typer.echo(line)
 
 
 @inbox.callback(invoke_without_command=True)
@@ -1809,7 +1924,7 @@ def swept(
 
 
 class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
-    """The sweep beside the host service: once it listens, then every `every`, so a launch whose launcher and container are gone is ended though no launch follows it (`swept`), and a repository's approved copy no process runs and none judges is removed (`lup_dev/copies.py`).
+    """The sweep beside the host service: once it listens, then every `every`, so a launch whose launcher and container are gone is ended though no launch follows it (`swept`), a repository's approved copy no process runs and none judges is removed (`lup_dev/copies.py`), and each thread parked until a time that came, a conversation that ended or a condition the gate found holding is woken (`Coming.swept`): the one moment the host looks of its own accord, whether a session runs or not.
 
     It asks the service as a launch does, from a thread, so the service goes on
     answering meanwhile; its end waits for a sweep under way, so none outlives
@@ -1826,6 +1941,9 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
     """The commands of the repositories' processes, running or starting, their
     links followed: the copies in use."""
     every: timedelta = timedelta(seconds=30)
+    coming: Coming | None = None
+    """What wakes the threads parked until what the sweep sees come; none wakes
+    none."""
     pause: Callable[[float], Awaitable[None]] = asyncio.sleep
     """Waits the seconds between two sweeps; a test gives its own."""
     stopping: asyncio.Event = Field(default_factory=asyncio.Event)
@@ -1866,6 +1984,17 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
             told = "".join(traceback.format_exception(failed))
             self.say(f"{failing}:\n{told}")
         await self.pruned()
+        self.woken()
+
+    def woken(self) -> None:
+        """Wake each thread parked until what the sweep sees come (`Coming.swept`), on the event loop, as the inbox is written; where it fails, say why, with its traceback, and the next sweep goes on."""
+        if self.coming is None:
+            return
+        try:
+            self.coming.swept()
+        except Exception as failed:
+            told = "".join(traceback.format_exception(failed))
+            self.say(f"Waking the threads parked until what came failed:\n{told}")
 
     async def pruned(self) -> None:
         """Remove each repository's copies no process runs and none judges, saying each; where one can't be, say why, and the next sweep tries again."""
@@ -2580,6 +2709,8 @@ class Scanned(Model):
     unread: list[Path] = []
     """The files left out, which resolve outside the worktree, its links
     followed: lup doesn't read them (`lup_dev.confined`)."""
+    held: list[str] = []
+    """The conditions the project declares that held, each asked once."""
 
 
 def scanned(paths: list[Path] | None, *, issues: bool) -> Scanned:
@@ -2644,9 +2775,8 @@ def scanned(paths: list[Path] | None, *, issues: bool) -> Scanned:
             else GitHubIssues(root=root)
         )
         unreachable = tracker.unreachable()
-    gate = Trackers(
-        issues=tracker if unreachable is None else None, conditions=conditions
-    )
+    held = holding(conditions)
+    gate = Trackers(issues=tracker if unreachable is None else None, held=held)
 
     def found(path: Path) -> list[Finding]:
         report = next(each for each in reports if each.path == path)
@@ -2666,7 +2796,11 @@ def scanned(paths: list[Path] | None, *, issues: bool) -> Scanned:
 
     findings = [each for path in files for each in found(path)]
     return Scanned(
-        files=files, findings=findings, unreachable=unreachable, unread=unread
+        files=files,
+        findings=findings,
+        unreachable=unreachable,
+        unread=unread,
+        held=held,
     )
 
 
@@ -2694,7 +2828,9 @@ def rules_check(
     paths, it checks every such file in the worktree, as the gate's `rules` step
     runs it. An `ignore` that keeps nothing fails it too, until `lup-dev rules
     fix` removes it. What came due is kept, over every file and where every
-    issue was asked, for a session to be told at their start.
+    issue was asked, for a session to be told at their start, with each
+    condition the project declares that held, which wakes a thread parked
+    until it.
     """
     found = scanned(paths, issues=True)
     if found.unread:
@@ -2704,7 +2840,9 @@ def rules_check(
         typer.echo("lup checked no files.")
         return
     failing = [each for each in found.findings if not each.reminder]
-    due = Due(reminders=[each for each in found.findings if each.reminder])
+    due = Due(
+        reminders=[each for each in found.findings if each.reminder], held=found.held
+    )
     for line in (line for each in failing for line in finding_lines(each, "")):
         typer.echo(line)
     if due.reminders:

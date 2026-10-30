@@ -636,6 +636,30 @@ export function feed(keys: readonly string[]): boolean {
     return true;
 }
 
+/** What the editor holds of the keys typed so far, as a key goes down to it. */
+export interface KeyState {
+    /** Whether a comment is being written: vim's insert mode. */
+    inserting: boolean;
+    /** The keys of a command begun, as vim's keymap names each (`<Space>`, `z`). */
+    held: readonly string[];
+    /** Whether the key goes to vim's own prompt, as `/`'s query, rather than the text. */
+    prompt: boolean;
+}
+
+/**
+ * Return what the editor last made holds of the keys typed so far, as a key goes down at `target`, before vim has it:
+ * none where it goes elsewhere than the editor, as to the palette or the overview. What the page's timings name a key's
+ * kind by (`keyKind`, `keys.ts`).
+ */
+export function keyState(target: EventTarget | null): KeyState | null {
+    const cm = fed === null ? null : vimOf(fed);
+    if (fed === null || cm === null || !(target instanceof Node) || !fed.dom.contains(target)) {
+        return null;
+    }
+    const vim = cm.state.vim;
+    return { inserting: vim.insertMode, held: vim.inputState.keyBuffer, prompt: target !== fed.contentDOM };
+}
+
 /** Return the editor's vim, once it's started. */
 export function vimOf(view: EditorView): CodeMirrorV | null {
     const cm = getCM(view);

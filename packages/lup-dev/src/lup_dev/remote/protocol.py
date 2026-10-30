@@ -395,11 +395,12 @@ class Remotes(Model, arbitrary_types_allowed=True):
     """Where each push and fetch is said: the service's log."""
     run: Callable[[Program], Awaitable[Ran]] = executed
     """Runs one git command to its end on the service's event loop."""
-    landed: Callable[[Register, list[str]], Awaitable[None]] | None = None
-    """Told which refs a launch's push updated, once it's done and before its
-    room hears: a push moving the integration branch puts the approval of the
-    host zone at its tip in the operator's inbox (`cli.py`). None tells
-    nothing."""
+    landed: Callable[[Register, list[Update]], Awaitable[None]] | None = None
+    """Told what a launch's push updated, each ref with the object it names,
+    once it's done and before its room hears: a push moving the integration
+    branch puts the approval of the host zone at its tip in the operator's
+    inbox, and wakes each thread parked until a commit it brings (`cli.py`).
+    None tells nothing."""
     modules: LaunchModules | None = None
     """Each launch's modules, whose hooks at `Publishing` see what a push would
     publish before git runs; none asks nothing, for a service serving no
@@ -754,7 +755,10 @@ class PushHandler(Model, RoomHandler[Pushing]):
         )
         updated = [each.destination for each in outcome.updates if each.error is None]
         if self.remotes.landed is not None and updated and not request.dry_run:
-            await self.remotes.landed(launch, updated)
+            await self.remotes.landed(
+                launch,
+                [each for each in request.updates if each.destination in updated],
+            )
         return outcome
 
     async def merging(

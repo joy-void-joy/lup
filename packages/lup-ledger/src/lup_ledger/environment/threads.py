@@ -12,7 +12,16 @@ from typing import TYPE_CHECKING
 from lup.types import Model
 from lup_ledger.environment.store import Ledger
 from lup_ledger.records import Edge, Node
-from lup_ledger.threads import In, Member, Moved, Refers, Standing, Thread
+from lup_ledger.threads import (
+    In,
+    Member,
+    Moved,
+    Parked,
+    Refers,
+    Standing,
+    Status,
+    Thread,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -76,7 +85,7 @@ class Threads(Model, arbitrary_types_allowed=True):
         return held(thread)
 
     def members(self, number: int) -> list[Member]:
-        """Return what's in thread `number`, in the order it came in: each node in it, and each part moved into it, with the edges drawn to its node."""
+        """Return what's in thread `number`, in the order it came in: each node in it, and each part moved into it, with the edges drawn to its node that stand, none a later one replaced."""
         with self.ledger.together():
             entries = self.ledger.drawn_to(number, Edge, current=True)
 
@@ -91,7 +100,7 @@ class Threads(Model, arbitrary_types_allowed=True):
                 return Member(
                     node=self.ledger.node(source, Node),
                     part=part,
-                    drawn=self.ledger.drawn_to(source, Edge),
+                    drawn=self.ledger.drawn_to(source, Edge, current=True),
                 )
 
             found = [member(each) for each in entries]
@@ -100,6 +109,30 @@ class Threads(Model, arbitrary_types_allowed=True):
     def references(self, number: int) -> list[Refers]:
         """Return the references to thread `number` from items of other threads that touch it, in the order drawn."""
         return self.ledger.drawn_to(number, Refers)
+
+    def parked(self, repository: Path | None = None) -> list[Parked]:
+        """Return what each parked thread waits for, the status it stands at, of `repository`, or of every one where it's none, in the order each was parked.
+
+        Only the latest `Parked` drawn to each thread is read against its
+        status, so a thread parked many times costs one read.
+        """
+        with self.ledger.together():
+            found = [
+                each
+                for each in self.ledger.drawn_of(Parked)
+                if repository is None or each.repository == repository
+            ]
+            latest = {each.target: place for place, each in enumerate(found)}
+            return [
+                found[place]
+                for place in sorted(latest.values())
+                if self.status(found[place].target) == found[place]
+            ]
+
+    def status(self, number: int) -> Status | None:
+        """Return the latest edge saying where thread `number` stands; none where nothing has."""
+        statuses = self.ledger.drawn_to(number, Status)
+        return statuses[-1] if statuses else None
 
     def standing(self, number: int) -> Standing:
         """Return where thread `number` stands, read from the edges drawn to it and to what's in it (`Standing.read`)."""
