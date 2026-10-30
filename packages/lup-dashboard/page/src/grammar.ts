@@ -535,11 +535,12 @@ function offered(draft: Draft, act: Extract<Act, { kind: "mark" }>, verb: string
  * or remark written on a block offering what a comment on it implies, as a file of "since you approved" offers marking
  * it reviewed, or a file held at landing offers declining its landing, that offer marked by its verb on the block, at the
  * version the comment was written on, the latest written on it; none where the draft marks the block by that offer's
- * action already, by any verb, the operator's own mark the later word.
+ * action already, by any verb, the operator's own mark the later word. And each thread they acted in read up to what the
+ * review shows of it (`threadsRead`), as Space d on its banner reads it.
  * Shown as the draft's own marks are, and kept in the draft as it's sent, so Ctrl+Enter applies them with the rest.
  */
 export function implied(laidOut: Laid, draft: Draft): Marked[] {
-    const found = new Map<string, Marked>();
+    const found = new Map<string, Marked>(threadsRead(laidOut, draft).map((each) => [each.id, each]));
     for (const each of laidOut.written) {
         const quote = "quote" in each ? each.quote : null;
         const block = quote?.block ?? "";
@@ -567,6 +568,68 @@ export function implied(laidOut: Laid, draft: Draft): Marked[] {
         }
     }
     return [...found.values()];
+}
+
+/**
+ * Return each thread the operator acted in, as the draft says, read as far as the review shows it, its review mark moved
+ * there as the reply is sent (`readAct`), so only what comes after is new to them, the latest few they read shown before
+ * it: an item in it marked done or declined, or commented on, a message written on it, a check in it ticked or answered.
+ * Read up to the last item it shows before the first news they leave unread, in the order the items came, so moving it
+ * never takes news they haven't read out of what's new, as Space d on its banner reads it with it. An item, a check, is
+ * the innermost thread's it's laid out in. None for a thread they mark read already, nor one showing no item before
+ * what they leave unread.
+ */
+export function threadsRead(laidOut: Laid, draft: Draft): Marked[] {
+    const threads = laidOut.groups.filter((each) => each.thread !== null);
+    // The innermost thread laid out at `at`: the latest begun of those it's within.
+    const threadAt = (at: number): Group | undefined => threads.findLast((each) => each.banner.from <= at && at <= each.end);
+    const acted = new Set<number>();
+    const items = new Set([
+        ...(draft.done ?? []),
+        ...(draft.declined ?? []),
+        ...(draft.comments ?? []).filter((each) => each.text.trim() !== "").map((each) => each.item),
+    ]);
+    const ticked = new Set(
+        (draft.marks ?? []).filter((each) => each.action === "inbox-check-answer").map((each) => Number((each.argument as { number?: number }).number ?? 0)),
+    );
+    for (const region of laidOut.regions) {
+        const thread = items.has(region.item.number) ? threadAt(region.header.from)?.thread : undefined;
+        if (thread != null) {
+            acted.add(thread.thread.number);
+        }
+    }
+    for (const check of laidOut.checks) {
+        if (items.has(check.check.check.number) || ticked.has(check.check.check.number)) {
+            acted.add(check.thread);
+        }
+    }
+    for (const letter of (draft.letters ?? []).filter((each) => each.text.trim() !== "")) {
+        if (letter.thread != null) {
+            acted.add(letter.thread);
+        }
+    }
+    const marked: Marked[] = [];
+    for (const group of threads) {
+        const read = group.thread;
+        if (read === null || !acted.has(read.thread.number)) {
+            continue;
+        }
+        const node = findNode(laidOut.nodes, `group ${group.place}`);
+        const shown = laidOut.regions
+            .filter((each) => threadAt(each.header.from) === group)
+            .map((each) => each.item)
+            .toSorted((a, b) => a.number - b.number);
+        const unread = shown.findIndex((each) => news(each) && each.state.state === "waiting" && !items.has(each.number));
+        const upTo = (unread < 0 ? shown : shown.slice(0, unread)).at(-1);
+        if (node === undefined || upTo === undefined || (draft.marks ?? []).some((each) => each.block === node.id && each.action === "review-mark")) {
+            continue;
+        }
+        const act = readAct(read, node.id, upTo.number);
+        if (act.kind === "mark") {
+            marked.push({ id: `implied read ${read.thread.number}`, action: act.offer.action, argument: act.offer.argument ?? {}, verb: CORE.done, says: act.offer.says, block: act.block, version: null });
+        }
+    }
+    return marked;
 }
 
 /** What moving a review mark is given (`MoveMarks`, one of its marks): the repository, the module, its key and how far. */

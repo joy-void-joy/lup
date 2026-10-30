@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { everyone, launches, ring, running, type Activity, type Agent, type Running } from "./agents";
-import { ask, type Asked, type OfCopy, type Replied } from "./api";
+import { ApiError, ask, type Asked, type OfCopy, type Replied } from "./api";
 import { cited } from "./comments";
 import { useNow, useSame, useThreads, useViews, useWatched, type ThreadAsked } from "./hooks";
 import { movedSaid, type Marked, type Moved } from "./grammar";
@@ -177,6 +177,9 @@ export function App() {
         }, GATHERED);
     }, []);
     const [said, setSaid] = useState<string | null>(null);
+    // Where the reply's sending stands, said under the review: being sent, or why the last Ctrl+Enter sent nothing.
+    const [sending, setSending] = useState<Sending | null>(null);
+    const inFlight = useRef(false);
     const [demo, setDemo] = useState(false);
     // What a demo serving a copy of the operator's dashboard state says of it (`About.copied`); none over stand-in data,
     // and for the dashboard. Held in a ref too, for the drawers' reading, which says in a drawer why the copy refused it.
@@ -569,6 +572,8 @@ export function App() {
     }, []);
 
     const change = useCallback((next: Draft, typedOnly: boolean = false) => {
+        // What the last Ctrl+Enter said of a reply as it was goes with it; one being sent is said until it's sent.
+        setSending((before) => (before === null || before.state === "sending" ? before : null));
         if (typing.current !== null) {
             clearTimeout(typing.current);
             typing.current = null;
@@ -972,16 +977,25 @@ export function App() {
     /**
      * Send the reply: the draft kept as it stands, then its part the inbox sends, the comments, messages and remarks and
      * each item marked done, declined or read (`inbox-send-draft`), then each other mark applied (`applying`), and the
-     * draft kept without those applied. Where the inbox refuses its part, nothing is sent and every mark stays; where a
-     * mark is refused after, what came before is sent, and that mark stays drafted, said.
+     * draft kept without those applied. Where the inbox refuses its part, nothing is sent and every mark stays, and why is
+     * returned; where a mark is refused after, what came before is sent, and that mark stays drafted, said. Throws where
+     * the dashboard or the host can't be reached.
      */
-    async function sent() {
+    async function sent(): Promise<string | null> {
         if (keeping.current !== null) {
             clearTimeout(keeping.current);
+            keeping.current = null;
         }
         // What's sent is what the host keeps: a draft it refuses to keep isn't sent, lest the last one kept go instead;
-        // the marks the operator's comments imply among its own, applied with them.
+        // the marks the operator's comments imply among its own, applied with them. What was typed is taken now, and no
+        // keep or layout waiting brings the draft as it was before the send back after it.
         const drafted = typed.current ?? draft;
+        if (typing.current !== null) {
+            clearTimeout(typing.current);
+            typing.current = null;
+        }
+        typed.current = null;
+        pending.current = null;
         const whole = pruned(implied.length === 0 ? drafted : { ...drafted, marks: [...(drafted.marks ?? []), ...implied] });
         // A comment on a check is the operator's answer to it, which the page sends apart: the inbox knows no item by its
         // number.
@@ -989,15 +1003,13 @@ export function App() {
         const now = { ...whole, comments: (whole.comments ?? []).filter((each) => !checks.has(each.item)) };
         const kept = await ask({ kind: "inbox-keep-draft", draft: now });
         if (kept.kind === "refused") {
-            setSaid(kept.error);
-            return;
+            return kept.error;
         }
         const told: string[] = [];
         if (covered(now).length > 0 || messages(now).length > 0 || remarks(now).length > 0) {
             const answer = await ask({ kind: "inbox-send-draft" });
             if (answer.kind === "refused") {
-                setSaid(answer.error);
-                return;
+                return answer.error;
             }
             if (answer.kind === "inbox-reviewed") {
                 told.push(...reviewSaid(answer, called));
@@ -1032,6 +1044,43 @@ export function App() {
         setSaid(`Sent: ${told.join("; ") || "nothing"}.`);
         setDraft(left);
         setEpoch((before) => before + 1);
+        return null;
+    }
+
+    /**
+     * Send the reply as Ctrl+Enter asks, saying under the review what comes of it, never nothing: that it's being sent,
+     * at once, as the host may take seconds to answer; that one is being sent still, at a second press, which sends
+     * nothing more; that nothing is drafted; and, where the host refuses it or can't be reached, as while lup restarts,
+     * why, the draft kept, for the next Ctrl+Enter to send.
+     */
+    async function sendReply() {
+        if (inFlight.current) {
+            setSending({ state: "sending", text: "Still sending your reply: what came of it is said here once the host answers." });
+            return;
+        }
+        if (going.length === 0) {
+            setSending({ state: "nothing", text: "Nothing to send: no reply drafted." });
+            return;
+        }
+        inFlight.current = true;
+        setSending({ state: "sending", text: "Sending your reply…" });
+        try {
+            const refused = await sent();
+            setSending(refused === null ? null : { state: "failed", text: notSent(refused) });
+        } catch (error) {
+            setSending({ state: "failed", text: notSent(unreached(error)) });
+            // Where the host sent part of it before it went, what's left drafted is what it keeps.
+            void ask({ kind: "inbox-draft" })
+                .then((answer) => {
+                    if (answer.kind === "inbox-drafted") {
+                        setDraft(answer.draft);
+                        setEpoch((before) => before + 1);
+                    }
+                })
+                .catch(() => undefined);
+        } finally {
+            inFlight.current = false;
+        }
     }
 
     /** Go to an agent's group, as the palette asks. */
@@ -1088,9 +1137,7 @@ export function App() {
                         around={around}
                         drawers={drawers}
                         send={() => {
-                            if (going.length > 0) {
-                                void sent();
-                            }
+                            void sendReply();
                         }}
                         opened={opened}
                         jump={jump}
@@ -1117,6 +1164,11 @@ export function App() {
                         sizing={sizing}
                     />
                     <div className="status">
+                        {sending === null ? null : (
+                            <span className={sending.state === "failed" ? "error" : "sending"} data-sending={sending.state}>
+                                {sending.text}{" "}
+                            </span>
+                        )}
                         {going.length === 0 ? (
                             <span className="muted">No reply drafted.</span>
                         ) : (
@@ -1170,6 +1222,38 @@ function keyKindOf(event: KeyboardEvent, paletteOpen: boolean, parts: readonly P
         return "motion";
     }
     return keyKind(parts, [...state.held.map(writtenVim), writtenKey(event)]);
+}
+
+/** Where the reply's sending stands, as the line under the review says it: being sent, nothing to send, or not sent, and why. */
+interface Sending {
+    state: "sending" | "nothing" | "failed";
+    text: string;
+}
+
+/** Say a reply wasn't sent, and why: `why`, the host's refusal or why it couldn't be reached; the draft kept for the next Ctrl+Enter. */
+export function notSent(why: string): string {
+    return `Not sent: ${why.replace(/[.\s]+$/, "")}. Your draft is kept: Ctrl+Enter sends it again.`;
+}
+
+/**
+ * Say why asking the host failed, `error` as `ask` threw it: the dashboard out of reach, as it is while lup's host
+ * service restarts, the dashboard with it; the host behind it out of reach (503, `HostError`); else what the dashboard
+ * answered.
+ */
+export function unreached(error: unknown): string {
+    if (error instanceof ApiError) {
+        let detail = error.message;
+        try {
+            detail = String((JSON.parse(error.message) as { detail?: unknown }).detail ?? detail);
+        } catch {
+            // Not the dashboard's JSON: its words as they came.
+        }
+        return error.status === 503 ? `the host is restarting, or out of reach (${detail})` : `the dashboard answered ${error.status}: ${detail}`;
+    }
+    if (error instanceof TypeError) {
+        return "the dashboard can't be reached: the host is restarting, or out of reach";
+    }
+    return error instanceof Error ? error.message : String(error);
 }
 
 /** Ask the host for more than the inbox's own text: what `shown` takes from its reply, or why it refused, or why it couldn't be asked. */
