@@ -7,7 +7,9 @@ first time the service starts on a ledger holding none of it, and said:
   (`lup_dev.inbox.conversion.converted`);
 - the review marks' files, a file of each module's per repository, the judge's
   marks of each branch from before the files carried in
-  (`lup_dev.inbox.conversion.marks_converted`).
+  (`lup_dev.inbox.conversion.marks_converted`);
+- past conversations, made threads: each item a conversation sent the operator
+  before threads put in its session's root (`lup_dev.inbox.rooting.rooted`).
 
 `checked` is `lup-dev inbox check-conversion`: it rehearses each conversion
 into a scratch directory, removed after, reading lup's files alone and the
@@ -36,6 +38,7 @@ from lup_dev.inbox.conversion import (
     marks_rehearsed,
     rehearsed,
 )
+from lup_dev.inbox.rooting import concerned, rooted, rooted_rehearsed
 from lup_dev.inbox.store import KINDS, Inbox, InboxError, located
 from lup_dev.policy.reviewed import CARRIED, JUDGE, older
 from lup_ledger.environment.layout import LedgerLayout
@@ -74,6 +77,9 @@ def inbox_opened(
             f"lup: the review marks' files under {layout.repositories} are on the "
             f"ledger: {marked.said()}. The files stay as they were."
         )
+    put = rooted(concerned(inbox, layout))
+    if put is not None:
+        say(f"lup: past conversations are threads: {put.said()}.")
     return inbox
 
 
@@ -149,14 +155,13 @@ def checked(
         items = Check(of="The inbox's files", said=[f"Nothing to convert: {nothing}."])
     live = LedgerLayout(home=scratch / "live")
     if not snapshot(LedgerLayout.of(layout), live):
+        nothing = [
+            f"Nothing to check: lup keeps no ledger at {LedgerLayout.of(layout).home}."
+        ]
         return [
             items,
-            Check(
-                of="The review marks' files",
-                said=[
-                    f"Nothing to check: lup keeps no ledger at {LedgerLayout.of(layout).home}."
-                ],
-            ),
+            Check(of="The review marks' files", said=nothing),
+            Check(of="Past conversations as threads", said=nothing),
         ]
     ledger = Ledger.opened(live, KINDS)
     try:
@@ -176,4 +181,13 @@ def checked(
         marks = Check(
             of="The review marks' files", said=[f"Nothing to convert: {nothing}."]
         )
-    return [items, marks]
+    threads = rooted_rehearsed(layout, live)
+    return [
+        items,
+        marks,
+        Check(
+            of="Past conversations as threads",
+            said=threads.said(),
+            differs=bool(threads.differs),
+        ),
+    ]

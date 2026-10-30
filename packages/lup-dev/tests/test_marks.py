@@ -365,8 +365,8 @@ def test_the_host_service_converts_the_marks_as_it_opens_the_inbox_once_and_says
     opened.ledger.close()
     again = inbox_opened(machine, say=said.append)
 
-    assert len(said) == 1
-    assert "5 marks, 2 of them carried in from the judge's older store" in said[0]
+    [marked] = [each for each in said if "review marks" in each]
+    assert "5 marks, 2 of them carried in from the judge's older store" in marked
     assert again.marks.of(repository, "transcripts", CONVERSATION) is not None
     assert len(again.ledger.drawn_of(Reviewed)) == 5
 
