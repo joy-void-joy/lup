@@ -282,6 +282,11 @@ kbd {
     color: var(--err);
 }
 
+/* A reply being sent, or nothing to send: said at once, as the host may take seconds to answer. */
+.status .sending {
+    color: var(--info);
+}
+
 .bar .said {
     color: var(--info);
 }
