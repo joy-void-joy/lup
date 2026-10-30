@@ -315,11 +315,15 @@ export function Outline({ following, laidOut, reading, narrow, open, setOpen, ju
                 );
             })}
             <div className="outline-hint">
-                <kbd>gO</kbd> here · <kbd>j</kbd> <kbd>k</kbd> · <kbd>⏎</kbd> go · <kbd>Esc</kbd> back
-                <br />
-                <span className="mark-waiting">◆</span> waiting on you · <span className="mark-to-review">◇</span> to review · <span className="mark-news">•</span> news
-                <br />
-                <span className="outline-draft">» ✓ ✔</span> in your next <kbd>^⏎</kbd>: comment, read, approve
+                <div>
+                    <kbd>gO</kbd> here · <kbd>j</kbd> <kbd>k</kbd> · <kbd>⏎</kbd> go · <kbd>Esc</kbd> back
+                </div>
+                <div>
+                    <span className="mark-waiting">◆</span> waiting on you · <span className="mark-to-review">◇</span> to review · <span className="mark-news">•</span> news
+                </div>
+                <div>
+                    <span className="outline-draft">» ✓ ✔</span> in your next <kbd>^⏎</kbd>: comment, read, approve
+                </div>
             </div>
         </nav>
     );

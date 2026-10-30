@@ -4,7 +4,8 @@
 // by what one would do, what applies where the cursor is first, then each part,
 // Enter running the one chosen where it's keys it runs (`runOf`), Esc closing
 // it, the keyboard back where it was; at its end, whether the page's timings are measured in this browser, Enter
-// switching them off or on (`timings.ts`). Once a chord is
+// switching them off or on (`timings.ts`); and, before `?`, `g<` where a line of the page leaves out what was said,
+// which it shows whole (`Whole.tsx`). Once a chord is
 // begun, as with Space, a panel over the line lists the keys that may follow
 // and what each does, after a moment, so a chord typed whole shows none
 // (`keys.ts`; `docs/dashboard.md`, *The keys*).
@@ -30,9 +31,11 @@ interface Props {
     waits?: number;
     /** Whether the page's timings are measured in this browser, and their switch (`timings.ts`); none before they're begun. */
     measuring?: { on: boolean; switched: (on: boolean) => void } | null;
+    /** Whether a line of the page leaves out what was said, which `g<` shows whole: said at the line's end, so it's found. */
+    cut?: boolean;
 }
 
-export function Keys({ parts, here, inserting, open, setOpen, run, pending = "", waits = 250, measuring = null }: Props) {
+export function Keys({ parts, here, inserting, open, setOpen, run, pending = "", waits = 250, measuring = null, cut = false }: Props) {
     // The chord whose following keys are shown, once it has waited.
     const [shown, setShown] = useState("");
     useEffect(() => {
@@ -102,6 +105,11 @@ export function Keys({ parts, here, inserting, open, setOpen, run, pending = "",
                         ))}
                     </span>
                 )}
+                {inserting || !cut ? null : (
+                    <span className="keys-all">
+                        <kbd>g&lt;</kbd> in full
+                    </span>
+                )}
                 {/* In a comment, `?` is a question mark. */}
                 {inserting ? null : (
                     <span className="keys-all">
@@ -123,10 +131,10 @@ export function Keys({ parts, here, inserting, open, setOpen, run, pending = "",
                     {here.reached.length === 0 ? null : (
                         <Command.Group heading={`Here: ${here.on}`}>
                             {here.reached.map((each) => (
-                                <Command.Item key={`here ${each.keys}`} value={`here ${each.keys} ${each.says} ${each.on ?? ""}`} onSelect={() => chose(vimKeys(each.keys.split(" ")[0] ?? ""))}>
+                                <Command.Item key={`here ${each.keys}`} value={`here ${each.keys} ${each.whole ?? each.says} ${each.on ?? ""}`} onSelect={() => chose(vimKeys(each.keys.split(" ")[0] ?? ""))}>
                                     <span>
                                         <kbd>{each.keys}</kbd> {each.on === null ? null : <span className="keys-on">{each.on}: </span>}
-                                        {each.says}
+                                        {each.whole ?? each.says}
                                     </span>
                                 </Command.Item>
                             ))}

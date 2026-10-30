@@ -180,6 +180,21 @@ export function piled(item: Item): boolean {
 const TITLE_MOST = 80;
 
 /**
+ * The longest a thread's title is where a line of the review says it, its banner and its line in the pile, in
+ * characters: a banner is one row, its title whole in the overview's (`outline.ts`) and the thread palette's.
+ */
+export const ABOUT_MOST = 60;
+
+/** Return `text` cut at a word to `most` characters at most, `…` where it's cut. */
+export function cutAt(text: string, most: number): string {
+    if (text.length <= most) {
+        return text;
+    }
+    const cut = text.lastIndexOf(" ", most - 1);
+    return `${text.slice(0, cut > 0 ? cut : most - 1).trimEnd()}…`;
+}
+
+/**
  * Say an item of the pile by its title: a friction's own, else its text's first sentence, cut at a word to
  * `TITLE_MOST` characters at most, as how it felt has none, and a friction may leave it out.
  */
@@ -192,11 +207,7 @@ export function pileTitle(item: Item): string {
     const text = "text" in reason && typeof reason.text === "string" ? reason.text : "";
     const line = text.split("\n").find((each) => each.trim() !== "")?.trim() ?? "";
     const sentence = /^(.+?[.!?])(\s|$)/.exec(line)?.[1] ?? line;
-    if (sentence.length <= TITLE_MOST) {
-        return sentence;
-    }
-    const cut = sentence.lastIndexOf(" ", TITLE_MOST - 1);
-    return `${sentence.slice(0, cut > 0 ? cut : TITLE_MOST - 1).trimEnd()}…`;
+    return cutAt(sentence, TITLE_MOST);
 }
 
 /** One section of the review where it's laid out: its line, saying what it holds, and its fold whole under it. */
@@ -1746,7 +1757,7 @@ export function laid(
                 ...(frictionsHere === 0 ? [] : [counted(frictionsHere, "friction")]),
                 ...(entries.length === frictionsHere ? [] : [`${entries.length - frictionsHere} how it felt`]),
             ].join(", ");
-            const header = w.line(`@${read.thread.name} · ${about(read.thread)} · ${counts}`, id);
+            const header = w.line(`@${read.thread.name} · ${cutAt(about(read.thread), ABOUT_MOST)} · ${counts}`, id);
             asides.push({ kind: "pile-thread", ...header });
             const node = part(id, "pile", header.from, header.to);
             nodes.push(node);

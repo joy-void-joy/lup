@@ -177,7 +177,8 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
                 kind: "thread",
                 depth: group.depth + 1,
                 text: `@${read.thread.name}`,
-                title: text.slice(group.banner.from, group.banner.to),
+                // Its title whole, which its banner cuts to keep to one row.
+                title: `@${read.thread.name} · ${read.thread.title}`,
                 marks: read.state === "waiting on the operator" || read.state === "done to confirm" ? ["waiting"] : (read.new ?? []).length > 0 ? ["news"] : [],
                 draft: [],
                 fresh: (read.new ?? []).length > 0,
