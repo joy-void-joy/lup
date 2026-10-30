@@ -394,3 +394,39 @@ def test_a_room_never_reads_the_review_s_threads(work: Work) -> None:
                 ShowThread(number=work.lag.number), REPOSITORY
             )
         )
+
+
+def test_a_part_moved_in_stands_open_until_an_item_there_cites_it_never_asking_the_operator(
+    work: Work, clock: FakeClock
+) -> None:
+    clock.sleep(60)
+    answer = asyncio.run(
+        work.delivery.answer(
+            work.question,
+            [Ruling(decision=1, verdict="leaning")],
+            "And write it up in the docs.",
+        )
+    )
+    part = Spot(node=answer.number, part=2)
+    clock.sleep(60)
+    work.ran(work.lead.thread(Threading(name="docs", move=[f"{answer.number}.2"])))
+
+    docs = work.read()["docs"]
+    assert docs.unanswered == [part]
+    assert (docs.section, docs.asks) == ("every thread", [])
+    [moved] = [
+        each
+        for each in work.shown(docs.thread, whole=True).entries
+        if each.spot == part
+    ]
+    assert moved.unanswered
+
+    clock.sleep(60)
+    cited = work.sent(
+        ThreadedRemark(remark=f"Written up, as @{answer.number}.2 asks.", thread="docs")
+    )
+    after = work.read()["docs"]
+    assert after.unanswered == []
+    entries = {each.spot: each for each in work.shown(after.thread, whole=True).entries}
+    assert not entries[part].unanswered
+    assert entries[Spot(node=cited)].under == part

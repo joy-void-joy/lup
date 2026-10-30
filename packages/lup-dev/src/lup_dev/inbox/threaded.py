@@ -17,8 +17,10 @@ it, every repository's, and the operator settles, declines and reopens them:
   from where they read it, what came before counted, or whole; each item, check
   or part of their words moved in, in the order it came, and their own words on
   each, a review's comment, an answer's rulings, a reply, under what it's on;
-  an agent's last words under the latest of the operator's words in the thread
-  they answer; with the items, the checks, the items of other threads that name
+  an item citing a part of their words moved in under that part, which stands
+  open until one does, waiting on whoever answers for the thread and never on
+  them (`Standing.unanswered`); an agent's last words under the latest of the
+  operator's words in the thread they answer; with the items, the checks, the items of other threads that name
   it, and who's on it, whose places the thread's code is read from.
 - **`inbox-settle-thread`**, **`inbox-decline-thread`** and
   **`inbox-reopen-thread`** are the operator's, as Space `d` and Space `x` on
@@ -199,6 +201,13 @@ class ReadTo(Model):
         return cls(members=len(came), at=at)
 
 
+class Spot(Model):
+    """Where one entry of a thread's conversation is: a node, an item or a check, or one of an item's parts by its place."""
+
+    node: int
+    part: int | None = None
+
+
 class Ask(Model):
     """One thing in a thread asking the operator: an item or a check waiting on them, by its number, what it is in a few words (`a question`, `a check`), and when it came into the thread."""
 
@@ -228,6 +237,10 @@ class ThreadRead(Model):
     pile: list[int] = []
     """Its frictions and how it felt the operator hasn't read, for the pile to
     read, which make it neither new nor waiting."""
+    unanswered: list[Spot] = []
+    """The parts of the operator's words moved into it that nothing in it
+    answers yet (`Standing.unanswered`), in the order they came: each open in
+    the thread, waiting on whoever answers for it, never on the operator."""
     members: int = 0
     """How much is in it: items, checks and parts moved in."""
     earlier: int = 0
@@ -237,13 +250,6 @@ class ThreadRead(Model):
     answering: Conversation | None = None
     """Who answers for it: its holder where they go on, else the holder of the
     nearest thread above that does; none where nobody does."""
-
-
-class Spot(Model):
-    """Where one entry of a thread's conversation is: a node, an item or a check, or one of an item's parts by its place."""
-
-    node: int
-    part: int | None = None
 
 
 class Entry(Model):
@@ -260,6 +266,9 @@ class Entry(Model):
     earlier: bool = False
     """Whether it came before where the operator last read the thread: shown
     where something after it is under it."""
+    unanswered: bool = False
+    """Whether it's a part of the operator's words moved in that nothing in the
+    thread answers yet: open, waiting on whoever answers for it."""
 
 
 class CheckRead(Model):
@@ -433,11 +442,21 @@ class Readings(Model, arbitrary_types_allowed=True):
             asks=asking,
             new=new,
             pile=[each.number for each in unreads if pile(each)],
+            unanswered=self.unanswered(number, members),
             members=len(members),
             earlier=read_to.members,
             mark=mark,
             answering=self.concerns.answering(thread),
         )
+
+    def unanswered(self, number: int, members: list[Joined]) -> list[Spot]:
+        """Return the parts of the operator's words moved into thread `number` that nothing in it answers yet, as the ledger's reading of where it stands says (`Standing.unanswered`), read only where a part was moved in."""
+        if all(each.part is None for each in members):
+            return []
+        standing = self.concerns.threads.standing(number)
+        return [
+            Spot(node=each.node.number, part=each.part) for each in standing.unanswered
+        ]
 
     def read_to(
         self, members: list[Joined], mark: ReviewMark | None, status: Stated | None
@@ -498,6 +517,11 @@ class Readings(Model, arbitrary_types_allowed=True):
         def earlier(came: datetime) -> bool:
             return read_to.at is not None and came <= read_to.at
 
+        moved = [
+            Spot(node=each.node, part=each.part)
+            for each in members
+            if each.part is not None
+        ]
         own = [
             Entry(
                 spot=Spot(node=each.node, part=each.part),
@@ -505,6 +529,7 @@ class Readings(Model, arbitrary_types_allowed=True):
                 member=True,
                 new=each.node in read.new and each.part is None,
                 earlier=at <= read_to.members,
+                unanswered=Spot(node=each.node, part=each.part) in read.unanswered,
             )
             for at, each in enumerate(members, start=1)
         ]
@@ -522,8 +547,18 @@ class Readings(Model, arbitrary_types_allowed=True):
         ]
 
         def answering(entry: Entry) -> Entry:
-            item = items.get(entry.spot.node)
-            if item is None or not isinstance(item.reason, Message):
+            item = None if entry.spot.part is not None else items.get(entry.spot.node)
+            if item is None:
+                return entry
+            cited = [
+                spot
+                for each in item.citations
+                if each.part is not None
+                and (spot := Spot(node=each.item, part=each.part)) in moved
+            ]
+            if cited:
+                return entry.model_copy(update={"under": cited[0]})
+            if not isinstance(item.reason, Message):
                 return entry
             answered = item.reason.answers
             said = [
