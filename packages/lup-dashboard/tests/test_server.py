@@ -595,6 +595,7 @@ def test_the_demo_keeps_a_draft_and_sends_it_taking_what_it_covers_off_the_list_
         "declined": [],
         "noted": [],
         "kept": [],
+        "unanswerable": [],
     }
     assert left.json()["draft"] == {
         "comments": [

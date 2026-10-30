@@ -11,11 +11,12 @@ from lup_dev import cli
 from lup_dev.host.names import Names
 from lup_dev.host.protocol import Limits, Register
 from lup_dev.host.pushes import Pushes
-from lup_dev.inbox.delivery import Delivery
+from lup_dev.inbox.delivery import Delivery, Unanswerable
 from lup_dev.inbox.marks import CORE, ReviewMark, on_node
 from lup_dev.inbox.notices import Notices
 from lup_dev.inbox.store import (
     KINDS,
+    Approval,
     Comment,
     Done,
     Draft,
@@ -23,6 +24,7 @@ from lup_dev.inbox.store import (
     InboxError,
     Letter,
     Message,
+    Quote,
     Review,
     Ruling,
     Waiting,
@@ -565,6 +567,105 @@ def test_writing_on_a_thread_done_reopens_it(work: Work) -> None:
     asyncio.run(work.delivery.reviewed())
     voice = work.read()["voice"]
     assert isinstance(voice.status, Reopened)
+
+
+def own_words(work: Work, text: str) -> int:
+    """Send the operator's message to the lead under their banner, as the dashboard does; return the review it went as, the operator's own words."""
+    work.delivery.inbox.drafted(Draft(letters=[Letter(to=LEAD, text=text)]))
+    [review] = asyncio.run(work.delivery.reviewed()).reviews
+    return review.number
+
+
+def test_a_mark_on_the_operator_s_own_words_in_a_thread_is_dropped_and_said_the_approval_beside_it_going_through(
+    work: Work, clock: FakeClock
+) -> None:
+    clock.sleep(60)
+    own = own_words(work, "Ship the parser first.")
+    # Moved into a thread, as an agent moves one with `thread`, where the review shows it.
+    work.delivery.concerns().moved(LEAD, work.lag, str(own))
+    standing = work.delivery.inbox.item(own).state
+    approval = work.delivery.inbox.made(
+        Approval(
+            text="Approve the host zone at abc?",
+            summary="",
+            repository=REPOSITORY,
+            fingerprint="abc",
+        ),
+        Operator(),
+        Operator(),
+        None,
+        clock.now(),
+    )
+    work.delivery.inbox.drafted(Draft(done=[own, approval.number]))
+
+    dispatched = asyncio.run(work.delivery.reviewed())
+
+    assert [each.number for each in dispatched.approved] == [approval.number]
+    assert dispatched.unanswerable == [
+        Unanswerable(
+            number=own,
+            part="done",
+            said=(
+                f"@{own} not marked done: it's a review from the operator, which a "
+                "reply doesn't answer"
+            ),
+        )
+    ]
+    assert dispatched.reviews == []
+    assert work.delivery.inbox.item(own).state == standing
+    # Dropped, it's gone from the draft, never refused at the next send.
+    assert work.delivery.inbox.draft() == Draft()
+
+
+def test_the_operator_s_comment_on_their_own_words_goes_on_their_thread_to_whoever_answers_for_it(
+    work: Work, clock: FakeClock
+) -> None:
+    clock.sleep(60)
+    own = own_words(work, "Ship the parser first.\n\nThen the cache.")
+    work.delivery.concerns().moved(LEAD, work.lag, str(own))
+    elsewhere = own_words(work, "Rename it.")
+    parked = own_words(work, "Later, maybe.")
+    on_passage = Quote(text="Then the cache.", start=24, end=39)
+    work.delivery.inbox.drafted(
+        Draft(
+            comments=[
+                Comment(
+                    id="c1", item=own, quote=on_passage, text="Or the cache first."
+                ),
+                Comment(id="c2", item=elsewhere, text="Not yet."),
+            ],
+            declined=[elsewhere],
+            parked=[parked],
+        )
+    )
+
+    dispatched = asyncio.run(work.delivery.reviewed())
+
+    [review] = dispatched.reviews
+    assert review.recipient == LEAD
+    assert isinstance(review.reason, Review)
+    assert review.reason.covers == []
+    assert review.reason.letters == [
+        Letter(
+            id="c1",
+            to=LEAD,
+            thread=work.lag.number,
+            text=f"On @{own}.2:\n\n> Then the cache.\n\nOr the cache first.",
+        )
+    ]
+    why = "it's a review from the operator, which a reply doesn't answer"
+    assert [each.said for each in dispatched.unanswerable] == [
+        f"the comment on @{own} sent on @lag to `lead`, as a message there: {why}",
+        f"@{elsewhere} not declined: {why}",
+        f"the comment on @{elsewhere} kept drafted: {why}, and it's in no thread",
+        f"@{parked} not left for later: {why}",
+    ]
+    # It shows in the thread as a message written there, open until the lead answers.
+    assert [each.node for each in work.read()["lag"].unanswered] == [review.number]
+    # The words with nowhere to go stay drafted, never lost.
+    assert work.delivery.inbox.draft() == Draft(
+        comments=[Comment(id="c2", item=elsewhere, text="Not yet.")]
+    )
 
 
 def test_a_thread_s_conversation_shows_the_latest_few_read_before_what_s_new_as_context(

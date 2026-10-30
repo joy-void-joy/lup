@@ -49,6 +49,7 @@ from lup_dev.host.service import Handler, Reading, Route
 from lup_dev.inbox import context, lines, marks
 from lup_dev.inbox.delivery import (
     Delivery,
+    Unanswerable,
 )
 from lup_dev.inbox.marks import CORE
 from lup_dev.inbox.reading import Narrowing, Reader, Spelling
@@ -459,6 +460,11 @@ class Reviewed(Reply):
     kept: list[int] = []
     """The approvals commented on that no known session's push asked: their
     comments stay drafted."""
+    unanswerable: list[Unanswerable] = []
+    """What it did with each part on an item a reply doesn't answer, the
+    operator's own words among them, rather than refuse the reply whole: each
+    mark dropped, each comment written on the item's thread or kept drafted,
+    and why."""
 
 
 class Gathering(Reply):
@@ -1350,6 +1356,7 @@ class DraftSending(Model, Handler[SendDraft], arbitrary_types_allowed=True):
             declined=dispatched.declined,
             noted=dispatched.noted,
             kept=dispatched.kept,
+            unanswerable=dispatched.unanswerable,
         )
 
 
