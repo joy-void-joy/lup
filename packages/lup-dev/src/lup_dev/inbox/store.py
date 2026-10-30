@@ -1095,6 +1095,11 @@ class Whereabouts(Model):
     started: int | None = None
     """The thread they started on, which what they say with `how_it_felt` lands
     in: their parent's, for a subagent; none for their session's root thread."""
+    chose_start: bool = False
+    """Whether a subagent chose the thread they started on, their parent's, by
+    joining, holding or being handed it: until they do, they hear only what's
+    addressed to them there, never a line for what lands in it, which they
+    never chose to be on (`Concerns.quiet`)."""
     root: int | None = None
     """For a session's own conversation, their root thread, once it's opened or
     taken; none before, and for a subagent."""
