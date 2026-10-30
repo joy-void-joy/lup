@@ -381,7 +381,9 @@ class Readings(Model, arbitrary_types_allowed=True):
         status = ledgered.statuses.get(number)
 
         def asked(member: Joined) -> Ask | None:
-            # lup: defer(issue=345, why="a part of the operator's words moved into a thread asks them until its holder answers it, which piece 3b reads (`Standing.unanswered`)")
+            # A part of the operator's words moved into a thread waits on its
+            # holder, not on them: it shows open in the thread until an item
+            # there cites it, and never keeps the operator from inbox zero.
             if member.part is not None:
                 return None
             item = items.get(member.node)
