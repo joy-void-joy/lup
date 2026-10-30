@@ -5,7 +5,7 @@
 import "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
-import { marking, reachOf } from "./grammar";
+import { implied, marking, reachOf, threadsRead } from "./grammar";
 import { toSend, waitingOn } from "./App";
 import { outlineOf } from "./outline";
 import {
@@ -319,6 +319,33 @@ describe("the review grouped by thread", () => {
         // Read once, whatever came since shows.
         const marked = { ...AUTH, mark: { key: { node: 303 }, up_to: "40", at: AT } } as ThreadRead;
         expect(untilCalled(never, marked).before).toEqual([]);
+    });
+
+    it("reads a thread up to what it shows as the operator acts in it, an item marked or commented on, a check ticked, a message on it, never past news left unread", () => {
+        const upTo = (draft: Draft) =>
+            threadsRead(lay(draft), draft).map((each) => {
+                const argument = each.argument as { key: { node: number }; up_to: string };
+                return [argument.key.node, argument.up_to, each.says];
+            });
+        expect(upTo(EMPTY)).toEqual([]);
+        // An item marked read in @auth: it's read up to the last item it shows, as Space d on its banner reads it.
+        expect(upTo({ ...EMPTY, done: [70] })).toEqual([[303, "70", "@auth read"]]);
+        expect(upTo({ ...EMPTY, comments: [{ id: "c1", item: 70, text: "Thanks." }] as Draft["comments"] })).toEqual([[303, "70", "@auth read"]]);
+        // A check ticked in @reader, and a message written on it.
+        const tick = { id: "t1", action: "inbox-check-answer", argument: { number: 311 }, verb: "done", says: "tick it", block: "check 311", version: null };
+        expect(upTo({ ...EMPTY, marks: [tick] })).toEqual([[302, "51", "@reader read"]]);
+        expect(upTo({ ...EMPTY, letters: [{ id: "m1", to: WORKER, thread: 302, text: "Go on." }] })).toEqual([[302, "51", "@reader read"]]);
+        // A message on @auth leaves its note unread: it's read no further than before it, so the note stays new.
+        expect(upTo({ ...EMPTY, letters: [{ id: "m2", to: WORKER, thread: 303, text: "Go on." }] })).toEqual([]);
+        // Read already by the operator's own mark, it's theirs alone.
+        const out = lay({ ...EMPTY, done: [70] });
+        const reach = reachOf(out, out.text.indexOf("━━ @auth"), { name: "done", key: "d" } as Parameters<typeof reachOf>[2], { called });
+        const own = reach.on === null ? undefined : reach.acts.find((each) => each.kind === "mark");
+        expect(own).toBeDefined();
+        const marked = marking({ ...EMPTY, done: [70] }, own === undefined ? [] : [own], "done");
+        expect(threadsRead(lay(marked), marked)).toEqual([]);
+        // Among the marks a comment implies, shown and sent with them.
+        expect(implied(lay({ ...EMPTY, done: [70] }), { ...EMPTY, done: [70] }).map((each) => each.action)).toEqual(["review-mark"]);
     });
 
     it("folds the whole of a thread they never read once nothing in it calls for them, what they answered never coming back", () => {
