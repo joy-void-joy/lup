@@ -47,10 +47,12 @@ describe("what may follow a chord", () => {
 
     it("lists the keys after Space f and Space F, each kind of fold's letter but the item's own", () => {
         const kinds = [
-            "a agents' groups",
+            "w sections",
+            "a groups",
             "t the tasks",
             "s since you approved",
             "v the conversation",
+            "o what you read before",
             "f files",
             "p branches",
             "l roles",
@@ -71,11 +73,13 @@ describe("what may follow a chord", () => {
 
     it("lists the keys after z f, each kind of fold's letter closing the one the cursor is in, the item's own among them", () => {
         expect(following("zf")).toEqual([
-            "a the agent's group",
+            "w the section",
+            "a the group",
             "i the item",
             "t the tasks",
             "s since you approved",
             "v the conversation",
+            "o what you read before",
             "f the file",
             "p the branch",
             "l the role",

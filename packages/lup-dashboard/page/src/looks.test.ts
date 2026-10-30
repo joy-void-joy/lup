@@ -17,7 +17,7 @@ const OTHER: Looks = {
 describe("the looks, merged across repositories", () => {
     it("knows each kind of fold by its name, the core's first, outermost first, a drawer's among them", () => {
         const looks = merged({}, STANDING);
-        expect(looks.kinds.map((each) => `${each.letter}${each.drawer ? "·" : ""}`).join(" ")).toBe("a i t· s· v· f p l e b u k c m d");
+        expect(looks.kinds.map((each) => `${each.letter}${each.drawer ? "·" : ""}`).join(" ")).toBe("w a i t· s· v· o f p l e b u k c m d");
         expect(looks.kinds.find((each) => each.name === "item")).toMatchObject({ chord: false, whole: true, counts: true });
         expect(looks.kinds.find((each) => each.name === "lines")).toMatchObject({ counts: false });
         expect(looks.drawers("/r/any.git").map((each) => each.view)).toEqual(["tasks", "since", "conversation"]);

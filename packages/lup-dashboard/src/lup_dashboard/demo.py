@@ -1330,10 +1330,57 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         ]
         self.covered = [*self.covered, *covered]
         self.threads.replied(commented, self.clock.now())
+        sent = self.written(draft)
         self.draft = draft.kept()
         self.changed.set()
         self.changed = asyncio.Event()
-        return Reviewed(items=[], read=read, approved=approved, declined=declined)
+        return Reviewed(items=sent, read=read, approved=approved, declined=declined)
+
+    def written(self, draft: Draft) -> list[Item]:
+        """Keep each message of `draft` as the host does, telling no agent (`kept_letter`), and return the reviews they make."""
+        now = self.clock.now()
+        return [
+            each
+            for letter in draft.written()
+            if (each := self.kept_letter(letter, now)) is not None
+        ]
+
+    def kept_letter(self, letter: Letter, now: datetime) -> Item | None:
+        """Keep `letter`, written at `now`, as the host does: to a conversation, as a review of the operator's to them, its part put in the thread it's written on, open there, which is returned; to no one, as a note of theirs to themselves, done, in its thread. Writing on a thread done, to confirm, reopens it."""
+        number = 100 + len(self.sent) + 1
+        thread = None if letter.thread is None else self.threads.stood(letter.thread)
+        if thread is not None:
+            self.threads.written_on(thread.thread.number, now)
+        if letter.to is None:
+            if thread is None:
+                return None
+            note = Item(
+                number=number,
+                reason=Message(
+                    kind="note", text=letter.text, repository=thread.thread.repository
+                ),
+                sender=Operator(),
+                recipient=Operator(),
+                made=now,
+                state=Done(at=now),
+            )
+            self.sent = [*self.sent, note]
+            self.threads.joined(thread.thread.number, Joined(node=number, came=now))
+            return None
+        review = Item(
+            number=number,
+            reason=Review(covers=[], letters=[letter]),
+            sender=Operator(),
+            recipient=letter.to,
+            made=now,
+            state=Told(at=now, how="call"),
+        )
+        self.sent = [*self.sent, review]
+        if thread is not None:
+            self.threads.joined(
+                thread.thread.number, Joined(node=number, part=1, came=now)
+            )
+        return review
 
     def holds(self, talker: Talker) -> bool:
         """Say whether the operator holds each flagged write of `talker`."""

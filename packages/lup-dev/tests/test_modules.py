@@ -872,7 +872,7 @@ class ViewerServing(ModuleServing):
     module: Viewer
 
     @lup.view(
-        place=lup.Drawer(letter="w", called="the greeting", colour="cyan"),
+        place=lup.Drawer(letter="g", called="the greeting", colour="cyan"),
         watch=lup.Watch(on=[lup.TurnEnded], longest=timedelta(minutes=1)),
     )
     async def greeting(self, viewed: lup.OfAgent) -> lup.Blocks:
@@ -947,7 +947,7 @@ def test_a_view_placed_in_a_drawer_resolves_with_its_letter_after_the_core_s(
     looks = viewing(tmp_path).resolved.looks
     assert [(each.view, each.place.letter) for each in looks.drawers] == [
         *((each.view, each.place.letter) for each in CORE_LOOKS.drawers),
-        ("greeting", "w"),
+        ("greeting", "g"),
     ]
     assert [tone.name for tone in looks.tones] == [
         *(tone.name for tone in CORE_LOOKS.tones),
@@ -963,7 +963,9 @@ def test_the_core_s_looks_are_the_shell_s_the_runtime_adapters_and_the_judge_s()
     looks = resolve(Project(modules=Modules.only(Core()))).looks
     assert CORE_LOOKS.folds == []
     assert [fold.name for fold in looks.folds] == [
+        "section",
         "group",
+        "read",
         "item",
         "file",
         "body",
@@ -1102,7 +1104,7 @@ def test_two_modules_taking_one_fold_letter_fail_the_load() -> None:
     clashing = Viewer(
         folds=Folds.of(
             lup.FoldKind(
-                name="mine", letter="w", called="mine", one="mine", level=1, colour="ok"
+                name="mine", letter="g", called="mine", one="mine", level=1, colour="ok"
             )
         )
     )

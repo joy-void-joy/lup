@@ -14,7 +14,7 @@ it, every repository's, and the operator settles, declines and reopens them:
   makes no thread new or waiting; how much came before where they read it;
   its review mark; and who answers for it; and where each conversation going
   on works (`Working`), whose "since you approved" the page lays out there.
-- **`inbox-thread`** (`ShowThread`) reads one thread's conversation (`Entry`):
+- **`inbox-thread`** (`ShowThread`) reads one thread's conversation (`ThreadEntry`):
   from where they read it, what came before counted but what asks them and a
   part of theirs nothing answers yet, which never fold away as read, or whole;
   each item, check
@@ -24,7 +24,7 @@ it, every repository's, and the operator settles, declines and reopens them:
   open until one does, waiting on whoever answers for the thread and never on
   them (`Standing.unanswered`); an agent's last words under the latest of the
   operator's words in the thread they answer; each part of the operator's
-  words with what they said there (`Entry.said`); with the items, the checks,
+  words with what they said there (`ThreadEntry.said`); with the items, the checks,
   the items of other threads that name it, and who's on it, whose places the
   thread's code is read from.
 - **`inbox-settle-thread`**, **`inbox-decline-thread`** and
@@ -260,7 +260,7 @@ class ThreadRead(Model):
     nearest thread above that does; none where nobody does."""
 
 
-class Entry(Model):
+class ThreadEntry(Model):
     """One entry of a thread's conversation: what's in the thread, or the operator's words on it, where it's laid out under what it answers, and when it came."""
 
     spot: Spot
@@ -298,7 +298,7 @@ class ThreadShown(Reply):
 
     kind: Literal["inbox-thread-shown"] = "inbox-thread-shown"
     read: ThreadRead
-    entries: list[Entry]
+    entries: list[ThreadEntry]
     left: int = 0
     """How many entries came before where the operator last read it and are
     left out, folded under one line; none where it's read whole."""
@@ -647,7 +647,7 @@ class Readings(Model, arbitrary_types_allowed=True):
             )
 
         own = [
-            Entry(
+            ThreadEntry(
                 spot=Spot(node=each.node, part=each.part),
                 came=each.came,
                 member=True,
@@ -660,7 +660,7 @@ class Readings(Model, arbitrary_types_allowed=True):
             for at, each in enumerate(members, start=1)
         ]
         said = [
-            Entry(
+            ThreadEntry(
                 spot=Spot(node=item.number, part=anchor.id.part),
                 under=Spot(node=anchor.item),
                 came=item.made,
@@ -673,7 +673,7 @@ class Readings(Model, arbitrary_types_allowed=True):
             if anchor.item is not None and anchor.item in numbers
         ]
 
-        def answering(entry: Entry) -> Entry:
+        def answering(entry: ThreadEntry) -> ThreadEntry:
             item = None if entry.spot.part is not None else items.get(entry.spot.node)
             if item is None:
                 return entry
@@ -756,13 +756,13 @@ class Readings(Model, arbitrary_types_allowed=True):
         )
 
     def after(
-        self, entries: list[Entry], open_: Callable[[Entry], bool]
-    ) -> list[Entry]:
+        self, entries: list[ThreadEntry], open_: Callable[[ThreadEntry], bool]
+    ) -> list[ThreadEntry]:
         """Return the entries after where the operator last read, each earlier one still `open_`, as what asks them or a part of theirs nothing answers yet, which never folds away as read, and each earlier one an entry kept is under, at any depth, in order."""
         later = [each for each in entries if not each.earlier or open_(each)]
         by_spot = {(each.spot.node, each.spot.part): each for each in entries}
 
-        def above(entry: Entry, depth: int) -> list[Entry]:
+        def above(entry: ThreadEntry, depth: int) -> list[ThreadEntry]:
             under = entry.under
             found = None if under is None else by_spot.get((under.node, under.part))
             if found is None or depth > len(entries):

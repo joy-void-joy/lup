@@ -762,13 +762,32 @@ def kept_open[T](
 
 SHELL_FOLDS = [
     FoldKind(
+        name="section",
+        letter="w",
+        called="sections",
+        one="the section",
+        level=0,
+        colour="muted",
+        whole=True,
+    ),
+    FoldKind(
         name="group",
         letter="a",
-        called="agents' groups",
-        one="the agent's group",
+        called="groups",
+        one="the group",
         level=0,
         colour="cyan",
         whole=True,
+    ),
+    FoldKind(
+        name="read",
+        letter="o",
+        called="what you read before",
+        one="what you read before",
+        level=1,
+        opens="deep",
+        colour="ok",
+        counts=False,
     ),
     FoldKind(
         name="item",
@@ -811,9 +830,12 @@ SHELL_FOLDS = [
     ),
 ]
 """The fold kinds of the shell, which every repository's looks carry and no
-module's letter may take: an agent's group whole under its banner, an item
-whole under its header, and an item's context, the core's; a file, a body and a
-run of unchanged lines, which `Diff` and `Code` fold under. `Core` declares
+module's letter may take: a section of the review whole under its line,
+*waiting on you*, *new*, *to read*, *every thread* and *agents*; a group whole
+under its banner, a thread's or an agent's; what of a thread came before
+where the operator last read it, read from the host as it opens; an item
+whole under its header, and an item's context, the core's; a file, a body and
+a run of unchanged lines, which `Diff` and `Code` fold under. `Core` declares
 them (`Core.folds`), so a person's layer changes how each starts and whether
 `zR` and `zM` reach it."""
 

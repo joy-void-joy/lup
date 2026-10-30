@@ -1421,6 +1421,54 @@ kbd {
     color: var(--muted);
 }
 
+/* A section of the review grouped by thread: its line, saying what it holds, set apart above it; what waits on the
+   operator in their colour. */
+.buffer .cm-line.review-section {
+    color: var(--fg);
+    font-weight: 700;
+    border-bottom: 1px solid var(--muted);
+    margin-top: 0.6em;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.buffer .cm-line.review-section.section-waiting-on-you {
+    color: var(--warn);
+    border-bottom-color: var(--warn);
+}
+
+/* A thread's banner: a thread waiting on the operator barred in their colour, one done for them to confirm too; one
+   settled or declined dimmed. */
+.buffer .cm-line.thread-banner.state-waiting-on-the-operator,
+.buffer .cm-line.thread-banner.state-done-to-confirm {
+    box-shadow: inset 4px 0 0 var(--warn);
+}
+
+.buffer .cm-line.thread-banner.state-settled,
+.buffer .cm-line.thread-banner.state-declined {
+    color: var(--muted);
+}
+
+/* A thread's own lines: what's to try in one done, a check waiting on the operator, one answered, and the operator's
+   words moved in or on what isn't laid out there. */
+.buffer .cm-line.thread-line {
+    padding-left: calc(6px + 2ch);
+}
+
+.buffer .cm-line.aside-to-try,
+.buffer .cm-line.aside-check {
+    color: var(--warn);
+    font-weight: 700;
+}
+
+.buffer .cm-line.aside-checked {
+    color: var(--ok);
+}
+
+.buffer .cm-line.aside-check-text {
+    color: var(--fg);
+}
+
 /* Where each item ends, a faint rule; where a group does, a line saying whose, set in as its banner is. */
 .buffer .cm-line.item-end {
     background: linear-gradient(to bottom, transparent 8px, rgb(255 153 51 / 0.45) 8px, rgb(255 153 51 / 0.45) 9px, transparent 9px) no-repeat;
@@ -1520,6 +1568,7 @@ kbd {
 }
 
 .outline-agent,
+.outline-thread,
 .outline-approvals {
     color: var(--cyan);
     font-weight: 700;

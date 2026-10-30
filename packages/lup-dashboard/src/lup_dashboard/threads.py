@@ -244,6 +244,21 @@ class StandInThreads(MutableModel, ThreadSource, arbitrary_types_allowed=True):
             None,
         )
 
+    def joined(self, number: int, member: Joined) -> None:
+        """Put `member` in thread `number`, after what's in it: an item, or a part of the operator's words."""
+        self.threads = [
+            each.model_copy(update={"members": [*each.members, member]})
+            if each.thread.number == number
+            else each
+            for each in self.threads
+        ]
+
+    def written_on(self, number: int, at: datetime) -> None:
+        """Reopen thread `number` where it's done, to confirm, which the operator wrote on, as the host does (`Delivery.reopening`)."""
+        status = self.statuses.get(number)
+        if status is not None and status.kind == "ledger:done":
+            self.reopened(number, "the operator replied there", at)
+
     def replied(self, numbers: Sequence[int], at: datetime) -> None:
         """Reopen each thread done, to confirm, holding one of the items `numbers`, which the operator replied to, as the host does (`Delivery.reopening`)."""
         for each in self.threads:

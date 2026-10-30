@@ -1,7 +1,7 @@
 // React's side of the API: a request watched for as long as a component shows it.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { watch, type Asked, type Connection, type Replied } from "./api";
+import { watch, type Asked, type Connection, type Replied, type ReplyOf } from "./api";
 import { instanceOf, type Blocks, type Instance } from "./views";
 
 /** The host's reply to `request`, kept up to date while the component is mounted, and where the watch stands. */
@@ -113,4 +113,69 @@ export function useViews(asked: readonly Instance[]): ReadonlyMap<string, Blocks
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [key]);
     return answers;
+}
+
+/** One thread's conversation the page asks for: from where the operator last read it, or whole. */
+export interface ThreadAsked {
+    number: number;
+    whole: boolean;
+}
+
+/**
+ * What the host answers of each thread's conversation in `asked`, each watched while it's asked, answered again as the
+ * thread changes (`inbox-thread`; `docs/inbox.md`, *Threads in the review*): those from where the operator last read
+ * them, and those read whole, each by the thread's number. One no longer asked stops being watched, and what it
+ * answered goes; a refusal, or one not yet answered, none.
+ */
+export function useThreads(asked: readonly ThreadAsked[]): { shown: ReadonlyMap<number, ReplyOf<"inbox-thread-shown">>; whole: ReadonlyMap<number, ReplyOf<"inbox-thread-shown">> } {
+    const [answers, setAnswers] = useState<ReadonlyMap<string, ReplyOf<"inbox-thread-shown">>>(new Map());
+    // Each watch running, by its thread's key: one asked again is kept, never watched anew.
+    const watching = useRef(new Map<string, () => void>());
+    const keyOf = (each: ThreadAsked) => `${each.number}${each.whole ? " whole" : ""}`;
+    const key = JSON.stringify(asked.map(keyOf).sort());
+    useEffect(() => {
+        const keys = new Set(asked.map(keyOf));
+        for (const [each, stop] of watching.current) {
+            if (!keys.has(each)) {
+                stop();
+                watching.current.delete(each);
+            }
+        }
+        for (const each of asked) {
+            const at = keyOf(each);
+            if (watching.current.has(at)) {
+                continue;
+            }
+            const stop = watch(
+                { kind: "inbox-thread", number: each.number, whole: each.whole },
+                (reply) => {
+                    if (reply.kind === "inbox-thread-shown") {
+                        setAnswers((before) => new Map(before).set(at, reply));
+                    }
+                },
+                () => undefined,
+            );
+            watching.current.set(at, stop);
+        }
+        setAnswers((before) => (before.size === 0 || [...before.keys()].every((each) => keys.has(each)) ? before : new Map([...before].filter(([each]) => keys.has(each)))));
+        // Watched again only where what's asked changes, by the threads' keys.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [key]);
+    useEffect(
+        () => () => {
+            for (const stop of watching.current.values()) {
+                stop();
+            }
+            watching.current.clear();
+        },
+        [],
+    );
+    return useMemo(() => {
+        const shown = new Map<number, ReplyOf<"inbox-thread-shown">>();
+        const whole = new Map<number, ReplyOf<"inbox-thread-shown">>();
+        for (const [each, reply] of answers) {
+            (each.endsWith(" whole") ? whole : shown).set(reply.read.thread.number, reply);
+        }
+        return { shown, whole };
+    }, [answers]);
 }

@@ -1,16 +1,46 @@
 {
   "folds": [
     {
+      "name": "section",
+      "letter": "w",
+      "called": "sections",
+      "one": "the section",
+      "level": 0,
+      "opens": "together",
+      "colour": "muted",
+      "chord": true,
+      "whole": true,
+      "counts": true,
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
+    },
+    {
       "name": "group",
       "letter": "a",
-      "called": "agents' groups",
-      "one": "the agent's group",
+      "called": "groups",
+      "one": "the group",
       "level": 0,
       "opens": "together",
       "colour": "cyan",
       "chord": true,
       "whole": true,
       "counts": true,
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
+    },
+    {
+      "name": "read",
+      "letter": "o",
+      "called": "what you read before",
+      "one": "what you read before",
+      "level": 1,
+      "opens": "deep",
+      "colour": "ok",
+      "chord": true,
+      "whole": false,
+      "counts": false,
       "keeps_open": null,
       "starts_open": null,
       "by_all": true
