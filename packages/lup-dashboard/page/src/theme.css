@@ -1482,6 +1482,22 @@ kbd {
     color: var(--fg);
 }
 
+/* The pile to read: a line for each thread with something in it, then each friction and how it felt by its title, set
+   in under it, its text set in further. */
+.buffer .cm-line.aside-pile-thread {
+    padding-left: 6px;
+    color: var(--cyan);
+    font-weight: 700;
+}
+
+.buffer .cm-line.aside-pile {
+    color: var(--orange);
+}
+
+.buffer .cm-line.aside-pile-text {
+    color: var(--fg);
+}
+
 /* Where each item ends, a faint rule; where a group does, a line saying whose, set in as its banner is. */
 .buffer .cm-line.item-end {
     background: linear-gradient(to bottom, transparent 8px, rgb(255 153 51 / 0.45) 8px, rgb(255 153 51 / 0.45) 9px, transparent 9px) no-repeat;

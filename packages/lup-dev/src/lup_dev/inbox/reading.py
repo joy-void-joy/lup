@@ -518,7 +518,7 @@ class Reader(Model, arbitrary_types_allowed=True):
         placed: list[int],
         owed: list[PartId],
     ) -> str:
-        """Say what's in `thread` whole under a heading: an item as `whole` does, the operator's words on it under it; a part of their words moved in, with who moved it, and whether it's answered, `owed` being those that aren't; a check, and their answer to it where they gave one."""
+        """Say what's in `thread` whole under a heading: an item as `whole` does, the operator's words on it under it, and who moved it there where it was moved in whole; a part of their words moved in, with who moved it, and whether it's answered, `owed` being those that aren't; a check, and their answer to it where they gave one."""
         node = member.node
         if member.part is not None:
             part = PartId(item=node.number, part=member.part)
@@ -574,7 +574,20 @@ class Reader(Model, arbitrary_types_allowed=True):
         item = self.delivery.inbox.items.get(node.number)
         if item is None:
             return f"@{node.number}  {clocked(node.at)}  a `{node.kind}`."
-        return self.whole(item, placed)
+        said = self.whole(item, placed)
+        if not member.moved:
+            return said
+        # An item moved in whole stays in the thread it landed in: said so, and by whom.
+        moved = next(
+            (
+                each
+                for each in self.delivery.inbox.ledger.drawn_to(thread.number, Moved)
+                if each.source == node.number and each.part is None
+            ),
+            None,
+        )
+        by = "" if moved is None else f" by {self.wrote(moved.by)}"
+        return f"Moved here{by}, from where it landed:\n{said}"
 
     def waits(self, item: Item) -> bool:
         """Say whether `item` still waits, as the reader lists what waits: for them alone, where they read their own exchange; else for whomever it's for."""

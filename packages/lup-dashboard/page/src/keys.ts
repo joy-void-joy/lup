@@ -101,7 +101,7 @@ const MARKS: Part[] = [
             { keys: "‖", does: "an item left for later", short: "parked" },
             { keys: "new", does: "an item that came after you last read its thread, Space d on its banner, or, by agent, marked its agent seen, and that you haven't commented on", short: "new" },
             { keys: "▶ ○ ✕", does: "an agent calling a tool, between calls, ended", short: "agents" },
-            { keys: "» ✓ ✔ ✗", does: "in yellow, what your next Ctrl+Enter does with it: your comment on it goes, it's marked read, it's approved, it's declined", short: "your reply" },
+            { keys: "» ✓ ✔ ✗ →", does: "in yellow, what your next Ctrl+Enter does with it: your comment on it goes, it's marked read, it's approved, it's declined, it's moved into a thread from the pile to read", short: "your reply" },
         ],
     },
 ];
@@ -115,9 +115,9 @@ const LIST: Part[] = [{ title: "This palette", keys: [{ keys: "?", does: "open i
  * undone with u and sent with Ctrl+Enter, the key pressed again taking it off. A module's own verb says what it's called.
  */
 const VERBS: Readonly<Record<string, string>> = {
-    done: "mark it done: an item read; an approval or a held change approved, the comments under it going with it; a check ticked, you tried it; a file of \"since you approved\" reviewed at the version shown, approving its flagged writes where it still stands so; on the drawer's line, every file it shows; a conversation read up to its last step; on a thread's banner, the thread settled where it's done, for you to confirm, else read up to the last item shown, its news with it; on an agent's banner, the agent seen, their own items and drawers, their subagents' left as they are",
+    done: "mark it done: an item read; an approval or a held change approved, the comments under it going with it; a check ticked, you tried it; a file of \"since you approved\" reviewed at the version shown, approving its flagged writes where it still stands so; on the drawer's line, every file it shows; a conversation read up to its last step; on a thread's banner, the thread settled where it's done, for you to confirm, else read up to the last item shown, its news with it; on an agent's banner, the agent seen, their own items and drawers, their subagents' left as they are; in the pile to read, a friction or how it felt read, on a thread's line there each of its",
     decline: "decline an approval or a held change, the comments under it going with it; on a thread's banner, the thread declined where it's done, for you to confirm; a comment never declines",
-    send: "leave the item for later, folded, in its thread, or at the review's end grouped by agent, what's drafted on it staying drafted as the rest is sent; on one left for later, bring it back; on a message written on a thread, send it to no one, kept there as yours, or back to whoever answers for the thread",
+    send: "leave the item for later, folded, in its thread, or at the review's end grouped by agent, what's drafted on it staying drafted as the rest is sent; on one left for later, bring it back; on a message written on a thread, send it to no one, kept there as yours, or back to whoever answers for the thread; in the pile to read, move a friction or how it felt, a thread's there on its line, into a thread you name in a palette, one of its repository's or a new one you title, each staying where it landed, read, and whoever answers for that thread told it; pressed again, no longer moved",
     comment: "comment on it whole: an item; on a check, your answer in words; on a thread's banner, a message on the thread to whoever answers for it; on an agent's banner, a message to them, which their drawers' remarks go with; in a drawer, a remark on the line",
     hold: "from anywhere in an agent's group, hold each flagged write of the agent and their subagents for your answer, or let them land again",
     pause: "pause the agent at their next call until they're resumed: not built yet, its host side designed beside #157",
@@ -208,8 +208,13 @@ export function reviewKeys(kinds: readonly Kind[], verbs: readonly Verb[] = []):
             },
             {
                 keys: "gd",
-                does: "on a citation, go to the passage of your words it cites, above the answer; on that passage, back to the citation; on a banner naming another agent's drawer, as a landing waiting on files there, to that drawer; on an agent's name, as a thread's banner or an item's header says it, to their own views among the agents, their conversation opened",
+                does: "on a citation, go to the passage of your words it cites, above the answer; on that passage, back to the citation; on a banner naming another agent's drawer, as a landing waiting on files there, to that drawer; on an agent's name, as a thread's banner or an item's header says it, to their own views among the agents, their conversation opened; in a thread's whole conversation, on a line pointing to an item above, to it there; on a thread's line in the pile, to the thread; ^o comes back",
                 short: "follow",
+            },
+            {
+                keys: "gt",
+                does: "from an item of waiting on you or new, or its thread's header there, to the thread whole in open, opened, on that item in its conversation, read from the host first where it isn't yet; ^o comes back",
+                short: "whole thread",
             },
             {
                 keys: "/ n N",
@@ -269,7 +274,7 @@ export function reviewKeys(kinds: readonly Kind[], verbs: readonly Verb[] = []):
             ...lettered.map((each) => ({ keys: `zf${each.letter}`, does: `open or close ${each.one} the cursor is in`, short: each.one })),
             {
                 keys: "␣f",
-                does: "and a letter: select every fold of its kind in the item, the drawer or the agent's group the cursor is in, fold-wise, each drawn as selected; in visual mode, those within the selection; motions reshape it, Esc ends it",
+                does: "and a letter: select every fold of its kind in the item, the drawer or the agent's group the cursor is in, in the pile to read the thread's there, or the whole pile from its section's line, fold-wise, each drawn as selected; in visual mode, those within the selection; motions reshape it, Esc ends it",
                 short: "select by kind",
             },
             {

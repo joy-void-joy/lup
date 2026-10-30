@@ -12,7 +12,7 @@
 import { newId } from "./anchors";
 import type { components } from "./generated/api";
 import { cited } from "./comments";
-import { isLetter, news, writtenId, type Conversation, type Draft, type Group, type Item, type Laid, type Placed, type Region, type ThreadRead } from "./review";
+import { isLetter, news, writtenId, type Conversation, type Draft, type Group, type Item, type Laid, type Piled, type PileRun, type Placed, type Region, type ThreadRead } from "./review";
 import type { Block as ViewBlock, Offer } from "./views";
 
 export type Verb = components["schemas"]["Verb"];
@@ -31,7 +31,22 @@ export type Act =
     | { kind: "mark"; offer: Offer; block: string; version: string | null }
     | { kind: "once"; offer: Offer; conversation: Conversation | null }
     | { kind: "comment" }
-    | { kind: "readdress"; id: string; to: Conversation | null };
+    | { kind: "readdress"; id: string; to: Conversation | null }
+    | { kind: "move"; number: number; repository: string; block: string };
+
+/** The host's request moving frictions and how it felt from the pile into a thread (`inbox-move-into-thread`), which a mark moving one is applied by. */
+export const MOVE = "inbox-move-into-thread";
+
+/** Where what's moved from the pile goes: a thread, by its number and name, or one opened with a title. */
+export type Destination = { thread: number; name: string } | { title: string };
+
+/** What a mark moving an item of the pile is given: the item, its repository, and where it goes. */
+export interface Moving {
+    numbers: number[];
+    repository: string;
+    thread: number | null;
+    title: string | null;
+}
 
 /** Where a verb lands at the cursor: what it's on, as the line of keys names it, the part of the review it is, what it does there, and its acts; or why nothing there takes it. */
 export type Reach = { on: string; node: Placed; says: string; acts: Act[] } | { on: null; says: null; why: string };
@@ -285,11 +300,47 @@ export function reachOf(laidOut: Laid, at: number, verb: Verb, naming: Naming): 
                 }
                 break;
             }
+            case "pile": {
+                const found = pileReach(laidOut, node, verb);
+                if (found !== null) {
+                    return found;
+                }
+                break;
+            }
             default:
                 break;
         }
     }
     return { on: null, says: null, why: whyNot(verb) };
+}
+
+/**
+ * Return where `verb` lands in the pile to read, at `node`: on a friction or how it felt, done marking it read and send
+ * moving it into a thread, which the operator names as it's pressed; on a thread's line there, each of its entries
+ * alike. None for what else.
+ */
+function pileReach(laidOut: Laid, node: Placed, verb: Verb): Reach | null {
+    const entry = laidOut.pile.flatMap((each) => each.entries).find((each) => `pile ${each.item.number}` === node.id);
+    const run = entry === undefined ? laidOut.pile.find((each) => `pile thread:${each.thread.thread.number}` === node.id) : undefined;
+    const entries: Piled[] = entry !== undefined ? [entry] : (run?.entries ?? []);
+    if (entries.length === 0) {
+        return null;
+    }
+    const on = entry !== undefined ? `${entry.item.reason.reason === "friction" ? "friction" : "how it felt"} ${cited(entry.item.number)}` : `@${(run as PileRun).thread.thread.name}'s pile`;
+    const them = entries.length === 1 ? "it" : `its ${entries.length}`;
+    switch (verb.name) {
+        case CORE.done:
+            return { on, node, says: `mark ${them} read`, acts: entries.map((each) => ({ kind: "item", number: each.item.number, list: "done" })) };
+        case CORE.send:
+            return {
+                on,
+                node,
+                says: `move ${them} into a thread, which you name`,
+                acts: entries.map((each) => ({ kind: "move", number: each.item.number, repository: each.thread.thread.repository, block: `pile ${each.item.number}` })),
+            };
+        default:
+            return null;
+    }
 }
 
 /** Return where `verb` lands on `region`'s item, laid out at `node`: what its kind's view offers, else the core's done, send and comment; none where neither takes it. */
@@ -423,7 +474,9 @@ function threadReach(laidOut: Laid, node: Placed, group: Group, read: ThreadRead
                 return reached === null || reached.on === null ? [] : reached.acts;
             });
             const left = regions.filter((each) => each.item.rank.name === "waiting on you").map((each) => cited(each.item.number));
-            const last = Math.max(0, ...regions.map((each) => each.item.number));
+            // An item laid out above, in waiting on you or new, is the thread's too, where its line points to it.
+            const pointed = laidOut.pointers.filter((each) => each.from > node.from && each.from <= node.to).map((each) => each.node);
+            const last = Math.max(0, ...regions.map((each) => each.item.number), ...pointed);
             const acts = [...(last === 0 ? [] : [readAct(read, node.id, last)]), ...items];
             const leaving = left.length === 0 ? "" : `, ${left.join(" ")} left`;
             return acts.length === 0 ? null : { on, node, says: `mark it read${items.length === 0 ? "" : ", its news with it"}${leaving}`, acts };
@@ -449,7 +502,14 @@ export function reachedIn(laidOut: Laid, folds: readonly { summary: { from: numb
             continue;
         }
         for (const act of reach.acts) {
-            const key = act.kind === "item" ? `item ${act.number} ${act.list}` : act.kind === "mark" ? `mark ${act.block} ${act.offer.action}` : `${act.kind} ${acts.size}`;
+            const key =
+                act.kind === "item"
+                    ? `item ${act.number} ${act.list}`
+                    : act.kind === "mark"
+                      ? `mark ${act.block} ${act.offer.action}`
+                      : act.kind === "move"
+                        ? `move ${act.number}`
+                        : `${act.kind} ${acts.size}`;
             if (!acts.has(key)) {
                 acts.set(key, act);
             }
@@ -465,9 +525,34 @@ export function isMarked(draft: Draft, act: Act, verb: string): boolean {
             return (draft[act.list] ?? []).includes(act.number);
         case "mark":
             return (draft.marks ?? []).some((each) => each.block === act.block && each.verb === verb && each.action === act.offer.action);
+        case "move":
+            return (draft.marks ?? []).some((each) => each.block === act.block && each.action === MOVE);
         default:
             return false;
     }
+}
+
+/**
+ * Return `draft` with each of `acts`, items of the pile, marked moved into `to` as the reply is sent: one mark each, on
+ * its line, in place of any earlier mark moving it, each no longer marked read, declined or left for later, since moving
+ * it reads it.
+ */
+export function movedInto(draft: Draft, acts: readonly Extract<Act, { kind: "move" }>[], to: Destination): Draft {
+    const blocks = new Set(acts.map((each) => each.block));
+    const numbers = new Set(acts.map((each) => each.number));
+    const says = "thread" in to ? `into @${to.name}` : `into a new thread: ${to.title}`;
+    const made: Marked[] = acts.map((each) => {
+        const argument: Moving = { numbers: [each.number], repository: each.repository, thread: "thread" in to ? to.thread : null, title: "title" in to ? to.title : null };
+        return { id: newId(), action: MOVE, argument: argument as unknown as Marked["argument"], verb: CORE.send, says, block: each.block, version: null };
+    });
+    const without = (list: Listed) => (draft[list] ?? []).filter((each) => !numbers.has(each));
+    return {
+        ...draft,
+        done: without("done"),
+        declined: without("declined"),
+        parked: without("parked"),
+        marks: [...(draft.marks ?? []).filter((each) => !(each.action === MOVE && blocks.has(each.block))), ...made],
+    };
 }
 
 /**
@@ -487,11 +572,20 @@ export function marking(draft: Draft, acts: readonly Act[], verb: string): Draft
             }),
         };
     }
-    const marks = acts.filter((each) => each.kind === "item" || each.kind === "mark");
+    const marks = acts.filter((each) => each.kind === "item" || each.kind === "mark" || each.kind === "move");
     if (marks.length === 0) {
         return draft;
     }
     const unmarking = marks.every((each) => isMarked(draft, each, verb));
+    // A move is marked with where it goes (`movedInto`); here it's only taken off.
+    const moving = marks.filter((each) => each.kind === "move");
+    if (moving.length > 0) {
+        if (!unmarking) {
+            return draft;
+        }
+        const blocks = new Set(moving.map((each) => each.block));
+        return { ...draft, marks: (draft.marks ?? []).filter((each) => !(each.action === MOVE && blocks.has(each.block))) };
+    }
     let next = draft;
     for (const act of marks) {
         if (isMarked(next, act, verb) !== unmarking) {
@@ -506,7 +600,9 @@ export function marking(draft: Draft, acts: readonly Act[], verb: string): Draft
 export function listed(draft: Draft, number: number, list: Listed | null): Draft {
     const without = (each: Listed) => (draft[each] ?? []).filter((one) => one !== number);
     const put = (each: Listed) => (each === list ? [...without(each), number] : without(each));
-    return { ...draft, done: put("done"), declined: put("declined"), parked: put("parked") };
+    // Marked read, an item of the pile is no longer moved anywhere.
+    const marks = list === null ? draft.marks : (draft.marks ?? []).filter((each) => !(each.action === MOVE && each.block === `pile ${number}`));
+    return { ...draft, done: put("done"), declined: put("declined"), parked: put("parked"), ...(marks === undefined ? {} : { marks }) };
 }
 
 /**
@@ -609,19 +705,23 @@ export function threadsRead(laidOut: Laid, draft: Draft): Marked[] {
         }
     }
     const marked: Marked[] = [];
-    for (const group of threads) {
-        const read = group.thread;
-        if (read === null || !acted.has(read.thread.number)) {
+    // A thread's headers, one a section it's laid out in, waiting on you, new, open: what each shows is the thread's.
+    for (const number of acted) {
+        const headers = threads.filter((each) => each.thread?.thread.number === number);
+        const [group] = headers;
+        const read = group?.thread ?? null;
+        if (group === undefined || read === null) {
             continue;
         }
         const node = findNode(laidOut.nodes, `group ${group.place}`);
         const shown = laidOut.regions
-            .filter((each) => threadAt(each.header.from) === group)
+            .filter((each) => headers.some((header) => threadAt(each.header.from) === header))
             .map((each) => each.item)
             .toSorted((a, b) => a.number - b.number);
         const unread = shown.findIndex((each) => news(each) && each.state.state === "waiting" && !items.has(each.number));
         const upTo = (unread < 0 ? shown : shown.slice(0, unread)).at(-1);
-        if (node === undefined || upTo === undefined || (draft.marks ?? []).some((each) => each.block === node.id && each.action === "review-mark")) {
+        const markedAlready = (draft.marks ?? []).some((each) => each.action === "review-mark" && headers.some((header) => each.block === `group ${header.place}`));
+        if (node === undefined || upTo === undefined || markedAlready) {
             continue;
         }
         const act = readAct(read, node.id, upTo.number);

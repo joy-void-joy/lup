@@ -58,6 +58,8 @@ from lup_dev.inbox.protocol import (
 from lup_dev.inbox.threaded import (
     DeclineThread,
     ListThreads,
+    MovedIntoThread,
+    MoveIntoThread,
     ReopenThread,
     SettleThread,
     ShowThread,
@@ -97,6 +99,7 @@ type Asked = Annotated[
     | SettleThread
     | DeclineThread
     | ReopenThread
+    | MoveIntoThread
     | AnswerCheck
     | Viewing
     | KeepTimings,
@@ -113,7 +116,8 @@ its groups shown and kept, what they write on a conversation shown and kept, wha
 last saw them read and their files marked reviewed or their landing declined,
 the landings waiting on the operator, review marks moved as a reply is sent,
 the threads as the review reads them and one's conversation, a thread
-settled, declined or reopened, a check answered, a module's view, which the
+settled, declined or reopened, frictions and how it felt moved into one from
+the pile to read, a check answered, a module's view, which the
 page draws from its blocks (`docs/host.md`, *The views the dashboard shows*),
 and what the page measured of itself in the operator's browser, which the host
 keeps (`docs/host.md`, *A page's timings*)."""
@@ -139,6 +143,7 @@ type Replied = Annotated[
     | ThreadsRead
     | ThreadShown
     | ThreadStated
+    | MovedIntoThread
     | CheckShown
     | Viewed
     | TimingsKept

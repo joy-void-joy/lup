@@ -123,10 +123,13 @@ describe("moving through the review grouped by thread, line by line, in headless
         expect(back).toEqual(landings.toReversed().slice(1));
     });
 
-    it("moves j and k exactly one line shown at a time with every section open", async () => {
+    it("moves j and k exactly one line shown at a time with every section open, and a thread whole in open, its lines pointing to items above among it", async () => {
         for (const name of ["to read", "settled", "agents"]) {
             await opened(name);
         }
+        await review.goTo("━━ @transcript-reader · The transcript reader · lup-impl/parser holds · working");
+        await dashboard.keys.press(["z", "o"]);
+        await review.holds("↑ @51 question · in waiting on you · gd goes there");
         await to("first");
         expect(await stepped("j")).toEqual([]);
         await to("last");

@@ -46,6 +46,21 @@
       "by_all": true
     },
     {
+      "name": "pile",
+      "letter": "r",
+      "called": "frictions and how it felt",
+      "one": "the friction or how it felt",
+      "level": 1,
+      "opens": "together",
+      "colour": "orange",
+      "chord": true,
+      "whole": false,
+      "counts": true,
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
+    },
+    {
       "name": "item",
       "letter": "i",
       "called": "the item",

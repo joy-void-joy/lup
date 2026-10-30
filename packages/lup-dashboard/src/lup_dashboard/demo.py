@@ -38,6 +38,7 @@ from lup_dev.host.timings import KeepTimings, Report, TimingsKept, TimingsStore
 from lup_dev.host.workers import Viewed, Viewing
 from lup_dev.inbox import marks
 from lup_dev.inbox.citations import resolved
+from lup_dev.inbox.concerns import slugged
 from lup_dev.inbox.marks import CORE, MarksMoved, MoveMarks, ReviewMark
 from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.protocol import (
@@ -110,6 +111,8 @@ from lup_dev.inbox.threaded import (
     DeclineThread,
     Joined,
     ListThreads,
+    MovedIntoThread,
+    MoveIntoThread,
     ReopenThread,
     SettleThread,
     ShowThread,
@@ -394,6 +397,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 return self.stated(
                     lambda: self.threads.reopened(number, why, self.clock.now())
                 )
+            case MoveIntoThread(numbers=numbers, thread=number, title=title):
+                return self.gathered(numbers, number, title)
             case AnswerCheck(number=number, text=text):
                 try:
                     check = self.threads.checked(number, text, self.clock.now())
@@ -459,6 +464,76 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 )
                 self.views.marks.moved(each.thread.repository, CORE, [mark])
         return made
+
+    def gathered(
+        self, numbers: list[int], number: int | None, title: str | None
+    ) -> MovedIntoThread | Refused:
+        """Move the frictions and how it felt `numbers` into thread `number`, or one opened titled `title` under the root above where the first landed, as the host does (`Concerns.gathered`), telling no agent: each marked read, staying where it landed; a thread done, to confirm, reopened. Refused, saying why, as the host refuses."""
+        by_number = {each.number: each for each in self.every()}
+        items = [by_number.get(each) for each in numbers]
+        found = [each for each in items if each is not None]
+        if len(found) < len(items) or not found:
+            return Refused(error="the demo holds no such item")
+        if any(not isinstance(each.reason, Friction | HowItFelt) for each in found):
+            return Refused(
+                error="only frictions and how it felt are moved from the pile to read"
+            )
+        landed = [self.threads.containing(each.number) for each in found]
+        first = landed[0]
+        if first is None or None in landed:
+            return Refused(error="an item is in no thread")
+        repositories = dict.fromkeys(
+            each.repository for each in landed if each is not None
+        )
+        if len(repositories) > 1:
+            return Refused(
+                error="the frictions are of several repositories: move each repository's apart"
+            )
+        now = self.clock.now()
+        if number is None:
+            taken = [each.thread.name for each in self.threads.threads]
+            wanted = slugged(title or "")
+            name, tried = wanted, 1
+            while name in taken:
+                tried += 1
+                name = f"{wanted}-{tried}"
+            thread = Thread(
+                number=max(
+                    [
+                        *(each.thread.number for each in self.threads.threads),
+                        *(each.number for each in self.threads.checks),
+                    ]
+                )
+                + 1,
+                repository=first.repository,
+                by=Operator(),
+                at=now,
+                name=name,
+                title=(title or "").strip(),
+                parent=self.threads.rooted(first).number,
+            )
+            self.views.marks.ledger.kept(thread)
+            self.threads.opened(thread)
+        else:
+            try:
+                thread = self.threads.stood(number).thread
+            except KeyError as missing:
+                return Refused(error=str(missing.args[0]))
+            if any(each is not None and each.number == number for each in landed):
+                return Refused(error=f"they landed in @{thread.name} already")
+            self.threads.written_on(number, now)
+        self.threads.gathered(numbers, thread.number, now)
+        self.covered = [*self.covered, *numbers]
+        self.changed.set()
+        self.changed = asyncio.Event()
+        stated = self.threads.readings().read(thread.number)
+        answering = [] if stated.answering is None else [stated.answering]
+        return MovedIntoThread(
+            read=stated,
+            opened=number is None,
+            moved=numbers,
+            paths=self.threads.paths(answering),
+        )
 
     def stated(self, stating: Callable[[], ThreadStated]) -> ThreadStated | Refused:
         """Settle, decline or reopen a stand-in thread as `stating` does, and let each watch answer again; refused where the demo has no such thread."""
@@ -1738,7 +1813,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                         "before the tests ran, printing nothing until then. I was "
                         "running the gate on the reader; a line saying the rebuild, "
                         "and how long it takes, would have kept me from killing it."
-                    )
+                    ),
+                    title="the gate rebuilds the engine without a word",
                 ),
                 sender=parser,
                 recipient=Operator(),
@@ -2562,7 +2638,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     f"`uv run lup-dev check` rebuilt the engine before worker {n}'s "
                     "tests ran, printing nothing until then; a line saying the rebuild "
                     "would have kept me from killing it."
-                )
+                ),
+                title="the gate's rebuild prints nothing",
             )
             return [
                 item(number, n, note, 400 - n),

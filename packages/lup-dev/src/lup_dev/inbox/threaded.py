@@ -10,8 +10,9 @@ it, every repository's, and the operator settles, declines and reopens them:
   haven't read and that asks nothing; else `every thread`; what in it asks
   them (`Ask`), each in the order it came, and since when it's been in its
   section, which the page orders by and keeps, never sorting again; what's
-  new, what's in it for the pile to read, frictions and how it felt, which
-  makes no thread new or waiting; how much came before where they read it;
+  new, what's in it for the pile to read, frictions and how it felt still
+  waiting wherever their mark is, which makes no thread new or waiting; how
+  much came before where they read it;
   its review mark; and who answers for it; and where each conversation going
   on works (`Working`), whose "since you approved" the page lays out there.
 - **`inbox-thread`** (`ShowThread`) reads one thread's conversation (`ThreadEntry`):
@@ -27,6 +28,10 @@ it, every repository's, and the operator settles, declines and reopens them:
   words with what they said there (`ThreadEntry.said`); with the items, the checks,
   the items of other threads that name it, and who's on it, whose places the
   thread's code is read from.
+- **`inbox-move-into-thread`** (`MoveIntoThread`) moves frictions and how it
+  felt from the pile into a thread, one the operator names or opens with a
+  title, each staying where it landed and marked read, whoever answers for the
+  thread told each whole (`Concerns.gathered`).
 - **`inbox-settle-thread`**, **`inbox-decline-thread`** and
   **`inbox-reopen-thread`** are the operator's, as Space `d` and Space `x` on
   a thread done, to confirm, are, and `lup-dev inbox settle-thread` and its
@@ -49,9 +54,9 @@ hook any agent makes.
 
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import TYPE_CHECKING, Annotated, Literal, override
+from typing import TYPE_CHECKING, Annotated, Literal, Self, override
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from lup.types import Model, MutableModel
 from lup_dev.host.names import Names
@@ -114,6 +119,10 @@ class Joined(Model):
     part: int | None = None
     """The part moved in, by its place in its item; none for the node itself."""
     came: datetime
+    moved: bool = False
+    """Whether an item whole was moved in (`Moved`), staying in the thread it
+    landed in: a friction or how it felt the operator gathered here from the
+    pile to read."""
 
 
 class Ledgered(Model):
@@ -129,6 +138,10 @@ class Ledgered(Model):
     """Each check's answer, by its number, where the operator gave one."""
     references: dict[int, list[int]]
     """The items of other threads that name each, by its number."""
+    went: dict[int, int] = {}
+    """The thread each item moved whole went to, by the item's number: where a
+    friction or how it felt the operator gathered went, which its own thread
+    says."""
 
     @classmethod
     def read(cls, concerns: Concerns) -> Ledgered:
@@ -148,6 +161,7 @@ class Ledgered(Model):
             refers = ledger.drawn_of(Refers)
         current = {each.source: each for each in ins}
         parts = {(each.source, each.part): each for each in moved}
+        went = {each.source: each.target for each in moved if each.part is None}
         joined = sorted(
             [
                 *(
@@ -157,7 +171,12 @@ class Ledgered(Model):
                 *(
                     (
                         each.target,
-                        Joined(node=each.source, part=each.part, came=each.at),
+                        Joined(
+                            node=each.source,
+                            part=each.part,
+                            came=each.at,
+                            moved=each.part is None,
+                        ),
                     )
                     for each in parts.values()
                 ),
@@ -177,6 +196,7 @@ class Ledgered(Model):
                 number: [each.source for each in refers if each.target == number]
                 for number in dict.fromkeys(each.target for each in refers)
             },
+            went=went,
         )
 
 
@@ -244,7 +264,9 @@ class ThreadRead(Model):
     they came: what makes it new."""
     pile: list[int] = []
     """Its frictions and how it felt the operator hasn't read, for the pile to
-    read, which make it neither new nor waiting."""
+    read, in the order they came, which make it neither new nor waiting: each
+    still waiting wherever their review mark on it is, since only marking it
+    read or moving it takes one off the pile; none moved in from another."""
     unanswered: list[Spot] = []
     """The parts of the operator's words moved into it that nothing in it
     answers yet (`Standing.unanswered`), in the order they came: each open in
@@ -277,6 +299,12 @@ class ThreadEntry(Model):
     unanswered: bool = False
     """Whether it's a part of the operator's words moved in that nothing in the
     thread answers yet: open, waiting on whoever answers for it."""
+    moved: bool = False
+    """Whether it's an item moved in whole, staying in the thread it landed in:
+    a friction or how it felt the operator gathered here from the pile to read."""
+    went: int | None = None
+    """The thread it was moved into whole from here, by number, where it landed
+    here; none else."""
     seen: bool = False
     """Whether it's shown as context before what's new: one of the latest of
     what came before where the operator last read the thread (`ShowThread.seen`),
@@ -379,6 +407,35 @@ class ReopenThread(Request, reads=False):
     kind: Literal["inbox-reopen-thread"] = "inbox-reopen-thread"
     number: int
     why: str = ""
+
+
+class MoveIntoThread(Request, reads=False):
+    """Move frictions and how it felt into a thread, as the operator does from the pile to read: one they name by `thread`, or one opened titled `title` under the root above where the first landed; each marked read, staying in the thread it landed in, and whoever answers for the thread told each whole (`Concerns.gathered`)."""
+
+    kind: Literal["inbox-move-into-thread"] = "inbox-move-into-thread"
+    numbers: list[int] = Field(min_length=1)
+    thread: int | None = None
+    """The thread to move them into, by number; none to open one."""
+    title: str | None = None
+    """What a thread opened for them is about, in a line, where `thread` is none."""
+
+    @model_validator(mode="after")
+    def one(self) -> Self:
+        """Refuse naming both a thread and a title, or neither."""
+        if (self.thread is None) == (self.title is None):
+            message = "name a thread, or a title to open one with: one of them"
+            raise ValueError(message)
+        return self
+
+
+class MovedIntoThread(Reply):
+    """Frictions and how it felt the operator moved into a thread: the thread as it stands, whether it was opened for them, the items moved, and who answers for it, by their path."""
+
+    kind: Literal["inbox-moved-into-thread"] = "inbox-moved-into-thread"
+    read: ThreadRead
+    opened: bool = False
+    moved: list[int]
+    paths: list[Pathed] = []
 
 
 class ThreadStated(Reply):
@@ -522,8 +579,9 @@ class Readings(Model, arbitrary_types_allowed=True):
         def asked(member: Joined) -> Ask | None:
             # A part of the operator's words moved into a thread waits on its
             # holder, not on them: it shows open in the thread until an item
-            # there cites it, and never keeps the operator from inbox zero.
-            if member.part is not None:
+            # there cites it, and never keeps the operator from inbox zero. An
+            # item moved in whole asks where it landed, if anywhere.
+            if member.part is not None or member.moved:
                 return None
             item = items.get(member.node)
             if item is not None:
@@ -547,7 +605,11 @@ class Readings(Model, arbitrary_types_allowed=True):
         read_to = self.read_to(members, mark, status)
 
         def unread(member: Joined) -> Item | None:
-            item = None if member.part is not None else items.get(member.node)
+            item = (
+                None
+                if member.part is not None or member.moved
+                else items.get(member.node)
+            )
             if item is None:
                 return None
             return (
@@ -563,6 +625,11 @@ class Readings(Model, arbitrary_types_allowed=True):
             if (item := unread(each)) is not None
         ]
         new = [each.number for each in unreads if not pile(each)]
+        piled = [
+            item.number
+            for each in members
+            if (item := unread(each)) is not None and pile(item)
+        ]
         placing = self.placed(
             thread, asking=asking, status=status, new=new, members=members
         )
@@ -574,7 +641,7 @@ class Readings(Model, arbitrary_types_allowed=True):
             since=placing.since,
             asks=asking,
             new=new,
-            pile=[each.number for each in unreads if pile(each)],
+            pile=piled,
             unanswered=beside.unanswered,
             members=len(members),
             earlier=read_to.members,
@@ -665,6 +732,10 @@ class Readings(Model, arbitrary_types_allowed=True):
                 unanswered=Spot(node=each.node, part=each.part) in read.unanswered,
                 said=None if (anchor := words(each)) is None else anchor.text,
                 to=None if anchor is None else anchor.to,
+                moved=each.moved,
+                went=None
+                if each.part is not None or each.moved
+                else ledgered.went.get(each.node),
             )
             for at, each in enumerate(members, start=1)
         ]
@@ -742,7 +813,8 @@ class Readings(Model, arbitrary_types_allowed=True):
         writers = [
             sender
             for each in members
-            if (item := items.get(each.node)) is not None
+            if not each.moved
+            and (item := items.get(each.node)) is not None
             and isinstance(sender := item.sender, Conversation)
         ]
         holder = [] if thread.holder is None else [thread.holder]
@@ -962,8 +1034,38 @@ class ThreadReopening(Model, Handler[ReopenThread], arbitrary_types_allowed=True
         return self.reading.stated(request.number)
 
 
+class ThreadMoving(Model, Handler[MoveIntoThread], arbitrary_types_allowed=True):
+    """Answers `MoveIntoThread`: the frictions and how it felt moved into the thread, opened for them where it's new, each marked read, whoever answers for it told; a thread done, to confirm, reopened, as writing there does (`Delivery.reopening`)."""
+
+    reading: ThreadReading
+
+    @override
+    def request(self) -> type[MoveIntoThread]:
+        return MoveIntoThread
+
+    @override
+    async def answer(self, request: MoveIntoThread) -> Reply:
+        delivery = self.reading.delivery
+        concerns = delivery.concerns()
+        thread = None if request.thread is None else concerns.thread(request.thread)
+        gathered = concerns.gathered(request.numbers, thread, request.title)
+        for item in gathered.items:
+            if isinstance(item.state, Waiting):
+                delivery.done(item.number)
+        if thread is not None:
+            delivery.reopening([], [thread.number])
+        number = gathered.thread.number
+        stated = self.reading.stated(number)
+        return MovedIntoThread(
+            read=stated.read,
+            opened=thread is None,
+            moved=[each.number for each in gathered.items],
+            paths=stated.paths,
+        )
+
+
 def routes(delivery: Delivery) -> list[Route]:
-    """Route reading the review's threads, and settling, declining and reopening one, over `delivery`, each reading shared."""
+    """Route reading the review's threads, and settling, declining, reopening one and moving frictions into one, over `delivery`, each reading shared."""
     reading = ThreadReading(delivery=delivery)
     return [
         Route.reading(ThreadsListing(reading=reading)),
@@ -971,4 +1073,5 @@ def routes(delivery: Delivery) -> list[Route]:
         Route.to(ThreadStating(reading=reading)),
         Route.to(ThreadDeclining(reading=reading)),
         Route.to(ThreadReopening(reading=reading)),
+        Route.to(ThreadMoving(reading=reading)),
     ]

@@ -34,8 +34,8 @@ export interface Typing {
     timed: Timed;
 }
 
-/** An item of the demo's, a note of how the work felt, whose text is a line. */
-export const DEMO_ITEM = "── @58 how it felt";
+/** An item of the demo's, explore-auth's note, new to the operator, shown in new: the review always lays it out whole. */
+export const DEMO_ITEM = "── @66 note";
 
 /** What's typed unless said: 30 keys, letters and spaces, as #341's measures typed. */
 export const PANGRAM = "the quick brown fox jumps over";

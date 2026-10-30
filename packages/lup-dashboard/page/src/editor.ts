@@ -98,6 +98,8 @@ interface Actions {
     cite: (forward: boolean) => void;
     /** `gd`: follow a citation to the passage it cites, or a passage cited back to its citation. */
     follow: () => void;
+    /** `gt`: go to the thread what the cursor is in is of, whole. */
+    thread: () => void;
     list: () => void;
     fold: (how: "toggle" | "open" | "close") => void;
     /** `zO` and `zC`: open or close the folds the cursor is in recursively, as vim's do (`recursive`). */
@@ -544,6 +546,7 @@ function mapKeys(): void {
     action("lupNextCitation", (actions) => actions.cite(true));
     action("lupPreviousCitation", (actions) => actions.cite(false));
     action("lupFollow", (actions) => actions.follow());
+    action("lupThread", (actions) => actions.thread());
     action("lupKeys", (actions) => actions.list());
     // Vim's own fold keys, which its CodeMirror mode leaves unmapped, on CodeMirror's folds.
     action("lupFoldToggle", (actions) => actions.fold("toggle"));
@@ -618,6 +621,7 @@ function mapKeys(): void {
     map("]q", "lupNextCitation", "normal");
     map("[q", "lupPreviousCitation", "normal");
     map("gd", "lupFollow", "normal");
+    map("gt", "lupThread", "normal");
 }
 
 /** The editor last made, which the palette gives the keys it runs (`feed`). */
@@ -661,6 +665,24 @@ export function keyState(target: EventTarget | null): KeyState | null {
 }
 
 /** Return the editor's vim, once it's started. */
+/** What of vim's state a jump is recorded in: its list of jumps, which Ctrl-O and Ctrl-I walk. */
+interface Jumps {
+    jumpList: { add: (cm: CodeMirror, from: unknown, to: unknown) => void };
+}
+
+/**
+ * Record a jump the page makes from `from` to `to` in `view`, as vim records its own, `G` and a search's, so Ctrl-O comes
+ * back to where it was: the review's own jumps, `gd` and `gt`, go there by a selection vim doesn't see.
+ */
+export function jumped(view: EditorView, from: number, to: number): void {
+    const cm = vimOf(view);
+    const global = (Vim as unknown as { getVimGlobalState_?: () => Jumps }).getVimGlobalState_?.();
+    if (cm === null || global === undefined || from === to) {
+        return;
+    }
+    global.jumpList.add(cm, cm.posFromIndex(from), cm.posFromIndex(to));
+}
+
 export function vimOf(view: EditorView): CodeMirrorV | null {
     const cm = getCM(view);
     return cm !== null && started(cm) ? cm : null;
@@ -1597,6 +1619,8 @@ export interface Own<C> {
     cite?: (forward: boolean) => void;
     /** Follow a citation to what it cites, or back, as the review's `gd` does; none where the view has none. */
     follow?: () => void;
+    /** Go to the thread what the cursor is in is of, whole, as the review's `gt` does; none where the view has none. */
+    thread?: () => void;
     /** What's painted on the lines from `from` to `to` while they're in view, beyond what `draw` drew: a changed file's lines and their highlighting. */
     paint?: (from: number, to: number) => Range<Decoration>[];
     /** The folds `zr` opens (`opening`) or `zm` closes from `position`, or with `all` `zR` and `zM`; where none's said, those of every fold (`levelled`). */
@@ -2039,6 +2063,7 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
             pinned: () => own.pinned?.() ?? 0,
             cite: (forward) => own.cite?.(forward),
             follow: () => own.follow?.(),
+            thread: () => own.thread?.(),
             written: (forward) => {
                 const editor = view.current;
                 const target = editor === null ? undefined : nextWritten(live().blocks, head(), forward, visited.current);

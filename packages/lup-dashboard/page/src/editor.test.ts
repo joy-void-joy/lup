@@ -430,8 +430,8 @@ describe("the chords Space leads", () => {
             "lupFoldAround-calls",
             "lupFoldAround-call",
         ]);
-        // No trace drawer any more, so no `r`.
-        expect(around.has("zfr")).toBe(false);
+        // `r` is the pile to read's, a trace drawer's no longer.
+        expect(kindOfAction(around.get("zfr"))).toBe("lupFoldAround-pile");
         // Each is in the list of keys, and plain zF stays vim's, unmapped.
         const listed = new Set(REVIEW_KEYS.flatMap((part) => part.keys).flatMap((key) => key.keys.split(" ")));
         expect([...around.keys()].every((keys) => listed.has(keys))).toBe(true);

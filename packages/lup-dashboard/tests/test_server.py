@@ -36,6 +36,8 @@ from lup_dev.inbox.protocol import (
 from lup_dev.inbox.store import Approval, Decided, Item, Message, Text
 from lup_dev.inbox.threaded import (
     ListThreads,
+    MovedIntoThread,
+    MoveIntoThread,
     SettleThread,
     ShowThread,
     ThreadRead,
@@ -679,6 +681,56 @@ def test_the_demo_reads_its_threads_as_the_host_does_and_the_operator_settles_on
     assert refused.json() == {
         "kind": "refused",
         "error": "the demo has no thread @9999",
+    }
+
+
+def test_the_demo_moves_frictions_and_how_it_felt_from_the_pile_into_a_thread_as_the_host_does(
+    page: Path,
+) -> None:
+    served = client(Demo(clock=Fixed(), size=0), page)
+
+    def asked(request: Asked) -> JsonValue:
+        return served.post(
+            "/api/ask", json=request.model_dump(mode="json"), headers=bearing()
+        ).json()
+
+    def threads() -> dict[str, ThreadRead]:
+        listed = ThreadsRead.model_validate(asked(ListThreads()))
+        return {each.thread.name: each for each in listed.threads}
+
+    before = threads()
+    # The parser's friction stays in the pile, though it came before where the operator read its thread.
+    assert before["transcript-reader"].pile == [57]
+    assert before["guidance-voice"].pile == [58]
+    moved = MovedIntoThread.model_validate(
+        asked(MoveIntoThread(numbers=[57, 58], title="The gate's silent rebuild"))
+    )
+    gate = moved.read.thread
+    assert (moved.opened, moved.moved, gate.name, gate.parent) == (
+        True,
+        [57, 58],
+        "the-gate-s-silent-rebuild",
+        before["lup-impl"].thread.number,
+    )
+    after = threads()
+    assert (after["transcript-reader"].pile, after["guidance-voice"].pile) == ([], [])
+    gathered = ThreadShown.model_validate(
+        asked(ShowThread(number=gate.number, whole=True))
+    )
+    assert [(each.spot.node, each.moved) for each in gathered.entries] == [
+        (57, True),
+        (58, True),
+    ]
+    landed = ThreadShown.model_validate(
+        asked(ShowThread(number=before["transcript-reader"].thread.number, whole=True))
+    )
+    assert [each.went for each in landed.entries if each.spot.node == 57] == [
+        gate.number
+    ]
+    refused = asked(MoveIntoThread(numbers=[51], thread=gate.number))
+    assert refused == {
+        "kind": "refused",
+        "error": "only frictions and how it felt are moved from the pile to read",
     }
 
 

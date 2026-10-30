@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { watch, type Asked, type Connection, type Replied, type ReplyOf } from "./api";
+import { SEEN } from "./review";
 import { instanceOf, type Blocks, type Instance } from "./views";
 
 /** The host's reply to `request`, kept up to date while the component is mounted, and where the watch stands. */
@@ -115,11 +116,6 @@ export function useViews(asked: readonly Instance[]): ReadonlyMap<string, Blocks
     return answers;
 }
 
-/**
- * How many of what came before where the operator last read a thread show before what's new, the latest, each folded to
- * its header: a little they may have seen, as context, the rest under "N earlier" (`ShowThread.seen`).
- */
-const SEEN = 3;
 
 /** One thread's conversation the page asks for: from where the operator last read it, or whole. */
 export interface ThreadAsked {
