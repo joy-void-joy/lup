@@ -30,6 +30,7 @@ import {
     groupAt,
     heading,
     isLetter,
+    isRemark,
     fileHeads,
     nextToReview,
     pageUnits,
@@ -227,7 +228,7 @@ function onBlock(out: Laid, block: string, first: number, last: number, start: n
 }
 
 function onItem(written: Written | undefined): Comment | undefined {
-    return written === undefined || isLetter(written) ? undefined : written;
+    return written === undefined || isLetter(written) || isRemark(written) ? undefined : written;
 }
 
 /** The banners and headers of a layout, in order: its groups and items as laid out. */

@@ -567,7 +567,11 @@ def named_by(items: list[Item]) -> list[Conversation]:
             ),
             *(
                 [
-                    *(letter.to for letter in item.reason.letters),
+                    *(
+                        letter.to
+                        for letter in item.reason.letters
+                        if letter.to is not None
+                    ),
                     *(remark.to for remark in item.reason.remarks),
                 ]
                 if isinstance(item.reason, Review)

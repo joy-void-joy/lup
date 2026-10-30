@@ -89,7 +89,8 @@ export { body, calls, plain, sinceSummary, UNREAD, whose, type AgentDrawers, typ
 export type Item = components["schemas"]["Item"];
 export type Draft = components["schemas"]["Draft"];
 export type Comment = components["schemas"]["Comment"];
-export type Letter = components["schemas"]["Letter"];
+/** The operator's message: to a conversation, under their agent's banner; or on a thread, to whoever answers for it as they write, or to no one (`to` none). Never on an item, nor quoting anything, which a comment and a remark are. */
+export type Letter = components["schemas"]["Letter"] & { item?: never; quote?: never };
 export type Remark = components["schemas"]["Remark"];
 export type Conversation = components["schemas"]["Conversation"];
 export type PartId = components["schemas"]["PartId"];
@@ -456,18 +457,18 @@ export function withWritten(draft: Draft, list: Written[]): Draft {
     return { ...draft, comments: list.filter(isComment), letters: list.filter(isLetter), remarks: list.filter(isRemark) };
 }
 
-/** Return whether what's written is a message to an agent, rather than a comment on an item or a remark in a drawer. */
+/** Return whether what's written is a message, to an agent or on a thread, rather than a comment on an item or a remark in a drawer. */
 export function isLetter(each: Written): each is Letter {
-    return "to" in each && !("quote" in each);
+    return !("item" in each) && !("quote" in each);
 }
 
 /** Return whether what's written is a remark in one of an agent's drawers. */
 export function isRemark(each: Written): each is Remark {
-    return "to" in each && "quote" in each;
+    return !("item" in each) && "quote" in each;
 }
 
 function isComment(each: Written): each is Comment {
-    return !("to" in each);
+    return "item" in each;
 }
 
 /** One line under an item that isn't its own text, and what it shows. */
@@ -1244,7 +1245,7 @@ export function laid(
         called: name,
     };
     const now = grouped(items.filter((each) => !parked.includes(each.number)), (item) => banner({ item }, false, ""));
-    const empty = emptyGroups([...agents, ...letters.map((each) => each.to), ...remarks.map((each) => each.to)], now);
+    const empty = emptyGroups([...agents, ...letters.flatMap((each) => (each.to == null ? [] : [each.to])), ...remarks.map((each) => each.to)], now);
     const later = grouped(items.filter((each) => parked.includes(each.number)), (item) => banner({ item }, true, ""));
     const w = new Writer();
     const groups: Group[] = [];
@@ -1398,7 +1399,7 @@ export function laid(
         const writtenParts: Placed[] = [];
         if (!isParked) {
             for (const letter of letters) {
-                if (whose(letter.to) === group.key) {
+                if (letter.to != null && whose(letter.to) === group.key) {
                     writeWritten(letter, blocks, writtenParts);
                 }
             }
@@ -2239,7 +2240,7 @@ export function heading(laidOut: Laid, head: number, writing: boolean, wrote: Wr
     const being = block === undefined ? undefined : wrote.find((each) => writtenId(each) === block.comment);
     const goesTo = (written: Written): Conversation | null => {
         if (isLetter(written) || isRemark(written)) {
-            return written.to;
+            return written.to ?? null;
         }
         const item = laidOut.regions.find((each) => each.item.number === written.item)?.item;
         return item === undefined ? null : recipient(item);

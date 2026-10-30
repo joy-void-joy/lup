@@ -134,8 +134,8 @@ class Moved(Edge):
 
     A part counts as a member of the thread it's moved into, while its item
     stays in its own. A part is in one thread at a time, like a node. It waits
-    on whoever answers for the thread until a node in the thread cites it
-    (`Edge.cites`), whoever wrote that node (`answered`).
+    on whoever answers for the thread until a node in the thread answers it
+    (`Edge.answers`), whoever wrote that node (`answered`).
     """
 
     kind: Literal["ledger:moved"] = "ledger:moved"
@@ -343,7 +343,7 @@ class Member(Model):
 
 
 def answered(member: Member, members: list[Member]) -> bool:
-    """Say whether `member`, a part of the operator's words moved into a thread whose members are `members`, is answered: a node in the thread cites it (`Edge.cites`), whoever wrote it.
+    """Say whether `member`, a part of the operator's words moved into a thread whose members are `members`, is answered: a node in the thread answers it (`Edge.answers`), citing it or answering the whole of what it's of, whoever wrote it.
 
     The answer is where the operator reads it, beside their words: whoever
     answers for the thread from above answers into it, naming it as they
@@ -357,7 +357,7 @@ def answered(member: Member, members: list[Member]) -> bool:
         return False
     inside = [each.node.number for each in members if each.part is None]
     return any(
-        each.cites(member.part) and each.source in inside for each in member.drawn
+        each.answers(member.part) and each.source in inside for each in member.drawn
     )
 
 

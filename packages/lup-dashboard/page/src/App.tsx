@@ -1124,7 +1124,7 @@ export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): 
     const to = new Map<string, string[]>();
     const reaching = (who: string, what: string) => to.set(who, [...(to.get(who) ?? []), what]);
     const letters = messages(draft);
-    for (const [who, count] of tallyOf(letters.map((each) => naming.called(each.to)))) {
+    for (const [who, count] of tallyOf(letters.map((each) => (each.to == null ? "no one" : naming.called(each.to))))) {
         reaching(who, count === 1 ? "a message" : `${count} messages`);
     }
     for (const [who, count] of tallyOf(remarks(draft).map((each) => naming.called(each.to)))) {

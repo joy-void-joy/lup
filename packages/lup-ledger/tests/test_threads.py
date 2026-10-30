@@ -431,7 +431,7 @@ class Citing(Edge):
     part: int | None = None
 
     @override
-    def cites(self, part: int) -> bool:
+    def answers(self, part: int) -> bool:
         return self.part == part
 
 

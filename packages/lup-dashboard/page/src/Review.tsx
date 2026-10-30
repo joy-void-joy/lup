@@ -965,7 +965,7 @@ export function Review({
     /** Say whom what's written reaches, on its first line, where the header no longer says it: the stack's. */
     const reachesOf = (each: Written): string => {
         if (isLetter(each) || isRemark(each)) {
-            return `to ${called(each.to)}`;
+            return each.to == null ? "to no one" : `to ${called(each.to)}`;
         }
         const item = laidOut.regions.find((region) => region.item.number === each.item)?.item;
         const party = item === undefined ? null : recipient(item);

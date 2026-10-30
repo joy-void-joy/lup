@@ -30,7 +30,7 @@ The ledger keeps the work as a typed graph: nodes, the edges between them, and e
 
 What's in it is edges drawn to it:
 - **a member** (`In`): an item, or a check (`Check`), something only the operator can try;
-- **a part** of an item, moved in by its id (`Moved`): the operator's words. It counts as a member while its item stays in its own thread, and waits on whoever answers for the thread until a node in the thread cites it, whoever wrote it (`answered`); a citation from outside is a reference, no answer. Each kind of edge says whether it cites a part (`Edge.cites`), as the inbox's citation does, so the ledger reads one without knowing the inbox's kinds;
+- **a part** of an item, moved in by its id (`Moved`): the operator's words. It counts as a member while its item stays in its own thread, and waits on whoever answers for the thread until a node in the thread answers it, whoever wrote it (`answered`); a citation from outside is a reference, no answer. Each kind of edge says whether it answers a part (`Edge.answers`), as the inbox's citation of the part does and its answer to the whole item the part is of, so the ledger reads one without knowing the inbox's kinds;
 - **a reference** (`Refers`): an item of another thread that touches this one, shown here as a line pointing at it, and no member;
 - **its status** (`Status`), the latest one drawn:
   - parked until the first of its triggers comes: an issue closing, a branch or a commit landing, a conversation ending, a time, or a condition named as `defer`'s `when=` names one;

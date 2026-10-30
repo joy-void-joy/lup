@@ -1005,7 +1005,11 @@ def shown(item: Item, paths: Sequence[Pathed] = ()) -> str:
             numbers = ", ".join(cited(each) for each in covers)
             body = [
                 *([f"Of {numbers}."] if covers else []),
-                *(f"To {called(each.to, paths)}: {each.text}" for each in letters),
+                *(
+                    f"To {called(each.to, paths)}: {each.text}"
+                    for each in letters
+                    if each.to is not None
+                ),
                 *(commented(each) for each in comments),
             ]
     return "\n".join([heading(item, paths), *body])
