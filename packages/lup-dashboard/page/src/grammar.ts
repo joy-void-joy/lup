@@ -12,7 +12,7 @@
 import { newId } from "./anchors";
 import type { components } from "./generated/api";
 import { cited } from "./comments";
-import { EMPTY, isLetter, news, waits, writtenId, type Conversation, type Draft, type Group, type Item, type Laid, type Piled, type PileRun, type Placed, type Region, type ThreadRead } from "./review";
+import { EMPTY, answerable, isLetter, news, toAnswer, waits, writtenId, type Conversation, type Draft, type Group, type Item, type Laid, type Piled, type PileRun, type Placed, type Region, type ThreadRead } from "./review";
 import type { Block as ViewBlock, Offer } from "./views";
 
 export type Verb = components["schemas"]["Verb"];
@@ -399,13 +399,21 @@ function pileReach(laidOut: Laid, node: Placed, verb: Verb): Reach | null {
     }
 }
 
-/** Return where `verb` lands on `region`'s item, laid out at `node`: what its kind's view offers, else the core's done, send and comment; none where neither takes it. */
+/**
+ * Return where `verb` lands on `region`'s item, laid out at `node`: what its kind's view offers, else the core's done,
+ * send and comment; none where neither takes it. On what a reply doesn't answer (`answerable`), as the operator's own
+ * words in a thread's conversation, the core's comment alone, which goes on its thread: done and send go on outward, to
+ * the thread or the agent's group it's in, as on its banner.
+ */
 function itemReach(region: Region, node: Placed, verb: Verb): Reach | null {
     const on = region.named;
     const number = region.item.number;
     const offered = answering(region.body.answer?.blocks.offers, verb)[0];
     if (offered !== undefined) {
         return { on, node, says: offered.says, acts: [actOf(offered, region.body.id, null, null)] };
+    }
+    if (!answerable(region.item) && verb.name !== CORE.comment) {
+        return null;
     }
     switch (verb.name) {
         case CORE.done:
@@ -450,7 +458,7 @@ function groupReach(laidOut: Laid, node: Placed, group: Group, verb: Verb, namin
                 const reached = news(region.item) ? itemReach(region, child, verb) : null;
                 return reached === null || reached.on === null ? [] : reached.acts;
             });
-            const left = leaving(regions.filter(({ region }) => !news(region.item) && waits(region.item)).map(({ region }) => region.item.number));
+            const left = leaving(regions.filter(({ region }) => !news(region.item) && waits(region.item) && answerable(region.item)).map(({ region }) => region.item.number));
             // Each drawer's blocks offering done, as the files of "since you approved"; else what the drawer offers as a
             // whole, as a conversation marked read.
             const drawers = group.drawers.flatMap((drawer) => {
@@ -556,7 +564,7 @@ function threadReach(laidOut: Laid, node: Placed, group: Group, read: ThreadRead
                 return reached === null || reached.on === null ? [] : reached.acts;
             });
             // What asks the operator and still waits is left: a question answered, a held change decided, is the thread's history.
-            const left = leaving(regions.filter((each) => each.item.rank.name === "waiting on you" && waits(each.item)).map((each) => each.item.number));
+            const left = leaving(regions.filter((each) => toAnswer(each.item, EMPTY)).map((each) => each.item.number));
             // An item laid out above, in waiting on you or new, is the thread's too, where its line points to it; and
             // what the host says is new in it, read as far as the newest, though its conversation isn't read yet.
             const pointed = laidOut.pointers.filter((each) => each.from > node.from && each.from <= node.to).map((each) => each.node);
@@ -824,7 +832,7 @@ export function threadsRead(laidOut: Laid, draft: Draft): Marked[] {
             .filter((each) => headers.some((header) => threadAt(each.header.from) === header))
             .map((each) => each.item)
             .toSorted((a, b) => a.number - b.number);
-        const unread = shown.findIndex((each) => news(each) && each.state.state === "waiting" && !items.has(each.number));
+        const unread = shown.findIndex((each) => news(each) && answerable(each) && each.state.state === "waiting" && !items.has(each.number));
         const upTo = (unread < 0 ? shown : shown.slice(0, unread)).at(-1);
         const markedAlready = (draft.marks ?? []).some((each) => each.action === "review-mark" && headers.some((header) => each.block === `group ${header.place}`));
         if (node === undefined || upTo === undefined || markedAlready) {
