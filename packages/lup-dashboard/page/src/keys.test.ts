@@ -9,9 +9,9 @@ const KINDS = LOOKS.kinds;
 describe("the palette's table", () => {
     it("answers with each verb the looks declare, Space and its key, in their order, then undo and send", () => {
         const answering = REVIEW_KEYS.find((part) => part.title === "Answering")?.keys.map((key) => `${key.keys} ${key.short}`);
-        expect(answering).toEqual(["␣d done", "␣x decline", "␣s send to", "␣c comment", "␣h hold", "␣p pause", "u undo", "^⏎ send"]);
-        // Pause says it isn't built, as its key does where it's pressed.
-        expect(REVIEW_KEYS.flatMap((part) => part.keys).find((key) => key.keys === "␣p")?.does).toContain("not built yet");
+        expect(answering).toEqual(["␣d done", "␣x decline", "␣s send to", "␣c comment", "␣h hold", "u undo", "^⏎ send"]);
+        // Pause is declared, but not built: no key offers it.
+        expect(REVIEW_KEYS.flatMap((part) => part.keys).some((key) => key.keys === "␣p")).toBe(false);
     });
 
     it("lists no key that changes meaning by where the cursor is: h, Space a and Space A are gone", () => {
@@ -42,7 +42,7 @@ describe("what may follow a chord", () => {
     const following = (pressed: string) => chords(REVIEW_KEYS, pressed).map((each) => `${each.keys.join(" ")} ${each.short}`);
 
     it("lists the keys after Space, from the same table as the line of keys and the palette, once each: each verb, then the fold-wise selections", () => {
-        expect(following("␣")).toEqual(["d done", "x decline", "s send to", "c comment", "h hold", "p pause", "f select by kind", "F select every one"]);
+        expect(following("␣")).toEqual(["d done", "x decline", "s send to", "c comment", "h hold", "f select by kind", "F select every one"]);
     });
 
     it("lists the keys after Space f and Space F, each kind of fold's letter but the item's own", () => {

@@ -54,6 +54,12 @@ export interface Merged {
 
 export const UNLOOKED: Merged = { kinds: [], tones: [], verbs: [], drawers: () => [], banners: () => [], refused: [] };
 
+/**
+ * The verbs declared that nothing acts on yet, by name: pause, the runtime adapters', whose host side is designed beside
+ * #157. Each keeps its key, so no other verb takes it, but the page offers none of them: no key that isn't built.
+ */
+export const UNBUILT: ReadonlySet<string> = new Set(["pause"]);
+
 /** Return the kind of fold a drawer is, named for its view: folded under its summary line under the banner, its scope whole. */
 function drawerKind(drawn: Drawn): Declared {
     const place = drawn.place;
@@ -73,7 +79,7 @@ function named(path: string): string {
  * their level, in that order within one; each tone by its name, the first keeping it; each repository's drawers and
  * banner parts its own, or the stand-in's where it has none; each verb by its name, the first keeping it, a later one
  * of another name taking a key already taken refused, which `refused` says, since one key does one thing in the one
- * buffer.
+ * buffer; one not built yet (`UNBUILT`) keeping its key, but no verb of the review's.
  */
 export function merged(looks: Readonly<Record<string, Looks>>, standing: Looks): Merged {
     const kinds = new Map<string, Kind>();
@@ -125,7 +131,7 @@ export function merged(looks: Readonly<Record<string, Looks>>, standing: Looks):
             }
         }
         for (const verb of each.verbs ?? []) {
-            if (verbs.has(verb.name)) {
+            if (verbs.has(verb.name) || keys.get(verb.key) === verb.name) {
                 continue;
             }
             const holder = keys.get(verb.key);
@@ -136,7 +142,9 @@ export function merged(looks: Readonly<Record<string, Looks>>, standing: Looks):
                 continue;
             }
             keys.set(verb.key, verb.name);
-            verbs.set(verb.name, verb);
+            if (!UNBUILT.has(verb.name)) {
+                verbs.set(verb.name, verb);
+            }
         }
     };
     read(standing, null);

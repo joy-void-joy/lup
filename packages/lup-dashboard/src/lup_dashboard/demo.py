@@ -197,7 +197,10 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     # lup: ignore("runtime-mention", why="stand-in data: the runtimes the demo's launches show, not a feature built for one")
     runtimes: list[str] = ["claude", "codex"]
     """The runtimes the demo's launches run, by name: the first for most, the second for one."""
-    draft: Draft = Draft()
+    draft: Draft = Draft(parked=[58])
+    """The operator's draft, kept in memory: the voice session's how it felt, @58,
+    left for later as items were before the pile to read was there, a park the
+    page drops, the pile being where it's read."""
     order: Order = Order()
     """Where the review lays out its groups, kept in memory, as the host keeps it: each page open on the demo shares it."""
     talks: dict[str, Talk] = {}

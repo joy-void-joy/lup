@@ -73,6 +73,8 @@ import { markerEnd, outdated, unfound } from "./exchange";
 import { source, sourced, without, type Source } from "./markdown";
 import {
     ROOT_TITLE,
+    ABOUT_MOST,
+    cutAt,
     barsOf,
     aboutAt,
     headerClasses,
@@ -199,6 +201,8 @@ interface Props {
     pending: (keys: string) => void;
     /** Open the list of every key. */
     list: () => void;
+    /** Open the panel of what was said, whole (`g<`). */
+    whole: () => void;
     /** How far the operator has seen each group, and what they commented on in a reply sent: what an item is new by. */
     seeing: Seeing;
     /** Told the marks the operator's comments imply, a comment counting as a review (`implied`), as the review is laid out. */
@@ -248,7 +252,8 @@ export function threadBanner(read: ThreadRead, landing: number, called: (party: 
     const thread = read.thread;
     // A root is its session's own, named as they are: an ended session's, which lup knows only by its ids, is said so.
     const root = thread.parent == null && thread.title === ROOT_TITLE;
-    const about = root ? "the session's own" : thread.title;
+    // A banner is one row: a long title cut, whole in the overview's and the thread palette's.
+    const about = root ? "the session's own" : cutAt(thread.title, ABOUT_MOST);
     const holder = thread.holder == null ? null : called(thread.holder);
     const answering = read.answering == null ? null : called(read.answering);
     const ended = root && holder !== null && holder !== answering ? "its session has ended" : null;
@@ -848,6 +853,7 @@ export function Review({
     placed,
     pending,
     list,
+    whole,
     seeing: seeingGiven,
     implying,
     activities,
@@ -1004,6 +1010,7 @@ export function Review({
             placed(folds === null ? hereAt(editor.head()) : hereChosen(folds));
         },
         list,
+        whole,
         pending,
         unfolded: (fold) => {
             const drawer = laidOut.drawers.find((each) => each.folds.some((own) => foldKey(own) === fold.key && own.kind === each.kind));
@@ -1564,17 +1571,12 @@ export function Review({
             }
             const reach = reachOf(laidOut, at, each, { called, fresh: isFresh });
             if (reach.on === null) {
-                // Pause is declared, and said in an agent's group, where it would act once it's built; decline on a flagged
-                // write says why it doesn't, the write having landed (#247).
-                const agent = each.name === "pause" ? groupAround(laidOut, at)?.conversation : null;
-                if (agent !== null && agent !== undefined) {
-                    return [{ keys: `␣${each.key}`, says: `${each.called}, not built yet`, on: called(agent) }];
-                }
+                // Decline on a flagged write says why it doesn't, the write having landed (#247).
                 const drawer = each.name === "decline" ? drawerAt(laidOut, at) : undefined;
                 const flagged = drawer?.kind === "since" && (sinceFileAt(drawer, at)?.file.flags ?? []).length > 0;
-                return flagged ? [{ keys: `␣${each.key}`, says: `${each.called}, not yet: a flagged write has landed, and is declined once a landing waits on it`, on: null }] : [];
+                return flagged ? [{ keys: `␣${each.key}`, says: `${each.called}: not until a landing waits on it`, on: null }] : [];
             }
-            return [{ keys: `␣${each.key}`, says: reach.says, on: reach.on }];
+            return [{ keys: `␣${each.key}`, says: reach.says, on: reach.on, ...(reach.whole === undefined ? {} : { whole: reach.whole }) }];
         });
         const writtenOn = blockAt(laidOut, at) === undefined ? null : "your comment";
         const on = writtenOn ?? reached.find((each) => each.on !== null)?.on ?? "";
@@ -1990,7 +1992,7 @@ export function Review({
                 return;
             }
             if (current === null || target === undefined) {
-                say("gd follows a citation of your words to the passage it cites, and that passage back, a banner naming another agent's drawer to it, an agent's name to their own views, a line pointing to an item above to it, and a thread's line in the pile to the thread: put the cursor on one.");
+                say("gd: nothing here to follow. It follows a citation of your words to the passage it cites, and that passage back, a banner naming another agent's drawer to it, an agent's name to their own views, a line pointing to an item above to it, and a thread's line in the pile to the thread: put the cursor on one.");
                 return;
             }
             const effects = reaching(current.state, target);
@@ -2006,7 +2008,7 @@ export function Review({
             const at = editor.toLaid(head);
             const read = groupAround(laidOut, at)?.thread ?? null;
             if (current === null || read === null) {
-                say("gt goes from an item of waiting on you or new, or its thread's header there, to the whole thread in open: put the cursor on one.");
+                say("gt: no thread here to go to whole. It goes from an item of waiting on you or new, or its thread's header there, to the whole thread in open: put the cursor on one.");
                 return;
             }
             const node = regionAt(laidOut, at)?.item.number ?? checkAt(laidOut, at)?.check.check.number ?? null;

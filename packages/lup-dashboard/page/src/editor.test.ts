@@ -445,7 +445,6 @@ describe("the chords Space leads", () => {
             ["<Space>s", "lupVerb-send"],
             ["<Space>c", "lupVerb-comment"],
             ["<Space>h", "lupVerb-hold"],
-            ["<Space>p", "lupVerb-pause"],
         ]);
         // Space a and Space A answered at once before the verbs; they're gone, and `h` is vim's again.
         expect(["<Space>a", "<Space>A", "h"].filter((keys) => mapped.has(keys))).toEqual([]);

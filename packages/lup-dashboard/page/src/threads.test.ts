@@ -295,12 +295,38 @@ describe("the review grouped by thread", () => {
         const reader = out.groups.find((each) => each.thread?.thread.name === "reader");
         const reach = done === undefined || reader === undefined ? null : reachOf(out, reader.banner.from, done, { called });
         expect(reach).toMatchObject({
-            says: "mark it read, @51 left",
+            says: "mark it read, 1 left to answer",
+            whole: "mark it read, @51 left to answer",
             acts: [{ kind: "mark", offer: { action: "review-mark", argument: { module: "core", key: { node: 302 }, up_to: "51" } } }],
         });
         const auth = out.groups.find((each) => each.thread?.thread.name === "auth");
         const fresh = done === undefined || auth === undefined ? null : reachOf(out, auth.banner.from, done, { called });
         expect(fresh).toMatchObject({ says: "mark it read, its news with it", acts: [{ kind: "mark" }, { kind: "item", number: 70, list: "done" }] });
+    });
+
+    it("keeps a thread's banner to one row, a long title cut at a word, whole in the overview", () => {
+        const title = "Containment's open holes in the room's walls, kept off public GitHub: CI through a push, pasta, the cache's level";
+        const long = { ...DOCS, thread: { ...DOCS.thread, title } } as ThreadRead;
+        expect(threadBanner(long, 0, called)).toBe("━━ @docs · Containment's open holes in the room's walls, kept off… · s1/a1 held it, s1 answers · working ━━");
+        const threads = threading();
+        const out = laid([], [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called, {
+            threads: { ...threads, read: { ...threads.read, threads: threads.read.threads.map((each) => (each.thread.number === 304 ? long : each)) } },
+        });
+        const row = outlineOf(out, { draft: EMPTY, seeing: UNSEEN, states: new Map(), called }).find((each) => each.text === "@docs");
+        expect(row?.title).toBe(`@docs · ${title}`);
+    });
+
+    it("leaves nothing on a thread's banner that no longer waits: a question answered is the thread's history", () => {
+        const answered = { ...QUESTION, state: { state: "answered", at: AT, by: 60 } } as unknown as Item;
+        const read = { ...READER, state: "working", section: "every thread", asks: [] } as ThreadRead;
+        const threads = threading(false, [[302, shown(read, READER_WHOLE.entries.filter((each) => each.spot.node !== 311), [NOTE, BETWEEN, answered])]]);
+        const reads = { ...threads.read, threads: threads.read.threads.map((each) => (each.thread.number === 302 ? read : each)) };
+        const out = laid([], [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called, { threads: { ...threads, read: reads, shown: new Map() } });
+        const done = adopted().verbs.find((each) => each.name === "done");
+        const reader = out.groups.find((each) => each.thread?.thread.name === "reader");
+        expect(out.regions.some((each) => each.item.number === 51)).toBe(true);
+        const reach = done === undefined || reader === undefined ? null : reachOf(out, reader.banner.from, done, { called });
+        expect(reach).toMatchObject({ says: "mark it read, its news with it" });
     });
 
     it("lays a part of the operator's words moved in after who wrote it, open, and writes on a thread to whoever answers for it", () => {

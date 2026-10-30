@@ -23,6 +23,8 @@ describe("the looks, merged across repositories", () => {
         expect(looks.drawers("/r/any.git").map((each) => each.view)).toEqual(["tasks", "since", "conversation"]);
         expect(looks.banners("/r/any.git").map((each) => `${each.module} ${each.view}`)).toEqual(["adapters banner", "judge banner"]);
         expect(looks.refused).toEqual([]);
+        // Pause is declared, its key kept, but it isn't built: no verb of the review's.
+        expect(looks.verbs.map((each) => each.name)).toEqual(["done", "decline", "send", "comment", "hold"]);
     });
 
     it("refuses a later repository's kind the letter an earlier one took, said once, its folds left to the generic keys", () => {
