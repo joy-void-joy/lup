@@ -319,6 +319,16 @@ KINDS = Kinds(
 """The kinds the ledger declares itself."""
 
 
+def stood(status: Status | None, *, waiting: bool) -> State:
+    """Say where a thread stands given its latest `status`, none where nothing said one, and whether something in it `waiting` on the operator: as its status says, but for a thread working or reopened, which waits on the operator where something in it does.
+
+    >>> stood(None, waiting=True), stood(None, waiting=False)
+    ('waiting on the operator', 'working')
+    """
+    stands = "working" if status is None else status.stands
+    return "waiting on the operator" if stands == "working" and waiting else stands
+
+
 class Member(Model):
     """What's in a thread: a node in it, or a part of one moved into it, with the edges drawn to that node, oldest first."""
 
@@ -350,8 +360,7 @@ class Standing(Model):
         statuses = [each for each in drawn if isinstance(each, Status)]
         status = statuses[-1] if statuses else None
         waiting = [each for each in members if each.node.waiting(each.drawn)]
-        stands = "working" if status is None else status.stands
-        state = "waiting on the operator" if stands == "working" and waiting else stands
+        state = stood(status, waiting=bool(waiting))
         holder = [] if thread.holder is None else [thread.holder]
         writers = [
             each.node.by for each in members if isinstance(each.node.by, Conversation)

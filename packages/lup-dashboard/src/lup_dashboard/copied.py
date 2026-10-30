@@ -122,6 +122,7 @@ from lup_dev.inbox.notices import Notices
 from lup_dev.inbox.protocol import Exchanged, ItemsListing, ListItems
 from lup_dev.inbox.protocol import routes as inbox_routes
 from lup_dev.inbox.store import HeldChange
+from lup_dev.inbox.threaded import routes as threaded_routes
 from lup_dev.layout import Layout
 from lup_dev.policy.checkpoint import Conversations as Working
 from lup_dev.policy.checkpoint import Warned
@@ -628,6 +629,7 @@ def taken(
         Route.to(HoldingSetting(launches=launches)),
         *inbox_routes(delivery, recorded),
         *marks_routes(inbox.marks, clock, changes),
+        *threaded_routes(delivery),
         *waits_routes(waits),
         *unread(Withholding()),
         Route.reading(module_views, watch=module_views.watched),

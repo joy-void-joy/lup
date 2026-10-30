@@ -44,6 +44,7 @@ from lup_dev.inbox import marks
 from lup_dev.inbox.marks import MarksFile, MarksMoved, MoveMarks, Moving, ReviewMark
 from lup_dev.inbox.protocol import (
     AnswerApproval,
+    AnswerCheck,
     AnswerItem,
     Context,
     Conversed,
@@ -91,6 +92,16 @@ from lup_dev.inbox.store import (
     TalkComment,
     Text,
     Whereabouts,
+)
+from lup_dev.inbox.threaded import (
+    DeclineThread,
+    ListThreads,
+    ReopenThread,
+    SettleThread,
+    ShowThread,
+    ThreadShown,
+    ThreadsRead,
+    ThreadStated,
 )
 from lup_dev.layout import Layout
 from lup_dev.policy.since import ReviewSince, ShowSince, ViewedFile
@@ -609,6 +620,18 @@ def test_every_request_the_page_may_send_acts_on_the_copy_alone(tmp_path: Path) 
                 argument=of.model_dump(mode="json"),
             )
             assert ask(viewing, Viewed).blocks.blocks
+        # The copy's past conversations are threads, as the host would make them.
+        threads = ask(ListThreads(), ThreadsRead).threads
+        assert threads
+        first = threads[0].thread.number
+        assert ask(ShowThread(number=first, whole=True), ThreadShown).entries
+        assert ask(SettleThread(number=first), ThreadStated).read.state == "settled"
+        reopened = ask(ReopenThread(number=first, why="again"), ThreadStated)
+        assert reopened.read.state != "settled"
+        declined = ask(DeclineThread(number=first, why="no"), ThreadStated)
+        assert declined.read.state == "declined"
+        unchecked = ask(AnswerCheck(number=standing.note), Refused)
+        assert "isn't a check" in unchecked.error
         rulings = [Ruling(decision=1, verdict="leaning")]
         ask(AnswerItem(number=standing.question, rulings=rulings), Shown)
         ask(FinishItem(number=standing.note), Shown)

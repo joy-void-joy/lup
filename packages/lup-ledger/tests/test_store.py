@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 
 from lup_ledger.environment.layout import LedgerLayout
-from lup_ledger.environment.store import Ledger
+from lup_ledger.environment.store import Ledger, Written
 from lup_ledger.errors import LupLedgerError
 from lup_ledger.parties import Conversation, Lup, Operator
 from lup_ledger.records import Edge, Node
@@ -270,6 +270,23 @@ def test_edges_are_read_in_the_order_drawn(ledger: Ledger) -> None:
     assert ledger.drawn_to(lag.number, Settled) == [settled]
     assert ledger.drawn_to(found.number, Edge) == [answered]
     assert ledger.drawn_from(found.number, Edge) == [placed]
+
+
+def test_how_far_the_ledger_is_written_moves_with_each_version_and_edge_alone(
+    ledger: Ledger,
+) -> None:
+    assert ledger.written() == Written(versions=0, edges=0)
+    lag = ledger.kept(thread(ledger, "lag"))
+    kept = ledger.written()
+    ledger.rewritten("draft", Written(versions=7, edges=7))
+    assert ledger.written() == kept
+    ledger.drawn(
+        Settled(target=lag.number, repository=REPOSITORY, by=Operator(), at=START)
+    )
+    drawn = ledger.written()
+    assert (drawn.versions, drawn.edges) == (kept.versions, kept.edges + 1)
+    ledger.kept(lag.model_copy(update={"title": "Lag", "at": at(1)}))
+    assert ledger.written().versions == drawn.versions + 1
 
 
 def test_an_edge_needs_both_ends_on_the_ledger_and_in_its_repository(

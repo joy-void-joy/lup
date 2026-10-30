@@ -133,6 +133,13 @@ class Drawn(Model):
     edge: Edge
 
 
+class Written(Model):
+    """How far the ledger has been written: its latest version's place in the order kept, and its latest edge's in the order drawn; 0 where none is."""
+
+    versions: int
+    edges: int
+
+
 class Ledger(Model, arbitrary_types_allowed=True):
     """The ledger's store, open: every repository's nodes and edges, read and written by the host service.
 
@@ -247,6 +254,15 @@ class Ledger(Model, arbitrary_types_allowed=True):
                     self.connection.execute("RELEASE writing")
                 else:
                     self.connection.execute("COMMIT" if done else "ROLLBACK")
+
+    def written(self) -> Written:
+        """Say how far the ledger has been written: what a reader holding what it made of it compares, to know whether to make it again. Plain records aren't counted, rewritten in place."""
+        with self.lock:
+            row = self.connection.execute(
+                "SELECT (SELECT coalesce(max(version), 0) FROM versions), "
+                "(SELECT coalesce(max(drawn), 0) FROM edges)"
+            ).fetchone()
+        return Written(versions=row[0], edges=row[1])
 
     def numbered(self) -> int:
         """Take the sequence's next number, for a node about to be kept; none is ever taken twice."""

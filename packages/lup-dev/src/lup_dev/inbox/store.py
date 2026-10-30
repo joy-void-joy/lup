@@ -1306,11 +1306,9 @@ class ItemNode(Node):
 
     @override
     def waiting(self, drawn: list[Edge]) -> bool:
-        """Say whether it waits on the operator, given the edges drawn to it: theirs, of a kind that waits on them (`ranked`), and standing nowhere yet, or put back to wait, as the latest `Stands` says."""
-        if self.recipient != Operator() or ranked(self.reason).name != "waiting on you":
-            return False
-        states = [each for each in drawn if isinstance(each, Stands)]
-        return not states or isinstance(states[-1], StandsWaiting)
+        """Say whether it waits on the operator, given the edges drawn to it, where the latest `Stands` says it stands (`asks`)."""
+        states = [each.state for each in drawn if isinstance(each, Stands)]
+        return asks(self.recipient, self.reason, states[-1] if states else Waiting())
 
     def links(self, reading: int) -> list[Answers | Replies | Cites]:
         """Return the edges its fields say, from it, as it's written: what it answers, an answer its question and a turn's last words the operator's items they answer; the message it replies to; and each item it cites, of reading `reading` of its citations."""
@@ -1364,6 +1362,21 @@ class ItemNode(Node):
             ),
             *cited.values(),
         ]
+
+
+def asks(recipient: Party, reason: Reason, state: State) -> bool:
+    """Say whether an item for `recipient`, of `reason`, standing at `state`, waits on the operator: theirs, of a kind that waits on them (`ranked`), and waiting, standing nowhere yet or put back to wait.
+
+    >>> asks(Operator(), Question(text="Which?"), Waiting())
+    True
+    >>> asks(Operator(), Message(kind="note", text="Built."), Waiting())
+    False
+    """
+    return (
+        recipient == Operator()
+        and ranked(reason).name == "waiting on you"
+        and isinstance(state, Waiting)
+    )
 
 
 def linking(edge: Edge) -> str:

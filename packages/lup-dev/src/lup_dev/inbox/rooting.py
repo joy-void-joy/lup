@@ -34,6 +34,7 @@ from lup_dev.inbox.concerns import ROOT, Concerns
 from lup_dev.inbox.conversion import Differs
 from lup_dev.inbox.roster import Roster
 from lup_dev.inbox.store import KINDS, Inbox, Item, cited
+from lup_dev.inbox.threaded import Ledgered, Readings
 from lup_dev.listing import many
 from lup_ledger.environment.store import Ledger
 from lup_ledger.parties import Conversation, Lup, Operator
@@ -214,6 +215,13 @@ class RootedRehearsal(Model):
     """Putting them there, on a snapshot of the ledger, in seconds."""
     threads: int
     """The threads on the ledger after."""
+    listed: float
+    """Reading every thread as the review does after, in seconds: what the
+    page's watch asks once the ledger changed (`inbox-threads`)."""
+    largest: int
+    """How much the thread with the most in it holds."""
+    shown: float
+    """Reading that thread's conversation whole, in seconds (`inbox-thread`)."""
     differs: list[Differs]
 
     def said(self) -> list[str]:
@@ -237,7 +245,15 @@ class RootedRehearsal(Model):
                 *(f"  {each.of}: {each.field}" for each in self.differs),
             ]
         )
-        return [did, f"{many(self.threads, 'thread')} on the ledger after.", *differs]
+        return [
+            did,
+            (
+                f"{many(self.threads, 'thread')} on the ledger after, read as the "
+                f"review reads them in {self.listed:.2f}s; the largest, of "
+                f"{self.largest}, read whole in {self.shown:.2f}s."
+            ),
+            *differs,
+        ]
 
 
 def rooted_compared(
@@ -306,10 +322,22 @@ def rooted_rehearsed(layout: Layout, live: LedgerLayout) -> RootedRehearsal:
         started = time.perf_counter()
         done = rooted(concerns)
         converting = time.perf_counter() - started
+        started = time.perf_counter()
+        readings = Readings(concerns=concerns, ledgered=Ledgered.read(concerns))
+        listed = readings.listed()
+        listing = time.perf_counter() - started
+        largest = max(listed.threads, key=lambda each: each.members, default=None)
+        started = time.perf_counter()
+        if largest is not None:
+            readings.shown(largest.thread.number, whole=True)
+        showing = time.perf_counter() - started
         return RootedRehearsal(
             rooted=done,
             conversion=converting,
-            threads=len(ledger.every(Thread)),
+            threads=len(listed.threads),
+            listed=listing,
+            largest=0 if largest is None else largest.members,
+            shown=showing,
             differs=rooted_compared(before, concerns, put),
         )
     finally:
