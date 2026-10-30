@@ -10781,6 +10781,91 @@ def test_agents_open_and_hold_threads_and_are_told_what_lands_there_on_each_runt
     assert "Calm." not in read
 
 
+@pytest.mark.parametrize("runtime", ["claude", "codex"])
+def test_a_subagent_hears_only_what_s_addressed_to_them_in_their_parent_s_thread_on_each_runtime(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+    *,
+    runtime: str,
+) -> None:
+    """Two subagents start on their session's root: neither is told the operator's words to the session there, nor the other's note; one who opened a sub-thread is told what lands there, and one who joins the root is told what lands there from then on, on either runtime."""
+    records = Subagents(tmp_path)
+    rollouts = Rollouts(tmp_path)
+    worktree = tmp_path / "w"
+    start = claude if runtime == "claude" else codex
+    lead = Conversation(
+        repository=worktree / ".git",
+        runtime=runtime,
+        session="s1" if runtime == "claude" else "t1",
+    )
+    agents = {"parser": ("a1", "th1"), "lexer": ("a2", "th2")}
+
+    def subagent(
+        name: str, tool: str, arguments: dict[str, JsonValue]
+    ) -> tuple[str, bool]:
+        agent, thread = agents[name]
+        if runtime == "claude":
+            return records.lup((hook, mcp), tool, arguments, agent, "Explore")
+        return rollouts.lup((hook, mcp), tool, arguments, thread)
+
+    def subagent_calls(name: str, made: str) -> str:
+        agent, thread = agents[name]
+        if runtime == "claude":
+            told = send(hook, records.call(agent, "Explore", made))
+        else:
+            told = send(hook, rollouts.call(thread, made))
+        return context(told) if told else ""
+
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, worktree, "one", runtime)
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, start("SessionStart", source="startup"))
+        for call, name in [("t1", "parser"), ("t2", "lexer")]:
+            agent, thread = agents[name]
+            if runtime == "claude":
+                send(hook, records.spawn(call, name=name))
+                records.recorded(agent, "Explore", call, name=name)
+            else:
+                rollouts.recorded(thread, "t1", f"/root/{name}")
+        subagent("parser", "note", {"remark": "On the parser."})
+        opened = subagent(
+            "parser", "note", {"remark": "Tabs vanish.", "thread": "Tabs vanish"}
+        )
+        subagent("lexer", "note", {"remark": "The lexer is done."})
+        root = delivery.concerns().named(worktree / ".git", "w")
+        drafting(
+            machine,
+            clock,
+            Draft(
+                letters=[
+                    Letter(to=lead, thread=root.number, text="Ship the parser first.")
+                ]
+            ),
+        )
+        sending(machine, clock)
+        spared = subagent_calls("parser", "c1")
+        subagent("lexer", "note", {"remark": "Tabs here too.", "thread": "tabs-vanish"})
+        under = subagent_calls("parser", "c2")
+        joined = subagent("lexer", "thread", {"name": "w", "join": True})
+        subagent("parser", "note", {"remark": "The parser is done."})
+        heard = subagent_calls("lexer", "c3")
+    assert opened[0].endswith(", in @tabs-vanish. You can carry on.")
+    # On the root by working there and by what they sent landing there, the
+    # parser is told neither the operator's words to the session nor the
+    # lexer's note: nothing beside their next calls.
+    assert spared == ""
+    # The sub-thread they opened by sending into it is theirs to hear.
+    assert under.startswith("lup: in @tabs-vanish, a note from `w/lexer`, @")
+    assert under.endswith(": Tabs here too.")
+    # Joining the thread they started on, the lexer chose it, and hears what lands there.
+    assert joined == ("You work in @w: what you send lands there.", False)
+    assert heard.startswith("lup: in @w, a note from `w/parser`, @")
+    assert heard.endswith(": The parser is done.")
+
+
 def test_lup_dev_inbox_answer_answers_a_check_and_whoever_asked_it_is_told(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
