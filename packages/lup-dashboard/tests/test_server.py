@@ -640,13 +640,18 @@ def test_the_demo_reads_its_threads_as_the_host_does_and_the_operator_settles_on
     reader = read["transcript-reader"]
     assert [each.what for each in reader.asks] == ["a question", "a check"]
     assert read["guidance-voice"].state == "done to confirm"
-    # The parser's question and check, read, still show; their exchange with
-    # their subagent, read, folds under what came earlier.
+    # The parser's question and check, read, still show, after the latest three
+    # read besides, but the flagged write, their exchange with their subagent
+    # among them; the rest folds under what came earlier.
     conversation = shown(reader.thread.number)
-    assert [each.spot.node for each in conversation.entries] == [
-        each.node for each in reader.asks
+    assert [(each.spot.node, each.seen) for each in conversation.entries] == [
+        (67, True),
+        (70, True),
+        (51, False),
+        (311, False),
+        (57, True),
     ]
-    assert conversation.left == 6
+    assert conversation.left == 3
     # A part of the operator's words moved in says what they said, open.
     [part] = shown(read["voice-branch"].thread.number, whole=True).entries
     assert part.unanswered

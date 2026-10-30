@@ -560,3 +560,43 @@ def test_writing_on_a_thread_done_reopens_it(work: Work) -> None:
     asyncio.run(work.delivery.reviewed())
     voice = work.read()["voice"]
     assert isinstance(voice.status, Reopened)
+
+
+def test_a_thread_s_conversation_shows_the_latest_few_read_before_what_s_new_as_context(
+    work: Work, clock: FakeClock
+) -> None:
+    def step(at: int) -> int:
+        clock.sleep(60)
+        return work.sent(ThreadedRemark(remark=f"Step {at}.", thread="docs"))
+
+    read = [step(at) for at in range(5)]
+    clock.sleep(60)
+    work.delivery.inbox.marks.moved(
+        REPOSITORY,
+        CORE,
+        [
+            ReviewMark(
+                key=on_node(work.docs.number), up_to=str(read[-1]), at=clock.now()
+            )
+        ],
+    )
+    clock.sleep(60)
+    fresh = work.sent(ThreadedRemark(remark="Step 5.", thread="docs"))
+
+    shown = work.shown(work.docs)
+
+    assert [(each.spot.node, each.seen) for each in shown.entries] == [
+        (read[2], True),
+        (read[3], True),
+        (read[4], True),
+        (fresh, False),
+    ]
+    assert shown.left == 3
+    none = asyncio.run(
+        ThreadShowing(reading=work.reading()).answer(
+            ShowThread(number=work.docs.number, seen=0)
+        )
+    )
+    assert isinstance(none, ThreadShown)
+    assert [each.spot.node for each in none.entries] == [fresh]
+    assert none.left == 6

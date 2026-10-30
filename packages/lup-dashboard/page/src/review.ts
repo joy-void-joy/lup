@@ -115,15 +115,20 @@ export type ThreadsRead = components["schemas"]["ThreadsRead"];
 export type ThreadEntry = components["schemas"]["ThreadEntry"];
 export type CheckRead = components["schemas"]["CheckRead"];
 
-/** A section of the review grouped by thread, in its order: what asks the operator, what came that they haven't read, the pile to read, every other thread, and each agent with their own views. */
-export type SectionName = "waiting on you" | "new" | "to read" | "every thread" | "agents";
+/**
+ * A section of the review grouped by thread, in its order: what asks the operator, what came that they haven't read,
+ * the front, every other thread still open, the pile to read, what's settled or declined, and each agent with their
+ * own views.
+ */
+export type SectionName = "waiting on you" | "new" | "open" | "to read" | "settled" | "agents";
 
-/** The sections, in the review's order, and whether each starts folded. */
+/** The sections, in the review's order, and whether each starts folded: the front, open, is there to look at. */
 export const SECTIONS: readonly { name: SectionName; folded: boolean }[] = [
     { name: "waiting on you", folded: false },
     { name: "new", folded: false },
+    { name: "open", folded: false },
     { name: "to read", folded: true },
-    { name: "every thread", folded: true },
+    { name: "settled", folded: true },
     { name: "agents", folded: true },
 ];
 
@@ -1392,7 +1397,8 @@ export function laid(
     const asides: Aside[] = [];
     const checkLines: CheckLine[] = [];
     const loading: Loading[] = [];
-    // The groups whose fold starts closed, as each of every thread's does, and those whose conversation isn't read yet.
+    // The groups whose fold starts closed, as each thread's of the front and of what's settled does, and those whose
+    // conversation isn't read yet.
     const closedGroups = new Set<string>();
     const unreadGroups = new Set<string>();
     // Each agent whose "since you approved" is laid out at the end of the thread they work in, by `whose` they are.
@@ -1409,7 +1415,7 @@ export function laid(
         layThreaded(threading);
     }
     // Each group folds whole under its banner, up to the next as deep or shallower, a subagent's inside their parent's,
-    // a thread's under its parent's in every thread, and never past its section's end.
+    // a thread's under its parent's in its section, and never past its section's end.
     {
         groups.forEach((group, at) => {
             const next = groups.findIndex((each, after) => after > at && each.depth <= group.depth);
@@ -1562,14 +1568,17 @@ export function laid(
      * waiting on you, each thread something in asks the operator, a landing waiting on files among it, those blocked on
      * them first, then those done for them to confirm, each in the order it came into the section, and never sorted
      * again, its place kept (`places`), then what asks them in no thread, as lup's own approvals, by whom it's from; new,
-     * each thread with something they haven't read that asks nothing; to read, the pile's count; every thread, each other
-     * thread, nested under its parent among them, folded and read as it opens; and agents, each agent's group as it was,
-     * their banner and their own views, folded.
+     * each thread with something they haven't read that asks nothing; open, the front, every thread still open those
+     * don't hold, a line each, nested under its parent among them, folded, the section open; to read, the pile's count;
+     * settled, each thread settled or declined, nested so, folded; and agents, each agent's group as it was, their banner
+     * and their own views, folded. A thread of the front or of what's settled is read as it opens.
      */
     function layThreaded(threading: Threading): void {
         const reads = threading.read.threads;
         const landed = (read: ThreadRead) => threading.landing.get(read.thread.number) ?? 0;
-        const sectionOf = (read: ThreadRead): SectionName => (landed(read) > 0 ? "waiting on you" : read.section);
+        // What the host reads as every thread is the front, each open, or what's settled or declined.
+        const sectionOf = (read: ThreadRead): SectionName =>
+            landed(read) > 0 ? "waiting on you" : read.section !== "every thread" ? read.section : read.state === "settled" || read.state === "declined" ? "settled" : "open";
         // Where each conversation works, by the thread: whose "since you approved" is laid out at its group's end; and
         // each writer of a file a landing waits on, where they work nowhere now, as an ended subagent, at the end of the
         // thread their lander works in, where what the landing waits on is asked.
@@ -1591,17 +1600,18 @@ export function laid(
         const inOrder = (list: ThreadRead[]) => keptBy(list.toSorted((a, b) => since(a) - since(b)), (each) => threadPlace(each.thread.number));
         const waiting = reads.filter((each) => sectionOf(each) === "waiting on you");
         const blocked = inOrder(waiting.filter((each) => (each.asks ?? []).length > 0 || landed(each) > 0));
-        const done = inOrder(waiting.filter((each) => !blocked.includes(each)));
+        const confirming = inOrder(waiting.filter((each) => !blocked.includes(each)));
         const fresh = inOrder(reads.filter((each) => sectionOf(each) === "new"));
-        const every = reads.filter((each) => sectionOf(each) === "every thread");
+        const front = reads.filter((each) => sectionOf(each) === "open");
+        const done = reads.filter((each) => sectionOf(each) === "settled");
         // What asks the operator in no thread, as lup's own approvals.
         const asked = new Set(reads.flatMap((each) => (each.asks ?? []).map((ask) => ask.node)));
         const loose = grouped(
             items.filter((each) => each.rank.name === "waiting on you" && !asked.has(each.number) && !parked.includes(each.number)),
             (item) => banner({ item }, false, ""),
         );
-        layThreadSection("waiting on you", `${blocked.length + done.length + loose.length}`, () => {
-            for (const each of [...blocked, ...done]) {
+        layThreadSection("waiting on you", `${blocked.length + confirming.length + loose.length}`, () => {
+            for (const each of [...blocked, ...confirming]) {
                 layThread(each, 0, false);
             }
             for (const group of kept(loose, false)) {
@@ -1613,6 +1623,12 @@ export function laid(
                 layThread(each, 0, false);
             }
         });
+        // The front: every thread still open the sections above don't hold, a line each, nested as threads nest.
+        layThreadSection("open", `${front.length}`, () => {
+            for (const { read, depth } of nestedThreads(front)) {
+                layThread(read, depth, true);
+            }
+        });
         const piled = new Map(items.map((each) => [each.number, each]));
         const pile = reads.flatMap((each) => each.pile ?? []);
         const frictions = pile.filter((each) => piled.get(each)?.reason.reason === "friction").length;
@@ -1620,26 +1636,10 @@ export function laid(
             const line = { kind: "summary" as const, ...w.line("frictions and how it felt, by their titles: piece 4c lists them here", "section to read pile") };
             asides.push(line);
         });
-        const open = every.filter((each) => each.state !== "settled" && each.state !== "declined").length;
-        layThreadSection("every thread", `${open} open · ${every.length - open} settled or declined`, () => {
-            // Each under its parent among them, in the order each was opened.
-            const numbers = new Set(every.map((each) => each.thread.number));
-            const under = new Map<number | null, ThreadRead[]>();
-            for (const each of every.toSorted((a, b) => a.thread.number - b.thread.number)) {
-                let parent = each.thread.parent ?? null;
-                while (parent !== null && !numbers.has(parent)) {
-                    parent = reads.find((one) => one.thread.number === parent)?.thread.parent ?? null;
-                }
-                under.set(parent, [...(under.get(parent) ?? []), each]);
-            }
-            const walk = (read: ThreadRead, depth: number) => {
+        const declined = done.filter((each) => each.state === "declined").length;
+        layThreadSection("settled", `${done.length - declined} settled · ${declined} declined`, () => {
+            for (const { read, depth } of nestedThreads(done)) {
                 layThread(read, depth, true);
-                for (const child of under.get(read.thread.number) ?? []) {
-                    walk(child, depth + 1);
-                }
-            };
-            for (const each of under.get(null) ?? []) {
-                walk(each, 0);
             }
         });
         // Each agent's group, their banner and their own views, as an agent's group was: those running, those holding
@@ -1654,6 +1654,24 @@ export function laid(
             }
         });
 
+        /** Return `threads`, each under its parent among them, in the order each was opened, with how deep it's set in. */
+        function nestedThreads(threads: readonly ThreadRead[]): { read: ThreadRead; depth: number }[] {
+            const numbers = new Set(threads.map((each) => each.thread.number));
+            const under = new Map<number | null, ThreadRead[]>();
+            for (const each of threads.toSorted((a, b) => a.thread.number - b.thread.number)) {
+                let parent = each.thread.parent ?? null;
+                while (parent !== null && !numbers.has(parent)) {
+                    parent = reads.find((one) => one.thread.number === parent)?.thread.parent ?? null;
+                }
+                under.set(parent, [...(under.get(parent) ?? []), each]);
+            }
+            const walk = (read: ThreadRead, depth: number): { read: ThreadRead; depth: number }[] => [
+                { read, depth },
+                ...(under.get(read.thread.number) ?? []).flatMap((child) => walk(child, depth + 1)),
+            ];
+            return (under.get(null) ?? []).flatMap((each) => walk(each, 0));
+        }
+
         /** Lay a section's line, saying what it holds, then what `lay` lays in it. */
         function layThreadSection(name: SectionName, holds: string, lay: () => void): void {
             const id = `section ${name}`;
@@ -1664,10 +1682,11 @@ export function laid(
         }
 
         /**
-         * Lay thread `read` out as a group, `depth` deep among every thread's: its banner, the operator's messages on it,
+         * Lay thread `read` out as a group, `depth` deep among its section's: its banner, the operator's messages on it,
          * what's to try where it's done, then its conversation from where they last read it, what came before folded
          * under one line and read whole as it opens, and the "since you approved" of each agent working in it; folded,
-         * where `folded` says, as every thread's start, and its conversation read as it opens where it isn't yet.
+         * where `folded` says, as the front's and what's settled start, and its conversation read as it opens where it
+         * isn't yet.
          */
         function layThread(read: ThreadRead, depth: number, folded: boolean): void {
             const number = read.thread.number;
@@ -1811,8 +1830,9 @@ export function laid(
                 const words = below.filter((each) => !each.member);
                 // A message between agents folds to its header, as does what no longer waits on the operator: answered,
                 // marked done, decided, which is the thread's history.
+                // And what's shown as context before what's new, read already (`ThreadEntry.seen`).
                 const between = item.reason.reason === "message" && item.reason.to != null && item.sender.party === "conversation";
-                within.push(layItem(item, parked.includes(item.number), { under, words, folded: between || !waits(item) }));
+                within.push(layItem(item, parked.includes(item.number), { under, words, folded: between || !waits(item) || entry.seen === true }));
                 for (const each of words) {
                     for (const child of children.get(spotKey(each.spot)) ?? []) {
                         walk(child, true);

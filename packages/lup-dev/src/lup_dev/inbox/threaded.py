@@ -277,6 +277,10 @@ class ThreadEntry(Model):
     unanswered: bool = False
     """Whether it's a part of the operator's words moved in that nothing in the
     thread answers yet: open, waiting on whoever answers for it."""
+    seen: bool = False
+    """Whether it's shown as context before what's new: one of the latest of
+    what came before where the operator last read the thread (`ShowThread.seen`),
+    or their words on one."""
     said: str | None = None
     """The operator's words there, where it's a part of an item of theirs: a
     comment, a ruling, a message; none for an item or a check whole, which the
@@ -342,11 +346,16 @@ class ListThreads(Request, reads=True):
 
 
 class ShowThread(Request, reads=True):
-    """Show one thread's conversation, from where the operator last read it, or `whole`."""
+    """Show one thread's conversation, from where the operator last read it, the latest `seen` of what came before it besides, or `whole`."""
 
     kind: Literal["inbox-thread"] = "inbox-thread"
     number: int
     whole: bool = False
+    seen: int = Field(default=3, ge=0)
+    """How many of what came before where the operator last read it show
+    besides, the latest, each but a flagged write, which the review shows
+    elsewhere: a little of what they may have seen, as context before what's
+    new, as a drawer keeps an agent's last words open."""
 
 
 class SettleThread(Request, reads=False):
@@ -619,8 +628,8 @@ class Readings(Model, arbitrary_types_allowed=True):
             since=max([thread.at, *(each.came for each in members)]),
         )
 
-    def shown(self, number: int, *, whole: bool) -> ThreadShown:
-        """Read thread `number`'s conversation: from where the operator last read it, each entry an entry after it is under counted too, or `whole`."""
+    def shown(self, number: int, *, whole: bool, seen: int = 3) -> ThreadShown:
+        """Read thread `number`'s conversation: from where the operator last read it, each entry an entry after it is under counted too, and the latest `seen` of what came before (`context`), or `whole`."""
         read = self.read(number)
         ledgered = self.ledgered
         members = ledgered.members.get(number, [])
@@ -704,16 +713,20 @@ class Readings(Model, arbitrary_types_allowed=True):
         kept = (
             entries
             if whole
-            else self.after(
+            else self.context(
                 entries,
-                lambda each: (
-                    each.unanswered
-                    or (
-                        each.member
-                        and each.spot.part is None
-                        and each.spot.node in asking
-                    )
+                self.after(
+                    entries,
+                    lambda each: (
+                        each.unanswered
+                        or (
+                            each.member
+                            and each.spot.part is None
+                            and each.spot.node in asking
+                        )
+                    ),
                 ),
+                seen,
             )
         )
         named = list(
@@ -754,6 +767,47 @@ class Readings(Model, arbitrary_types_allowed=True):
             on=on,
             paths=self.source.paths([*named_by(shown), *on, *addressed]),
         )
+
+    def context(
+        self, entries: list[ThreadEntry], after: list[ThreadEntry], seen: int
+    ) -> list[ThreadEntry]:
+        """Return `after`, what's shown of `entries` from where the operator last read them, with the latest `seen` of what came before besides, each but a flagged write, and their words on each, each marked seen: a little of what they may have seen, as context before what's new."""
+        items = self.source.items()
+        shown = {(each.spot.node, each.spot.part): each for each in after}
+
+        def flagged(entry: ThreadEntry) -> bool:
+            item = None if entry.spot.part is not None else items.get(entry.spot.node)
+            return item is not None and ranked(item.reason).name == "flag"
+
+        before = [
+            each
+            for each in entries
+            if each.earlier
+            and each.member
+            and (each.spot.node, each.spot.part) not in shown
+            and not flagged(each)
+        ]
+        latest = {
+            (each.spot.node, each.spot.part): each
+            for each in (before[-seen:] if seen > 0 else [])
+        }
+        words = {
+            (each.spot.node, each.spot.part): each
+            for each in entries
+            if not each.member
+            and each.under is not None
+            and (each.under.node, each.under.part) in latest
+            and (each.spot.node, each.spot.part) not in shown
+        }
+        context = latest | words
+        return [
+            each.model_copy(update={"seen": True})
+            if (each.spot.node, each.spot.part) in context
+            else each
+            for each in entries
+            if (each.spot.node, each.spot.part) in shown
+            or (each.spot.node, each.spot.part) in context
+        ]
 
     def after(
         self, entries: list[ThreadEntry], open_: Callable[[ThreadEntry], bool]
@@ -850,7 +904,9 @@ class ThreadShowing(Model, Reading[ShowThread], arbitrary_types_allowed=True):
     @override
     async def answer(self, request: ShowThread) -> Reply:
         self.reading.thread(request.number)
-        return self.reading.readings_now().shown(request.number, whole=request.whole)
+        return self.reading.readings_now().shown(
+            request.number, whole=request.whole, seen=request.seen
+        )
 
     @override
     async def scoped(self, request: ShowThread, repository: Path) -> Reply:

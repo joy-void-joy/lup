@@ -427,7 +427,8 @@ export function App() {
         (map) => JSON.stringify([...map]),
     );
     // Each thread's conversation the review shows: each waiting on the operator or new, from where they last read it;
-    // and each they open, of every thread, and read whole where they open what came before (`openThread`).
+    // and each they open, of the front or of what's settled, and read whole where they open what came before
+    // (`openThread`).
     const [opening, setOpening] = useState<readonly ThreadAsked[]>([]);
     const openThread = useCallback((number: number, whole: boolean) => {
         setOpening((before) => (before.some((each) => each.number === number && each.whole === whole) ? before : [...before, { number, whole }]));

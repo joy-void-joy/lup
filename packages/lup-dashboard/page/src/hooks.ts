@@ -115,6 +115,12 @@ export function useViews(asked: readonly Instance[]): ReadonlyMap<string, Blocks
     return answers;
 }
 
+/**
+ * How many of what came before where the operator last read a thread show before what's new, the latest, each folded to
+ * its header: a little they may have seen, as context, the rest under "N earlier" (`ShowThread.seen`).
+ */
+const SEEN = 3;
+
 /** One thread's conversation the page asks for: from where the operator last read it, or whole. */
 export interface ThreadAsked {
     number: number;
@@ -147,7 +153,7 @@ export function useThreads(asked: readonly ThreadAsked[]): { shown: ReadonlyMap<
                 continue;
             }
             const stop = watch(
-                { kind: "inbox-thread", number: each.number, whole: each.whole },
+                { kind: "inbox-thread", number: each.number, whole: each.whole, seen: SEEN },
                 (reply) => {
                     if (reply.kind === "inbox-thread-shown") {
                         setAnswers((before) => new Map(before).set(at, reply));

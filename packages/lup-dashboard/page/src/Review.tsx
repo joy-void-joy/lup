@@ -250,7 +250,7 @@ export function threadBanner(read: ThreadRead, landing: number, called: (party: 
         holder === null
             ? answering === null
                 ? "nobody holds it"
-                : `${answering} answers`
+                : `nobody holds it, ${answering} answers`
             : holder === answering
               ? `${holder} holds`
               : `${ended ?? `${holder} held it`}${answering === null ? "" : `, ${answering} answers`}`;
@@ -261,8 +261,30 @@ export function threadBanner(read: ThreadRead, landing: number, called: (party: 
         ...(read.state === "done to confirm" ? ["done, to confirm"] : []),
         ...((read.new ?? []).length === 0 ? [] : [`${(read.new ?? []).length} new`]),
     ];
-    const stands = why.length > 0 ? why.join(", ") : read.state === "waiting on the operator" ? "waiting on you" : read.state;
+    const status = read.status ?? null;
+    const parked = status !== null && status.kind === "ledger:parked" ? `parked until ${status.until.map((each) => until(each, called)).join(" or ")}` : read.state;
+    const stands = why.length > 0 ? why.join(", ") : read.state === "waiting on the operator" ? "waiting on you" : read.state === "parked" ? parked : read.state;
     return `━━ @${thread.name} · ${about} · ${holds} · ${stands} ━━`;
+}
+
+/** Say what a parked thread waits for, one of what wakes it, as `thread`'s `park` takes it. */
+function until(trigger: NonNullable<ThreadRead["status"]> extends infer S ? (S extends { until: (infer T)[] } ? T : never) : never, called: (party: Conversation) => string): string {
+    switch (trigger.trigger) {
+        case "issue closed":
+            return typeof trigger.issue === "number" ? `#${trigger.issue} closes` : `${trigger.issue} closes`;
+        case "branch landed":
+            return `${trigger.branch} lands`;
+        case "commit landed":
+            return `${trigger.commit.slice(0, 8)} lands`;
+        case "conversation ended":
+            return `${called(trigger.conversation)} ends`;
+        case "time came":
+            return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(trigger.at));
+        case "condition held":
+            return `${trigger.when} holds`;
+        default:
+            return "what it waits for comes";
+    }
 }
 
 /** What every root thread is titled, as the host titles it (`lup_dev.inbox.concerns.ROOT`): its banner says whose it is instead. */
