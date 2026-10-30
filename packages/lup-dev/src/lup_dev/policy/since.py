@@ -498,9 +498,17 @@ class Reader(Model, arbitrary_types_allowed=True):
 
     @staticmethod
     def chosen(
-        found: list[Located], worktree: Path | None, branch: str | None
+        found: list[Located], worktree: Path | None, branch: str | None, git: Git
     ) -> Located:
-        """Return the place of `found` the page names by `worktree` and `branch`, the first where it names neither; refused where it's none of them."""
+        """Return the place of `found` the page names by `worktree` and `branch`, the first where it names neither.
+
+        A place the page names on a branch that isn't one of `found`, as a
+        worktree removed or detached after its branch landed, is that branch:
+        read at its tip where it's there, and gone, nothing left to mark,
+        where it isn't; so a mark the drawer showed is never refused for
+        where the work went after, and never stays drafted for it. Refused
+        where it names no branch and is none of them.
+        """
         if worktree is None and branch is None:
             if not found:
                 message = (
@@ -512,11 +520,17 @@ class Reader(Model, arbitrary_types_allowed=True):
             (each for each in found if each.root == worktree and each.branch == branch),
             None,
         )
-        if named is None:
-            where = branch if worktree is None else worktree
-            message = f"{where} is no place the conversation worked"
-            raise InboxError(message)
-        return named
+        if named is not None:
+            return named
+        if branch is not None:
+            alone = next(
+                (each for each in found if each.root is None and each.branch == branch),
+                None,
+            )
+            gone = git.commit(f"refs/heads/{branch}") is None
+            return alone or Located(root=None, branch=branch, gone=gone)
+        message = f"{worktree} is no place the conversation worked"
+        raise InboxError(message)
 
     def old(self, git: Git) -> str | None:
         """Return the integration branch's tip, the remote's copy where it's there, else the local branch's; none where there's neither."""
@@ -702,7 +716,8 @@ class Reader(Model, arbitrary_types_allowed=True):
         """
         party = request.conversation
         places = self.places(party)
-        located = self.chosen(places, request.worktree, request.branch)
+        git = Git.pinned(party.repository)
+        located = self.chosen(places, request.worktree, request.branch, git)
         branch = located.branch
         if branch is None:
             message = (
@@ -710,14 +725,15 @@ class Reader(Model, arbitrary_types_allowed=True):
                 "reviewed on its branch"
             )
             raise InboxError(message)
-        git = Git.pinned(party.repository)
         # Each place as it stands before the marking, every one where the page says the drawer it shows.
         standings = {
             (each.root, each.branch): self.standing(party, each)
             for each in places
             if request.seen is not None or each == located
         }
-        before = standings[located.root, located.branch]
+        before = standings.get((located.root, located.branch)) or self.standing(
+            party, located
+        )
         waiting = self.waiting(party, branch)
         held = self.held(git, branch, waiting)
         standing = {

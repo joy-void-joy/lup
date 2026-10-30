@@ -282,6 +282,11 @@ kbd {
     color: var(--err);
 }
 
+/* A reply being sent, or nothing to send: said at once, as the host may take seconds to answer. */
+.status .sending {
+    color: var(--info);
+}
+
 .bar .said {
     color: var(--info);
 }
@@ -382,6 +387,12 @@ kbd {
 .review-header.is-done {
     color: var(--muted);
     text-decoration: line-through;
+}
+
+/* What no longer waits on the operator, answered, read or decided: a thread's history, muted, never struck through,
+   which says what the next Ctrl+Enter does with it. */
+.review-header.is-past {
+    color: var(--muted);
 }
 
 .review-header.is-parked {

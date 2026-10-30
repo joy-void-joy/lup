@@ -860,7 +860,8 @@ export function threadPlace(number: number): string {
  * Return a thread's conversation as the host answered it, `shown`, as it's laid out: `before`, what folds with what came
  * before where the operator last read it; and `after`, what's shown. A thread they never read, as a past session's
  * whole history lup put in its root, shows only what calls for them, what's new to them, what asks them, a part of their
- * words still open (`ThreadRead`), with what each is under; the rest folds. One they read shows whatever came since.
+ * words still open (`ThreadRead`), with what each is under; the rest folds, all of it where nothing calls for them, so
+ * what they've answered never comes back once nothing's left. One they read shows whatever came since.
  */
 export function untilCalled(shown: ThreadShown, read: ThreadRead): { before: ThreadEntry[]; after: ThreadEntry[] } {
     const entries = shown.entries;
@@ -877,9 +878,6 @@ export function untilCalled(shown: ThreadShown, read: ThreadRead): { before: Thr
             kept.add(spotKey(at.spot));
             at = at.under == null ? undefined : byKey.get(spotKey(at.under));
         }
-    }
-    if (kept.size === 0) {
-        return { before: [], after: [...entries] };
     }
     return {
         before: entries.filter((each) => !kept.has(spotKey(each.spot))),
@@ -2824,6 +2822,23 @@ export function toAnswer(item: Item, draft: Draft): boolean {
 /** Whether an item still waits where it stands, as each the inbox lists does: grouped by thread, a thread's conversation shows those answered, done or decided too. */
 export function waits(item: Item): boolean {
     return item.state.state === "waiting";
+}
+
+/**
+ * Return the classes of an item's header line: new to the operator, news; struck through where the draft marks it done,
+ * declined or left for later, which the next Ctrl+Enter does; and muted where it no longer waits, answered, read or
+ * decided, a thread's history, never struck through as the draft's own marks are.
+ */
+export function headerClasses(item: Item, draft: Draft, seeing: Seeing): string {
+    const number = item.number;
+    return [
+        "review-header",
+        fresh(item, seeing) ? "is-new" : "",
+        news(item) ? "is-news" : "",
+        (draft.done ?? []).includes(number) ? "is-done" : waits(item) ? "" : "is-past",
+        (draft.declined ?? []).includes(number) ? "is-declined" : "",
+        (draft.parked ?? []).includes(number) ? "is-parked" : "",
+    ].join(" ");
 }
 
 /**

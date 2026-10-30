@@ -323,16 +323,66 @@ def test_the_drawer_reads_every_place_the_conversation_worked_each_its_own_and_m
     assert reviews.marks("old").files == []
     after = reader.read(ShowSince(conversation=branch.party))
     assert [each.branch for each in after.places] == ["dev", "feat"]
-    # A place no longer the conversation's is refused.
+    # Marked again, as a mark drafted from the drawer before is: the branch is gone, nothing left to mark.
+    again = reader.reviewed(
+        ReviewSince(
+            conversation=branch.party,
+            branch="old",
+            files=[ViewedFile(path=Path("src/old.py"))],
+        )
+    )
+    assert (again.reviewed, again.approved) == ([Path("src/old.py")], [])
+    assert reviews.marks("old").files == []
+    # A worktree that isn't a place of theirs, on no branch, is refused.
     with pytest.raises(InboxError) as refused:
         reader.reviewed(
             ReviewSince(
                 conversation=branch.party,
-                branch="old",
+                worktree=bare / "tree" / "elsewhere",
                 files=[ViewedFile(path=Path("src/old.py"))],
             )
         )
-    assert str(refused.value) == "old is no place the conversation worked"
+    assert str(refused.value) == (
+        f"{bare / 'tree' / 'elsewhere'} is no place the conversation worked"
+    )
+
+
+def test_a_file_marked_on_a_worktree_detached_once_its_branch_landed_is_marked_on_the_branch_or_nothing_where_its_gone(
+    bare: Path, shell: Shell, clock: FakeClock, tmp_path: Path
+) -> None:
+    delivery = alone(tmp_path, clock)
+    branch = Branch(bare, shell, delivery, clock)
+    reader = branch.reader(tmp_path)
+    branch.wrote("src/pkg/a.py", "a = 1\n")
+    flag = branch.flagged("src/pkg/a.py", None, "a = 1\n")
+    shown = only(reader.read(ShowSince(conversation=branch.party)))
+    assert (shown.worktree, shown.branch) == (branch.feat, "feat")
+    viewed = [ViewedFile(path=each.path, version=each.version) for each in shown.files]
+    marking = ReviewSince(
+        conversation=branch.party, worktree=branch.feat, branch="feat", files=viewed
+    )
+    # Landed, its worktree detached, as `land` leaves it: the branch is marked at its tip, its flag approved.
+    shell.git(branch.feat, "checkout", "-q", "--detach")
+    marked = reader.reviewed(marking)
+    assert (marked.reviewed, marked.approved, marked.moved) == (
+        [Path("src/pkg/a.py")],
+        [flag],
+        [],
+    )
+    reviews = Reviews.of(
+        Layout(state=tmp_path / "state", runtime=tmp_path / "run"),
+        delivery.inbox.marks,
+        bare,
+    )
+    assert [each.path for each in reviews.marks("feat").files] == [Path("src/pkg/a.py")]
+    # Its branch deleted: nothing left to mark, never refused, so the page's mark is applied and leaves the draft.
+    shell.git(bare, "branch", "-D", "feat")
+    gone = reader.reviewed(marking)
+    assert (gone.reviewed, gone.approved, gone.moved) == (
+        [Path("src/pkg/a.py")],
+        [],
+        [],
+    )
 
 
 def flag_on(branch: Branch, path: str, on: str) -> int:
