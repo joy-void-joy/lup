@@ -1471,6 +1471,15 @@ kbd {
     border-bottom-color: var(--warn);
 }
 
+/* The line in open the roots of sessions that have ended are under: a section's within the front, quieter. */
+.buffer .cm-line.aside-ended {
+    color: var(--muted);
+    font-weight: 700;
+    padding-top: 0.3em;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
 /* A thread's banner: a thread waiting on the operator barred in their colour, one done for them to confirm too; one
    settled or declined dimmed. */
 .buffer .cm-line.thread-banner.state-waiting-on-the-operator,

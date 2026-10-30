@@ -150,16 +150,24 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
     });
     let repository: string | null = null;
     let later = false;
-    // Grouped by thread, each section is a heading, as a repository is grouped by agent.
+    // Grouped by thread, each section is a heading, as a repository is grouped by agent; and in open, the line the
+    // ended sessions' roots are under, set in.
     let section: string | null = null;
+    let endedSaid = false;
     const threaded = laidOut.sections.length > 0;
     laidOut.groups.forEach((group, at) => {
         const from = group.banner.from;
         const within = laidOut.sections.findLast((each) => each.header.from < from);
+        const ended = laidOut.ended;
         if (threaded && within !== undefined && within.name !== section) {
             section = within.name;
             rows.push(heading(`section ${within.name}`, within.name, text.slice(within.header.from, within.header.to), within.header.from));
-        } else if (threaded) {
+        }
+        if (threaded && ended !== null && !endedSaid && from > ended.header.from && from <= ended.to) {
+            endedSaid = true;
+            rows.push({ ...heading("ended", "ended", text.slice(ended.header.from, ended.header.to), ended.header.from), depth: 1 });
+        }
+        if (threaded) {
             // Each section's heading stands for its repositories.
         } else if (group.later && !later) {
             later = true;
