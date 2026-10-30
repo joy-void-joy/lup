@@ -12,7 +12,7 @@
 import { newId } from "./anchors";
 import type { components } from "./generated/api";
 import { cited } from "./comments";
-import { news, writtenId, type Conversation, type Draft, type Group, type Item, type Laid, type Placed, type Region } from "./review";
+import { isLetter, news, writtenId, type Conversation, type Draft, type Group, type Item, type Laid, type Placed, type Region, type ThreadRead } from "./review";
 import type { Block as ViewBlock, Offer } from "./views";
 
 export type Verb = components["schemas"]["Verb"];
@@ -30,7 +30,8 @@ export type Act =
     | { kind: "item"; number: number; list: Listed }
     | { kind: "mark"; offer: Offer; block: string; version: string | null }
     | { kind: "once"; offer: Offer; conversation: Conversation | null }
-    | { kind: "comment" };
+    | { kind: "comment" }
+    | { kind: "readdress"; id: string; to: Conversation | null };
 
 /** Where a verb lands at the cursor: what it's on, as the line of keys names it, the part of the review it is, what it does there, and its acts; or why nothing there takes it. */
 export type Reach = { on: string; node: Placed; says: string; acts: Act[] } | { on: null; says: null; why: string };
@@ -91,6 +92,27 @@ function whyNot(verb: Verb): string {
         default:
             return `nothing here takes ${verb.called}`;
     }
+}
+
+/**
+ * Return where send lands on a message written on a thread, laid out at `node`, in `laidOut`: switching whom it goes to
+ * between whoever answers for the thread and no one, where it stays as the operator's; none on anything else written,
+ * nor for another verb.
+ */
+function writtenReach(laidOut: Laid, node: Placed, verb: Verb, naming: Naming): Reach | null {
+    if (verb.name !== CORE.send) {
+        return null;
+    }
+    const letter = laidOut.written.find((each) => `written ${writtenId(each)}` === node.id);
+    if (letter === undefined || !isLetter(letter) || letter.thread == null) {
+        return null;
+    }
+    const group = laidOut.groups.find((each) => each.thread?.thread.number === letter.thread);
+    const answering = group?.conversation ?? null;
+    if (letter.to != null) {
+        return { on: "your message", node, says: "send it to no one: it stays on the thread, waking nobody", acts: [{ kind: "readdress", id: writtenId(letter), to: null }] };
+    }
+    return answering === null ? null : { on: "your message", node, says: `send it to ${naming.called(answering)}`, acts: [{ kind: "readdress", id: writtenId(letter), to: answering }] };
 }
 
 /**
@@ -202,6 +224,13 @@ export function reachOf(laidOut: Laid, at: number, verb: Verb, naming: Naming): 
     };
     for (const node of chain.toReversed()) {
         switch (node.kind) {
+            case "written": {
+                const found = writtenReach(laidOut, node, verb, naming);
+                if (found !== null) {
+                    return found;
+                }
+                break;
+            }
             case "block": {
                 const block = node.block;
                 if (block === undefined) {
@@ -291,6 +320,9 @@ function itemReach(region: Region, node: Placed, verb: Verb): Reach | null {
  * nothing of it takes the verb, as on lup's approvals, which no agent is.
  */
 function groupReach(laidOut: Laid, node: Placed, group: Group, verb: Verb, naming: Naming): Reach | null {
+    if (group.thread !== null) {
+        return threadReach(laidOut, node, group, group.thread, verb, naming);
+    }
     const conversation = group.conversation;
     const on = conversation === null ? "lup's approvals" : naming.called(conversation);
     for (const part of group.parts) {
@@ -344,6 +376,67 @@ function groupReach(laidOut: Laid, node: Placed, group: Group, verb: Verb, namin
     }
 }
 
+/** Return an act on thread `read`, shown on its banner, `block`: `action`, the host's, settling or declining it, saying `says`. */
+function threadAct(read: ThreadRead, block: string, action: string, says: string): Act {
+    const offer: Offer = { action, argument: { number: read.thread.number }, verb: null, chord: null, runs: "send", commented: false, says };
+    return { kind: "mark", offer, block, version: null };
+}
+
+/**
+ * Return marking thread `read` read up to item `upTo`, shown on its banner, `block`: the core's review mark on its node,
+ * moved as the reply is sent (`review-mark`; `docs/inbox.md`, *Threads in the review*), so what came after is new.
+ */
+export function readAct(read: ThreadRead, block: string, upTo: number): Act {
+    const offer: Offer = {
+        action: "review-mark",
+        argument: { repository: read.thread.repository, module: CORE_MODULE, key: { node: read.thread.number }, up_to: String(upTo) },
+        verb: CORE.done,
+        chord: null,
+        runs: "send",
+        commented: false,
+        says: `@${read.thread.name} read`,
+    };
+    return { kind: "mark", offer, block, version: null };
+}
+
+/**
+ * Return where `verb` lands on a thread's group, `group`, laid out at `node`, the host reading it as `read`: on one done,
+ * for the operator to confirm, done settles it and decline declines it; on any other, done marks it read up to the last
+ * item shown, each of its news read with it, and an item asking something left, named; comment writes on it, to whoever
+ * answers for it, or to no one where nobody does. None for what else.
+ */
+function threadReach(laidOut: Laid, node: Placed, group: Group, read: ThreadRead, verb: Verb, naming: Naming): Reach | null {
+    const on = `@${read.thread.name}`;
+    const confirming = read.state === "done to confirm";
+    switch (verb.name) {
+        case CORE.done: {
+            if (confirming) {
+                return { on, node, says: "settle it: it works", acts: [threadAct(read, node.id, "inbox-settle-thread", `${on} settled`)] };
+            }
+            const regions = laidOut.regions.filter((each) => each.header.from > node.from && each.header.from <= node.to);
+            const items = regions.flatMap((region) => {
+                if (!news(region.item)) {
+                    return [];
+                }
+                const child = chainAt(node.children, region.header.from).findLast((each) => each.kind === "item");
+                const reached = child === undefined ? null : itemReach(region, child, verb);
+                return reached === null || reached.on === null ? [] : reached.acts;
+            });
+            const left = regions.filter((each) => each.item.rank.name === "waiting on you").map((each) => cited(each.item.number));
+            const last = Math.max(0, ...regions.map((each) => each.item.number));
+            const acts = [...(last === 0 ? [] : [readAct(read, node.id, last)]), ...items];
+            const leaving = left.length === 0 ? "" : `, ${left.join(" ")} left`;
+            return acts.length === 0 ? null : { on, node, says: `mark it read${items.length === 0 ? "" : ", its news with it"}${leaving}`, acts };
+        }
+        case CORE.decline:
+            return confirming ? { on, node, says: "decline it: nothing more will be done", acts: [threadAct(read, node.id, "inbox-decline-thread", `${on} declined`)] } : null;
+        case CORE.comment:
+            return { on, node, says: group.conversation === null ? "write on it, to no one" : `write on it, to ${naming.called(group.conversation)}`, acts: [{ kind: "comment" }] };
+        default:
+            return null;
+    }
+}
+
 /**
  * Return the acts `verb` reaches on each of `folds`, a visual selection's, each from its summary line outward but never
  * past it, so a run of unchanged lines reaches nothing where its file would: each act once, in their order.
@@ -383,6 +476,17 @@ export function isMarked(draft: Draft, act: Act, verb: string): boolean {
  * left for later. Acts that mark nothing, a comment or what runs at once, leave it as it is.
  */
 export function marking(draft: Draft, acts: readonly Act[], verb: string): Draft {
+    // A message readdressed, to whoever answers for its thread or to no one, as send on it does.
+    const readdressed = acts.flatMap((each) => (each.kind === "readdress" ? [each] : []));
+    if (readdressed.length > 0) {
+        return {
+            ...draft,
+            letters: (draft.letters ?? []).map((letter) => {
+                const act = readdressed.find((each) => each.id === letter.id);
+                return act === undefined ? letter : { ...letter, to: act.to };
+            }),
+        };
+    }
     const marks = acts.filter((each) => each.kind === "item" || each.kind === "mark");
     if (marks.length === 0) {
         return draft;

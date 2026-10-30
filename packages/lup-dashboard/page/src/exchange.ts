@@ -83,7 +83,7 @@ export function spokenOf(item: Item): Said[] {
                 on.push({ ...plain, id: id(at + 1), text: each.text, on: each.item, quote: each.quote ?? null });
             });
             for (const each of reason.letters ?? []) {
-                rest.push({ ...plain, text: each.text, to: each.to });
+                rest.push({ ...plain, text: each.text, to: each.to ?? null });
             }
             for (const each of reason.remarks ?? []) {
                 rest.push({ ...plain, text: each.text, to: each.to, quote: each.quote, remark: true });

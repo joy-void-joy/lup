@@ -147,11 +147,12 @@ class Edge(Record):
         del earlier
         return False
 
-    def cites(self, part: int) -> bool:
-        """Say whether its source cites part `part` of its target: a part of the operator's words moved into a thread is answered once something in the thread cites it (`lup_ledger.threads.Standing`).
+    def answers(self, part: int) -> bool:
+        """Say whether its source answers part `part` of its target: a part of the operator's words moved into a thread is answered once something in the thread does (`lup_ledger.threads.Standing`).
 
-        The base cites nothing: the kind that cites says so, as the inbox's
-        citation does.
+        The base answers nothing: the kind that answers says so, as the inbox's
+        citation of the part does, and its answer to the whole of what the part
+        is of.
         """
         del part
         return False

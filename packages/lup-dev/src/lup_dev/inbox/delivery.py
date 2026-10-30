@@ -125,7 +125,7 @@ import asyncio
 import difflib
 import secrets
 import textwrap
-from collections.abc import Callable, Coroutine, Generator
+from collections.abc import Callable, Coroutine, Generator, Sequence
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Literal, override
 
@@ -173,6 +173,7 @@ from lup_dev.inbox.store import (
     Inbox,
     InboxError,
     Item,
+    Letter,
     Message,
     Passage,
     Question,
@@ -1327,7 +1328,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         under_items = [] if under is None else under
         items = [self.inbox.item(each) for each in review.covers]
         commented = [each.item for each in review.comments]
-        addressed = list(dict.fromkeys(each.to for each in review.letters))
+        addressed = list(
+            dict.fromkeys(each.to for each in review.letters if each.to is not None)
+        )
         on_items = parts[: len(review.comments)]
         rest = [each.id.said() for each in parts[len(review.comments) :]]
 
@@ -1338,9 +1341,17 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         def written(to: Conversation) -> str:
             return "\n\n".join(each.text for each in review.letters if each.to == to)
 
+        def on_thread(letter: Letter) -> dict[str, str]:
+            thread = None if letter.thread is None else self.on_thread(letter)
+            return {} if thread is None else {"thread": thread.name}
+
         def mine(to: Conversation) -> list[Tag]:
             return [
-                Tag(name="message", attributes=numbered(at), parts=[each.text])
+                Tag(
+                    name="message",
+                    attributes={**numbered(at), **on_thread(each)},
+                    parts=[each.text],
+                )
                 for at, each in enumerate(review.letters)
                 if each.to == to
             ]
@@ -1465,9 +1476,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return self.inbox.drafted(draft)
 
     def heard(self, draft: Draft) -> None:
-        """Refuse a draft with a message, or a remark, for a conversation lup's inbox has never heard of, which no reply could reach: it's known once one of its hooks is heard."""
+        """Refuse a draft with a message, or a remark, for a conversation lup's inbox has never heard of, which no reply could reach: it's known once one of its hooks is heard; and a message on a thread lup doesn't keep, of another repository than whom it's to, or to no one on none."""
+        for letter in draft.letters:
+            self.on_thread(letter)
         for to in [
-            *(each.to for each in draft.letters),
+            *(each.to for each in draft.letters if each.to is not None),
             *(each.to for each in draft.remarks),
         ]:
             if to.key() not in self.inbox.whereabouts:
@@ -1549,8 +1562,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     for each in messages
                     if isinstance(each.reason, Question)
                 ),
-            ]
+            ],
+            [each.thread for each in draft.written() if each.thread is not None],
         )
+        self.threaded(draft, reviews)
         dispatched = Dispatched(
             reviews=reviews,
             read=[
@@ -1571,9 +1586,86 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             await self.delivered(each)
         return dispatched
 
+    def on_thread(self, letter: Letter) -> Thread | None:
+        """Return the thread `letter` is written on; none for one under an agent's banner. Say where lup keeps no such thread, it's of another repository than whom the letter is to, or a letter to no one is on none."""
+        if letter.thread is None:
+            if letter.to is None:
+                message = "a message to no one is written on a thread, where it stays as yours"
+                raise InboxError(message)
+            return None
+        thread = self.concerns().thread(letter.thread)
+        if letter.to is not None and letter.to.repository != thread.repository:
+            message = (
+                f"a message on @{thread.name} goes to someone of its repository, "
+                f"{thread.repository}, and {self.roster().who(letter.to)} is of "
+                f"{letter.to.repository}"
+            )
+            raise InboxError(message)
+        return thread
+
+    def threaded(self, draft: Draft, sent: list[Item]) -> None:
+        """Put each message of `draft` written on a thread there, once the reviews `sent` are made: one to a conversation as the part of their review it is, moved into the thread (`Moved`), where it stays open until something there answers it, waiting on whoever answers for the thread and never on the operator, told to nobody again but everyone else on it in a line; one to no one as a note of the operator's to themselves, done, in the thread, told to nobody (`docs/inbox.md`, *Threads in the review*)."""
+        concerns = self.concerns()
+        at = self.clock.now()
+        for item in sent:
+            review = item.reason
+            if not isinstance(review, Review):
+                continue
+            for place, letter in enumerate(review.letters):
+                thread = self.on_thread(letter)
+                to = letter.to
+                if (
+                    thread is None
+                    or to is None
+                    or to != (item.addressed or item.recipient)
+                ):
+                    continue
+                part = len(review.comments) + len(item.replies) + place + 1
+                concerns.drawn(
+                    ledger.Moved(
+                        source=item.number,
+                        part=part,
+                        target=thread.number,
+                        repository=thread.repository,
+                        by=Operator(),
+                        at=at,
+                    )
+                )
+                concerns.telling(
+                    thread,
+                    [to],
+                    whole=None,
+                    line=(
+                        f"lup: in @{thread.name}, the operator's words @{item.number}."
+                        f"{part}, to {concerns.roster.who(to)}: {cue(letter.text)}"
+                    ),
+                    holder=False,
+                )
+        for letter in draft.unaddressed():
+            thread = self.on_thread(letter)
+            if thread is None:
+                continue
+            note = self.inbox.made(
+                Message(kind="note", text=letter.text, repository=thread.repository),
+                Operator(),
+                Operator(),
+                None,
+                at,
+            )
+            self.inbox.kept(note.model_copy(update={"state": Done(at=at)}))
+            concerns.drawn(
+                ledger.In(
+                    source=note.number,
+                    target=thread.number,
+                    repository=thread.repository,
+                    by=Operator(),
+                    at=at,
+                )
+            )
+
     def reviews(self, draft: Draft, covered: list[Item]) -> list[Item]:
-        """Make the reviews `draft` is sent as for the messages and questions it covers, `covered`, its messages to agents and its remarks in their drawers, one to each conversation it reaches, and settle each item; delivering them is the caller's."""
-        letters = draft.written()
+        """Make the reviews `draft` is sent as for the messages and questions it covers, `covered`, its messages to agents and its remarks in their drawers, one to each conversation it reaches, and settle each item; delivering them is the caller's. A message to no one reaches nobody (`threaded`)."""
+        letters = draft.addressed()
         remarks = draft.remarked()
         if not covered and not letters and not remarks:
             return []
@@ -1595,7 +1687,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             dict.fromkeys(
                 [
                     *senders,
-                    *(each.to for each in letters),
+                    *(each.to for each in letters if each.to is not None),
                     *(each.to for each in remarks),
                 ]
             )
@@ -1871,14 +1963,16 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             served=lambda launch: self.layout.record(launch).is_file(),
         )
 
-    def reopening(self, numbers: list[int]) -> list[Thread]:
-        """Reopen each thread done, for the operator to confirm, that holds one of the items `numbers` they replied on, or answered: a reply there says it isn't done, and it goes back to whoever held it, told so (`Concerns.reopened`). Return those reopened."""
+    def reopening(
+        self, numbers: list[int], written: Sequence[int] = ()
+    ) -> list[Thread]:
+        """Reopen each thread done, for the operator to confirm, that holds one of the items `numbers` they replied on, or answered, or that they wrote on, `written`, by number: a reply there says it isn't done, and it goes back to whoever held it, told so (`Concerns.reopened`). Return those reopened."""
         concerns = self.concerns()
         held = {
             thread.number: thread
             for each in numbers
             if (thread := concerns.containing(each)) is not None
-        }
+        } | {each: concerns.thread(each) for each in written}
         done = [
             each
             for each in held.values()

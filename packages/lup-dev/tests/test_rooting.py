@@ -27,7 +27,7 @@ from lup_dev.inbox.store import (
     Question,
     Whereabouts,
 )
-from lup_dev.inbox.threaded import Ledgered, Readings
+from lup_dev.inbox.threaded import Readings
 from lup_dev.layout import Layout
 from lup_dev.settings import LupDevSettings
 from lup_ledger.environment.layout import LedgerLayout
@@ -170,7 +170,7 @@ def test_lup_s_settling_of_a_past_root_isn_t_where_the_operator_read_it(
     rooted(concerns)
     dev = concerns.containing(past.read[0].number)
     assert dev is not None
-    readings = Readings(concerns=concerns, ledgered=Ledgered.read(concerns))
+    readings = Readings.of(concerns)
     read = readings.read(dev.number)
     assert (read.section, read.state, read.new, read.earlier) == (
         "every thread",
@@ -181,7 +181,7 @@ def test_lup_s_settling_of_a_past_root_isn_t_where_the_operator_read_it(
     # The operator settling it is: what came before is read.
     clock.sleep(60)
     concerns.settled(dev)
-    again = Readings(concerns=concerns, ledgered=Ledgered.read(concerns))
+    again = Readings.of(concerns)
     assert again.read(dev.number).earlier == read.members
 
 

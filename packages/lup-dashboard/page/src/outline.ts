@@ -20,8 +20,8 @@ import {
     type Region,
 } from "./review";
 
-/** What an entry of the overview is. */
-export type OutlineKind = "repository" | "agent" | "approvals" | "item";
+/** What an entry of the overview is: a heading, a repository's or, grouped by thread, a section's; an agent; lup's approvals; a thread; an item. */
+export type OutlineKind = "repository" | "agent" | "approvals" | "thread" | "item";
 
 /**
  * How an entry stands, the state it's in, each in its own colour: an item waiting on the operator, news to read, or
@@ -68,8 +68,11 @@ function last(path: string): string {
     return name.endsWith(".git") ? name.slice(0, -".git".length) : name;
 }
 
-/** Return the repository a group is of: its agent's, or an approval's. */
+/** Return the repository a group is of: its thread's, its agent's, or an approval's. */
 function repositoryOf(group: Group): string {
+    if (group.thread !== null) {
+        return group.thread.thread.repository;
+    }
     if (group.conversation !== null) {
         return group.conversation.repository;
     }
@@ -146,16 +149,58 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
     });
     let repository: string | null = null;
     let later = false;
+    // Grouped by thread, each section is a heading, as a repository is grouped by agent.
+    let section: string | null = null;
+    const threaded = laidOut.sections.length > 0;
     laidOut.groups.forEach((group, at) => {
         const from = group.banner.from;
-        if (group.later && !later) {
+        const within = laidOut.sections.findLast((each) => each.header.from < from);
+        if (threaded && within !== undefined && within.name !== section) {
+            section = within.name;
+            rows.push(heading(`section ${within.name}`, within.name, text.slice(within.header.from, within.header.to), within.header.from));
+        } else if (threaded) {
+            // Each section's heading stands for its repositories.
+        } else if (group.later && !later) {
             later = true;
             rows.push(heading("later", "later", "left for later", from));
         } else if (!group.later && group.depth === 0 && repositoryOf(group) !== repository) {
             repository = repositoryOf(group);
             rows.push(heading(`repository ${repository} ${at}`, last(repository), repository, from));
         }
-        const to = ends[at] ?? from;
+        const to = Math.min(ends[at] ?? from, group.end);
+        if (group.thread !== null) {
+            const read = group.thread;
+            const own = laidOut.regions.filter((each) => each.header.from > from && each.header.from <= to);
+            rows.push({
+                key: `group ${group.place}`,
+                kind: "thread",
+                depth: group.depth + 1,
+                text: `@${read.thread.name}`,
+                title: text.slice(group.banner.from, group.banner.to),
+                marks: read.state === "waiting on the operator" || read.state === "done to confirm" ? ["waiting"] : (read.new ?? []).length > 0 ? ["news"] : [],
+                draft: [],
+                fresh: (read.new ?? []).length > 0,
+                from,
+                to,
+                at: from,
+                tag: toReview(group) === 0 ? null : `◇${toReview(group)}`,
+            });
+            own.forEach((region, index) => {
+                rows.push({
+                    key: `item ${region.item.number}`,
+                    kind: "item",
+                    depth: group.depth + 2,
+                    text: region.named,
+                    title: text.slice(region.header.from, region.header.to),
+                    ...itemStanding(region, draft, seeing),
+                    from: region.header.from,
+                    to: Math.min((own[index + 1]?.header.from ?? to + 1) - 1, to),
+                    at: region.header.from,
+                    tag: null,
+                });
+            });
+            return;
+        }
         const key = group.conversation === null ? null : whose(group.conversation);
         const state = key === null ? null : (states.get(key) ?? null);
         const path = group.conversation === null ? "lup's approvals" : called(group.conversation);

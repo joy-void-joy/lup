@@ -127,6 +127,10 @@ class Message(Model):
     """The conversation it was sent to, where it's the operator's copy of a
     message one conversation sent another (`send`), which they read as news
     whatever its kind; none where its recipient is whom it was sent to."""
+    repository: Path | None = None
+    """The repository it's about where no conversation is its party: the
+    operator's words on a thread to no one, which stay in that thread
+    (`Letter.to`); none else."""
     answers: list[int] = []
     """For a turn's last words, the operator's items told to the conversation
     since their last such words, which these words answer: a review, a message, an
@@ -584,11 +588,16 @@ class Comment(Model):
 
 
 class Letter(Model):
-    """The operator's message to one conversation, written under its agent's banner in the review and sent with the rest of the reply."""
+    """The operator's message, written in the review and sent with the rest of the reply: to one conversation, under their agent's banner; or on a thread, to whoever answers for it as they write, or to no one (`docs/inbox.md`, *Threads in the review*)."""
 
     id: str = ""
     """What names it among what's drafted, as a comment's does (`Comment.id`)."""
-    to: Conversation
+    to: Conversation | None = None
+    """Whom it reaches; none for words written on a thread to no one, which
+    stay there as the operator's, waking nobody."""
+    thread: int | None = None
+    """The thread it's written on, by its number, where it shows in order as
+    the operator's words; none for a message written under an agent's banner."""
     text: str
 
 
@@ -1170,6 +1179,14 @@ class Draft(Model):
         """Return the messages that say something, in order: those the draft sends."""
         return [each for each in self.letters if each.text.strip()]
 
+    def addressed(self) -> list[Letter]:
+        """Return the messages that say something to a conversation, in order: those the reply carries to them."""
+        return [each for each in self.written() if each.to is not None]
+
+    def unaddressed(self) -> list[Letter]:
+        """Return the messages that say something to no one, in order: each the operator's words on a thread, kept there."""
+        return [each for each in self.written() if each.to is None]
+
     def remarked(self) -> list[Remark]:
         """Return the remarks that say something, in order: those the draft sends."""
         return [each for each in self.remarks if each.text.strip()]
@@ -1216,7 +1233,7 @@ class Order(Model):
 
 
 def located(item: Item) -> Path:
-    """Return the repository `item` is kept under on the ledger: its conversations', the first of its sender, its recipient and whom it was for; else the one its approval is about; else `/`, for one between the operator and themselves about none, which lup doesn't make.
+    """Return the repository `item` is kept under on the ledger: its conversations', the first of its sender, its recipient and whom it was for; else the one its approval, or the operator's words on a thread to no one, are about; else `/`, for one between the operator and themselves about none, which lup doesn't make.
 
     A version of a node stays in its node's repository, and each of these is
     the same in every version of the item: a recipient changed when a subagent
@@ -1227,7 +1244,11 @@ def located(item: Item) -> Path:
         for each in [item.sender, item.recipient, item.addressed]
         if isinstance(each, Conversation)
     ]
-    about = [item.reason.repository] if isinstance(item.reason, Approval) else []
+    match item.reason:
+        case Approval(repository=repository) | Message(repository=Path() as repository):
+            about = [repository]
+        case _:
+            about = []
     return next(iter([*conversations, *about]), Path("/"))
 
 
@@ -1530,6 +1551,12 @@ class Answers(Edge):
     kind: Literal["inbox:answers"] = "inbox:answers"
     source: int
 
+    @override
+    def answers(self, part: int) -> bool:
+        """Say it answers every part of the item it answers: a turn's last words answer the operator's items whole, so a part of their words moved into a thread is answered by them where they come into it, cited or not (`lup_ledger.threads.answered`)."""
+        del part
+        return True
+
 
 class Replies(Edge):
     """The operator's reply to a conversation's message, drawn to that message (`Message.of`)."""
@@ -1558,7 +1585,7 @@ class Cites(Edge):
         return isinstance(earlier, Cites) and earlier.reading < self.reading
 
     @override
-    def cites(self, part: int) -> bool:
+    def answers(self, part: int) -> bool:
         """Say whether it names part `part` of the item it cites, which answers that part where it's moved into a thread (`lup_ledger.threads.answered`)."""
         return self.part == part
 

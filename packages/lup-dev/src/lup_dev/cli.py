@@ -191,6 +191,12 @@ from lup_dev.inbox.texts import (
     opening,
     what,
 )
+from lup_dev.inbox.threaded import (
+    DeclineThread,
+    ReopenThread,
+    SettleThread,
+    ThreadStated,
+)
 from lup_dev.inbox.threaded import routes as threaded_routes
 from lup_dev.inbox.tools import InboxTools
 from lup_dev.inbox.typed import TypeReader
@@ -999,7 +1005,11 @@ def shown(item: Item, paths: Sequence[Pathed] = ()) -> str:
             numbers = ", ".join(cited(each) for each in covers)
             body = [
                 *([f"Of {numbers}."] if covers else []),
-                *(f"To {called(each.to, paths)}: {each.text}" for each in letters),
+                *(
+                    f"To {called(each.to, paths)}: {each.text}"
+                    for each in letters
+                    if each.to is not None
+                ),
                 *(commented(each) for each in comments),
             ]
     return "\n".join([heading(item, paths), *body])
@@ -1674,6 +1684,53 @@ def inbox_done(
     """Take a message or a flagged write you've read off your list."""
     answering().ask(FinishItem(number=number), Shown)
     typer.echo(f"{cited(number)} is done.")
+
+
+ThreadNumber = Annotated[
+    int,
+    typer.Argument(
+        parser=item_number,
+        help="The thread's number, as the review's banner and `inbox --thread` say it: `@2601`, or `2601`.",
+    ),
+]
+"""A thread named on the command line, by its number: unique on the machine, where its name is its repository's alone."""
+
+Why = Annotated[
+    str,
+    typer.Option(help="Why, in a line: whoever answers for the thread is told it."),
+]
+
+
+def thread_stated(stated: ThreadStated, did: str) -> str:
+    """Say what settling, declining or reopening a thread did: the thread, where it stands after, and who answers for it, who was told."""
+    read = stated.read
+    told = (
+        "nobody answers for it, so nobody was told"
+        if read.answering is None
+        else f"{called(read.answering, stated.paths)} answers for it, and was told"
+    )
+    return f'@{read.thread.name} (@{read.thread.number}), "{read.thread.title}", {did}: {read.state}; {told}.'
+
+
+@inbox.command("settle-thread")
+def inbox_settle_thread(number: ThreadNumber) -> None:
+    """Settle a thread, as Space d on the banner of one done, to confirm, does in the review: it folds into every thread, and whoever answers for it is told."""
+    stated = answering().ask(SettleThread(number=number), ThreadStated)
+    typer.echo(thread_stated(stated, "settled"))
+
+
+@inbox.command("decline-thread")
+def inbox_decline_thread(number: ThreadNumber, why: Why = "") -> None:
+    """Decline a thread, as Space x on the banner of one done, to confirm, does in the review: nothing more will be done about it, and whoever answers for it is told why."""
+    stated = answering().ask(DeclineThread(number=number, why=why), ThreadStated)
+    typer.echo(thread_stated(stated, "declined"))
+
+
+@inbox.command("reopen-thread")
+def inbox_reopen_thread(number: ThreadNumber, why: Why = "") -> None:
+    """Reopen a thread done, parked, settled or declined, back to whoever held it, as a reply of yours in it does: whoever answers for it is told why."""
+    stated = answering().ask(ReopenThread(number=number, why=why), ThreadStated)
+    typer.echo(thread_stated(stated, "reopened"))
 
 
 @inbox.command("check-conversion")

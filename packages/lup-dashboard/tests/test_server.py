@@ -21,6 +21,8 @@ from lup_dev.host.records import Called
 from lup_dev.host.timings import TimingsStore
 from lup_dev.host.workers import Viewed, Viewing
 from lup_dev.inbox.protocol import (
+    AnswerCheck,
+    CheckShown,
     Conversed,
     Files,
     Items,
@@ -32,6 +34,15 @@ from lup_dev.inbox.protocol import (
     ShowConversation,
 )
 from lup_dev.inbox.store import Approval, Decided, Item, Message, Text
+from lup_dev.inbox.threaded import (
+    ListThreads,
+    SettleThread,
+    ShowThread,
+    ThreadRead,
+    ThreadShown,
+    ThreadsRead,
+    ThreadStated,
+)
 from lup_ledger.parties import Conversation, Operator
 
 if TYPE_CHECKING:
@@ -411,6 +422,11 @@ def test_the_demo_serves_its_stand_in_launches_and_refuses_the_rest(page: Path) 
         68,
         69,
         62,
+        67,
+        70,
+        64,
+        65,
+        66,
     ]
     assert other.json() == {
         "kind": "refused",
@@ -505,7 +521,7 @@ def test_the_demo_weaves_a_conversations_items_into_its_view_a_message_sent_from
     unsent = served.post("/api/ask", json=elsewhere.model_dump(), headers=bearing())
     found = demo.exchanged(parser)
     assert sent.json()["item"]["number"] == 101
-    assert [each.item.number for each in found.sent] == [47, 51, 57, 59]
+    assert [each.item.number for each in found.sent] == [47, 51, 57, 59, 67]
     assert found.sent[0].item.call == "call-47"
     assert [(each.item.number, each.text) for each in found.received] == [
         (48, "Good: keep the two readers apart."),
@@ -588,6 +604,81 @@ def test_the_demo_keeps_a_draft_and_sends_it_taking_what_it_covers_off_the_list_
         "declined": [],
         "parked": [53],
         "marks": [],
+    }
+
+
+def test_the_demo_reads_its_threads_as_the_host_does_and_the_operator_settles_one_and_answers_a_check(
+    page: Path,
+) -> None:
+    served = client(Demo(clock=Fixed(), size=0), page)
+
+    def threads() -> dict[str, ThreadRead]:
+        asked = served.post(
+            "/api/ask", json=ListThreads().model_dump(), headers=bearing()
+        )
+        listed = ThreadsRead.model_validate(asked.json())
+        return {each.thread.name: each for each in listed.threads}
+
+    def shown(number: int, *, whole: bool = False) -> ThreadShown:
+        asked = ShowThread(number=number, whole=whole).model_dump()
+        replied = served.post("/api/ask", json=asked, headers=bearing())
+        return ThreadShown.model_validate(replied.json())
+
+    read = threads()
+    assert {name: each.section for name, each in read.items()} == {
+        "lup-impl": "waiting on you",
+        "transcript-reader": "waiting on you",
+        "auth-survey": "new",
+        "clock-ticks": "every thread",
+        "legacy-cache": "every thread",
+        "reader-names": "every thread",
+        "guidance-voice": "waiting on you",
+        "voice-branch": "every thread",
+        "main": "waiting on you",
+        "dev": "every thread",
+    }
+    reader = read["transcript-reader"]
+    assert [each.what for each in reader.asks] == ["a question", "a check"]
+    assert read["guidance-voice"].state == "done to confirm"
+    # The parser's question and check, read, still show, after the latest three
+    # read besides, but the flagged write, their exchange with their subagent
+    # among them; the rest folds under what came earlier.
+    conversation = shown(reader.thread.number)
+    assert [(each.spot.node, each.seen) for each in conversation.entries] == [
+        (67, True),
+        (70, True),
+        (51, False),
+        (311, False),
+        (57, True),
+    ]
+    assert conversation.left == 3
+    # A part of the operator's words moved in says what they said, open.
+    [part] = shown(read["voice-branch"].thread.number, whole=True).entries
+    assert part.unanswered
+    assert part.said == (
+        "Once that's done, put it on its branch for me to read. "
+        "Keep the examples short."
+    )
+
+    voice = read["guidance-voice"].thread.number
+    settled = served.post(
+        "/api/ask", json=SettleThread(number=voice).model_dump(), headers=bearing()
+    )
+    assert ThreadStated.model_validate(settled.json()).read.state == "settled"
+    check = reader.asks[1].node
+    answered = served.post(
+        "/api/ask", json=AnswerCheck(number=check).model_dump(), headers=bearing()
+    )
+    assert CheckShown.model_validate(answered.json()).thread == "transcript-reader"
+    after = threads()
+    assert after["guidance-voice"].section == "every thread"
+    assert [each.what for each in after["transcript-reader"].asks] == ["a question"]
+    refused = served.post(
+        "/api/ask", json=SettleThread(number=9999).model_dump(), headers=bearing()
+    )
+    assert refused.json() == {
+        "kind": "refused",
+        "error": "the demo has no thread @9999",
     }
 
 

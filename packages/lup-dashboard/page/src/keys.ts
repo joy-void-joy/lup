@@ -93,13 +93,13 @@ const MARKS: Part[] = [
     {
         title: "Marks in the margin and the overview",
         keys: [
-            { keys: "◆", does: "an item waiting on you: a question, a held change, an approval, a hold at landing", short: "waiting" },
+            { keys: "◆", does: "an item waiting on you: a question, a held change, an approval, a hold at landing; a check to try; a thread waiting on you, or done for you to confirm", short: "waiting" },
             { keys: "◇", does: "a file to review; beside an agent in the overview, how many their \"since you approved\" has (◇3)", short: "to review" },
             { keys: "⚑", does: "a file with a line that matters, held or flagged; lup's approvals in the overview", short: "flagged" },
             { keys: "·", does: "a file folded whole: automatic, a test, data, a first approval's", short: "folded" },
             { keys: "•", does: "news, to read rather than answer: a note, a turn's last words, a friction, how it felt, a stop", short: "news" },
             { keys: "‖", does: "an item left for later", short: "parked" },
-            { keys: "new", does: "an item that came after you last marked its agent seen, Space d on their banner, and that you haven't commented on", short: "new" },
+            { keys: "new", does: "an item that came after you last read its thread, Space d on its banner, or, by agent, marked its agent seen, and that you haven't commented on", short: "new" },
             { keys: "▶ ○ ✕", does: "an agent calling a tool, between calls, ended", short: "agents" },
             { keys: "» ✓ ✔ ✗", does: "in yellow, what your next Ctrl+Enter does with it: your comment on it goes, it's marked read, it's approved, it's declined", short: "your reply" },
         ],
@@ -115,10 +115,10 @@ const LIST: Part[] = [{ title: "This palette", keys: [{ keys: "?", does: "open i
  * undone with u and sent with Ctrl+Enter, the key pressed again taking it off. A module's own verb says what it's called.
  */
 const VERBS: Readonly<Record<string, string>> = {
-    done: "mark it done: an item read; an approval or a held change approved, the comments under it going with it; a file of \"since you approved\" reviewed at the version shown, approving its flagged writes where it still stands so; on the drawer's line, every file it shows; a conversation read up to its last step; on a banner, the agent seen, their own items and drawers, their subagents' left as they are",
-    decline: "decline an approval or a held change, the comments under it going with it; a comment never declines",
-    send: "leave the item for later, folded at the review's end, where what's drafted on it stays drafted as the rest is sent; on one left for later, bring it back; sending to an agent or a named pile comes with piles (#312)",
-    comment: "comment on it whole: an item; on a banner, a message to its agent, which their drawers' remarks go with; in a drawer, a remark on the line",
+    done: "mark it done: an item read; an approval or a held change approved, the comments under it going with it; a check ticked, you tried it; a file of \"since you approved\" reviewed at the version shown, approving its flagged writes where it still stands so; on the drawer's line, every file it shows; a conversation read up to its last step; on a thread's banner, the thread settled where it's done, for you to confirm, else read up to the last item shown, its news with it; on an agent's banner, the agent seen, their own items and drawers, their subagents' left as they are",
+    decline: "decline an approval or a held change, the comments under it going with it; on a thread's banner, the thread declined where it's done, for you to confirm; a comment never declines",
+    send: "leave the item for later, folded, in its thread, or at the review's end grouped by agent, what's drafted on it staying drafted as the rest is sent; on one left for later, bring it back; on a message written on a thread, send it to no one, kept there as yours, or back to whoever answers for the thread",
+    comment: "comment on it whole: an item; on a check, your answer in words; on a thread's banner, a message on the thread to whoever answers for it; on an agent's banner, a message to them, which their drawers' remarks go with; in a drawer, a remark on the line",
     hold: "from anywhere in an agent's group, hold each flagged write of the agent and their subagents for your answer, or let them land again",
     pause: "pause the agent at their next call until they're resumed: not built yet, its host side designed beside #157",
 };
@@ -149,7 +149,7 @@ export function reviewKeys(kinds: readonly Kind[], verbs: readonly Verb[] = []):
     {
         title: "Commenting",
         keys: [
-            { keys: "o", does: "comment on the line: an item's, a file's, or the agent's words in their conversation, a remark; on a banner, a message to its agent, which their drawers' remarks go with", short: "comment" },
+            { keys: "o", does: "comment on the line: an item's, a file's, or the agent's words in their conversation, a remark; on a check, your answer in words; on a thread's banner, a message on the thread to whoever answers for it, ␣s sending it to no one; on an agent's banner, a message to them, which their drawers' remarks go with", short: "comment" },
             {
                 keys: "c…",
                 does: "comment on the passage a motion covers: ct. ciw cip, cc the line",
@@ -178,7 +178,7 @@ export function reviewKeys(kinds: readonly Kind[], verbs: readonly Verb[] = []):
             },
             {
                 keys: "]a [a",
-                does: "next and previous item to answer, in the order they came: a question, a held change, an approval, a hold at landing; news and what's marked read or left for later are passed over; the folds hiding where it lands open, said under the review; the view stays where it's in view, else it comes in a third of the view from the edge",
+                does: "next and previous item to answer, in the order they came: a question, a held change, an approval, a hold at landing; grouped by thread, in the review's order, a check not answered and a thread done, for you to confirm, among them; news and what's marked read or left for later are passed over; the folds hiding where it lands open, said under the review; the view stays where it's in view, else it comes in a third of the view from the edge",
                 short: "to answer",
             },
             {
@@ -208,7 +208,7 @@ export function reviewKeys(kinds: readonly Kind[], verbs: readonly Verb[] = []):
             },
             {
                 keys: "gd",
-                does: "on a citation, go to the passage of your words it cites, above the answer; on that passage, back to the citation; on a banner naming another agent's drawer, as a landing waiting on files there, to that drawer",
+                does: "on a citation, go to the passage of your words it cites, above the answer; on that passage, back to the citation; on a banner naming another agent's drawer, as a landing waiting on files there, to that drawer; on an agent's name, as a thread's banner or an item's header says it, to their own views among the agents, their conversation opened",
                 short: "follow",
             },
             {
@@ -218,8 +218,8 @@ export function reviewKeys(kinds: readonly Kind[], verbs: readonly Verb[] = []):
             },
             {
                 keys: "]g [g",
-                does: "next and previous agent's group, on its banner, its fold's letter a in the margin; the view stays where it's in view, else it comes in a third of the view from the edge",
-                short: "agents",
+                does: "next and previous group, a thread's or an agent's, on its banner, its fold's letter a in the margin; the view stays where it's in view, else it comes in a third of the view from the edge",
+                short: "groups",
             },
             {
                 keys: "]i [i",

@@ -16,10 +16,13 @@ from lup_dev.inbox.notices import Notices
 from lup_dev.inbox.store import (
     KINDS,
     Comment,
+    Done,
     Draft,
     Inbox,
     InboxError,
+    Letter,
     Message,
+    Review,
     Ruling,
 )
 from lup_dev.inbox.threaded import (
@@ -51,8 +54,9 @@ from lup_dev.inbox.tools import (
 from lup_dev.layout import Layout
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
-from lup_ledger.parties import Conversation
-from lup_ledger.threads import Declined, Done, Reopened, Settled, Thread
+from lup_ledger.parties import Conversation, Operator
+from lup_ledger.threads import Declined, Reopened, Settled, Thread
+from lup_ledger.threads import Done as ThreadDone
 
 if TYPE_CHECKING:
     from conftest import FakeClock
@@ -210,7 +214,7 @@ def test_each_thread_s_section_says_what_asks_the_operator_what_s_new_and_the_pi
         "done to confirm",
         [],
     )
-    assert isinstance(voice.status, Done)
+    assert isinstance(voice.status, ThreadDone)
     assert voice.status.to_try == "Say hello: it answers."
     assert voice.since == voice.status.at
     # A note unread makes the root new; the friction beside it, the pile's, doesn't.
@@ -284,6 +288,14 @@ def test_a_thread_s_conversation_lays_each_reply_under_what_it_answers(
         (Spot(node=answer.number, part=2), Spot(node=work.question), False),
         (Spot(node=ending.number), Spot(node=answer.number, part=2), True),
     ]
+    # The operator's words are said on their entries; an item's, read from the item.
+    assert [each.said for each in shown.entries] == [
+        None,
+        None,
+        "Long ones.",
+        "Go on.",
+        None,
+    ]
     assert {each.number for each in shown.items} == {
         work.question,
         answer.number,
@@ -295,7 +307,7 @@ def test_a_thread_s_conversation_lays_each_reply_under_what_it_answers(
     assert {each.conversation for each in shown.paths} == {LEAD}
 
 
-def test_a_thread_s_conversation_from_its_mark_keeps_what_a_later_entry_is_under(
+def test_a_thread_s_conversation_from_its_mark_keeps_what_a_later_entry_is_under_and_what_asks(
     work: Work, clock: FakeClock
 ) -> None:
     clock.sleep(60)
@@ -315,11 +327,14 @@ def test_a_thread_s_conversation_from_its_mark_keeps_what_a_later_entry_is_under
 
     shown = work.shown(work.lag)
 
+    # The question, read, stays above the answer under it; the check, read too,
+    # stays for it still asks the operator.
     assert [(each.spot, each.earlier) for each in shown.entries] == [
         (Spot(node=work.question), True),
+        (Spot(node=work.check), True),
         (Spot(node=answer.number, part=1), False),
     ]
-    assert shown.left == 1
+    assert shown.left == 0
     assert shown.read.earlier == 2
     whole = work.shown(work.lag, whole=True)
     assert [each.spot for each in whole.entries] == [
@@ -420,6 +435,7 @@ def test_a_part_moved_in_stands_open_until_an_item_there_cites_it_never_asking_t
         if each.spot == part
     ]
     assert moved.unanswered
+    assert moved.said == "And write it up in the docs."
 
     clock.sleep(60)
     cited = work.sent(
@@ -430,3 +446,157 @@ def test_a_part_moved_in_stands_open_until_an_item_there_cites_it_never_asking_t
     entries = {each.spot: each for each in work.shown(after.thread, whole=True).entries}
     assert not entries[part].unanswered
     assert entries[Spot(node=cited)].under == part
+
+
+def test_where_each_conversation_works_is_read_with_the_threads(work: Work) -> None:
+    listed = asyncio.run(ThreadsListing(reading=work.reading()).answer(ListThreads()))
+    assert isinstance(listed, ThreadsRead)
+    assert [(each.conversation, each.thread) for each in listed.working] == [
+        (LEAD, work.root.number)
+    ]
+    work.ran(work.lead.thread(Threading(name="lag", join=True)))
+    listed = asyncio.run(ThreadsListing(reading=work.reading()).answer(ListThreads()))
+    assert isinstance(listed, ThreadsRead)
+    assert [(each.conversation, each.thread) for each in listed.working] == [
+        (LEAD, work.lag.number)
+    ]
+    assert LEAD in {each.conversation for each in listed.paths}
+
+
+def test_settling_declining_or_reopening_a_thread_says_who_answers_for_it_by_their_path(
+    work: Work,
+) -> None:
+    stated = work.reading().stated(work.voice.number)
+    assert [(each.conversation, each.path) for each in stated.paths] == [(LEAD, "lead")]
+    said = cli.thread_stated(stated, "settled")
+    assert said.startswith("@voice (@")
+    assert (
+        '"Voice", settled: done to confirm; `lead` answers for it, and was told.'
+        in said
+    )
+
+
+def test_a_message_written_on_a_thread_reaches_whoever_answers_for_it_and_shows_there_open_until_they_answer(
+    work: Work, clock: FakeClock
+) -> None:
+    clock.sleep(60)
+    work.delivery.inbox.drafted(
+        Draft(
+            letters=[
+                Letter(to=LEAD, thread=work.lag.number, text="Long ones only, please.")
+            ]
+        )
+    )
+    [review] = asyncio.run(work.delivery.reviewed()).reviews
+    assert review.recipient == LEAD
+    [part] = work.read()["lag"].unanswered
+    assert part.node == review.number
+    [entry] = [
+        each for each in work.shown(work.lag, whole=True).entries if each.spot == part
+    ]
+    assert (entry.said, entry.to, entry.unanswered) == (
+        "Long ones only, please.",
+        LEAD,
+        True,
+    )
+    # It's told to its recipient as their message, saying where it's written.
+    told = work.delivery.inbox.item(review.number)
+    assert isinstance(told.reason, Review)
+    [letter] = told.reason.letters
+    assert letter.thread == work.lag.number
+    # Their turn's last words answering the review, in the thread, answer it, citing it or not.
+    clock.sleep(60)
+    ending = work.delivery.inbox.made(
+        Message(kind="note", text="Done.", ending=True, answers=[review.number]),
+        LEAD,
+        Operator(),
+        Path("/work/lead"),
+        clock.now(),
+    )
+    work.delivery.concerns().landed(ending, work.lag)
+    assert work.read()["lag"].unanswered == []
+
+
+def test_a_message_to_no_one_stays_in_its_thread_as_the_operator_s_waking_nobody(
+    work: Work, clock: FakeClock
+) -> None:
+    clock.sleep(60)
+    work.delivery.inbox.drafted(
+        Draft(letters=[Letter(thread=work.docs.number, text="Note to self: docs.")])
+    )
+    dispatched = asyncio.run(work.delivery.reviewed())
+    assert dispatched.reviews == []
+    docs = work.read()["docs"]
+    assert (docs.section, docs.asks, docs.new) == ("every thread", [], [])
+    [note] = [
+        work.delivery.inbox.item(each.spot.node)
+        for each in work.shown(work.docs, whole=True).entries
+        if each.spot.node != work.documented
+    ]
+    assert (note.sender, note.recipient) == (Operator(), Operator())
+    assert isinstance(note.reason, Message)
+    assert note.reason.text == "Note to self: docs."
+    assert note.reason.repository == REPOSITORY
+    assert isinstance(note.state, Done)
+
+
+def test_a_message_on_a_thread_is_refused_to_no_one_on_none_or_to_another_repository(
+    work: Work,
+) -> None:
+    work.delivery.inbox.drafted(Draft(letters=[Letter(text="To nobody.")]))
+    with pytest.raises(InboxError, match="written on a thread"):
+        asyncio.run(work.delivery.reviewed())
+    elsewhere = LEAD.model_copy(update={"repository": Path("/work/other.git")})
+    with pytest.raises(InboxError, match="of its repository"):
+        work.delivery.on_thread(
+            Letter(to=elsewhere, thread=work.lag.number, text="Here.")
+        )
+
+
+def test_writing_on_a_thread_done_reopens_it(work: Work) -> None:
+    work.delivery.inbox.drafted(
+        Draft(letters=[Letter(to=LEAD, thread=work.voice.number, text="It lags.")])
+    )
+    asyncio.run(work.delivery.reviewed())
+    voice = work.read()["voice"]
+    assert isinstance(voice.status, Reopened)
+
+
+def test_a_thread_s_conversation_shows_the_latest_few_read_before_what_s_new_as_context(
+    work: Work, clock: FakeClock
+) -> None:
+    def step(at: int) -> int:
+        clock.sleep(60)
+        return work.sent(ThreadedRemark(remark=f"Step {at}.", thread="docs"))
+
+    read = [step(at) for at in range(5)]
+    clock.sleep(60)
+    work.delivery.inbox.marks.moved(
+        REPOSITORY,
+        CORE,
+        [
+            ReviewMark(
+                key=on_node(work.docs.number), up_to=str(read[-1]), at=clock.now()
+            )
+        ],
+    )
+    clock.sleep(60)
+    fresh = work.sent(ThreadedRemark(remark="Step 5.", thread="docs"))
+
+    shown = work.shown(work.docs)
+
+    assert [(each.spot.node, each.seen) for each in shown.entries] == [
+        (read[2], True),
+        (read[3], True),
+        (read[4], True),
+        (fresh, False),
+    ]
+    assert shown.left == 3
+    none = asyncio.run(
+        ThreadShowing(reading=work.reading()).answer(
+            ShowThread(number=work.docs.number, seen=0)
+        )
+    )
+    assert isinstance(none, ThreadShown)
+    assert [each.spot.node for each in none.entries] == [fresh]
+    assert none.left == 6

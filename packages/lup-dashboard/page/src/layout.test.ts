@@ -2,7 +2,7 @@ import "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
 import { cursorRow, itemStanding, outlineOf, type Reading } from "./outline";
-import { EMPTY, barsOf, laid, nested, ownerOf, rowLabel, whose, UNREAD, UNSEEN, type AgentDrawers, type Around, type Conversation, type Head, type Item, type Placed } from "./review";
+import { EMPTY, barsOf, laid, nested, ownerOf, rowLabel, whose, UNREAD, UNSEEN, type AgentDrawers, type Around, type Conversation, type GroupHead, type Item, type Placed } from "./review";
 import { around, linesOver, pinned, stickies, type Geometry } from "./stack";
 import { STANDING } from "./fixtures/looks";
 import { merged } from "./looks";
@@ -34,7 +34,10 @@ function note(number: number, sender: Conversation, rank: Item["rank"] = NEWS): 
 
 const NOTHING: Around = { contexts: new Map(), files: new Map(), answers: [], commented: [] };
 const header = (item: Item, parked: boolean) => `── @${item.number} note${parked ? " · later" : ""} ──`;
-const banner = (head: Head) => {
+const banner = (head: GroupHead) => {
+    if ("thread" in head) {
+        return `━━ @${head.thread.thread.name} ━━`;
+    }
     const party = "item" in head ? head.item.sender : head.conversation;
     return `━━ ${party.party === "conversation" ? (party.agent ?? party.session) : "lup"} ━━`;
 };

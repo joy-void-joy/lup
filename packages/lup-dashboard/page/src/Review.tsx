@@ -1,6 +1,10 @@
 // The review: everything waiting for the operator in one buffer moved through
-// with vim (`editor.ts`), in groups, one per agent, every agent running having
-// one, empty or not; their comments written into it, each under the line it's
+// with vim (`editor.ts`), grouped by thread, in sections (`review.ts`,
+// `layThreaded`), each thread's banner saying where it stands
+// (`threadBanner`), Space `d` and `x` on one done settling and declining it,
+// `o` on its banner writing on it, Space `s` sending that to no one, `gd` on an
+// agent's name going to their own views; each agent in a group of their own
+// among the agents, every agent running having one, empty or not; their comments written into it, each under the line it's
 // on: Space `c` opens one on the item whole; `o` or Space `c` on a banner, a
 // message to its agent, under the banner; `o` in an agent's drawer, a remark to
 // them. Ctrl+Enter elsewhere than in a comment or a message sends. Space and a
@@ -107,7 +111,9 @@ import {
     sinceFileAt,
     stepped,
     tallied,
+    toAnswer,
     toKeep,
+    waits,
     waited,
     whose,
     withWritten,
@@ -128,9 +134,13 @@ import {
     type PlacedFile,
     type Region,
     type Scope,
+    type Threading,
+    type ThreadRead,
     type Wait,
     type Where,
     type Written,
+    reachedBy,
+    checkAt,
 } from "./review";
 import { filesOf, freshRows, type Fresh } from "./since";
 import type { Instance, Offer, Remote, Running, Span as ViewSpan } from "./views";
@@ -147,6 +157,10 @@ export interface Jump {
 
 interface Props {
     items: Item[];
+    /** The review's threads, as the host reads them, and what of each the page has read: what it's grouped by, where given; none groups it by agent. */
+    threads?: Omit<Threading, "banner"> | null;
+    /** Told each thread whose conversation a fold reads as it opens, whole where it's what came before, so the page asks it of the host. */
+    openThread?: (number: number, whole: boolean) => void;
     /** The conversations running, in the order the host lists them: each has a group, empty or not. */
     agents: Conversation[];
     draft: Draft;
@@ -217,6 +231,80 @@ interface Props {
 function asideClasses(aside: Aside, code: boolean): string {
     const under = aside.kind === "summary" || aside.kind === "refused" || aside.kind === "reviewed" ? null : "aside-under";
     return [`aside-${aside.kind}`, under, code ? "code-run" : null].filter((each) => each !== null).join(" ");
+}
+
+/**
+ * Say a thread's banner, as the core says it: its name and what it's about, a root by whose it is; who holds it, or who
+ * answers for it where its holder has ended; and where it stands, what asks the operator in it, how many files a
+ * landing waits on there, `landing`, done for them to confirm, what's new, else its state.
+ */
+export function threadBanner(read: ThreadRead, landing: number, called: (party: Conversation) => string): string {
+    const thread = read.thread;
+    // A root is its session's own, named as they are: an ended session's, which lup knows only by its ids, is said so.
+    const root = thread.parent == null && thread.title === ROOT_TITLE;
+    const about = root ? "the session's own" : thread.title;
+    const holder = thread.holder == null ? null : called(thread.holder);
+    const answering = read.answering == null ? null : called(read.answering);
+    const ended = root && holder !== null && holder !== answering ? "its session has ended" : null;
+    const holds =
+        holder === null
+            ? answering === null
+                ? "nobody holds it"
+                : `nobody holds it, ${answering} answers`
+            : holder === answering
+              ? `${holder} holds`
+              : `${ended ?? `${holder} held it`}${answering === null ? "" : `, ${answering} answers`}`;
+    const asks = tallyWords((read.asks ?? []).map((each) => each.what));
+    const why = [
+        ...asks,
+        ...(landing === 0 ? [] : [`landing waits on ${landing === 1 ? "1 file" : `${landing} files`}`]),
+        ...(read.state === "done to confirm" ? ["done, to confirm"] : []),
+        ...((read.new ?? []).length === 0 ? [] : [`${(read.new ?? []).length} new`]),
+    ];
+    const status = read.status ?? null;
+    const parked = status !== null && status.kind === "ledger:parked" ? `parked until ${status.until.map((each) => until(each, called)).join(" or ")}` : read.state;
+    const stands = why.length > 0 ? why.join(", ") : read.state === "waiting on the operator" ? "waiting on you" : read.state === "parked" ? parked : read.state;
+    return `━━ @${thread.name} · ${about} · ${holds} · ${stands} ━━`;
+}
+
+/** Say what a parked thread waits for, one of what wakes it, as `thread`'s `park` takes it. */
+function until(trigger: NonNullable<ThreadRead["status"]> extends infer S ? (S extends { until: (infer T)[] } ? T : never) : never, called: (party: Conversation) => string): string {
+    switch (trigger.trigger) {
+        case "issue closed":
+            return typeof trigger.issue === "number" ? `#${trigger.issue} closes` : `${trigger.issue} closes`;
+        case "branch landed":
+            return `${trigger.branch} lands`;
+        case "commit landed":
+            return `${trigger.commit.slice(0, 8)} lands`;
+        case "conversation ended":
+            return `${called(trigger.conversation)} ends`;
+        case "time came":
+            return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(trigger.at));
+        case "condition held":
+            return `${trigger.when} holds`;
+        default:
+            return "what it waits for comes";
+    }
+}
+
+/** What every root thread is titled, as the host titles it (`lup_dev.inbox.concerns.ROOT`): its banner says whose it is instead. */
+const ROOT_TITLE = "a main session's root thread";
+
+/** Say what of each kind there is, `a question` once, `2 questions` twice, in the order first said. */
+function tallyWords(whats: readonly string[]): string[] {
+    const counted = new Map<string, number>();
+    for (const each of whats) {
+        counted.set(each, (counted.get(each) ?? 0) + 1);
+    }
+    return [...counted].map(([what, count]) => (count === 1 ? what : `${count} ${what.replace(/^an? /, "")}s`));
+}
+
+/** Say what waits below, grouped by thread, for the header over the review: how many threads wait on the operator, and how many are new. */
+function threadTally(laidOut: Laid): string {
+    const count = (name: string) => laidOut.groups.filter((group) => group.depth === 0 && laidOut.sections.findLast((each) => each.header.from < group.banner.from)?.name === name).length;
+    const waiting = count("waiting on you");
+    const fresh = count("new");
+    return [`${waiting} waiting on you`, ...(fresh === 0 ? [] : [`${fresh} new`])].join(" · ");
 }
 
 /** How a changed file's line is marked after its number: added, removed, or neither. */
@@ -449,9 +537,19 @@ function decorations(
         }
     };
     for (const group of laidOut.groups) {
-        marks.push({ from: group.banner.from, to: group.banner.from, value: Decoration.line({ class: bannerClasses(group.depth) }) });
+        // A thread's banner, marked by where it stands: what asks the operator, done for them to confirm, settled.
+        const thread = group.thread === null ? "" : ` thread-banner state-${group.thread.state.replace(/ /g, "-")}`;
+        marks.push({ from: group.banner.from, to: group.banner.from, value: Decoration.line({ class: `${bannerClasses(group.depth)}${thread}` }) });
         marks.push(...group.blocks.flatMap((block) => remarks(laidOut, block)));
         group.blocks.forEach(reaching);
+    }
+    // Each section's line; and each line of a thread's that's no item's nor drawer's, the operator's words moved in, a
+    // check, what's to try, in what it shows.
+    for (const section of laidOut.sections) {
+        marks.push({ from: section.header.from, to: section.header.from, value: Decoration.line({ class: `review-section section-${section.name.replace(/ /g, "-")}` }) });
+    }
+    for (const aside of laidOut.asides) {
+        marks.push({ from: aside.from, to: aside.from, value: Decoration.line({ class: `aside-${aside.kind} thread-line` }) });
     }
     for (const scope of scopesOf(laidOut)) {
         if (isDrawer(scope)) {
@@ -471,7 +569,7 @@ function decorations(
                 "review-header",
                 fresh(region.item, seeing) ? "is-new" : "",
                 news(region.item) ? "is-news" : "",
-                (draft.done ?? []).includes(number) ? "is-done" : "",
+                (draft.done ?? []).includes(number) || !waits(region.item) ? "is-done" : "",
                 (draft.declined ?? []).includes(number) ? "is-declined" : "",
                 (draft.parked ?? []).includes(number) ? "is-parked" : "",
             ].join(" ");
@@ -609,6 +707,34 @@ function namedDrawer(laidOut: Laid, position: number): number | undefined {
     return undefined;
 }
 
+/**
+ * Return the agent whose name is under the cursor at `position`, grouped by thread, as a thread's banner or an item's
+ * header says it, `called` naming them: their group among the agents, where their own views are; the longest name there
+ * first, so a subagent's path wins over their session's. None where no agent's name is under it.
+ */
+export function agentNamed(laidOut: Laid, position: number, called: (party: Conversation) => string): Group | undefined {
+    const start = laidOut.text.lastIndexOf("\n", position - 1) + 1;
+    const end = laidOut.text.indexOf("\n", position);
+    const line = laidOut.text.slice(start, end < 0 ? laidOut.text.length : end);
+    const column = position - start;
+    const agents = laidOut.groups
+        .filter((each) => each.thread === null && each.conversation !== null)
+        .map((group) => ({ group, name: called(group.conversation as Conversation) }))
+        .sort((a, b) => b.name.length - a.name.length);
+    for (const { group, name } of agents) {
+        let at = line.indexOf(name);
+        while (at >= 0) {
+            const before = line[at - 1] ?? " ";
+            const after = line[at + name.length] ?? " ";
+            if (column >= at && column <= at + name.length && !/[\w/-]/.test(before) && !/[\w/-]/.test(after)) {
+                return group;
+            }
+            at = line.indexOf(name, at + 1);
+        }
+    }
+    return undefined;
+}
+
 /** What names a file of a "since you approved" drawer among its others: its block's id after `file ` or `reviewed `, its path and, past the drawer's first place, its place's. */
 function fileKey(file: PlacedFile): string {
     return file.block.replace(/^(file|reviewed) /, "");
@@ -675,6 +801,8 @@ function revisualized(view: EditorView, was: { anchor: number; head: number } | 
 
 export function Review({
     items: itemsGiven,
+    threads: threadsGiven = null,
+    openThread = () => undefined,
     agents: agentsGiven,
     draft: given,
     typed,
@@ -728,17 +856,33 @@ export function Review({
     // How the review is being first read (`readBy`): until it's read, what the host answers is laid out as it comes.
     const loading = useRef<Reading>({ since: null, last: 0, read: false });
     const answered = useMemo(
-        () => ({ items: itemsGiven, agents: agentsGiven, banner: bannerGiven, called: calledGiven, around: aroundGiven, drawers: drawersGiven, seeing: seeingGiven, order: orderGiven, parents, looks, running, landings, remote }),
-        [itemsGiven, agentsGiven, bannerGiven, calledGiven, aroundGiven, drawersGiven, seeingGiven, orderGiven, parents, looks, running, landings, remote],
+        () => ({ items: itemsGiven, agents: agentsGiven, banner: bannerGiven, called: calledGiven, around: aroundGiven, drawers: drawersGiven, seeing: seeingGiven, order: orderGiven, parents, looks, running, landings, remote, threadsRead: threadsGiven }),
+        [itemsGiven, agentsGiven, bannerGiven, calledGiven, aroundGiven, drawersGiven, seeingGiven, orderGiven, parents, looks, running, landings, remote, threadsGiven],
     );
     // While a comment is being typed, what's typed laid out once typing pauses, the host's answers wait as long as
     // they may, so the keys aren't held up behind a layout: what came meanwhile is laid out with what was typed.
-    const { items, agents, banner, called, around, drawers, seeing, order, ...arrangedBy } = usePaced(answered, () =>
+    const { items, agents, banner, called, around, drawers, seeing: seenGiven, order, threadsRead, ...arrangedBy } = usePaced(answered, () =>
         !loading.current.read ? 0 : typed.current !== null ? PACED_MOST : Math.min(PACED_MOST, Math.max(PACED_LEAST, 4 * cost.current)),
     );
+    // What's new to the operator: grouped by thread, each item that came after where they last read its thread.
+    const seeing = useMemo(() => {
+        if (threadsRead === null) {
+            return seenGiven;
+        }
+        // What's new in a thread and what asks the operator there, of what came after where they last read it.
+        const later = new Set(
+            [...threadsRead.shown.values(), ...threadsRead.whole.values()].flatMap((each) =>
+                each.entries.flatMap((entry) => (entry.member && entry.spot.part == null && entry.earlier !== true ? [entry.spot.node] : [])),
+            ),
+        );
+        const calling = threadsRead.read.threads.flatMap((each) => [...(each.new ?? []), ...(each.asks ?? []).map((ask) => ask.node)]);
+        return { ...seenGiven, threaded: new Set(calling.filter((each) => later.has(each))) };
+    }, [seenGiven, threadsRead]);
+    // The threads, each banner saying what the core says of it (`threadBanner`).
+    const threads = useMemo<Threading | null>(() => (threadsRead === null ? null : { ...threadsRead, banner: (read, landing) => threadBanner(read, landing, called) }), [threadsRead, called]);
     // The same object while what it holds is the same, as the rest of what's taken is.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    const arranging = useMemo(() => arrangedBy, [arrangedBy.parents, arrangedBy.looks, arrangedBy.running, arrangedBy.landings, arrangedBy.remote]);
+    const arranging = useMemo(() => ({ ...arrangedBy, threads }), [arrangedBy.parents, arrangedBy.looks, arrangedBy.running, arrangedBy.landings, arrangedBy.remote, threads]);
     // The review as it was last laid out into the editor, which each comment is followed from (`Arranging.previous`).
     const before = useRef<Laid | null>(null);
     // Laid out with what's typed in a comment, though it isn't given yet, so the text laid out is what the editor holds.
@@ -751,8 +895,14 @@ export function Review({
             (head, later, parts) => `━━ ${banner(head)}${parts === "" ? "" : ` · ${parts}`}${later ? " · later" : ""} ━━`,
             // What the item's kind says of it, then what the core says of how it stands.
             (item, later, said) => {
+                // Grouped by thread, an item says whose it is, as a conversation's line does: several agents write in one.
+                const whose = threads !== null && item.sender.party === "conversation" ? [called(item.sender)] : [];
+                // Grouped by thread, one no longer waiting says where it stands: answered, done, decided.
+                const stands = threads !== null && !waits(item) ? [item.state.state] : [];
                 const told = [
                     `${cited(item.number)} ${said}`,
+                    ...whose,
+                    ...stands,
                     ...((item.edits ?? []).length > 0 ? ["edited"] : []),
                     ...(fresh(item, seeing) ? ["new"] : []),
                     when(item.made),
@@ -770,7 +920,7 @@ export function Review({
         return { drafted, laidOut, cost: performance.now() - began };
         // `typed` is read as the review is laid out, whatever else lays it out: what's typed alone doesn't.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [items, agents, banner, called, given, around, drawers, seeing, arranging, order]);
+    }, [items, agents, banner, called, given, around, drawers, seeing, arranging, order, threads]);
     const { laidOut } = layout;
     // The draft as the review is laid out: with what was typed in a comment as it was laid out.
     const draft = layout.drafted;
@@ -787,7 +937,7 @@ export function Review({
             blocks: blocksOf(laidOut),
             // In the text's order, as CodeMirror takes the folds a transaction makes: a fold over others, as an
             // automatic file's or an item's marked read, is laid out after them.
-            folds: [...scopesOf(laidOut).flatMap((each) => each.folds), ...laidOut.groups.flatMap((each) => (each.fold === null ? [] : [each.fold]))]
+            folds: [...scopesOf(laidOut).flatMap((each) => each.folds), ...laidOut.groups.flatMap((each) => (each.fold === null ? [] : [each.fold])), ...laidOut.outer]
                 .map((each) => ({ ...each, key: foldKey(each) }))
                 .sort((a, b) => a.from - b.from || b.to - a.to),
             sources: sourcesOf(laidOut),
@@ -829,6 +979,12 @@ export function Review({
             const drawer = laidOut.drawers.find((each) => each.folds.some((own) => foldKey(own) === fold.key && own.kind === each.kind));
             if (drawer !== undefined) {
                 told(drawer.conversation, drawer.kind);
+            }
+            // A thread's conversation, read as its fold opens: from where it was read, or what came before, whole.
+            for (const each of laidOut.loading) {
+                if (each.key === fold.key) {
+                    openThread(each.number, each.whole);
+                }
             }
             // A fold of a module's view's, read from another of its views as it opens.
             for (const each of laidOut.drawers) {
@@ -959,17 +1115,22 @@ export function Review({
     const freshOf: Freshness = (scope, file) =>
         isDrawer(scope) && scope.kind === "since" ? freshRows(looked.current.get(lookedAt(scope.of, fileKeyOf(scope, file))) ?? null, file) : null;
 
-    // What each group's end says of whose it is.
-    const ends: Ends = (group) => (group.conversation === null ? "lup's approvals" : (called(group.conversation).split("/").at(-1) ?? ""));
+    // What each group's end says of whose it is: a thread's, its name.
+    const ends: Ends = (group) =>
+        group.thread !== null ? `@${group.thread.thread.name}` : group.conversation === null ? "lup's approvals" : (called(group.conversation).split("/").at(-1) ?? "");
 
     /** Say whom what's written reaches, on its first line, where the header no longer says it: the stack's. */
     const reachesOf = (each: Written): string => {
         if (isLetter(each) || isRemark(each)) {
-            return `to ${called(each.to)}`;
+            return reachedBy(laidOut, each, each.to ?? null, called);
+        }
+        // A comment on a check answers it, which tells whoever asked it.
+        if (laidOut.checks.some((check) => check.check.check.number === each.item)) {
+            return `answering the check ${cited(each.item)}`;
         }
         const item = laidOut.regions.find((region) => region.item.number === each.item)?.item;
         const party = item === undefined ? null : recipient(item);
-        return party === null ? "to no agent: no session's push asked it" : `to ${called(party)}`;
+        return reachedBy(laidOut, each, party, called);
     };
 
     /** Take each "since you approved" drawer read for the first time as looked at, and forget what was looked at of each file standing as the operator last saw it, which shows each of its changes once it comes back. */
@@ -1161,19 +1322,22 @@ export function Review({
         }
         const ticks: Tick[] = [
             ...laidOut.drawn.map((each) => ({ at: each.at, said: (at: Date) => spanSaid(each.span, at), look: each.span.gauge != null ? "drawn-gauge" : "drawn-ticking" })),
-            ...laidOut.regions.map((region) => {
+            // How long each item still waiting has waited: one answered or done, as a thread's conversation shows, has not.
+            ...laidOut.regions.filter((region) => waits(region.item)).map((region) => {
                 const line = laidOut.text.slice(region.header.from, region.header.to);
                 const came = when(region.item.made);
                 const at = line.indexOf(came);
                 return { at: region.header.from + (at < 0 ? line.length : at + came.length), said: (now: Date) => ` · ${waited(region.item.made, now)}`, look: "drawn-wait" };
             }),
             ...laidOut.groups.flatMap((group) => {
-                const key = group.conversation === null ? null : whose(group.conversation);
-                if (key === null || !activities.has(key)) {
+                // An agent's group says what they're doing; a thread's banner says where it stands.
+                const head = group.head;
+                const key = group.conversation === null || "thread" in head ? null : whose(group.conversation);
+                if (key === null || "thread" in head || !activities.has(key)) {
                     return [];
                 }
                 const activity = activities.get(key) ?? null;
-                return [{ at: group.banner.from + "━━ ".length + banner(group.head).length, said: (now: Date) => ` · ${doing(activity, now)}`, look: "drawn-doing" }];
+                return [{ at: group.banner.from + "━━ ".length + banner(head).length, said: (now: Date) => ` · ${doing(activity, now)}`, look: "drawn-doing" }];
             }),
         ];
         current.dispatch({ effects: ticked.of(ticks) });
@@ -1348,7 +1512,14 @@ export function Review({
      * drawer's line, on the line the cursor is on, a comment on an item whole; none where it opens none.
      */
     function commentSays(at: number): { says: string; on: string | null } | null {
+        const check = checkAt(laidOut, at);
+        if (check !== undefined) {
+            return { says: "answer it in your words", on: `check ${cited(check.check.check.number)}` };
+        }
         const group = groupAt(laidOut, at);
+        if (group !== undefined && group.thread !== null) {
+            return { says: group.conversation === null ? "write on it, to no one" : `write on it, to ${called(group.conversation)}`, on: `@${group.thread.thread.name}` };
+        }
         if (group !== undefined) {
             return group.conversation === null ? null : { says: "write to them", on: called(group.conversation) };
         }
@@ -1451,6 +1622,15 @@ export function Review({
         switch (kind) {
             case "group": {
                 const group = laidOut.groups.find((each) => each.banner.from === from);
+                // A thread by its name, marked as it stands: asking the operator, done for them to confirm, new.
+                const read = group?.thread ?? null;
+                if (read !== null) {
+                    const waiting = read.state === "waiting on the operator" || read.state === "done to confirm";
+                    return {
+                        ...plain(`@${read.thread.name}`),
+                        state: waiting ? { glyph: GLYPHS.waiting ?? "◆", mark: "waiting" } : (read.new ?? []).length > 0 ? { glyph: GLYPHS.news ?? "•", mark: "news" } : null,
+                    };
+                }
                 const conversation = group?.conversation ?? null;
                 if (conversation === null) {
                     return plain("approvals");
@@ -1589,7 +1769,29 @@ export function Review({
                 : [...landings].reverse().find((each) => each.at < head);
             goTo(target?.region, false);
         },
-        answer: (forward) => goTo(answerAfter(laidOut, draft, editor.head(), forward), true),
+        answer: (forward) => {
+            // Grouped by thread, what asks the operator in the text's order: an item to answer, a check not answered, a
+            // thread done for them to confirm, on its banner.
+            const current = view.current;
+            if (laidOut.sections.length === 0 || current === null) {
+                goTo(answerAfter(laidOut, draft, editor.head(), forward), true);
+                return;
+            }
+            const stops = [
+                ...laidOut.regions.filter((each) => toAnswer(each.item, draft)).map(arrival),
+                ...laidOut.checks.filter((each) => (each.check.answer ?? null) === null && !(draft.marks ?? []).some((mark) => mark.action === "inbox-check-answer" && mark.block === `check ${each.check.check.number}`)).map((each) => each.from),
+                ...laidOut.groups.filter((each) => each.thread?.state === "done to confirm" && !(draft.marks ?? []).some((mark) => mark.block === `group ${each.place}`)).map((each) => each.banner.from),
+            ].sort((a, b) => a - b);
+            const head = editor.toLaid(editor.head());
+            const target = forward ? stops.find((each) => each > head) : stops.findLast((each) => each < head);
+            if (target === undefined) {
+                say(`Nothing waits on you ${forward ? "after" : "before"} this.`);
+                return;
+            }
+            const at = editor.fromLaid(target);
+            opening(current, at);
+            bring(current, at);
+        },
         matter: (forward) => {
             const current = view.current;
             if (current === null) {
@@ -1662,8 +1864,19 @@ export function Review({
             const current = view.current;
             const head = editor.head();
             const target = current === null ? undefined : (following(citationsOf(laidOut), head) ?? namedDrawer(laidOut, head));
+            // Grouped by thread, an agent's name goes to their own views among the agents: their conversation, opened.
+            const agent = current === null || target !== undefined ? undefined : agentNamed(laidOut, editor.toLaid(head), called);
+            if (current !== null && agent !== undefined) {
+                const drawer = agent.drawers.find((each) => each.kind === "conversation") ?? agent.drawers[0];
+                const to = editor.fromLaid(drawer?.header.from ?? agent.banner.from);
+                const own = drawer === undefined ? undefined : laidFor.folds.find((each) => each.of === drawer.of && each.kind === drawer.kind && each.name === "");
+                const effects = [...reaching(current.state, to), ...(own === undefined ? [] : [folding(editor.live(own), false)])];
+                current.dispatch({ selection: { anchor: to }, effects, annotations: reached.of(effects.length) });
+                current.dispatch({ effects: EditorView.scrollIntoView(to, { y: "start" }) });
+                return;
+            }
             if (current === null || target === undefined) {
-                say("gd follows a citation of your words to the passage it cites, and that passage back, and a banner naming another agent's drawer to it: put the cursor on one.");
+                say("gd follows a citation of your words to the passage it cites, and that passage back, a banner naming another agent's drawer to it, and an agent's name to their own views: put the cursor on one.");
                 return;
             }
             const effects = reaching(current.state, target);
@@ -1700,15 +1913,20 @@ export function Review({
 
     const naming = {
         // A group by its banner's words, the core's and each part's, as its banner says them.
-        group: (group: Group) =>
-            [banner(group.head), ...group.parts.flatMap((each) => {
+        group: (group: Group) => {
+            const head = group.head;
+            if ("thread" in head) {
+                return `@${head.thread.thread.name}`;
+            }
+            return [banner(head), ...group.parts.flatMap((each) => {
                 const words = (each.answer?.blocks.summary ?? []).map((span) => span.text).join("");
                 return words === "" ? [] : [words];
-            })].join(" · "),
+            })].join(" · ");
+        },
         item: (region: Region) => region.named,
         party: called,
     };
-    const where = <Heading parts={heading(laidOut, Math.min(head, laidOut.text.length), commenting, laidOut.written, naming)} tally={tallied(items, draft, seeing)} />;
+    const where = <Heading parts={heading(laidOut, Math.min(head, laidOut.text.length), commenting, laidOut.written, naming)} tally={threads === null ? tallied(items, draft, seeing) : threadTally(laidOut)} />;
     // Each header pinned is drawn as the buffer draws its line.
     const classesOf = (sticky: Sticky): string => {
         switch (sticky.kind) {
@@ -1725,7 +1943,7 @@ export function Review({
                     "review-header",
                     fresh(region.item, seeing) ? "is-new" : "",
                     news(region.item) ? "is-news" : "",
-                    (draft.done ?? []).includes(number) ? "is-done" : "",
+                    (draft.done ?? []).includes(number) || !waits(region.item) ? "is-done" : "",
                     (draft.declined ?? []).includes(number) ? "is-declined" : "",
                     (draft.parked ?? []).includes(number) ? "is-parked" : "",
                 ].join(" ");

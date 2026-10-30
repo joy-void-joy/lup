@@ -365,7 +365,7 @@ class SaidServing(ModuleServing):
     module: Shown
 
     @lup.view(
-        place=lup.Drawer(letter="w", called="what's said", colour="cyan"),
+        place=lup.Drawer(letter="g", called="what's said", colour="cyan"),
         watch=lup.Watch(on=[lup.CallFinished]),
     )
     async def said(self, viewed: lup.OfAgent) -> lup.Blocks:

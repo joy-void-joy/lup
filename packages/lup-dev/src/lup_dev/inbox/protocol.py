@@ -543,7 +543,16 @@ class Pathed(Model):
 
 
 def pathed(roster: Roster, items: list[Item]) -> list[Pathed]:
-    """Return each conversation `items` name with their path, once, where lup knows it (`Roster`): each an item is from, for, was addressed to or sent to (`Message.to`), and each a review writes to."""
+    """Return each conversation `items` name with their path, once, where lup knows it (`Roster`): each an item is from, for, was addressed to or sent to (`Message.to`), and each a review writes to (`named_by`)."""
+    return [
+        Pathed(conversation=each, path=path, alike=bool(roster.alike(each)))
+        for each in named_by(items)
+        if (path := roster.path(each)) is not None
+    ]
+
+
+def named_by(items: list[Item]) -> list[Conversation]:
+    """Return each conversation `items` name, once, in the order named: each an item is from, for, was addressed to or sent to (`Message.to`), and each a review writes to."""
     named = dict.fromkeys(
         each
         for item in items
@@ -558,7 +567,11 @@ def pathed(roster: Roster, items: list[Item]) -> list[Pathed]:
             ),
             *(
                 [
-                    *(letter.to for letter in item.reason.letters),
+                    *(
+                        letter.to
+                        for letter in item.reason.letters
+                        if letter.to is not None
+                    ),
                     *(remark.to for remark in item.reason.remarks),
                 ]
                 if isinstance(item.reason, Review)
@@ -567,11 +580,7 @@ def pathed(roster: Roster, items: list[Item]) -> list[Pathed]:
         ]
         if isinstance(each, Conversation)
     )
-    return [
-        Pathed(conversation=each, path=path, alike=bool(roster.alike(each)))
-        for each in named
-        if (path := roster.path(each)) is not None
-    ]
+    return list(named)
 
 
 def called(conversation: Conversation, paths: list[Pathed]) -> str:
