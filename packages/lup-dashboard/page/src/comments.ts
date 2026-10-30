@@ -210,10 +210,10 @@ export function hunks(a: string[], b: string[]): Hunk[] {
     }));
 }
 
-/** Return the change of `before`, of `count` lines starting at `starts` (and one past its end), that replaces its lines `from` to `to` with `lines`. */
-export function lineChange(before: string, count: number, starts: readonly number[], from: number, to: number, lines: readonly string[]): Change {
-    const start = starts[from] ?? before.length;
-    const end = (starts[to] ?? before.length + 1) - 1;
+/** Return the change of a text `length` long, of `count` lines starting at `starts` (and one past its end), that replaces its lines `from` to `to` with `lines`. */
+export function lineChange(length: number, count: number, starts: readonly number[], from: number, to: number, lines: readonly string[]): Change {
+    const start = starts[from] ?? length;
+    const end = (starts[to] ?? length + 1) - 1;
     const insert = lines.join("\n");
     if (to > from && lines.length > 0) {
         return { from: start, to: end, insert };
@@ -223,13 +223,13 @@ export function lineChange(before: string, count: number, starts: readonly numbe
         if (to < count) {
             return { from: start, to: end + 1, insert: "" };
         }
-        return { from: Math.max(start - 1, 0), to: before.length, insert: "" };
+        return { from: Math.max(start - 1, 0), to: length, insert: "" };
     }
     // Lines added: before line `from`, or after the last.
     if (from < count) {
         return { from: start, to: start, insert: `${insert}\n` };
     }
-    return count === 0 ? { from: 0, to: 0, insert } : { from: before.length, to: before.length, insert: `\n${insert}` };
+    return count === 0 ? { from: 0, to: 0, insert } : { from: length, to: length, insert: `\n${insert}` };
 }
 
 /** Return the hunks that make lines `a` into lines `b`, as few lines changed as can be; none where more than `MOST` differ. */
