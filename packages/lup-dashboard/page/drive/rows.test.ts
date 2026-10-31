@@ -138,14 +138,19 @@ describe("every line of the page on one row, at the demo's width, in headless Ch
         expect(whole).toContain("Left for later @62");
         await dashboard.keys.press(["Escape"]);
         await dashboard.page.waitForSelector(".whole-palette", { state: "detached" });
-        // The keyboard back in the review, its keys doing what they do there.
+        // The keyboard back in the review, its keys doing what they do there; the draft kept on the host after, so
+        // nothing of this test's is still being kept as the next one refuses the keeping.
+        const kept = dashboard.page.waitForResponse((response) => {
+            const asked = JSON.parse(response.request().postData() ?? "null") as { kind?: string; draft?: { parked?: number[] } } | null;
+            return asked?.kind === "inbox-keep-draft" && !(asked.draft?.parked ?? []).includes(62);
+        });
         await dashboard.keys.press(["u"]);
         await dashboard.page.waitForFunction(() => document.querySelector(".status")?.textContent?.includes("for later") === false);
+        await kept;
     });
 
     it("says a refusal in its first sentence on one row, its whole with g<", async () => {
-        // The draft kept on the host 300 ms after it changes: what's refused below is the send's own keeping.
-        await dashboard.page.waitForTimeout(600);
+        // The draft is kept already (the test before waits for it): what's refused below is the send's own keeping.
         const why =
             "the draft writes to lup-impl/gone of /r/lup.git, which lup's inbox has never heard of. Write to an agent the dashboard shows running: " +
             "a conversation is known once one of its hooks is heard, and one whose session ended long ago, or that ran in another repository, " +
