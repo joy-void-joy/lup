@@ -13,5 +13,10 @@ export default defineConfig({
         include: ["*.test.ts"],
         testTimeout: 60_000,
         hookTimeout: 60_000,
+        // Three files at a time: each runs a demo and a Chromium, about 230 processes and threads, and a room holds
+        // 2,048 at most (#162), shared by every session and gate in it. All at once, one per core, 13 files reached
+        // the limit: Chromium crashed, `xdotool` couldn't start, the demo answered 500. Three peaked at 722 and ran in
+        // 29 s, faster than all at once (`docs/field-notes.md`, *The drive tests in a room*).
+        maxWorkers: 3,
     },
 });
