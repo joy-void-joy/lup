@@ -406,6 +406,14 @@ Behind `docs/dashboard.md`, *The demo*, and the driver's `display.ts` and `dashb
 - **On US-International, with no input method,** Chromium's GTK handling composes: `xdotool key dead_acute e` gives `keydown` `Process` (`code` `Quote`), `compositionstart`, `compositionupdate` "´", `keyup` `Dead`, then `keydown` `Process`, `compositionend` "é". `dead_acute` then `t` gives "´t", the spacing accent, where the operator's own system may give "'t". `xdotool type "'"` presses AltGr's level of the key, a plain apostrophe, never the dead key: a dead key is pressed by its keysym, `dead_acute`. A keysym the layout has on no key is typed on a spare keycode `xdotool` maps for the while, the page seeing `code` "".
 - **`Xvfb -displayfd`** picks a free display number itself; the rooms share the host's network, and with it the host's abstract X sockets, so `:0` is taken by the host's display, which refuses a room's client without authorization.
 
+## The drive tests in a room (Chromium 151 headless, vitest 5.0.4, Node 26.7, a 32-core host, podman's default pids limit of 2,048, measured in a room 2026-10-31)
+
+Behind `packages/lup-dashboard/page/drive/vitest.config.ts`'s `maxWorkers` (#162): how many processes and threads the gate's `drive` step holds at once.
+- **Each test file runs a demo and a Chromium:** about 230 processes and threads while it runs, read from the room's `pids.current`.
+- **All at once,** vitest's default of one file per core, the 13 files reached the room's 2,048 (`pids.peak` read 2048): Chromium's renderers crashed ("Target crashed"), `xdotool` couldn't start (`spawn xdotool EAGAIN`), a demo answered 500, and the run took 94 to 159 s, failing 8 or 9 of 50 tests. The session running the gate was cut off once around then; whether by this or by the host service's restart at the same minute isn't known from the room.
+- **Three files at a time** peaked at 722, every test passing, in 29 s.
+- The limit is the room's, shared by every session, subagent and gate in it, so a step that runs browsers in parallel caps itself well under it.
+
 ## The room's hook when the host service goes away (socat 1.8.1.3, Linux 7.2.6, measured 2026-10-22)
 
 Behind `docs/host.md`, *The one hook*. A stand-in service, a process of its own on a Unix socket, read a hook's payload to its end, then closed the connection, exited with it open, or was killed with `SIGKILL` while the hook waited; the hook was the room's command of the time (`sh -c 'socat -t 600 - UNIX-CONNECT:<socket>,retry=120,interval=0.5 || …'`). In all three, `socat` ended with status 0 and printed nothing, as for an empty answer: only a reset ends it with status 1. The host service's own stop closes each hook's connection cleanly (`close_clients`). With the service answering every hook with something and the command telling an empty answer apart, the same three ended with status 2 and lup's line, and a socket nobody listened on with status 1.

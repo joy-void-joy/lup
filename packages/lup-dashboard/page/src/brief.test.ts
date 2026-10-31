@@ -1,27 +1,48 @@
 import { describe, expect, it } from "vitest";
 
 import { calledBy, notSent } from "./App";
-import { brief, countedRuns, partsSaid, shortened } from "./brief";
+import { brief, partSaid, partsCounted, partsSaid, shortened, type ReplyPart } from "./brief";
 import type { Conversation } from "./review";
 
 describe("what the page says on one row", () => {
-    it("counts each run of two or more items' numbers, one alone named", () => {
-        expect(countedRuns("read @51, @58 and @69 · approving @54")).toBe("read 3 items · approving @54");
-        expect(countedRuns("@51 @58 @69.2 left")).toBe("3 items left");
-        expect(countedRuns("@dashboard-review read")).toBe("@dashboard-review read");
-    });
-
     it("says the first sentence alone, its whole left to g<", () => {
         expect(brief("reviewed a.py. b.py changed since you read it: shown with what came.")).toBe("reviewed a.py.");
         expect(shortened("reviewed a.py. b.py changed since you read it.")).toBe(true);
         expect(brief("Sent: read @66.")).toBe("Sent: read @66.");
         expect(shortened("Sent: read @66.")).toBe(false);
-        expect(brief("Sent: read @1, @2, @3.")).toBe("Sent: read 3 items.");
     });
 
-    it("says a reply's parts on one line, threads marked alike counted where the first was", () => {
-        expect(partsSaid(["to s1: a message", "@reader read", "read @1, @2", "@auth read", "@voice settled"])).toBe("to s1: a message · 2 threads read · read 2 items · @voice settled");
-        expect(partsSaid(["@reader read"])).toBe("@reader read");
+    it("says a reply's parts on one line by what each does, items and threads done alike counted, and each whole, every number named", () => {
+        const parts: ReplyPart[] = [
+            { kind: "to", who: "s1", what: ["a message", "comments on @62"] },
+            { kind: "thread", name: "reader", done: "read" },
+            { kind: "items", done: "read", numbers: [1, 2] },
+            { kind: "thread", name: "auth", done: "read" },
+            { kind: "thread", name: "voice", done: "settled" },
+            { kind: "items", done: "approving", numbers: [54] },
+        ];
+        expect(partsSaid(parts)).toBe("to s1: a message, comments on @62 · 2 threads read · read 2 items · @voice settled · approving @54");
+        expect(parts.map(partSaid)).toEqual(["to s1: a message, comments on @62", "@reader read", "read @1, @2", "@auth read", "@voice settled", "approving @54"]);
+        expect(partsCounted(parts)).toBe(true);
+        // One thread or item alone is named.
+        const alone: ReplyPart[] = [
+            { kind: "thread", name: "reader", done: "read" },
+            { kind: "items", done: "read", numbers: [66] },
+        ];
+        expect(partsSaid(alone)).toBe("@reader read · read @66");
+        expect(partsCounted(alone)).toBe(false);
+    });
+
+    it("counts by what a part does, never by its words: what's said as it is stays as it is, worded as a thread's or with numbers", () => {
+        const parts: ReplyPart[] = [
+            { kind: "said", text: "@notes read" },
+            { kind: "thread", name: "gate", done: "read" },
+            { kind: "thread", name: "lag", done: "read" },
+            { kind: "said", text: "check @1, @2: refused" },
+            { kind: "items", done: "comments on", numbers: [4, 5], then: " kept: no session's push asked it" },
+        ];
+        expect(partsSaid(parts, "; ")).toBe("@notes read; 2 threads read; check @1, @2: refused; comments on 2 items kept: no session's push asked it");
+        expect(parts.map(partSaid).join("; ")).toBe("@notes read; @gate read; @lag read; check @1, @2: refused; comments on @4, @5 kept: no session's push asked it");
     });
 
     it("says a reply not sent in one sentence, the draft kept", () => {
