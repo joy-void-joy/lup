@@ -341,6 +341,29 @@ class Store(Model):
         )
         return Entry(path=path, mode=mode, blob=self.keep(found.output))
 
+    def beside(self, tree: str, commit: str, paths: list[Path]) -> list[Path]:
+        """Return those of `paths` the snapshot `tree` and `commit` hold differently: other content, or one of them not at all. Each side is read from its own objects."""
+        if not paths:
+            return []
+
+        def files(git: Git, of: str) -> dict[Path, str]:
+            return {
+                Path(each.path): each.object
+                for each in git.tracked(of)
+                if each.kind == "blob"
+            }
+
+        ours = files(self.snapshots(), tree)
+        theirs = files(self.repository(), commit)
+        return [path for path in paths if ours.get(path) != theirs.get(path)]
+
+    def in_commit(self, commit: str, path: Path) -> str | None:
+        """Return the object `commit` holds at `path`, or none where it holds none."""
+        found = self.repository().run(
+            "rev-parse", "--verify", "--quiet", f"{commit}:{path}", ok=[0, 1, 128]
+        )
+        return found.output.decode().strip() if found.status == 0 else None
+
     def merges(self, commits: list[str]) -> list[Merge]:
         """Remake git's merges of two commits from the history of `commits`.
 

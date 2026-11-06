@@ -72,6 +72,7 @@ from lup_dev.policy.holds import (
     HeldFile,
     Hold,
     Holds,
+    Version,
     answered,
     late_answer,
     named,
@@ -1063,6 +1064,16 @@ class Snapshot(Model):
     judged: dict[Path, Judged]
     """Content already judged, by path: the last judged there."""
     move: Move | None = None
+    holding: dict[Path, str] = {}
+    """The version each file held for the operator is held at, by its path, which
+    a move's commit holding it doesn't ask about again."""
+    refused: list[Version] = []
+    """The versions the operator said no to (`Holds.refused`)."""
+
+    def settled(self, path: Path, blob: str | None) -> bool:
+        """Say whether `path` as object `blob` was judged elsewhere (`Elsewhere.holds`): never a version the operator said no to, whatever commit holds it, so one brought back asks again."""
+        version = Version(path=path, blob=blob or "")
+        return version not in self.refused and self.elsewhere.holds(path, blob)
 
     def plan(self, path: Path) -> Planned:
         """Plan what to do with one changed path."""
@@ -1074,14 +1085,33 @@ class Snapshot(Model):
         accepted = decoded(store.content(self.accepted, path))
         if prior is not None and prior.blob == (blob or ""):
             change = Change(path=path, before=accepted, after=after, baseline=baseline)
-            return Planned(path=path, change=change, decide=False, told=prior.told)
+            judged = Planned(path=path, change=change, decide=False, told=prior.told)
+            if self.move is None or path not in self.move.paths:
+                return judged
+            base = store.entry(self.move.after, path)
+            moved = self.brought(path, base, accepted)
+            return judged.model_copy(update={"moved": moved, "base": base})
         if self.move is not None and path in self.move.paths:
             return self.moving(path, self.move)
-        if self.elsewhere.holds(path, blob):
+        if self.settled(path, blob):
             return Planned(path=path)
         before = accepted if prior is None else decoded(store.object(prior.blob))
         change = Change(path=path, before=before, after=after, baseline=baseline)
         return Planned(path=path, change=change)
+
+    def brought(self, path: Path, base: Entry, before: str | None) -> Change | None:
+        """Return what a move of `HEAD` brought to `path`, which `HEAD` holds as `base`, to be judged once, as its commits', as a change from `before`; none where it's what's accepted or held there, judged already as a write, or judged elsewhere."""
+        blob = base.blob or ""
+        prior = self.judged.get(path)
+        known = [
+            self.store.blob(self.accepted, path) or "",
+            self.holding.get(path),
+            None if prior is None else prior.blob,
+        ]
+        if blob in known or self.settled(path, base.blob):
+            return None
+        after = decoded(self.store.object(blob)) if blob else None
+        return Change(path=path, before=before, after=after, baseline=before)
 
     def moving(self, path: Path, move: Move) -> Planned:
         """Plan a path a move of `HEAD` changed: the move's part, then the rest.
@@ -1093,26 +1123,26 @@ class Snapshot(Model):
         """
         store = self.store
         base = store.entry(move.after, path)
-        brought = decoded(store.object(base.blob)) if base.blob else None
         accepted = decoded(store.content(self.accepted, path))
-        unjudged = base.blob != store.blob(self.accepted, path) and not (
-            self.elsewhere.holds(path, base.blob)
-        )
-        moved = (
-            Change(path=path, before=accepted, after=brought, baseline=accepted)
-            if unjudged
-            else None
-        )
+        moved = self.brought(path, base, accepted)
         blob = store.blob(self.taken, path)
-        if blob == base.blob or self.elsewhere.holds(path, blob):
+        if blob == base.blob or self.settled(path, blob):
             return Planned(path=path, moved=moved, base=base)
         rest = Change(
             path=path,
-            before=brought,
+            before=decoded(store.object(base.blob)) if base.blob else None,
             after=decoded(store.content(self.taken, path)),
             baseline=decoded(store.content(self.start, path)),
         )
         return Planned(path=path, change=rest, moved=moved, base=base)
+
+    def committed(self, path: Path, move: Move) -> Planned:
+        """Plan a path only a move of `HEAD` changed, the worktree holding it as accepted or held for the operator: what the commits changed there, judged as theirs, the file left as it is."""
+        store = self.store
+        was = store.entry(move.before, path)
+        before = decoded(store.object(was.blob)) if was.blob else None
+        base = store.entry(move.after, path)
+        return Planned(path=path, moved=self.brought(path, base, before), base=base)
 
 
 class Acted(Model):
@@ -1158,7 +1188,11 @@ def act(
     state = store.state()
     held_paths = [judgement.path for judgement in judged.held]
     kept_out = [*held_paths, *(each.path for each in state.holding)]
-    bases = [plan.base for plan in decided.plans if plan.base and plan.path in kept_out]
+    bases = [
+        plan.base
+        for plan in decided.plans
+        if plan.base and plan.change is not None and plan.path in kept_out
+    ]
     based = [base.path for base in bases]
     tree = (
         store.unstage(
@@ -1369,7 +1403,7 @@ def checkpointed(
             worktree.record(services.layout, head)
             return Checked()
         state = store.state()
-        holding = [each.path for each in state.holding]
+        holding = {each.path: each.blob for each in state.holding}
         changed = [
             each.path
             for each in (store.changed(accepted, taken) if taken != accepted else [])
@@ -1381,19 +1415,35 @@ def checkpointed(
             for other, each in heads.worktrees.items()
             if other != root and each is not None
         ]
-        remote = store.remote_tips() if changed else []
+        move = moving(worktree, heads, head)
+        alone = (
+            []
+            if move is None or move.after is None
+            else store.beside(
+                accepted,
+                move.after,
+                [path for path in move.paths if path not in changed],
+            )
+        )
+        reading = bool(changed or alone)
+        remote = store.remote_tips() if reading else []
         snapshot = Snapshot(
             store=store,
             session=key,
             taken=taken,
             accepted=accepted,
             head=head,
-            start=store.started(key) if changed else None,
+            start=store.started(key) if reading else None,
             elsewhere=Elsewhere(store=store, commits=[*state.tips, *others, *remote]),
             judged={each.path: each for each in session.judged},
-            move=moving(worktree, heads, head) if changed else None,
+            move=move if reading else None,
+            holding=holding,
+            refused=worktree.holds().refused() if reading else [],
         )
-        plans = [snapshot.plan(path) for path in changed]
+        plans = [
+            *(snapshot.plan(path) for path in changed),
+            *(snapshot.committed(path, move) for path in alone if move is not None),
+        ]
         wrote = writers(session, plans, agent)
         changes = [plan.change for plan in plans if plan.change is not None]
         judgements = (
@@ -1719,6 +1769,25 @@ def late_answers(
             held.blob
         )
 
+    def still_committed(hold: Hold) -> str:
+        """Say that `HEAD` holds a version of `hold` the operator refused, where it does: the file was put back, the commit wasn't."""
+        store = worktree.store
+        head = store.head()
+        if head is None or hold.commit is not None:
+            return ""
+        kept = [
+            held
+            for held in hold.files
+            if held.blob and store.in_commit(head, held.path) == held.blob
+        ]
+        if not kept:
+            return ""
+        paths = ", ".join(str(worktree.root / held.path) for held in kept)
+        return (
+            f"`HEAD`, {head}, still holds what they refused of {paths}: it asks again "
+            "if it comes back, and at its landing, so rewrite the commit."
+        )
+
     def told(hold: Hold) -> str:
         holds.mark(hold.key, delivered=True)
         approved = hold.answer is not None and hold.answer.approved
@@ -1729,11 +1798,14 @@ def late_answers(
             in_place(held) for held in hold.files
         )
         if hold.told:
+            if not approved:
+                return still_committed(hold)
             if placed:
                 return ""
             return f"The change to {named(hold)} the operator approved isn't in place, {REDO}"
         if not approved:
-            return late_answer(hold, PUT_BACK)
+            said = [late_answer(hold, PUT_BACK), still_committed(hold)]
+            return " ".join(each for each in said if each)
         return late_answer(
             hold, "It's in place." if placed else f"It isn't in place, {REDO}"
         )
