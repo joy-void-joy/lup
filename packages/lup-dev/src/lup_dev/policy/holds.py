@@ -99,6 +99,13 @@ class HeldFile(Model):
     none where none was kept."""
 
 
+class Version(Model):
+    """A file's content, by its path and its object id: empty for its deletion."""
+
+    path: Path
+    blob: str
+
+
 class Hold(Model):
     """A change waiting for the operator."""
 
@@ -236,6 +243,24 @@ class Holds(Model):
     change is put back, and a hold no call waits on any more is kept: the first
     lup held calls for 4 hours without trouble; a day leaves room for an
     operator away overnight."""
+
+    def refused(self) -> list[Version]:
+        """Return each version of a file the operator's latest answer on it refused, or whose hold's patience ran out with no answer: a commit holding it is no judgement of it (`Snapshot.settled`)."""
+
+        def when(hold: Hold) -> datetime:
+            return hold.created if hold.answer is None else hold.answer.time
+
+        settled = sorted(
+            [hold for hold in self.all() if hold.answer is not None or hold.abandoned],
+            key=when,
+        )
+        said = {
+            Version(path=each.path, blob=each.blob): hold.answer is not None
+            and hold.answer.approved
+            for hold in settled
+            for each in hold.files
+        }
+        return [version for version, approved in said.items() if not approved]
 
     def unused(self) -> str:
         """Return a short key no hold here has, which the operator can type."""
