@@ -16,6 +16,13 @@ from lup.blocks import Block, Fold, Load, OfAgent
 from lup_dashboard.cli import kept_token
 from lup_dashboard.demo import Demo, files
 from lup_dashboard.host import Host
+from lup_dashboard.plain import (
+    BRANCH_KEYS,
+    DEV_ALONE,
+    DEV_BUTTON,
+    RUN_TICKED,
+    TICKED_BUTTON,
+)
 from lup_dashboard.server import Access, application
 from lup_dev.clock import Clock
 from lup_dev.host.protocol import HostError, Listed, ListLaunches, Refused
@@ -1224,6 +1231,39 @@ def test_the_plain_page_lists_dev_and_each_branch_on_trial_with_a_way_to_run_eac
     assert 'name="only" value=""' in shown
     assert 'name="only" value="rival"' in shown
     assert "<script src" not in shown
+
+
+def test_each_key_the_plain_page_offers_is_the_one_its_script_presses(
+    page: Path,
+) -> None:
+    listed = PAGE_COPIES.model_copy(update={"trial": ON_TRIAL})
+    host = StandIn({"copies": [listed]})
+    shown = client(host, page).get("/copies", headers=bearing()).text
+    assert RUN_TICKED not in BRANCH_KEYS
+    assert f"{RUN_TICKED}: run what" in shown
+    assert f'id="{TICKED_BUTTON}"' in shown
+    assert f"{DEV_ALONE}: run alone" in shown
+    assert f'id="{DEV_BUTTON}"' in shown
+    assert json.dumps({RUN_TICKED: TICKED_BUTTON, DEV_ALONE: DEV_BUTTON}) in shown
+
+
+def test_a_branch_past_the_keys_says_it_has_none_and_keeps_its_button(
+    page: Path,
+) -> None:
+    many = [
+        BranchListed(branch=f"b{at}", tip="t", landed=datetime(2026, 11, 6, tzinfo=UTC))
+        for at in range(len(BRANCH_KEYS) + 1)
+    ]
+    trial = ON_TRIAL.model_copy(update={"branches": many})
+    listed = PAGE_COPIES.model_copy(update={"trial": trial})
+    host = StandIn({"copies": [listed]})
+    shown = client(host, page).get("/copies", headers=bearing()).text
+    last = f"b{len(BRANCH_KEYS)}"
+    assert f'<button name="only" value="{last}">run alone (no key)</button>' in shown
+    assert shown.count("(no key)") == 1
+    assert 'id="branch-"' not in shown
+    for key in BRANCH_KEYS:
+        assert f'id="branch-{key}"' in shown
 
 
 def test_the_plain_page_says_nothing_of_trial_where_nothing_s_computed(

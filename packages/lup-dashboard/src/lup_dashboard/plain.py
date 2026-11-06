@@ -11,7 +11,8 @@ thing a page can't do by itself:
 - `switching_page` waits for the next service, since the one that answered the
   button is stopping, and a browser doesn't retry a refresh that fails;
 - `copies_page`'s keys press a copy's button by its place in the list, a branch's
-  by its letter.
+  by its letter, each from what the buttons are made with (`BRANCH_KEYS`,
+  `RUN_TICKED`, `DEV_ALONE`).
 
 Picking is a form the server reads as sent (`picked`), a box ticked for each branch
 of a set, and a button to run one alone.
@@ -20,6 +21,7 @@ of a set, and a button to run one alone.
 import json
 from html import escape
 from itertools import chain, repeat
+from string import ascii_lowercase
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs
 
@@ -41,8 +43,20 @@ td, th { border-bottom: 1px solid #8884; padding: .4em .6em; text-align: left; v
 """What the plain page looks like, inline since it can't rest on the page's build."""
 
 
-KEYS = "abcdefghijklmnopqstuvwxyz"
-"""The letters that press a branch's button, by its place: `r` runs what's ticked."""
+RUN_TICKED = "r"
+"""The key that runs what's ticked."""
+
+DEV_ALONE = "0"
+"""The key that runs `dev` alone: no copy has it, those being counted from 1."""
+
+BRANCH_KEYS = [each for each in ascii_lowercase if each != RUN_TICKED]
+"""The keys that press a branch's button, by its place; one past them has none, which its button says."""
+
+TICKED_BUTTON = "branch-ticked"
+"""The id of the button running what's ticked, which `RUN_TICKED` presses."""
+
+DEV_BUTTON = "branch-dev"
+"""The id of the button running `dev` alone, which `DEV_ALONE` presses."""
 
 
 class Picking(Model):
@@ -126,8 +140,21 @@ def picked(body: str) -> list[str]:
     return sent.branch
 
 
-def branch_row(letter: str, trial: TrialListed, branch: BranchListed) -> str:
-    """Return a branch's row: a box for the set, what it is, where it stands, and its button, named by its `letter` in the list, which none has past the last of them."""
+def branch_button(key: str | None, name: str) -> str:
+    """Return the button running the branch whose escaped name is `name` alone, pressed by `key`; where it has none, saying so, since Tab and Enter still reach it.
+
+    >>> branch_button("a", "rooms")
+    '<button name="only" value="rooms" id="branch-a">a: run alone</button>'
+    >>> branch_button(None, "rooms")
+    '<button name="only" value="rooms">run alone (no key)</button>'
+    """
+    if key is None:
+        return f'<button name="only" value="{name}">run alone (no key)</button>'
+    return f'<button name="only" value="{name}" id="branch-{key}">{key}: run alone</button>'
+
+
+def branch_row(key: str | None, trial: TrialListed, branch: BranchListed) -> str:
+    """Return a branch's row: a box for the set, what it is, where it stands, and its button, pressed by `key`, where it has one."""
     name = escape(branch.branch, quote=True)
     ticked = " checked" if branch.within else ""
     state = (
@@ -143,9 +170,7 @@ def branch_row(letter: str, trial: TrialListed, branch: BranchListed) -> str:
     return (
         f'<tr{mark}><td><input type="checkbox" name="branch" value="{name}"{ticked}></td>'
         f"<td>{escape(branch.branch)}</td><td>{escape(branch.subject)}</td>"
-        f"<td>{state}{built}</td>"
-        f'<td><button name="only" value="{name}" id="branch-{letter}">'
-        f"{letter}: run alone</button></td></tr>"
+        f"<td>{state}{built}</td><td>{branch_button(key, name)}</td></tr>"
     )
 
 
@@ -153,8 +178,10 @@ def trial_part(trial: TrialListed) -> str:
     """Return what's on trial: `dev`, each branch, and the form that runs a set or one alone."""
     integration = escape(trial.integration)
     rows = "".join(
-        branch_row(letter, trial, each)
-        for letter, each in zip(chain(KEYS, repeat("")), trial.branches, strict=False)
+        branch_row(key, trial, each)
+        for key, each in zip(
+            chain(BRANCH_KEYS, repeat(None)), trial.branches, strict=False
+        )
     )
     none = (
         "" if rows else f"<p>Nothing is on trial: <code>{integration}</code> runs.</p>"
@@ -162,12 +189,12 @@ def trial_part(trial: TrialListed) -> str:
     table = (
         "<table><tr><th></th><th>Branch</th><th>What it is</th><th>Where it stands</th>"
         f"<th></th></tr><tr><td></td><td>{integration}</td><td></td><td>always</td>"
-        '<td><button name="only" value="" id="branch-dev">0: run alone</button></td></tr>'
+        f'<td><button name="only" value="" id="{DEV_BUTTON}">{DEV_ALONE}: run alone</button></td></tr>'
         f"{rows}</table>"
     )
     return (
         f'<h1>What runs</h1><form method="post" action="/copies/pick">{none}{table}'
-        '<p><button id="branch-ticked">r: run what\'s ticked</button></p></form>'
+        f'<p><button id="{TICKED_BUTTON}">{RUN_TICKED}: run what\'s ticked</button></p></form>'
         f"<p>Two that conflict can't run together. A set you've said yes to runs at "
         "once, restarting the host service. One you haven't asks in your inbox first, "
         "and a yes builds it, in minutes, since a build runs its code on this machine. "
@@ -193,14 +220,16 @@ def copies_page(listed: CopiesListed | None, said: str) -> str:
         if rows
         else "<p>No copy of <code>lup-dev</code> is kept yet.</p>"
     )
-    script = """
-addEventListener("keydown", (event) => {
+    named = {RUN_TICKED: TICKED_BUTTON, DEV_ALONE: DEV_BUTTON}
+    script = f"""
+const named = {json.dumps(named)};
+addEventListener("keydown", (event) => {{
   if (event.ctrlKey || event.metaKey || event.altKey) return;
-  const named = event.key === "r" ? "branch-ticked" : event.key === "0" ? "branch-dev" : null;
-  (named ? document.getElementById(named)
-    : document.getElementById(`copy-${event.key}`) ?? document.getElementById(`branch-${event.key}`)
+  (document.getElementById(named[event.key])
+    ?? document.getElementById(`copy-${{event.key}}`)
+    ?? document.getElementById(`branch-${{event.key}}`)
   )?.click();
-});
+}});
 """
     trial = "" if listed is None or listed.trial is None else trial_part(listed.trial)
     return document(
