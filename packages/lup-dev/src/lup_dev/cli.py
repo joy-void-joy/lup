@@ -467,7 +467,6 @@ def services(environments: Path | None = None) -> Services:
         clock=SystemClock(),
         layout=Layout.of(settings),
         spawner=BackgroundSpawner(environments=environments),
-        integration=settings.lup_integration_branch,
         announcing=InboxAnnouncing(layout=host, clock=SystemClock()),
         flagging=InboxFlagging(layout=host, clock=SystemClock()),
         facts=HostFacts(),

@@ -22,7 +22,13 @@ from typer.testing import CliRunner
 
 from lup.types import Model
 from lup_dev import cli
-from lup_dev.approval import Approval, ReleaseTool, Tool, WorkspaceTool
+from lup_dev.approval import (
+    Approval,
+    ReleaseTool,
+    Tool,
+    WorkspaceTool,
+    approved_branches,
+)
 from lup_dev.codescan.contract import Checker, FileReport, Parser, Rule, Source
 from lup_dev.codescan.engine import EngineError
 from lup_dev.conversions import inbox_opened
@@ -35,7 +41,7 @@ from lup_dev.declaration.requirements import (
 )
 from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import Detached, HostClient, Starter
-from lup_dev.host.protocol import HostError, Register, Stop
+from lup_dev.host.protocol import Branches, HostError, Register, Stop
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.service import HostService
 from lup_dev.host.workers import LaunchJudge
@@ -79,6 +85,7 @@ from lup_dev.launch.trust import (
     Unchanged,
     UvToolchain,
     building,
+    machine_trust,
 )
 from lup_dev.layout import CopyLayout, JudgeLayout, Layout
 from lup_dev.stored import read_model, write_model
@@ -431,7 +438,6 @@ def trusting(
     return Trust(
         root=root,
         layout=placed,
-        integration="dev",
         asker=asker,
         approvals=approvals or Here(),
         toolchain=Recording(),
@@ -1712,7 +1718,7 @@ def test_an_approved_commit_gone_from_the_repository_shows_everything(
     assert lines[-1] == (
         "The judge couldn't read the zone's change, so the review opens every file: "
         f"the commit approved last, {'0' * 40}, isn't in the repository: approve "
-        "the integration branch's tip with `lup-dev trust`"
+        "the running branch's tip with `lup-dev trust`"
     )
 
 
@@ -2558,7 +2564,7 @@ def test_an_approval_of_a_newer_zone_supersedes_the_one_waiting(
     assert isinstance(late.exception, SupersededError)
     assert str(late.exception) == (
         f"@{older} was superseded by @{newer}, an approval of the host zone "
-        "at the integration branch's tip."
+        "at the running branch's tip."
     )
     assert acting == []
 
@@ -2668,3 +2674,197 @@ def test_a_service_that_doesnt_know_approvals_is_said_with_what_to_do(
     )
     assert said.endswith("`lup-dev host stop`, then ask again")
     assert answering(trust).said == []
+
+
+RUNNING_LIVE = '''"""The declaration, running `live`."""
+
+from lup_dev import Modules, Project, Versions
+
+project = Project(modules=Modules.default().add(Versions(running="live")))
+'''
+"""A declaration selecting `Versions`, with `live` the branch the host runs."""
+
+
+def beside(root: Path, branch: str, shell: Shell) -> str:
+    """Make `branch` from where `dev` stands, one commit past it, and return its tip; the checkout stays on `dev`."""
+    shell.git(root, "switch", "-q", "-c", branch)
+    tip = changed(root, {f"{branch}.md": f"On {branch}.\n"}, shell)
+    shell.git(root, "switch", "-q", "dev")
+    return tip
+
+
+def test_before_the_first_approval_trust_reads_dev_whatever_the_tip_declares(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    dev = changed(lup, {"lup_project.py": RUNNING_LIVE}, shell)
+    beside(lup, "live", shell)
+    trust = trusting(lup, kit, unasked())
+    repository = trust.repository()
+    assert approved_branches(kit.layout, repository) == Branches(
+        integration="dev", running="dev"
+    )
+    assert trust.check().zone.commit == dev
+
+
+def test_an_approval_keeps_the_branches_its_declaration_names_and_trust_then_reads_them(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    dev = changed(lup, {"lup_project.py": RUNNING_LIVE}, shell)
+    live = beside(lup, "live", shell)
+    outcome = trusting(lup, kit, yes()).ensure()
+    assert isinstance(outcome, Trusted)
+    assert outcome.approval.commit == dev
+    assert outcome.approval.branches == Branches(integration="dev", running="live")
+    assert outcome.report().endswith(
+        "The running branch is now `live`: trust reads it, and `land` lands on it."
+    )
+    assert trusting(lup, kit, unasked()).check().zone.commit == live
+
+
+def test_a_project_not_selecting_versions_reads_dev_and_says_nothing_of_branches(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    beside(lup, "live", shell)
+    dev = shell.git(lup, "rev-parse", "dev")
+    outcome = trusting(lup, kit, yes()).ensure()
+    assert isinstance(outcome, Trusted)
+    assert outcome.approval.branches == Branches()
+    assert outcome.branches is None
+    assert "branch" not in outcome.report()
+    assert trusting(lup, kit, unasked()).check().zone.commit == dev
+
+
+def test_a_project_s_own_integration_branch_is_read_once_approved(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    declared = '''"""The declaration, integrating on `trunk`."""
+
+from lup_dev import Core, Modules, Project
+
+project = Project(modules=Modules.default().edit(Core(integration="trunk")))
+'''
+    changed(lup, {"lup_project.py": declared}, shell)
+    trunk = beside(lup, "trunk", shell)
+    outcome = trusting(lup, kit, yes()).ensure()
+    assert isinstance(outcome, Trusted)
+    assert outcome.approval.branches == Branches(integration="trunk", running="trunk")
+    assert trusting(lup, kit, unasked()).check().zone.commit == trunk
+
+
+def test_a_change_to_the_running_branch_waits_for_its_approval_which_shows_it(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    trusting(lup, kit, yes()).ensure()
+    live = beside(lup, "live", shell)
+    dev = changed(lup, {"lup_project.py": RUNNING_LIVE}, shell)
+    trust = trusting(lup, kit, no())
+    standing = trust.check()
+    # Nothing moves on the commit alone: trust still reads `dev`.
+    assert standing.zone.commit == dev
+    assert 'Versions(running="live")' in trust.change(standing).diff()
+    assert isinstance(trust.ensure(), Kept)
+    assert approved_branches(kit.layout, trust.repository()) == Branches()
+    assert trusting(lup, kit, unasked()).check().zone.commit == dev
+    outcome = trusting(lup, kit, yes()).ensure()
+    assert isinstance(outcome, Trusted)
+    assert outcome.approval.branches.running == "live"
+    assert trusting(lup, kit, unasked()).check().zone.commit == live
+
+
+def test_a_tip_s_declaration_runs_only_once_the_operator_said_yes(
+    lup: Path, kit: Kit, shell: Shell, tmp_path: Path
+) -> None:
+    ran = tmp_path / "ran"
+    trusting(lup, kit, yes()).ensure()
+    assert not ran.exists()
+    runs = f'''"""A declaration that leaves a mark where it's run."""
+
+from pathlib import Path
+
+from lup_dev import Project
+
+Path({str(ran)!r}).touch()
+project = Project()
+'''
+    changed(lup, {"lup_project.py": runs}, shell)
+    trust = trusting(lup, kit, no())
+    standing = trust.check()
+    trust.change(standing)
+    assert isinstance(trust.ensure(), Kept)
+    assert not ran.exists()
+    assert isinstance(trusting(lup, kit, yes()).ensure(), Trusted)
+    assert ran.exists()
+
+
+def test_a_running_branch_the_repository_lacks_reads_the_integration_branch_not_head(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    changed(lup, {"lup_project.py": RUNNING_LIVE}, shell)
+    trusting(lup, kit, yes()).ensure()
+    dev = shell.git(lup, "rev-parse", "dev")
+    shell.git(lup, "switch", "-q", "-c", "feat")
+    feat = changed(lup, {"feat.md": "A branch's own.\n"}, shell)
+    zone = trusting(lup, kit, unasked()).check().zone
+    assert zone.commit == dev
+    assert zone.commit != feat
+
+
+def test_a_declaration_that_doesn_t_load_leaves_the_branches_and_says_so(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    changed(lup, {"lup_project.py": RUNNING_LIVE}, shell)
+    trusting(lup, kit, yes()).ensure()
+    # It's `live` that's read now: the broken declaration lands there.
+    shell.git(lup, "switch", "-q", "-c", "live")
+    broken = changed(lup, {"lup_project.py": "raise ValueError('broken')\n"}, shell)
+    outcome = trusting(lup, kit, yes()).ensure()
+    assert isinstance(outcome, Trusted)
+    assert outcome.approval.commit == broken
+    assert outcome.approval.branches == Branches(integration="dev", running="live")
+    said = outcome.report()
+    assert "The branches stay `dev` to integrate on and `live` to run" in said
+    assert "`lup_project.py` can't be imported: broken" in said
+
+
+def test_the_person_s_layer_can_name_the_running_branch_through_its_approval(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    trusting(lup, kit, yes()).ensure()
+    live = beside(lup, "live", shell)
+    layered(
+        lup,
+        '''"""The person's own layer, running `live`."""
+
+from lup_dev import Modules, Project, Versions
+
+project = Project(modules=Modules().add(Versions(running="live")))
+''',
+    )
+    outcome = trusting(lup, kit, yes()).ensure()
+    assert isinstance(outcome, Trusted)
+    assert not outcome.installed
+    assert outcome.approval.branches == Branches(integration="dev", running="live")
+    assert outcome.report().endswith("`land` lands on it.")
+    assert trusting(lup, kit, unasked()).check().zone.commit == live
+
+
+def test_a_record_from_before_approvals_kept_the_branches_reads_dev(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    outcome = trusting(lup, kit, yes()).ensure()
+    assert isinstance(outcome, Trusted)
+    trust = trusting(lup, kit, unasked())
+    kept = kit.layout.approved(trust.repository())
+    kept.write_text(outcome.approval.model_dump_json(exclude={"branches"}))
+    assert "branches" not in kept.read_text()
+    assert approved_branches(kit.layout, trust.repository()) == Branches()
+    assert isinstance(trust.ensure(), Unchanged)
+
+
+def test_the_machine_s_variable_is_gone(
+    lup: Path, shell: Shell, machine: Layout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    beside(lup, "next", shell)
+    dev = shell.git(lup, "rev-parse", "dev")
+    monkeypatch.setenv("LUP_INTEGRATION_BRANCH", "next")
+    assert machine_trust(lup, []).check().zone.commit == dev

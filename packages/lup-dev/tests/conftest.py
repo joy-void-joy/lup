@@ -900,7 +900,6 @@ class Kit:
                 clock=self.clock,
                 layout=self.layout,
                 spawner=self.spawner,
-                integration="dev",
                 announcing=self.announced,
                 flagging=self.flags,
                 facts=self.facts,
