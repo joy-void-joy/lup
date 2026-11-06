@@ -165,6 +165,15 @@ def demo(
             )
         ),
     ] = None,
+    types_read: Annotated[
+        float | None,
+        typer.Option(
+            help=(
+                "How many seconds after the page first asks for the approval's files "
+                "their types are read: long enough to watch, unless given."
+            )
+        ),
+    ] = None,
     copy: Annotated[
         bool,
         typer.Option(
@@ -190,10 +199,17 @@ def demo(
     state instead (`lup_dashboard/copied.py`).
     """
     if copy:
-        if size is not None or hooks or approval_lines or arrives or grows:
+        if (
+            size is not None
+            or hooks
+            or approval_lines
+            or arrives
+            or grows
+            or types_read
+        ):
             message = (
                 "--copy serves the operator's state as it is: it takes none of "
-                "--size, --hooks, --approval-lines, --arrives or --grows"
+                "--size, --hooks, --approval-lines, --arrives, --grows or --types-read"
             )
             raise typer.BadParameter(message)
         copied(port, address, timings)
@@ -210,6 +226,8 @@ def demo(
         host.arrives = timedelta(seconds=arrives)
     if grows is not None:
         host.grows = timedelta(seconds=grows)
+    if types_read is not None:
+        host.types_read = timedelta(seconds=types_read)
     served(host, port, address)
 
 
