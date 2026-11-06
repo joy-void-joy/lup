@@ -163,7 +163,7 @@ function padded(left: readonly Stretch[], tally: Tally): Stretch[] {
 export interface ListReading {
     items: readonly Item[];
     draft: Draft;
-    /** Those the review gives a group with nothing to answer: each running, then each holding what waits. */
+    /** Those the review gives a group with nothing to answer: each running, in the host's order, which is the list's, then each holding what waits. */
     agents: readonly Conversation[];
     parents: ReadonlyMap<string, string>;
     called: (party: Conversation) => string;
@@ -268,20 +268,32 @@ export function conversationNamed(key: string, reading: Pick<ListReading, "agent
     return [...reading.agents, ...ownersIn(reading)].find((each) => whose(each) === key) ?? reading.items.flatMap((each) => (each.sender.party === "conversation" && whose(each.sender) === key ? [each.sender] : []))[0];
 }
 
-/** Return every agent's group the list names, with those of lup's approvals: each with an item, then each of `agents` with none. */
+/**
+ * Return every agent's group the list names, in an order what they hold has no part in: each of `agents`, as the host's
+ * tree has them, so those running stay where they are; then whoever else owns a check or a task, or sent an item, and
+ * lup's approvals, whom the list goes on to order by name (`byName`).
+ */
 function groupsOf(reading: ListReading): Grouping[] {
-    const groups = grouped([...reading.items], reading.banner);
-    const keys = new Set(groups.map((each) => each.key));
-    const owners = ownersIn(reading);
-    const empty = [...reading.agents, ...owners].flatMap((conversation): Grouping[] => {
+    const holding = new Map(grouped([...reading.items], reading.banner).map((each) => [each.key, each]));
+    const listed = new Map<string, Grouping>();
+    for (const conversation of [...reading.agents, ...ownersIn(reading)]) {
         const key = whose(conversation);
-        if (keys.has(key)) {
-            return [];
+        if (!listed.has(key)) {
+            listed.set(key, holding.get(key) ?? { key, conversation, head: { conversation }, items: [] });
         }
-        keys.add(key);
-        return [{ key, conversation, head: { conversation }, items: [] }];
-    });
-    return [...groups, ...empty];
+    }
+    for (const [key, group] of holding) {
+        if (!listed.has(key)) {
+            listed.set(key, group);
+        }
+    }
+    return [...listed.values()];
+}
+
+/** Return `groups` by what they're called, as those no tree of the host's orders are listed: what they hold, or when it came, moves none of them. */
+function byName(groups: readonly Grouping[], called: ListReading["called"]): Grouping[] {
+    const name = (group: Grouping) => (group.conversation === null ? group.key : called(group.conversation));
+    return groups.toSorted((a, b) => name(a).localeCompare(name(b)) || a.key.localeCompare(b.key));
 }
 
 /** Return the row of the agent `group` is of, set in `depth` deep: how they stand, their name and their tally; under it, what they're doing, drawn, and what they're working on. */
@@ -456,7 +468,7 @@ export function listedByAgent(reading: ListReading): Row[] {
     }
     const threads = reading.threads;
     for (const party of parties) {
-        const held = groups.filter((each) => partyOf(each) === party);
+        const held = byName(groups.filter((each) => partyOf(each) === party), reading.called);
         // A task no agent's ever owned sits in the party itself; one whose owner it holds, with them.
         const unowned = threads === null ? [] : threads.read.threads.filter((each) => taskShown(each) && taskOwner(each) === null && party.holdsTask(each, reading.running));
         if (held.length > 0 || unowned.length > 0) {
@@ -471,7 +483,7 @@ export function listedByAgent(reading: ListReading): Row[] {
             }
         }
     }
-    for (const group of groups.filter((each) => each.conversation === null)) {
+    for (const group of byName(groups.filter((each) => each.conversation === null), reading.called)) {
         rows.push(agentRow(group, 0, reading));
     }
     if (threads !== null) {
@@ -594,7 +606,7 @@ export function listedByThread(reading: ListReading): Row[] {
             under: { key: "list settled", closed: true, kind: "section", rows: threadsNested(done, reads).map(({ read, depth }) => threadRow(read, depth, threads, reading)) },
         });
     }
-    for (const group of groups.filter((each) => each.conversation === null)) {
+    for (const group of byName(groups.filter((each) => each.conversation === null), reading.called)) {
         rows.push(agentRow(group, 0, asAgents, false));
     }
     return rows;

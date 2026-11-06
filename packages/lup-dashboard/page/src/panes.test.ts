@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { carried, implied, reachOf, type Marked, type Verb } from "./grammar";
 import { adopted } from "./looks";
-import { arrivalIn, bufferKey, bufferSpans, listLaid, listedByAgent, listedByThread, panesAsked, pathTo, rowAt, spanAt, titled, type ListReading } from "./panes";
+import { arrivalIn, bufferKey, bufferSpans, listLaid, listedByAgent, listedByThread, panesAsked, pathTo, rowAt, spanAt, titled, type ListReading, type Row } from "./panes";
 import { EMPTY, NO_AGENT, PARTIES, ROOT_TITLE, aboutAt, checkOwner, followedFrom, groupAt, laid, opened, whose as whoseOf, type Around, type Conversation, type Draft, type Drawers, type Item, type Laid, type OwnedCheck, type Party, type Showing, type ThreadRead, type ThreadShown, type Threading } from "./review";
 import { partyNamed, threadBanner } from "./Review";
 
@@ -305,6 +305,69 @@ describe("the list by agent", () => {
         for (const each of laidOut.marks) {
             expect(laidOut.text.slice(each.from, each.to)).not.toContain("\n");
         }
+    });
+});
+
+describe("where each agent stays in the list", () => {
+    const ALPHA = from("alpha");
+    const BRAVO = from("bravo");
+    const CHARLIE = from("charlie");
+    const NAMES = ["alpha", "bravo", "charlie"];
+    /** The list, with those three running, in the order the host's tree has them, holding `items`. */
+    const listing = (items: Item[], agents: Conversation[] = [ALPHA, BRAVO, CHARLIE]): ListReading => ({
+        ...reading(),
+        items,
+        agents,
+        parents: new Map(),
+        running: running(ALPHA, BRAVO, CHARLIE),
+        states: new Map(),
+    });
+    const runningNames = (rows: readonly Row[]) => {
+        const from = rows.findIndex((each) => each.id === "heading running") + 1;
+        const to = rows.findIndex((each) => each.id.startsWith("party "));
+        return rows.slice(from, to < 0 ? undefined : to).map((each) => each.says);
+    };
+
+    it("keeps the running in the host's order, whatever they hold, gaining or losing an item moving nobody", () => {
+        for (const items of [[], [note(10, CHARLIE, "c")], [note(10, CHARLIE, "c"), note(11, BRAVO, "b")], [note(11, BRAVO, "b")], [note(12, CHARLIE, "c"), note(13, BRAVO, "b"), note(14, ALPHA, "a")]]) {
+            expect(runningNames(listedByAgent(listing(items)))).toEqual(NAMES);
+        }
+    });
+
+    it("keeps them there grouped by thread too, an agent being a line each", () => {
+        const threads = { read: { kind: "inbox-threads", threads: [] }, shown: new Map(), whole: new Map(), landing: new Map() } as unknown as Threading;
+        const by = (items: Item[]) => listedByThread({ ...listing(items), threads });
+        expect(by([note(10, CHARLIE, "c")]).slice(2, 5).map((each) => each.says)).toEqual(NAMES);
+    });
+
+    it("keeps a subagent under their parent there, whichever of them holds something", () => {
+        const child = from("alpha", "child");
+        const parents = new Map([[whoseOf(child), whoseOf(ALPHA)]]);
+        const list = (items: Item[]) => runningNames(listedByAgent({ ...listing(items, [ALPHA, child, BRAVO, CHARLIE]), parents, running: running(ALPHA, child, BRAVO, CHARLIE) }));
+        expect(list([])).toEqual(["alpha", "alpha/child", "bravo", "charlie"]);
+        expect(list([note(10, child, "c")])).toEqual(["alpha", "alpha/child", "bravo", "charlie"]);
+        expect(list([note(10, CHARLIE, "c"), note(11, child, "c")])).toEqual(["alpha", "alpha/child", "bravo", "charlie"]);
+    });
+
+    it("names each repository once, however what's held falls across them", () => {
+        const elsewhere = { ...BRAVO, repository: "/r/other.git" };
+        const agents = [ALPHA, CHARLIE, elsewhere];
+        const list = listedByAgent({ ...listing([note(10, CHARLIE, "c"), note(11, elsewhere, "e"), note(12, ALPHA, "a")], agents), running: running(...agents) });
+        expect(list.filter((each) => each.id.startsWith("repository ")).map((each) => each.says)).toEqual(["/r/lup.git", "/r/other.git"]);
+    });
+
+    it("keeps No agent's by name, what they hold, or when it came, moving nobody", () => {
+        const [ENDED_A, ENDED_B, ENDED_C] = [from("ended-a"), from("ended-b"), from("ended-c")] as [Conversation, Conversation, Conversation];
+        const held = (items: Item[], agents: Conversation[] = []) => {
+            const rows = listedByAgent({ ...listing(items), agents: [ALPHA, BRAVO, CHARLIE, ...agents] });
+            const from = rows.findIndex((each) => each.id === "party no agent") + 1;
+            return rows.slice(from).map((each) => each.says);
+        };
+        const names = ["ended-a, ended", "ended-b, ended", "ended-c, ended"];
+        expect(held([note(20, ENDED_C, "c"), note(21, ENDED_A, "a"), note(22, ENDED_B, "b")])).toEqual(names);
+        // Their first item gone, as they're marked read, and one with nothing but what their drawer holds.
+        expect(held([note(21, ENDED_A, "a"), note(23, ENDED_C, "c")], [ENDED_B])).toEqual(names);
+        expect(held([note(22, ENDED_B, "b"), note(24, ENDED_A, "a")], [ENDED_C])).toEqual(names);
     });
 });
 
