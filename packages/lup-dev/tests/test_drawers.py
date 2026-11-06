@@ -27,6 +27,7 @@ from lup_dev.inbox.store import (
     Reading,
     Remark,
     Review,
+    ReviewedAt,
     Text,
     Waiting,
     Whereabouts,
@@ -208,7 +209,9 @@ def test_since_you_approved_shows_each_file_from_the_version_last_seen_and_a_fil
         )
     )
     assert reviewed == SinceReviewed(reviewed=[rooms.path], approved=[flag], moved=[])
-    assert delivery.inbox.item(flag).state == Decided(at=clock.now(), approved=True)
+    assert delivery.inbox.item(flag).state == Decided(
+        at=clock.now(), approved=True, reviewed=ReviewedAt(version=rooms.version)
+    )
     settled = reader.read(ShowSince(conversation=branch.party, seen=shown.version))
     assert settled.same is False
     assert [each.path for each in only(settled).files] == [readme.path, rooms.path]

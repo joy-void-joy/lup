@@ -181,6 +181,7 @@ from lup_dev.inbox.store import (
     Reason,
     Remark,
     Review,
+    ReviewedAt,
     Ruling,
     Stop,
     Superseded,
@@ -2462,15 +2463,15 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         await self.delivered(reply)
         return reply
 
-    def flag_approved(self, number: int) -> Item:
-        """Approve the flagged write item `number`, as marking it good in its agent's drawer does (`lup_dev.policy.since`), whatever its state but approved already, which it keeps; refused where it isn't a flagged write."""
+    def flag_approved(self, number: int, reviewed: ReviewedAt | None = None) -> Item:
+        """Approve the flagged write item `number`, as marking it good in its agent's drawer does (`lup_dev.policy.since`), at the version `reviewed` there where it says one, whatever its state but approved already, which it keeps; refused where it isn't a flagged write."""
         item = self.inbox.item(number)
         if not isinstance(item.reason, Flagged):
             message = f"{cited(number)} is {what(item)}, not a flagged write"
             raise InboxError(message)
         if isinstance(item.state, Decided) and item.state.approved:
             return item
-        approved = Decided(at=self.clock.now(), approved=True)
+        approved = Decided(at=self.clock.now(), approved=True, reviewed=reviewed)
         self.say(f"{cited(number)}, a flagged write, was approved")
         return self.inbox.kept(item.model_copy(update={"state": approved}))
 

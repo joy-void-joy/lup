@@ -863,6 +863,12 @@ class Done(Model):
     at: datetime
 
 
+class ReviewedAt(Model):
+    """The version of its file a flagged write was approved at, by marking the file reviewed in its agent's drawer: git's id for it, none where they approved its deletion."""
+
+    version: str | None
+
+
 class Decided(Model):
     """An approval or a held change the operator answered, wherever they answered it: yes or no, and what they add; or a flagged write they approved, marking it read with nothing to add."""
 
@@ -870,6 +876,11 @@ class Decided(Model):
     at: datetime
     approved: bool
     comment: str = ""
+    reviewed: ReviewedAt | None = None
+    """For a flagged write approved by marking its file reviewed, the version
+    they marked, which may not be the one kept beside the item: what they
+    approved, and all they approved (`Baseline.approves`,
+    `lup_dev.policy.landing`). None where they approved what the item keeps."""
 
 
 class Superseded(Model):

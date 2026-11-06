@@ -180,6 +180,7 @@ from lup_dev.inbox.store import (
     Reason,
     Remark,
     Review,
+    ReviewedAt,
     Sent,
     Talk,
     TalkComment,
@@ -9014,11 +9015,14 @@ def test_a_landing_waits_on_each_file_flagged_on_what_it_lands_held_in_its_write
         f"@{flags[3]} (`src/pkg/gone.py` on `feat`).\n"
     ) in answer
     assert landings.on_forge("refs/heads/dev") == tip
+    reviewed = Decided(
+        at=clock.now(), approved=True, reviewed=ReviewedAt(version=version)
+    )
     approved = Decided(at=clock.now(), approved=True)
     withdrawn = Withdrawn(
         at=clock.now(), why=f"`feat` landed on `dev` at {tip}, and is gone since"
     )
-    assert states == [approved, approved, Waiting(), withdrawn, approved]
+    assert states == [reviewed, reviewed, Waiting(), withdrawn, approved]
     assert after == []
 
 
