@@ -575,6 +575,51 @@ def test_words_typed_read_what_came_before_them_an_item_among_it() -> None:
     assert view.text().splitlines()[0] == "messages · 3"
 
 
+def test_a_message_is_read_by_its_words_being_on_screen_so_one_closed_under_its_heading_isn_t() -> (
+    None
+):
+    offer = Offer(action="review-mark", verb="done", says="mark it read")
+    entries: list[Entry] = [Said(by="agent", text="Going.", at=at(1))]
+    answered = item(
+        61,
+        note("Fine."),
+        2,
+        sender=Operator(),
+        recipient=SESSION,
+        state=Told(at=at(2), how="call"),
+    )
+    noted = item(
+        62,
+        note("Two."),
+        3,
+        sender=WORKER,
+        recipient=SESSION,
+        state=Told(at=at(3), how="call"),
+    )
+    view = drawer(entries, listed(answered, noted), reading=offer)
+    assert view.sights is not None
+    # What came after their last words alone, the words themselves, and their own words read nothing.
+    assert [(each.block, each.up_to) for each in view.sights.sights] == [
+        ("text 62", "0")
+    ]
+    assert view.sights.sights[0].through == at(3)
+    assert view.sights.offer == offer
+    # With nothing new, nothing is.
+    assert drawer(entries, listed(answered), reading=offer).sights is None
+
+
+def test_what_s_new_under_the_fold_of_messages_holds_the_mark_back_until_it_s_opened() -> (
+    None
+):
+    offer = Offer(action="review-mark", verb="done", says="mark it read")
+    view = drawer([], many(30), reading=offer)
+    assert view.sights is not None
+    first, *rest = view.sights.sights
+    assert first.folded
+    assert first.block == "messages until last 20"
+    assert len(rest) == 20
+
+
 def test_the_fold_of_what_they_read_reads_up_to_the_message_it_names_and_nothing_where_it_s_gone() -> (
     None
 ):

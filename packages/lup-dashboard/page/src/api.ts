@@ -52,6 +52,15 @@ export async function ask(request: Asked): Promise<Replied> {
     return (await response.json()) as Replied;
 }
 
+/** Send one of the host's requests as the page may be going, which it outlives (`fetch`'s `keepalive`), and return whether it was kept. */
+export async function asked(request: Asked): Promise<boolean> {
+    const response = await fetch("/api/ask", { ...posting(request), keepalive: true });
+    if (!response.ok) {
+        return false;
+    }
+    return ((await response.json()) as Replied).kind !== "refused";
+}
+
 /** What the page sends on its socket, as the server's `Watch` and `Unwatch` read it. */
 type Sent = { kind: "watch"; number: number; request: Asked } | { kind: "unwatch"; number: number };
 

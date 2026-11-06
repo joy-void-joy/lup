@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { cursorRow, itemStanding, outlineOf, type Reading } from "./outline";
 import { EMPTY, barsOf, holderOf, laid, nested, opened, ownerOf, quoted, rowLabel, whose, UNREAD, UNSEEN, type AgentDrawers, type Around, type Conversation, type Draft, type GroupHead, type Item, type Placed, type Remark } from "./review";
+import { sightsOf } from "./seeing";
 import { around, linesOver, pinned, stickies, type Geometry } from "./stack";
 import { STANDING } from "./fixtures/looks";
 import { merged } from "./looks";
@@ -294,6 +295,57 @@ describe("a comment in a drawer goes to whoever wrote what it's on", () => {
     it("keeps a remark drafted before quotes named their block with whom it's to", () => {
         const old: Remark = { id: "old", to: CHILD, quote: { text: "Reading.", block: "", version: "", line: 0, lines: [], start: 0, end: 8 }, text: "And?", step: 1 };
         expect(holderOf(old)).toEqual(CHILD);
+    });
+});
+
+describe("what a drawer's view says is read by being on screen", () => {
+    const id = instanceOf("/r/lup.git", "transcripts", "messages", { runtime: "claude", session: "s1", agent: null });
+    const offer = { action: "review-mark", argument: { repository: "/r/lup.git", module: "transcripts", key: { runtime: "claude", session: "s1", agent: null, drawer: "messages" }, up_to: "9", forward: true }, verb: "done", chord: null, runs: "send", commented: false, says: "mark their messages read" } as const;
+    const words = (key: string, text: string) => ({ block: "markdown" as const, id: key, version: null, offers: [], text, tone: "plain", by: null });
+    const talked: Blocks = {
+        summary: [{ text: "messages · 3 · 2 new", tone: "plain" }],
+        waiting: false,
+        count: 0,
+        offers: [offer],
+        blocks: [
+            { block: "fold", id: "earlier", version: null, offers: [], kind: "earlier", summary: [{ text: "1 earlier, 1 new", tone: "muted" }], open: false, barred: false, content: { view: "earlier_messages", argument: { until_last: 20 } } },
+            words("step 3", "Found it.\nThree places."),
+            words("step 5", "Thanks."),
+        ],
+        sights: {
+            offer,
+            sights: [
+                { block: "earlier", up_to: "1", through: null, folded: true },
+                { block: "step 3", up_to: "3", through: "2026-10-17T12:01:00Z", folded: false },
+                { block: "step 5", up_to: "5", through: "2026-10-17T12:02:00Z", folded: false },
+            ],
+        },
+    } as unknown as Blocks;
+    const remote: Remote = new Map([[id, talked]]);
+    const drawers = new Map([[whose(PARENT), TASKED]]);
+    const out = laid([], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { remote });
+
+    it("says each block where it's laid out, moving that drawer's mark, in the order it comes", () => {
+        const sights = sightsOf(out, UNSEEN, EMPTY, remote, null);
+        expect(sights.map((each) => [each.moves?.up_to, each.standing, each.held])).toEqual([
+            ["1", true, true],
+            ["3", false, false],
+            ["5", false, false],
+        ]);
+        const [, three] = sights;
+        expect(three?.moves).toEqual({ repository: "/r/lup.git", module: "transcripts", key: offer.argument.key, up_to: "3", through: "2026-10-17T12:01:00Z", forward: true, seen: true });
+        expect(out.text.slice(three?.from, three?.to)).toBe("Found it.\nThree places.");
+        expect(three?.lines).toBe(2);
+        // A fold not read yet, and the mark's one position: all of it is the one mark's, in order.
+        expect(new Set(sights.map((each) => each.mark)).size).toBe(1);
+    });
+
+    it("holds the mark back from what holds a remark of theirs", () => {
+        const on = opened(out, out.text.indexOf("Thanks.")) as Remark;
+        const draft: Draft = { ...EMPTY, remarks: [{ ...on, id: "mine", text: "And?" }] };
+        const wrote = laid([], [PARENT], banner, header, draft, NOTHING, [], drawers, undefined, { remote });
+        const sights = sightsOf(wrote, UNSEEN, draft, remote, null);
+        expect(sights.find((each) => each.moves?.up_to === "5")?.held).toBe(true);
     });
 });
 

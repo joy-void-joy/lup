@@ -35,6 +35,7 @@ import {
     type Threading,
 } from "./review";
 import { agentNamed, threadBanner, threadTarget } from "./Review";
+import { sightsOf } from "./seeing";
 import { adopted } from "./looks";
 
 const AT = "2026-10-30T12:00:00Z";
@@ -183,6 +184,43 @@ function lay(draft: Draft = EMPTY, whole: boolean = false, places: string[] = []
 function lines(out: Laid): string[] {
     return out.text.split("\n");
 }
+
+describe("what's read by being on screen, grouped by thread or by agent", () => {
+    const read = threading().read.threads;
+
+    it("reads a thread's news and what asks them, each moving its thread's mark", () => {
+        const sights = sightsOf(lay(), UNSEEN, EMPTY, new Map(), read);
+        const news = sights.find((each) => each.id === "item 70");
+        expect(news?.moves).toEqual({ repository: REPOSITORY, module: "core", key: { node: 303 }, up_to: "70", forward: true, seen: true });
+        expect(news?.asks).toBe(false);
+        const asks = sights.find((each) => each.id === "item 51");
+        expect(asks?.asks).toBe(true);
+        expect(asks?.moves?.key).toEqual({ node: 302 });
+    });
+
+    it("leaves what the draft marks to the draft, and holds the mark back from what holds their words", () => {
+        expect(sightsOf(lay(), UNSEEN, { ...EMPTY, done: [70] }, new Map(), read).some((each) => each.id === "item 70")).toBe(false);
+        const held = sightsOf(lay(), UNSEEN, { ...EMPTY, comments: [{ id: "c1", item: 70, quote: { text: "", block: "", version: "", line: 0, lines: [], start: 0, end: 0 }, text: "Why?" }] } as unknown as Draft, new Map(), read);
+        expect(held.find((each) => each.id === "item 70")?.held).toBe(true);
+    });
+
+    it("holds a thread's mark at what's new in it that's laid out nowhere", () => {
+        const late = { ...AUTH, new: [70, 71] } as ThreadRead;
+        const sights = sightsOf(lay(), UNSEEN, EMPTY, new Map(), [late]);
+        const [first, second] = sights;
+        expect(first?.id).toBe("item 70");
+        expect(second?.id).toBe("item 71");
+        expect(second?.held).toBe(true);
+    });
+
+    it("reads an agent's group by its own mark, where threads aren't read", () => {
+        const out = laid([LATE], [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called);
+        const [sight] = sightsOf(out, UNSEEN, EMPTY, new Map(), null);
+        expect(sight?.moves).toEqual({ repository: REPOSITORY, module: "core", key: { runtime: "claude", session: "s1", agent: "a1" }, up_to: "70", forward: true, seen: true });
+        // Seen since it came, it's no longer new, and nothing's left to read of it.
+        expect(sightsOf(out, { ...UNSEEN, groups: new Map([[JSON.stringify([REPOSITORY, "claude", "s1", "a1"]), 70]]) }, EMPTY, new Map(), null)).toEqual([]);
+    });
+});
 
 describe("the review grouped by thread", () => {
     it("lays out each section under its line: waiting on you, what asks under each thread's header, new, open, every thread still open, to read, settled and agents", () => {
@@ -499,7 +537,7 @@ describe("the review grouped by thread", () => {
     });
 
     it("folds each of the few read entries shown before what's new to its header, as context", () => {
-        const read = { ...AUTH, mark: { key: { node: 303 }, up_to: "47", at: AT } } as ThreadRead;
+        const read = { ...AUTH, mark: { key: { node: 303 }, up_to: "47", at: AT, seen: false } } as ThreadRead;
         const seen = shown(
             read,
             [
@@ -606,7 +644,7 @@ const FELT = item(81, LEAD, { reason: "how it felt", text: "Steady.\nThe brief n
 function piling(draft: Draft = EMPTY): Laid {
     const threads = threading();
     // Auth read before, so its conversation shows whole.
-    const read = { ...AUTH, pile: [81], mark: { key: { node: 303 }, up_to: "40", at: AT } } as ThreadRead;
+    const read = { ...AUTH, pile: [81], mark: { key: { node: 303 }, up_to: "40", at: AT, seen: false } } as ThreadRead;
     const reads = threads.read.threads.map((each) => (each.thread.number === 302 ? { ...each, pile: [80, 82] } : each.thread.number === 303 ? read : each));
     const auth = shown(
         read,
@@ -679,7 +717,7 @@ describe("the pile to read", () => {
         const said = (number: number) => out.text.slice(out.regions.find((each) => each.item.number === number)?.header.from ?? 0).split("\n")[0];
         // The test's header says only the number; the core's says what the view and the note say, which `laid` gives it.
         const told: string[] = [];
-        const marked = { ...AUTH, mark: { key: { node: 303 }, up_to: "40", at: AT } } as ThreadRead;
+        const marked = { ...AUTH, mark: { key: { node: 303 }, up_to: "40", at: AT, seen: false } } as ThreadRead;
         laid([FELT], [LEAD], banner, (shownItem, _, words) => {
             told.push(`${shownItem.number}: ${words}`);
             return header(shownItem);

@@ -65,6 +65,8 @@ from lup.blocks import (
     Markdown,
     OfAgent,
     Offer,
+    Sight,
+    Sights,
     Span,
     Tone,
     kept_open,
@@ -315,6 +317,7 @@ class Read(Model):
             )
         )
         marked = None if mark is None or mark.up_to is None else int(mark.up_to)
+        by_mark = None if mark is None else mark.through or mark.at
         return cls(
             step=max(
                 (each for each in (typed, before, marked) if each is not None),
@@ -324,7 +327,7 @@ class Read(Model):
                 (
                     each
                     for each in (
-                        None if mark is None else mark.at,
+                        by_mark,
                         spoke,
                         None if typed is None else times[typed],
                     )
@@ -355,6 +358,52 @@ class Read(Model):
         return len(entries) - (
             0 if self.step is None else min(self.step + 1, len(entries))
         )
+
+
+class Position(Model):
+    """Where one turn is, as a mark reads it: the last step at or before it, and what had come by it."""
+
+    step: int = -1
+    """The last step at or before it; -1 for before every step, as what spawned
+    a subagent is."""
+    through: datetime | None = None
+
+
+def key(turn: Turn) -> str:
+    """Return what names `turn` among the others, whatever comes after it."""
+    match turn:
+        case Inboxed():
+            return f"item {turn.number}"
+        case Spoken() | Calling():
+            return f"step {turn.step}"
+
+
+def positions(turns: Sequence[Turn]) -> dict[str, Position]:
+    """Return where each of `turns`, as `merged` orders them, is (`Position`), by what names it (`key`)."""
+
+    def after(last: Position, turn: Turn) -> Position:
+        match turn:
+            case Inboxed():
+                step, at = last.step, turn.at
+            case Spoken():
+                step, at = turn.step, turn.said.at
+            case Calling():
+                step, at = turn.step, turn.called.at
+        known = [each for each in (last.through, at) if each is not None]
+        return Position(step=step, through=max(known, default=None))
+
+    return {
+        key(turn): place
+        for turn, place in zip(
+            turns, list(accumulate(turns, after, initial=Position()))[1:], strict=True
+        )
+    }
+
+
+def latest(entries: list[Entry], exchanged: Exchanged) -> datetime | None:
+    """Return what had come by the last thing `entries` and what's `exchanged` hold, which a mark moved to where it's all read says it's read through (`ReviewMark.through`); none where nothing says when."""
+    times = [each.at for each in entries if each.at is not None]
+    return max([*times, *(each.at for each in inboxed(exchanged))], default=None)
 
 
 class Part(Model):
@@ -671,9 +720,16 @@ def ran_of(calls: list[Calling], row: int = 100) -> str:
     return cut(f"· {counted(len(calls), 'call')}: {said}", row)
 
 
+class Turned(Model):
+    """One thing `turned` lays out: its blocks, and the last of the turns they stand for."""
+
+    blocks: list[Block]
+    last: Turn
+
+
 def turned(
     turns: list[Turn], of: OfAgent, view: Method, run: int = 3, row: int = 100
-) -> list[Block]:
+) -> list[Turned]:
     """Lay `turns` out in blocks, in order: the operator's words; the agent's, each a fold of their own under a line saying how they start, open but for those an item repeats, which fold under its line; each call a line saying what it was given, each run of `run` calls or more under one line saying how many of which, open; and each item a line with its text folded under it; what each run, call and item folds set off by a bar (`Fold.barred`).
 
     A call whose record gives it an id folds its input and output under its
@@ -768,18 +824,23 @@ def turned(
             case Inboxed():
                 return [item(turn)]
 
-    def laid(group: list[Turn]) -> list[Block]:
+    def laid(group: list[Turn]) -> list[Turned]:
         rows = [each for each in group if isinstance(each, Calling)]
         if len(rows) < run:
-            return [block for each in group for block in one(each)]
+            return [Turned(blocks=one(each), last=each) for each in group]
         return [
-            Fold(
-                id=f"calls {rows[0].step}",
-                kind=CALLS_KIND.name,
-                summary=[Span(text=ran_of(rows, row), tone=RUN_TONE.name)],
-                open=True,
-                barred=True,
-                content=[call(each) for each in rows],
+            Turned(
+                blocks=[
+                    Fold(
+                        id=f"calls {rows[0].step}",
+                        kind=CALLS_KIND.name,
+                        summary=[Span(text=ran_of(rows, row), tone=RUN_TONE.name)],
+                        open=True,
+                        barred=True,
+                        content=[call(each) for each in rows],
+                    )
+                ],
+                last=rows[-1],
             )
         ]
 
@@ -790,12 +851,32 @@ def turned(
         if not (isinstance(each, Calling) and each.called.id in calls)
     ]
     runs = groupby(shown, key=lambda each: isinstance(each, Calling))
-    return [block for _, group in runs for block in laid(list(group))]
+    return [each for _, group in runs for each in laid(list(group))]
 
 
 def agent_s(turn: Turn) -> bool:
     """Say whether `turn` is the agent's words, which the cap on what's open counts: never their calls, each a line however many there are, nor an item, but those an item repeats, though they fold, so a conversation of turns' ends alone stays small too."""
     return isinstance(turn, Spoken) and turn.said.by != "operator"
+
+
+class Capped(Model):
+    """What's laid out of a run of a conversation: its blocks, and what of them is read by being on screen."""
+
+    blocks: list[Block]
+    sights: list[Sight] = []
+
+
+def sight_of(turn: Turn, block: str, places: dict[str, Position]) -> Sight:
+    """Return what block `block`, standing for what ends with `turn`, reads its drawer's mark to once it's on screen."""
+    place = places.get(key(turn), Position())
+    return Sight(block=block, up_to=str(place.step), through=place.through)
+
+
+def sighted(reading: Offer | None, sights: list[Sight]) -> Sights | None:
+    """Return `sights` as a view says them, each moving the mark `reading` moves; none where nothing's read by being on screen."""
+    return (
+        None if reading is None or not sights else Sights(offer=reading, sights=sights)
+    )
 
 
 def capped(
@@ -806,10 +887,11 @@ def capped(
     through: int | None = None,
     until_last: int | None,
     read: Read | None = None,
+    places: dict[str, Position],
     exchange: Method,
     call: Method,
     run: int,
-) -> list[Block]:
+) -> Capped:
     """Lay out the turns of `part`, or only those up to step `through` in it, or before the agent's last `until_last` words: what the operator has read of it (`read`) folded, and of the rest at most the agent's last `kind.keeps_open` words open, with what follows them, what came before them folded too, under one line saying how many steps and items and how many of them are new, read from `exchange` as it opens (`kept_open`).
 
     Where only what they'd read folds, the fold reads the exchange up to the
@@ -821,6 +903,10 @@ def capped(
     how many of the agent's last words it comes before (`exchange 12 until
     last 20`), which a new turn of the agent's never changes, so a fold the
     operator opened stays open as the conversation grows.
+
+    Each thing shown they haven't read is read by being on screen, a closed fold's
+    line counting, so a run of calls `zm` closed is read as its line is; and
+    what's new under the fold holds their mark back until it's opened (`Sight`).
     """
     # What they'd read of it is all read: only what came after it splits again.
     if through is None:
@@ -833,9 +919,19 @@ def capped(
     )
     reviewed = 0 if marking is None else marking.reviewed(turns)
     kept = kept_open(turns, agent_s, kind.keeps_open, reviewed)
-    shown = turned(kept.shown, of, call, run)
+    laid_out = turned(kept.shown, of, call, run)
+    shown = [block for each in laid_out for block in each.blocks]
+    sights = (
+        []
+        if marking is None
+        else [
+            sight_of(each.last, each.blocks[0].id, places)
+            for each in laid_out
+            if not marking.covers(each.last)
+        ]
+    )
     if not kept.folded:
-        return shown
+        return Capped(blocks=shown, sights=sights)
     steps = sum(1 for each in kept.folded if not isinstance(each, Inboxed))
     items = len(kept.folded) - steps
     new = sum(
@@ -855,7 +951,7 @@ def capped(
         None if marking is None else marking.step,
     )
     if only_read and last is not None:
-        key = f"{part.key()} through {last}"
+        fold_id = f"{part.key()} through {last}"
         loaded = OfExchange(
             runtime=of.runtime,
             session=of.session,
@@ -865,7 +961,7 @@ def capped(
         )
     else:
         deeper = (until_last or 0) + (kind.keeps_open or 0)
-        key = f"{part.key()}{'' if through is None else f' through {through}'} until last {deeper}"
+        fold_id = f"{part.key()}{'' if through is None else f' through {through}'} until last {deeper}"
         loaded = OfExchange(
             runtime=of.runtime,
             session=of.session,
@@ -875,12 +971,18 @@ def capped(
             until_last=deeper,
         )
     fold = Fold(
-        id=key,
+        id=fold_id,
         kind=kind.name,
         summary=[Span(text=said, tone="muted")],
         content=Load.of(exchange, loaded),
     )
-    return [fold, *shown]
+    holds_new = marking is not None and len(kept.folded) > kept.reviewed
+    held_back = sight_of(kept.folded[-1], fold_id, places).model_copy(
+        update={"folded": True}
+    )
+    return Capped(
+        blocks=[fold, *shown], sights=[*([held_back] if holds_new else []), *sights]
+    )
 
 
 def conversation_blocks(
@@ -909,7 +1011,9 @@ def conversation_blocks(
     """
     if not entries:
         return Blocks()
-    *before, latest = parts(merged(entries, inboxed(exchanged)))
+    turns = merged(entries, inboxed(exchanged))
+    places = positions(turns)
+    *before, latest = parts(turns)
     read = Read.of(mark, entries, exchanged)
     unread = len(latest.turns) - read.reviewed(latest.turns)
 
@@ -956,6 +1060,7 @@ def conversation_blocks(
         earlier,
         until_last=None,
         read=read,
+        places=places,
         exchange=exchange,
         call=call,
         run=run,
@@ -964,9 +1069,9 @@ def conversation_blocks(
     def opening() -> list[Block]:
         """Return the latest exchange: its fold, open, as the others are folded, or what came before the operator's first words, where they've said none yet; a line alone, nothing under it yet."""
         if latest.opening is None:
-            return shown
+            return shown.blocks
         first, *further = words(latest.opening)
-        under = [*further, *shown]
+        under = [*further, *shown.blocks]
         if not under:
             return [first]
         return [
@@ -979,6 +1084,12 @@ def conversation_blocks(
             )
         ]
 
+    # An earlier exchange unread, as what a subagent's parent told them opens: it holds their mark back too.
+    unread_before = [
+        sight_of(part.turns[-1], part.key(), places).model_copy(update={"folded": True})
+        for part in before
+        if read.reviewed(part.turns) < len(part.turns)
+    ]
     new = read.new(entries)
     said = [
         f"trace · {counted(len(entries), 'step')}",
@@ -991,6 +1102,7 @@ def conversation_blocks(
             *(folded_part(part, until) for part, until in pairwise([*before, latest])),
             *opening(),
         ],
+        sights=sighted(reading, [*unread_before, *shown.sights]),
     )
 
 
@@ -1004,6 +1116,7 @@ def exchange_blocks(
     earlier: FoldKind = EARLIER_KIND,
     run: int = 3,
     mark: ReviewMark | None = None,
+    reading: Offer | None = None,
 ) -> Blocks:
     """Lay out one exchange of an agent's conversation as its fold in the drawer shows it opened: the operator's further lines of the words that open it, then each step and item up to their next words, but for at most the agent's last words `earlier` keeps open (`capped`).
 
@@ -1016,12 +1129,14 @@ def exchange_blocks(
     they've read of it folded as in the drawer (`mark`, `Read`); none where the
     agent said no more. What came before the words kept open is read from
     `exchange`, this view, and each call's input and output from `call`, one
-    call's view, as each fold opens.
+    call's view, as each fold opens. What of it's read by being on screen moves
+    the mark `reading` moves.
 
     Raise `ConversationError` where `of.step` isn't a step of the operator's
     words.
     """
-    every = parts(merged(entries, inboxed(exchanged)))
+    turns = merged(entries, inboxed(exchanged))
+    every = parts(turns)
     found = [part for part in every if part.step() == of.step]
     match found, of.step:
         case [part], _:
@@ -1048,11 +1163,14 @@ def exchange_blocks(
         through=of.through,
         until_last=of.until_last,
         read=Read.of(mark, entries, exchanged) if latest else None,
+        places=positions(turns),
         exchange=exchange,
         call=call,
         run=run,
     )
-    return Blocks(blocks=[*further, *shown])
+    return Blocks(
+        blocks=[*further, *shown.blocks], sights=sighted(reading, shown.sights)
+    )
 
 
 def call_blocks(

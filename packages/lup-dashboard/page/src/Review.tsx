@@ -57,6 +57,8 @@ import { arrivedLines, arriving, owned, owning, ownersOf, readBy, reconcile, set
 import { clock, ticked, ticking, type Tick } from "./ticking";
 import { doing, since, type Activity } from "./agents";
 import { Following } from "./follow";
+import { sightsOf } from "./seeing";
+import { useSeeing } from "./useSeeing";
 import { usePaced } from "./hooks";
 import { mapOutlineKey, mapScopeKeys, Outline, setOutlineFocus, setOutlineToggle, setScopeJump, useNarrow, type ScopeKey } from "./Outline";
 import { Stack, type Mark as StackMark } from "./Stack";
@@ -1041,6 +1043,17 @@ export function Review({
     // clear, so the cursor's line never goes under the stack. Read as it scrolls, of what's laid out then.
     const over = useRef<(position: number) => number>(() => 0);
     over.current = (position) => linesOver(roots, editor.toLaid(position), narrow) * (view.current?.defaultLineHeight ?? 18);
+    // What's read by being on screen, and for how long it has been (`useSeeing.ts`).
+    const sights = useMemo(() => sightsOf(laidOut, seeing, draft, arrangedBy.remote, threadsRead?.read.threads ?? null), [laidOut, seeing, draft, arrangedBy.remote, threadsRead]);
+    useSeeing({
+        following: follower,
+        sights,
+        over: (position) => over.current(position),
+        toLaid: (position) => editor.toLaid(position),
+        fromLaid: (position) => editor.fromLaid(position),
+        typing: commenting,
+        covered: narrow && overview,
+    });
     // The margin, the review's structure: with its labels where there's room for them.
     const gutters = useMemo(() => new Compartment(), []);
     // Where the scroll being made is to, which its margins are read for.

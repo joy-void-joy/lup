@@ -1657,6 +1657,106 @@ def test_a_subagent_s_record_says_what_their_parent_told_them_as_typed_which_rea
     assert ran.text().splitlines()[0] == "trace · 10 steps · 10 new"
 
 
+def test_what_s_new_is_read_by_being_on_screen_each_thing_shown_saying_how_far_it_moves_the_mark() -> (
+    None
+):
+    view = drawer(talking(4), mark=marked(3), reading=READING)
+    assert view.sights is not None
+    assert view.sights.offer == READING
+    assert [
+        (each.block, each.up_to, each.folded, each.through)
+        for each in view.sights.sights
+    ] == [
+        ("step 4", "4", False, at(2)),
+        ("said 5", "5", False, at(2)),
+        ("step 6", "6", False, at(3)),
+        ("said 7", "7", False, at(3)),
+    ]
+    # All read, nothing is.
+    assert drawer(talking(4), mark=marked(7), reading=READING).sights is None
+    # A view's text form, and one nobody can mark, says none.
+    assert drawer(talking(4), mark=marked(3)).sights is None
+
+
+def test_a_run_of_calls_is_read_by_its_line_and_an_item_by_its_own_a_closed_fold_s_line_being_what_s_shown() -> (
+    None
+):
+    entries: list[Entry] = [
+        Said(by="agent", text="Going.", at=at(0)),
+        Called(tool="Bash", id="b1", at=at(1)),
+        Called(tool="Bash", id="b2", at=at(2)),
+        Called(tool="Read", id="r1", at=at(3)),
+    ]
+    told = item(
+        60,
+        note("Done."),
+        4,
+        sender=SURVEY,
+        recipient=SESSION,
+        state=Told(at=at(4), how="call"),
+    )
+    view = drawer(entries, listed((told, "Done.")), reading=READING)
+    assert view.sights is not None
+    assert [(each.block, each.up_to) for each in view.sights.sights] == [
+        ("said 0", "0"),
+        ("calls 1", "3"),
+        ("item 60", "3"),
+    ]
+    assert view.sights.sights[-1].through == at(4)
+
+
+def test_what_s_new_under_a_fold_holds_the_mark_back_and_says_so_itself_once_it_s_opened() -> (
+    None
+):
+    entries = talking(30)
+    view = drawer(entries, mark=marked(9), reading=READING)
+    assert view.sights is not None
+    first, *rest = view.sights.sights
+    assert first.block == "exchange before until last 20"
+    assert first.folded
+    assert not any(each.folded for each in rest)
+    page = exchange_blocks(
+        OfExchange(runtime="claude", session="s1", until_last=20),
+        entries,
+        ALONE,
+        exchange=Viewing.exchange,
+        call=Viewing.call,
+        mark=marked(9),
+        reading=READING,
+    )
+    assert page.sights is not None
+    assert not any(each.folded for each in page.sights.sights)
+    # What they'd read, opened, reads nothing more.
+    read = exchange_blocks(
+        OfExchange(runtime="claude", session="s1", through=9),
+        entries,
+        ALONE,
+        exchange=Viewing.exchange,
+        call=Viewing.call,
+        mark=marked(9),
+        reading=READING,
+    )
+    assert read.sights is None
+
+
+def test_what_came_after_where_a_mark_is_up_to_stays_new_however_long_before_it_was_moved() -> (
+    None
+):
+    # Moved at minute 59, as what was on screen left it; it read as far as what had come by minute 5.
+    mark = ReviewMark(
+        key=OF.model_dump(mode="json"), up_to="5", at=at(59), through=at(5)
+    )
+    told = item(50, note("Seen."), 2)
+    late = item(51, note("Late."), 8)
+    view = drawer(talking(6), listed((told, "Seen."), (late, "Late.")), mark=mark)
+    lines = view.text().splitlines()
+    assert lines[:2] == [
+        "trace · 12 steps · 6 new",
+        "▸ 6 earlier steps, 1 item  [exchange through=5]",
+    ]
+    assert any("@51" in each for each in lines)
+
+
 def test_a_drawer_long_unread_since_its_mark_keeps_the_cap_its_fold_saying_how_many_are_new() -> (
     None
 ):

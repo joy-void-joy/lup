@@ -26,8 +26,8 @@ of the two drawers it's written in; each is anchored to the drawer it's written
 in, as every comment is to its block, so the same words read in the other drawer
 don't carry it.
 
-What came after the operator last read it stays open and new, with the last few
-they read before it (`seen`), but for at most the last `FoldKind.keeps_open`
+What came after the operator last read it stays open and new, read by its words
+being on screen (`Sight`), with the last few they read before it (`seen`), but for at most the last `FoldKind.keeps_open`
 messages, what came before folded under one line (`▸ 412 earlier messages, 30
 new`) read as it opens (`laid`). How far they've read is the drawer's own review
 mark, or their own last words to the agent, typed or through lup, since they speak
@@ -67,13 +67,19 @@ from lup_transcripts.environment.conversation import (
     RECEIVED_TONE,
     SENT_TONE,
     Calling,
+    Capped,
     Inboxed,
+    Position,
     Read,
     Spoken,
     counted,
     inboxed,
     kept,
+    key,
     merged,
+    positions,
+    sight_of,
+    sighted,
 )
 
 if TYPE_CHECKING:
@@ -111,15 +117,6 @@ class OfMessages(OfAgent):
 
 type Word = Spoken | Inboxed
 """One message: something said at a step, or an item of lup's inbox."""
-
-
-def key(turn: Word) -> str:
-    """Return what names `turn` among the messages, whatever comes after it."""
-    match turn:
-        case Inboxed():
-            return f"item {turn.number}"
-        case Spoken():
-            return f"step {turn.step}"
 
 
 def messages(
@@ -228,6 +225,15 @@ def message(turn: Word, exchanged: Exchanged, report: Report, *, new: bool) -> B
             return under(f"said {step}", line, SENT_TONE, body)
 
 
+def body_of(block: Block) -> str:
+    """Return the id of what a message's `block` says: its words under its heading, which a fold closed over them keeps off screen; the line itself, for one with no words."""
+    match block:
+        case Fold(content=[first, *_]):
+            return first.id
+        case _:
+            return block.id
+
+
 def laid(
     said: list[Word],
     of: OfAgent,
@@ -237,10 +243,11 @@ def laid(
     view: Method,
     report: Report,
     read: Read | None,
+    places: dict[str, Position],
     through: str | None = None,
     until_last: int | None = None,
     seen: int = 3,
-) -> list[Block]:
+) -> Capped:
     """Lay out `said`, or only those up to the message `through`, or before the last `until_last`: what the operator has read folded, but for the last `seen` of it, so the drawer opens on where the exchange stands rather than on one line saying how much came before; and of the rest at most the last `kind.keeps_open` open, each saying it's new, what came before folded too, under one line saying how many and how many of them are new, read from `view` as it opens (`kept_open`).
 
     Where only what they'd read folds, the fold reads up to the last message they
@@ -249,6 +256,10 @@ def laid(
     so each fold opened shows `kind.keeps_open` more, and folds what came before
     them the same way; its id says how many of the last messages it comes before,
     which a new message never changes, so a fold the operator opened stays open.
+
+    Each message new to them is read by being on screen, its words themselves, so
+    one closed under its heading isn't; and what's new under the fold holds their
+    mark back until it's opened (`Sight`).
     """
     named = [key(each) for each in said]
     within = said if through is None else said[: named.index(through) + 1]
@@ -258,20 +269,26 @@ def laid(
     # What they'd read of it is all read: only what came after it splits again.
     read_up_to = 0 if read is None or through is not None else read.reviewed(turns)
     held = kept_open(turns, always, kind.keeps_open, max(read_up_to - seen, 0))
-    shown = [
-        message(
-            each,
-            exchanged,
-            report,
-            new=read is not None
+
+    def is_new(at: int, turn: Word) -> bool:
+        return (
+            read is not None
             and through is None
             and at + len(held.folded) >= read_up_to
-            and not their_own(each),
+            and not their_own(turn)
         )
+
+    shown = [
+        message(each, exchanged, report, new=is_new(at, each))
         for at, each in enumerate(held.shown)
     ]
+    sights = [
+        sight_of(each, body_of(block), places)
+        for at, (each, block) in enumerate(zip(held.shown, shown, strict=True))
+        if is_new(at, each)
+    ]
     if not held.folded:
-        return shown
+        return Capped(blocks=shown, sights=sights)
     new = sum(1 for each in held.folded[read_up_to:] if not their_own(each))
     said_of = ", ".join(
         [
@@ -299,7 +316,12 @@ def laid(
         summary=[Span(text=said_of, tone="muted")],
         content=Load.of(view, loaded),
     )
-    return [fold, *shown]
+    held_back = sight_of(held.folded[-1], block, places).model_copy(
+        update={"folded": True}
+    )
+    return Capped(
+        blocks=[fold, *shown], sights=[*([held_back] if new else []), *sights]
+    )
 
 
 def always(turn: Word) -> bool:
@@ -338,10 +360,21 @@ def messages_blocks(
     read = Read.of(mark, entries, exchanged)
     new = sum(1 for each in said[read.reviewed(said) :] if not their_own(each))
     summary = [f"messages · {len(said)}", *([f"{new} new"] if new else [])]
+    shown = laid(
+        said,
+        of,
+        exchanged,
+        earlier,
+        view=view,
+        report=report,
+        read=read,
+        places=positions(merged(entries, inboxed(exchanged))),
+    )
     return Blocks(
         summary=[Span(text=" · ".join(summary))],
         offers=[] if reading is None or not new else [reading],
-        blocks=laid(said, of, exchanged, earlier, view=view, report=report, read=read),
+        blocks=shown.blocks,
+        sights=sighted(reading, shown.sights),
     )
 
 
@@ -355,21 +388,22 @@ def earlier_messages_blocks(
     brief: str | None = None,
     earlier: FoldKind = EARLIER_KIND,
     mark: ReviewMark | None = None,
+    reading: Offer | None = None,
 ) -> Blocks:
     """Lay out what came earlier among an agent's messages, as its fold in the drawer shows it opened (`OfMessages`): none where nothing did, or the message it's up to is gone, as one the agent's `edit` left saying what no step does."""
     said = messages(entries, exchanged, of, brief)
     if of.through is not None and of.through not in [key(each) for each in said]:
         return Blocks()
-    return Blocks(
-        blocks=laid(
-            said,
-            of,
-            exchanged,
-            earlier,
-            view=view,
-            report=report,
-            read=Read.of(mark, entries, exchanged),
-            through=of.through,
-            until_last=of.until_last,
-        )
+    shown = laid(
+        said,
+        of,
+        exchanged,
+        earlier,
+        view=view,
+        report=report,
+        read=Read.of(mark, entries, exchanged),
+        places=positions(merged(entries, inboxed(exchanged))),
+        through=of.through,
+        until_last=of.until_last,
     )
+    return Blocks(blocks=shown.blocks, sights=sighted(reading, shown.sights))

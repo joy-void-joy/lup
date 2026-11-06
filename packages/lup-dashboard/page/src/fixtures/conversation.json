@@ -136,7 +136,8 @@
                     "version": null,
                     "offers": [],
                     "text": "Twenty kinds of line.\n\nFour carry what was said.",
-                    "tone": "plain"
+                    "tone": "plain",
+                    "by": null
                   }
                 ]
               },
@@ -182,7 +183,9 @@
                 "session": "s1",
                 "agent": "a1"
               },
-              "up_to": "6"
+              "up_to": "6",
+              "through": "2026-10-17T11:57:00+00:00",
+              "forward": true
             },
             "verb": "done",
             "chord": null,
@@ -190,7 +193,43 @@
             "commented": false,
             "says": "mark it read"
           }
-        ]
+        ],
+        "sights": {
+          "offer": {
+            "action": "review-mark",
+            "argument": {
+              "repository": "/r/.git",
+              "module": "transcripts",
+              "key": {
+                "runtime": "claude",
+                "session": "s1",
+                "agent": "a1"
+              },
+              "up_to": "6",
+              "through": "2026-10-17T11:57:00+00:00",
+              "forward": true
+            },
+            "verb": "done",
+            "chord": null,
+            "runs": "send",
+            "commented": false,
+            "says": "mark it read"
+          },
+          "sights": [
+            {
+              "block": "said 5",
+              "up_to": "5",
+              "through": "2026-10-17T11:56:00Z",
+              "folded": false
+            },
+            {
+              "block": "step 6",
+              "up_to": "6",
+              "through": "2026-10-17T11:57:00Z",
+              "folded": false
+            }
+          ]
+        }
       }
     },
     {
@@ -230,7 +269,8 @@
                 "version": null,
                 "offers": [],
                 "text": "Reading the records.",
-                "tone": "plain"
+                "tone": "plain",
+                "by": null
               }
             ]
           },
@@ -270,7 +310,8 @@
         "summary": [],
         "waiting": false,
         "count": 0,
-        "offers": []
+        "offers": [],
+        "sights": null
       }
     }
   ]
