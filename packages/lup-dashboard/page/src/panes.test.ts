@@ -419,6 +419,12 @@ describe("the list by thread", () => {
         expect(lead?.under?.rows.find((each) => each.id === "thread 310")?.opens).toEqual({ kind: "thread", number: 310 });
     });
 
+    it("says of a task fallen to who answers for its holder, ended, that nobody's working on it", () => {
+        const fell = thread(316, "fallen", { answering: LEAD });
+        const rows = listLaid(listedByAgent({ ...reading(), threads: { ...threads, read: { ...threads.read, threads: [fell] } } }));
+        expect(rows.text.split("\n").find((each) => each.includes("@fallen"))).toContain("holder ended");
+    });
+
     it("lists a task whose owner's ended under No agent, under them, and one nobody ever held on its own there", () => {
         const heldByGone = thread(312, "gone", { answering: null } as Partial<ThreadRead>);
         const gone = { ...heldByGone, thread: { ...heldByGone.thread, holder: GONE } } as ThreadRead;

@@ -390,9 +390,13 @@ function fitted(left: readonly Stretch[]): Stretch[] {
  * operator there; opened, it reads across agents as a conversation, the thread's own buffer.
  */
 function taskRow(read: ThreadRead, set: string, depth: number, threads: Threading, reading: ListReading): Row {
-    const state = threadState(read);
     const tally = threadTally(read, threads, reading.draft);
     const waiting = tally.asks + tally.files > 0;
+    // Working in the ledger's word, though whoever held it has ended and it's fallen to who answers for them: nobody is.
+    const holder = read.thread.holder ?? null;
+    const answering = read.answering ?? null;
+    const fell = read.state === "working" && holder !== null && answering !== null && whose(holder) !== whose(answering);
+    const state = fell ? { text: "holder ended", look: "list-sub" } : threadState(read);
     const left: Stretch[] = [
         { text: `${set}${"  ".repeat(depth)}` },
         { text: `@${read.thread.name}`, look: waiting ? "list-name" : "list-sub" },
