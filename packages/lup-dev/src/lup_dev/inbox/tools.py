@@ -900,6 +900,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         def arrived() -> bool:
             return any(whose(each) in on for each in inbox.waiting(self.party))
 
+        await self.delivery.answers_unheard(self.party)
         told = await self.delivery.held(
             self.party, arrived, on=on, home=self.launch.home, within=awaiting.within
         )

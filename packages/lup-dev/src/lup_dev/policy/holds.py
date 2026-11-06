@@ -9,15 +9,20 @@ back, or never lets it land, and saves it, with the comment beside it; an
 approval with a comment passes the comment on. Unanswered within the patience,
 the change is put back and saved, and the hold stays open.
 
-The call waiting holds a lock for as long as it waits (`Holds.waiting`), which
-the OS frees where its process ends, so a hold whose call is gone is told from
-one still waited on (`Holds.waited_on`). The host service stopping, or the
-repository's process ending, takes the call's wait with it: such a hold is settled
-at a later checkpoint in its worktree, as its call would have settled it, and
-its session told (`docs/judging-writes.md`, *Asking the operator*). A call its
-runtime ends while it waits, the operator interrupting it, or whose launch ends
-meanwhile, gives up on the hold as on one unanswered in time, telling its
-conversation at their next call.
+The call waiting holds a lock from before its hold reaches the operator for as
+long as it waits (`Holds.waiting`, `Holds.claiming`), which the OS frees where its
+process ends, so a hold whose call is gone is told from one still waited on
+(`Holds.waited_on`). The host service stopping, or the repository's process
+ending, takes the call's wait with it: such a hold is settled at a later checkpoint
+in its worktree, as its call would have settled it. A call its runtime ends while
+it waits, the operator interrupting it, or whose launch ends meanwhile, gives up on
+the hold as on one unanswered in time, telling its conversation at their next call.
+
+An answer no call waits to hear goes through the conversation's inbox as it's given
+(`answer` with `telling`, `Delivery.decided`), so it reaches them beside a later
+call or through `wait_inbox`; the checkpoint settling it adds only what the answer
+couldn't say (`docs/judging-writes.md`, *Asking the operator*). An answer given
+where a call waited, which the call never acted on, is told by that checkpoint.
 
 What a move of `HEAD` asks is already committed, and isn't put back, so on every
 runtime it's kept as a hold no agent waits on, with the commit it came from
@@ -50,6 +55,7 @@ from lup_dev.host.protocol import Holding, HostError, ShowHolding
 from lup_dev.inbox.protocol import AskHold, Shown
 from lup_dev.inbox.store import ChangedFile, HeldChange, Reading
 from lup_dev.layout import HostLayout, Layout, StoreLayout
+from lup_dev.policy.store import WorktreeState
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.stored import read_model, write_model
 from lup_ledger.parties import Conversation
@@ -130,7 +136,12 @@ class Hold(Model):
     """Whether the call waiting on it was gone when its answer came, as when the
     host service restarted mid-wait: a later checkpoint acted on the answer."""
     delivered: bool = False
-    """Whether an answer given while no agent waited reached the session."""
+    """Whether a checkpoint of its session took an answer given while no agent
+    waited: what it covers for them, and what's left to tell of it."""
+    told: bool = False
+    """Whether its answer was told through the inbox of the conversation that made
+    the change, no call being there to hear it: a checkpoint settling it adds only
+    what that couldn't say (`late_answers`, `policy/checkpoint.py`)."""
 
     def waited(self) -> bool:
         """Say whether an agent waits inside a hook for the answer, or did until its process ended."""
@@ -262,6 +273,23 @@ class Holds(Model):
         with FileLock(self.layout.waiter(key)):
             yield
 
+    @contextmanager
+    def claiming(self) -> Generator[Callable[[str], None]]:
+        """Open a context in which a call claims a hold it's about to put before the operator and wait on, by its key: the hold's lock (`waiting`) is held until the context closes, so an answer however quick finds a call there to hear it (`waited_on`)."""
+        self.layout.holds.mkdir(parents=True, exist_ok=True)
+        claimed: list[FileLock] = []
+
+        def claim(key: str) -> None:
+            lock = FileLock(self.layout.waiter(key))
+            lock.acquire()
+            claimed.append(lock)
+
+        try:
+            yield claim
+        finally:
+            for lock in claimed:
+                lock.release()
+
     def waited_on(self, key: str) -> bool:
         """Say whether a call waits on hold `key`: whether its lock is held."""
         self.layout.holds.mkdir(parents=True, exist_ok=True)
@@ -295,6 +323,16 @@ class Holds(Model):
                 return None
             clock.sleep(poll.total_seconds())
 
+    def unheard(self, key: str) -> bool:
+        """Say whether an answer to hold `key` would reach no call, where it has a conversation to tell: a move's has none waiting on it, and is told at a checkpoint."""
+        hold = self.get(key)
+        return hold is not None and hold.commit is None and not self.waited_on(key)
+
+    def noted(self, key: str) -> bool:
+        """Say whether the store's state holds files for hold `key`, which a checkpoint settles: it does until then, but for a write outside the worktree and a hold its process ended before noting."""
+        state = read_model(self.layout.state, WorktreeState) or WorktreeState()
+        return any(each.hold == key for each in state.holding)
+
     def mark(
         self,
         key: str,
@@ -303,8 +341,9 @@ class Holds(Model):
         delivered: bool = False,
         interrupted: bool = False,
         orphaned: bool = False,
+        told: bool = False,
     ) -> None:
-        """Note that hold `key` was given up on, its call interrupted, or settled with no call waiting, or that its late answer was told."""
+        """Note that hold `key` was given up on, its call interrupted, or settled with no call waiting, or that its late answer was taken by a checkpoint, or told through the inbox."""
         hold = self.get(key)
         if hold is None:
             return
@@ -314,6 +353,7 @@ class Holds(Model):
                 "delivered": hold.delivered or delivered,
                 "interrupted": hold.interrupted or interrupted,
                 "orphaned": hold.orphaned or orphaned,
+                "told": hold.told or told,
             }
         )
         write_model(self.layout.hold(key), marked)
@@ -330,8 +370,10 @@ class Holds(Model):
             if not hold.waited() and hold.answer is not None and not hold.delivered
         ]
 
-    def answer(self, key: str, response: Response, clock: Clock) -> Hold:
-        """Record the operator's answer to hold `key`."""
+    def answer(
+        self, key: str, response: Response, clock: Clock, *, told: bool = False
+    ) -> Hold:
+        """Record the operator's answer to hold `key`; `told` says it's told through the inbox of the conversation that made the change, written with it so no checkpoint reading it tells it too."""
         hold = self.get(key)
         if hold is None:
             message = f"no hold {key} in this store"
@@ -345,7 +387,8 @@ class Holds(Model):
                     approved=response.approved,
                     comment=response.comment,
                     time=clock.now(),
-                )
+                ),
+                "told": told,
             }
         )
         write_model(self.layout.hold(key), answered)
@@ -413,8 +456,9 @@ def answer(
     clock: Clock,
     *,
     worktree: Path | None = None,
+    telling: bool = False,
 ) -> Hold:
-    """Answer hold `key`, unless this runs inside a session: in `worktree`'s store, where it's named, else wherever it's kept.
+    """Answer hold `key`, unless this runs inside a session: in `worktree`'s store, where it's named, else wherever it's kept; `telling` says the inbox tells it where no call waits to hear it, `told` then (`said_answering`). A move's is told at a checkpoint.
 
     A key is unique within one store alone, so one kept in more than one store,
     where no worktree is named, is refused, naming them, rather than answered
@@ -438,7 +482,9 @@ def answer(
         kept = ", ".join(str(holds.layout.holds) for holds in holding)
         message = f"hold {key} is kept in more than one worktree's store ({kept}): name its worktree"
         raise HoldError(message)
-    hold = holding[0].answer(key, response, clock)
+    found = holding[0]
+    told = telling and found.unheard(key)
+    hold = found.answer(key, response, clock, told=told)
     if not hold.waited():
         common = Git(cwd=hold.worktree).text(
             "rev-parse", "--path-format=absolute", "--git-common-dir"
@@ -446,6 +492,92 @@ def answer(
         log = VerdictLog(path=layout.verdicts(Path(common)))
         log.append(answered(hold, "approved" if response.approved else "declined"))
     return hold
+
+
+def named(hold: Hold) -> str:
+    """Name each file a hold holds, in full."""
+    return ", ".join(str(hold.worktree / each.path) for each in hold.files)
+
+
+def late_answer(hold: Hold, after: str) -> str:
+    """Say the operator's answer to `hold`, which no call heard, for the conversation that made the change; `after` says what comes of it, where its call's process ended and it wasn't given up on, as the rest are said whole.
+
+    >>> from datetime import UTC, datetime
+    >>> made = datetime(2026, 1, 1, tzinfo=UTC)
+    >>> kept = HeldFile(path=Path("a.md"), role="operator", blob="b", reasons=[], asks=[])
+    >>> hold = Hold(key="k", worktree=Path("/w"), session="s", created=made, files=[kept], diff="",
+    ...     answer=Answer(approved=True, comment="fine", time=made))
+    >>> late_answer(hold, "It's in place.")
+    "lup's host service went away while your call waited for the operator's answer to the change to /w/a.md, which they have since approved: fine. It's in place."
+    >>> late_answer(hold.model_copy(update={"abandoned": True}), "")
+    'After the hold timed out, the operator approved the change to /w/a.md: fine. Your version was saved when it was put back.'
+    >>> late_answer(hold.model_copy(update={"commit": "c0"}), "")
+    'The operator approved what commit c0 brought to /w/a.md: fine.'
+    """
+    answer = hold.answer
+    approved = answer is not None and answer.approved
+    verb = "approved" if approved else "declined"
+    comment = f": {answer.comment}." if answer is not None and answer.comment else "."
+    if hold.commit is not None:
+        kept = (
+            ""
+            if approved
+            else " Nothing was changed: revert it only at the operator's word."
+        )
+        return (
+            f"The operator {verb} what commit {hold.commit} brought to {named(hold)}"
+            f"{comment}{kept}"
+        )
+    if hold.abandoned:
+        gave_up = (
+            "your call was interrupted" if hold.interrupted else "the hold timed out"
+        )
+        return (
+            f"After {gave_up}, the operator {verb} the change to {named(hold)}"
+            f"{comment} Your version was saved when it was put back."
+        )
+    return (
+        "lup's host service went away while your call waited for the operator's "
+        f"answer to the change to {named(hold)}, which they have since {verb}{comment} "
+        f"{after}"
+    )
+
+
+def said_answering(layout: Layout, hold: Hold) -> str:
+    """Say `hold`'s answer as it's given, no call hearing it, for the inbox of the conversation that made the change: what's still to come of it, as a checkpoint settles it, or that nothing is where no state notes it."""
+    if (
+        not Holds(layout=layout.store(hold.worktree)).noted(hold.key)
+        and not hold.abandoned
+    ):
+        return late_answer(
+            hold,
+            "lup lost its hold as it went away, so their answer changes nothing: a "
+            "change still there is asked again at a checkpoint, and one that never "
+            "landed is yours to make again if it's still wanted.",
+        )
+    if hold.answer is not None and hold.answer.approved:
+        return late_answer(
+            hold,
+            "The next checkpoint in its worktree keeps it, and you hear more only "
+            "where the file has changed since and it isn't in place.",
+        )
+    return late_answer(
+        hold,
+        "The next checkpoint in its worktree puts it back, or it never lands, and "
+        "saves your version.",
+    )
+
+
+def answer_unheard(layout: Layout, worktree: Path, key: str) -> str | None:
+    """Return what to tell the conversation that made hold `key` of `worktree` where it's answered and unsettled with no call there, and no inbox told it, as where the service stopped just after the answer, before its call looked, noting it told; none else."""
+    holds = Holds(layout=layout.store(worktree))
+    hold = holds.get(key)
+    if hold is None or hold.answer is None or hold.told:
+        return None
+    if not holds.noted(key) or holds.waited_on(key):
+        return None
+    holds.mark(key, told=True)
+    return said_answering(layout, hold)
 
 
 def unified(path: Path, before: str | None, after: str | None) -> str:

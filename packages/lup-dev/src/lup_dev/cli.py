@@ -259,7 +259,13 @@ from lup_dev.migration import HostRuntime, Migrating
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
 from lup_dev.policy.coming import Coming
 from lup_dev.policy.flags import InboxFlagging
-from lup_dev.policy.holds import InboxAnnouncing, Response, answer
+from lup_dev.policy.holds import (
+    InboxAnnouncing,
+    Response,
+    answer,
+    answer_unheard,
+    said_answering,
+)
 from lup_dev.policy.importers import BackgroundSpawner
 from lup_dev.policy.judge import finding
 from lup_dev.policy.landing import LandingTools
@@ -597,6 +603,7 @@ def host_serve(context: typer.Context) -> None:
         settle_hold=lambda change, approved, said: hold_answered(
             layout, change, approved=approved, comment=said
         ),
+        hold_unheard=lambda change: hold_unheard(layout, change),
         queues={
             adapter.runtime.name(): adapter.queues
             for adapter in known.known
@@ -950,18 +957,27 @@ def heading(item: Item, paths: Sequence[Pathed] = ()) -> str:
 
 def hold_answered(
     layout: Layout, change: HeldChange, *, approved: bool, comment: str
-) -> None:
-    """Write the operator's answer to a held change where its hook waits for it, or a later checkpoint tells it; a hold at landing has no hook, its answer its item's own state."""
+) -> str | None:
+    """Write the operator's answer to a held change where its hook waits for it, and return what to tell the conversation that made it where no call waits to hear it; a hold at landing has no hook, its answer its item's own state."""
     if change.key is None:
-        return
-    answer(
+        return None
+    hold = answer(
         layout,
         change.key,
         Response(approved=approved, comment=comment),
         runtimes(),
         SystemClock(),
         worktree=change.worktree,
+        telling=True,
     )
+    return said_answering(layout, hold) if hold.told else None
+
+
+def hold_unheard(layout: Layout, change: HeldChange) -> str | None:
+    """Return what to tell the conversation that made a held change answered already, where nothing told them (`answer_unheard`); none else, as for a hold at landing."""
+    if change.key is None:
+        return None
+    return answer_unheard(layout, change.worktree, change.key)
 
 
 def shown(item: Item, paths: Sequence[Pathed] = ()) -> str:

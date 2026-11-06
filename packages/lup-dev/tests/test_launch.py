@@ -1544,9 +1544,10 @@ GONE = (
     "it restarts,"
 )
 HELD = (
-    "A write lup held for the operator's review stays held, and their answer "
-    "reaches you at a later call."
+    "A write lup held for the operator's review still waits for their answer, which "
+    "reaches you beside a later call or through `wait_inbox`."
 )
+UNJUDGED = f"{GONE} so what was written may not have been judged. {HELD}"
 
 
 @pytest.mark.parametrize(
@@ -1560,17 +1561,17 @@ HELD = (
         (
             events.CallFinished,
             2,
-            f"{GONE} so what was written is judged at your next call. {HELD}",
+            UNJUDGED,
         ),
         (
             events.TurnEnded,
             2,
-            f"{GONE} so what was written is judged at your next call. {HELD}",
+            UNJUDGED,
         ),
         (
             events.ConversationEnded,
             2,
-            f"{GONE} so what was written is judged at your next call. {HELD}",
+            UNJUDGED,
         ),
         (events.SessionStarted, 1, f"{GONE} so its answer was lost."),
         (events.TurnStarted, 1, f"{GONE} so its answer was lost."),
