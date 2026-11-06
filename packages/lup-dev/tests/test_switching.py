@@ -509,6 +509,17 @@ def test_the_try_apart_runs_on_a_state_of_its_own_with_a_copy_of_the_ledger(
     assert first_host.layout != machine.layout.host
 
 
+def test_a_try_asked_for_runs_the_copy_apart_whichever_it_is_and_moves_nothing(
+    machine: Machine,
+) -> None:
+    old = machine.running("old")
+    machine.told.fails = ["no"]
+    assert machine.switching.tried(old) == "no"
+    assert machine.steps == ["rehearse old", "asked", "end old"]
+    assert machine.linked() == "old"
+    assert last_switch(machine.layout) is None
+
+
 def test_a_copy_that_has_answered_isnt_tried_again_so_flipping_is_quick(
     machine: Machine,
 ) -> None:
@@ -705,12 +716,26 @@ def test_a_snapshot_that_cant_be_taken_doesnt_stop_the_way_back(
     assert machine.linked() == "before"
 
 
-def test_going_back_runs_restore_from_where_it_went_not_what_it_left(
+def test_a_copy_that_was_answering_stands_behind_the_one_gone_to(
     machine: Machine,
 ) -> None:
-    machine.running("broken")
+    left = machine.running("left")
+    switch = machine.switching.to(machine.copy("before", answered=True), returning=True)
+    assert isinstance(switch, Switched)
+    assert (
+        machine.copies.layout.back.resolve().parent
+        == machine.copies.place(left).home.resolve()
+    )
+
+
+def test_a_dead_service_isnt_what_restore_runs_from_after_going_back(
+    machine: Machine,
+) -> None:
+    machine.running("dead")
+    machine.host = machine.host.model_copy(update={"running": False})
+    switching = machine.switching.model_copy(update={"host": machine.host})
     before = machine.copy("before", answered=True)
-    switch = machine.switching.to(before, returning=True)
+    switch = switching.to(before, returning=True)
     assert isinstance(switch, Switched)
     assert (
         machine.copies.layout.back.resolve().parent
@@ -928,6 +953,18 @@ def test_a_switch_from_a_page_starts_the_copy_s_own_restore(machine: Machine) ->
     assert reply.last is not None
     assert reply.last.said == "before this"
     assert started == ["before before-commit"]
+
+
+def test_a_copy_that_never_answered_is_switched_to_by_the_one_running(
+    machine: Machine,
+) -> None:
+    host_machine(machine)
+    machine.running("current")
+    never = machine.copy("never")
+    machine.copies.pin([never.commit])
+    handler, started = switcher_of(machine)
+    asyncio.run(handler.answer(SwitchCopy(commit="never")))
+    assert started == ["current never-commit"]
 
 
 @pytest.mark.parametrize(

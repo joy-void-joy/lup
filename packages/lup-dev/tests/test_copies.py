@@ -254,6 +254,16 @@ def test_restore_runs_though_the_copy_that_judges_cant(
     assert run(launched.directory / "lup-dev", "sessions", ok=[3]).status == 3
 
 
+def test_restore_runs_the_copy_that_judges_where_the_one_before_cant(
+    copies: Copies, launched: Launched
+) -> None:
+    copies.switch(installed(copies, "current"))
+    broken = installed(copies, "broken")
+    broken.command("lup-dev").write_text("#!/bin/sh\nexit 1\n")
+    copies.back(broken)
+    assert launched.ran("restore", "abc") == "current ran with restore abc"
+
+
 def test_restore_runs_the_copy_that_judges_where_none_answered_before(
     copies: Copies, launched: Launched
 ) -> None:
@@ -263,7 +273,7 @@ def test_restore_runs_the_copy_that_judges_where_none_answered_before(
 
 def test_a_home_with_a_space_is_quoted(tmp_path: Path) -> None:
     written = launcher(tmp_path / "with space", "lup-dev")
-    assert "'" in written.splitlines()[4]
+    assert f"home='{tmp_path}/with space'" in written.splitlines()
 
 
 def test_the_commands_replace_uvs_link_once_and_leave_it_after(

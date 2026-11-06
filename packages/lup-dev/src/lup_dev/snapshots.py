@@ -108,7 +108,7 @@ class Lost(Model):
         >>> print(Lost(since=datetime(2026, 11, 6, 14, 2)).said())
         Everything since 2026-11-06 14:02 leaves the ledger, however much that is: its tables have changed, so it can't be counted. A session waiting on one of those items gets no answer to it.
         """
-        at = self.since.strftime("%Y-%m-%d %H:%M")
+        at = self.since.astimezone().strftime("%Y-%m-%d %H:%M")
         if self.versions is None or self.edges is None:
             how = (
                 ", however much that is: its tables have changed, so it can't be "
@@ -137,7 +137,7 @@ class Restored(Model):
         """Say what happened, for the report."""
         return (
             f"The ledger is back as it was at "
-            f"{self.snapshot.taken.strftime('%Y-%m-%d %H:%M')}. "
+            f"{self.snapshot.taken.astimezone().strftime('%Y-%m-%d %H:%M')}. "
             f"{self.lost.said()} What it replaced is kept in {self.aside}."
         )
 

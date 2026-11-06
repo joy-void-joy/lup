@@ -131,8 +131,8 @@ const wait = () => fetch("/copies")
   .catch(() => "")
   .then((page) => {{
     const said = new DOMParser().parseFromString(page, "text/html").body.dataset.last;
-    const done = page && said !== undefined && said !== before;
-    if (done || (page && Date.now() - began > 90000)) location.replace("/copies");
+    if (page && said !== undefined && said !== before) location.replace("/copies");
+    else if (Date.now() - began > 90000) document.getElementById("late").hidden = false;
     else setTimeout(wait, 500);
   }});
 setTimeout(wait, 500);
@@ -144,5 +144,7 @@ setTimeout(wait, 500);
         "goes back to the list once it's known what came of it. If nothing answers "
         "here within a minute, <code>lup-dev restore</code> in a terminal goes back, "
         f"and what came of this is in <code>{escape(str(switching.log))}</code>.</p>"
+        '<p id="late" class="said" hidden>Nothing has said what came of it. '
+        '<a href="/copies">Back to the list</a>.</p>'
         f"<script>{script}</script>",
     )

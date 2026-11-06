@@ -19,9 +19,9 @@ two steps (`lup_dev/switching.py`), so a copy can be built ahead of its first ru
 
 **The person's `lup-dev` is a launcher, not a copy** (`launcher`): a few lines of
 shell that hand every command to the copy the link names and `restore` to the
-one that answered before it, so `lup-dev restore` works whatever is wrong with
-the current copy, an import that fails among it, which nothing written in Python
-could survive by being a command of that copy.
+one that answered before it where that can run it, so `lup-dev restore` works
+whatever is wrong with either alone, an import that fails among it, which nothing
+written in Python could survive by being a command of that copy.
 
 An install holds the repository's lock from the moment its copy's directory is
 made until the link names it, and choosing the copies to remove takes the same
@@ -77,19 +77,19 @@ def linked(link: Path, target: Path) -> None:
 
 
 def launcher(home: Path, name: str) -> str:
-    r"""Return the person's command for the repository whose copies are at `home`: `restore` handed to the copy that answered before the one that judges, every other command to the one that judges.
+    r"""Return the person's command for the repository whose copies are at `home`: `restore` handed to the copy that answered before the one that judges, where that can run it, every other command to the one that judges.
 
     Standard shell alone, so nothing about any copy or any Python stops it
-    choosing. Where no copy answered before yet, `restore` goes to the one that
-    judges.
+    choosing. Asking for `restore`'s help imports what running it would, so a copy
+    that can't is passed over, and one that isn't there, as before any answered.
 
     >>> print(launcher(Path("/data/judges/abc"), "lup-dev"))
     #!/bin/sh
     # `lup-dev`, as lup writes it (docs/trust.md, The way back): every command runs
-    # the copy that judges, and `restore` the one that answered before it, so it
-    # works whatever is wrong with the copy that judges.
+    # the copy that judges, and `restore` the one that answered before it where that
+    # can, so it works whatever is wrong with the copy that judges.
     home=/data/judges/abc
-    if [ "${1-}" = restore ] && [ -x "$home/back/lup-dev" ]; then
+    if [ "${1-}" = restore ] && "$home/back/lup-dev" restore --help >/dev/null 2>&1; then
         exec "$home/back/lup-dev" "$@"
     fi
     exec "$home/bin/lup-dev" "$@"
@@ -98,10 +98,10 @@ def launcher(home: Path, name: str) -> str:
     return (
         "#!/bin/sh\n"
         f"# `{name}`, as lup writes it (docs/trust.md, The way back): every command runs\n"
-        "# the copy that judges, and `restore` the one that answered before it, so it\n"
-        "# works whatever is wrong with the copy that judges.\n"
+        "# the copy that judges, and `restore` the one that answered before it where that\n"
+        "# can, so it works whatever is wrong with the copy that judges.\n"
         f"home={shlex.quote(str(home))}\n"
-        f'if [ "${{1-}}" = restore ] && [ -x "$home/back/{name}" ]; then\n'
+        f'if [ "${{1-}}" = restore ] && "$home/back/{name}" restore --help >/dev/null 2>&1; then\n'
         f'    exec "$home/back/{name}" "$@"\n'
         "fi\n"
         f'exec "$home/bin/{name}" "$@"\n'

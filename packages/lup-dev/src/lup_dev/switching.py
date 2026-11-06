@@ -546,6 +546,10 @@ class Switcher(ABC):
     ) -> Switch:
         """Move to the copy `kept`, restoring the snapshot `ledger` where it's given. `returning` says the operator is going back: a snapshot that can't be taken is said and doesn't stop them."""
 
+    @abstractmethod
+    def tried(self, kept: Kept) -> str | None:
+        """Run the copy `kept` on a state of its own, moving nothing, and say why it doesn't answer; none where it does."""
+
 
 def held_back(number: int, frame: FrameType | None) -> None:
     """Do nothing with a signal: a handler, not `SIG_IGN`, which a program started meanwhile would inherit, and the service then never hear it end."""
@@ -588,9 +592,6 @@ class Moved(Model):
     taken: Snapshot | None
     restored: Restored | None
     began: datetime
-    returning: bool
-    """Whether the operator is going back, away from a copy they may be leaving
-    for what's wrong with it."""
 
 
 class Switching(Model, Switcher, arbitrary_types_allowed=True):
@@ -622,7 +623,7 @@ class Switching(Model, Switcher, arbitrary_types_allowed=True):
         """Try the copy on a state of its own where it has never answered, then hand over to it, keeping what came of it."""
         name = kept.approval.tool.name
         command = self.copies(kept).place(kept).command(name)
-        why = None if kept.answered is not None else self.first(command)
+        why = None if kept.answered is not None else self.tried(kept)
         switch = (
             Stayed(kept=kept, why=why)
             if why is not None
@@ -639,8 +640,10 @@ class Switching(Model, Switcher, arbitrary_types_allowed=True):
         )
         return switch
 
-    def first(self, command: Path) -> str | None:
-        """Say why the copy whose command is `command` won't answer on a state of its own; none where it does. A ledger that can't be copied, or a copy that can't start, is why too."""
+    @override
+    def tried(self, kept: Kept) -> str | None:
+        """Say why the copy `kept` won't answer on a state of its own; none where it does. A ledger that can't be copied, or a copy that can't start, is why too."""
+        command = self.copies(kept).place(kept).command(kept.approval.tool.name)
         rehearsal = Rehearsal(
             layout=self.layout,
             answers=self.answers,
@@ -697,12 +700,11 @@ class Switching(Model, Switcher, arbitrary_types_allowed=True):
                 taken=kept_ledger.taken,
                 restored=kept_ledger.restored,
                 began=began,
-                returning=returning,
             )
-            tried = self.tried(command)
-            if tried.why is None:
+            asked = self.started_and_asked(command)
+            if asked.why is None:
                 return self.settled(kept, moved)
-            return self.fell_back(kept, moved, tried)
+            return self.fell_back(kept, moved, asked)
 
     def ledger_kept(
         self, before: Standing, ledger: Snapshot | None, *, returning: bool
@@ -738,7 +740,7 @@ class Switching(Model, Switcher, arbitrary_types_allowed=True):
         copies.switch(copies.place(kept))
         write_model(self.layout.approved(kept.repository), kept.approval)
 
-    def tried(self, command: Path) -> Tried:
+    def started_and_asked(self, command: Path) -> Tried:
         """Start the service from `command`, and ask it."""
         try:
             started = self.processes.started(
@@ -749,15 +751,13 @@ class Switching(Model, Switcher, arbitrary_types_allowed=True):
         return Tried(started=started, why=self.answers.failing(self.host, started))
 
     def settled(self, kept: Kept, moved: Moved) -> Switched:
-        """Keep that the copy answered, and have the person's commands name it. What `lup-dev restore` runs from is what ran before, where it was answering when it was stopped and the operator isn't leaving it for what's wrong with it; else this copy, which just answered."""
+        """Keep that the copy answered, and have the person's commands name it. What `lup-dev restore` runs from is what ran before, where it has answered and was answering when it was stopped, so a second copy stands behind this one; else this copy, which just answered: what's left behind a dead service may be why it died."""
         copies = self.copies(kept)
         answering = kept.model_copy(update={"answered": self.clock.now()})
         copies.recorded(answering)
         left = moved.before.kept
-        good = left is not None and left.answered and moved.before.ran
-        copies.back(
-            copies.place(left if good and left and not moved.returning else kept)
-        )
+        good = left is not None and left.answered is not None and moved.before.ran
+        copies.back(copies.place(left if left is not None and good else kept))
         if self.commands is not None:
             copies.commands(
                 self.commands(), kept.approval.tool.name, self.layout.host_copies
@@ -811,8 +811,7 @@ class Switching(Model, Switcher, arbitrary_types_allowed=True):
         """Start again what ran before, and say why it doesn't answer; none where it does. There's nothing to start at a repository's first copy, which is why."""
         if before.command is None:
             return "there's no copy to go back to"
-        tried = self.tried(before.command)
-        return tried.why
+        return self.started_and_asked(before.command).why
 
 
 def host_starter(layout: Layout) -> Detached:
@@ -954,7 +953,7 @@ class CopiesAnswering(Model, Handler[ListCopies]):
 
 
 class CopySwitch(Model, Handler[SwitchCopy], arbitrary_types_allowed=True):
-    """Answers `SwitchCopy`: checks what can be refused while this service still runs, then starts `lup-dev restore` from the copy going to, whose code has answered, in a session of its own, since it stops this service."""
+    """Answers `SwitchCopy`: checks what can be refused while this service still runs, then starts `lup-dev restore` in a session of its own, since it stops this service: from the copy going to where that has answered, whose code has worked, else from the one running, which is answering this."""
 
     layout: Layout
     start: Callable[[CopyLayout, str], None]
@@ -987,7 +986,9 @@ class CopySwitch(Model, Handler[SwitchCopy], arbitrary_types_allowed=True):
             )
             raise HostError(message)
         last = last_switch(self.layout)
-        self.start(copies.place(kept), kept.commit)
+        running = copies.running()
+        from_copy = kept if kept.answered is not None or running is None else running
+        self.start(copies.place(from_copy), kept.commit)
         return CopySwitching(commit=kept.commit, log=self.layout.host.log, last=last)
 
 

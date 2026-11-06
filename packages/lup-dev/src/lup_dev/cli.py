@@ -3325,6 +3325,13 @@ def restore(
             help="Put the ledger back as that copy left it too, losing what happened since, which it says and asks about first."
         ),
     ] = False,
+    attempt: Annotated[
+        bool,
+        typer.Option(
+            "--try",
+            help="Run that copy on a copy of your state, beside the service you have, and say whether it answers, moving nothing.",
+        ),
+    ] = False,
 ) -> None:
     """Go back to a copy of `lup-dev` kept, or list them, with or without a host service or a dashboard.
 
@@ -3378,15 +3385,24 @@ def restore(
     if commit is None:
         typer.echo(restoring.listing())
         return
+    if attempt:
+        why = restoring.tried(commit)
+        if why is not None:
+            typer.echo(f"It doesn't answer, and nothing moved. Why: {why}")
+            raise typer.Exit(1)
+        typer.echo("It answers, on a copy of your state, and nothing moved.")
+        return
     try:
         switch = restoring.restored(commit, ledger=ledger)
     except (RestoreError, HostError) as refused:
-        write_model(
-            layout.host.switched,
-            LastSwitch(
-                commit=commit, at=clock.now(), said=str(refused), answered=False
-            ),
-        )
+        # A page started this, and is waiting to hear: a terminal has been told.
+        if not sys.stdin.isatty():
+            write_model(
+                layout.host.switched,
+                LastSwitch(
+                    commit=commit, at=clock.now(), said=str(refused), answered=False
+                ),
+            )
         raise
     typer.echo(switch.report())
     if not isinstance(switch, Switched):

@@ -445,6 +445,9 @@ class Accepting(Model, Switcher, arbitrary_types_allowed=True):
             kept=answering, ran=self.running, snapshot=None, took=timedelta()
         )
 
+    def tried(self, kept: KeptCopy) -> str | None:
+        return None
+
 
 def trusting(
     root: Path,

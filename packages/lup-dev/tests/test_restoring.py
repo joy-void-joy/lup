@@ -39,6 +39,8 @@ class Went(Switcher):
         self.went: list[str] = []
         self.ledgers: list[Snapshot | None] = []
         self.returning: list[bool] = []
+        self.tries: list[str] = []
+        self.why: str | None = None
 
     @override
     def to(
@@ -48,6 +50,11 @@ class Went(Switcher):
         self.ledgers.append(ledger)
         self.returning.append(returning)
         return Switched(kept=kept, ran=True, snapshot=None, took=timedelta(seconds=4))
+
+    @override
+    def tried(self, kept: Kept) -> str | None:
+        self.tries.append(kept.commit)
+        return self.why
 
 
 class Answering(HostClient):
@@ -270,6 +277,20 @@ def test_an_approval_being_carried_out_holds_it_off(way: Way) -> None:
     ):
         restoring.restored("c0ffee", ledger=False)
     assert way.went.went == []
+
+
+def test_a_try_moves_nothing_and_says_why(way: Way) -> None:
+    way.copy("c0ffee")
+    way.went.why = "the page is blank"
+    assert way.restoring().tried("c0f") == "the page is blank"
+    assert way.went.tries == ["c0ffee"]
+    assert way.went.went == []
+
+
+def test_a_copy_gone_cant_be_tried(way: Way) -> None:
+    way.copy("gone00", there=False)
+    with pytest.raises(RestoreError, match="copy is gone"):
+        way.restoring().tried("gone00")
 
 
 def test_it_refuses_inside_an_agents_session(

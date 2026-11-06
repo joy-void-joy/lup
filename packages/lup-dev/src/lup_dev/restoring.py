@@ -158,6 +158,18 @@ class Restoring(Model, arbitrary_types_allowed=True):
             )
             raise RestoreError(message) from busy
 
+    def tried(self, commit: str) -> str | None:
+        """Run the copy of `commit`, a prefix naming it, on a state of its own, moving nothing, whichever copy it is: say why it doesn't answer; none where it does. Raise `RestoreError` where it's not there to run."""
+        copies = host_copies(self.layout)
+        if copies is None:
+            message = "no copy of `lup-dev` is kept yet, so there's none to try"
+            raise RestoreError(message)
+        target = self.chosen(copies, commit)
+        if not copies.there(target):
+            message = f"{target.commit}'s copy is gone, so there's none to try"
+            raise RestoreError(message)
+        return self.switcher.tried(target)
+
     def chosen(self, copies: Copies, commit: str) -> Kept:
         """Return the copy to go to: among those there, else among those gone."""
         there = [each for each in copies.history() if copies.there(each)]
