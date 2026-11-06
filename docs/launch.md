@@ -102,7 +102,7 @@ Not mounted: the operator's own `~/.claude` and `~/.codex`, the SSH agent, `gh`'
 - the operator's uid inside (`--userns=keep-id`), so what the agent writes is theirs on the host;
 - `--init`, since without it the first lup piled up 4,045 zombies against its pids limit;
 - every capability dropped, and `no-new-privileges`;
-- podman's own pids limit, which counts threads: 2048 on podman 6.1.3 (measured in a room), where the first lup's 4,096 broke a test run, so lup means to lift it (#162);
+- a pids limit of 16,384, which counts threads and is shared by every session, worker, gate and demo in a room: podman's own default of 2,048 made gates fail with errors that don't name it, a gate alone peaking at about 720. It's a limit rather than none, since it's also what stops a fork bomb in a room from taking the host down;
 - the host's network, shared both ways, so a server the agent starts opens in the operator's browser, and the sign-in's callback reaches the CLI. The cost is that code in the room reaches what listens on the host's loopback: the walls are there so nothing explodes, not to contain an agent (`DESIGN.md`, *Who it's for*);
 - a terminal with no detach keys, so Ctrl+P reaches the program, and the operator's `TERM`, `LANG`, `TZ` and `EDITOR`, without which the first lup's sessions lost their colour, locale, time zone and Ctrl+G.
 

@@ -142,6 +142,7 @@ def test_a_run_carries_the_wall_the_terminal_the_variables_and_the_mounts() -> N
         "--userns=keep-id",
         "--cap-drop=all",
         "--security-opt=no-new-privileges",
+        "--pids-limit=16384",
         "--interactive",
         "--tty",
         "--detach-keys=",
@@ -512,9 +513,7 @@ def test_a_named_container_is_run_by_its_name_and_asked_after() -> None:
     )
     command = engine.command(invocation)
 
-    assert command[command.index("--security-opt=no-new-privileges") + 1] == (
-        "--name=lup-1a2b"
-    )
+    assert command[command.index("--pids-limit=16384") + 1] == "--name=lup-1a2b"
     assert engine.exists("lup-1a2b")
     assert not engine.exists("lup-1a2b")
     with pytest.raises(ContainerError, match="lup-1a2b"):
