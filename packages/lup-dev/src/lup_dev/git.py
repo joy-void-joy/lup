@@ -26,8 +26,15 @@ A commit's files are written out from git's own objects (`Git.export`): each fil
 through `git archive`, which applies the repository's `.gitattributes`
 (`export-subst` rewrites a file's text, `export-ignore` leaves one out), so its
 copy could differ from the commit the operator was shown.
+
+What a commit changes can be read from its objects' own bytes (`Git.own_changes`),
+each hashed as git hashes one and compared with its id (`Git.verified`), where a
+room writes the store and what's read decides what the operator is asked: the
+ids alone say what a commit holds, as a forge reads them
+(`docs/field-notes.md`, *Host-side git in a repository the room writes*).
 """
 
+import hashlib
 import io
 import os
 from itertools import batched
@@ -68,6 +75,83 @@ class Tracked(Model):
     object: str
     path: PurePosixPath
     """From the repository's root."""
+
+
+type ObjectKind = Literal["blob", "tree", "commit"]
+"""What an object of git's store is, as git hashes it."""
+
+
+def named_by(object_id: str, kind: ObjectKind, content: bytes) -> bool:
+    """Say whether `object_id` is the id git gives an object of `kind` holding `content`, in a repository of either hash: an id's length is its hash's.
+
+    >>> named_by("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391", "blob", b"")
+    True
+    >>> named_by("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391", "blob", b"x")
+    False
+    """
+    framed = b"".join([f"{kind} {len(content)}".encode(), b"\0", content])
+    ids = [
+        hashlib.sha1(framed, usedforsecurity=False).hexdigest(),
+        hashlib.sha256(framed, usedforsecurity=False).hexdigest(),
+    ]
+    return object_id in ids
+
+
+def tree_entries(content: bytes, under: PurePosixPath, width: int) -> Iterator[Tracked]:
+    r"""Read a tree object's bytes, each entry its mode, a space, its name, a NUL and its id's `width` bytes, as entries of the tree at `under`.
+
+    >>> found = tree_entries(b"100644 a\x00" + bytes(20), PurePosixPath("d"), 20)
+    >>> [(each.mode, each.kind, str(each.path)) for each in found]
+    [('100644', 'blob', 'd/a')]
+    """
+    reader = io.BytesIO(content)
+
+    def until(end: bytes) -> bytes:
+        return b"".join(
+            iter(lambda: b"" if (byte := reader.read(1)) == end else byte, b"")
+        )
+
+    while mode := os.fsdecode(until(b" ")):
+        name = os.fsdecode(until(b"\0"))
+        yield Tracked(
+            mode=mode,
+            kind="tree"
+            if mode == "40000"
+            else "commit"
+            if mode == "160000"
+            else "blob",
+            object=reader.read(width).hex(),
+            path=under / name,
+        )
+
+
+class Parted(Model):
+    """A directory where two commits' trees part, from the repository's root: each side's tree there, none where a side has no directory there."""
+
+    under: PurePosixPath
+    was: str | None
+    now: str | None
+
+
+class TreeChange(Model):
+    """A file two commits' trees differ in: its path, and its entry in the later, none where it's gone there."""
+
+    path: PurePosixPath
+    entry: Tracked | None
+
+
+def parting(
+    path: PurePosixPath, old: Tracked | None, new: Tracked | None
+) -> Iterator[Parted | TreeChange]:
+    """Say what two trees differing at `path`, as `old` and `new`, come to there: a directory on either side to read further, and the file on either side, as it is in `new` or gone from it."""
+    was = None if old is None or old.kind != "tree" else old.object
+    now = None if new is None or new.kind != "tree" else new.object
+    if was is not None or now is not None:
+        yield Parted(under=path, was=was, now=now)
+    if new is not None and now is None:
+        yield TreeChange(path=path, entry=new)
+    if old is not None and was is None and (new is None or now is not None):
+        yield TreeChange(path=path, entry=None)
 
 
 LISTED = "%(objectmode)%x00%(objecttype)%x00%(objectname)%x00%(path)"
@@ -276,6 +360,80 @@ class Git(Model):
             return content
 
         return [read(each) for each in objects]
+
+    def verified(self, kind: ObjectKind, objects: list[str]) -> list[bytes]:
+        """Return the content of each of `objects`, each an object of `kind`, in order, each hashed as git hashes one: raise `GitError` where one isn't what its id says, or git can't read it."""
+        contents = self.contents(objects)
+        unlike = [
+            each
+            for each, content in zip(objects, contents, strict=True)
+            if not named_by(each, kind, content)
+        ]
+        if unlike:
+            named = ", ".join(unlike)
+            message = f"what the repository's store holds as {named} isn't that {kind}"
+            raise GitError(message)
+        return contents
+
+    def own_changes(
+        self, before: str | None, after: str
+    ) -> dict[PurePosixPath, Tracked | None]:
+        """Return each file the commit `after` changes against the commit `before`, or each it holds where that's none, from the repository's root, with its entry in `after`, none where it deleted it: read from each object's own bytes, one `git cat-file` a level, only where the two trees' ids part (`verified`).
+
+        A directory replaced by a file, or the other way, is each of its files
+        changed and the file. Raise `GitError` where an object can't be read or
+        isn't what its id says.
+        """
+        width = len(after) // 2
+        commits = [each for each in [before, after] if each is not None]
+        contents = self.verified("commit", commits)
+        trees = {
+            commit: io.BytesIO(content)
+            .readline()
+            .removeprefix(b"tree ")
+            .strip()
+            .decode()
+            for commit, content in zip(commits, contents, strict=True)
+        }
+
+        def walked(pending: list[Parted]) -> Iterator[TreeChange]:
+            if not pending:
+                return
+            wanted = list(
+                dict.fromkeys(
+                    each
+                    for parted in pending
+                    for each in [parted.was, parted.now]
+                    if each is not None
+                )
+            )
+            read = dict(zip(wanted, self.verified("tree", wanted), strict=True))
+
+            def listed(tree: str | None, under: PurePosixPath) -> dict[str, Tracked]:
+                if tree is None:
+                    return {}
+                found = tree_entries(read[tree], under, width)
+                return {str(each.path): each for each in found}
+
+            def compared(parted: Parted) -> Iterator[Parted | TreeChange]:
+                was = listed(parted.was, parted.under)
+                now = listed(parted.now, parted.under)
+                for named in was.keys() | now.keys():
+                    if was.get(named) != now.get(named):
+                        yield from parting(
+                            PurePosixPath(named), was.get(named), now.get(named)
+                        )
+
+            found = [each for parted in pending for each in compared(parted)]
+            yield from (each for each in found if isinstance(each, TreeChange))
+            yield from walked([each for each in found if isinstance(each, Parted)])
+
+        root = Parted(
+            under=PurePosixPath(),
+            was=None if before is None else trees[before],
+            now=trees[after],
+        )
+        return {each.path: each.entry for each in walked([root])}
 
     def walked(self, sources: list[str], has: list[str]) -> list[str]:
         """Return each commit `sources` reach that `has` don't, oldest first: what a push of `sources` publishes to a remote holding `has`.
