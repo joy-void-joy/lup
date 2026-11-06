@@ -127,6 +127,47 @@ def test_every_step_runs_after_one_fails(tmp_path: Path) -> None:
     assert failed(gated.outcomes) == ["lint"]
 
 
+def test_the_report_says_how_long_each_step_it_timed_ran(tmp_path: Path) -> None:
+    class Timed(Processes):
+        @override
+        def run(self, command: list[str], cwd: Path) -> Ran:
+            code = 1 if command[0] == "types" else 0
+            return Ran(code=code, output="", seconds=61.56)
+
+    text = report(gate(tmp_path, Timed()))
+    assert text.splitlines()[:3] == [
+        "passed   lint 61.6 s",
+        "failed   types 61.6 s (exit 1)",
+        "passed   tests 61.6 s",
+    ]
+
+
+def test_the_report_says_how_long_a_run_whose_steps_were_timed_took(
+    tmp_path: Path,
+) -> None:
+    class Timed(Processes):
+        @override
+        def run(self, command: list[str], cwd: Path) -> Ran:
+            return Ran(code=0, output="", seconds=1.0)
+
+    gated = gate(tmp_path, Timed())
+    assert gated.seconds is not None
+    assert report(gated.model_copy(update={"seconds": 145.4})).endswith(
+        "The gate passed in 145 s."
+    )
+    assert report(
+        gate(tmp_path, Scripted({"types": Ran(code=1, output="")})).model_copy(
+            update={"seconds": 145.4}
+        )
+    ).endswith("The gate failed in 145 s: types.")
+
+
+def test_a_command_run_as_a_process_is_timed(tmp_path: Path) -> None:
+    ran = Shell().run([sys.executable, "-c", ""], tmp_path)
+    assert ran.seconds is not None
+    assert ran.seconds >= 0
+
+
 def test_the_report_gives_each_failures_output_in_full(tmp_path: Path) -> None:
     long = "".join(f"finding {n}\n" for n in range(500))
     processes = Scripted(

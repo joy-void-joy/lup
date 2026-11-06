@@ -54,6 +54,7 @@ and memory come later.
 import hashlib
 import shutil
 import tempfile
+import time
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
@@ -88,6 +89,8 @@ class Ran(Model):
     code: int
     output: str
     """Its standard output and error together, in full."""
+    seconds: float | None = None
+    """How long it ran, where that was timed: none where it didn't run as a process."""
 
 
 class Processes(ABC):
@@ -104,13 +107,18 @@ class Shell(Processes):
     @override
     def run(self, command: list[str], cwd: Path) -> Ran:
         program, *arguments = command
+        started = time.perf_counter()
         try:
             ran = programs.run(program, *arguments, cwd=cwd, checked=False, merged=True)
         except programs.ProgramMissingError:
             return Ran(
                 code=127, output=f"`{program}` isn't installed, or not on PATH\n"
             )
-        return Ran(code=ran.status, output=ran.output.decode(errors="replace"))
+        return Ran(
+            code=ran.status,
+            output=ran.output.decode(errors="replace"),
+            seconds=time.perf_counter() - started,
+        )
 
 
 class Fixes(Model):
@@ -265,6 +273,8 @@ class Outcome(Model):
     output: str = ""
     why: str = ""
     """Why it was skipped."""
+    seconds: float | None = None
+    """How long it ran, where that was timed."""
 
 
 class Gated(Model):
@@ -281,6 +291,8 @@ class Gated(Model):
     moved: bool = False
     """The worktree's files changed while the steps ran, so the pass isn't
     recorded."""
+    seconds: float | None = None
+    """How long the whole run took, where its steps were timed."""
 
 
 def invoked(step: Step, runner: Runner) -> list[str]:
@@ -408,7 +420,13 @@ class Check(Model, arbitrary_types_allowed=True):
         if ran.code == 0:
             self.record(step, given)
         result = "passed" if ran.code == 0 else "failed"
-        return Outcome(step=step.name, result=result, code=ran.code, output=ran.output)
+        return Outcome(
+            step=step.name,
+            result=result,
+            code=ran.code,
+            output=ran.output,
+            seconds=ran.seconds,
+        )
 
     def record(self, step: Step, given: dict[str, str]) -> None:
         """Record what `step`, given the sources `given`, passed on, unless it left no file or they changed as it ran: as a pass, it counts only for what it checked."""
@@ -444,6 +462,7 @@ class Check(Model, arbitrary_types_allowed=True):
         steps. `again` runs the steps that build a file too, once each: nothing
         else makes one run on sources it passed on.
         """
+        started = time.perf_counter()
         passes = self.passes
         if again:
             self.forget()
@@ -456,7 +475,13 @@ class Check(Model, arbitrary_types_allowed=True):
         fixed = [self.one(step) for step in self.fixes]
         checked = None if passes is None else standing(self.root)
         outcomes = [self.one(step) for step in self.steps]
-        gated = Gated(off=report.off, outcomes=[*built, *fixed, *outcomes])
+        every = [*built, *fixed, *outcomes]
+        timed = any(outcome.seconds is not None for outcome in every)
+        gated = Gated(
+            off=report.off,
+            outcomes=every,
+            seconds=time.perf_counter() - started if timed else None,
+        )
         if passes is None or checked is None or failed(gated.outcomes):
             return gated
         if standing(self.root) != checked:
@@ -491,10 +516,11 @@ def report(gated: Gated) -> str:
     """Report what's off, each step's outcome, each failure's output, the verdict, and whether the pass is recorded.
 
     A pass found is said alone where nothing ran, and after the outcomes of the
-    builds that ran beside it where some did.
+    builds that ran beside it where some did. A step that was timed says how long
+    it ran, so a slow gate is read off its report rather than run again to find out.
 
-    >>> print(report(Gated(outcomes=[Outcome(step="ruff", result="passed", code=0)])))
-    passed   ruff
+    >>> print(report(Gated(outcomes=[Outcome(step="ruff", result="passed", code=0, seconds=2.25)])))
+    passed   ruff 2.2 s
     <BLANKLINE>
     The gate passed.
     """
@@ -510,7 +536,8 @@ def report(gated: Gated) -> str:
             if outcome.why
             else ""
         )
-        return f"{outcome.result:<8} {outcome.step}{detail}"
+        took = "" if outcome.seconds is None else f" {outcome.seconds:.1f} s"
+        return f"{outcome.result:<8} {outcome.step}{took}{detail}"
 
     def output(outcome: Outcome) -> str:
         return (
@@ -522,7 +549,12 @@ def report(gated: Gated) -> str:
     summary = "\n".join([*off, *(line(outcome) for outcome in outcomes)])
     failures = [output(outcome) for outcome in outcomes if outcome.result == "failed"]
     names = failed(outcomes)
-    verdict = f"The gate failed: {', '.join(names)}." if names else "The gate passed."
+    took = "" if gated.seconds is None else f" in {gated.seconds:.0f} s"
+    verdict = (
+        f"The gate failed{took}: {', '.join(names)}."
+        if names
+        else f"The gate passed{took}."
+    )
     kept = (
         f" These files passed already, {found.when()}, so only the builds stale "
         "in this worktree ran. `--again` runs every step."
