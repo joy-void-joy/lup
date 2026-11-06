@@ -571,9 +571,32 @@ def test_the_demo_weaves_a_conversations_items_into_its_view_a_message_sent_from
         found.received[0].text
     )
     assert found.received[-1].text == "Go on."
-    # Each a line where it happened in the conversation's view, as the core words it,
-    # the message not told yet, since no agent runs here to be told it.
-    lines = [each.strip() for each in viewed.blocks.text().splitlines()]
+    # Their message reads what came before it, so all of it folds under one line, as
+    # the drawer's text says it; there, each a line where it happened in the
+    # conversation's view, as the core words it, the message not told yet, since no
+    # agent runs here to be told it. The demo's agents go on as they're read, so
+    # the fold is opened as far as any step goes.
+    assert viewed.blocks.text().splitlines()[-1].strip() == (
+        "▸ 17 earlier steps, 4 items  [exchange step=8 through=25]"
+    )
+    opened = Viewing(
+        repository=parser.repository,
+        module="transcripts",
+        view="exchange",
+        argument={
+            "runtime": "claude",
+            "session": "s1",
+            "agent": "a02",
+            "step": 8,
+            "through": 1000,
+        },
+    )
+    read = Viewed.model_validate(
+        served.post(
+            "/api/ask", json=opened.model_dump(mode="json"), headers=bearing()
+        ).json()
+    )
+    lines = [each.strip() for each in read.blocks.text().splitlines()]
     assert f"▸ ← @{number} your message · not told yet" in lines
     assert any(
         each.startswith("▸ → @51 question to you · waiting on you") for each in lines

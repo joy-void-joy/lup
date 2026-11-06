@@ -7,7 +7,8 @@ layout answering `Blocks`, the layout of one of `Transcripts`' views:
   the first line of their words that opened it, the latest open under its own,
   what came before their first words under a line of its own, and everything
   since they last read it open and new, from the drawer's review mark or their
-  own last words, whichever is later (`Read`), but for at most the agent's last
+  own last words, typed or through lup, whichever is later (`Read`), but for at
+  most the agent's last
   20 words (`EARLIER_KIND.keeps_open`) with what follows them, what came before
   folded under one line saying how much (`capped`);
 - `exchange_blocks`, one earlier exchange's steps, or those its fold of what
@@ -70,6 +71,7 @@ from lup.blocks import (
 )
 from lup.types import Model
 from lup_dev.host.records import Called, Entry, Said
+from lup_ledger.parties import Operator
 from lup_transcripts.errors import LupTranscriptsError
 
 if TYPE_CHECKING:
@@ -237,6 +239,10 @@ class Inboxed(Model):
     at: datetime
     """When it was told the conversation, or made: where it goes among the steps
     when no call places it."""
+    spoken: datetime | None = None
+    """When the operator said it, where it's their own words, sent through lup:
+    what had reached the conversation by then they said having read (`Read`); none
+    for anyone else's."""
 
 
 class Spoken(Model):
@@ -261,36 +267,78 @@ type Turn = Spoken | Calling | Inboxed
 
 
 class Read(Model):
-    """How far the operator has read a conversation: up to the step their review mark on its drawer names, or their own last words typed to it, whichever is later, and when they moved the mark; none read where neither.
+    """How far the operator has read a conversation: up to the step their review mark on its drawer names, or their own last words to it, typed or through lup, whichever is later, and by when; none read where neither.
 
-    Their words typed to the agent count as a review of what came before them,
-    as a comment sent on a file does: they were reading it in the agent's
-    terminal.
+    Their words count as a review of what came before them, as a comment sent on
+    a file does: they speak having read it. Through lup that's what had reached
+    the conversation as they said it, not as it's told their words, which may be a
+    long call or a quiet later, so what came between stays new. Those words are
+    what a session driven from the dashboard has, whose record holds nothing
+    typed; and a subagent's record says what their parent told them as typed, which
+    is no reading of the operator's at all.
     """
 
     step: int | None = None
     """The last step they've read; none where they've read none."""
     marked: datetime | None = None
-    """When they moved the drawer's mark, which an item of the inbox told the
-    conversation by then is read with; none where they never did."""
+    """When they moved the drawer's mark or last spoke, which an item of the inbox
+    told the conversation by then is read with; none where they never did."""
 
     @classmethod
-    def of(cls, mark: ReviewMark | None, entries: list[Entry]) -> Read:
-        """Return how far the operator has read the conversation of `entries`, by its drawer's review `mark` and their own words in it."""
-        typed = [
-            step
-            for step, entry in enumerate(entries)
-            if isinstance(entry, Said) and entry.by == "operator"
-        ]
+    def of(
+        cls, mark: ReviewMark | None, entries: list[Entry], exchanged: Exchanged
+    ) -> Read:
+        """Return how far the operator has read the conversation of `entries`, by its drawer's review `mark`, their words typed in it, and what they said to it through lup among what it exchanged."""
+        times = times_of(entries)
+        typed = (
+            None
+            if exchanged.parent is not None
+            else max(
+                (
+                    step
+                    for step, entry in enumerate(entries)
+                    if isinstance(entry, Said) and entry.by == "operator"
+                ),
+                default=None,
+            )
+        )
+        spoke = max(
+            (spoken for each in inboxed(exchanged) if (spoken := each.spoken)),
+            default=None,
+        )
+        before = (
+            None
+            if spoke is None
+            else max(
+                (step for step, at in enumerate(times) if at is None or at <= spoke),
+                default=None,
+            )
+        )
         marked = None if mark is None or mark.up_to is None else int(mark.up_to)
-        steps = [*typed, *([] if marked is None else [marked])]
         return cls(
-            step=max(steps, default=None), marked=None if mark is None else mark.at
+            step=max(
+                (each for each in (typed, before, marked) if each is not None),
+                default=None,
+            ),
+            marked=max(
+                (
+                    each
+                    for each in (
+                        None if mark is None else mark.at,
+                        spoke,
+                        None if typed is None else times[typed],
+                    )
+                    if each is not None
+                ),
+                default=None,
+            ),
         )
 
     def covers(self, turn: Turn) -> bool:
-        """Say whether the operator has read `turn`: a step up to theirs, an item told by the time they moved the mark."""
+        """Say whether the operator has read `turn`: a step up to theirs, an item told by the time they moved the mark or last spoke, and their own words, whenever they're told."""
         match turn:
+            case Inboxed(spoken=datetime()):
+                return True
             case Inboxed():
                 return self.marked is not None and turn.at <= self.marked
             case Spoken() | Calling():
@@ -448,12 +496,26 @@ def inboxed(exchanged: Exchanged) -> list[Inboxed]:
             reported=each.words is not None and each.words.reported,
             echoes=each.echoes,
             at=each.at,
+            spoken=each.item.made
+            if not sent
+            and each.words is not None
+            and isinstance(each.item.sender, Operator)
+            else None,
         )
 
     return [
         *(shown(each, sent=True) for each in exchanged.sent),
         *(shown(each, sent=False) for each in exchanged.received),
     ]
+
+
+def times_of(entries: list[Entry]) -> list[datetime | None]:
+    """Return the time of each of `entries`: one its record gives no time taking the time of the last before it, none for one before any time."""
+
+    def latest(known: datetime | None, at: datetime | None) -> datetime | None:
+        return known if at is None else at
+
+    return list(accumulate((each.at for each in entries), latest))
 
 
 def merged(entries: list[Entry], items: list[Inboxed]) -> list[Turn]:
@@ -481,10 +543,7 @@ def merged(entries: list[Entry], items: list[Inboxed]) -> list[Turn]:
         if isinstance(each, Calling) and each.called.id is not None
     }
 
-    def latest(known: datetime | None, at: datetime | None) -> datetime | None:
-        return known if at is None else at
-
-    times = list(accumulate((each.at for each in entries), latest))
+    times = times_of(entries)
 
     def by_then(step: int, item: Inboxed) -> bool:
         time = times[step]
@@ -839,7 +898,7 @@ def conversation_blocks(
     """Lay out an agent's conversation as its drawer shows it: its summary line counting its steps and those new to the operator, each exchange before their last words folded under the first line of their words, the latest open under its own, what they've read since folded under one line, and everything after it open, but for at most the agent's last words `earlier` keeps open (`capped`).
 
     How far they've read is the drawer's review `mark` or their own last
-    words, whichever is later (`Read`); where anything came after it, the
+    words, typed or through lup, whichever is later (`Read`); where anything came after it, the
     drawer offers `reading`, marking it read up to its last step, Space `d` on
     its line. What came before their first words folds under a line of its
     own, saying how many steps and items and how long before their words. Each
@@ -851,7 +910,7 @@ def conversation_blocks(
     if not entries:
         return Blocks()
     *before, latest = parts(merged(entries, inboxed(exchanged)))
-    read = Read.of(mark, entries)
+    read = Read.of(mark, entries, exchanged)
     unread = len(latest.turns) - read.reviewed(latest.turns)
 
     def at(turn: Turn) -> datetime | None:
@@ -988,7 +1047,7 @@ def exchange_blocks(
         earlier,
         through=of.through,
         until_last=of.until_last,
-        read=Read.of(mark, entries) if latest else None,
+        read=Read.of(mark, entries, exchanged) if latest else None,
         exchange=exchange,
         call=call,
         run=run,

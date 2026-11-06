@@ -31,7 +31,7 @@ they read before it (`seen`), but for at most the last `FoldKind.keeps_open`
 messages, what came before folded under one line (`▸ 412 earlier messages, 30
 new`) read as it opens (`laid`). How far they've read is the drawer's own review
 mark, or their own last words to the agent, typed or through lup, since they speak
-having read what came before (`reviewed`). Space `d` on the drawer's line moves
+having read what came before (`Read`), and their words themselves are never new. Space `d` on the drawer's line moves
 it, and leaves the trace's as it is, each drawer being its own scope.
 
 Each block's id names what it shows, so it stays as the conversation grows: `said
@@ -173,14 +173,9 @@ def messages(
     ]
 
 
-def reviewed(said: list[Word], read: Read) -> int:
-    """Return how many of `said`, from the first, the operator has read: what their review mark and their typed words cover (`Read`), and everything before what they last said through lup, which they said having read it."""
-    theirs = [
-        at
-        for at, each in enumerate(said)
-        if isinstance(each, Inboxed) and not each.sent and each.by is None
-    ]
-    return max(read.reviewed(said), (theirs[-1] + 1) if theirs else 0)
+def their_own(turn: Word) -> bool:
+    """Say whether `turn` is the operator's own words through lup, which are never new to them."""
+    return isinstance(turn, Inboxed) and turn.spoken is not None
 
 
 def message(turn: Word, exchanged: Exchanged, report: Report, *, new: bool) -> Block:
@@ -261,7 +256,7 @@ def laid(
         within if until_last is None else kept_open(within, always, until_last).folded
     )
     # What they'd read of it is all read: only what came after it splits again.
-    read_up_to = 0 if read is None or through is not None else reviewed(turns, read)
+    read_up_to = 0 if read is None or through is not None else read.reviewed(turns)
     held = kept_open(turns, always, kind.keeps_open, max(read_up_to - seen, 0))
     shown = [
         message(
@@ -270,13 +265,14 @@ def laid(
             report,
             new=read is not None
             and through is None
-            and at + len(held.folded) >= read_up_to,
+            and at + len(held.folded) >= read_up_to
+            and not their_own(each),
         )
         for at, each in enumerate(held.shown)
     ]
     if not held.folded:
         return shown
-    new = max(len(held.folded) - read_up_to, 0)
+    new = sum(1 for each in held.folded[read_up_to:] if not their_own(each))
     said_of = ", ".join(
         [
             counted(len(held.folded), "earlier message"),
@@ -339,8 +335,8 @@ def messages_blocks(
     said = messages(entries, exchanged, of, brief)
     if not said:
         return Blocks()
-    read = Read.of(mark, entries)
-    new = len(said) - reviewed(said, read)
+    read = Read.of(mark, entries, exchanged)
+    new = sum(1 for each in said[read.reviewed(said) :] if not their_own(each))
     summary = [f"messages · {len(said)}", *([f"{new} new"] if new else [])]
     return Blocks(
         summary=[Span(text=" · ".join(summary))],
@@ -372,7 +368,7 @@ def earlier_messages_blocks(
             earlier,
             view=view,
             report=report,
-            read=Read.of(mark, entries),
+            read=Read.of(mark, entries, exchanged),
             through=of.through,
             until_last=of.until_last,
         )

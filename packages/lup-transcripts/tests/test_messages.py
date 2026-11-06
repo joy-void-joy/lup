@@ -529,6 +529,52 @@ def test_what_they_said_through_lup_reads_what_came_before_it_and_the_drawer_off
     assert read.offers == []
 
 
+def test_what_came_while_their_words_waited_to_be_told_stays_new_and_their_words_never_are() -> (
+    None
+):
+    # They said it at minute 2; it's told at minute 5, another's note reaching them between.
+    answered = item(
+        61,
+        note("Fine."),
+        2,
+        sender=Operator(),
+        recipient=SESSION,
+        state=Told(at=at(5), how="call"),
+    )
+    between = item(
+        60,
+        note("One."),
+        3,
+        sender=WORKER,
+        recipient=SESSION,
+        state=Told(at=at(3), how="call"),
+    )
+    view = drawer([], listed(between, answered))
+    assert view.text().splitlines()[0] == "messages · 2 · 1 new"
+    assert headings(view) == [
+        "@60 lup-impl/parser → lup-impl · note · new",
+        "@61 you → lup-impl · message",
+    ]
+
+
+def test_words_typed_read_what_came_before_them_an_item_among_it() -> None:
+    entries: list[Entry] = [
+        Said(by="operator", text="Look.", at=at(0)),
+        Said(by="operator", text="Go on.", at=at(5)),
+        Said(by="agent", text="Going.", at=at(6)),
+    ]
+    noted = item(
+        60,
+        note("One."),
+        2,
+        sender=WORKER,
+        recipient=SESSION,
+        state=Told(at=at(2), how="call"),
+    )
+    view = drawer(entries, listed(noted))
+    assert view.text().splitlines()[0] == "messages · 3"
+
+
 def test_the_fold_of_what_they_read_reads_up_to_the_message_it_names_and_nothing_where_it_s_gone() -> (
     None
 ):
@@ -719,5 +765,7 @@ def test_a_subagent_s_steps_their_parent_said_as_a_runtime_records_what_spawned_
         Said(by="agent", text="Three.", at=at(1)),
     ]
     view = drawer(steps, listed(party=WORKER, parent=SESSION), OF_WORKER)
-    assert headings(view)[0] == "lup-impl → lup-impl/parser"
+    # It's no words of the operator's, so it reads nothing for them.
+    assert headings(view)[0] == "lup-impl → lup-impl/parser · new"
+    assert view.text().splitlines()[0] == "messages · 2 · 2 new"
     assert markdown(view, "step 0").by == OF_SESSION
