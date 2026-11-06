@@ -1,10 +1,10 @@
 // The line of keys under a view: what the cursor is on and what each verb
 // would do to it there (`Here`), or, in a comment, the keys that end it; and at
-// its end, but in a comment, `?`, which opens the palette of them all, searched
+// its end, but in a comment, `g?`, which opens the palette of them all, searched
 // by what one would do, what applies where the cursor is first, then each part,
 // Enter running the one chosen where it's keys it runs (`runOf`), Esc closing
 // it, the keyboard back where it was; at its end, whether the page's timings are measured in this browser, Enter
-// switching them off or on (`timings.ts`); and, before `?`, `g<` where a line of the page leaves out what was said,
+// switching them off or on (`timings.ts`); and, before `g?`, `g<` where a line of the page leaves out what was said,
 // which it shows whole (`Whole.tsx`). Once a chord is
 // begun, as with Space, a panel over the line lists the keys that may follow
 // and what each does, after a moment, so a chord typed whole shows none
@@ -110,10 +110,10 @@ export function Keys({ parts, here, inserting, open, setOpen, run, pending = "",
                         <kbd>g&lt;</kbd> in full
                     </span>
                 )}
-                {/* In a comment, `?` is a question mark. */}
+                {/* In a comment, `g?` types itself. */}
                 {inserting ? null : (
                     <span className="keys-all">
-                        <kbd>?</kbd> all keys
+                        <kbd>g?</kbd> all keys
                     </span>
                 )}
             </div>
