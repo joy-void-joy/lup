@@ -129,6 +129,7 @@ from lup_dev.policy.since import (
 from lup_dev.policy.waits import LandingsWaiting, ShowLandings
 from lup_dev.stored import write_model
 from lup_dev.switching import CopiesListed, CopySwitching, ListCopies, SwitchCopy
+from lup_dev.trial import PickBranches
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
 from lup_ledger.parties import Conversation, Operator
@@ -629,6 +630,9 @@ def test_every_request_the_page_may_send_acts_on_the_copy_alone(tmp_path: Path) 
         assert (
             "no copy of `lup-dev` is kept" in ask(SwitchCopy(commit="c"), Refused).error
         )
+        assert "a demo runs nothing on trial" in (
+            ask(PickBranches(branches=["rooms"]), Refused).error
+        )
         since = ask(ShowSince(conversation=PARSER), Refused)
         assert since.error == Withholding().why
         marking = ReviewSince(
@@ -845,6 +849,10 @@ def test_every_request_the_page_may_send_acts_on_the_stand_in_demo_alone() -> No
         assert ask(KeepTimings(report=measured), TimingsKept).windows == 1
         [_, before, _] = ask(ListCopies(), CopiesListed).copies
         switching = ask(SwitchCopy(commit=before.commit), CopySwitching)
+        assert (
+            "a demo runs nothing on trial"
+            in ask(PickBranches(branches=["rooms"]), Refused).error
+        )
     finally:
         REACH.watched = None
     assert REACH.reached == []

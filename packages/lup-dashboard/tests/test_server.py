@@ -54,7 +54,9 @@ from lup_dev.switching import (
     LastSwitch,
     ListCopies,
     SwitchCopy,
+    TrialSaid,
 )
+from lup_dev.trial import BranchListed, PickBranches, TrialListed
 from lup_ledger.parties import Conversation, Operator
 
 if TYPE_CHECKING:
@@ -1180,3 +1182,107 @@ def test_the_copies_go_through_the_api_too(page: Path) -> None:
     )
     assert response.status_code == 200
     assert response.json()["kind"] == "copies-listed"
+
+
+ON_TRIAL = TrialListed(
+    integration="dev",
+    running="live",
+    dev="d1",
+    live="l1",
+    branches=[
+        BranchListed(
+            branch="rooms<a>",
+            tip="t1",
+            subject="the <rooms>",
+            landed=datetime(2026, 11, 6, tzinfo=UTC),
+            within=True,
+            built=True,
+        ),
+        BranchListed(
+            branch="rival",
+            tip="t2",
+            landed=datetime(2026, 11, 6, tzinfo=UTC),
+            conflict="it conflicts with `rooms`, in `a.py`",
+        ),
+    ],
+)
+
+
+def test_the_plain_page_lists_dev_and_each_branch_on_trial_with_a_way_to_run_each(
+    page: Path,
+) -> None:
+    listed = PAGE_COPIES.model_copy(update={"trial": ON_TRIAL})
+    host = StandIn({"copies": [listed]})
+    shown = client(host, page).get("/copies", headers=bearing()).text
+    assert 'action="/copies/pick"' in shown
+    assert "the &lt;rooms&gt;" in shown
+    assert "it conflicts with `rooms`, in `a.py`" in shown
+    assert 'value="rooms&lt;a&gt;" checked' in shown
+    assert 'value="rival">' in shown
+    assert "its copy is built" in shown
+    assert 'name="only" value=""' in shown
+    assert 'name="only" value="rival"' in shown
+    assert "<script src" not in shown
+
+
+def test_the_plain_page_says_nothing_of_trial_where_nothing_s_computed(
+    page: Path,
+) -> None:
+    host = StandIn({"copies": [PAGE_COPIES]})
+    shown = client(host, page).get("/copies", headers=bearing()).text
+    assert "/copies/pick" not in shown
+
+
+@pytest.mark.parametrize(
+    ("form", "branches"),
+    [
+        ("branch=a&branch=b", ["a", "b"]),
+        ("branch=a&only=c", ["c"]),
+        ("branch=a&only=", []),
+        ("", []),
+    ],
+)
+def test_a_form_on_the_plain_page_asks_the_host_for_what_it_names(
+    page: Path, form: str, branches: list[str]
+) -> None:
+    host = StandIn(
+        {
+            "trial-pick": [TrialSaid(said="`live` is at l2.")],
+            "copies": [PAGE_COPIES],
+        }
+    )
+    response = client(host, page).post(
+        "/copies/pick",
+        headers={**bearing(), "content-type": "application/x-www-form-urlencoded"},
+        content=form,
+    )
+    assert response.status_code == 200
+    assert host.asked[0] == PickBranches(branches=branches)
+    assert "`live` is at l2." in response.text
+
+
+def test_a_pick_that_switches_waits_for_the_next_service(page: Path) -> None:
+    switching = CopySwitching(commit="beef00", log=Path("/log"))
+    host = StandIn({"trial-pick": [TrialSaid(said="moving", switching=switching)]})
+    response = client(host, page).post("/copies/pick", headers=bearing(), content="")
+    assert response.status_code == 200
+    assert "Switching to beef00" in response.text
+
+
+def test_a_pick_refused_says_why_on_the_list(page: Path) -> None:
+    host = StandIn(
+        {
+            "trial-pick": [Refused(error="`a` and `b` can't be picked together")],
+            "copies": [PAGE_COPIES],
+        }
+    )
+    response = client(host, page).post("/copies/pick", headers=bearing(), content="")
+    assert response.status_code == 409
+    assert "can&#x27;t be picked together" in response.text
+
+
+def test_a_pick_needs_the_dashboard_s_token(page: Path) -> None:
+    host = StandIn({"trial-pick": []})
+    response = client(host, page).post("/copies/pick", content="branch=a")
+    assert response.status_code == 401
+    assert host.asked == []

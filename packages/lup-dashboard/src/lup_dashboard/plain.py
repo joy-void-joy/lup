@@ -1,4 +1,4 @@
-"""The plain page: the copies of `lup-dev` kept, and a button to each, with nothing of the review's.
+"""The plain page: `dev` and each branch on trial to run, and the copies of `lup-dev` kept, a button to each, with nothing of the review's.
 
 `docs/trust.md`, *The way back*; `docs/dashboard.md`, *The plain page*. The review
 is React and CodeMirror, whose bundle can break in ways a server can't see, and
@@ -10,17 +10,26 @@ thing a page can't do by itself:
   carries, for the cookie, as the review's page does;
 - `switching_page` waits for the next service, since the one that answered the
   button is stopping, and a browser doesn't retry a refresh that fails;
-- `copies_page`'s keys press a copy's button by its place in the list.
+- `copies_page`'s keys press a copy's button by its place in the list, a branch's
+  by its letter.
+
+Picking is a form the server reads as sent (`picked`), a box ticked for each branch
+of a set, and a button to run one alone.
 """
 
 import json
 from html import escape
+from itertools import chain, repeat
 from typing import TYPE_CHECKING
+from urllib.parse import parse_qs
+
+from lup.types import Model
 
 if TYPE_CHECKING:
     from datetime import datetime
 
     from lup_dev.switching import CopiesListed, CopyListed, CopySwitching
+    from lup_dev.trial import BranchListed, TrialListed
 
 STYLE = """
 body { font: 15px/1.5 ui-monospace, monospace; margin: 2em auto; max-width: 70em; padding: 0 1em; }
@@ -30,6 +39,19 @@ td, th { border-bottom: 1px solid #8884; padding: .4em .6em; text-align: left; v
 .running { font-weight: bold; }
 """
 """What the plain page looks like, inline since it can't rest on the page's build."""
+
+
+KEYS = "abcdefghijklmnopqstuvwxyz"
+"""The letters that press a branch's button, by its place: `r` runs what's ticked."""
+
+
+class Picking(Model):
+    """What the plain page's form sends."""
+
+    branch: list[str] = []
+    """Each box ticked."""
+    only: list[str] | None = None
+    """The button pressed, one to a form, to run one branch alone; its value empty for `dev` alone. None where none was, so it's what's ticked that runs."""
 
 
 def document(title: str, body: str, last: str = "") -> str:
@@ -86,6 +108,79 @@ def row(place: int, copy: CopyListed) -> str:
     )
 
 
+def picked(body: str) -> list[str]:
+    """Read the branches the plain page's form sent: the one its button ran alone, none for `dev` alone, where one was pressed; else each ticked.
+
+    >>> picked("branch=a&branch=b")
+    ['a', 'b']
+    >>> picked("branch=a&only=c")
+    ['c']
+    >>> picked("branch=a&only=")
+    []
+    >>> picked("")
+    []
+    """
+    sent = Picking.model_validate(parse_qs(body, keep_blank_values=True))
+    if sent.only is not None:
+        return [each for each in sent.only if each]
+    return sent.branch
+
+
+def branch_row(letter: str, trial: TrialListed, branch: BranchListed) -> str:
+    """Return a branch's row: a box for the set, what it is, where it stands, and its button, named by its `letter` in the list, which none has past the last of them."""
+    name = escape(branch.branch, quote=True)
+    ticked = " checked" if branch.within else ""
+    state = (
+        f"in <code>{escape(trial.running)}</code>"
+        if branch.within
+        else escape(
+            branch.conflict
+            or (
+                "out: you took it out"
+                if branch.out
+                else f"not in {trial.running} yet"
+            )
+        )
+    )
+    built = "; its copy is built" if branch.built else ""
+    mark = ' class="running"' if branch.within else ""
+    return (
+        f'<tr{mark}><td><input type="checkbox" name="branch" value="{name}"{ticked}></td>'
+        f"<td>{escape(branch.branch)}</td><td>{escape(branch.subject)}</td>"
+        f"<td>{state}{built}</td>"
+        f'<td><button name="only" value="{name}" id="branch-{letter}">'
+        f"{letter}: run alone</button></td></tr>"
+    )
+
+
+def trial_part(trial: TrialListed) -> str:
+    """Return what's on trial: `dev`, each branch, and the form that runs a set or one alone."""
+    integration = escape(trial.integration)
+    rows = "".join(
+        branch_row(letter, trial, each)
+        for letter, each in zip(chain(KEYS, repeat("")), trial.branches, strict=False)
+    )
+    none = (
+        "" if rows else f"<p>Nothing is on trial: <code>{integration}</code> runs.</p>"
+    )
+    table = (
+        "<table><tr><th></th><th>Branch</th><th>What it is</th><th>Where it stands</th>"
+        f"<th></th></tr><tr><td></td><td>{integration}</td><td></td><td>always</td>"
+        '<td><button name="only" value="" id="branch-dev">0: run alone</button></td></tr>'
+        f"{rows}</table>"
+    )
+    return (
+        f'<h1>What runs</h1><form method="post" action="/copies/pick">{none}{table}'
+        '<p><button id="branch-ticked">r: run what\'s ticked</button></p></form>'
+        f"<p>Two that conflict can't run together. A set you've said yes to runs at "
+        "once, restarting the host service. One you haven't asks in your inbox first, "
+        "and a yes builds it, in minutes, since a build runs its code on this machine. "
+        "A set the gate has passed is one a landing made: running another is yours to "
+        "judge. <code>lup-dev live accept</code> and <code>drop</code>, in a terminal, "
+        "settle a branch.</p>"
+    )
+
+
 def copies_page(listed: CopiesListed | None, said: str) -> str:
     """Return the plain page of the copies `listed`, saying `said` above them; none where they couldn't be listed, which `said` says."""
     last = None if listed is None else listed.last
@@ -105,12 +200,16 @@ def copies_page(listed: CopiesListed | None, said: str) -> str:
     script = """
 addEventListener("keydown", (event) => {
   if (event.ctrlKey || event.metaKey || event.altKey) return;
-  document.getElementById(`copy-${event.key}`)?.click();
+  const named = event.key === "r" ? "branch-ticked" : event.key === "0" ? "branch-dev" : null;
+  (named ? document.getElementById(named)
+    : document.getElementById(`copy-${event.key}`) ?? document.getElementById(`branch-${event.key}`)
+  )?.click();
 });
 """
+    trial = "" if listed is None or listed.trial is None else trial_part(listed.trial)
     return document(
         "lup: the copies kept",
-        f"<h1>The copies kept</h1>{paragraphs}{table}"
+        f"{paragraphs}{trial}<h1>The copies kept</h1>{table}"
         "<p>A switch restarts the host service, in a few seconds, and your sessions "
         "wait for it. A copy that doesn't answer is switched back from, and this "
         "page then says why. The terminal's <code>lup-dev restore</code> does the "
