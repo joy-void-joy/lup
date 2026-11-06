@@ -127,6 +127,8 @@ interface Actions {
     send: () => void;
     /** Esc with nothing left for vim to end, in normal mode with no key of a command held; whether it was taken, none taking it where the view isn't in panes. */
     escaped: () => boolean;
+    /** Ctrl+O in normal mode, where the view's last jump crossed to another buffer: back to it; whether there was one. */
+    jumpedBack: () => boolean;
     /** Enter in normal mode, where the view has its own use for it, as the list of the panes opening a row; whether it was taken. */
     pressedEnter: () => boolean;
     blocks: () => Block[];
@@ -845,6 +847,10 @@ const keys = Prec.highest(
             }
             // Esc with nothing left for vim to end: out of the pane, where the view has panes (`Panes.tsx`).
             if (event.key === "Escape" && !modified && event.target === view.contentDOM && idle(cm) && bound.actions?.escaped() === true) {
+                event.preventDefault();
+                return true;
+            }
+            if (event.key === "o" && event.ctrlKey && !event.altKey && !event.metaKey && event.target === view.contentDOM && idle(cm) && bound.actions?.jumpedBack() === true) {
                 event.preventDefault();
                 return true;
             }
@@ -1660,6 +1666,8 @@ export interface Own<C> {
     verbOn?: (name: string, folds: readonly Folding[]) => void;
     /** What Enter does in normal mode where it isn't vim's; none leaves it vim's. */
     enter?: () => void;
+    /** What Ctrl+O does where the last jump crossed to another buffer, vim's list of jumps being this one's alone: go back, and say so; none, or false, leaves it vim's. */
+    back?: () => boolean;
 }
 
 /** One editor, as a view uses it. */
@@ -2261,6 +2269,7 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 config.escaped();
                 return true;
             },
+            jumpedBack: () => own.back?.() ?? false,
             pressedEnter: () => {
                 if (own.enter === undefined) {
                     return false;

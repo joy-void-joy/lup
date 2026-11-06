@@ -474,6 +474,22 @@ export interface Group {
  */
 export type Showing = { kind: "for you" } | { kind: "agent"; key: string } | { kind: "no agent" } | { kind: "thread"; number: number };
 
+/** A check that waits on the operator, in the thread it's in: laid out by agent, under whoever owns that thread (`checkOwner`), where the review goes by agent and threads aren't what it's laid out by. */
+export interface OwnedCheck {
+    check: CheckRead;
+    thread: ThreadRead;
+}
+
+/**
+ * Return who a check answers to, where the review goes by agent: whoever answers for its thread, or the one holding it
+ * though they've ended, or the one who asked it where nobody holds it. So it sits under them, or, where they've ended,
+ * under `No agent`, one owner for everything.
+ */
+export function checkOwner(owned: OwnedCheck): Conversation | null {
+    const by = owned.check.check.by;
+    return owned.thread.answering ?? owned.thread.thread.holder ?? (by.party === "conversation" ? by : null);
+}
+
 /** What a comment is followed from as the review is laid out anew (`placed`, `anchors.ts`): where each comment was last seated on its block, and that block's lines then. */
 export type Followed = Pick<Laid, "seated" | "lines">;
 
@@ -519,6 +535,8 @@ export interface Arranging {
     threads?: Threading | null;
     /** The one buffer to lay out of the review, where it's laid out in panes; none lays it out whole. */
     showing?: Showing | null;
+    /** The checks waiting on the operator, each laid out under whoever owns it (`checkOwner`), where the panes go by agent; none else. */
+    checks?: readonly OwnedCheck[];
 }
 
 /**
@@ -1586,6 +1604,17 @@ export function laid(
     const sinceLaid = new Set<string>();
     const threading = arranging.threads ?? null;
     const showing = arranging.showing ?? null;
+    // The checks each group's agent owns, by `whose` they are; and a group for each owner with none.
+    const checksOf = new Map<string, OwnedCheck[]>();
+    const checkOwners: Conversation[] = [];
+    for (const each of arranging.checks ?? []) {
+        const owner = checkOwner(each);
+        if (owner !== null) {
+            checksOf.set(whose(owner), [...(checksOf.get(whose(owner)) ?? []), each]);
+            checkOwners.push(owner);
+        }
+    }
+    empty.push(...emptyGroups(checkOwners, [...now, ...empty]));
     if (showing?.kind === "agent") {
         // One agent's own buffer: what's left for later of theirs, then their group, what's live and what's written to
         // them last.
@@ -1607,7 +1636,7 @@ export function laid(
     } else if (showing?.kind === "for you") {
         // What's for the operator: each group with an item, or something it holds waits on them, or written to under its
         // banner; of its drawers, only what waits on them.
-        const holds = (group: Grouping) => group.items.length > 0 || letters.some((each) => each.to != null && whose(each.to) === group.key) || sinceWaits(group) !== null;
+        const holds = (group: Grouping) => group.items.length > 0 || checksOf.has(group.key) || letters.some((each) => each.to != null && whose(each.to) === group.key) || sinceWaits(group) !== null;
         for (const { group, depth } of nested(kept([...now, ...empty].filter(holds), false), arranging.parents ?? null)) {
             layGroup(group, false, depth, "for you");
         }
@@ -2279,12 +2308,12 @@ export function laid(
         }
     }
 
-    /** Lay a check of thread `number` into `within`: what's to try, its lines set in, what the operator saw where they answered it, and the comments drafted on it, an answer in their words. */
-    function layCheck(check: CheckRead, number: number, within: Placed[]): void {
+    /** Lay a check of thread `number` into `within`: what's to try, its lines set in, what the operator saw where they answered it, and the comments drafted on it, an answer in their words; where it's laid out outside its thread, `of` names it. */
+    function layCheck(check: CheckRead, number: number, within: Placed[], of: string | null = null): void {
         const id = `check ${check.check.number}`;
         const answer = check.answer ?? null;
         const [first = "", ...rest] = check.check.text.split("\n");
-        const head = w.line(`${answer === null ? "◆" : "✓"} check ${cited(check.check.number)}: ${first}`, id);
+        const head = w.line(`${answer === null ? "◆" : "✓"} check ${cited(check.check.number)}${of === null ? "" : ` in @${of}`}: ${first}`, id);
         asides.push({ kind: answer === null ? "check" : "checked", ...head });
         for (const line of rest) {
             asides.push({ kind: "check-text", ...w.line(`${SET_IN}${line}`, id) });
@@ -2472,12 +2501,17 @@ export function laid(
         for (const item of group.items) {
             node.children.push(layItem(item, isParked));
         }
+        if (!isParked) {
+            for (const each of checksOf.get(group.key) ?? []) {
+                layCheck(each.check, each.thread.thread.number, node.children, each.thread.thread.name);
+            }
+        }
         if (shape === "own") {
             layDrawers(declared.filter((each) => each.view === "conversation"), `${id} live`, true);
             if (conversation !== null) {
                 layWriting(made, node, id, `to ${name(conversation)}`, talksTo);
             }
-        } else if (group.items.length === 0 && made.drawers.length === 0 && blocks.length > 0) {
+        } else if ((checksOf.get(group.key) ?? []).length > 0 || (group.items.length === 0 && made.drawers.length === 0 && blocks.length > 0)) {
             w.line("", `${id} end`);
         }
     }

@@ -155,6 +155,7 @@ const PANES: Part = {
         { keys: "o", does: "in the list, go into the row's buffer writing to whom it reaches; at a buffer's last line, write to them", short: "write to them" },
         { keys: "gt", does: "from an item or a thread's header, to the thread's own buffer, on that item", short: "to its thread" },
         { keys: "gd", does: "on an agent's name, to their own buffer", short: "to their buffer" },
+        { keys: "^o", does: "back from the buffer gt or gd went to, before vim's own jumps", short: "back" },
         { keys: "gO", does: "into the list", short: "the list" },
         { keys: "\\", does: "hide the list or show it again", short: "hide the list" },
     ],

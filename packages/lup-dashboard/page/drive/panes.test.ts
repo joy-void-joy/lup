@@ -208,6 +208,26 @@ describe("the panes by agent", () => {
         await review.holds("to guidance-voice");
     });
 
+    it("shows a check under whoever owns its thread, and answers it from there", async () => {
+        const { page } = dashboard;
+        await listRow(dashboard, "parser");
+        await page.keyboard.press("Enter");
+        await review.holds("check @");
+        const line = (await review.text()).split("\n").find((each) => each.startsWith("◆ check @")) ?? "";
+        expect(line).toContain(" in @transcript-reader:");
+        const number = /check @(\d+)/.exec(line)?.[1] ?? "";
+        // Counted with what waits on the operator, as the list says.
+        const row = (await listText(dashboard)).find((each) => each.includes("parser")) ?? "";
+        expect(row).toContain("◆2");
+        await review.goTo(`check @${number}`);
+        await dashboard.keys.press([" ", "d"]);
+        await page.waitForFunction(() => (document.querySelector(".status")?.textContent ?? "").includes("No reply drafted") === false, undefined, { polling: 50 });
+        await page.waitForFunction(() => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("parser") && (each.textContent ?? "").includes("◆1")), undefined, { polling: 50 });
+        // Undone: nothing of it is sent by what follows.
+        await page.keyboard.press("u");
+        await page.waitForFunction(() => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("parser") && (each.textContent ?? "").includes("◆2")), undefined, { polling: 50 });
+    });
+
     it("sends with Ctrl+Enter from Normal mode, from any buffer, the comment and the message going whole", async () => {
         const { page } = dashboard;
         await listRow(dashboard, "main");
@@ -312,5 +332,13 @@ describe("the panes by thread", () => {
         await page.keyboard.press("t");
         await review.until("went to the thread", (view) => !/^waiting on you · /m.test(view.state.doc.toString()) && !view.state.doc.toString().includes("reading…"));
         await review.until("put the cursor on the item", (view) => view.state.doc.lineAt(view.state.selection.main.head).text.includes("@51 question"));
+    });
+
+    it("comes back with Ctrl+O, to where it went from", async () => {
+        const { page } = dashboard;
+        await page.keyboard.press("Control+o");
+        await review.until("went back to what's for the operator", (view) => /^waiting on you · /m.test(view.state.doc.toString()));
+        await review.until("put the cursor back on the item", (view) => view.state.doc.lineAt(view.state.selection.main.head).text.includes("@51 question"));
+        expect(dashboard.thrown).toEqual([]);
     });
 });

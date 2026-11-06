@@ -146,6 +146,7 @@ import {
     type Item,
     type Keeping,
     type Laid,
+    type OwnedCheck,
     type PlacedFile,
     type Region,
     type Scope,
@@ -249,6 +250,8 @@ interface Props {
     panes?: PanesBy | null;
     /** Told as Pane mode begins and ends, where the keys of the page do nothing but move between panes. */
     paning?: (yes: boolean) => void;
+    /** The checks waiting on the operator, each laid out under whoever owns it, where the panes go by agent. */
+    checks?: readonly OwnedCheck[];
 }
 
 /** Return the classes a line under an item or in a drawer is drawn with: what it shows, and whether it's set in under a summary or a file's header, as a file's reviewed line isn't. */
@@ -889,6 +892,8 @@ const offLastLine = EditorState.transactionFilter.of((transaction) => {
     return [transaction, { selection: EditorSelection.single(doc.line(doc.lines - 1).from), sequential: true }];
 });
 
+const NO_CHECKS: readonly OwnedCheck[] = [];
+
 export function Review({
     items: itemsGiven,
     threads: threadsGiven = null,
@@ -928,6 +933,7 @@ export function Review({
     sizing,
     panes = null,
     paning,
+    checks: checksGiven = NO_CHECKS,
 }: Props) {
     // In panes, the one buffer on screen, and where the keyboard is: in a pane, or, in Pane mode, nowhere, a pane selected.
     const [showing, setShowing] = useState<Showing>({ kind: "for you" });
@@ -942,6 +948,8 @@ export function Review({
     const buffersLeft = useRef(new Map<string, { owner: string; into: number; screen: number | null }>());
     // The buffer being gone to, until it's laid out and read: where it lands, and whether a message is written once it has.
     const goingTo = useRef<{ write: boolean; item: number | null; since: boolean } | null>(null);
+    // The buffers `gt` and `gd` crossed from, which Ctrl+O goes back to: vim's own list of jumps knows one text.
+    const crossed = useRef<Showing[]>([]);
     const listHandle = useRef<ListHandle | null>(null);
     const root = useRef<HTMLDivElement>(null);
     // Where the cursor is, and whether a comment is being written: what the header says.
@@ -965,8 +973,8 @@ export function Review({
     // How the review is being first read (`readBy`): until it's read, what the host answers is laid out as it comes.
     const loading = useRef<Reading>({ since: null, last: 0, read: false });
     const answered = useMemo(
-        () => ({ items: itemsGiven, agents: agentsGiven, banner: bannerGiven, called: calledGiven, around: aroundGiven, drawers: drawersGiven, seeing: seeingGiven, order: orderGiven, parents, looks, running, landings, remote, threadsRead: threadsGiven }),
-        [itemsGiven, agentsGiven, bannerGiven, calledGiven, aroundGiven, drawersGiven, seeingGiven, orderGiven, parents, looks, running, landings, remote, threadsGiven],
+        () => ({ items: itemsGiven, agents: agentsGiven, banner: bannerGiven, called: calledGiven, around: aroundGiven, drawers: drawersGiven, seeing: seeingGiven, order: orderGiven, parents, looks, running, landings, remote, threadsRead: threadsGiven, checks: checksGiven }),
+        [itemsGiven, agentsGiven, bannerGiven, calledGiven, aroundGiven, drawersGiven, seeingGiven, orderGiven, parents, looks, running, landings, remote, threadsGiven, checksGiven],
     );
     // While a comment is being typed, what's typed laid out once typing pauses, the host's answers wait as long as
     // they may, so the keys aren't held up behind a layout: what came meanwhile is laid out with what was typed.
@@ -991,7 +999,7 @@ export function Review({
     const threads = useMemo<Threading | null>(() => (threadsRead === null ? null : { ...threadsRead, banner: (read, landing, section) => threadBanner(read, landing, called, section) }), [threadsRead, called]);
     // The same object while what it holds is the same, as the rest of what's taken is.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    const arranging = useMemo(() => ({ ...arrangedBy, threads }), [arrangedBy.parents, arrangedBy.looks, arrangedBy.running, arrangedBy.landings, arrangedBy.remote, threads]);
+    const arranging = useMemo(() => ({ ...arrangedBy, threads }), [arrangedBy.parents, arrangedBy.looks, arrangedBy.running, arrangedBy.landings, arrangedBy.remote, arrangedBy.checks, threads]);
     /** The words a group's banner says: `banner`'s, its parts' after them, and whether it's what's left for later. */
     const bannerLine = (head: Head, later: boolean, parts: string) => `━━ ${banner(head)}${parts === "" ? "" : ` · ${parts}`}${later ? " · later" : ""} ━━`;
     // The review as it was last laid out into the editor, which each comment is followed from (`Arranging.previous`):
@@ -1027,7 +1035,7 @@ export function Review({
             ordered(places.current, order ?? []),
             drawers,
             called,
-            { ...arranging, previous: panes === null ? before.current : followed.current, showing: shownNow },
+            { ...arranging, previous: panes === null ? before.current : followed.current, showing: shownNow, checks: shownNow === null ? [] : arranging.checks },
         );
     const layout = useMemo(() => {
         const drafted = typed.current ?? given;
@@ -2189,7 +2197,7 @@ export function Review({
             // Grouped by thread, what asks the operator in the text's order: an item to answer, a check not answered, a
             // thread done for them to confirm, on its banner.
             const current = view.current;
-            if (laidOut.sections.length === 0 || current === null) {
+            if ((laidOut.sections.length === 0 && laidOut.checks.length === 0) || current === null) {
                 goTo(answerAfter(laidOut, draft, editor.head(), forward), true);
                 return;
             }
@@ -2299,11 +2307,13 @@ export function Review({
                 if (naming !== undefined) {
                     const conversation = { party: "conversation" as const, repository: groupAt(laidOut, at)?.conversation?.repository ?? "", ...naming, agent: naming.agent ?? null };
                     kept.current.set(foldKey({ of: ownerOf({ drawer: "since", conversation }), kind: "since", name: "" }), false);
+                    crossed.current.push(showing);
                     openBuffer({ kind: "agent", key: whose(conversation) }, "in", null, true);
                     return;
                 }
                 const named = partyNamed(laidOut.text, at, [...agents, ...items.flatMap((each) => (each.sender.party === "conversation" ? [each.sender] : []))], called);
                 if (named !== undefined) {
+                    crossed.current.push(showing);
                     openBuffer({ kind: "agent", key: whose(named) }, "in");
                     return;
                 }
@@ -2343,6 +2353,7 @@ export function Review({
             const node = regionAt(laidOut, at)?.item.number ?? checkAt(laidOut, at)?.check.check.number ?? null;
             // In panes, to the thread's own buffer.
             if (panes !== null) {
+                crossed.current.push(showing);
                 openBuffer({ kind: "thread", number: read.thread.number }, "in", node);
                 return;
             }
@@ -2366,6 +2377,14 @@ export function Review({
             }
         },
         send: sending,
+        back: () => {
+            const buffer = crossed.current.pop();
+            if (buffer === undefined) {
+                return false;
+            }
+            openBuffer(buffer, "in");
+            return true;
+        },
         paint: (from, to) => painted(laidOut, from, to, freshOf),
         level: (position, opening, all, closed) => levelled(scopeFolds(position), closed, opening, all),
         // `zO` and `zC` within the item or the drawer the cursor is in; on a banner, its group's.
@@ -2418,10 +2437,10 @@ export function Review({
     }, [narrow]);
     // In panes, the list, read from what the review is laid out from: it lays out one buffer of it at a time.
     const listReading = useMemo(
-        () => ({ items, draft, agents, parents: arrangedBy.parents, called, banner: (item: Item) => bannerLine({ item }, false, ""), drawers, looks: arrangedBy.looks, remote: arrangedBy.remote, running: arrangedBy.running, activities, states, threads, landings: arrangedBy.landings }),
+        () => ({ items, draft, agents, parents: arrangedBy.parents, called, banner: (item: Item) => bannerLine({ item }, false, ""), drawers, looks: arrangedBy.looks, remote: arrangedBy.remote, running: arrangedBy.running, activities, states, threads, landings: arrangedBy.landings, checks: arrangedBy.checks }),
         // `bannerLine` says what `banner` does.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-        [items, draft, agents, arrangedBy.parents, called, banner, drawers, arrangedBy.looks, arrangedBy.remote, arrangedBy.running, activities, states, threads, arrangedBy.landings],
+        [items, draft, agents, arrangedBy.parents, called, banner, drawers, arrangedBy.looks, arrangedBy.remote, arrangedBy.running, activities, states, threads, arrangedBy.landings, arrangedBy.checks],
     );
     const listed = useMemo(() => (panes === null ? [] : panes === "agents" ? listedByAgent(listReading) : listedByThread(listReading)), [panes, listReading]);
     const title = panes === null ? null : titled(showing, listReading);

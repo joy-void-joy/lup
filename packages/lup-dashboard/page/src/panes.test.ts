@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { carried, implied, type Marked } from "./grammar";
 import { adopted } from "./looks";
 import { arrivalIn, bufferKey, listLaid, listedByAgent, listedByThread, panesAsked, rowAt, titled, type ListReading } from "./panes";
-import { EMPTY, aboutAt, followedFrom, groupAt, laid, opened, whose as whoseOf, type Around, type Conversation, type Draft, type Item, type Laid, type Showing, type ThreadRead, type ThreadShown, type Threading } from "./review";
+import { EMPTY, aboutAt, checkOwner, followedFrom, groupAt, laid, opened, whose as whoseOf, type Around, type Conversation, type Draft, type Item, type Laid, type OwnedCheck, type Showing, type ThreadRead, type ThreadShown, type Threading } from "./review";
 import { partyNamed, threadBanner } from "./Review";
 
 const AT = "2026-10-30T12:00:00Z";
@@ -229,6 +229,70 @@ describe("the list by agent", () => {
         for (const each of laidOut.marks) {
             expect(laidOut.text.slice(each.from, each.to)).not.toContain("\n");
         }
+    });
+});
+
+describe("the checks, going by agent", () => {
+    const THREAD = {
+        thread: { kind: "ledger:thread", number: 302, name: "reader", title: "The reader", repository: REPOSITORY, by: LEAD, at: AT, parent: null, holder: GONE },
+        state: "waiting on the operator",
+        section: "waiting on you",
+        since: AT,
+        asks: [{ node: 311, what: "a check", came: AT }],
+        answering: null,
+    } as unknown as ThreadRead;
+    const CHECK: OwnedCheck = { thread: THREAD, check: { check: { kind: "ledger:check", number: 311, name: null, text: "Search a long record.", repository: REPOSITORY, by: WORKER, at: AT }, answer: null } as unknown as OwnedCheck["check"] };
+    const answering = { ...THREAD, answering: LEAD } as ThreadRead;
+    const noHolder = { ...THREAD, thread: { ...THREAD.thread, holder: null } } as ThreadRead;
+
+    function checked(showing: Showing, checks: readonly OwnedCheck[] = [CHECK]): Laid {
+        return laid(ITEMS, [LEAD, WORKER], banner, header, EMPTY, NOTHING, [], new Map(), called, { showing, running: running(LEAD, WORKER), looks: adopted(), checks });
+    }
+
+    it("belongs to whoever answers for its thread, else whoever holds it, else whoever asked it", () => {
+        expect(checkOwner(CHECK)).toEqual(GONE);
+        expect(checkOwner({ ...CHECK, thread: answering })).toEqual(LEAD);
+        expect(checkOwner({ ...CHECK, thread: noHolder })).toEqual(WORKER);
+    });
+
+    it("sits in its owner's own buffer, naming its thread, and where they've ended, under No agent", () => {
+        const own = checked({ kind: "agent", key: whoseOf(LEAD) }, [{ ...CHECK, thread: answering }]);
+        expect(own.text).toContain("◆ check @311 in @reader: Search a long record.");
+        expect(own.checks.map((each) => each.check.check.number)).toEqual([311]);
+        expect(checked({ kind: "no agent" }).text).toContain("check @311");
+        expect(checked({ kind: "agent", key: whoseOf(LEAD) }).text).not.toContain("check @311");
+    });
+
+    it("counts in what's for the operator, wherever it sits, as its owner's group does", () => {
+        const out = checked({ kind: "for you" });
+        expect(out.text).toContain("check @311");
+        const list = listLaid(listedByAgent({ ...reading(), checks: [CHECK] }));
+        expect(list.text.split("\n")[0]).toContain("◆2");
+        expect(list.text.split("\n").find((each) => each.includes("s2"))).toContain("◆1");
+    });
+
+    it("gives its owner a group where they have none, and a row under No agent", () => {
+        const stranger = from("s9");
+        const held = { ...CHECK, thread: { ...THREAD, thread: { ...THREAD.thread, holder: stranger } } as ThreadRead };
+        const out = checked({ kind: "no agent" }, [held]);
+        expect(out.groups.map((each) => called(each.conversation as Conversation))).toContain("s9");
+        expect(listLaid(listedByAgent({ ...reading(), checks: [held] })).text).toContain("s9");
+    });
+
+    it("stops counting as the draft answers it", () => {
+        const ticked: Draft = { ...EMPTY, marks: [{ id: "m", action: "inbox-check-answer", argument: { number: 311 }, verb: "done", says: "tick it", block: "check 311", version: null }] };
+        const list = listLaid(listedByAgent({ ...reading(ticked), checks: [CHECK] }));
+        expect(list.text.split("\n").find((each) => each.includes("s2"))).not.toContain("◆");
+    });
+
+    it("is what a buffer lands on first, whichever comes first of what asks", () => {
+        const out = checked({ kind: "agent", key: whoseOf(LEAD) }, [{ ...CHECK, thread: answering }]);
+        expect(arrivalIn(out, EMPTY)).toBe(out.checks[0]?.from);
+    });
+
+    it("leaves the review without panes unaware of it", () => {
+        const whole = laid(ITEMS, [LEAD, WORKER], banner, header, EMPTY, NOTHING, [], new Map(), called, { running: running(LEAD, WORKER), looks: adopted() });
+        expect(whole.checks).toEqual([]);
     });
 });
 

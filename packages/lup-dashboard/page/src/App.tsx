@@ -61,9 +61,11 @@ import {
     type Draft,
     type Drawers,
     type Head,
+    type ThreadRead,
     type ThreadsRead,
     type Item,
     type Keeping,
+    type OwnedCheck,
     type Since,
     type Threading,
     type ThreadShown,
@@ -98,6 +100,7 @@ const SAID = {
 /** What the review is laid out from before it's all read: no item, and no conversation running. */
 const NONE: Item[] = [];
 const NO_ONE: InboxConversation[] = [];
+const NO_CHECKS: readonly OwnedCheck[] = [];
 
 /** How long the page lets each agent's record and branch go unread with no hook heard, in milliseconds: a record written just after its hook, or a write no hook said, is read all the same. */
 const FALLBACK = 60_000;
@@ -260,7 +263,8 @@ export function App() {
     const [paneMode, setPaneMode] = useState(false);
     // The review's threads, as the host reads them for it (`docs/inbox.md`, *Threads in the review*): the same object
     // while the host says the same of them, which it says again at every hook.
-    const threadsWatch = useWatched(byThread ? { kind: "inbox-threads" } : null);
+    // The panes by agent read them for one thing alone: the checks waiting on the operator, each under whoever owns it.
+    const threadsWatch = useWatched(byThread || panes === "agents" ? { kind: "inbox-threads" } : null);
     const threadsRead = useSame(
         useMemo(() => (threadsWatch.reply?.kind === "inbox-threads-read" ? threadsWatch.reply : null), [threadsWatch.reply]),
         (each) => JSON.stringify(each),
@@ -288,10 +292,26 @@ export function App() {
         setOpening((before) => (before.some((each) => each.number === number && each.whole === whole) ? before : [...before, { number, whole }]));
     }, []);
     const threadsAsked = useMemo(() => {
-        const shown = (threadsRead?.threads ?? []).filter((each) => each.section !== "every thread" || landingIn.has(each.thread.number)).map((each) => ({ number: each.thread.number, whole: false }));
+        const asking = (each: ThreadRead) => (byThread ? each.section !== "every thread" || landingIn.has(each.thread.number) : (each.asks ?? []).some((ask) => ask.what === "a check"));
+        const shown = (threadsRead?.threads ?? []).filter(asking).map((each) => ({ number: each.thread.number, whole: false }));
         return [...shown, ...opening.filter((each) => each.whole || !shown.some((one) => one.number === each.number))];
+        // `byThread` says it once, as the page loads.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [threadsRead, landingIn, opening]);
     const conversations = useThreads(threadsAsked);
+    // By agent in panes, the checks waiting on the operator, each in the thread it's in, whose thread that thread read says.
+    const checksWaiting = useSame(
+        useMemo(
+            () =>
+                panes !== "agents" || threadsRead === null
+                    ? []
+                    : threadsRead.threads.flatMap((thread) => (conversations.shown.get(thread.thread.number)?.checks ?? []).filter((check) => (check.answer ?? null) === null && (thread.asks ?? []).some((ask) => ask.node === check.check.number)).map((check) => ({ check, thread }))),
+            // `panes` says it once, as the page loads.
+            // eslint-disable-next-line react-hooks/exhaustive-deps
+            [threadsRead, conversations],
+        ),
+        (list) => JSON.stringify(list),
+    );
     // Each conversation the inbox's items and the threads read name, with their path as the host names it, by `whose`
     // they are: what names an agent who isn't running, or isn't their launch's latest session, which no launch listed
     // names, the sender of a thread's history among them, whose items no longer wait.
@@ -485,7 +505,9 @@ export function App() {
     const setAside = useMemo(() => (inbox.reply?.kind === "inbox-items" ? inbox.reply.set_aside : []), [inbox.reply]);
 
     const threading = useMemo<Omit<Threading, "banner"> | null>(
-        () => (threadsRead === null ? null : { read: threadsRead, shown: conversations.shown, whole: conversations.whole, landing: landingIn }),
+        () => (threadsRead === null || !byThread ? null : { read: threadsRead, shown: conversations.shown, whole: conversations.whole, landing: landingIn }),
+        // `byThread` says it once, as the page loads.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
         [threadsRead, conversations, landingIn],
     );
     // The checks the threads shown hold, by number: a comment on one is the operator's answer to it, in their words.
@@ -618,7 +640,7 @@ export function App() {
     // where a friction or how it felt is read, or moved into a thread, and a park on one only hid it from the count.
     useEffect(() => {
         // Never while a comment's typing waits to be laid out, which the draft as it stands here doesn't hold yet.
-        if (!ready || threadsRead === null || typed.current !== null) {
+        if (!ready || !byThread || threadsRead === null || typed.current !== null) {
             return;
         }
         const piled = new Set(threadsRead.threads.flatMap((each) => each.pile ?? []));
@@ -1238,7 +1260,7 @@ export function App() {
                 )}
                 <span className="spacer" />
                 <span className="count">
-                    {agents.length} {agents.length === 1 ? "agent" : "agents"} · <span className="mark-waiting">◆</span> {waitingOn(threadsRead, landingIn, waiting, draft.parked ?? [])} waiting on you
+                    {agents.length} {agents.length === 1 ? "agent" : "agents"} · <span className="mark-waiting">◆</span> {waitingOn(byThread ? threadsRead : null, landingIn, waiting, draft.parked ?? []) + checksWaiting.length} waiting on you
                     {toReadCount === 0 ? null : (
                         <>
                             {" · "}
@@ -1289,6 +1311,7 @@ export function App() {
                         order={ready ? kept : null}
                         keepOrder={whole && panes === null ? keepOrder : null}
                         panes={panes}
+                        checks={ready ? checksWaiting : NO_CHECKS}
                         paning={setPaneMode}
                         looks={looks}
                         running={runningNow}

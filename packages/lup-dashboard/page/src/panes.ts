@@ -10,6 +10,7 @@ import type { Run } from "./reconcile";
 import type { Merged } from "./looks";
 import {
     about,
+    checkOwner,
     cutAt,
     grouped,
     nested,
@@ -23,6 +24,7 @@ import {
     type Grouping,
     type Item,
     type Laid,
+    type OwnedCheck,
     type Showing,
     type ThreadRead,
     type Threading,
@@ -156,6 +158,21 @@ export interface ListReading {
     states: ReadonlyMap<string, string | null>;
     threads: Threading | null;
     landings?: Shown["landings"];
+    /** The checks waiting on the operator, by agent (`checkOwner`), where the list goes by agent. */
+    checks?: readonly OwnedCheck[];
+}
+
+/** Return the number of a check as the draft marks it answered: ticked, or a comment on it its answer in words. */
+function checkAnswered(number: number, draft: Draft): boolean {
+    return (draft.marks ?? []).some((each) => each.block === `check ${number}`) || (draft.comments ?? []).some((each) => each.item === number && each.text.trim() !== "");
+}
+
+/** Return how many checks of the agent named `key` still wait on the operator, as the draft stands. */
+function checksWaiting(key: string, reading: Pick<ListReading, "checks" | "draft">): number {
+    return (reading.checks ?? []).filter((each) => {
+        const owner = checkOwner(each);
+        return owner !== null && whose(owner) === key && !checkAnswered(each.check.check.number, reading.draft);
+    }).length;
 }
 
 /** Return how the agent `group` is of stands: what of theirs asks the operator, what's news, what's left to review in their "since you approved", and what's drafted to them. */
@@ -165,7 +182,7 @@ function agentTally(group: Grouping, reading: ListReading): Tally {
     const parked = draft.parked ?? [];
     const done = draft.done ?? [];
     const open = group.items.filter((each) => !parked.includes(each.number));
-    const asks = open.filter((each) => toAnswer(each, draft)).length;
+    const asks = open.filter((each) => toAnswer(each, draft)).length + checksWaiting(group.key, reading);
     const newsCount = open.filter((each) => news(each) && waits(each) && !done.includes(each.number)).length;
     const numbers = new Set(group.items.map((each) => each.number));
     const comments = (draft.comments ?? []).filter((each) => numbers.has(each.item) && each.text.trim() !== "").length;
@@ -184,17 +201,29 @@ function agentTally(group: Grouping, reading: ListReading): Tally {
 }
 
 /** Return the conversation of the agent named `key`, among those the review names; none where it isn't one of them, as lup's approvals. */
-export function conversationNamed(key: string, reading: Pick<ListReading, "agents" | "items">): Conversation | undefined {
-    return reading.agents.find((each) => whose(each) === key) ?? reading.items.flatMap((each) => (each.sender.party === "conversation" && whose(each.sender) === key ? [each.sender] : []))[0];
+export function conversationNamed(key: string, reading: Pick<ListReading, "agents" | "items" | "checks">): Conversation | undefined {
+    const owners = (reading.checks ?? []).flatMap((each) => {
+        const owner = checkOwner(each);
+        return owner === null ? [] : [owner];
+    });
+    return [...reading.agents, ...owners].find((each) => whose(each) === key) ?? reading.items.flatMap((each) => (each.sender.party === "conversation" && whose(each.sender) === key ? [each.sender] : []))[0];
 }
 
 /** Return every agent's group the list names, with those of lup's approvals: each with an item, then each of `agents` with none. */
 function groupsOf(reading: ListReading): Grouping[] {
     const groups = grouped([...reading.items], reading.banner);
     const keys = new Set(groups.map((each) => each.key));
-    const empty = reading.agents.flatMap((conversation): Grouping[] => {
+    const owners = (reading.checks ?? []).flatMap((each) => {
+        const owner = checkOwner(each);
+        return owner === null ? [] : [owner];
+    });
+    const empty = [...reading.agents, ...owners].flatMap((conversation): Grouping[] => {
         const key = whose(conversation);
-        return keys.has(key) ? [] : [{ key, conversation, head: { conversation }, items: [] }];
+        if (keys.has(key)) {
+            return [];
+        }
+        keys.add(key);
+        return [{ key, conversation, head: { conversation }, items: [] }];
     });
     return [...groups, ...empty];
 }
@@ -496,7 +525,7 @@ export interface Titled {
 }
 
 /** Return what the buffer `showing` says of itself over its pane. */
-export function titled(showing: Showing, reading: Pick<ListReading, "agents" | "called" | "running" | "threads" | "items">): Titled {
+export function titled(showing: Showing, reading: Pick<ListReading, "agents" | "called" | "running" | "threads" | "items" | "checks">): Titled {
     switch (showing.kind) {
         case "for you":
             return { name: "what's for you", whom: "a comment reaches who sent the item" };
@@ -526,9 +555,11 @@ export function titled(showing: Showing, reading: Pick<ListReading, "agents" | "
  * written to them is written under, at its end, the latest of what's live just above it; else on its first item.
  */
 export function arrivalIn(laid: Laid, draft: Draft): number {
-    const asking = laid.regions.find((each) => toAnswer(each.item, draft));
-    if (asking !== undefined) {
-        return asking.header.from;
+    const asking = laid.regions.find((each) => toAnswer(each.item, draft))?.header.from;
+    const checking = laid.checks.find((each) => (each.check.answer ?? null) === null && !checkAnswered(each.check.check.number, draft))?.from;
+    const first = Math.min(asking ?? Infinity, checking ?? Infinity);
+    if (first !== Infinity) {
+        return first;
     }
     const writing = laid.groups.find((each) => each.writing !== undefined)?.writing;
     return writing?.from ?? laid.regions[0]?.header.from ?? 0;
