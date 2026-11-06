@@ -392,7 +392,7 @@ function fitted(left: readonly Stretch[]): Stretch[] {
 function taskRow(read: ThreadRead, set: string, depth: number, threads: Threading, reading: ListReading): Row {
     const tally = threadTally(read, threads, reading.draft);
     const waiting = tally.asks + tally.files > 0;
-    // Working in the ledger's word, though whoever held it has ended and it's fallen to who answers for them: nobody is.
+    // Working in the ledger's word, though whoever held it has ended and someone else answers for it: nobody is.
     const holder = read.thread.holder ?? null;
     const answering = read.answering ?? null;
     const fell = read.state === "working" && holder !== null && answering !== null && whose(holder) !== whose(answering);

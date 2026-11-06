@@ -481,23 +481,23 @@ export interface OwnedCheck {
 }
 
 /**
- * Return who a check answers to, where the review goes by agent: whoever answers for its thread, or the one holding it
- * though they've ended, or the one who asked it where nobody holds it. So it sits under them, or, where they've ended,
- * under `No agent`, one owner for everything.
+ * Return who a check answers to, where the review goes by agent: whoever holds its thread (`taskOwner`), or the one who
+ * asked it where nobody ever did. So it sits under them, or, where they've ended, under `No agent`, one owner for
+ * everything.
  */
 export function checkOwner(owned: OwnedCheck): Conversation | null {
     const by = owned.check.check.by;
-    return owned.thread.answering ?? owned.thread.thread.holder ?? (by.party === "conversation" ? by : null);
+    return owned.thread.thread.holder ?? owned.thread.answering ?? (by.party === "conversation" ? by : taskOwner(owned.thread));
 }
 
 /**
- * Return who owns a thread, as a task, where the review goes by agent: whoever answers for it, else whoever holds it
- * though they've ended, else whoever opened it; none where the operator or lup did and nobody's taken it. What's owned by
- * no one running sits under `No agent`.
+ * Return who owns a thread, as a task, where the review goes by agent: whoever holds it, running or not, so a task whose
+ * holder ended without finishing it sits under them, under `No agent`, though someone answers for it; else whoever answers
+ * for it; else whoever opened it; none where the operator or lup did and nobody's taken it.
  */
 export function taskOwner(read: ThreadRead): Conversation | null {
     const by = read.thread.by;
-    return read.answering ?? read.thread.holder ?? (by.party === "conversation" ? by : null);
+    return read.thread.holder ?? read.answering ?? (by.party === "conversation" ? by : null);
 }
 
 /** Whether a thread's a session's own root, which holds whatever its session is given: no concern of its own to list, but where something in it waits. */
@@ -2558,7 +2558,10 @@ export function laid(
         const declared = data === undefined && shape !== "own" ? [] : looks.drawers(repository).filter((each) => !(each.view === "since" && sinceLaid.has(group.key)));
         // Under the banner, before the items, each drawer; in what's for the operator, only what waits on them; in the
         // agent's own buffer, all but their conversation, which comes after the items, live, what's written to them under it.
-        const first = shape === "banner" ? [] : shape === "for you" ? declared.filter((each) => each.view === "since" && sinceWaits(group) !== null) : shape === "own" ? declared.filter((each) => each.view !== "conversation") : declared;
+        // What's live in their own buffer: the plain conversation where their repository's looks have one (`messages`), the
+        // trace beside it a drawer as any other; else the trace.
+        const liveView = declared.find((each) => each.view === "messages") ?? declared.find((each) => each.view === "conversation");
+        const first = shape === "banner" ? [] : shape === "for you" ? declared.filter((each) => each.view === "since" && sinceWaits(group) !== null) : shape === "own" ? declared.filter((each) => each !== liveView) : declared;
         layDrawers(first, `${id} drawers`, false);
         for (const item of group.items) {
             node.children.push(layItem(item, isParked));
@@ -2579,11 +2582,10 @@ export function laid(
             }
         }
         if (shape === "own") {
-            const live = declared.filter((each) => each.view === "conversation");
             const drawersBefore = made.drawers.length;
-            layDrawers(live, `${id} live`, true);
+            layDrawers(liveView === undefined ? [] : [liveView], `${id} live`, true);
             // Never a buffer that looks empty: where their conversation isn't there, why.
-            const talk = live[0];
+            const talk = liveView;
             if (conversation !== null && of !== null && made.drawers.length === drawersBefore && talk !== undefined) {
                 const read = mount(repository, talk.module, talk.view, of, shown, remote).answer !== null;
                 const said = w.line(read ? "They haven't said anything yet." : "Reading their conversation…", `${id} live`);
