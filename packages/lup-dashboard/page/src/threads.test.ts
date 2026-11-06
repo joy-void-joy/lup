@@ -22,6 +22,7 @@ import {
     pileTitle,
     placeIn,
     ROOT_TITLE,
+    toAnswer,
     UNSEEN,
     type Around,
     type Conversation,
@@ -743,5 +744,47 @@ describe("the pile to read", () => {
             ["@81 how it felt", [], ["read"]],
         ]);
         expect(rows[at + 6]?.text).toBe("settled");
+    });
+});
+
+describe("the operator's own words in a thread", () => {
+    // Their review, moved into @auth as an agent moves one with `thread`: the host ranks it waiting on them, but a reply
+    // never answers it, and refused a mark on it, the whole reply.
+    const OWN = {
+        ...item(
+            90,
+            LEAD,
+            { reason: "review", covers: [], comments: [], letters: [{ id: "", to: LEAD, thread: null, text: "Ship the parser first." }], remarks: [] } as unknown as Item["reason"],
+            WAITING,
+        ),
+        sender: { party: "operator" },
+        recipient: LEAD,
+    } as Item;
+    const MOVED = shown(
+        AUTH,
+        [
+            { spot: { node: 90 }, came: AT, member: true },
+            { spot: { node: 70 }, came: AT, member: true, new: true },
+        ] as ThreadShown["entries"],
+        [OWN, LATE],
+    );
+
+    it("never marks them done, declined or left for later: Space d goes on to the thread and reads it, as on its banner", () => {
+        const out = laid([QUESTION, LATE], [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called, { threads: threading(false, [[303, MOVED]]) });
+        const region = out.regions.find((each) => each.item.number === 90);
+        expect(region).toBeDefined();
+        const at = region?.header.from ?? 0;
+        const marked = (name: string) => {
+            const reach = reaching(out, at, name);
+            return reach === null || reach.on === null ? [] : reach.acts.filter((each) => each.kind === "item" && each.number === 90);
+        };
+        expect(marked("done")).toEqual([]);
+        expect(marked("decline")).toEqual([]);
+        expect(marked("send")).toEqual([]);
+        expect(reaching(out, at, "done")).toMatchObject({ on: "@auth", says: "mark its news read" });
+        // Nor are they ever to answer, which `]a` stops at and a thread's banner counts as left.
+        expect(toAnswer(OWN, EMPTY)).toBe(false);
+        // A comment on them is opened still: the host writes it on their thread, to whoever answers for it.
+        expect(reaching(out, at, "comment")).toMatchObject({ on: region?.named, says: "comment on it" });
     });
 });

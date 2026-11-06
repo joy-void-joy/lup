@@ -6492,21 +6492,29 @@ def test_a_turns_end_held_to_tell_an_item_still_puts_its_message_before_the_oper
     ]
 
 
-def test_a_draft_that_answers_nothing_or_what_a_review_cant_is_refused(
+def test_a_draft_that_answers_nothing_is_refused_and_a_mark_on_the_operator_s_own_words_dropped(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
         call(machine.host.launch("one").mcp, "ask", {"question": "In words?"})
         inbox("send", "one", "Mine.")
         empty = refused_draft(machine, clock, Draft())
-        own = refused_draft(machine, clock, Draft(done=[3]))
+        drafting(machine, clock, Draft(done=[3]))
+        own = client(machine.host, clock).ask(SendDraft(), Reviewed)
+        left = delivery.inbox.draft()
     assert empty == (
         "the draft answers no item and writes to no agent: comment on an item, take "
         "one off the list, or write to an agent under their banner"
     )
-    assert own == "@3 is a note from the operator, which a review doesn't answer"
+    # A mark on the operator's own message is dropped, said, never refusing the reply.
+    [dropped] = own.unanswerable
+    assert dropped.said == (
+        "@3 not marked done: it's a note from the operator, which a reply doesn't "
+        "answer"
+    )
+    assert left == Draft()
 
 
 def refused_draft(machine: Layout, clock: FakeClock, draft: Draft) -> str:

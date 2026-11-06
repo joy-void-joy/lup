@@ -1517,7 +1517,12 @@ function tallyOf(names: readonly string[]): Map<string, number> {
     return counted;
 }
 
-/** Return what sending the inbox's part of the reply did, as the host answered, part by part: each review sent and to whom, the items marked read, approved and declined, each note left, and the comments kept. */
+/**
+ * Return what sending the inbox's part of the reply did, as the host answered, part by part: each review sent and to
+ * whom, the items marked read, approved and declined, each note left, and the comments kept; and, as the host says it,
+ * what became of each part on an item a reply doesn't answer, as the operator's own words, rather than refusing the
+ * reply whole: a mark dropped, a comment written on the item's thread or kept drafted, and why.
+ */
 function reviewSaid(answer: Extract<Replied, { kind: "inbox-reviewed" }>, called: (party: Item["sender"]) => string): ReplyPart[] {
     const doing = (how: string, numbers: readonly number[], then?: string): ReplyPart[] =>
         numbers.length === 0 ? [] : [{ kind: "items", done: how, numbers, ...(then === undefined ? {} : { then }) }];
@@ -1528,6 +1533,7 @@ function reviewSaid(answer: Extract<Replied, { kind: "inbox-reviewed" }>, called
         ...doing("declined", (answer.declined ?? []).map((each) => each.number)),
         ...(answer.noted ?? []).map((each): ReplyPart => ({ kind: "said", text: `comments to ${called(each.recipient)} as ${cited(each.number)}` })),
         ...doing("comments on", answer.kept ?? [], " kept: no session's push asked it"),
+        ...(answer.unanswerable ?? []).map((each): ReplyPart => ({ kind: "said", text: each.said })),
     ];
 }
 
