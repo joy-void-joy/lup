@@ -1,3 +1,4 @@
+import { hosted } from "./fixtures/kinds";
 import "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
@@ -17,9 +18,9 @@ function from(session: string, agent: string | null = null): Conversation {
 }
 
 function note(number: number, sender: Conversation, rank: Item["rank"] = NEWS): Item {
-    return {
+    return hosted({
         number,
-        reason: { reason: "message", passages: [], answers: [], ending: false, kind: "note", text: `Note ${number}.\nSecond line.` },
+        reason: { reason: "message", passages: [], answers: [], ending: false, kind: rank.name === "news" ? "note" : "problem", text: `Note ${number}.\nSecond line.` },
         sender,
         recipient: { party: "operator" },
         replies: [],
@@ -29,7 +30,7 @@ function note(number: number, sender: Conversation, rank: Item["rank"] = NEWS): 
         made: AT,
         state: { state: "waiting" },
         rank,
-    };
+    });
 }
 
 const NOTHING: Around = { contexts: new Map(), files: new Map(), answers: [], commented: [] };
@@ -379,12 +380,12 @@ describe("the overview", () => {
             "  s1 [calling]",
             "    @4 note [news]",
             "    a1 [ended]",
-            "      @1 note [waiting] {comment}",
+            "      @1 problem [waiting] {comment}",
         ]);
         // As the groups are laid out, never another order.
         expect(rows.filter((each) => each.kind === "agent").map((each) => each.from)).toEqual(out.groups.map((each) => each.banner.from));
         // The cursor's entry is the deepest holding it.
-        expect(cursorRow(rows, out.text.indexOf("Note 1."))?.text).toBe("@1 note");
+        expect(cursorRow(rows, out.text.indexOf("Note 1."))?.text).toBe("@1 problem");
         expect(cursorRow(rows, out.text.indexOf("━━ s1"))?.text).toBe("s1");
         expect(itemStanding(out.regions.find((each) => each.item.number === 1)!, { ...EMPTY, parked: [1], comments: [{ id: "x", item: 1, text: "x" }] }, { groups: new Map([[whose(CHILD), 1]]), commented: new Set() })).toEqual({ marks: ["parked"], draft: [], fresh: false });
     });
@@ -394,7 +395,7 @@ describe("the overview", () => {
         expect(said(outlineOf(out, reading))).toEqual([
             "lup []",
             "  s1/a1 [ended]",
-            "    @1 note [waiting] {comment}",
+            "    @1 problem [waiting] {comment}",
             "  s2 [ended]",
             "    @2 note [] {read}",
             "  s1 [calling]",

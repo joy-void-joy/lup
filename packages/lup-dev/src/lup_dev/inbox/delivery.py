@@ -174,6 +174,7 @@ from lup_dev.inbox.store import (
     InboxError,
     Item,
     Letter,
+    Listed,
     Message,
     Passage,
     Question,
@@ -315,25 +316,9 @@ def unanswerable(item: Item, roster: Roster) -> str | None:
     >>> unanswerable(own, Roster(names={}, places={}, items={}))
     "it's a review from the operator, which a reply doesn't answer"
     """
-    match item:
-        case (
-            Item(reason=Approval() | HeldChange())
-            | Item(
-                sender=Conversation(),
-                reason=Message()
-                | Friction()
-                | HowItFelt()
-                | Stop()
-                | Question()
-                | Flagged(),
-            )
-        ):
-            return None
-        case _:
-            return (
-                f"it's {what(item)} from {roster.who(item.sender)}, which a reply "
-                "doesn't answer"
-            )
+    if item.answers:
+        return None
+    return f"it's {what(item)} from {roster.who(item.sender)}, which a reply doesn't answer"
 
 
 def quoting(item: Item, comment: Comment) -> str:
@@ -568,10 +553,6 @@ def rewritten(reason: Reason, text: str) -> Reason:
             return reason.model_copy(update={"why": text})
         case _:
             return reason
-
-
-type Listed = Literal["done", "declined", "parked"]
-"""Which of the draft's lists of items an item is marked in."""
 
 
 def marked(listed: Listed) -> str:

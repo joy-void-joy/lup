@@ -94,7 +94,9 @@ class Offer(Model):
     action: str
     """The action, by its name: the method's of the module whose view the block
     is in; for a view the page lays out itself until its module serves it, the
-    request the page sends (`inbox-answer-approval`)."""
+    request the page sends (`policy-review-since`); for an item's answer, until
+    those are their modules' actions, what the page marks in the draft
+    (`lup_dev.inbox.store.Item.offers`)."""
     argument: dict[str, JsonValue] = {}
     """What the action is given, as JSON."""
     verb: str | None = None

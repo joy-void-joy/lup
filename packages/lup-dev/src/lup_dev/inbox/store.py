@@ -52,6 +52,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, Self, override
 
 from pydantic import Field, JsonValue, computed_field, model_validator
 
+from lup.blocks import Offer
 from lup.sessions import results
 from lup.tools import speaking
 from lup.types import Model, MutableModel
@@ -925,43 +926,147 @@ class Rank(Model):
     notifies: bool
 
 
-def ranked(reason: Reason) -> Rank:
-    """Return the rank of an item of `reason`'s kind: the one place each kind's is said, which the review orders by (`page/src/review.ts`) and the desktop notices read (`Delivery.noticed`).
+WAITS_ON_YOU = Rank(name="waiting on you", order=0, notifies=True)
+NEWS = Rank(name="news", order=1, notifies=False)
+FLAG = Rank(name="flag", order=2, notifies=False)
 
-    | Rank | Kinds | Order | Notice |
+
+type Listed = Literal["done", "declined", "parked"]
+"""Which of the draft's lists of items an item is marked in: done, declined, or left for later."""
+
+
+MARKED = "inbox-mark"
+"""The action of an item's answer (`Offer.action`): marked in one of the draft's
+lists, as the page marks it, sent with the reply (`Item.offers`), until the inbox's
+answers are its module's actions (#113)."""
+
+COMMENTED = "inbox-comment"
+"""The action of a comment on an item whole, which the page opens where it's
+offered; the comment is sent with the reply."""
+
+
+class Answering(Model):
+    """One way the operator answers an item of a kind: the verb whose key reaches it, the list of their draft it marks it in, what it does as the line of keys says it, what it did as what's dropped says it, and whether a comment on the item implies it."""
+
+    verb: str
+    marks: Listed
+    says: str
+    did: str
+    commented: bool = False
+
+    def offer(self, number: int) -> Offer:
+        """Return this answer as item `number` offers it."""
+        return Offer(
+            action=MARKED,
+            argument={"number": number, "list": self.marks},
+            verb=self.verb,
+            commented=self.commented,
+            says=self.says,
+        )
+
+
+READ = Answering(verb="done", marks="done", says="mark it read", did="marked done")
+LATER = Answering(
+    verb="send", marks="parked", says="leave it for later", did="left for later"
+)
+APPROVE = Answering(verb="done", marks="done", says="approve", did="approved")
+DECLINE = Answering(verb="decline", marks="declined", says="decline", did="declined")
+
+
+class ItemKind(Model):
+    """What one kind of item is to the operator (`kind_of`)."""
+
+    rank: Rank
+    asks: bool
+    """Whether it needs the operator: one of this kind, theirs and waiting, is
+    what counts as waiting on them (`asks`); any other is news to read, or none
+    of theirs."""
+    answers: list[Answering] = []
+    """How they answer one, offered only while it waits on them (`Item.offers`):
+    none for what a reply doesn't answer."""
+    whoever: bool = False
+    """Whether they answer one whoever sent it; else, only one a conversation
+    sent, never their own words."""
+
+
+def kind_of(reason: Reason) -> ItemKind:
+    """Return what an item of `reason`'s kind is to the operator: the one table of kinds, which every rank, every count of what's waiting and every offer reads, the page's among them.
+
+    | Kinds | Rank | Asks | Answers |
     |---|---|---|---|
-    | waiting on you | a question, a held change, an approval, a problem (`blocked`), a disagreement, a question sent as a message | first | yes |
-    | news | a note, a turn's last words among them, a friction, how it felt, a stop by choice, a subagent's end, lup's word on citations that didn't resolve, the operator's copy of a message between conversations | next | no |
-    | flag | a write that landed flagged | last | no |
+    | an approval | waiting on you | yes | approve, decline, leave for later, whoever asked |
+    | a held change | waiting on you | yes | as an approval's, a comment on it approving it |
+    | a question, a problem (`blocked`), a disagreement, a question sent as a message | waiting on you | yes | mark read, leave for later |
+    | a note, a turn's last words among them, a friction, how it felt, a stop by choice, the operator's copy of a message between conversations | news | no | mark read, leave for later |
+    | a subagent's end, lup's word on citations that didn't resolve | news | no | none |
+    | a write that landed flagged | flag | no | mark read, leave for later |
+    | the operator's own answer or review | waiting on you | no | none |
 
-    A message to the operator ranks by its kind, whichever tool sent it: a note
-    is a remark to read, where a doubt that needs the operator soon is a
-    question, asked. A copy of one a conversation sent another is news of any
-    kind, since it waits on that other, not on them. The operator's own items,
-    an answer and a review, go to agents, so neither the review nor a notice
-    reads theirs; nor a subagent's end, which goes to their parent, nor lup's word
-    on citations, which goes to the conversation that wrote them.
+    The rank says where the review shows a kind among the rest, and whether one
+    raises a desktop notice as it reaches them. A message to the operator ranks by
+    its kind, whichever tool sent it: a note is a remark to read, where a doubt
+    that needs the operator soon is a question, asked. A copy of one a
+    conversation sent another is news of any kind, since it waits on that other,
+    not on them. The operator's own items go to agents, so neither the review nor
+    a notice reads theirs, nor asks anything of them; nor a subagent's end, which
+    goes to their parent, nor lup's word on citations, which goes to the
+    conversation that wrote them.
 
-    >>> ranked(Stop(why="Done."))
-    Rank(name='news', order=1, notifies=False)
-    >>> ranked(Message(kind="note", text="It rests on the cache.")).name
-    'news'
+    >>> kind_of(Stop(why="Done.")).asks
+    False
+    >>> [each.says for each in kind_of(Question(text="Which?")).answers]
+    ['mark it read', 'leave it for later']
     """
     match reason:
+        case Approval():
+            return ItemKind(
+                rank=WAITS_ON_YOU,
+                asks=True,
+                answers=[APPROVE, DECLINE, LATER],
+                whoever=True,
+            )
+        case HeldChange():
+            approving = APPROVE.model_copy(update={"commented": True})
+            return ItemKind(
+                rank=WAITS_ON_YOU,
+                asks=True,
+                answers=[approving, DECLINE, LATER],
+                whoever=True,
+            )
         case (
             Message(kind="note")
             | Message(to=Conversation())
             | Friction()
             | HowItFelt()
             | Stop()
-            | Ended()
-            | Unresolved()
         ):
-            return Rank(name="news", order=1, notifies=False)
+            return ItemKind(rank=NEWS, asks=False, answers=[READ, LATER])
+        case Ended() | Unresolved():
+            return ItemKind(rank=NEWS, asks=False)
         case Flagged():
-            return Rank(name="flag", order=2, notifies=False)
-        case Message() | Question() | Approval() | HeldChange() | Answer() | Review():
-            return Rank(name="waiting on you", order=0, notifies=True)
+            return ItemKind(rank=FLAG, asks=False, answers=[READ, LATER])
+        case Message() | Question():
+            return ItemKind(rank=WAITS_ON_YOU, asks=True, answers=[READ, LATER])
+        case Answer() | Review():
+            return ItemKind(rank=WAITS_ON_YOU, asks=False)
+
+
+def ranked(reason: Reason) -> Rank:
+    """Return the rank of an item of `reason`'s kind (`kind_of`), which the review orders by (`page/src/review.ts`) and the desktop notices read (`Delivery.noticed`).
+
+    >>> ranked(Stop(why="Done."))
+    Rank(name='news', order=1, notifies=False)
+    >>> ranked(Message(kind="note", text="It rests on the cache.")).name
+    'news'
+    """
+    return kind_of(reason).rank
+
+
+class Spent(Model):
+    """A verb an item's kind answers to that does nothing on one a later item replaced, and why, as the line of keys says it: `superseded by @70, not approved`."""
+
+    verb: str
+    says: str
 
 
 class Reply(Model):
@@ -1042,6 +1147,53 @@ class Item(Model):
     def rank(self) -> Rank:
         """Its kind's rank (`ranked`), carried with it to the dashboard's page, whose review orders by it."""
         return ranked(self.reason)
+
+    @computed_field
+    @property
+    def asks(self) -> bool:
+        """Whether it needs the operator as it stands (`asks`): what counts as waiting on them, carried with it to the page, whose counts read it."""
+        return asks(self.recipient, self.reason, self.state)
+
+    @property
+    def waits(self) -> bool:
+        """Say whether it waits on the operator's word, of any kind: theirs, standing nowhere yet or put back to wait."""
+        return self.recipient == Operator() and isinstance(self.state, Waiting)
+
+    @property
+    def answers(self) -> list[Answering]:
+        """Return how the operator answers an item of its kind (`kind_of`), wherever it stands: none where a reply doesn't answer it, as their own words."""
+        kind = kind_of(self.reason)
+        return (
+            kind.answers
+            if kind.whoever or isinstance(self.sender, Conversation)
+            else []
+        )
+
+    @computed_field
+    @property
+    def offers(self) -> list[Offer]:
+        """What the operator can do with it, which the page's keys read and nothing else: each answer of its kind while it waits on them, so no view can go on offering approve on what's answered; and a comment on it whole, whatever it stands at, since anything shown can be commented on and what's said on it reaches an agent (`Delivery.reviewed`)."""
+        comment = Offer(
+            action=COMMENTED,
+            argument={"number": self.number},
+            verb="comment",
+            says="comment on it",
+        )
+        answers = self.answers if self.waits else []
+        return [*(each.offer(self.number) for each in answers), comment]
+
+    @computed_field
+    @property
+    def spent(self) -> list[Spent]:
+        """Each verb that would have answered it, where a later one replaced it: said on the line of keys rather than going on to what's around it, since the operator may well think they answered it."""
+        match self.state:
+            case Superseded(by=by):
+                return [
+                    Spent(verb=each.verb, says=replaced_by(by, each))
+                    for each in self.answers
+                ]
+            case _:
+                return []
 
     def of(self, repository: Path) -> bool:
         """Say whether it's of the repository whose git directory is `repository` alone: each conversation it's from, to or for is of it, and an approval is about it; one between the operator and themselves alone is of none."""
@@ -1409,8 +1561,17 @@ class ItemNode(Node):
         ]
 
 
+def replaced_by(by: int, answer: Answering) -> str:
+    """Say that `answer` doesn't apply, the item having been superseded by item `by`.
+
+    >>> replaced_by(70, APPROVE)
+    'superseded by @70, not approved'
+    """
+    return f"superseded by {cited(by)}, not {answer.did}"
+
+
 def asks(recipient: Party, reason: Reason, state: State) -> bool:
-    """Say whether an item for `recipient`, of `reason`, standing at `state`, waits on the operator: theirs, of a kind that waits on them (`ranked`), and waiting, standing nowhere yet or put back to wait.
+    """Say whether an item for `recipient`, of `reason`, standing at `state`, waits on the operator: theirs, of a kind that needs them (`kind_of`), and waiting, standing nowhere yet or put back to wait.
 
     >>> asks(Operator(), Question(text="Which?"), Waiting())
     True
@@ -1418,9 +1579,7 @@ def asks(recipient: Party, reason: Reason, state: State) -> bool:
     False
     """
     return (
-        recipient == Operator()
-        and ranked(reason).name == "waiting on you"
-        and isinstance(state, Waiting)
+        recipient == Operator() and kind_of(reason).asks and isinstance(state, Waiting)
     )
 
 

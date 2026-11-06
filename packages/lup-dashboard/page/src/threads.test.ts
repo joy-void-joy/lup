@@ -2,6 +2,7 @@
 // conversation from where the operator read it, what came before folded and read as it opens, a check, the operator's
 // words, a message between agents folded to its header, a thread's "since you approved", what the verbs do on a
 // thread's banner, and where what's written there goes.
+import { hosted } from "./fixtures/kinds";
 import "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
@@ -50,7 +51,7 @@ const LEAD = from("s1");
 const WORKER = from("s1", "a1");
 
 function item(number: number, sender: Conversation, reason: Item["reason"], rank: Item["rank"] = NEWS, made: string = AT): Item {
-    return {
+    return hosted({
         number,
         reason,
         sender,
@@ -62,7 +63,7 @@ function item(number: number, sender: Conversation, reason: Item["reason"], rank
         made,
         state: { state: "waiting" },
         rank,
-    };
+    });
 }
 
 function note(number: number, sender: Conversation, text: string, to: Conversation | null = null): Item {
@@ -392,7 +393,7 @@ describe("the review grouped by thread", () => {
     });
 
     it("leaves nothing on a thread's banner that no longer waits: a question answered is the thread's history", () => {
-        const answered = { ...QUESTION, state: { state: "answered", at: AT, by: 60 } } as unknown as Item;
+        const answered = hosted({ ...QUESTION, state: { state: "answered", at: AT, answer: 60 } });
         const read = { ...READER, state: "working", section: "every thread", asks: [] } as ThreadRead;
         const threads = threading(false, [[302, shown(read, READER_WHOLE.entries.filter((each) => each.spot.node !== 311), [NOTE, BETWEEN, answered])]]);
         const reads = { ...threads.read, threads: threads.read.threads.map((each) => (each.thread.number === 302 ? read : each)) };
@@ -518,7 +519,7 @@ describe("the review grouped by thread", () => {
         expect(out.regions.find((each) => each.item.number === 70)?.folds.find((each) => each.kind === "item")?.closed).toBe(false);
     });
     it("folds what no longer waits in a thread's conversation to its header, its history", () => {
-        const answered = { ...QUESTION, state: { state: "answered", at: AT, by: 60 } } as unknown as Item;
+        const answered = hosted({ ...QUESTION, state: { state: "answered", at: AT, answer: 60 } });
         const read = { ...READER, asks: [{ node: 311, what: "a check", came: AT }] } as ThreadRead;
         const threads = threading(false, [[302, shown(read, READER_WHOLE.entries, [NOTE, BETWEEN, answered], { checks: [CHECK] })]]);
         const reads = { ...threads.read, threads: threads.read.threads.map((each) => (each.thread.number === 302 ? read : each)) };

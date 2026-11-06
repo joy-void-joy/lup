@@ -59,7 +59,8 @@ const WAITING: Item["rank"] = { name: "waiting on you", order: 0, notifies: true
 const NEWS: Item["rank"] = { name: "news", order: 1, notifies: false };
 
 function item(number: number, reason: Item["reason"], rank: Item["rank"] = NEWS, sender: Item["sender"] = PARSER): Item {
-    return { number, reason, sender, recipient: { party: "operator" }, replies: [], citations: [], edits: [], quiet: false, made: AT, state: { state: "waiting" }, rank };
+    // No view reads what the host says an item offers, so these leave it out: each fixture pins what a view lays out of an item.
+    return { number, reason, sender, recipient: { party: "operator" }, replies: [], citations: [], edits: [], quiet: false, made: AT, state: { state: "waiting" }, rank } as unknown as Item;
 }
 
 const text = (value: string) => ({ kind: "text" as const, text: value });
@@ -282,10 +283,8 @@ describe("the views the page lays out itself", () => {
         const approval = producerOf("core", "approval")?.answer({ number: 54 } as never, shownOf(CASES["core approval"]![0]!.given), REPOSITORY)?.blocks;
         expect((approval?.summary ?? []).map((each) => each.text).join("")).toBe("approval · 1 with an ignore · 1 test · 1 unread");
         expect(approval?.blocks.map((each) => each.id)).toEqual(["text", "file reader.py", "file test_reader.py", "file logo.png"]);
-        expect(approval?.offers.map((each) => [each.verb, each.action, each.runs])).toEqual([
-            ["done", "inbox-answer-approval", "send"],
-            ["decline", "inbox-answer-approval", "send"],
-        ]);
+        // What it offers is the host's, on the item: a view can't go on offering what's answered.
+        expect(approval?.offers).toEqual([]);
         const refused = producerOf("core", "approval")?.answer({ number: 54 } as never, shownOf(CASES["core approval"]![2]!.given), REPOSITORY)?.blocks;
         expect(refused?.blocks.at(-1)).toMatchObject({ id: "refused", spans: [{ text: "no files: the copy is gone", tone: "refused" }] });
     });

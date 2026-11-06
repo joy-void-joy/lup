@@ -1418,12 +1418,13 @@ interface Naming {
  * among them, by whom it's from; how many items do, before the threads are read.
  */
 export function waitingOn(read: ThreadsRead | null, landing: ReadonlyMap<number, number>, waiting: readonly Item[]): number {
+    const asking = waiting.filter((each) => each.asks);
     if (read === null) {
-        return waiting.filter((each) => each.rank.name === "waiting on you").length;
+        return asking.length;
     }
     const threads = read.threads.filter((each) => each.section === "waiting on you" || landing.has(each.thread.number));
     const asked = new Set(read.threads.flatMap((each) => (each.asks ?? []).map((ask) => ask.node)));
-    const loose = new Set(waiting.filter((each) => each.rank.name === "waiting on you" && !asked.has(each.number)).map((each) => (each.sender.party === "conversation" ? whose(each.sender) : "lup")));
+    const loose = new Set(asking.filter((each) => !asked.has(each.number)).map((each) => (each.sender.party === "conversation" ? whose(each.sender) : "lup")));
     return threads.length + loose.size;
 }
 

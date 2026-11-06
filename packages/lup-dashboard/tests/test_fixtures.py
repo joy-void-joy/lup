@@ -1,7 +1,8 @@
-"""The page's fixtures, held to what lup's Python says: the looks the page's tests read are those the host gives it, each view the page lays out itself answers blocks its module's Python can, and the conversation its tests lay out is `Transcripts`' own answer."""
+"""The page's fixtures, held to what lup's Python says: the looks the page's tests read are those the host gives it, each view the page lays out itself answers blocks its module's Python can, the items its tests lay out say what the host's table of kinds says, and the conversation its tests lay out is `Transcripts`' own answer."""
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import override
@@ -20,7 +21,28 @@ from lup_dev.host.workers import Viewing
 from lup_dev.inbox.exchanges import Exchanges
 from lup_dev.inbox.marks import MarkStore, StoredMarks
 from lup_dev.inbox.protocol import Exchanged
+from lup_dev.inbox.store import (
+    Answer,
+    Approval,
+    Done,
+    Ended,
+    Flagged,
+    Friction,
+    HeldChange,
+    HowItFelt,
+    Item,
+    Message,
+    Question,
+    Reason,
+    Review,
+    State,
+    Stop,
+    Superseded,
+    Unresolved,
+    Waiting,
+)
 from lup_dev.layout import Layout
+from lup_ledger.parties import Conversation, Operator, Party
 
 FIXTURES = Path(__file__).resolve().parents[1] / "page" / "src" / "fixtures"
 
@@ -89,6 +111,84 @@ def test_each_view_the_page_lays_out_answers_blocks_its_module_s_python_can() ->
         assert {each.kind for each in every if isinstance(each, Fold)} <= kinds, name
         offered = [*answer.offers, *(offer for each in every for offer in each.offers)]
         assert {each.verb for each in offered if each.verb is not None} <= verbs, name
+
+
+KINDS = FIXTURES / "kinds.json"
+"""What the host says of an item of each kind, from each party, standing each way: what the page's tests give the items they lay out (`fixtures/kinds.ts`), rather than a table of the page's own."""
+
+
+def kinds() -> list[Item]:
+    """Return an item of each kind, from a conversation and from the operator, waiting on the operator, standing past that, replaced, and waiting on someone else.
+
+    `uv run python -c "import sys; sys.path.insert(0, 'packages/lup-dashboard/tests');
+    import test_fixtures as t; t.KINDS.write_text(t.kinds_written())"`
+    """
+    at = datetime(2026, 10, 1, 12, tzinfo=UTC)
+    agent = Conversation(repository=Path("/r"), runtime="claude", session="s1")
+    reasons: list[Reason] = [
+        Approval(text="?", summary="", repository=Path("/r"), fingerprint="f"),
+        HeldChange(text="?", summary="", worktree=Path("/w"), key="k"),
+        Question(text="?"),
+        Message(kind="note", text="."),
+        Message(kind="problem", text="."),
+        Message(kind="note", text=".", to=agent),
+        Friction(text="."),
+        HowItFelt(text="."),
+        Stop(why="."),
+        Ended(name="a"),
+        Unresolved(of=1, citations=[]),
+        Flagged(text=".", summary="", worktree=Path("/w"), path=Path("a")),
+        Answer(question=1),
+        Review(covers=[]),
+    ]
+    standing: list[tuple[Party, Party, State]] = [
+        (agent, Operator(), Waiting()),
+        (agent, Operator(), Done(at=at)),
+        (agent, Operator(), Superseded(at=at, by=9)),
+        (agent, agent, Waiting()),
+        (Operator(), Operator(), Waiting()),
+    ]
+    return [
+        Item(
+            number=7,
+            reason=reason,
+            sender=sender,
+            recipient=recipient,
+            state=state,
+            made=at,
+        )
+        for reason in reasons
+        for sender, recipient, state in standing
+    ]
+
+
+def kinds_written() -> str:
+    """Return `kinds.json` as the host's table of kinds says it: what each is, and what the host says of it, a line each."""
+    rows = [
+        json.dumps(
+            {
+                "reason": each.reason.model_dump(mode="json")["reason"],
+                "kind": getattr(each.reason, "kind", None),
+                "to": getattr(each.reason, "to", None) is not None,
+                "sender": each.sender.party,
+                "recipient": each.recipient.party,
+                "state": each.state.state,
+                "rank": each.rank.name,
+                "asks": each.asks,
+                "offers": [offer.model_dump(mode="json") for offer in each.offers],
+                "spent": [spent.model_dump(mode="json") for spent in each.spent],
+            }
+        )
+        for each in kinds()
+    ]
+    return "[\n" + ",\n".join(rows) + "\n]\n"
+
+
+def test_the_items_the_page_s_tests_lay_out_say_what_the_host_s_table_of_kinds_says() -> (
+    None
+):
+    """`kinds.json` is what each kind is to the host: rewrite it where this fails (`kinds`)."""
+    assert KINDS.read_text() == kinds_written()
 
 
 CONVERSATION = FIXTURES / "conversation.json"

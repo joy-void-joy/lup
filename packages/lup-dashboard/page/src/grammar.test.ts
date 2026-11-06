@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import { hosted, KINDS, type Said } from "./fixtures/kinds";
 import "./fixtures/looks";
-import { chainAt, isMarked, listed, marking, markedPart, seenAct, type Act, type Marked } from "./grammar";
-import { EMPTY, type Conversation, type Placed } from "./review";
+import { chainAt, isMarked, listed, marking, markedPart, reachOf, seenAct, type Act, type Marked, type Verb } from "./grammar";
+import { EMPTY, laid, type Around, type Conversation, type Item, type Placed } from "./review";
 import type { Offer } from "./views";
 
 const HOLD: Offer = { action: "set-holding", argument: { launch: "l1", session: "s1", agent: null, on: true }, verb: "hold", chord: null, runs: "send", commented: false, says: "hold their writes" };
@@ -115,5 +116,77 @@ describe("review marks", () => {
         expect(markedPart(settled, called, unnamed)).toEqual({ kind: "said", text: "@voice settled" });
         // A check ticked marks no thread.
         expect(markedPart(mark("inbox-check-answer", { number: 311 }, "tick it"), called, named)).toEqual({ kind: "said", text: "tick it" });
+    });
+});
+
+/** An item of the kind `said` is of, as `kinds.json` has it. */
+function written(said: Said): Item {
+    const agent = { party: "conversation", repository: "/r", runtime: "claude", session: "s1" } as const;
+    const party = (name: string) => (name === "operator" ? { party: "operator" as const } : agent);
+    const state = said.state === "superseded" ? { state: "superseded", at: "2026-10-01T12:00:00Z", by: 9 } : said.state === "done" ? { state: "done", at: "2026-10-01T12:00:00Z" } : { state: "waiting" };
+    return hosted({
+        number: 7,
+        reason: { reason: said.reason, kind: said.kind, to: said.to ? agent : null, text: ".", why: ".", passages: [], answers: [], ending: false, citations: [], covers: [], comments: [], decisions: [], rulings: [], comment: "", summary: "" } as unknown as Item["reason"],
+        sender: party(said.sender),
+        recipient: party(said.recipient),
+        replies: [],
+        citations: [],
+        edits: [],
+        quiet: false,
+        made: "2026-10-01T12:00:00Z",
+        state: state as Item["state"],
+        rank: { name: "news", order: 1, notifies: false },
+    });
+}
+
+const VERBS: Verb[] = [
+    { name: "done", key: "d", called: "done" },
+    { name: "decline", key: "x", called: "decline" },
+    { name: "send", key: "s", called: "send to" },
+    { name: "comment", key: "c", called: "comment" },
+];
+
+describe("what the host offers on an item", () => {
+    it("is what the host's table of kinds says of each kind, from each party, standing each way", () => {
+        for (const said of KINDS) {
+            const item = written(said);
+            const name = JSON.stringify([said.reason, said.kind, said.to, said.sender, said.recipient, said.state]);
+            expect([name, item.asks, item.offers, item.spent]).toEqual([name, said.asks, said.offers, said.spent]);
+        }
+    });
+
+    it("reaches only what it offers, and says why on what a later item replaced, going on outward from anything else", () => {
+        const around: Around = { contexts: new Map(), files: new Map(), answers: [], commented: [] };
+        const called = (each: Conversation) => each.session;
+        for (const said of KINDS) {
+            const item = written(said);
+            const out = laid([item], [], () => "━━ banner ━━", () => "── item ──", EMPTY, around);
+            const at = out.text.indexOf("── item ──");
+            for (const verb of VERBS) {
+                const reach = reachOf(out, at, verb, { called });
+                const name = JSON.stringify([said.reason, said.kind, said.to, said.sender, said.recipient, said.state, verb.name]);
+                const offer = item.offers.find((each) => each.verb === verb.name);
+                const spent = item.spent.find((each) => each.verb === verb.name);
+                const on = reach.on === null ? null : reach.node.id;
+                // What no longer offers a verb never reaches the item itself: it goes on to its group, or to nothing.
+                expect([name, on === "item 7" ? reach.says : null]).toEqual([name, offer?.says ?? spent?.says ?? null]);
+            }
+        }
+    });
+
+    it("marks a key's answer in the draft's list the host names, and opens a comment", () => {
+        const approval = KINDS.find((each) => each.reason === "approval" && each.sender === "operator" && each.state === "waiting");
+        const item = written(approval as Said);
+        const around: Around = { contexts: new Map(), files: new Map(), answers: [], commented: [] };
+        const out = laid([item], [], () => "━━ banner ━━", () => "── item ──", EMPTY, around);
+        const at = out.text.indexOf("── item ──");
+        const acts = (name: string) => {
+            const reach = reachOf(out, at, VERBS.find((each) => each.name === name) as Verb, { called: (each) => each.session });
+            return reach.on === null ? null : reach.acts;
+        };
+        expect(acts("done")).toEqual([{ kind: "item", number: 7, list: "done" }]);
+        expect(acts("decline")).toEqual([{ kind: "item", number: 7, list: "declined" }]);
+        expect(acts("send")).toEqual([{ kind: "item", number: 7, list: "parked" }]);
+        expect(acts("comment")).toEqual([{ kind: "comment" }]);
     });
 });

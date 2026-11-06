@@ -259,9 +259,9 @@ export interface OfItem {
  * Return the view of an item that changes files, an approval, a held change or a flagged write: its summary, what it
  * is (`what`) and how its files read, as the host has answered them (`tally`), and whether the judge is still reading
  * an approval's types; its body, its text, then each file it changes, whole (`judged`, `first` where it's a first
- * approval's), or a line saying why the host showed none; and what it offers.
+ * approval's), or a line saying why the host showed none. What it offers is the host's (`Item.offers`).
  */
-export function changed(item: Item, what: string, text: string, shown: Shown, first: boolean, offers: Offer[]): Answer {
+export function changed(item: Item, what: string, text: string, shown: Shown, first: boolean): Answer {
     const files = shown.beyond.files.get(item.number);
     const counted = files !== undefined && "shown" in files ? tally(files.shown, first) : "";
     const typing = item.reason.reason === "approval" && item.reason.typing;
@@ -271,7 +271,7 @@ export function changed(item: Item, what: string, text: string, shown: Shown, fi
         summary: summary.map((each, at) => ({ text: at === 0 ? each : ` · ${each}`, tone: "plain" })),
         waiting: false,
         count: 0,
-        offers,
+        offers: [],
         blocks: [
             { block: "markdown", id: "text", version: null, offers: [], text, tone: "plain" },
             ...(files !== undefined && "shown" in files ? files.shown.map((each) => judged(each, first)) : []),
@@ -281,21 +281,7 @@ export function changed(item: Item, what: string, text: string, shown: Shown, fi
     return { blocks };
 }
 
-/** Return what approving and declining an item offers, Space d and Space x, as the reply is sent, a comment on it implying approval where `commented`. */
-export function answering(item: Item, commented: boolean): Offer[] {
-    const answer = (approved: boolean): Offer => ({
-        action: "inbox-answer-approval",
-        argument: { number: item.number, approved },
-        verb: approved ? "done" : "decline",
-        chord: null,
-        runs: "send",
-        commented: approved && commented,
-        says: approved ? "approve" : "decline",
-    });
-    return [answer(true), answer(false)];
-}
-
-/** A held change: what it holds, a landing or a change, its text and summary, its files; approving or declining it, a comment on it approving it with the comment. */
+/** A held change: what it holds, a landing or a change, its text and summary, its files. */
 export const HELD: View<OfItem> = {
     module: "judge",
     view: "held",
@@ -305,7 +291,7 @@ export const HELD: View<OfItem> = {
             return null;
         }
         const reason = item.reason;
-        return changed(item, reason.landing == null ? "held change" : "holds a landing", `${reason.text}\n${reason.summary}`, shown, false, answering(item, true));
+        return changed(item, reason.landing == null ? "held change" : "holds a landing", `${reason.text}\n${reason.summary}`, shown, false);
     },
 };
 
@@ -318,7 +304,7 @@ export const FLAGGED: View<OfItem> = {
         if (item?.reason.reason !== "flagged") {
             return null;
         }
-        return changed(item, "landed, flagged", `${item.reason.text}\n${item.reason.summary}`, shown, false, []);
+        return changed(item, "landed, flagged", `${item.reason.text}\n${item.reason.summary}`, shown, false);
     },
 };
 

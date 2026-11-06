@@ -1,3 +1,4 @@
+import { hosted } from "./fixtures/kinds";
 import "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
@@ -9,7 +10,7 @@ type Item = components["schemas"]["Item"];
 const AT = "2026-10-17T12:00:00Z";
 
 function note(text: string, fields: Partial<Item> = {}): Item {
-    return {
+    return hosted({
         number: 7,
         reason: { reason: "message", passages: [], answers: [], ending: true, kind: "note", text },
         sender: { party: "conversation", repository: "/r/.git", runtime: "claude", session: "s1", agent: null },
@@ -22,7 +23,7 @@ function note(text: string, fields: Partial<Item> = {}): Item {
         state: { state: "waiting" },
         rank: { name: "news", order: 1, notifies: false },
         ...fields,
-    };
+    });
 }
 
 const FOUND: Citation = {

@@ -114,32 +114,7 @@
       ],
       "waiting": false,
       "count": 0,
-      "offers": [
-        {
-          "action": "inbox-answer-approval",
-          "argument": {
-            "number": 54,
-            "approved": true
-          },
-          "verb": "done",
-          "chord": null,
-          "runs": "send",
-          "commented": false,
-          "says": "approve"
-        },
-        {
-          "action": "inbox-answer-approval",
-          "argument": {
-            "number": 54,
-            "approved": false
-          },
-          "verb": "decline",
-          "chord": null,
-          "runs": "send",
-          "commented": false,
-          "says": "decline"
-        }
-      ],
+      "offers": [],
       "blocks": [
         {
           "block": "markdown",
@@ -337,32 +312,7 @@
       ],
       "waiting": false,
       "count": 0,
-      "offers": [
-        {
-          "action": "inbox-answer-approval",
-          "argument": {
-            "number": 64,
-            "approved": true
-          },
-          "verb": "done",
-          "chord": null,
-          "runs": "send",
-          "commented": false,
-          "says": "approve"
-        },
-        {
-          "action": "inbox-answer-approval",
-          "argument": {
-            "number": 64,
-            "approved": false
-          },
-          "verb": "decline",
-          "chord": null,
-          "runs": "send",
-          "commented": false,
-          "says": "decline"
-        }
-      ],
+      "offers": [],
       "blocks": [
         {
           "block": "markdown",
@@ -490,32 +440,7 @@
       ],
       "waiting": false,
       "count": 0,
-      "offers": [
-        {
-          "action": "inbox-answer-approval",
-          "argument": {
-            "number": 54,
-            "approved": true
-          },
-          "verb": "done",
-          "chord": null,
-          "runs": "send",
-          "commented": false,
-          "says": "approve"
-        },
-        {
-          "action": "inbox-answer-approval",
-          "argument": {
-            "number": 54,
-            "approved": false
-          },
-          "verb": "decline",
-          "chord": null,
-          "runs": "send",
-          "commented": false,
-          "says": "decline"
-        }
-      ],
+      "offers": [],
       "blocks": [
         {
           "block": "markdown",
