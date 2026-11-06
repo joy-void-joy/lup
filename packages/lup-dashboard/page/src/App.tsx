@@ -949,7 +949,7 @@ export function App() {
         const applied: string[] = [];
         const said: ReplyPart[] = [];
         const reviews = new Map<string, { conversation: InboxConversation; place: Placing; decline: boolean; files: Viewed[]; ids: string[] }>();
-        const moving = new Map<string, { repository: string; module: string; marks: { key: Record<string, unknown>; up_to: string | null }[]; ids: string[] }>();
+        const moving = new Map<string, { repository: string; module: string; marks: { key: Record<string, unknown>; up_to: string | null; through: string | null; forward: boolean; seen: boolean }[]; ids: string[] }>();
         // What's moved from the pile, by where it goes: one request each, a thread opened once for all of them.
         const gathering = new Map<string, { thread: number | null; title: string | null; numbers: number[]; says: string; ids: string[] }>();
         for (const mark of marks) {
@@ -979,7 +979,7 @@ export function App() {
                     const argument = mark.argument as unknown as Moved;
                     const key = JSON.stringify([argument.repository, argument.module]);
                     const was = moving.get(key) ?? { repository: argument.repository, module: argument.module, marks: [], ids: [] };
-                    moving.set(key, { ...was, marks: [...was.marks, { key: argument.key, up_to: argument.up_to ?? null }], ids: [...was.ids, mark.id] });
+                    moving.set(key, { ...was, marks: [...was.marks, { key: argument.key, up_to: argument.up_to ?? null, through: argument.through ?? null, forward: argument.forward ?? false, seen: false }], ids: [...was.ids, mark.id] });
                     break;
                 }
                 case "set-holding": {

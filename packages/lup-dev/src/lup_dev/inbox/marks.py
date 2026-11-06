@@ -12,8 +12,14 @@ since one file shows in an approval and in "since you approved" alike; and
 says how far in its own terms (`ReviewMark.up_to`: a file's version as git
 names its content, a conversation's step, a thread's last node read).
 
+A mark on what comes in order only goes forward (`further`), so a page that's
+behind, a phone's or a draft's, never takes back what another moved it past; and
+says what had come by the point it's up to (`ReviewMark.through`), so what came
+between what was shown and the host hearing of it stays new.
+
 Each mark moved is an edge the operator draws on the ledger (`Reviewed`), so
-every move stays, a record of what they reviewed when, and the latest drawn for
+every move stays, a record of what they reviewed when, and whether they marked it
+or it was on screen long enough (`ReviewMark.seen`), and the latest drawn for
 a key is its mark. It's drawn to the node it's on where it's on one, a thread
 keyed `{"node": 12}`; else to the node standing for its module's marks in its
 repository (`Reviewing`), since a file of a branch or a conversation is no node
@@ -128,7 +134,48 @@ class ReviewMark(Model):
     thread's last node read; none where its module says only when, or a file
     was reviewed deleted."""
     at: datetime
-    """When the operator moved it there: as their reply was sent."""
+    """When the operator moved it there: as their reply was sent, or what it's
+    up to left their screen."""
+    through: datetime | None = None
+    """What had come by the point it's up to, in a module whose marks read things
+    by when they came as well as how far (Transcripts' items): what came after it
+    is new, however long before `at`; none reads by `at`, as a mark did before it
+    said."""
+    seen: bool = False
+    """Whether it moved by being on screen, rather than by the operator's key or
+    their words (`docs/dashboard.md`, *Review marks*)."""
+
+
+def number_of(up_to: str | None) -> int | None:
+    """Return the step or the item a mark is up to, in a module whose marks go by them; none where it says no number, as a file's version.
+
+    >>> number_of("12"), number_of("-1"), number_of("a1b2"), number_of(None)
+    (12, -1, None, None)
+    """
+    if up_to is None or not up_to.removeprefix("-").isdecimal():
+        return None
+    return int(up_to)
+
+
+def further(mark: ReviewMark, kept: ReviewMark | None) -> bool:
+    """Say whether `mark` is further on than `kept`, the mark it would replace: by the step or item it's up to, then by what had come by then; one that says no number moves wherever it's told.
+
+    >>> from datetime import UTC
+    >>> now = datetime(2026, 10, 18, tzinfo=UTC)
+    >>> on = lambda up_to: ReviewMark(key={}, up_to=up_to, at=now)
+    >>> further(on("7"), None), further(on("7"), on("3")), further(on("3"), on("7"))
+    (True, True, False)
+    >>> further(on("7"), on("7"))
+    False
+    """
+    if kept is None:
+        return True
+    to, was = number_of(mark.up_to), number_of(kept.up_to)
+    if to is None or was is None:
+        return True
+    if to != was:
+        return to > was
+    return (mark.through or mark.at) > (kept.through or kept.at)
 
 
 class ModuleMarks(Model):
@@ -183,6 +230,8 @@ class Reviewed(Edge):
     module: str
     key: Key
     up_to: str | None = None
+    through: datetime | None = None
+    seen: bool = False
 
     @override
     def refused(self, source: Node | None, target: Node) -> str | None:
@@ -201,7 +250,13 @@ class Reviewed(Edge):
 
     def mark(self) -> ReviewMark:
         """Return it as the mark it says."""
-        return ReviewMark(key=self.key, up_to=self.up_to, at=self.at)
+        return ReviewMark(
+            key=self.key,
+            up_to=self.up_to,
+            at=self.at,
+            through=self.through,
+            seen=self.seen,
+        )
 
 
 KINDS = Kinds(nodes=[Reviewing], edges=[Reviewed])
@@ -311,6 +366,8 @@ class MarkStore(MutableModel, arbitrary_types_allowed=True):
                     module=module,
                     key=mark.key,
                     up_to=mark.up_to,
+                    through=mark.through,
+                    seen=mark.seen,
                 )
             )
 
@@ -367,6 +424,14 @@ class Moving(Model):
 
     key: Key
     up_to: str | None = None
+    through: datetime | None = None
+    """What had come by the point it's up to, as the view showing it said
+    (`ReviewMark.through`)."""
+    forward: bool = False
+    """Whether it only goes forward, what it's on coming in order (`further`):
+    behind where it stands, it's left there. The core's always do."""
+    seen: bool = False
+    """Whether it moves by being on screen, rather than by the operator's key."""
 
 
 class MoveMarks(Request, reads=False):
@@ -453,9 +518,26 @@ class MarksMoving(Model, Handler[MoveMarks], arbitrary_types_allowed=True):
             )
             raise HostError(message)
         at = self.clock.now()
+
+        def mark(each: Moving) -> ReviewMark:
+            return ReviewMark(
+                key=each.key,
+                up_to=each.up_to,
+                at=at,
+                through=each.through,
+                seen=each.seen,
+            )
+
         marks = [
-            ReviewMark(key=each.key, up_to=each.up_to, at=at) for each in request.marks
+            mark(each)
+            for each in request.marks
+            if not (each.forward or request.module == CORE)
+            or further(
+                mark(each), self.store.of(request.repository, request.module, each.key)
+            )
         ]
+        if not marks:
+            return MarksMoved(marks=[])
         await asyncio.to_thread(
             self.store.moved, request.repository, request.module, marks
         )
@@ -544,8 +626,16 @@ class ReviewMarks(MutableModel, arbitrary_types_allowed=True):
         [found] = await self.of([key])
         return found
 
-    def offer(self, key: Key, up_to: str | None, says: str) -> Offer:
-        """Return the offer of moving the mark on what `key` names to `up_to`, Space `d` on what it's shown on, applied as the reply is sent: the core's request (`MoveMarks`), so a module names no action of its own for it.
+    def offer(
+        self,
+        key: Key,
+        up_to: str | None,
+        says: str,
+        *,
+        through: datetime | None = None,
+        forward: bool = False,
+    ) -> Offer:
+        """Return the offer of moving the mark on what `key` names to `up_to`, Space `d` on what it's shown on, applied as the reply is sent: the core's request (`MoveMarks`), so a module names no action of its own for it; `through` saying what had come by then, and `forward` that it goes no further back.
 
         >>> class Nowhere(Marks):
         ...     async def kept(self, repository, module, keys): return []
@@ -561,6 +651,8 @@ class ReviewMarks(MutableModel, arbitrary_types_allowed=True):
                 "module": self.module,
                 "key": dict(key),
                 "up_to": up_to,
+                **({} if through is None else {"through": through.isoformat()}),
+                **({"forward": True} if forward else {}),
             },
             verb="done",
             says=says,

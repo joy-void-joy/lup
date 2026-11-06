@@ -77,6 +77,7 @@ from lup_transcripts.environment.conversation import (
     call_blocks,
     conversation_blocks,
     exchange_blocks,
+    latest,
 )
 from lup_transcripts.environment.messages import (
     OfMessages,
@@ -85,7 +86,8 @@ from lup_transcripts.environment.messages import (
 )
 
 if TYPE_CHECKING:
-    from lup_dev.host.records import Record, Records
+    from lup_dev.host.records import Entry, Record, Records
+    from lup_dev.inbox.protocol import Exchanged
     from lup_transcripts.environment.module import Transcripts
 
 
@@ -462,6 +464,18 @@ class TranscriptsServing(ModuleServing):
             EARLIER_KIND,
         )
 
+    def reading(
+        self, key: JsonObject, entries: list[Entry], exchanged: Exchanged, says: str
+    ) -> lup.Offer:
+        """Return the offer of moving a drawer's review mark on `key` as far as its view shows, what had come by then with it, so what comes before the operator's reply is sent stays new; going no further back."""
+        return self.marks.offer(
+            key,
+            str(len(entries) - 1),
+            says,
+            through=latest(entries, exchanged),
+            forward=True,
+        )
+
     def last_words(self, of: OfAgent) -> str:
         """Return what `of` last said, from their runtime's record, each read again only once it changed (`Recording`): what a subagent's parent is handed by their runtime, which no item holds; nothing where their record isn't read."""
         try:
@@ -501,9 +515,7 @@ class TranscriptsServing(ModuleServing):
             brief=read.transcript.brief,
             earlier=self.earlier(),
             mark=await self.marks.mark(key),
-            reading=self.marks.offer(
-                key, str(len(entries) - 1), "mark their messages read"
-            ),
+            reading=self.reading(key, entries, exchanged, "mark their messages read"),
         )
 
     @lup.view(watch=GROWING)
@@ -517,16 +529,19 @@ class TranscriptsServing(ModuleServing):
             viewed.agent,
         )
         exchanged = await self.exchanges.exchanged(viewed)
+        entries = read.transcript.entries
+        key = read_messages(viewed)
         return await asyncio.to_thread(
             earlier_messages_blocks,
             viewed,
-            read.transcript.entries,
+            entries,
             exchanged,
             view=TranscriptsServing.earlier_messages,
             report=self.last_words,
             brief=read.transcript.brief,
             earlier=self.earlier(),
-            mark=await self.marks.mark(read_messages(viewed)),
+            mark=await self.marks.mark(key),
+            reading=self.reading(key, entries, exchanged, "mark their messages read"),
         )
 
     @lup.view(
@@ -553,7 +568,7 @@ class TranscriptsServing(ModuleServing):
             call=TranscriptsServing.call,
             earlier=self.earlier(),
             mark=await self.marks.mark(key),
-            reading=self.marks.offer(key, str(len(entries) - 1), "mark it read"),
+            reading=self.reading(key, entries, exchanged, "mark it read"),
         )
 
     @lup.view(watch=GROWING)
@@ -567,14 +582,17 @@ class TranscriptsServing(ModuleServing):
             viewed.agent,
         )
         exchanged = await self.exchanges.exchanged(viewed)
+        entries = read.transcript.entries
+        key = drawn(viewed)
         return exchange_blocks(
             viewed,
-            read.transcript.entries,
+            entries,
             exchanged,
             exchange=TranscriptsServing.exchange,
             call=TranscriptsServing.call,
             earlier=self.earlier(),
-            mark=await self.marks.mark(drawn(viewed)),
+            mark=await self.marks.mark(key),
+            reading=self.reading(key, entries, exchanged, "mark it read"),
         )
 
     @lup.view(watch=lup.Watch(on=[lup.CallFinished]))
