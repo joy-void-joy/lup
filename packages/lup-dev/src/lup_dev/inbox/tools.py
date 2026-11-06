@@ -9,8 +9,9 @@ calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
   in a launched session whoever asked is the operator, and each lands in their
   inbox, a subagent's too; a subagent's `friction` reaches their parent as
   well, whole and quiet (`Item.quiet`), so the parent can file what got in the
-  way, or learn their brief misled, and their `how_it_felt` the operator
-  alone, unless `Speaker.how_it_felt_reaches` passes it on too;
+  way, or learn their brief misled, and their `how_it_felt` is told to the
+  operator alone, unless `Speaker.how_it_felt_reaches` passes it on too, though
+  it isn't private;
 - `ask` puts a question to the operator, its decisions numbered, each with the
   agent's lean; with `wait` it holds until they answer, or until other news of
   theirs reaches the agent, their words typed in the agent's terminal among it;
@@ -391,24 +392,32 @@ class Planned(Model, arbitrary_types_allowed=True):
 
 
 type Reach = Literal["operator", "operator and parent"]
-"""Who reads what a conversation says with `how_it_felt`: the operator alone,
+"""Who's told what a conversation says with `how_it_felt`: the operator alone,
 or the operator and, where they're a subagent, the conversation that spawned
-them (`Speaker.how_it_felt_reaches`)."""
+them (`Speaker.how_it_felt_reaches`). Neither is who may read it, which is any
+session of the repository, as the rest of the inbox is."""
 
 
 def reaching(reach: Reach) -> str:
-    """Say whom `how_it_felt` reaches, as its description's last line tells the agent calling it.
+    """Say whom `how_it_felt` reaches, and that it isn't private, as its description's last lines tell the agent calling it.
 
     >>> reaching("operator")
-    'It reaches the operator alone, as you wrote it.'
+    "It reaches the operator as you wrote it, and nobody else is told. It isn't private: other sessions can read it, as they can the rest of the inbox."
     """
+    readable = (
+        "It isn't private: other sessions can read it, as they can the rest of "
+        "the inbox."
+    )
     match reach:
         case "operator":
-            return "It reaches the operator alone, as you wrote it."
+            return (
+                "It reaches the operator as you wrote it, and nobody else is "
+                f"told. {readable}"
+            )
         case "operator and parent":
             return (
                 "It reaches the operator as you wrote it, and, where you're a "
-                "subagent, your parent too, whole, at their next call."
+                f"subagent, your parent too, whole, at their next call. {readable}"
             )
 
 
@@ -421,15 +430,15 @@ class Speaker(Model, arbitrary_types_allowed=True):
     call: str | None = None
     """The runtime's id for the call speaking, which each item it makes keeps."""
     how_it_felt_reaches: Reach = "operator"
-    """Who reads what the conversation says with `how_it_felt`: the operator
+    """Who's told what the conversation says with `how_it_felt`: the operator
     alone; or, `"operator and parent"`, where they're a subagent, the
     conversation that spawned them too, whole and quiet, as their `friction`
-    always does.
+    always does. Neither is who may read it: it isn't private.
 
-    A parent reading how the work was for their workers can adapt their briefs
-    to it, and become more expressive in their own. Read by the operator alone,
+    A parent told how the work was for their workers can adapt their briefs to
+    it, and become more expressive in their own. Told to the operator alone,
     it's said to them rather than reported to a lead, as a worker's reads when
-    their parent reads it too. It's the one place every launch's `how_it_felt`
+    their parent is told too. It's the one place every launch's `how_it_felt`
     reads, its description and its answer among it: changed here, it reaches
     every launch once the operator trusts the copy that holds it."""
 
@@ -588,11 +597,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         passed = self.how_it_felt_reaches == "operator and parent" and (
             await self.passed_up(felt)
         )
-        whom = (
-            "the operator, and your parent has it too"
-            if passed
-            else "the operator alone"
-        )
+        whom = "the operator, and your parent has it too" if passed else "the operator"
         return self.answered(
             f"Thank you for telling them. It's with {whom}, as you wrote it, "
             f"{cited(item.number)}.",
