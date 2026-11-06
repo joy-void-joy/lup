@@ -134,6 +134,7 @@ from lup_dev.policy.since import ReviewSince, ShowSince
 from lup_dev.policy.waits import Waits
 from lup_dev.policy.waits import routes as waits_routes
 from lup_dev.policy.worktrees import Holding
+from lup_dev.switching import ListCopies, SwitchCopy
 from lup_dev.worker import RepositoryModules
 from lup_ledger.parties import Conversation
 
@@ -412,6 +413,20 @@ def unread(withholding: Withholding) -> list[Route]:
     ]
 
 
+def unmoved() -> list[Route]:
+    """Route the copies of `lup-dev` kept, and moving the host service to one, to a refusal: the copy holds no copies of `lup-dev`, and moves no service."""
+
+    async def refused(raw: str) -> Reply:
+        del raw
+        message = "the demo over a copy moves no host service, and keeps no copies"
+        raise HostError(message)
+
+    return [
+        Route(kind=ListCopies.named(), answer=refused),
+        Route(kind=SwitchCopy.named(), answer=refused),
+    ]
+
+
 def asked_kinds() -> list[str]:
     """List the kinds the page may ask (`api.Asked`)."""
     [union, _] = get_args(Asked.__value__)
@@ -638,6 +653,7 @@ def taken(
         *waits_routes(waits),
         *timings_routes(TimingsStore(home=timings or lup.host.timings), clock),
         *unread(Withholding()),
+        *unmoved(),
         Route.reading(module_views, watch=module_views.watched),
     ]
     return CopyHost(

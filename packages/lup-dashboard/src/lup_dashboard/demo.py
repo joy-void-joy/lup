@@ -7,7 +7,7 @@ lands. Its data are the host's own models, so it shows what the page would show.
 
 import asyncio
 import hashlib
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, override
@@ -132,6 +132,13 @@ from lup_dev.policy.since import (
     ViewedFile,
 )
 from lup_dev.policy.waits import Awaited, LandingsWaiting, ShowLandings, Wait
+from lup_dev.switching import (
+    CopiesListed,
+    CopyListed,
+    CopySwitching,
+    ListCopies,
+    SwitchCopy,
+)
 from lup_ledger.parties import Conversation, Lup, Operator
 from lup_ledger.threads import Check, Parked, Settled, Thread, TimeCame
 from lup_ledger.threads import Done as ThreadDone
@@ -190,6 +197,26 @@ class Standing(MutableModel):
     tasks: list[Task] = []
 
 
+def stand_in_copies() -> list[CopyListed]:
+    """Return three copies of `lup-dev` kept, as the plain page lists them, the first running."""
+    at = datetime(2026, 11, 6, 14, 2, tzinfo=UTC)
+    subjects = [
+        "Merge the review's new fold: what's folded stays folded across a reload",
+        "Merge fix-the-clock: a tick no longer drifts past the hour",
+        "Merge the way back: copies kept, a switch that falls back, `lup-dev restore`",
+    ]
+    return [
+        CopyListed(
+            commit=f"{at_place}c0ffee",
+            subject=subject,
+            approved=at - timedelta(hours=at_place),
+            answered=at - timedelta(hours=at_place) if at_place != 2 else None,
+            running=at_place == 0,
+        )
+        for at_place, subject in enumerate(subjects)
+    ]
+
+
 class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     """A host serving stand-in launches, conversations and items, as of the clock's time, and keeping the operator's draft and where the review lays out its groups in memory; what it can't answer it refuses, saying it's a demo."""
 
@@ -215,6 +242,9 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     """How many steps the parser subagent's conversation has taken since the demo began: one more each time it's asked, so a page following it sees it grow."""
     holding: list[SetHolding] = []
     """The operator's switch turned on for each conversation it holds every flagged write of, kept in memory."""
+    copies: list[CopyListed] = Field(default_factory=stand_in_copies)
+    """The copies of `lup-dev` kept, standing in: the plain page lists them, and a
+    switch moves which runs, moving nothing else."""
     changed: asyncio.Event = Field(default_factory=asyncio.Event)
     """Set once something the page watches changes, and replaced: each watch answers again."""
     typing: bool = True
@@ -417,8 +447,24 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 return await self.viewed(viewing)
             case KeepTimings(report=report):
                 return self.timed(report)
+            case ListCopies():
+                return CopiesListed(copies=self.copies, tables=2)
+            case SwitchCopy(commit=commit):
+                return self.switched(commit)
             case _:
                 return Refused(error=f"the demo doesn't answer `{request.kind}`")
+
+    def switched(self, commit: str) -> Replied:
+        """Have the stand-in copy of `commit` be the one running, moving nothing: the copies are the demo's alone."""
+        matching = [each for each in self.copies if each.commit.startswith(commit)]
+        if len(matching) != 1:
+            return Refused(error=f"no copy kept is of a commit starting {commit}")
+        [chosen] = matching
+        self.copies = [
+            each.model_copy(update={"running": each.commit == chosen.commit})
+            for each in self.copies
+        ]
+        return CopySwitching(commit=chosen.commit, log=Path("demo.log"))
 
     @override
     async def watch(self, request: Asked) -> AsyncGenerator[Replied]:

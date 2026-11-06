@@ -285,6 +285,8 @@ from lup_dev.settings import LupDevSettings, TerminalVariables
 from lup_dev.staging import Changed, Lines, StagingError
 from lup_dev.stored import read_model, write_model
 from lup_dev.switching import (
+    CopiesAnswering,
+    CopySwitch,
     LastSwitch,
     Programs,
     Serving,
@@ -292,6 +294,7 @@ from lup_dev.switching import (
     Switched,
     Switching,
     host_starter,
+    restore_detached,
 )
 from lup_dev.worker import RepositoryModules, worked
 from lup_ledger.parties import Conversation as InboxConversation
@@ -574,6 +577,8 @@ def control_routes(
         *threaded_routes(delivery),
         *timings_routes(TimingsStore(home=layout.host.timings), delivery.clock),
         *([] if views is None else [Route.reading(views, watch=views.watched)]),
+        Route.to(CopiesAnswering(layout=layout)),
+        Route.to(CopySwitch(layout=layout, start=restore_detached(layout))),
     ]
 
 

@@ -32,7 +32,7 @@ from fastapi import (
     Response,
     WebSocket,
 )
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import APIKeyCookie, HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import Field, TypeAdapter
@@ -49,11 +49,13 @@ from lup_dashboard.api import (
     Watched,
 )
 from lup_dashboard.host import Host
+from lup_dashboard.plain import copies_page, signing_in, switching_page
 from lup_dev.host.dashboard import hosted
-from lup_dev.host.protocol import HostError
+from lup_dev.host.protocol import HostError, Refused
 from lup_dev.inbox.protocol import AnswerApproval, Reviewed, SendDraft, Settled
 from lup_dev.inbox.store import Approval, Item
 from lup_dev.settings import Address
+from lup_dev.switching import CopiesListed, CopySwitching, ListCopies, SwitchCopy
 
 
 class Access(Model):
@@ -255,6 +257,49 @@ def application(
         """Say the host service couldn't be reached, as the API's answer."""
         del request
         return JSONResponse(status_code=503, content={"detail": str(failure)})
+
+    async def listed(said: str = "", status_code: int = 200) -> HTMLResponse:
+        """Return the plain page of the copies kept, saying `said` above them, or why they can't be listed."""
+        try:
+            replied = await host.ask(ListCopies())
+        except HostError as failed:
+            return HTMLResponse(copies_page(None, str(failed)), status_code=503)
+        match replied:
+            case CopiesListed():
+                return HTMLResponse(copies_page(replied, said), status_code=status_code)
+            case Refused(error=error):
+                return HTMLResponse(copies_page(None, error), status_code=503)
+            case _:
+                message = f"the host answered `{replied.kind}` to the copies' listing"
+                return HTMLResponse(copies_page(None, message), status_code=503)
+
+    @app.get("/copies", include_in_schema=False)
+    async def copies(
+        held: Annotated[str | None, Depends(cookie)],
+        given: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
+    ) -> HTMLResponse:
+        """Serve the plain page of the copies kept (`plain.py`): no script of the review's, so it works where that doesn't; the page trading the token for the cookie, to a browser without one, whose token is in its fragment, which no request carries."""
+        token = held or (None if given is None else given.credentials) or ""
+        if not secrets.compare_digest(token.encode(), access.token.encode()):
+            return HTMLResponse(signing_in(), status_code=401)
+        return await listed()
+
+    @app.post(
+        "/copies/{commit}",
+        include_in_schema=False,
+        dependencies=[Depends(authorized)],
+    )
+    async def switch_copy(commit: str) -> HTMLResponse:
+        """Move the host service to the copy of `commit`, by the host's own request, as the plain page's buttons ask: the page's cookie and origin are checked as the API's are. The answer is a page that waits for the next service, since this one is stopping."""
+        replied = await host.ask(SwitchCopy(commit=commit))
+        match replied:
+            case CopySwitching():
+                return HTMLResponse(switching_page(replied))
+            case Refused(error=error):
+                return await listed(error, status_code=409)
+            case _:
+                message = f"the host answered `{replied.kind}` to moving the copy"
+                return await listed(message, status_code=500)
 
     app.include_router(api)
     if page is not None:

@@ -117,6 +117,7 @@ from lup_dev.layout import Layout
 from lup_dev.policy.since import ReviewSince, ShowSince, ViewedFile
 from lup_dev.policy.waits import LandingsWaiting, ShowLandings
 from lup_dev.stored import write_model
+from lup_dev.switching import ListCopies, SwitchCopy
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
 from lup_ledger.parties import Conversation, Operator
@@ -604,6 +605,8 @@ def test_every_request_the_page_may_send_acts_on_the_copy_alone(tmp_path: Path) 
         talk = Talk(comments=[TalkComment(step=1, text="hm")])
         assert ask(ShowTalk(conversation=MAIN), Talked).talk == Talk()
         assert ask(KeepTalk(conversation=MAIN, talk=talk), Talked).talk == talk
+        assert "moves no host service" in ask(ListCopies(), Refused).error
+        assert "moves no host service" in ask(SwitchCopy(commit="c"), Refused).error
         since = ask(ShowSince(conversation=PARSER), Refused)
         assert since.error == Withholding().why
         marking = ReviewSince(
