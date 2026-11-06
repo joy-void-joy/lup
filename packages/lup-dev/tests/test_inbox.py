@@ -208,8 +208,8 @@ from lup_dev.inbox.threads import spoken
 from lup_dev.inbox.tools import Reach, Speaker, specs
 from lup_dev.inbox.typed import TypeReader
 from lup_dev.launch.room import RoomError
-from lup_dev.layout import GitDirectoryLayout, InboxLayout, Layout
-from lup_dev.merging import Merging, merged
+from lup_dev.layout import CopyLayout, GitDirectoryLayout, InboxLayout, Layout
+from lup_dev.merging import Merging, gated_commit, merged
 from lup_dev.policy import landing as landing_module
 from lup_dev.policy import report
 from lup_dev.policy.before import Overwrite, Replacement, before
@@ -231,7 +231,7 @@ from lup_dev.policy.holds import (
     Response,
     stores,
 )
-from lup_dev.policy.landing import LandingTools, detached, landed_felt
+from lup_dev.policy.landing import LandingTools, Turns, detached, landed_felt
 from lup_dev.policy.reviewed import Mark, Reviews
 from lup_dev.policy.since import (
     ReviewSince,
@@ -252,6 +252,9 @@ from lup_dev.private.withheld import kept as listed_at
 from lup_dev.remote.protocol import Pushed, PushHandler, Pushing, Remotes, Update
 from lup_dev.settings import LupDevSettings
 from lup_dev.stored import read_model, write_model
+from lup_dev.switching import TrialSaid
+from lup_dev.trial import AcceptBranch, DropBranch, OnTrial, Trial, Trials
+from lup_dev.trying import Trying
 from lup_dev.worker import HostExchanges, HostMarks, RepositoryModules
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
@@ -507,8 +510,9 @@ def inboxed(
     bearings: bool = False,
     queues: dict[str, Queues] | None = None,
     coming: Callable[[Delivery], Coming] | None = None,
+    trying: Callable[[Turns], Trying] | None = None,
 ) -> Generator[Watched]:
-    """A host service with lup's inbox and the dashboard's kind, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter; containers asked of `podman`, where given; each hook answered by `judge`, else with nothing, and each launch's modules served by `modules`, where given; `land` pushing through the remotes `remotes` makes over the delivery, where given, else through remotes telling no one, running in a launch's room through `rooms`, reading a file's parse through `parser`, and waking parked threads through what `coming` makes over the delivery, where given; a new main session told its bearings where `bearings` asks, its integration branch `dev`; what each runtime holds for a conversation read by `queues`, where given, a held call looking at it, and at its time limit, every few milliseconds."""
+    """A host service with lup's inbox and the dashboard's kind, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter; containers asked of `podman`, where given; each hook answered by `judge`, else with nothing, and each launch's modules served by `modules`, where given; `land` pushing through the remotes `remotes` makes over the delivery, where given, else through remotes telling no one, running in a launch's room through `rooms`, reading a file's parse through `parser`, and waking parked threads through what `coming` makes over the delivery, where given; what's on trial moved through what `trying` makes over the landings' turns, where given; a new main session told its bearings where `bearings` asks, its integration branch `dev`; what each runtime holds for a conversation read by `queues`, where given, a held call looking at it, and at its time limit, every few milliseconds."""
     known = cli.Adapters(known=cli.adapters())
     couriers = cli.Couriers(adapters=known)
     wakers = cli.Wakers(adapters=known)
@@ -534,6 +538,20 @@ def inboxed(
         if told is not None:
             told(line)
 
+    turns = Turns()
+    landing = LandingTools(
+        delivery=delivery,
+        layout=judging or machine,
+        remotes=(Remotes(say=said.append) if remotes is None else remotes(delivery)),
+        waits=waits,
+        coming=None if coming is None else coming(delivery),
+        turns=turns,
+    ).model_copy(
+        update={
+            **({} if rooms is None else {"run": rooms}),
+            **({} if parser is None else {"parser": parser}),
+        }
+    )
     service = HostService(
         layout=machine.host,
         answerer=known,
@@ -548,26 +566,20 @@ def inboxed(
         ),
         roots=RootNames(delivery=delivery),
         routes=cli.control_routes(
-            delivery, recorded or {}, None, judging or machine, waits=waits
+            delivery,
+            recorded or {},
+            None,
+            judging or machine,
+            waits=waits,
+            trying=None if trying is None else trying(turns),
+            landing=landing,
         ),
-        tools=[
-            each.model_copy(
-                update={
-                    **({} if rooms is None else {"run": rooms}),
-                    **({} if parser is None else {"parser": parser}),
-                }
-            )
-            if isinstance(each, LandingTools)
-            else each
-            for each in cli.room_tools(
-                delivery,
-                judging or machine,
-                Remotes(say=said.append) if remotes is None else remotes(delivery),
-                Predating() if modules is None else modules,
-                waits=waits,
-                coming=None if coming is None else coming(delivery),
-            )
-        ],
+        tools=cli.room_tools(
+            delivery,
+            judging or machine,
+            Predating() if modules is None else modules,
+            landing=landing,
+        ),
         judge=judge or Quiet(),
         modules=modules,
         say=said.append,
@@ -8524,9 +8536,37 @@ class Landings:
                 return await asyncio.to_thread(
                     self.merging, Path(workdir), base, tip, program.payload
                 )
+            case [
+                "podman",
+                "exec",
+                "--interactive",
+                "--workdir",
+                workdir,
+                _,
+                "uv",
+                "run",
+                "lup-dev",
+                "gate-commit",
+                commit,
+            ]:
+                return await asyncio.to_thread(self.gating, Path(workdir), commit)
             case _:
                 message = f"the room was asked {program.command}"
                 raise AssertionError(message)
+
+    def gating(self, root: Path, commit: str) -> Ran:
+        """Run `lup-dev gate-commit` as the room does, in this process, from the worktree at `root`, its gate the test's (`gate`)."""
+        gating = gated_commit(
+            root,
+            commit,
+            processes=self.gate,
+            passes=Passes.of(root, self.clock),
+            runner=Uv(),
+            say=self.gate.said.append,
+            stop=self.gate.stopped.append,
+        )
+        printed = TypeAdapter[Merging](Merging).dump_json(gating)
+        return Ran(command=["lup-dev", "gate-commit"], status=0, output=printed)
 
     def merging(self, root: Path, base: str, tip: str, message: str) -> Ran:
         """Run `lup-dev merge` as the room does, in this process, from the worktree at `root`, its gate the test's (`gate`); or fail as told (`unmerging`)."""
@@ -10441,7 +10481,19 @@ def test_land_wakes_each_thread_parked_until_the_branch_it_lands_or_a_commit_its
     assert isinstance(stands["after-other"], Parked)
 
 
-def test_land_lands_on_the_running_branch_the_declaration_approved_names_and_leaves_dev(
+LIVE = Branches(integration="dev", running="live")
+"""A project computing `live` from `dev` and what's on trial."""
+
+
+def parents_of(landings: Landings, commit: str) -> list[str]:
+    """Return `commit`'s parents, as the forge holds it."""
+    _, *parents = landings.shell.git(
+        landings.forge, "rev-list", "--parents", "-n", "1", commit
+    ).split()
+    return parents
+
+
+def test_a_branch_land_lands_goes_on_trial_on_a_branch_the_host_computes_and_stays(
     landings: Landings,
     machine: Layout,
     clock: FakeClock,
@@ -10450,29 +10502,35 @@ def test_land_lands_on_the_running_branch_the_declaration_approved_names_and_lea
     *,
     declared_branches: Callable[[Layout, Path, Branches], None],
 ) -> None:
-    feat, dev, shell = landings.feat, landings.dev, landings.shell
+    feat, shell = landings.feat, landings.shell
     landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
-    shell.git(dev, "branch", "live", "dev")
-    shell.git(landings.repository, "push", "-q", "origin", "dev", "live")
+    tip = shell.git(feat, "rev-parse", "HEAD")
     accepted = landings.on_forge("refs/heads/dev")
-    declared_branches(
-        machine, landings.repository, Branches(integration="dev", running="live")
-    )
+    declared_branches(machine, landings.repository, LIVE)
     with inboxed(
         machine, clock, notices, said, rooms=landings.room, parser=landings.parser
     ):
-        landings.launched("claude", gated=["refs/heads/dev", "refs/heads/live"])
+        landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
         answer = merging(landings, machine.host.launch("one").mcp)
-    merge = landings.on_forge("refs/heads/live")
-    assert merge is not None
-    assert merge != accepted
+    live = landings.on_forge("refs/heads/live")
+    assert live is not None
+    assert parents_of(landings, live) == [accepted, tip]
+    assert (
+        shell.git(landings.forge, "show", f"{live}:src/pkg/rooms.py") == '"""Rooms."""'
+    )
     assert landings.on_forge("refs/heads/dev") == accepted
-    assert f"Merged `feat` onto `live` as {merge}" in answer
-    assert f"Landed {merge} on `live` at `origin`" in answer
+    assert f"Landed `feat` on `live` at `origin`, as {live}" in answer
+    assert "`dev` with `feat`" in answer
+    assert "until the operator accepts it (`lup-dev live accept feat`)" in answer
+    # What's accepted is what's cleaned up: the branch and its worktree stay.
+    assert feat.is_dir()
+    assert shell.git(landings.repository, "branch", "--list", "feat") != ""
+    assert shell.git(landings.repository, "rev-parse", "refs/heads/live") == live
+    assert Trials.of(machine, landings.repository).read().tips == {"feat": tip}
 
 
-def test_land_refuses_a_running_branch_the_launch_s_own_limits_don_t_gate(
+def test_a_launch_from_before_the_running_branch_was_approved_lands_on_it_with_no_relaunch(
     landings: Landings,
     machine: Layout,
     clock: FakeClock,
@@ -10482,8 +10540,131 @@ def test_land_refuses_a_running_branch_the_launch_s_own_limits_don_t_gate(
     declared_branches: Callable[[Layout, Path, Branches], None],
 ) -> None:
     landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
-    declared_branches(
-        machine, landings.repository, Branches(integration="dev", running="live")
+    declared_branches(machine, landings.repository, LIVE)
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
+        # Its limits, registered as the launch began, don't name `live`.
+        landings.launched("claude", gated=["refs/heads/dev"])
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    assert "Landed `feat` on `live`" in answer
+    assert landings.on_forge("refs/heads/live") is not None
+
+
+def test_a_second_landing_is_the_next_commit_each_landing_a_fast_forward_of_the_last(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    feat, shell = landings.feat, landings.shell
+    other = landings.branched("other")
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    landings.wrote(other, "src/pkg/halls.py", '"""Halls."""\n')
+    declared_branches(machine, landings.repository, LIVE)
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        mcp = machine.host.launch("one").mcp
+        merging(landings, mcp)
+        first = landings.on_forge("refs/heads/live")
+        assert first is not None
+        answer, error = call(mcp, "land", {"branch": "other", "message": "other"})
+    assert not error, answer
+    live = landings.on_forge("refs/heads/live")
+    assert live is not None
+    dev = landings.on_forge("refs/heads/dev")
+    assert parents_of(landings, live)[:2] == [first, dev]
+    assert "`dev` with `feat` and `other`" in answer
+    # Both files, as computed from `dev`, never `live` merged into.
+    shown = shell.git(landings.forge, "ls-tree", "-r", "--name-only", live)
+    assert "src/pkg/rooms.py" in shown
+    assert "src/pkg/halls.py" in shown
+
+
+def test_a_commit_added_after_landing_doesn_t_reach_live_until_it_lands(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    feat, shell = landings.feat, landings.shell
+    other = landings.branched("other")
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    landed_at = shell.git(feat, "rev-parse", "HEAD")
+    landings.wrote(other, "src/pkg/halls.py", '"""Halls."""\n')
+    declared_branches(machine, landings.repository, LIVE)
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        mcp = machine.host.launch("one").mcp
+        merging(landings, mcp)
+        # A room writes its branch's ref: what's kept is the tip that landed.
+        landings.wrote(feat, "src/pkg/sneaked.py", '"""Sneaked."""\n')
+        call(mcp, "land", {"branch": "other", "message": "other"})
+    live = landings.on_forge("refs/heads/live")
+    assert live is not None
+    assert landed_at in parents_of(landings, live)
+    shown = shell.git(landings.forge, "ls-tree", "-r", "--name-only", live)
+    assert "src/pkg/sneaked.py" not in shown
+    assert Trials.of(machine, landings.repository).read().tips["feat"] == landed_at
+
+
+def test_a_branch_changing_only_docs_and_tests_goes_straight_to_dev_and_is_cleaned_up(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    feat, shell = landings.feat, landings.shell
+    landings.wrote(feat, "docs/rooms.md", "# Rooms\n")
+    accepted = landings.on_forge("refs/heads/dev")
+    declared_branches(machine, landings.repository, LIVE)
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    dev = landings.on_forge("refs/heads/dev")
+    assert dev != accepted
+    assert f"Landed {dev} on `dev` at `origin`" in answer
+    assert landings.on_forge("refs/heads/live") is None
+    assert not feat.exists()
+    assert shell.git(landings.repository, "branch", "--list", "feat") == ""
+
+
+def test_a_test_inside_what_the_host_builds_goes_on_trial_whatever_its_role(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    feat = landings.feat
+    landings.wrote(feat, "page/src/rooms.test.ts", "test('runs on the host');\n")
+    declared_branches(machine, landings.repository, LIVE)
+    approval = read_model(machine.approved(landings.repository), StoredApproval)
+    assert approval is not None
+    write_model(
+        machine.approved(landings.repository),
+        approval.model_copy(update={"paths": [Path("page")]}),
     )
     with inboxed(
         machine, clock, notices, said, rooms=landings.room, parser=landings.parser
@@ -10491,13 +10672,11 @@ def test_land_refuses_a_running_branch_the_launch_s_own_limits_don_t_gate(
         landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
         answer = merging(landings, machine.host.launch("one").mcp)
-    assert answer == (
-        "Not landed: `live` isn't a branch the project's declaration gates "
-        "(`Core.credentials`), where branches land: push any other with git"
-    )
+    assert "Landed `feat` on `live`" in answer
+    assert feat.is_dir()
 
 
-def test_land_refuses_a_running_branch_neither_the_repository_nor_its_remote_holds(
+def test_land_onto_dev_refuses_what_the_host_runs_since_that_s_the_operator_accepting(
     landings: Landings,
     machine: Layout,
     clock: FakeClock,
@@ -10507,19 +10686,571 @@ def test_land_refuses_a_running_branch_neither_the_repository_nor_its_remote_hol
     declared_branches: Callable[[Layout, Path, Branches], None],
 ) -> None:
     landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
-    declared_branches(
-        machine, landings.repository, Branches(integration="dev", running="live")
-    )
+    accepted = landings.on_forge("refs/heads/dev")
+    declared_branches(machine, landings.repository, LIVE)
     with inboxed(
         machine, clock, notices, said, rooms=landings.room, parser=landings.parser
     ):
-        landings.launched("claude", gated=["refs/heads/dev", "refs/heads/live"])
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer, error = call(
+            machine.host.launch("one").mcp,
+            "land",
+            {"branch": "feat", "message": "feat", "onto": "dev"},
+        )
+    assert not error
+    assert (
+        "Not landed: `feat` changes what the host runs (`src/pkg/rooms.py`)" in answer
+    )
+    assert "accepting it, the operator's" in answer
+    assert landings.on_forge("refs/heads/dev") == accepted
+    assert landings.on_forge("refs/heads/live") is None
+
+
+def test_dev_landing_as_it_is_refuses_what_the_host_runs_committed_on_it(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    landings.wrote(landings.dev, "src/pkg/rooms.py", '"""Rooms."""\n')
+    accepted = landings.on_forge("refs/heads/dev")
+    declared_branches(machine, landings.repository, LIVE)
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer, error = call(machine.host.launch("one").mcp, "land", {})
+    assert not error
+    assert "Not landed: `dev` changes what the host runs" in answer
+    assert landings.on_forge("refs/heads/dev") == accepted
+
+
+def test_a_branch_conflicting_with_what_s_on_trial_stays_on_trial_out_of_live_and_is_told(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    feat = landings.feat
+    rival = landings.branched("rival")
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    landings.wrote(rival, "src/pkg/rooms.py", '"""Rival rooms."""\n')
+    declared_branches(machine, landings.repository, LIVE)
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        mcp = machine.host.launch("one").mcp
+        merging(landings, mcp)
+        live = landings.on_forge("refs/heads/live")
+        answer, error = call(mcp, "land", {"branch": "rival", "message": "rival"})
+    assert not error, answer
+    assert landings.on_forge("refs/heads/live") == live
+    assert "`rival` is on trial" in answer
+    assert (
+        "and not in `live`: it conflicts with `feat`, in `src/pkg/rooms.py`" in answer
+    )
+    # On the remote, so what a pick later puts in `live` has passed the door.
+    assert landings.on_forge("refs/heads/rival") is not None
+    assert rival.is_dir()
+    trial = Trials.of(machine, landings.repository).read()
+    assert list(trial.tips) == ["feat"]
+    on = trial.on("rival")
+    assert on is not None
+    assert on.conflict == "it conflicts with `feat`, in `src/pkg/rooms.py`"
+
+
+def test_a_branch_conflicting_with_dev_says_merge_dev_in_and_nothing_goes_on_trial(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    landings.wrote(landings.dev, "src/pkg/rooms.py", '"""Other."""\n')
+    landings.shell.git(landings.repository, "push", "-q", "origin", "dev")
+    declared_branches(machine, landings.repository, LIVE)
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
+        landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
         answer = merging(landings, machine.host.launch("one").mcp)
-    assert answer == (
-        "Not landed: neither this repository nor `origin` has a `live` to merge onto"
-    )
+    assert "merging `feat` onto `dev` conflicts" in answer
+    assert "- src/pkg/rooms.py" in answer
+    assert Trials.of(machine, landings.repository).read().branches == []
+
+
+def test_a_gate_failing_on_what_live_would_hold_lands_nothing(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    landings.gate.code = 1
+    declared_branches(machine, landings.repository, LIVE)
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    assert "Not landed: the gate failed on what `live` would hold with `feat`" in answer
+    assert "the gate's report, ending 1" in answer
     assert landings.on_forge("refs/heads/live") is None
+    assert Trials.of(machine, landings.repository).read().branches == []
+    # Its fixes would be lost at the next recompute, so none are asked for.
+    assert ["uv", "run", "lup-dev", "check", "--fix"] not in landings.gate.ran
+
+
+def test_a_first_landing_asks_only_about_its_own_files_never_what_dev_holds_already(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    shell, dev = landings.shell, landings.dev
+    # What `dev` holds already: a protected file, read when it landed there.
+    landings.wrote(dev, "lup_project.py", '"""The declaration."""\n')
+    shell.git(landings.repository, "push", "-q", "origin", "dev")
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    declared_branches(machine, landings.repository, LIVE)
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ) as delivery:
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+        items = [
+            each.reason
+            for each in delivery.inbox.items.values()
+            if isinstance(each.reason, Flagged)
+        ]
+    assert items == []
+    assert "Landed `feat` on `live`" in answer
+
+
+def test_a_protected_file_a_branch_on_trial_changes_holds_its_landing_on_the_operator(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    landings.wrote(landings.feat, "lup_project.py", '"""Changed."""\n')
+    declared_branches(machine, landings.repository, LIVE)
+    session = lander(landings, "claude")
+    with (
+        inboxed(
+            machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+        ) as delivery,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        landing = pool.submit(merging, landings, machine.host.launch("one").mcp)
+        assert delivery.holding.wait(timeout=60)
+        assert landings.on_forge("refs/heads/live") is None
+        assert Trials.of(machine, landings.repository).read().branches == []
+        place = drawer(machine, clock, session, "feat")
+        answering(machine, clock, session, place, "lup_project.py")
+        answer = landing.result(timeout=60)
+    assert "Landed `feat` on `live`" in answer
+    assert "The operator approved `lup_project.py`." in answer
+    assert landings.on_forge("refs/heads/live") is not None
+
+
+def trying_nothing_runs(machine: Layout, clock: FakeClock) -> Callable[[Turns], Trying]:
+    """What moves what's on trial, every zone reading as the one approved, as `declared_branches` keeps it: a change in what runs is another test's."""
+
+    def made(turns: Turns) -> Trying:
+        def unexpected(_copy: CopyLayout, commit: str) -> None:
+            message = f"a switch to {commit}, where what runs doesn't change"
+            raise AssertionError(message)
+
+        return Trying(
+            layout=machine,
+            clock=clock,
+            say=lambda _: None,
+            turns=turns,
+            fingerprint=lambda _, __: "",
+            propose=lambda _: None,
+            start=unexpected,
+        )
+
+    return made
+
+
+def test_accepting_a_branch_merges_it_onto_dev_cleans_up_after_it_and_wakes_what_s_parked_on_it(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    feat, shell = landings.feat, landings.shell
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    tip = shell.git(feat, "rev-parse", "HEAD")
+    accepted = landings.on_forge("refs/heads/dev")
+    declared_branches(machine, landings.repository, LIVE)
+    made: dict[str, Coming] = {}
+
+    def coming(delivery: Delivery) -> Coming:
+        return made.setdefault(
+            "coming", Coming(delivery=delivery, layout=machine, say=said.append)
+        )
+
+    def remotes(delivery: Delivery) -> Remotes:
+        async def landed(launch: Register, updates: list[Update]) -> None:
+            await coming(delivery).pushed(launch, updates)
+
+        return Remotes(say=said.append, landed=landed)
+
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        rooms=landings.room,
+        parser=landings.parser,
+        remotes=remotes,
+        coming=coming,
+        trying=trying_nothing_runs(machine, clock),
+    ) as delivery:
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        party = lander(landings, "claude")
+        concerns = delivery.concerns()
+        root = concerns.root(party)
+        parked = concerns.opened(party, "after-feat", root, name="after-feat")
+        concerns.parked(party, parked, [BranchLanded(branch="feat")], "")
+        merging(landings, machine.host.launch("one").mcp)
+        on_trial = concerns.standing(
+            concerns.named(landings.repository, "after-feat")
+        ).status
+        replied = client(machine.host, clock).ask(
+            AcceptBranch(branch="feat", repository=landings.repository), TrialSaid
+        )
+        woken = concerns.standing(
+            concerns.named(landings.repository, "after-feat")
+        ).status
+    # A landing on `live` wakes nothing: it hasn't reached what work starts from.
+    assert not isinstance(on_trial, ThreadReopened)
+    assert isinstance(woken, ThreadReopened)
+    dev = landings.on_forge("refs/heads/dev")
+    assert dev not in (None, accepted)
+    assert parents_of(landings, dev or "") == [accepted, tip]
+    assert f"Landed {dev} on `dev` at `origin`" in replied.said
+    assert not feat.exists()
+    assert shell.git(landings.repository, "branch", "--list", "feat") == ""
+    trial = Trials.of(machine, landings.repository).read()
+    assert trial.branches == []
+    assert trial.dev == dev
+    live = landings.on_forge("refs/heads/live")
+    assert live == trial.live
+    assert (
+        shell.git(landings.forge, "show", f"{live}:src/pkg/rooms.py") == '"""Rooms."""'
+    )
+
+
+def test_accepting_merges_the_tip_that_landed_whatever_its_ref_says_since(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    feat, shell = landings.feat, landings.shell
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    tip = shell.git(feat, "rev-parse", "HEAD")
+    declared_branches(machine, landings.repository, LIVE)
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        rooms=landings.room,
+        parser=landings.parser,
+        trying=trying_nothing_runs(machine, clock),
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        merging(landings, machine.host.launch("one").mcp)
+        landings.wrote(feat, "src/pkg/sneaked.py", '"""Sneaked."""\n')
+        client(machine.host, clock).ask(
+            AcceptBranch(branch="feat", repository=landings.repository), TrialSaid
+        )
+    dev = landings.on_forge("refs/heads/dev")
+    assert parents_of(landings, dev or "")[1] == tip
+    shown = shell.git(landings.forge, "ls-tree", "-r", "--name-only", dev or "")
+    assert "src/pkg/sneaked.py" not in shown
+
+
+def test_accepting_with_no_session_running_says_so(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    tip = landings.shell.git(landings.repository, "rev-parse", "dev")
+    declared_branches(machine, landings.repository, LIVE)
+    Trials.of(machine, landings.repository).write(
+        Trial(branches=[OnTrial(branch="feat", tip=tip, landed=clock.now())])
+    )
+    with (
+        inboxed(
+            machine,
+            clock,
+            notices,
+            said,
+            rooms=landings.room,
+            parser=landings.parser,
+            trying=trying_nothing_runs(machine, clock),
+        ),
+        pytest.raises(HostError, match="no session of this repository is running"),
+    ):
+        client(machine.host, clock).ask(
+            AcceptBranch(branch="feat", repository=landings.repository), TrialSaid
+        )
+
+
+def test_a_merge_asking_what_wasn_t_approved_leaves_it_in_the_drawer_accepting_nothing(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    dev = landings.dev
+    lines = "".join(f"{each}\n" for each in "abcdefgh")
+    landings.wrote(dev, "lup_project.py", lines)
+    landings.shell.git(landings.repository, "push", "-q", "origin", "dev")
+    other = landings.branched("other")
+    landings.wrote(other, "lup_project.py", f"changed\n{lines}")
+    declared_branches(machine, landings.repository, LIVE)
+    session = lander(landings, "claude")
+    with (
+        inboxed(
+            machine,
+            clock,
+            notices,
+            said,
+            rooms=landings.room,
+            parser=landings.parser,
+            trying=trying_nothing_runs(machine, clock),
+        ) as delivery,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        mcp = machine.host.launch("one").mcp
+        landing = pool.submit(
+            call, mcp, "land", {"branch": "other", "message": "other"}
+        )
+        assert delivery.holding.wait(timeout=60)
+        place = drawer(machine, clock, session, "other")
+        answering(machine, clock, session, place, "lup_project.py")
+        landing.result(timeout=60)
+        landings.wrote(dev, "lup_project.py", f"{lines}moved\n")
+        landings.shell.git(landings.repository, "push", "-q", "origin", "dev")
+        before = landings.on_forge("refs/heads/dev")
+        replied = client(machine.host, clock).ask(
+            AcceptBranch(branch="other", repository=landings.repository), TrialSaid
+        )
+    assert replied.said.startswith("Not accepted: `other`")
+    assert "`lup_project.py`" in replied.said
+    assert landings.on_forge("refs/heads/dev") == before
+
+
+def test_dropping_a_branch_leaves_it_and_its_worktree_and_what_s_said_waits_for_who_landed_it(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    feat, shell = landings.feat, landings.shell
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    declared_branches(machine, landings.repository, LIVE)
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        rooms=landings.room,
+        parser=landings.parser,
+        trying=trying_nothing_runs(machine, clock),
+    ) as delivery:
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        merging(landings, machine.host.launch("one").mcp)
+        replied = client(machine.host, clock).ask(
+            DropBranch(
+                branch="feat",
+                words="rooms aren't it",
+                repository=landings.repository,
+            ),
+            TrialSaid,
+        )
+        words = delivery.inbox.whereabouts[lander(landings, "claude").key()].words
+    assert "Your words wait for who landed it" in replied.said
+    assert "rooms aren't it" in words[-1]
+    assert Trials.of(machine, landings.repository).read().branches == []
+    assert feat.is_dir()
+    assert shell.git(landings.repository, "branch", "--list", "feat") != ""
+    live = landings.on_forge("refs/heads/live")
+    shown = shell.git(landings.forge, "ls-tree", "-r", "--name-only", live or "")
+    assert "src/pkg/rooms.py" not in shown
+
+
+def test_a_room_s_push_moves_neither_the_branch_the_host_computes_nor_what_it_runs_onto_dev(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    tip = landings.merged()
+    declared_branches(machine, landings.repository, LIVE)
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, _):
+        launch = landings.launched(
+            "claude", name="pushing", gated=["refs/heads/dev", "refs/heads/live"]
+        )
+        handler = PushHandler(
+            remotes=checking_pushes(delivery, machine, said, landings.parser)
+        )
+        computed = asyncio.run(
+            handler.answer(
+                Pushing(
+                    remote="origin",
+                    updates=[Update(source=tip, destination="refs/heads/live")],
+                ),
+                launch,
+            )
+        )
+        accepting = asyncio.run(
+            handler.answer(
+                Pushing(
+                    remote="origin",
+                    updates=[Update(source=tip, destination="refs/heads/dev")],
+                ),
+                launch,
+            )
+        )
+    assert isinstance(computed, Pushed)
+    assert "is computed by the host" in (computed.updates[0].error or "")
+    assert isinstance(accepting, Pushed)
+    assert "accepting it, the operator's" in (accepting.updates[0].error or "")
+    assert landings.on_forge("refs/heads/live") is None
+    assert landings.on_forge("refs/heads/dev") != tip
+
+
+def test_a_room_s_push_of_docs_to_dev_goes_as_it_did(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    landings.wrote(landings.feat, "docs/rooms.md", "# Rooms\n")
+    tip = landings.merged()
+    declared_branches(machine, landings.repository, LIVE)
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, _):
+        launch = landings.launched("claude", name="pushing")
+        handler = PushHandler(
+            remotes=checking_pushes(delivery, machine, said, landings.parser)
+        )
+        pushed = asyncio.run(
+            handler.answer(
+                Pushing(
+                    remote="origin",
+                    updates=[Update(source=tip, destination="refs/heads/dev")],
+                ),
+                launch,
+            )
+        )
+    assert isinstance(pushed, Pushed)
+    assert [each.error for each in pushed.updates] == [None]
+    assert landings.on_forge("refs/heads/dev") == tip
+
+
+def test_a_trial_branch_isn_t_landed_for_delete_merged_until_dev_holds_it(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    feat, shell = landings.feat, landings.shell
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    shell.git(landings.repository, "push", "-q", "origin", "feat")
+    declared_branches(machine, landings.repository, LIVE)
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        rooms=landings.room,
+        parser=landings.parser,
+        remotes=lambda delivery: checking_pushes(
+            delivery, machine, said, landings.parser
+        ),
+    ) as delivery:
+        launch = landings.launched(
+            "claude", gated=["refs/heads/dev", "refs/heads/live"]
+        )
+        send(machine.host.launch("one").hook, started("claude"))
+        merging(landings, machine.host.launch("one").mcp)
+        handler = PushHandler(
+            remotes=checking_pushes(delivery, machine, said, landings.parser)
+        )
+        deleting_it = Pushing(
+            remote="origin",
+            updates=[Update(source=None, destination="refs/heads/feat")],
+        )
+        refused = asyncio.run(handler.answer(deleting_it, launch))
+    assert isinstance(refused, Pushed)
+    assert "aren't all in `refs/heads/dev`" in (refused.updates[0].error or "")
+    assert landings.on_forge("refs/heads/feat") is not None
 
 
 def test_a_subagent_kept_detached_is_told_to_start_from_the_integration_branch_not_what_it_landed_on() -> (

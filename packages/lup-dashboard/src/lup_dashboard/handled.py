@@ -70,6 +70,7 @@ from lup_dev.host.records import Recorded
 from lup_dev.host.service import (
     Answerer,
     Dispatcher,
+    Handler,
     HoldingSetting,
     Launches,
     Renaming,
@@ -96,6 +97,7 @@ from lup_dev.policy.waits import Waits
 from lup_dev.policy.waits import routes as waits_routes
 from lup_dev.stored import write_model
 from lup_dev.switching import CopiesAnswering, CopySwitch, LastSwitch, host_copies
+from lup_dev.trial import PickBranches
 from lup_dev.worker import RepositoryModules
 from lup_ledger.parties import Conversation
 
@@ -283,6 +285,19 @@ class Views(MutableModel, RepositoryAsking, arbitrary_types_allowed=True):
         return {each: self.modules(each).resolved.looks for each in self.repositories}
 
 
+class NothingOnTrial(Model, Handler[PickBranches]):
+    """Answers `PickBranches` for a demo, which holds nothing on trial: its plain page lists no branch to pick."""
+
+    @override
+    def request(self) -> type[PickBranches]:
+        return PickBranches
+
+    @override
+    async def answer(self, request: PickBranches) -> Reply:
+        message = f"a demo runs nothing on trial, so it can't pick {request.branches}"
+        raise HostError(message)
+
+
 def withheld_switch(
     lup: Layout, withheld: Withheld, clock: Clock
 ) -> Callable[[CopyLayout, str], None]:
@@ -454,6 +469,7 @@ def handled(
         Route.to(
             CopySwitch(layout=lup, start=withheld_switch(lup, withheld, clock)),
         ),
+        Route.to(NothingOnTrial()),
         *beyond,
         Route.reading(module_views, watch=module_views.watched),
     ]

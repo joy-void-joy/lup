@@ -49,13 +49,20 @@ from lup_dashboard.api import (
     Watched,
 )
 from lup_dashboard.host import Host
-from lup_dashboard.plain import copies_page, signing_in, switching_page
+from lup_dashboard.plain import copies_page, picked, signing_in, switching_page
 from lup_dev.host.dashboard import hosted
 from lup_dev.host.protocol import HostError, Refused
 from lup_dev.inbox.protocol import AnswerApproval, Reviewed, SendDraft, Settled
 from lup_dev.inbox.store import Approval, Item
 from lup_dev.settings import Address
-from lup_dev.switching import CopiesListed, CopySwitching, ListCopies, SwitchCopy
+from lup_dev.switching import (
+    CopiesListed,
+    CopySwitching,
+    ListCopies,
+    SwitchCopy,
+    TrialSaid,
+)
+from lup_dev.trial import PickBranches
 
 
 class Access(Model):
@@ -291,6 +298,26 @@ def application(
         if not secrets.compare_digest(token.encode(), access.token.encode()):
             return HTMLResponse(signing_in(), status_code=401)
         return await listed()
+
+    @app.post(
+        "/copies/pick",
+        include_in_schema=False,
+        dependencies=[Depends(authorized)],
+    )
+    async def pick_branches(request: Request) -> HTMLResponse:
+        """Run `dev` plus the branches the plain page's form names (`picked`), by the host's own request: a page waiting for the next service where that's a switch, else the list, saying what came of it."""
+        body = await request.body()
+        replied = await host.ask(PickBranches(branches=picked(body.decode())))
+        match replied:
+            case TrialSaid(switching=CopySwitching() as switching):
+                return HTMLResponse(switching_page(switching))
+            case TrialSaid(said=said):
+                return await listed(said)
+            case Refused(error=error):
+                return await listed(error, status_code=409)
+            case _:
+                message = f"the host answered `{replied.kind}` to the branches picked"
+                return await listed(message, status_code=500)
 
     @app.post(
         "/copies/{commit}",

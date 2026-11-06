@@ -92,7 +92,7 @@ from lup_dev.gate import (
     report,
 )
 from lup_dev.gate import Ran as GateRan
-from lup_dev.git import Git, nul_separated
+from lup_dev.git import Git, GitError, nul_separated
 from lup_dev.host.client import FromRoom, HostClient, RoomClient
 from lup_dev.host.copying import Copying
 from lup_dev.host.courier import (
@@ -257,7 +257,7 @@ from lup_dev.layout import (
     RoomPaths,
 )
 from lup_dev.listing import given, latest, many, moment, unlisted
-from lup_dev.merging import Merging, merged
+from lup_dev.merging import Merging, gated_commit, merged
 from lup_dev.migration import HostRuntime, Migrating
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
 from lup_dev.policy.coming import Coming
@@ -271,7 +271,7 @@ from lup_dev.policy.holds import (
 )
 from lup_dev.policy.importers import BackgroundSpawner
 from lup_dev.policy.judge import finding
-from lup_dev.policy.landing import LandingTools, unapproved_files
+from lup_dev.policy.landing import LandingTools, Turns, hosted_files, unapproved_files
 from lup_dev.policy.report import finding_lines
 from lup_dev.policy.since import routes as since_routes
 from lup_dev.policy.tools import JudgeTools, judge_call
@@ -301,8 +301,25 @@ from lup_dev.switching import (
     Switch,
     Switched,
     Switching,
+    TrialSaid,
     host_starter,
     restore_detached,
+)
+from lup_dev.trial import (
+    AcceptBranch,
+    BranchListed,
+    DropBranch,
+    ListTrial,
+    PickBranches,
+    TrialListed,
+)
+from lup_dev.trial import named as in_sentence
+from lup_dev.trying import (
+    TrialAccepting,
+    TrialDropping,
+    TrialListing,
+    TrialPicking,
+    Trying,
 )
 from lup_dev.worker import RepositoryModules, worked
 from lup_ledger.parties import Conversation as InboxConversation
@@ -329,6 +346,9 @@ private = typer.Typer(
     no_args_is_help=True,
     help="What never leaves under your name: the `Private` module's values.",
 )
+live = typer.Typer(
+    help="What the host runs while it's on trial: `dev` and the branches picked."
+)
 account = typer.Typer(
     no_args_is_help=True,
     help="The accounts rooms log in with, each a login per runtime.",
@@ -339,6 +359,7 @@ app.add_typer(inbox, name="inbox")
 app.add_typer(dashboard, name="dashboard")
 app.add_typer(private, name="private")
 app.add_typer(account, name="account")
+app.add_typer(live, name="live")
 
 
 def engine(environments: Path | None = None) -> Checker:
@@ -574,8 +595,10 @@ def control_routes(
     views: ModuleViews | None = None,
     *,
     waits: Waits,
+    trying: Trying | None = None,
+    landing: LandingTools | None = None,
 ) -> list[Route]:
-    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; the dashboard's, `dashboard`'s address; the drawer's, what a branch changed since the operator approved it, read from lup's state at `layout`, each file a landing waits on in `waits` held there; the landings waiting; the review marks, as `delivery`'s inbox holds them; the review's threads; what a page measured of itself, kept in lup's state; and a module's view the dashboard shows, through `views`, watched at its own triggers, where it's given."""
+    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; the dashboard's, `dashboard`'s address; the drawer's, what a branch changed since the operator approved it, read from lup's state at `layout`, each file a landing waits on in `waits` held there; the landings waiting; the review marks, as `delivery`'s inbox holds them; the review's threads; what a page measured of itself, kept in lup's state; a module's view the dashboard shows, through `views`, watched at its own triggers, where it's given; and what's on trial, moved through `trying` and accepted through `landing`, where they're given."""
     return [
         *inbox_routes(delivery, recorded),
         Route.to(dashboard_shown(dashboard)),
@@ -587,6 +610,23 @@ def control_routes(
         *([] if views is None else [Route.reading(views, watch=views.watched)]),
         Route.to(CopiesAnswering(layout=layout)),
         Route.to(CopySwitch(layout=layout, start=restore_detached(layout))),
+        *([] if trying is None else trial_routes(trying, delivery, landing)),
+    ]
+
+
+def trial_routes(
+    trying: Trying, delivery: Delivery, landing: LandingTools | None
+) -> list[Route]:
+    """Route what the operator asks of what's on trial, through `trying`, accepting through `landing`, where it's given."""
+    return [
+        Route.to(TrialListing(trying=trying)),
+        Route.to(TrialPicking(trying=trying)),
+        Route.to(TrialDropping(trying=trying, delivery=delivery)),
+        *(
+            []
+            if landing is None
+            else [Route.to(TrialAccepting(trying=trying, tools=landing))]
+        ),
     ]
 
 
@@ -652,9 +692,29 @@ def host_serve(context: typer.Context) -> None:
         running=workers.commands,
         coming=None if rehearsing else coming,
     )
-    remotes = host_remotes(delivery, layout, coming, workers, EngineParser())
+    turns = Turns()
+    trying = Trying(
+        layout=layout,
+        clock=delivery.clock,
+        say=typer.echo,
+        turns=turns,
+        fingerprint=zone_fingerprint,
+        propose=proposed_for,
+        start=restore_detached(layout),
+    )
+    remotes = host_remotes(
+        delivery, layout, coming, workers, EngineParser(), trying=trying
+    )
     waits = Waits(changes=changes)
     delivery.landing = waits.holding
+    landing = LandingTools(
+        delivery=delivery,
+        remotes=remotes,
+        layout=layout,
+        waits=waits,
+        coming=coming,
+        turns=turns,
+    )
     service = HostService(
         layout=layout.host,
         answerer=known,
@@ -674,10 +734,10 @@ def host_serve(context: typer.Context) -> None:
             layout,
             ModuleViews(asking=asking, changes=changes, say=typer.echo),
             waits=waits,
+            trying=trying,
+            landing=landing,
         ),
-        tools=room_tools(
-            delivery, layout, remotes, workers, waits=waits, coming=coming
-        ),
+        tools=room_tools(delivery, layout, workers, landing=landing),
         room_routes=[
             *remote_routes(remotes),
             *clipboard_routes(Desktop.of(settings)),
@@ -743,22 +803,66 @@ def host_remotes(
     coming: Coming,
     modules: LaunchModules,
     parser: Parser,
+    *,
+    trying: Trying | None = None,
 ) -> Remotes:
-    """Return git on the host for each launch's room: each push held to what the operator approved of what it lands (`unapproved_files`), each file read from its parse alone by `parser`, put to `modules`, and told to what follows a push (`after_push`)."""
+    """Return git on the host for each launch's room: each push held to what the operator approved of what it lands (`unapproved_files`), each file read from its parse alone by `parser`, put to `modules`, told to what follows a push (`after_push`), and kept off what the host computes, what `trying` moves (`computing`, `hosted_files`)."""
     return Remotes(
         say=typer.echo,
-        landed=partial(after_push, delivery, coming),
+        landed=partial(after_push, delivery, coming, trying=trying),
         asking=partial(unapproved_files, delivery, layout, parser=parser),
+        trying=partial(computing, layout),
+        hosted=partial(hosted_files, layout),
         modules=modules,
     )
 
 
+def computing(layout: Layout, launch: Register) -> Branches | None:
+    """Return the branches of `launch`'s repository where it computes its running branch, as the declaration approved names them; none where it doesn't (`Remotes.trying`)."""
+    branches = approved_branches(layout, launch.repository)
+    return None if branches.running == branches.integration else branches
+
+
+def zone_fingerprint(repository: Path, commit: str) -> str:
+    """Return the fingerprint of the host zone at `commit` in the repository at `repository`, reading no code of it (`Trust.zone_at`)."""
+    root = Git.pinned(repository).main_worktree()
+    trust = machine_trust(root, [])
+    return trust.fingerprint(trust.zone_at(commit))
+
+
+def proposed_for(repository: Path) -> int | None:
+    """Put the approval of the running branch's tip in the repository at `repository` in the operator's inbox where it isn't what's approved, as a push moving it does, and return its number (`Trust.proposed`, `proposed_after`)."""
+    git = Git.pinned(repository)
+    root = git.main_worktree()
+    branches = approved_branches(Layout.of(LupDevSettings()), repository)
+    return machine_trust(root, [], approval_reading(git, branches, root)).proposed()
+
+
 async def after_push(
-    delivery: Delivery, coming: Coming, launch: Register, updates: list[Update]
+    delivery: Delivery,
+    coming: Coming,
+    launch: Register,
+    updates: list[Update],
+    *,
+    trying: Trying | None = None,
 ) -> None:
-    """Once a launch's push updated `updates`: put the approval of the host zone at the running branch's tip in the operator's inbox where it moved there (`proposed_after`), and wake each thread parked until a commit it brings (`Coming.pushed`)."""
-    await proposed_after(delivery, launch, [each.destination for each in updates])
+    """Once a launch's push updated `updates`: put the approval of the host zone at the running branch's tip in the operator's inbox where it moved there (`proposed_after`), wake each thread parked until a commit it brings (`Coming.pushed`), and where it moved the integration branch of a project computing its running branch, compute that again (`Trying.moved_dev`), what fails being said in the service's log, as the push stands."""
+    refs = [each.destination for each in updates]
+    await proposed_after(delivery, launch, refs)
     await coming.pushed(launch, updates)
+    integration = approved_branches(Layout.of(LupDevSettings()), launch.repository)
+    if trying is None or f"refs/heads/{integration.integration}" not in refs:
+        return
+    try:
+        moved = await trying.moved_dev(launch.repository)
+    except (LupDevError, LupError) as failure:
+        typer.echo(
+            f"{launch.launch}: the push moved {integration.integration}, but "
+            f"{integration.running} wasn't computed again: {failure}"
+        )
+        return
+    for line in moved:
+        typer.echo(f"{launch.launch}: {line}")
 
 
 async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) -> None:
@@ -811,23 +915,15 @@ async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) 
 def room_tools(
     delivery: Delivery,
     layout: Layout,
-    remotes: Remotes,
     modules: LaunchModules,
     *,
-    waits: Waits,
-    coming: Coming | None = None,
+    landing: LandingTools,
 ) -> list[RoomTools]:
-    """List the core's tools the host service serves each launched session: the inbox's; the judge's, reading lup's state at `layout` by the delivery's clock, and running `quiet` in each launch's repository's process (`modules`); and `land`, pushing through `remotes` onto the running branch the declaration approved names, each landing waiting kept in `waits`, which the drawers read, waking through `coming` the threads parked until what it lands."""
+    """List the core's tools the host service serves each launched session: the inbox's; the judge's, reading lup's state at `layout` by the delivery's clock, and running `quiet` in each launch's repository's process (`modules`); and `landing`'s, `land`."""
     return [
         InboxTools(delivery=delivery),
         JudgeTools(layout=layout, clock=delivery.clock, modules=modules),
-        LandingTools(
-            delivery=delivery,
-            remotes=remotes,
-            layout=layout,
-            waits=waits,
-            coming=coming,
-        ),
+        landing,
     ]
 
 
@@ -846,9 +942,8 @@ def served_tools(resolved: Resolved) -> list[ToolSpec]:
         for tools in room_tools(
             unread,
             Layout.model_construct(),
-            Remotes.model_construct(),
             Workers.model_construct(),
-            waits=Waits(),
+            landing=LandingTools.model_construct(),
         )
         for spec in tools.specs()
     ]
@@ -3305,6 +3400,32 @@ def merge(
     typer.echo(TypeAdapter[Merging](Merging).dump_json(merging).decode())
 
 
+@app.command("gate-commit", hidden=True)
+def gate_commit(
+    commit: Annotated[str, typer.Argument(help="The commit to run the gate on.")],
+) -> None:
+    """Run the gate on `commit` without its fixes, and print what came of it as JSON: what `land` runs in a launch's room for what the host computed (`lup_dev.merging`). What the gate says as it goes is on standard error."""
+    root = toplevel(Path.cwd())
+    runner = resolve(load(root, local=person_layer(root)).project).runner
+
+    def stop(made: Path) -> None:
+        scrapped(made, runner)
+
+    def say(line: str) -> None:
+        typer.echo(line, err=True)
+
+    gating = gated_commit(
+        root,
+        commit,
+        processes=Shell(),
+        passes=Passes.of(root, SystemClock()),
+        runner=runner,
+        say=say,
+        stop=stop,
+    )
+    typer.echo(TypeAdapter[Merging](Merging).dump_json(gating).decode())
+
+
 def scrapped(worktree: Path, runner: Runner) -> None:
     """End what a gate run left for the worktree at `worktree`, which goes next: its engine, the store keeping the engine's lock and log, and in a room, the environment made for it among the launch's (`LUP_ENVIRONMENTS`).
 
@@ -3449,6 +3570,147 @@ def restore(
     typer.echo(switch.report())
     if not isinstance(switch, Switched):
         raise typer.Exit(1)
+
+
+def trial_lines(listed: TrialListed | None) -> list[str]:
+    """Say what's on trial: `dev` and the branches in `live`, a line for each other with what keeps it out, and what to type."""
+    if listed is None:
+        return ["This repository computes no running branch, so nothing is on trial."]
+    integration, running = listed.integration, listed.running
+    within = [each.branch for each in listed.branches if each.within]
+    holds = (
+        f"`{running}`: `{integration}` with {in_sentence(within)}."
+        if within
+        else f"`{running}`: `{integration}` alone."
+    )
+
+    def line(each: BranchListed) -> str:
+        built = ", its copy built" if each.built else ""
+        where = (
+            f"in `{running}`"
+            if each.within
+            else each.conflict
+            or ("out: you took it out" if each.out else f"not in `{running}` yet")
+        )
+        return f"- `{each.branch}` at {each.tip}: {where}{built}. {each.subject}"
+
+    return [
+        holds,
+        *(["Nothing is on trial."] if not listed.branches else []),
+        *map(line, listed.branches),
+        "",
+        (
+            "`lup-dev live pick [branch…]` runs those on "
+            f"`{integration}`; `lup-dev live accept <branch>` merges one there; "
+            "`lup-dev live drop <branch>` takes it off trial. `/copies`, on the "
+            "dashboard, picks too."
+        ),
+    ]
+
+
+def live_client(*, patience: timedelta = timedelta(minutes=1)) -> HostClient:
+    """Return the host service's client for what the operator asks of what's on trial, waiting `patience` for each reply, refusing inside an agent's session: which code the host runs, and what's accepted, are theirs."""
+    inside = [runtime.name() for runtime in runtimes() if runtime.inside()]
+    if inside:
+        message = (
+            f"this runs inside a {inside[0]} session, and what the host runs and "
+            "what's accepted are the operator's: run it in your own terminal"
+        )
+        raise HostError(message)
+    layout = Layout.of(LupDevSettings())
+    return HostClient(
+        layout=layout.host,
+        clock=SystemClock(),
+        starter=host_starter(layout),
+        timeout=patience,
+    )
+
+
+def here_repository() -> Path | None:
+    """Return the git directory of the repository this runs in; none outside one, where lup's own is meant."""
+    try:
+        common = Git(cwd=Path.cwd()).text(
+            "rev-parse", "--path-format=absolute", "--git-common-dir"
+        )
+    except GitError:
+        return None
+    return Path(common)
+
+
+def said_of_trial(replied: TrialSaid) -> None:
+    """Print what came of what was asked of what's on trial, and how that stands."""
+    if replied.said:
+        typer.echo(replied.said)
+    if replied.switching is not None:
+        typer.echo(
+            f"What came of it is in {replied.switching.log}; `lup-dev restore` goes back."
+        )
+        return
+    if replied.said:
+        typer.echo()
+    typer.echo("\n".join(trial_lines(replied.listed)))
+
+
+@live.callback(invoke_without_command=True)
+def live_list(context: typer.Context) -> None:
+    """Say what's on trial, what's in the running branch, and what conflicts, changing nothing."""
+    if context.invoked_subcommand is not None:
+        return
+    said_of_trial(live_client().ask(ListTrial(repository=here_repository()), TrialSaid))
+
+
+@live.command("pick")
+def live_pick(
+    branches: Annotated[
+        list[str] | None,
+        typer.Argument(help="The branches to run on `dev`; none runs `dev` alone."),
+    ] = None,
+) -> None:
+    """Run `dev` plus exactly these branches.
+
+    Your own terminal's, as `/copies` on the dashboard does it. Where you've said
+    yes to that set and its copy is kept, the host moves to it at once, restarting.
+    Where you haven't, the approval is in your inbox, whose yes builds it, in
+    minutes, and moves there. Branches that conflict can't be picked together, which
+    it says, moving nothing.
+    """
+    request = PickBranches(branches=branches or [], repository=here_repository())
+    said_of_trial(live_client().ask(request, TrialSaid))
+
+
+@live.command("accept")
+def live_accept(
+    branch: Annotated[str, typer.Argument(help="The branch on trial to accept.")],
+) -> None:
+    """Merge a branch on trial onto `dev`, at the tip it landed with, and clean up after it, as a landing does.
+
+    Its merge's gate runs, and its worktree goes, in the room of the session that
+    landed it, or another of the repository's: with none running, this says so.
+    Threads parked on it wake. A branch already in the running branch changes nothing
+    the host runs, so nothing is asked and nothing restarts.
+    """
+    client = live_client(patience=timedelta(days=1))
+    request = AcceptBranch(branch=branch, repository=here_repository())
+    said_of_trial(client.ask(request, TrialSaid))
+
+
+@live.command("drop")
+def live_drop(
+    branch: Annotated[str, typer.Argument(help="The branch to take off trial.")],
+    *,
+    say: Annotated[
+        str,
+        typer.Option(
+            help="What you say on it, which reaches who landed it, or waits for them."
+        ),
+    ] = "",
+) -> None:
+    """Take a branch off trial, leaving it and its worktree; landing it again puts it back.
+
+    Where it was in the running branch, what runs moves as a pick without it does.
+    """
+    request = DropBranch(branch=branch, words=say, repository=here_repository())
+    said_of_trial(live_client().ask(request, TrialSaid))
 
 
 @app.command("verdicts")

@@ -172,6 +172,7 @@ from lup_dev.switching import (
     Switching,
     host_starter,
 )
+from lup_dev.trial import running_tip
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterator
@@ -1730,7 +1731,8 @@ class Trust(Model, arbitrary_types_allowed=True):
     def zone(self) -> Zone:
         """Read the host zone at the running branch's tip, as the declaration approved names it, with the person's own layer and their profiles.
 
-        Where the repository has no such branch, at the integration branch's
+        A branch the host computes is read where the host keeps it, never by its
+        ref, which a room writes (`running_tip`, `lup_dev.trial`). Where the repository has no such branch, at the integration branch's
         tip, so naming one before it exists asks about what's accepted rather
         than whatever a launch's worktree has checked out; without that either,
         at the worktree's `HEAD`. The
@@ -1745,9 +1747,11 @@ class Trust(Model, arbitrary_types_allowed=True):
         `lup-dev` the host runs.
         """
         git = Git(cwd=self.root)
-        branches = approved_branches(self.layout, self.repository())
+        repository = self.repository()
+        branches = approved_branches(self.layout, repository)
         commit = (
-            git.commit(f"refs/heads/{branches.running}")
+            running_tip(self.layout, repository)
+            or git.commit(f"refs/heads/{branches.running}")
             or git.commit(f"refs/heads/{branches.integration}")
             or git.commit("HEAD")
         )
@@ -1757,6 +1761,10 @@ class Trust(Model, arbitrary_types_allowed=True):
                 "zone to approve"
             )
             raise TrustError(message)
+        return self.zone_at(commit)
+
+    def zone_at(self, commit: str) -> Zone:
+        """Read the host zone at the commit `commit`, with the person's own layer and their profiles: see `zone`. Raise `TrustError` where the lock doesn't say which `lup-dev` the host runs."""
         tool = self.tool(commit)
         own = person_layer(self.root)
         local = own.read_text() if own.is_file() else None

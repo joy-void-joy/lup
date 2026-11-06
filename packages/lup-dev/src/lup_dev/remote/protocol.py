@@ -26,6 +26,10 @@
   read from its own diff against that ref's tip on the remote (`Remotes.asking`):
   a push can't wait for them, so the refusal names `land`, which can, and whose
   own push passes here once they've answered. What can't be read isn't pushed;
+- where the project computes its running branch (`Versions`, `Remotes.trying`), no
+  room's push moves that branch, which the host alone computes (`lup_dev.trial`),
+  and none puts what the host runs on the integration branch, since that's
+  accepting it, the operator's: `land`'s own pushes are the ones that go there;
 - what each update would publish is put to the launch's modules' hooks at
   `Publishing` before git runs (`lup.publishing`), with what the
   remote holds already: the listing git asked for before the push
@@ -68,7 +72,15 @@ from lup.publishing import Place, Push, Refusal, Updating, told
 from lup.types import Model, MutableModel
 from lup_dev.errors import LupDevError
 from lup_dev.git import graphless, pinning, stray, ungrafted
-from lup_dev.host.protocol import Action, HostError, Limits, Register, Reply, Request
+from lup_dev.host.protocol import (
+    Action,
+    Branches,
+    HostError,
+    Limits,
+    Register,
+    Reply,
+    Request,
+)
 from lup_dev.host.rooms import RoomHandler, RoomRoute
 from lup_dev.host.service import Program, executed
 from lup_dev.host.workers import LaunchModules, refusals
@@ -411,6 +423,19 @@ class Remotes(Model, arbitrary_types_allowed=True):
     None tells nothing."""
     asking: Callable[[Register, str | None, str], Awaitable[list[Path]]] | None = None
     """What says which files of a push to a gated ref ask the operator by their role or an `ignore` they add, unapproved at that version, given the ref's tip on the remote, none where it isn't there, and the commit pushed (`unapproved_files`, `lup_dev.policy.landing`): any it names refuses the update, since a push can't wait for them. None asks nothing, for a service serving no landings."""
+    trying: Callable[[Register], Branches | None] | None = None
+    """Says the branches of a launch's repository where it computes its running
+    branch (`lup_dev.trial`), read from what's approved, so a launch's limits
+    from before that was approved don't matter; none where it doesn't. Such a
+    branch moves only by what the host computes, and a branch in it hasn't
+    landed for `delete-merged` until the integration branch holds it. None reads
+    it as none for every launch."""
+    hosted: Callable[[Register, str | None, str], Awaitable[list[Path]]] | None = None
+    """What says which files putting a commit on the integration branch, at the
+    given tip on the remote, changes that the host runs (`hosted_files`,
+    `lup_dev.policy.landing`), where `trying` says it computes its running
+    branch: any it names refuses a room's push, as that's accepting it. None
+    asks nothing."""
     modules: LaunchModules | None = None
     """Each launch's modules, whose hooks at `Publishing` see what a push would
     publish before git runs; none asks nothing, for a service serving no
@@ -511,7 +536,8 @@ class Remotes(Model, arbitrary_types_allowed=True):
         read, never the room's: the branch's tip there must be in the history
         of a gated branch's tip there (`Limits.gated`), where branches land and
         which `delete-merged` never deletes, both fetched into the store first
-        (`descends`). A pull request the branch heads isn't looked for: with its
+        (`descends`). A branch the host computes isn't one of those: what it
+        holds is on trial, and landed only once the integration branch holds it. A pull request the branch heads isn't looked for: with its
         tip in a gated branch, nothing is left in it to merge, whatever the
         forge. The lease fails the deletion where the branch moved since it was
         checked; `leased` is the room's own lease on it, where it gave one,
@@ -528,11 +554,13 @@ class Remotes(Model, arbitrary_types_allowed=True):
                 f"deleting `{branch}`: `{remote}` holds it at {tip}, not "
                 f"{leased.expected} as leased"
             )
+        tried = self.computed(launch)
         landing = [
             ref
             for ref in refs
             if ref.name.startswith("refs/heads/")
             and matching(ref.name, launch.limits.gated)
+            and ref.name != tried
         ]
         if not landing:
             return (
@@ -562,6 +590,11 @@ class Remotes(Model, arbitrary_types_allowed=True):
                 f"{where} there, so deleting it would lose them; {ANYWAY}"
             )
         return Lease(ref=branch, expected=tip)
+
+    def computed(self, launch: Register) -> str | None:
+        """Return the full name of the branch the host computes for `launch`'s repository; none where it computes none (`trying`)."""
+        branches = None if self.trying is None else self.trying(launch)
+        return None if branches is None else f"refs/heads/{branches.running}"
 
     async def url(self, launch: Register, remote: str, *, push: bool) -> str:
         """Return the URL of the remote named `remote` in `launch`'s repository, as git reads it there for a push or a fetch.
@@ -665,6 +698,10 @@ class PushHandler(Model, RoomHandler[Pushing]):
     """Answers `Pushing`: each update held to the launch's limits, then pushed by object id to the remote's push URL."""
 
     remotes: Remotes
+    own: bool = False
+    """It's `land`'s own push, of what the host computed or a landing held, rather
+    than a room's: it alone moves the branch the host computes, or puts what the
+    host runs on the integration branch."""
 
     @override
     def request(self) -> type[Pushing]:
@@ -685,6 +722,12 @@ class PushHandler(Model, RoomHandler[Pushing]):
             )
             if checked.status != 0:
                 return f"`{update.destination}` isn't a ref's name git accepts"
+            if not self.own and update.destination == self.remotes.computed(launch):
+                return (
+                    f"`{update.destination}` is computed by the host, from the "
+                    "integration branch and what's on trial, so no push moves it: "
+                    "`land` puts a branch on trial, as a push can't"
+                )
             forced = request.force or update.forced or update.destination in leases
             return refusal(update, forced=forced, launch=launch)
 
@@ -813,11 +856,13 @@ class PushHandler(Model, RoomHandler[Pushing]):
         it's refused, naming `land`, which can.
         """
         asking = self.remotes.asking
+        computed = self.remotes.computed(launch)
         gated = [
             each
             for each in allowed
             if each.source is not None
             and matching(each.destination, launch.limits.gated)
+            and not (self.own and each.destination == computed)
         ]
         if asking is None or not gated:
             return {}
@@ -834,10 +879,18 @@ class PushHandler(Model, RoomHandler[Pushing]):
                 ):
                     return f"`{named}` moved on `{request.remote}` while lup read it: push again"
                 paths = await asking(launch, old, tip)
+                accepting = await self.accepting(launch, named, old, tip)
             except LupDevError as failed:
                 return (
                     f"lup couldn't read what this puts on `{named}`, so it isn't "
                     f"pushed: {oneline(str(failed))}"
+                )
+            if accepting:
+                files = oneline(", ".join(f"`{each}`" for each in accepting))
+                return (
+                    f"this puts on `{named}` what the host runs: {files}. That's "
+                    "accepting it, the operator's: `land` puts it on trial, without "
+                    "`onto`"
                 )
             if not paths:
                 return None
@@ -858,6 +911,21 @@ class PushHandler(Model, RoomHandler[Pushing]):
             for destination, reason in reasons.items()
             if reason is not None
         }
+
+    async def accepting(
+        self, launch: Register, destination: str, old: str | None, tip: str
+    ) -> list[Path]:
+        """Return each file a room's push of `tip` to `destination`, at `old` on the remote, changes that the host runs, where `destination` is the integration branch of a project computing its running branch; none where it isn't, or this is `land`'s own push."""
+        trying = None if self.remotes.trying is None else self.remotes.trying(launch)
+        hosted = self.remotes.hosted
+        if (
+            self.own
+            or trying is None
+            or hosted is None
+            or destination != f"refs/heads/{trying.integration}"
+        ):
+            return []
+        return await hosted(launch, old, tip)
 
     async def barred(
         self, request: Pushing, launch: Register, allowed: list[Update]

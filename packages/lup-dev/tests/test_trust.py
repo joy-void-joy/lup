@@ -98,6 +98,7 @@ from lup_dev.launch.trust import (
 from lup_dev.layout import CopyLayout, JudgeLayout, Layout
 from lup_dev.stored import read_model, write_model
 from lup_dev.switching import FellBack, Stayed, Switch, Switched, Switcher
+from lup_dev.trial import Trial, Trials
 from lup_ledger.parties import Conversation
 
 if TYPE_CHECKING:
@@ -3042,6 +3043,26 @@ class Proposing:
         assert pushed_by is None
         self.asked += 1
         return self.asked
+
+
+def test_the_running_branch_lup_computes_is_read_where_the_host_keeps_it_never_its_ref(
+    lup: Path,
+    kit: Kit,
+    shell: Shell,
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    """A room writes refs: `refs/heads/live` moved by one asks nothing about what it names."""
+    dev = shell.git(lup, "rev-parse", "dev")
+    trust = trusting(lup, kit, unasked())
+    repository = trust.repository()
+    declared_branches(
+        kit.layout, repository, Branches(integration="dev", running="live")
+    )
+    Trials.of(kit.layout, repository).write(Trial(live=dev))
+    forged = beside(lup, "forged", shell)
+    shell.git(lup, "update-ref", "refs/heads/live", forged)
+    assert trust.check().zone.commit == dev
 
 
 def nobody_running(_delivery: Delivery, _launch: str) -> Conversation | None:
