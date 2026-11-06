@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import JsonValue, TypeAdapter
 
-from lup.blocks import Fold, Load, OfAgent
+from lup.blocks import Block, Fold, Load, OfAgent
 from lup_dashboard.demo import Demo, files
 from lup_dashboard.host import Host
 from lup_dashboard.server import Access, application
@@ -108,6 +108,19 @@ def page(tmp_path: Path) -> Path:
     built.mkdir()
     (built / "index.html").write_text("<!doctype html><title>lup</title>")
     return built
+
+
+def folded_in(blocks: list[Block]) -> list[Fold]:
+    """Return every fold among `blocks`, those inside each after it, whose content is given."""
+    return [
+        found
+        for each in blocks
+        if isinstance(each, Fold)
+        for found in [
+            each,
+            *(folded_in(each.content) if isinstance(each.content, list) else []),
+        ]
+    ]
 
 
 def client(host: Host, page: Path) -> TestClient:
@@ -463,14 +476,15 @@ def test_the_demo_answers_a_module_s_view_with_the_module_s_own_layout_over_its_
     assert isinstance(drawer, Viewed)
     # The module's own layout: its summary, its folds, its items woven in, each
     # call read whole as its fold opens, from its own view.
-    lines = drawer.blocks.text().splitlines()
+    lines = [each.strip() for each in drawer.blocks.text().splitlines()]
     assert lines[0].startswith("conversation · ")
-    assert "▸ → @51 question to you · waiting on you" in lines
+    assert any(
+        each.startswith("▸ → @51 question to you · waiting on you") for each in lines
+    )
     [loaded] = [
         each.content
-        for each in drawer.blocks.blocks
-        if isinstance(each, Fold)
-        and isinstance(each.content, Load)
+        for each in folded_in(drawer.blocks.blocks)
+        if isinstance(each.content, Load)
         and each.content.view == "call"
         and each.content.argument.get("id") == "call-51"
     ]
@@ -535,9 +549,11 @@ def test_the_demo_weaves_a_conversations_items_into_its_view_a_message_sent_from
     assert found.received[1].text == "Go on."
     # Each a line where it happened in the conversation's view, as the core words it,
     # the message not told yet, since no agent runs here to be told it.
-    lines = viewed.blocks.text().splitlines()
+    lines = [each.strip() for each in viewed.blocks.text().splitlines()]
     assert f"▸ ← @{number} your message · not told yet" in lines
-    assert "▸ → @51 question to you · waiting on you" in lines
+    assert any(
+        each.startswith("▸ → @51 question to you · waiting on you") for each in lines
+    )
     # The page reads a conversation's items only through that view.
     listed = served.post(
         "/api/ask",

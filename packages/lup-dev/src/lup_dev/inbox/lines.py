@@ -7,9 +7,9 @@ line is made here, for the conversation it's in (`lined`): what the item's
 kind says of it (`said`), then what the core says around it: whom it went to,
 or whom it came from and for whom, and where it stands. A module weaving the
 items in reads each one's line, when it reached the conversation, whether it
-repeats the conversation's own words, and the operator's comment on deciding
-it, as the core hands them with the items (`Exchanged`), and never matches an
-item's reason or state.
+repeats the conversation's own words or the input of the call that made it, and
+the operator's comment on deciding it, as the core hands them with the items
+(`Exchanged`), and never matches an item's reason or state.
 
 `said` is each kind's own words, as the kind's summary view will say them once
 each kind is its module's (#113, step 4): the one place here naming the kinds.
@@ -65,10 +65,14 @@ class Lined(Model):
     echoes: bool = False
     """Whether it repeats the conversation's own words, which a view of it shows
     already: a turn's last words, which lup made a note of."""
+    call_sends_it: bool = False
+    """Whether sending it is all the call that made it did, that call's input
+    being its text: one of lup's tools, as `note` or `ask`, rather than a write
+    lup flagged or held."""
 
 
 def said(item: Item) -> list[Piece]:
-    """Say what `item` is, in its kind's own words: a message by its kind, the operator's own as their message or their reply; their answer and review by what they answer; lup's word on citations by how many in which item; a held change, a stop, a flagged write; any other kind by its name.
+    """Say what `item` is, in its kind's own words: a turn's last words as their kind is named (`turn's end`, `inbox/texts.py`), a message by its kind, the operator's own as their message or their reply; their answer and review by what they answer; lup's word on citations by how many in which item; a held change, a stop, a flagged write; any other kind by its name.
 
     >>> from datetime import UTC
     >>> said(Item(number=54, reason=Message(kind="note", text="Good.", of=52),
@@ -76,6 +80,8 @@ def said(item: Item) -> list[Piece]:
     ['reply to @52']
     """
     match item.reason, item.sender:
+        case Message(ending=True), _:
+            return ["turn's end"]
         case Message(of=None), Operator():
             return ["message"]
         case Message(of=int() as of), Operator():
@@ -213,6 +219,13 @@ def lined(
             case _:
                 return False
 
+    def sends(item: Item) -> bool:
+        match item.reason:
+            case Flagged() | HeldChange():
+                return False
+            case _:
+                return item.call is not None
+
     def its(item: Item) -> Lined:
         match item.recipient:
             case Conversation() as recipient:
@@ -232,6 +245,7 @@ def lined(
             at=item.made,
             comment=comment,
             echoes=echoes(item),
+            call_sends_it=sends(item),
         )
 
     def came(item: Item) -> list[Piece]:

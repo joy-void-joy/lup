@@ -193,7 +193,7 @@ def test_claude_codes_record_reads_as_the_operators_words_the_agents_and_its_too
         Said(by="agent", text="Yes. Two options:\n1. queue\n2. agents", at=at),
         Called(tool="Bash", gist="ls", at=at),
         Called(tool="Bash", gist="ls", at=at),
-        Called(tool="Read", gist="a", at=at),
+        Called(tool="Read", gist="/a", at=at),
         Said(by="agent", text="Which do you want?", at=at),
         Said(by="operator", text="An older release's words, with no origin.", at=at),
         Said(by="operator", text="Also, the queue first.", at=at),
@@ -1126,7 +1126,7 @@ def test_codexs_plan_call_as_0_145_writes_it_reads_its_last_steps(
 def test_claude_codes_calls_read_as_a_line_each_and_whole_on_asking(
     tmp_path: Path,
 ) -> None:
-    """Each call's line says what it did, from its input; asked for, it's read whole: its input, and the result the agent was given, or the whole output Claude Code saved in the session's own folder, never a file elsewhere a record names (`docs/field-notes.md`, *A session's record*)."""
+    """Each call's line says what it was given, from its input; asked for, it's read whole: its input, and the result the agent was given, or the whole output Claude Code saved in the session's own folder, never a file elsewhere a record names (`docs/field-notes.md`, *A session's record*)."""
     folder = tmp_path / "projects" / "-w"
     saved = folder / "s1" / "tool-results"
     saved.mkdir(parents=True)
@@ -1168,6 +1168,12 @@ def test_claude_codes_calls_read_as_a_line_each_and_whole_on_asking(
                     call("t5", "Bash", command="cat other.log"),
                     call("t6", "Grep", pattern="def laid", path="/w"),
                     call("t7", "mcp__lup__send", to="parent", kind="note", text="x"),
+                    call("t8", "Read", file_path="/w/a.py", offset=3, limit=2),
+                    call("t9", "Write", file_path="/w/a.py", content="a\nb\n"),
+                    call("t10", "Bash", command="cd /w/tree/dev && ls -la\n| head"),
+                    call("t11", "NotebookEdit", notebook_path="/w/tree/n.ipynb"),
+                    call("t12", "mcp__lup__wait_inbox"),
+                    call("t13", "Edit", old_string="not its input"),
                 ),
                 result("t1", "5 passed"),
                 result(
@@ -1197,15 +1203,21 @@ def test_claude_codes_calls_read_as_a_line_each_and_whole_on_asking(
         for each in reader.read(record).entries
         if isinstance(each, Called)
     ]
-    whole = reader.calls(record, ["t4", "t1", "t2", "t3", "t5", "t6", "t9"])
+    whole = reader.calls(record, ["t4", "t1", "t2", "t3", "t5", "t6", "t99"])
     assert gists == [
-        ("Bash", "Run the tests"),
-        ("Read", "review.ts:480"),
-        ("Edit", "review.ts"),
-        ("Bash", "cat big.log"),
+        ("Bash", "Run the tests · uv run pytest -q"),
+        ("Read", "page/src/review.ts:480"),
+        ("Edit", "page/src/review.ts -1 +0"),
+        ("Bash", "cat big.log | head"),
         ("Bash", "cat other.log"),
-        ("Grep", "def laid"),
-        ("mcp__lup__send", "parent"),
+        ("Grep", "pattern=def laid · path=/w"),
+        ("mcp__lup__send", "to=parent · kind=note · text=x"),
+        ("Read", "/w/a.py:3,4"),
+        ("Write", "/w/a.py · 2 lines"),
+        ("Bash", "ls -la | head"),
+        ("NotebookEdit", "w/tree/n.ipynb"),
+        ("mcp__lup__wait_inbox", None),
+        ("Edit", "old_string=not its input"),
     ]
     assert whole == [
         Call(
@@ -1237,7 +1249,7 @@ def test_claude_codes_calls_read_as_a_line_each_and_whole_on_asking(
 
 
 def test_codexs_calls_read_as_a_line_each_and_whole_on_asking(tmp_path: Path) -> None:
-    """Each call's line says what it did: a command's words, the files a patch touches, else its first argument; asked for, it's read whole, its arguments read as JSON where they are, and what it returned, text or parts (`docs/field-notes.md`, *A thread's rollout*)."""
+    """Each call's line says what it was given: a command's words, the files a patch touches, a tool's text run together, else its arguments, each after its name; asked for, it's read whole, its arguments read as JSON where they are, and what it returned, text or parts (`docs/field-notes.md`, *A thread's rollout*)."""
 
     def called(kind: str, id_: str, name: str, **given: object) -> str:
         return rolled(
@@ -1272,6 +1284,15 @@ def test_codexs_calls_read_as_a_line_each_and_whole_on_asking(tmp_path: Path) ->
                     arguments=json.dumps({"command": ["bash", "-lc", "ls -la"]}),
                 ),
                 called("function_call", "c4", "wait", arguments="not json"),
+                called(
+                    "function_call",
+                    "c5",
+                    "write_stdin",
+                    arguments=json.dumps({"session_id": 4, "chars": "y"}),
+                ),
+                called(
+                    "custom_tool_call", "c6", "exec", input="const a = 1;\nawait a;\n"
+                ),
                 output("function_call_output", "c1", "5 passed"),
                 output(
                     "custom_tool_call_output",
@@ -1293,9 +1314,11 @@ def test_codexs_calls_read_as_a_line_each_and_whole_on_asking(tmp_path: Path) ->
     ]
     assert gists == [
         ("exec_command", "uv run pytest -q"),
-        ("apply_patch", "review.ts, calls.md"),
+        ("apply_patch", "page/src/review.ts, docs/calls.md"),
         ("shell", "bash -lc 'ls -la'"),
         ("wait", "not json"),
+        ("write_stdin", "session_id=4 · chars=y"),
+        ("exec", "const a = 1; await a;"),
     ]
     assert reader.calls(rollout, ["c2", "c1", "c3", "c4"]) == [
         Call(id="c2", input=patch, output="Success.\n[input_image]"),

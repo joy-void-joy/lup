@@ -152,7 +152,7 @@ def stand_in(
     *,
     output: str | None = None,
 ) -> StandIn:
-    """Return a stand-in call to `tool` saying `gist`, given `given`, which returned `output`; none while it runs."""
+    """Return a stand-in call to `tool` saying `gist`, what it was given as its runtime's reader would say it, given `given`, which returned `output`; none while it runs."""
     return StandIn(
         step=Called(tool=tool, gist=gist, id=id_, at=at),
         whole=Call(id=id_, input=given, output=output),
@@ -1891,7 +1891,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Bash",
                     8,
-                    "Count each kind of line in the session records",
+                    "Count each kind of line in the session records · python3 - <<'EOF' import collections, glob, json",
                     {
                         "command": (
                             "python3 - <<'EOF'\nimport collections, glob, json\n"
@@ -1915,7 +1915,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Bash",
                     7.8,
-                    "Show the start of one record",
+                    "Show the start of one record · head -c 400 /home/op/records/projects/-home-op-lup-git-tree-dev/0a1f3339.jsonl",
                     {
                         "command": f"head -c 400 {records}/0a1f3339.jsonl",
                         "description": "Show the start of one record",
@@ -1929,7 +1929,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Read",
                     7.5,
-                    "records.py:40",
+                    "lup_dev/host/records.py:40,51",
                     {
                         "file_path": f"{tree}/packages/lup-dev/src/lup_dev/host/records.py",
                         "offset": 40,
@@ -1951,7 +1951,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "mcp__lup__ask",
                     4,
-                    "Which way should the reader read each kind of line?",
+                    'question=Which way should the reader read each kind of line? · decisions=[{"text": "A model per kind", "lean": "yes"}, {"text": "A dict walked by hand", "lean": "no"}]',
                     {
                         "question": "Which way should the reader read each kind of line?",
                         "decisions": [
@@ -1965,7 +1965,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Grep",
                     3.8,
-                    "rollout-",
+                    "pattern=rollout- · path=/home/op/records/sessions",
                     {"pattern": "rollout-", "path": "/home/op/records/sessions"},
                 ),
             ],
@@ -1975,14 +1975,14 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Bash",
                     13,
-                    "Check the records' encoding",
+                    "file /home/op/records/projects/-home-op-lup-git-tree-dev/*.jsonl | sort | uniq -c",
                     {"command": f"file {records}/*.jsonl | sort | uniq -c"},
                     "  45 JSON text data\n",
                 ),
                 called(
                     "mcp__lup__note",
                     12,
-                    "The records are UTF-8 JSON lines; no other encoding found.",
+                    "remark=The records are UTF-8 JSON lines; no other encoding found.",
                     {
                         "remark": "The records are UTF-8 JSON lines; no other encoding found."
                     },
@@ -2021,7 +2021,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "blocked",
                     2,
-                    "The source clip clips/harbour.mov is truncated: its moov atom is missing.",
+                    "why=The source clip clips/harbour.mov is truncated: its moov atom is missing.",
                     {
                         "why": "The source clip clips/harbour.mov is truncated: its moov atom is missing."
                     },
@@ -2038,7 +2038,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Bash",
                     0.8,
-                    "Add CodeMirror's language packages",
+                    "Add CodeMirror's language packages · npm install --save-exact @codemirror/lang-python @codemirror/lang-javascript",
                     {
                         "command": "npm install --save-exact @codemirror/lang-python @codemirror/lang-javascript",
                         "description": "Add CodeMirror's language packages",
@@ -2048,7 +2048,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Edit",
                     0.5,
-                    "code.ts",
+                    "page/src/code.ts -1 +2",
                     {
                         "file_path": f"{tree}/packages/lup-dashboard/page/src/code.ts",
                         "old_string": 'import { tags } from "@lezer/highlight";',
@@ -2063,7 +2063,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Bash",
                     7.4,
-                    "Run the gate",
+                    "Run the gate · uv run lup-dev check",
                     {"command": "uv run lup-dev check", "description": "Run the gate"},
                     "passed   rules\npassed   ruff\npassed   pyright\n"
                     "passed   pytest (1,214 tests, 41.2s)\n\nThe gate passed.\n",
@@ -2071,7 +2071,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "mcp__lup__friction",
                     3,
-                    "the gate's 41 seconds",
+                    "got_in_the_way=the gate's 41 seconds · trying=to iterate on the reader · would_change=run only the tests the change touches",
                     {
                         "got_in_the_way": "the gate's 41 seconds",
                         "trying": "to iterate on the reader",
@@ -2087,7 +2087,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "mcp__lup__how_it_felt",
                     1.4,
-                    "The rewrite went smoothly once the voice was settled.",
+                    "text=The rewrite went smoothly once the voice was settled.",
                     {"text": "The rewrite went smoothly once the voice was settled."},
                     id_="call-58",
                 ),
@@ -2100,7 +2100,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Write",
                     6,
-                    "reader.py",
+                    "lup/transcripts/reader.py · 5 lines",
                     {
                         "file_path": f"{tree}/packages/lup/src/lup/transcripts/reader.py",
                         "content": '"""Reading a session\'s record."""\n\nclass Turn(BaseModel):\n    said: str\n',
@@ -2110,7 +2110,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Edit",
                     5.5,
-                    "reader.py",
+                    "lup/transcripts/reader.py -1 +1",
                     {
                         "file_path": f"{tree}/packages/lup/src/lup/transcripts/reader.py",
                         "old_string": "class Turn(BaseModel):",
@@ -2120,7 +2120,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Edit",
                     5,
-                    "reader.py",
+                    "lup/transcripts/reader.py -1 +2",
                     {
                         "file_path": f"{tree}/packages/lup/src/lup/transcripts/reader.py",
                         "old_string": "    said: str",
@@ -2134,7 +2134,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Edit",
                     2.5,
-                    "clock.py",
+                    "src/lup_dev/clock.py -1 +2",
                     {
                         "file_path": f"{tree}/packages/lup-dev/src/lup_dev/clock.py",
                         "old_string": "    def sleep(self, seconds: float) -> None:",
@@ -2152,7 +2152,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Bash",
                     1.1,
-                    "Count the parts of each kind of line",
+                    "Count the parts of each kind of line · jq -r '.type' /home/op/records/projects/-home-op-lup-git-tree-dev/*.jsonl | sort | uniq -c | sort -rn | head",
                     {
                         "command": f"jq -r '.type' {records}/*.jsonl | sort | uniq -c | sort -rn | head",
                         "description": "Count the parts of each kind of line",
@@ -2162,7 +2162,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "mcp__lup__note",
                     0.8,
-                    "Four kinds of line carry what was said.",
+                    "remark=Four kinds of line carry what was said.",
                     {"remark": "Four kinds of line carry what was said."},
                     "Noted for the operator: @62.",
                     id_="call-62",
@@ -2297,7 +2297,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 stand_in(
                     "toolu_p1",
                     "Bash",
-                    "List the session records",
+                    "List the session records · ls /home/op/records/projects/-home-op-lup-git-tree-dev | head -4",
                     self.ago(28),
                     {
                         "command": "ls /home/op/records/projects/-home-op-lup-git-tree-dev | head -4",
@@ -2311,7 +2311,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 stand_in(
                     "toolu_p2",
                     "Read",
-                    "field-notes.md:613",
+                    "tree/dev/docs/field-notes.md:613,616",
                     self.ago(27),
                     {
                         "file_path": f"{tree}/docs/field-notes.md",
@@ -2326,7 +2326,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 stand_in(
                     "call-47",
                     "mcp__lup__note",
-                    "Each session's record is a JSONL file; a subagent's is beside it.",
+                    "remark=Each session's record is a JSONL file; a subagent's is beside it.",
                     self.ago(26),
                     {
                         "remark": "Each session's record is a JSONL file; a subagent's is beside it."
@@ -2341,7 +2341,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 stand_in(
                     "toolu_p3",
                     "Read",
-                    "records.py",
+                    "src/lup_dev/host/records.py",
                     self.ago(24),
                     {
                         "file_path": f"{tree}/packages/lup-dev/src/lup_dev/host/records.py"
@@ -2352,7 +2352,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 stand_in(
                     "toolu_p4",
                     "Grep",
-                    "class Transcript",
+                    "pattern=class Transcript · path=/home/op/lup.git/tree/dev/packages",
                     self.ago(22),
                     {"pattern": "class Transcript", "path": f"{tree}/packages"},
                     output="packages/lup-dev/src/lup_dev/host/records.py:118:"
@@ -2372,7 +2372,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             stand_in(
                 "toolu_d1",
                 "Grep",
-                "def laid",
+                "pattern=def laid · output_mode=content · path=/home/op/lup.git/tree/dev/packages",
                 self.ago(18),
                 {
                     "pattern": "def laid",
@@ -2384,7 +2384,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             stand_in(
                 "toolu_d2",
                 "Read",
-                "review.ts:871",
+                "page/src/review.ts:871,873",
                 self.ago(17),
                 {
                     "file_path": f"{tree}/packages/lup-dashboard/page/src/review.ts",
@@ -2397,7 +2397,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             stand_in(
                 "toolu_d3",
                 "Read",
-                "conversation.ts",
+                "page/src/conversation.ts",
                 self.ago(17),
                 {
                     "file_path": f"{tree}/packages/lup-dashboard/page/src/conversation.ts"
@@ -2435,7 +2435,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             stand_in(
                 "call_r2",
                 "apply_patch",
-                "second.toml",
+                "scenes/second.toml",
                 self.ago(16),
                 patch,
                 output="Success. Updated the following files:\nM scenes/second.toml\n",
@@ -2450,7 +2450,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             stand_in(
                 f"toolu_g{step}",
                 "Read",
-                f"rollout-{step // 2 + 1}.jsonl",
+                f"rollouts/rollout-{step // 2 + 1}.jsonl",
                 self.ago(0),
                 {"file_path": f"{rollouts}/rollout-{step // 2 + 1}.jsonl"},
                 output='1\t{"type":"session_meta","payload":{"id":"th-1","cwd":"/w"}}\n'
@@ -2627,7 +2627,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     return stand_in(
                         f"toolu_w{at}",
                         "Read",
-                        f"step_{k}.py",
+                        f"lup/worker1/step_{k}.py",
                         when,
                         {"file_path": str(tree / module)},
                         output=function(k),
@@ -2636,7 +2636,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     return stand_in(
                         f"toolu_w{at}",
                         "Edit",
-                        f"step_{k}.py",
+                        f"lup/worker1/step_{k}.py -1 +1",
                         when,
                         {
                             "file_path": str(tree / module),
@@ -2650,7 +2650,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     return stand_in(
                         f"toolu_w{at}",
                         "Bash",
-                        f"Run step {k}'s tests",
+                        f"Run step {k}'s tests · uv run pytest {tests} -q",
                         when,
                         {
                             "command": f"uv run pytest {tests} -q",
@@ -2662,7 +2662,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     return stand_in(
                         f"toolu_w{at}",
                         "Read",
-                        f"test_step_{k}.py",
+                        f"packages/lup/tests/test_step_{k}.py:1,20",
                         when,
                         {"file_path": str(tree / tests), "limit": 20},
                         output=f"1\tfrom lup.worker1.step_{k} import step_{k}\n",

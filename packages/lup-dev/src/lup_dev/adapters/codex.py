@@ -269,11 +269,13 @@ from lup_dev.host.records import (
     Task,
     Transcript,
     Usage,
-    first,
+    argued,
     gist,
     head,
     homes,
+    ran,
     reached,
+    tail,
     within,
 )
 from lup_dev.host.records import Said as Spoken
@@ -1396,27 +1398,31 @@ class ToolCalled(Model, extra="ignore"):
             return self.arguments
 
     def gist(self) -> str | None:
-        r"""Return what the call did, in a line: the files a patch touches, the command a shell runs, else its first argument, or its text's first line.
+        r"""Return what the call was given, in a line: the files a patch touches, the command a shell runs (`ran`), a tool's text run together, as a cell of code; else its arguments, each after its name (`argued`).
 
-        >>> ToolCalled(type="custom_tool_call", name="apply_patch", input="*** Begin Patch\n*** Update File: src/review.ts\n@@\n*** End Patch").gist()
-        'review.ts'
-        >>> ToolCalled(type="function_call", name="exec_command", arguments='{"cmd": "rg -n gist", "workdir": "/w"}').gist()
+        >>> ToolCalled(type="custom_tool_call", name="apply_patch", input="*** Begin Patch\n*** Update File: page/src/review.ts\n@@\n*** End Patch").gist()
+        'page/src/review.ts'
+        >>> ToolCalled(type="function_call", name="exec_command", arguments='{"cmd": "cd /w && rg -n gist", "workdir": "/w"}').gist()
         'rg -n gist'
+        >>> ToolCalled(type="function_call", name="wait", arguments='{"cell_id": "13", "yield_time_ms": 1000}').gist()
+        'cell_id=13 · yield_time_ms=1000'
+        >>> ToolCalled(type="custom_tool_call", name="exec", input="const a = 1;\nawait tools.note(a);").gist()
+        'const a = 1; await tools.note(a);'
         """
         given = self.given()
         match given:
             case str() if self.name == "apply_patch":
-                return gist(
-                    ", ".join(PurePosixPath(each).name for each in patched(given))
-                )
+                return gist(", ".join(tail(each) for each in patched(given)))
             case {"input": str() as patch} if self.name == "apply_patch":
-                return gist(
-                    ", ".join(PurePosixPath(each).name for each in patched(patch))
-                )
+                return gist(", ".join(tail(each) for each in patched(patch)))
             case {"command": [*words]} if all(isinstance(each, str) for each in words):
-                return gist(shlex.join(str(each) for each in words))
+                return gist(ran(shlex.join(str(each) for each in words)))
+            case {"cmd": str() as command}:
+                return gist(ran(command))
             case dict():
-                return gist(first(given))
+                return argued(given)
+            case str():
+                return gist(ran(given))
             case _:
                 return gist(given)
 
@@ -1448,10 +1454,10 @@ class ShellCalled(Model, extra="ignore"):
     action: JsonObject = {}
 
     def gist(self) -> str | None:
-        """Return the command it runs, as a shell would read it; its action as JSON where it isn't a command."""
+        """Return the command it runs, as a shell would read it (`ran`); its action as JSON where it isn't a command."""
         match self.action:
             case {"command": [*words]} if all(isinstance(each, str) for each in words):
-                return gist(shlex.join(str(each) for each in words))
+                return gist(ran(shlex.join(str(each) for each in words)))
             case _:
                 return gist(self.action or None)
 

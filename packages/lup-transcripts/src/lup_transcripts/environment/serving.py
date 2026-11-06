@@ -28,7 +28,7 @@ is what the host holds as it asks.
 
 Its views read a conversation live, from the runtime's own record as it grows
 (`conversation`, the drawer under each agent's banner; `exchange`, one earlier
-exchange; `call`, one call read whole), laid out in lup's blocks
+exchange; `call`, one call, its output and each long argument read as each opens), laid out in lup's blocks
 (`environment/conversation.py`), each record read again only once it changed
 (`Recording`). The drawer opens what came after the operator last read it,
 by its review mark (`self.marks`, keyed by the conversation's runtime's ids,
@@ -37,8 +37,8 @@ Space `d` on its line; it keeps open at most the agent's last words its fold
 kind of what came earlier keeps (`FoldKind.keeps_open`, 20 unless a person's
 layer says), as the module's layers leave it. Shown, the drawer and each
 exchange opened in it are answered again at their agent's turns and calls and
-a minute apart at most; a call read whole, open in it, as a call of the
-agent's finishes, so one still running shows what it returned once it has.
+a minute apart at most; a call, open in it, as a call of the agent's finishes,
+so one still running shows what it returned once it has.
 """
 
 import asyncio
@@ -451,7 +451,7 @@ class TranscriptsServing(ModuleServing):
         watch=GROWING,
     )
     async def conversation(self, viewed: OfAgent) -> lup.Blocks:
-        """Show an agent's whole conversation from their runtime's record, live: everything since you last read it open, by its review mark or your last words, each earlier exchange folded under your words that opened it, each run of calls under one line, and the items of lup's inbox they sent and were sent where they happened."""
+        """Show an agent's whole conversation from their runtime's record, live: everything since you last read it open, by its review mark or your last words, each earlier exchange folded under your words that opened it, each call on a line saying what it was given, each run of them under one line it folds under, and the items of lup's inbox they sent and were sent where they happened, a turn's last words folded under theirs."""
         read = await asyncio.to_thread(
             self.recording.read,
             self.recorded,
@@ -496,7 +496,7 @@ class TranscriptsServing(ModuleServing):
 
     @lup.view(watch=lup.Watch(on=[lup.CallFinished]))
     async def call(self, viewed: OfCall) -> lup.Blocks:
-        """Show one call of an agent's conversation whole: what it was given, and what it returned, or that it hasn't returned yet."""
+        """Show one call of an agent's conversation: what it was given, and how much it returned, or that it hasn't returned yet; or, with `--output`, what it returned, or with `--argument`, one argument, whole."""
         read = await asyncio.to_thread(
             self.recording.read,
             self.recorded,
@@ -508,4 +508,6 @@ class TranscriptsServing(ModuleServing):
         found = await asyncio.to_thread(
             reader.calls, read.record, [viewed.id], read.root
         )
-        return call_blocks(viewed, found[0] if found else None)
+        return call_blocks(
+            viewed, found[0] if found else None, view=TranscriptsServing.call
+        )
