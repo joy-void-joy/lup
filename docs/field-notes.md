@@ -425,6 +425,28 @@ Behind `Dashboard.route` (`packages/lup-dashboard/page/drive/dashboard.ts`, #365
 - **Playwright reports no such request.** With interception on, it holds `Network.requestWillBeSent` until the same request's `Fetch.requestPaused`, which one that passed never gets, so neither `page.on("request")` nor the handler hears of it (`_onRequestWillBeSent`, its `crNetworkManager`).
 - **How it showed:** `rows.test.ts`'s refusal failed in 2 of 75 runs under such load, each at the wait for "Not sent": Ctrl+Enter's keeping of the draft reached the demo, which took it, so the reply was sent for real. Its steps alone, repeated on one draft under that load, did so in 35 of 521 tries, a second DevTools session seeing the browser send it and neither the handler nor `page.on("request")` hearing of it each time; through `Dashboard.route`, in 0 of 1,500.
 
+## What a landing's gate spends (3,662 tests, 18 drive files, a room of 32 cores under 2,048 processes, measured 2026-11-06)
+
+Behind `Step.together` and the drive tests' six files at a time. Each `lup-dev check --at HEAD --fix --again`, as `land` runs it on a merge, in a worktree made for it, timed by what wraps `uv` and `pnpm` on the `PATH` (one that runs them as a child has to hand on signals, or `drive`'s demos outlive their tests and fail them).
+
+| step, seconds | each in turn, one run | at once, the mean of five |
+|---|---:|---:|
+| worktree, environment and start | 3.7 | 3.6 |
+| `engine` and `dashboard` | 14.0 | 7.6, together |
+| `ignores` (`rules fix`), on a cold engine | 24.9 | 25.8 |
+| `drive` | 61.6 | 43.0 |
+| `rules` | 20.8 | 47.3 |
+| `pytest` | 66.9 on 8 workers | 61.5 on 12 |
+| `private` | 2.9 | 3.7 |
+| **the gate, cold** | **197 to 211, 2 runs** | **93 to 106, 5 runs, all passing** |
+
+- **What decides it** is the slowest of what runs at once, `pytest` now, then the fixes' 25 s before it. Each of the rest is under a second.
+- **What wasn't the cost:** the cold environment takes 0.2 s from uv's cache, and the two builds 14 s, so reusing them across checkouts could save little of the gate, and only with what a build is keyed by complete.
+- **`rules`** takes 10 s where its engine is warm and nothing else starts, and about 45 s beside the suite in a worktree just made. Its issues were 15 of its seconds, asked one by one. Why it's slower beside the suite isn't known; it's within `pytest`'s time, so the gate doesn't wait on it.
+- **Two gates at once:** each took 254 to 269 s and failed in `drive` at the limit, a third gate in the room, when each step ran in turn on three files without a lock. Each took 141 s at once with the lock, both passing, the second `drive` waiting its turn, peaking at 1,688.
+- **`pytest`'s time is spread out:** the slowest test takes about 5 s, and 3,614 tests summed 488 s. 96 tests start a real process and took 136 s of it, 20 of them `judged_in_its_process` taking 86 s. About 49,000 programs ran, nearly all git. Putting its temporary files in a tmpfs took 67 s, as on disk, and deferring pydantic's builds took the import from 1.35 s to 1.05 s and the suite nowhere.
+- **`drive`'s setup** took about 3.8 s a file: the demo 1.15 s, Chromium 0.34 s, the review 0.48 s, then `settled` 1.65 s, the largest part, a time-based wait.
+
 ## The room's hook when the host service goes away (socat 1.8.1.3, Linux 7.2.6, measured 2026-10-22)
 
 Behind `docs/host.md`, *The one hook*. A stand-in service, a process of its own on a Unix socket, read a hook's payload to its end, then closed the connection, exited with it open, or was killed with `SIGKILL` while the hook waited; the hook was the room's command of the time (`sh -c 'socat -t 600 - UNIX-CONNECT:<socket>,retry=120,interval=0.5 || …'`). In all three, `socat` ended with status 0 and printed nothing, as for an empty answer: only a reset ends it with status 1. The host service's own stop closes each hook's connection cleanly (`close_clients`). With the service answering every hook with something and the command telling an empty answer apart, the same three ended with status 2 and lup's line, and a socket nobody listened on with status 1.
