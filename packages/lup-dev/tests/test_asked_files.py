@@ -93,6 +93,38 @@ def test_it_reads_as_git_s_diff_does_a_directory_a_file_replaces_and_a_mode_chan
     assert own == {"a", "a/b/one.py", "a/two.py", "c", "c/three.py", "d/same.py"}
 
 
+@pytest.mark.parametrize("name", [".claude", ".github", ".vscode", ".githooks"])
+def test_a_link_at_a_protected_directory_s_name_asks_what_a_file_under_it_would(
+    bare: Path, shell: Shell, name: str
+) -> None:
+    root = bare / "tree" / "main"
+    old = shell.git(root, "rev-parse", "HEAD")
+    (root / "elsewhere").mkdir()
+    (root / "elsewhere" / "settings.json").write_text("{}\n")
+    (root / name).symlink_to("elsewhere")
+    shell.commit(root, "a link")
+    tip = shell.git(root, "rev-parse", "HEAD")
+    [found] = asked_files(Git.pinned(bare), ROLES, old, tip)
+    assert str(found.path) == name
+    assert found.judgement.role == "protected"
+    assert found.content == b"elsewhere"
+    assert found.version == shell.git(root, "rev-parse", f"{tip}:{name}")
+
+
+def test_a_link_elsewhere_into_a_protected_directory_changes_nothing_there_and_asks_nothing(
+    bare: Path, shell: Shell
+) -> None:
+    """What's under the protected directory is what a landing asks about, by its own path."""
+    root = bare / "tree" / "main"
+    old = committed(root, shell, {".claude/settings.json": "{}\n"})
+    (root / "into").symlink_to(".claude")
+    tip = committed(root, shell, {})
+    assert asked_files(Git.pinned(bare), ROLES, old, tip) == []
+    changed = committed(root, shell, {"into/settings.json": "{}\n# more\n"})
+    [found] = asked_files(Git.pinned(bare), ROLES, tip, changed)
+    assert str(found.path) == ".claude/settings.json"
+
+
 def test_every_file_of_a_tip_is_read_where_the_remote_has_no_such_branch(
     bare: Path, shell: Shell
 ) -> None:
