@@ -11,6 +11,12 @@ repeats the conversation's own words or the input of the call that made it, and
 the operator's comment on deciding it, as the core hands them with the items
 (`Exchanged`), and never matches an item's reason or state.
 
+A view of the conversation's words alone (`Transcripts`' `messages`) reads each
+one's heading instead (`Lined.heading`): who says it to whom, what it is, and
+where it stands (`@53 you → lup-impl/parser · answer to @51`). An item that's no
+words of theirs has none (`worded`). The operator's copy of a message between
+conversations is neither sent nor received: the message itself is (`copy`).
+
 `said` is each kind's own words, as the kind's summary view will say them once
 each kind is its module's (#113, step 4): the one place here naming the kinds.
 """
@@ -24,8 +30,10 @@ from lup.types import Model
 from lup_dev.inbox.store import (
     Answer,
     Answered,
+    Approval,
     Decided,
     Done,
+    Ended,
     Flagged,
     HeldChange,
     Item,
@@ -69,6 +77,17 @@ class Lined(Model):
     """Whether sending it is all the call that made it did, that call's input
     being its text: one of lup's tools, as `note` or `ask`, rather than a write
     lup flagged or held."""
+    by: OfAgent | None = None
+    """Who wrote it, where it's another conversation than this one: whom a
+    comment on its text goes to, whichever drawer it's written in."""
+    heading: list[Span] | None = None
+    """Its line among the conversation's words alone: who says it to whom, what
+    it is, and where it stands (`@53 you → lup-impl/parser · answer to @51`),
+    each conversation a span of their own as in `line`; none where it's no words
+    of theirs (`worded`)."""
+    reported: bool = False
+    """Whether what its sender said with it is their last words, which their
+    runtime hands their parent and only their record holds: a subagent's end."""
 
 
 def said(item: Item) -> list[Piece]:
@@ -123,6 +142,33 @@ def told(party: Conversation, item: Item) -> bool:
     return item.sender != party or lups(item)
 
 
+def copy(item: Item) -> bool:
+    """Say whether `item` is the operator's copy of a message one conversation sent another, which keeps it in a thread (`Concerns.landed`): the message itself is what they exchanged, and a view of them shows that."""
+    match item.reason:
+        case Message(to=Conversation()):
+            return True
+        case _:
+            return False
+
+
+def reported(item: Item) -> bool:
+    """Say whether `item` is a subagent's plain end of their turn whose last words their runtime hands their parent, so no item holds them."""
+    match item.reason:
+        case Ended(handed=True, stopped=False, failed=None):
+            return True
+        case _:
+            return False
+
+
+def worded(item: Item, party: Conversation) -> bool:
+    """Say whether `item` is words `party`'s conversation shows as said, rather than something done: not a write lup flagged or held, an approval, or lup's word on citations; and not the news of a subagent's their parent is told (`Item.quiet`) in the subagent's own view, the words being theirs already, to the operator or among their steps."""
+    match item.reason:
+        case Flagged() | HeldChange() | Approval() | Unresolved():
+            return False
+        case _:
+            return not (item.quiet and item.sender == party)
+
+
 def lined(
     party: Conversation, items: list[Item], named: Callable[[Conversation], str]
 ) -> list[Lined]:
@@ -137,6 +183,7 @@ def lined(
     calls them, referring to them by their runtime's ids (`Span.conversation`),
     which never change as they're renamed.
     """
+    items = [each for each in items if not copy(each)]
     received = [each for each in items if told(party, each)]
 
     def spanned(pieces: list[Piece]) -> list[Span]:
@@ -238,6 +285,11 @@ def lined(
             case _:
                 comment = ""
         head = [f"→ {cited(item.number)} ", *said(item), " to ", to]
+        match to:
+            case Conversation():
+                whom: Piece = to
+            case _:
+                whom = "you"
         return Lined(
             item=item,
             sent=True,
@@ -246,6 +298,15 @@ def lined(
             comment=comment,
             echoes=echoes(item),
             call_sends_it=sends(item),
+            heading=spanned(
+                dotted(
+                    [f"{cited(item.number)} ", party, " → ", whom],
+                    list(said(item)),
+                    standing(item),
+                )
+            )
+            if worded(item, party)
+            else None,
         )
 
     def came(item: Item) -> list[Piece]:
@@ -279,11 +340,39 @@ def lined(
                 waiting = None
             case _:
                 waiting, at = None, item.made
+        match item.sender:
+            case Conversation() as sender:
+                writer: Piece = sender
+                by = OfAgent(
+                    runtime=sender.runtime, session=sender.session, agent=sender.agent
+                )
+            case _:
+                writer, by = "you", None
+        whom = passed if passed is not None else party
+        passing = (
+            None
+            if passed is None
+            else ["passed on to ", item.recipient]
+            if isinstance(item.recipient, Conversation)
+            else None
+        )
         return Lined(
             item=item,
             sent=False,
             line=spanned(dotted(head, waiting, onward)),
             at=at,
+            by=by,
+            reported=reported(item),
+            heading=spanned(
+                dotted(
+                    [f"{cited(item.number)} ", writer, " → ", whom],
+                    list(said(item)),
+                    waiting,
+                    passing,
+                )
+            )
+            if worded(item, party)
+            else None,
         )
 
     return [

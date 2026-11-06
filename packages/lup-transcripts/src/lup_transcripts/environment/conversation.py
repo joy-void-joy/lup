@@ -1,8 +1,8 @@
-"""A conversation laid out in lup's building blocks: the drawer under its agent's banner, one earlier exchange, and one call read whole.
+"""A conversation laid out in lup's building blocks: the trace, the drawer under its agent's banner of everything they did, one earlier exchange, and one call read whole. Their words alone are `environment/messages.py`.
 
-`docs/dashboard.md`, *The drawers*, its **Conversation** entry. Each is a pure
+`docs/dashboard.md`, *The drawers*, its **Trace** entry. Each is a pure
 layout answering `Blocks`, the layout of one of `Transcripts`' views:
-- `conversation_blocks`, the drawer: its summary line counting the steps and
+- `conversation_blocks`, the trace: its summary line counting the steps and
   those new to the operator, each exchange before their last words folded under
   the first line of their words that opened it, the latest open under its own,
   what came before their first words under a line of its own, and everything
@@ -73,6 +73,8 @@ from lup_dev.host.records import Called, Entry, Said
 from lup_transcripts.errors import LupTranscriptsError
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from pydantic import JsonValue
 
     from lup.doors import Method
@@ -218,6 +220,17 @@ class Inboxed(Model):
     call_sends_it: bool = False
     """Whether sending it is all that call did: its line stands for the call's,
     which goes under it (`turned`)."""
+    by: OfAgent | None = None
+    """Who wrote it, where it's another conversation than this one: whom a comment
+    on its text goes to, whichever drawer it's written in."""
+    heading: list[Span] | None = None
+    """Its line among the conversation's words alone, as the core words it, who
+    says it to whom; none where it's no words of theirs
+    (`environment/messages.py`)."""
+    reading: str = ""
+    """What it says as the operator reads it back among those words."""
+    reported: bool = False
+    """Whether its sender's last words go with it, which only their record holds."""
     echoes: bool = False
     """Whether it repeats the conversation's own words: it stands for the step
     saying them, where one does (`merged`)."""
@@ -283,7 +296,7 @@ class Read(Model):
             case Spoken() | Calling():
                 return self.step is not None and turn.step <= self.step
 
-    def reviewed(self, turns: list[Turn]) -> int:
+    def reviewed(self, turns: Sequence[Turn]) -> int:
         """Return how many of `turns`, from the first, the operator has read: up to the first they haven't."""
         return next(
             (at for at, turn in enumerate(turns) if not self.covers(turn)), len(turns)
@@ -429,6 +442,10 @@ def inboxed(exchanged: Exchanged) -> list[Inboxed]:
             text=text(each.text, each.comment),
             call=each.item.call if sent else None,
             call_sends_it=each.call_sends_it,
+            by=each.by,
+            heading=None if each.words is None else each.words.line,
+            reading="" if each.words is None else each.words.text,
+            reported=each.words is not None and each.words.reported,
             echoes=each.echoes,
             at=each.at,
         )
@@ -652,7 +669,7 @@ def turned(
     def item(inboxed: Inboxed) -> Block:
         number = inboxed.number
         summary = line_of(inboxed, inboxed.text)
-        text = [Markdown(id=f"text {number}", text=inboxed.text)]
+        text = [Markdown(id=f"text {number}", text=inboxed.text, by=inboxed.by)]
         content = [*(text if inboxed.text else []), *made_by(inboxed)]
         if not content:
             return Line(id=f"item {number} line", spans=summary)
@@ -905,7 +922,7 @@ def conversation_blocks(
 
     new = read.new(entries)
     said = [
-        f"conversation · {counted(len(entries), 'step')}",
+        f"trace · {counted(len(entries), 'step')}",
         *([f"{new} new"] if new else []),
     ]
     return Blocks(

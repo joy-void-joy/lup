@@ -438,13 +438,9 @@ def test_the_demo_serves_its_stand_in_launches_and_items_as_the_host_lists_them(
         59,
         60,
         62,
-        64,
-        65,
         66,
-        67,
         68,
         69,
-        70,
     ]
     assert shown.json()["item"]["number"] == 51
 
@@ -497,11 +493,11 @@ def test_the_demo_answers_a_module_s_view_with_the_module_s_own_layout_over_its_
     # How every repository's views look, for the page to draw them by.
     assert [
         (each.module, each.view, each.place.letter)
-        ("transcripts", "messages", "M"),
         for each in listed.looks[lup].drawers
     ] == [
         ("adapters", "tasks", "t"),
         ("judge", "since", "s"),
+        ("transcripts", "messages", "M"),
         ("transcripts", "conversation", "v"),
     ]
     assert listed.standing == listed.looks[lup]

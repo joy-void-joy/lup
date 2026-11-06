@@ -221,7 +221,7 @@ def test_each_exchange_before_the_operator_s_last_words_folds_under_their_words_
 ):
     view = drawer(STEPS)
     assert view.text() == said(
-        "conversation · 8 steps · 2 new",
+        "trace · 8 steps · 2 new",
         "▸ you: Look into reading transcripts.  [exchange step=0]",
         "▾ you: Build the reader.",
         "  ▾ Twenty kinds of line.",
@@ -318,7 +318,7 @@ def test_the_operator_s_words_of_several_paragraphs_keep_one_blank_line_between_
     view = drawer(
         [Said(by="operator", text="One.\n\n\nTwo.\n"), Said(by="operator", text="")]
     )
-    assert view.text() == "conversation · 2 steps\n▸ you: One.  [exchange step=0]\nyou:"
+    assert view.text() == "trace · 2 steps\n▸ you: One.  [exchange step=0]\nyou:"
     assert (
         exchange([Said(by="operator", text="One.\n\n\nTwo.\n")], 0).text()
         == "\n     Two."
@@ -356,7 +356,7 @@ def test_each_call_is_a_line_of_its_own_saying_what_it_was_given_a_run_of_them_o
 ):
     view = drawer(CALLING)
     assert view.text() == said(
-        "conversation · 7 steps · 6 new",
+        "trace · 7 steps · 6 new",
         "▾ you: Fix it.",
         "  ▸ · Bash: Run the tests  [call id=t1]",
         "  ▾ Two fail.",
@@ -837,7 +837,7 @@ def test_each_item_is_a_line_its_text_under_it_one_sent_after_the_call_that_made
 ):
     view = drawer(CALLED, EXCHANGED)
     assert whole(view) == said(
-        "conversation · 7 steps · 6 new",
+        "trace · 7 steps · 6 new",
         "▾ you: Look into reading transcripts.",
         "  ▾ Each session is a JSONL file.",
         "    Each session is a JSONL file.",
@@ -1327,7 +1327,7 @@ def test_at_most_the_agent_s_last_twenty_words_stay_open_what_came_before_under_
     )
     # It says how many steps it holds, its text form the view and what it gives it.
     assert view.text().splitlines()[:3] == [
-        "conversation · 50 steps · 50 new",
+        "trace · 50 steps · 50 new",
         "▸ 11 earlier steps, 11 new  [exchange until_last=20]",
         "▾ Word 5.",
     ]
@@ -1429,7 +1429,7 @@ def test_in_an_exchange_the_operator_s_words_open_it_and_the_fold_comes_after_th
     ]
     view = drawer(entries, earlier=KEEPING_TWO)
     assert view.text().splitlines() == [
-        "conversation · 9 steps · 8 new",
+        "trace · 9 steps · 8 new",
         "▾ you: Read them all.",
         "       Every record.",
         "  ▸ 5 earlier steps, 5 new  [exchange step=0 until_last=2]",
@@ -1491,7 +1491,7 @@ def test_what_came_before_the_drawer_s_mark_folds_under_one_line_what_came_after
 ):
     view = drawer(talking(10), mark=marked(9), reading=READING)
     assert view.text().splitlines()[:4] == [
-        "conversation · 20 steps · 10 new",
+        "trace · 20 steps · 10 new",
         "▸ 10 earlier steps  [exchange through=9]",
         "· Bash",
         "▾ Word 5.",
@@ -1502,10 +1502,7 @@ def test_what_came_before_the_drawer_s_mark_folds_under_one_line_what_came_after
     assert view.offers == [READING]
     # Read to its last step, it's one line, nothing more to mark read.
     read = drawer(talking(10), mark=marked(19), reading=READING)
-    assert (
-        read.text()
-        == "conversation · 20 steps\n▸ 20 earlier steps  [exchange through=19]"
-    )
+    assert read.text() == "trace · 20 steps\n▸ 20 earlier steps  [exchange through=19]"
     assert read.offers == []
     # Never read, everything is new, and it offers marking it read.
     assert drawer(talking(2), reading=READING).offers == [READING]
@@ -1539,7 +1536,7 @@ def test_the_operator_s_words_typed_after_the_mark_count_as_reading_what_came_be
     ]
     view = drawer(entries, mark=marked(3))
     assert view.text().splitlines() == [
-        "conversation · 17 steps · 6 new",
+        "trace · 17 steps · 6 new",
         "▸ earlier · 10 steps, from 20m before your first words  [exchange]",
         "▾ you: Go on.",
         "  · Bash",
@@ -1567,7 +1564,7 @@ def test_a_drawer_long_unread_since_its_mark_keeps_the_cap_its_fold_saying_how_m
     entries = talking(30)
     view = drawer(entries, mark=marked(9))
     assert view.text().splitlines()[:3] == [
-        "conversation · 60 steps · 50 new",
+        "trace · 60 steps · 50 new",
         "▸ 21 earlier steps, 11 new  [exchange until_last=20]",
         "▾ Word 10.",
     ]
@@ -1615,7 +1612,7 @@ def test_an_item_told_after_the_mark_stays_open_one_told_before_folds_with_what_
     )
     lines = view.text().splitlines()
     assert lines[:3] == [
-        "conversation · 12 steps · 6 new",
+        "trace · 12 steps · 6 new",
         "▸ 6 earlier steps, 1 item  [exchange through=5]",
         "▸ → @51 note to you · unread · Late.",
     ]
