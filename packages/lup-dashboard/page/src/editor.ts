@@ -127,6 +127,10 @@ interface Actions {
     send: () => void;
     /** Esc with nothing left for vim to end, in normal mode with no key of a command held; whether it was taken, none taking it where the view isn't in panes. */
     escaped: () => boolean;
+    /** Vim's window commands: to the pane on the left (`h`) or the right (`l`), the other (`w`), or the one before (`p`). */
+    window: (how: "h" | "l" | "w" | "p") => void;
+    /** Whether the view has panes to go between: Ctrl+W is the browser's or vim's where it hasn't. */
+    windows: () => boolean;
     /** Ctrl+O in normal mode, where the view's last jump crossed to another buffer: back to it; whether there was one. */
     jumpedBack: () => boolean;
     /** Enter in normal mode, where the view has its own use for it, as the list of the panes opening a row; whether it was taken. */
@@ -146,6 +150,8 @@ interface Keyed {
     visual: boolean;
     /** The passage it tried to change outside every comment, as `v` then `R` would: what such a comment quotes. */
     passage: Span | null;
+    /** Whether Ctrl+W was the last key, whose window command this one says (`mapPaneKeys`). */
+    windowing: boolean;
     /** Whether it's part of vim's change, `c` and a motion, begun in normal mode: a comment it opens is on the passage the motion covers. */
     changing: boolean;
     /** Whether vim is in insert mode, that is, whether a comment is being written. */
@@ -360,6 +366,7 @@ const NONE: Keyed = {
     from: 0,
     visual: false,
     passage: null,
+    windowing: false,
     changing: false,
     inserting: false,
     searching: false,
@@ -524,6 +531,28 @@ export const INDENTING: readonly (readonly [keys: string, as: string])[] = [
 ];
 
 let mapped = false;
+
+/**
+ * Map vim's window commands under Space `w`, where the page lays the review out in panes (`panes.ts`): `h`, `l`, `w` and
+ * `p`. Ctrl+W takes the same keys, read ahead of vim (`keys`), where the browser gives it: a tab keeps it to close
+ * itself, so a tab never sees it. Firefox reserves it always (`key_close`, `reserved="true"`), with no
+ * `navigator.keyboard`; Chromium reserves it in a tab, and gives it to the page in an app window (`--app`, or installed)
+ * or in a fullscreen the page asked for.
+ */
+export function mapPaneKeys(): void {
+    if (paneKeysMapped) {
+        return;
+    }
+    paneKeysMapped = true;
+    mapKeys();
+    for (const how of ["h", "l", "w", "p"] as const) {
+        const named = `lupWindow-${how}`;
+        Vim.defineAction(named, (cm) => boundOf(cm.cm6.state).actions?.window(how));
+        Vim.mapCommand(`<Space>w${how}`, "action", named, {}, { context: "normal" });
+    }
+}
+
+let paneKeysMapped = false;
 
 /** Map the shared keys into vim's keymap, once: user mappings go before its own, and act on the editor the key is pressed in. */
 function mapKeys(): void {
@@ -841,6 +870,23 @@ const keys = Prec.highest(
                     view.dispatch({ selection: { anchor: turned.cursor }, annotations: reached.of(0) });
                     // Flush with the edge, no margin showing a sliver of what's beyond it.
                     scrollAfterKey(view, EditorView.scrollIntoView(turned.at, { y: turned.y, yMargin: 0 }));
+                    event.preventDefault();
+                    return true;
+                }
+            }
+            // Ctrl+W and a window command's key, where the browser lets it through (`mapPaneKeys`): vim's own maps know
+            // no key held with Ctrl leading another.
+            if (bound.actions?.windows() === true && !["Control", "Shift", "Alt", "Meta"].includes(event.key)) {
+                if (keyed.windowing) {
+                    keyed.windowing = false;
+                    if (["h", "l", "w", "p"].includes(event.key)) {
+                        bound.actions.window(event.key as "h" | "l" | "w" | "p");
+                    }
+                    event.preventDefault();
+                    return true;
+                }
+                if (event.key === "w" && event.ctrlKey && !event.altKey && !event.metaKey && event.target === view.contentDOM && idle(cm)) {
+                    keyed.windowing = true;
                     event.preventDefault();
                     return true;
                 }
@@ -1608,6 +1654,8 @@ interface Config<D, C> {
     rows?: boolean;
     /** Told Esc with nothing left for vim to end: out of the pane, in panes (`Panes.tsx`). None lets vim have it. */
     escaped?: () => void;
+    /** Told vim's window commands, in panes (`mapPaneKeys`). */
+    window?: (how: "h" | "l" | "w" | "p") => void;
     /** Open the list of every key (`g?`). */
     list: () => void;
     /** Open the panel of what was said, whole (`g<`). */
@@ -2269,6 +2317,8 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 config.escaped();
                 return true;
             },
+            window: (how) => config.window?.(how),
+            windows: () => config.window !== undefined,
             jumpedBack: () => own.back?.() ?? false,
             pressedEnter: () => {
                 if (own.enter === undefined) {

@@ -565,6 +565,23 @@ export function App() {
     // The page's build, as the dashboard served it when the page first went live: once the dashboard serves
     // another, as after lup is installed again, the page reloads itself, its drafts being on the host.
     const build = useRef<string | null | undefined>(undefined);
+    // In panes, a reflex Ctrl+W, vim's window key, closes a browser's tab, which the page can't stop (`mapPaneKeys`): it can
+    // ask first, but for its own reload to a new build.
+    const reloading = useRef(false);
+    useEffect(() => {
+        if (panes === null) {
+            return undefined;
+        }
+        const asking = (event: BeforeUnloadEvent) => {
+            if (!reloading.current) {
+                event.preventDefault();
+            }
+        };
+        window.addEventListener("beforeunload", asking);
+        return () => window.removeEventListener("beforeunload", asking);
+        // `panes` says it once, as the page loads.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
     useEffect(() => {
         if (connection !== "live") {
             return;
@@ -577,6 +594,7 @@ export function App() {
             if (build.current === undefined) {
                 build.current = served;
             } else if (served !== null && served !== build.current) {
+                reloading.current = true;
                 window.location.reload();
             }
         });

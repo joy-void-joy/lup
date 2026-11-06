@@ -28,6 +28,8 @@ interface Props {
     say: (text: string) => void;
     /** Told Esc with nothing left for vim to end. */
     escaped: () => void;
+    /** Told vim's window commands. */
+    window: (how: "h" | "l" | "w" | "p") => void;
     placed: (here: Here) => void;
     list: () => void;
     whole: () => void;
@@ -38,7 +40,7 @@ interface Props {
 /** What the list's editor keeps no draft of: nothing here is written. */
 const NOTHING = null;
 
-export function Listing({ rows, showing, open, send, say, escaped, placed, list, whole, pending, handle }: Props) {
+export function Listing({ rows, showing, open, send, say, escaped, window: windowCommand, placed, list, whole, pending, handle }: Props) {
     const laid = useMemo(() => listLaid(rows), [rows]);
     const shown = useMemo(() => ({ text: laid.text, blocks: [], folds: laid.folds }), [laid]);
     const hereOf = (at: number): Here => {
@@ -52,6 +54,7 @@ export function Listing({ rows, showing, open, send, say, escaped, placed, list,
                 ...(row.opens === null ? [] : [{ keys: "⏎", says: "open it, and go in", on: null }]),
                 ...(row.writes ? [{ keys: "o", says: "write to them", on: null }] : []),
                 ...(row.folds === undefined ? [] : [{ keys: "za", says: "open or fold them", on: null }]),
+                { keys: "␣ww", says: "to the buffer, as Ctrl+W w", on: null },
             ],
         };
     };
@@ -66,6 +69,7 @@ export function Listing({ rows, showing, open, send, say, escaped, placed, list,
         shownNow: false,
         rows: true,
         escaped,
+        window: windowCommand,
         say,
         moved: (at) => placed(hereOf(at)),
         list,

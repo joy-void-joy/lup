@@ -537,6 +537,8 @@ export interface Arranging {
     showing?: Showing | null;
     /** The checks waiting on the operator, each laid out under whoever owns it (`checkOwner`), where the panes go by agent; none else. */
     checks?: readonly OwnedCheck[];
+    /** Whether what the review is laid out from is all read, so a buffer with nothing in it holds nothing; unsaid, it is. */
+    read?: boolean;
 }
 
 /**
@@ -923,9 +925,10 @@ function filedIn(blocks: readonly ViewBlock[]): Filed[] {
 /**
  * How an agent's group is laid out: whole, as the review grouped by agent lays it, each drawer under its banner, then
  * its items, what's written to them under the banner; `for you`, of its drawers only what waits on the operator; or as
- * their `own` buffer, their conversation live after their items, what's written to them after it.
+ * their `own` buffer, their conversation live after their items, what's written to them after it; or their `banner`
+ * alone, saying who they are and what they're doing where nothing of theirs waits on the operator.
  */
-type GroupShape = "whole" | "for you" | "own";
+type GroupShape = "whole" | "for you" | "own" | "banner";
 
 /** A group as it's laid out: what names it among the others, the agent it's of, what its banner names it by, and its items. */
 export interface Grouping {
@@ -1604,6 +1607,8 @@ export function laid(
     const sinceLaid = new Set<string>();
     const threading = arranging.threads ?? null;
     const showing = arranging.showing ?? null;
+    // Whether what the review is laid out from is read yet: until then, a buffer's empty for that alone.
+    const readYet = arranging.read ?? true;
     // The checks each group's agent owns, by `whose` they are; and a group for each owner with none.
     const checksOf = new Map<string, OwnedCheck[]>();
     const checkOwners: Conversation[] = [];
@@ -1637,11 +1642,24 @@ export function laid(
         // What's for the operator: each group with an item, or something it holds waits on them, or written to under its
         // banner; of its drawers, only what waits on them.
         const holds = (group: Grouping) => group.items.length > 0 || checksOf.has(group.key) || letters.some((each) => each.to != null && whose(each.to) === group.key) || sinceWaits(group) !== null;
-        for (const { group, depth } of nested(kept([...now, ...empty].filter(holds), false), arranging.parents ?? null)) {
+        const holding = [...now, ...empty].filter(holds);
+        for (const { group, depth } of nested(kept(holding, false), arranging.parents ?? null)) {
             layGroup(group, false, depth, "for you");
         }
         for (const group of kept(later, true)) {
             layGroup(group, true, 0);
+        }
+        // Never empty while anyone's at work: each agent running with nothing for the operator, their banner alone.
+        const quiet = kept([...now, ...empty].filter((each) => !holding.includes(each) && shown.running.has(each.key)), false);
+        if (holding.length === 0 && later.length === 0 && readYet) {
+            layNote(quiet.length === 0 ? "Nothing waits on you, and nobody's running." : "Nothing waits on you.", "nothing waits");
+        }
+        if (quiet.length > 0) {
+            const line = layNote(`── also running · ${quiet.length} · gd on a name goes to them ──`, "also running");
+            breaks.push(line.from);
+            for (const { group, depth } of nested(quiet, arranging.parents ?? null)) {
+                layGroup(group, false, depth, "banner");
+            }
         }
     } else {
         for (const { group, depth } of nested(kept([...now, ...empty], false), arranging.parents ?? null)) {
@@ -1650,6 +1668,10 @@ export function laid(
         for (const group of kept(later, true)) {
             layGroup(group, true, 0);
         }
+    }
+    // A buffer with nothing in it says so, or that it's being read: the second pane never just looks empty.
+    if (showing !== null && w.at === 0) {
+        layNote(readYet ? "Nothing here now: the list beside this says what there is." : "Reading what's there…", "nothing here");
     }
     // Each group folds whole under its banner, up to the next as deep or shallower, a subagent's inside their parent's,
     // a thread's under its parent's in its section, and never past its section's end.
@@ -1685,7 +1707,8 @@ export function laid(
         const end = (sections[at + 1]?.header.from ?? w.at) - 1;
         const id = `section ${section.name}`;
         if (end > section.header.to) {
-            const folded = SECTIONS.find((each) => each.name === section.name)?.folded ?? false;
+            // In what's for the operator, its banners are there to be seen: it never looks empty while anyone's at work.
+            const folded = (SECTIONS.find((each) => each.name === section.name)?.folded ?? false) && !(showing?.kind === "for you" && section.name === "agents");
             section.fold = { of: id, kind: "section", name: "", label: w.lineFrom(section.header.from), closed: folded, summary: section.header, from: section.header.to, to: end, scope: true };
             outer.push(section.fold);
         }
@@ -1727,6 +1750,14 @@ export function laid(
         pile: pileRuns,
         ended: endedRun,
     };
+
+    /** Lay a line of the buffer's own, no part's but its own: what's said where there's nothing else to read. */
+    function layNote(said: string, id: string): Span {
+        const line = w.line(said, id);
+        asides.push({ kind: "buffer-note", ...line });
+        nodes.push(part(id, "frame", line.from, line.to));
+        return line;
+    }
 
     /** Return `section` with each group laid out before in its place, any other after them, in its own order. */
     function kept(section: Grouping[], isParked: boolean): Grouping[] {
@@ -1926,9 +1957,9 @@ export function laid(
         );
         layThreadSection("agents", `${agentGroups.length}`, () => {
             for (const { group, depth } of nested(kept(agentGroups, false), arranging.parents ?? null)) {
-                layGroup(group, false, depth);
+                layGroup(group, false, depth, showing?.kind === "for you" ? "banner" : "whole");
             }
-        });
+        }, agentGroups.length === 0);
 
         /**
          * Lay thread `read`'s run of the pile to read: a line naming it, then each of `entries`, a friction or how it
@@ -2002,7 +2033,7 @@ export function laid(
 
         /** Lay a section's line, saying what it holds, then what `lay` lays in it; in what's for the operator, only those holding what's for them, and none `empty`. */
         function layThreadSection(name: SectionName, holds: string, lay: () => void, empty: boolean = false): void {
-            if (showing?.kind === "for you" && ((name !== "waiting on you" && name !== "new" && name !== "to read") || empty)) {
+            if (showing?.kind === "for you" && ((name !== "waiting on you" && name !== "new" && name !== "to read" && name !== "agents") || empty)) {
                 return;
             }
             const id = `section ${name}`;
@@ -2497,7 +2528,8 @@ export function laid(
         const declared = data === undefined && shape !== "own" ? [] : looks.drawers(repository).filter((each) => !(each.view === "since" && sinceLaid.has(group.key)));
         // Under the banner, before the items, each drawer; in what's for the operator, only what waits on them; in the
         // agent's own buffer, all but their conversation, which comes after the items, live, what's written to them under it.
-        layDrawers(shape === "for you" ? declared.filter((each) => each.view === "since" && sinceWaits(group) !== null) : shape === "own" ? declared.filter((each) => each.view !== "conversation") : declared, `${id} drawers`, false);
+        const first = shape === "banner" ? [] : shape === "for you" ? declared.filter((each) => each.view === "since" && sinceWaits(group) !== null) : shape === "own" ? declared.filter((each) => each.view !== "conversation") : declared;
+        layDrawers(first, `${id} drawers`, false);
         for (const item of group.items) {
             node.children.push(layItem(item, isParked));
         }
@@ -2507,7 +2539,16 @@ export function laid(
             }
         }
         if (shape === "own") {
-            layDrawers(declared.filter((each) => each.view === "conversation"), `${id} live`, true);
+            const live = declared.filter((each) => each.view === "conversation");
+            const drawersBefore = made.drawers.length;
+            layDrawers(live, `${id} live`, true);
+            // Never a buffer that looks empty: where their conversation isn't there, why.
+            const talk = live[0];
+            if (conversation !== null && of !== null && made.drawers.length === drawersBefore && talk !== undefined) {
+                const read = mount(repository, talk.module, talk.view, of, shown, remote).answer !== null;
+                const said = w.line(read ? "They haven't said anything yet." : "Reading their conversation…", `${id} live`);
+                asides.push({ kind: "summary", ...said });
+            }
             if (conversation !== null) {
                 layWriting(made, node, id, `to ${name(conversation)}`, talksTo);
             }

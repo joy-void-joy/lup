@@ -53,7 +53,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 
 import { tokensOf, within, type Filed, type Matter, type Taken } from "./code";
 import { cited, type Block, type Folding, type Span } from "./comments";
-import { BARE, chosenKind, closedAs, folding, hiddenAt, isFolded, jumped as recordJump, mapLetters, mapVerbs, reached, reaching, rebuilt, refold, scrollAfterKey, uncovered, useEditor, vimOf, type Landing } from "./editor";
+import { BARE, chosenKind, closedAs, folding, hiddenAt, isFolded, jumped as recordJump, mapLetters, mapPaneKeys, mapVerbs, reached, reaching, rebuilt, refold, scrollAfterKey, uncovered, useEditor, vimOf, type Landing } from "./editor";
 import { arrivedLines, arriving, owned, owning, ownersOf, readBy, reconcile, settling, type Reading } from "./reconcile";
 import { clock, ticked, ticking, type Tick } from "./ticking";
 import { doing, since, type Activity } from "./agents";
@@ -1035,7 +1035,7 @@ export function Review({
             ordered(places.current, order ?? []),
             drawers,
             called,
-            { ...arranging, previous: panes === null ? before.current : followed.current, showing: shownNow, checks: shownNow === null ? [] : arranging.checks },
+            { ...arranging, previous: panes === null ? before.current : followed.current, showing: shownNow, checks: shownNow === null ? [] : arranging.checks, read: order !== null },
         );
     const layout = useMemo(() => {
         const drafted = typed.current ?? given;
@@ -1107,7 +1107,7 @@ export function Review({
             choosing.current = folds;
             placed(folds === null ? hereAt(editor.head()) : hereChosen(folds));
         },
-        ...(panes === null ? {} : { escaped: () => paneModeBegun() }),
+        ...(panes === null ? {} : { escaped: () => paneModeBegun(), window: (how: "h" | "l" | "w" | "p") => windowCommand(how) }),
         list,
         whole,
         pending,
@@ -1162,6 +1162,9 @@ export function Review({
         }
         follower.attach(current);
         mapOutlineKey();
+        if (panes !== null) {
+            mapPaneKeys();
+        }
         current.dispatch({
             effects: StateEffect.appendConfig.of([
                 gutters.of([]),
@@ -1612,8 +1615,20 @@ export function Review({
         root.current?.focus();
     }
 
+    /** Do vim's window command `how` (`mapPaneKeys`): into the list, the buffer, or the other pane, whatever mode it's from. */
+    function windowCommand(how: "h" | "l" | "w" | "p") {
+        const to = how === "h" ? "list" : how === "l" ? "buffer" : pane === "list" ? "buffer" : "list";
+        if (to === "list" && !overview) {
+            setOverview(true);
+        }
+        goIn(to);
+    }
+
     /** Go into `which` pane, in normal mode. */
     function goIn(which: "list" | "buffer") {
+        if (narrow) {
+            setOverview(which === "list");
+        }
         setPane(which);
         setPaneMode(false);
         paning?.(false);
@@ -2558,6 +2573,7 @@ export function Review({
                                 send={send}
                                 say={say}
                                 escaped={paneModeBegun}
+                                window={windowCommand}
                                 placed={(here) => {
                                     if (!paneNow.current.mode && paneNow.current.pane === "list") {
                                         placed(here);

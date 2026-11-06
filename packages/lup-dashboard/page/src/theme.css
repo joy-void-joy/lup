@@ -1819,6 +1819,17 @@ kbd {
     color: var(--muted);
 }
 
+/* A cursor shows only where the keys go: the other pane's would read as if it were still live. */
+.pane:not(:focus-within) .cm-vimCursorLayer,
+.pane:not(:focus-within) .cm-cursorLayer {
+    display: none;
+}
+
+/* What a buffer says of itself, where there's nothing else to read or to say who else is there. */
+.buffer .cm-line.aside-buffer-note {
+    color: var(--muted);
+}
+
 /* The line at the end of a buffer what's written to them is written under. */
 .buffer .cm-line.aside-writing {
     color: var(--warn);
@@ -1848,10 +1859,13 @@ kbd {
     color: var(--sel-fg);
 }
 
-.panes[data-mode="pane"] .cm-cursor,
-.panes[data-mode="pane"] .cm-fat-cursor,
+.panes[data-mode="pane"] .cm-vimCursorLayer,
 .panes[data-mode="pane"] .cm-cursorLayer {
-    visibility: hidden;
+    display: none;
+}
+
+.panes[data-mode="pane"] .list-buffer .cm-activeLine {
+    background: none;
 }
 
 .pane-mode {

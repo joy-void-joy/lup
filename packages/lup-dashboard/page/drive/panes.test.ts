@@ -108,6 +108,40 @@ describe("the panes by agent", () => {
         expect(await review.mode()).toBe("normal");
     });
 
+    it("goes between the panes with vim's window commands, under Space w, and without passing through Pane mode", async () => {
+        const { page } = dashboard;
+        await dashboard.keys.press([" ", "w", "h"]);
+        await page.waitForFunction(() => document.activeElement?.closest(".list-buffer") != null, undefined, { polling: 50 });
+        expect(await paneMode(dashboard)).toBe("normal");
+        await dashboard.keys.press([" ", "w", "w"]);
+        await page.waitForFunction(() => document.activeElement?.closest(".review-buffer") != null, undefined, { polling: 50 });
+        expect(await review.mode()).toBe("normal");
+        await dashboard.keys.press([" ", "w", "p"]);
+        await page.waitForFunction(() => document.activeElement?.closest(".list-buffer") != null, undefined, { polling: 50 });
+        await dashboard.keys.press([" ", "w", "l"]);
+        await page.waitForFunction(() => document.activeElement?.closest(".review-buffer") != null, undefined, { polling: 50 });
+    });
+
+    it("takes Ctrl+W and the same keys where the browser lets it through, as an app window does", async () => {
+        const { page } = dashboard;
+        await dashboard.keys.press(["Control+w", "h"]);
+        await page.waitForFunction(() => document.activeElement?.closest(".list-buffer") != null, undefined, { polling: 50 });
+        await dashboard.keys.press(["Control+w", "Control+w"]);
+        await page.waitForFunction(() => document.activeElement?.closest(".review-buffer") != null, undefined, { polling: 50 });
+    });
+
+    it("shows no cursor in a pane the keys don't go to, nor any in Pane mode", async () => {
+        const { page } = dashboard;
+        const cursors = () => page.evaluate(() => [...document.querySelectorAll(".cm-vimCursorLayer")].filter((each) => getComputedStyle(each).display !== "none" && each.children.length > 0).length);
+        expect(await cursors()).toBe(1);
+        await page.keyboard.press("Escape");
+        await inPaneMode(dashboard, "pane");
+        expect(await cursors()).toBe(0);
+        await page.keyboard.press("i");
+        await inPaneMode(dashboard, "normal");
+        expect(await cursors()).toBe(1);
+    });
+
     it("keeps vim's keys in the list, Enter opening a row's buffer and going into it", async () => {
         const { page } = dashboard;
         await listRow(dashboard, "main");
@@ -305,7 +339,9 @@ describe("the panes by thread", () => {
     it("opens on what's for the operator, by thread, with no section that isn't", async () => {
         const text = await review.text();
         expect(text).toMatch(/^waiting on you · /m);
-        expect(text).not.toMatch(/^(open|settled|agents) · /m);
+        expect(text).not.toMatch(/^(open|settled) · /m);
+        // Who else is running, under it, so it never looks empty.
+        expect(text).toMatch(/^agents · \d+/m);
         const list = await listText(dashboard);
         expect(list.some((each) => each.includes("@transcript-reader"))).toBe(true);
     });

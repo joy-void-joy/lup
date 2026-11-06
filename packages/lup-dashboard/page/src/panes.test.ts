@@ -89,11 +89,37 @@ describe("one buffer at a time", () => {
         expect(lines.at(-1)).toBe("── to s1 ──");
     });
 
-    it("lays out what's for the operator: each group with an item, none with only a banner", () => {
+    it("lays out what's for the operator: each group with an item", () => {
         const out = buffer({ kind: "for you" });
         expect(out.regions.map((each) => each.item.number).toSorted()).toEqual([51, 70, 80]);
-        const quiet = laid([LEFT], [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called, { showing: { kind: "for you" }, running: running(LEAD), looks: adopted() });
+        const quiet = laid([LEFT], [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called, { showing: { kind: "for you" }, looks: adopted() });
         expect(quiet.groups.map((each) => called(each.conversation as Conversation))).toEqual(["s2"]);
+    });
+
+    it("never looks empty while anyone's at work: nothing for the operator, each agent running under a line, their banner alone", () => {
+        const out = laid([], [LEAD, WORKER], banner, header, EMPTY, NOTHING, [], new Map(), called, { showing: { kind: "for you" }, running: running(LEAD, WORKER), looks: adopted(), parents: new Map([[whoseOf(WORKER), whoseOf(LEAD)]]) });
+        const lines = out.text.trimEnd().split("\n");
+        expect(lines[0]).toBe("Nothing waits on you.");
+        expect(lines[1]).toContain("also running · 2");
+        expect(out.groups.map((each) => called(each.conversation as Conversation))).toEqual(["s1", "s1/a1"]);
+        expect(out.drawers).toEqual([]);
+    });
+
+    it("says so where nothing's for the operator and nobody's running, or until what's there is read", () => {
+        const quiet = laid([], [], banner, header, EMPTY, NOTHING, [], new Map(), called, { showing: { kind: "for you" }, looks: adopted() });
+        expect(quiet.text.trimEnd()).toBe("Nothing waits on you, and nobody's running.");
+        const reading = laid([], [], banner, header, EMPTY, NOTHING, [], new Map(), called, { showing: { kind: "for you" }, looks: adopted(), read: false });
+        expect(reading.text.trimEnd()).toBe("Reading what's there…");
+    });
+
+    it("says why an agent's buffer has no conversation, under their banner and over what's written to them", () => {
+        const out = buffer({ kind: "agent", key: whoseOf(LEAD) });
+        expect(out.text).toContain("Reading their conversation…");
+    });
+
+    it("says something of a buffer whose agent's gone from what's read", () => {
+        const out = buffer({ kind: "agent", key: "nobody" });
+        expect(out.text.trimEnd()).toBe("Nothing here now: the list beside this says what there is.");
     });
 
     it("lays out what nobody running answers under No agent", () => {
@@ -361,8 +387,9 @@ describe("the list by thread", () => {
 
     it("lays out what's for the operator without the front or what's settled", () => {
         const out = laid(ITEMS, [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called, { threads, showing: { kind: "for you" }, looks: adopted() });
-        // Nothing to read here: no section says so.
-        expect(out.sections.map((each) => each.name)).toEqual(["waiting on you", "new"]);
+        // Nothing to read here: no section says so. Its banners never fold: nothing here is what looks empty.
+        expect(out.sections.map((each) => each.name)).toEqual(["waiting on you", "new", "agents"]);
+        expect(out.sections.find((each) => each.name === "agents")?.fold?.closed).toBe(false);
     });
 
     it("says whom the words reach from a thread's buffer, and where nobody answers for it", () => {
