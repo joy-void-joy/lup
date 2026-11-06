@@ -43,8 +43,13 @@ function told(due: readonly Due[], dwelling: Dwelling): void {
     }
 }
 
+/** What's done with what's on screen: `left` says it's about to be gone from the screen, as another buffer takes its place. */
+export interface Seen {
+    left: () => void;
+}
+
 /** Follow what's on screen of what's read by being seen, and tell the host how far each mark moves as what's seen leaves the screen, or the tab goes. */
-export function useSeeing(given: Seeing): void {
+export function useSeeing(given: Seeing): Seen {
     const now = useRef(given);
     now.current = given;
     const dwelling = useRef(new Dwelling());
@@ -158,4 +163,9 @@ export function useSeeing(given: Seeing): void {
     useEffect(() => {
         dwelling.current.settled(given.sights);
     }, [given.sights]);
+
+    return {
+        // As what's seen leaves the screen by the buffer going, whatever's still in view of it, while the buffer's still there to say so.
+        left: () => told(dwelling.current.due(now.current.sights, viewing(), true), dwelling.current),
+    };
 }

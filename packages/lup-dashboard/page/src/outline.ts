@@ -124,7 +124,7 @@ export function threadStanding(read: ThreadRead, section: string | undefined): {
  * approval marked read alone, one commented on left unanswered, a held change marked read or commented on approved, a
  * mark on one past waiting doing nothing, which the host drops; and whether it's new.
  */
-export function itemStanding(region: Region, draft: Draft, seeing: Seeing): Standing {
+export function itemStanding(region: Pick<Region, "item">, draft: Draft, seeing: Seeing): Standing {
     const item = region.item;
     const number = item.number;
     const commented = (draft.comments ?? []).some((each) => each.item === number && each.text.trim() !== "");

@@ -1,5 +1,5 @@
-// The review as the page opens it, grouped by agent, and grouped by thread only where its address asks (`docs/dashboard.md`,
-// *The review*). The other tests drive the threads' layout, which `demo` asks for unless told otherwise.
+// The review as one buffer grouped by agent, as its address may ask (`?panes=off`), and grouped by thread only where it asks
+// that (`docs/dashboard.md`, *The review*). The other tests drive the threads' layout, which `demo` asks for unless told otherwise.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { open, type Dashboard } from "./dashboard.ts";

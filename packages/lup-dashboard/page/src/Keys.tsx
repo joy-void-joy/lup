@@ -33,9 +33,11 @@ interface Props {
     measuring?: { on: boolean; switched: (on: boolean) => void } | null;
     /** Whether a line of the page leaves out what was said, which `g<` shows whole: said at the line's end, so it's found. */
     cut?: boolean;
+    /** Whether the page is in Pane mode, where no key acts on anything: said by the whole line, and no key but a pane's offered. */
+    paneMode?: boolean;
 }
 
-export function Keys({ parts, here, inserting, open, setOpen, run, pending = "", waits = 250, measuring = null, cut = false }: Props) {
+export function Keys({ parts, here, inserting, open, setOpen, run, pending = "", waits = 250, measuring = null, cut = false, paneMode = false }: Props) {
     // The chord whose following keys are shown, once it has waited.
     const [shown, setShown] = useState("");
     useEffect(() => {
@@ -84,7 +86,7 @@ export function Keys({ parts, here, inserting, open, setOpen, run, pending = "",
                     </dl>
                 </div>
             )}
-            <div className={inserting ? "keys inserting" : "keys"}>
+            <div className={paneMode ? "keys paning" : inserting ? "keys inserting" : "keys"}>
                 {inserting ? (
                     <span className="keys-shown">
                         <span className="keys-place">{WRITING_HERE}</span>
@@ -105,13 +107,13 @@ export function Keys({ parts, here, inserting, open, setOpen, run, pending = "",
                         ))}
                     </span>
                 )}
-                {inserting || !cut ? null : (
+                {inserting || paneMode || !cut ? null : (
                     <span className="keys-all">
                         <kbd>g&lt;</kbd> in full
                     </span>
                 )}
-                {/* In a comment, `g?` types itself. */}
-                {inserting ? null : (
+                {/* In a comment, `g?` types itself; in Pane mode, no key does anything. */}
+                {inserting || paneMode ? null : (
                     <span className="keys-all">
                         <kbd>g?</kbd> all keys
                     </span>

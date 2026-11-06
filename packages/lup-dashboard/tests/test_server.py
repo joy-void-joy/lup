@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from pydantic import JsonValue, TypeAdapter
 
 from lup.blocks import Block, Fold, Load, OfAgent
+from lup_dashboard.cli import kept_token
 from lup_dashboard.demo import Demo, files
 from lup_dashboard.host import Host
 from lup_dashboard.server import Access, application
@@ -1286,3 +1287,13 @@ def test_a_pick_needs_the_dashboard_s_token(page: Path) -> None:
     response = client(host, page).post("/copies/pick", content="branch=a")
     assert response.status_code == 401
     assert host.asked == []
+
+
+def test_a_demo_given_a_token_file_keeps_its_token_across_a_restart(
+    tmp_path: Path,
+) -> None:
+    kept = tmp_path / "token"
+    first = kept_token(kept)
+    assert kept.stat().st_mode & 0o777 == 0o600
+    assert kept_token(kept) == first
+    assert kept_token(None) != first

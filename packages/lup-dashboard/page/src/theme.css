@@ -1710,3 +1710,209 @@ kbd {
         pointer-events: none;
     }
 }
+
+/* The review in two panes (`Panes.tsx`, `panes.ts`), where the page's address asks for them: the list, then one buffer
+   at a time, each under a line saying what it is and whom the operator's words reach; the pane the keyboard's in
+   outlined. */
+.win:has(.panes):focus-within {
+    outline: none;
+}
+
+/* The margin in panes: letters and bars, no labels, what the list and the header over the buffer say, and fewer columns,
+   the deepest sharing the last, so the buffer has the width. */
+.panes {
+    --columns: 4;
+    position: relative;
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    outline: none;
+}
+
+.pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+}
+
+.pane-list {
+    flex: 0 0 50ch;
+    max-width: 45%;
+    border-right: 1px solid var(--border);
+}
+
+.pane-buffer {
+    flex: 1;
+}
+
+.pane:focus-within > .where {
+    box-shadow: inset 0 -2px 0 var(--focus);
+}
+
+.where-buffer {
+    display: inline-flex;
+    flex: 0 1 auto;
+    gap: 0 1ch;
+    min-width: 0;
+    margin-right: 2ch;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.where-name {
+    color: var(--warn);
+    font-weight: 700;
+}
+
+.where-whom {
+    color: var(--info);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.list-buffer .cm-scroller {
+    overflow-x: hidden;
+}
+
+/* The list's own cursor's line, only where the keys go; apart from what the second pane's cursor is on, which it keeps in
+   sight, as the overview: what's in view bracketed by a bar, the cursor's entry highlighted, neither a cursor. */
+.list-buffer .cm-activeLine {
+    background: none;
+}
+
+.pane-list:focus-within .list-buffer .cm-activeLine {
+    background: var(--float-bg);
+}
+
+.list-buffer .cm-line.list-in-view {
+    box-shadow: inset 2px 0 0 var(--border);
+    background: #04101a;
+}
+
+.list-buffer .cm-line.list-cursor {
+    background: var(--selection);
+}
+
+.list-buffer .cm-line.list-showing {
+    box-shadow: inset 3px 0 0 var(--warn);
+}
+
+.list-name {
+    color: var(--cyan);
+}
+
+.list-sub,
+.list-count {
+    color: var(--muted);
+}
+
+.list-for-you {
+    color: var(--warn);
+    font-weight: 700;
+}
+
+.list-buffer .cm-line.list-heading {
+    color: var(--warn);
+}
+
+.list-repository {
+    color: var(--muted);
+    font-style: italic;
+}
+
+.drawn.list-doing {
+    color: var(--muted);
+}
+
+.list-asks {
+    color: var(--orange);
+    font-weight: 700;
+}
+
+.mark-pile {
+    color: var(--purple);
+}
+
+.mark-parked {
+    color: var(--muted);
+}
+
+/* A cursor shows only where the keys go: the other pane's would read as if it were still live. */
+.pane:not(:focus-within) .cm-vimCursorLayer,
+.pane:not(:focus-within) .cm-cursorLayer {
+    display: none;
+}
+
+/* What a buffer says of itself, where there's nothing else to read or to say who else is there. */
+.buffer .cm-line.aside-buffer-note {
+    color: var(--muted);
+}
+
+/* The line at the end of a buffer what's written to them is written under. */
+.buffer .cm-line.aside-writing {
+    color: var(--warn);
+    font-weight: 700;
+    background: var(--float-bg);
+}
+
+/* Pane mode: Esc with nothing left for vim to end. No key acts on anything, so it looks like no other mode: both
+   buffers dimmed and no cursor, the pane selected framed in the selection's colour, its title filled, and the whole
+   line of keys saying so. */
+.panes[data-mode="pane"] .pane {
+    opacity: 0.45;
+}
+
+.panes[data-mode="pane"] .pane.is-selected {
+    opacity: 1;
+    outline: 3px solid var(--sel-bg);
+    outline-offset: -3px;
+}
+
+.panes[data-mode="pane"] .pane.is-selected > .where {
+    background: var(--sel-bg);
+    color: var(--sel-fg);
+}
+
+.panes[data-mode="pane"] .pane.is-selected > .where * {
+    color: var(--sel-fg);
+}
+
+.panes[data-mode="pane"] .cm-vimCursorLayer,
+.panes[data-mode="pane"] .cm-cursorLayer {
+    display: none;
+}
+
+.panes[data-mode="pane"] .list-buffer .cm-activeLine {
+    background: none;
+}
+
+.pane-mode {
+    padding: 0 1ch;
+    background: var(--sel-bg);
+    color: var(--sel-fg);
+    font-weight: 700;
+}
+
+.keys.paning {
+    background: var(--sel-bg);
+    color: var(--sel-fg);
+}
+
+.keys.paning .keys-place,
+.keys.paning kbd {
+    color: var(--sel-fg);
+    border-color: var(--sel-fg);
+    font-weight: 700;
+}
+
+/* A phone gets one pane at a time. */
+.panes.is-narrow .pane {
+    flex: 1;
+    max-width: none;
+    border-right: none;
+}
+
+.panes.is-narrow .pane:not(.is-selected) {
+    display: none;
+}

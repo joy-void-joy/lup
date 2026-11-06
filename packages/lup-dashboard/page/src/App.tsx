@@ -33,6 +33,7 @@ import { adopt, merged } from "./looks";
 import { instanceOf, type Instance } from "./views";
 import { producerOf } from "./views/index";
 import { useNarrow } from "./Outline";
+import { panesAsked } from "./panes";
 import { Palette } from "./Palette";
 import { Whole, type Said } from "./Whole";
 import { brief, partSaid, partsCounted, partsSaid, shortened, type ReplyPart } from "./brief";
@@ -60,9 +61,11 @@ import {
     type Draft,
     type Drawers,
     type Head,
+    type ThreadRead,
     type ThreadsRead,
     type Item,
     type Keeping,
+    type OwnedCheck,
     type Since,
     type Threading,
     type ThreadShown,
@@ -91,12 +94,13 @@ const SAID = {
     connecting: "connecting",
     live: "live",
     retrying: "out of reach, trying again",
-    refused: "this page's token is refused: open the dashboard again from `lup-dev dashboard`",
+    refused: "this page's token is refused: open it again from `lup-dev dashboard`, or a demo's latest address",
 };
 
 /** What the review is laid out from before it's all read: no item, and no conversation running. */
 const NONE: Item[] = [];
 const NO_ONE: InboxConversation[] = [];
+const NO_CHECKS: readonly OwnedCheck[] = [];
 
 /** How long the page lets each agent's record and branch go unread with no hook heard, in milliseconds: a record written just after its hook, or a write no hook said, is read all the same. */
 const FALLBACK = 60_000;
@@ -140,7 +144,12 @@ export function App() {
     // What the operator's comments imply, a comment counting as a review, as the review last laid it out: shown and
     // sent with the draft's own marks.
     const [implied, setImplied] = useState<readonly Marked[]>([]);
-    const implying = useCallback((marks: Marked[]) => setImplied((before) => (JSON.stringify(before) === JSON.stringify(marks) ? before : marks)), []);
+    // As they stand now, for a send the review asks in the same moment it says them (`Review.tsx`, in panes).
+    const impliedNow = useRef<readonly Marked[]>([]);
+    const implying = useCallback((marks: readonly Marked[]) => {
+        impliedNow.current = marks;
+        setImplied((before) => (JSON.stringify(before) === JSON.stringify(marks) ? before : marks));
+    }, []);
     // Whether the draft has been asked for, answered or not: with the inbox, the conversations running and the order,
     // what the review is laid out from, none of which it's laid out without, lest it tell the host its groups are gone.
     const [draftRead, setDraftRead] = useState(false);
@@ -222,7 +231,7 @@ export function App() {
         adopt(made);
         return made;
     }, [declared]);
-    const parts = useMemo(() => reviewKeys(looks.kinds, looks.verbs), [looks]);
+    const parts = useMemo(() => reviewKeys(looks.kinds, looks.verbs, panesAsked(location.search) !== null), [looks]);
     // A fold kind of another repository's taking a letter one already took is refused it, and said.
     useEffect(() => {
         if (looks.refused.length > 0) {
@@ -245,12 +254,17 @@ export function App() {
         useMemo<readonly Wait[]>(() => (landingsWatch.reply?.kind === "policy-landings" ? (landingsWatch.reply.waiting ?? []) : []), [landingsWatch.reply]),
         (list) => JSON.stringify(list),
     );
-    // The review is grouped by agent; `?threads` in the page's address groups it by thread (`docs/dashboard.md`, *The
-    // review*). Without it the host is never asked for threads, and everything below reads none.
-    const byThread = new URLSearchParams(location.search).has("threads");
+    // As one buffer the review is grouped by agent; `?threads` in the page's address groups it by thread (`docs/dashboard.md`,
+    // *The review*): there, and with `?panes=off`, the host is asked for threads where it's by thread alone.
+    // The panes, by agent as the page opens, by thread where the address asks (`panes.ts`); as one buffer where it asks that.
+    const panes = panesAsked(location.search);
+    const byThread = panes === null ? new URLSearchParams(location.search).has("threads") : panes === "threads";
+    // Whether the keys of the page do nothing but move between panes (`Pane mode`).
+    const [paneMode, setPaneMode] = useState(false);
     // The review's threads, as the host reads them for it (`docs/inbox.md`, *Threads in the review*): the same object
     // while the host says the same of them, which it says again at every hook.
-    const threadsWatch = useWatched(byThread ? { kind: "inbox-threads" } : null);
+    // The panes by agent read them for one thing alone: the checks waiting on the operator, each under whoever owns it.
+    const threadsWatch = useWatched(byThread || panes === "agents" ? { kind: "inbox-threads" } : null);
     const threadsRead = useSame(
         useMemo(() => (threadsWatch.reply?.kind === "inbox-threads-read" ? threadsWatch.reply : null), [threadsWatch.reply]),
         (each) => JSON.stringify(each),
@@ -278,10 +292,26 @@ export function App() {
         setOpening((before) => (before.some((each) => each.number === number && each.whole === whole) ? before : [...before, { number, whole }]));
     }, []);
     const threadsAsked = useMemo(() => {
-        const shown = (threadsRead?.threads ?? []).filter((each) => each.section !== "every thread" || landingIn.has(each.thread.number)).map((each) => ({ number: each.thread.number, whole: false }));
+        const asking = (each: ThreadRead) => (byThread ? each.section !== "every thread" || landingIn.has(each.thread.number) : (each.asks ?? []).some((ask) => ask.what === "a check"));
+        const shown = (threadsRead?.threads ?? []).filter(asking).map((each) => ({ number: each.thread.number, whole: false }));
         return [...shown, ...opening.filter((each) => each.whole || !shown.some((one) => one.number === each.number))];
+        // `byThread` says it once, as the page loads.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [threadsRead, landingIn, opening]);
     const conversations = useThreads(threadsAsked);
+    // By agent in panes, the checks waiting on the operator, each in the thread it's in, whose thread that thread read says.
+    const checksWaiting = useSame(
+        useMemo(
+            () =>
+                panes !== "agents" || threadsRead === null
+                    ? []
+                    : threadsRead.threads.flatMap((thread) => (conversations.shown.get(thread.thread.number)?.checks ?? []).filter((check) => (check.answer ?? null) === null && (thread.asks ?? []).some((ask) => ask.node === check.check.number)).map((check) => ({ check, thread }))),
+            // `panes` says it once, as the page loads.
+            // eslint-disable-next-line react-hooks/exhaustive-deps
+            [threadsRead, conversations],
+        ),
+        (list) => JSON.stringify(list),
+    );
     // Each conversation the inbox's items and the threads read name, with their path as the host names it, by `whose`
     // they are: what names an agent who isn't running, or isn't their launch's latest session, which no launch listed
     // names, the sender of a thread's history among them, whose items no longer wait.
@@ -465,7 +495,7 @@ export function App() {
         [inbox.reply],
     );
     // What's only to read, which the top bar counts apart from what asks the operator.
-    const toReadCount = countToRead(waiting, draft, seeing, threadsRead?.threads ?? null);
+    const toReadCount = countToRead(waiting, draft, seeing, byThread ? (threadsRead?.threads ?? null) : null);
 
     // What the draft marks or comments on that's past waiting, answered or replaced since it was written: laid out with
     // what's drafted on it, which stays in view, saying so, until it's sent.
@@ -533,6 +563,23 @@ export function App() {
     // The page's build, as the dashboard served it when the page first went live: once the dashboard serves
     // another, as after lup is installed again, the page reloads itself, its drafts being on the host.
     const build = useRef<string | null | undefined>(undefined);
+    // In panes, a reflex Ctrl+W, vim's window key, closes a browser's tab, which the page can't stop (`mapPaneKeys`): it can
+    // ask first, but for its own reload to a new build.
+    const reloading = useRef(false);
+    useEffect(() => {
+        if (panes === null) {
+            return undefined;
+        }
+        const asking = (event: BeforeUnloadEvent) => {
+            if (!reloading.current) {
+                event.preventDefault();
+            }
+        };
+        window.addEventListener("beforeunload", asking);
+        return () => window.removeEventListener("beforeunload", asking);
+        // `panes` says it once, as the page loads.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
     useEffect(() => {
         if (connection !== "live") {
             return;
@@ -545,6 +592,7 @@ export function App() {
             if (build.current === undefined) {
                 build.current = served;
             } else if (served !== null && served !== build.current) {
+                reloading.current = true;
                 window.location.reload();
             }
         });
@@ -608,7 +656,7 @@ export function App() {
     // where a friction or how it felt is read, or moved into a thread, and a park on one only hid it from the count.
     useEffect(() => {
         // Never while a comment's typing waits to be laid out, which the draft as it stands here doesn't hold yet.
-        if (!ready || threadsRead === null || typed.current !== null) {
+        if (!ready || !byThread || threadsRead === null || typed.current !== null) {
             return;
         }
         const piled = new Set(threadsRead.threads.flatMap((each) => each.pile ?? []));
@@ -1075,7 +1123,7 @@ export function App() {
         }
         typed.current = null;
         pending.current = null;
-        const whole = pruned(implied.length === 0 ? drafted : { ...drafted, marks: [...(drafted.marks ?? []), ...implied] });
+        const whole = pruned(impliedNow.current.length === 0 ? drafted : { ...drafted, marks: [...(drafted.marks ?? []), ...impliedNow.current] });
         // A comment on a check is the operator's answer to it, which the page sends apart: the inbox knows no item by its
         // number.
         const onChecks = (whole.comments ?? []).filter((each) => checks.has(each.item));
@@ -1228,7 +1276,7 @@ export function App() {
                 )}
                 <span className="spacer" />
                 <span className="count">
-                    {agents.length} {agents.length === 1 ? "agent" : "agents"} · <span className="mark-waiting">◆</span> {waitingOn(threadsRead, landingIn, waiting, draft.parked ?? [])} waiting on you
+                    {agents.length} {agents.length === 1 ? "agent" : "agents"} · <span className="mark-waiting">◆</span> {waitingOn(byThread ? threadsRead : null, landingIn, waiting, draft.parked ?? []) + checksWaiting.length + (panes === "agents" ? (threadsRead?.threads ?? []).filter((each) => each.state === "done to confirm").length : 0)} waiting on you
                     {toReadCount === 0 ? null : (
                         <>
                             {" · "}
@@ -1236,8 +1284,8 @@ export function App() {
                         </>
                     )}
                 </span>
-                <button type="button" className="overview-button" onClick={() => setOverview(!overview)} title="the overview of every agent and item">
-                    Overview <kbd>{"\\"}</kbd>
+                <button type="button" className="overview-button" onClick={() => setOverview(!overview)} title={panes === null ? "the overview of every agent and item" : "the list"}>
+                    {panes === null ? "Overview" : "List"} <kbd>{"\\"}</kbd>
                 </button>
                 <button type="button" onClick={() => setPalette(true)}>
                     Go to <kbd>Ctrl</kbd> <kbd>K</kbd>
@@ -1277,7 +1325,11 @@ export function App() {
                         overview={overview}
                         setOverview={setOverview}
                         order={ready ? kept : null}
-                        keepOrder={whole ? keepOrder : null}
+                        keepOrder={whole && panes === null ? keepOrder : null}
+                        panes={panes}
+                        checks={ready ? checksWaiting : NO_CHECKS}
+                        paning={setPaneMode}
+                        unreadSaid={connection === "refused" ? `${SAID.refused}.` : "Reading what's there…"}
                         looks={looks}
                         running={runningNow}
                         landings={landings}
@@ -1312,6 +1364,7 @@ export function App() {
                         pending={chord}
                         measuring={switching}
                         cut={cut}
+                        paneMode={paneMode}
                     />
                 </div>
             </main>
