@@ -25,7 +25,11 @@
         }
       ],
       "waiting": false,
-      "count": 0,
+      "tally": {
+        "holds": 0,
+        "flagged": 0,
+        "review": 0
+      },
       "offers": [
         {
           "action": "set-holding",
@@ -66,7 +70,11 @@
     "answer": {
       "summary": [],
       "waiting": false,
-      "count": 0,
+      "tally": {
+        "holds": 0,
+        "flagged": 0,
+        "review": 0
+      },
       "offers": [
         {
           "action": "set-holding",
@@ -220,7 +228,11 @@
         }
       ],
       "waiting": true,
-      "count": 0,
+      "tally": {
+        "holds": 0,
+        "flagged": 0,
+        "review": 0
+      },
       "offers": [],
       "blocks": []
     }
@@ -342,7 +354,11 @@
         }
       ],
       "waiting": false,
-      "count": 0,
+      "tally": {
+        "holds": 0,
+        "flagged": 0,
+        "review": 0
+      },
       "offers": [
         {
           "action": "set-holding",

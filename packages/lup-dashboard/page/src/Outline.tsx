@@ -136,9 +136,14 @@ function sameViewed(a: Viewed, b: Viewed): boolean {
     return a.cursor === b.cursor && a.seen.join("\n") === b.seen.join("\n");
 }
 
-/** How an entry stands, a glyph each, in the state's own colour: what waits on the operator a diamond, solid for an item, hollow for a file. */
+/**
+ * How an entry stands, a glyph each, in the state's own colour: a diamond for what waits on the operator, solid where
+ * something stays stopped until they answer it, hollow where nothing is, orange where it asks for their eyes, cyan where
+ * it's to review as they come to it.
+ */
 export const GLYPHS: Partial<Record<OutlineMark, string>> = {
     waiting: "◆",
+    asking: "◇",
     news: "•",
     parked: "‖",
     "to-review": "◇",
@@ -151,7 +156,7 @@ export const GLYPHS: Partial<Record<OutlineMark, string>> = {
 
 /** What the draft does with an item on the next Ctrl+Enter, said in the draft's colour. */
 export const DRAFTED: Record<DraftMark, { glyph: string; word: string }> = {
-    comment: { glyph: "»", word: "comment" },
+    comment: { glyph: "¶", word: "comment" },
     read: { glyph: "✓", word: "read" },
     approve: { glyph: "✔", word: "approve" },
     decline: { glyph: "✗", word: "decline" },
@@ -300,19 +305,24 @@ export function Outline({ following, laidOut, reading, narrow, open, setOpen, ju
                     <div key={row.key} data-key={row.key} className={classes} style={{ paddingLeft: `calc(${row.depth * 2}ch + 1ch)` }} title={row.title} onClick={() => go(row)}>
                         <span className={`outline-glyph mark-${mark}`}>{glyph}</span>
                         <span className="outline-text">{row.text}</span>
-                        {(row.counts?.asks ?? 0) === 0 ? null : (
-                            <span className="outline-tag mark-waiting" title="what here asks you something">
-                                ◆{row.counts?.asks}
+                        {(row.counts?.holds ?? 0) === 0 ? null : (
+                            <span className="outline-tag mark-waiting" title="what stays stopped until you answer it">
+                                ◆{row.counts?.holds}
+                            </span>
+                        )}
+                        {(row.counts?.flagged ?? 0) === 0 ? null : (
+                            <span className="outline-tag mark-asking" title="what's flagged for your eyes, with nothing stopped">
+                                ◇{row.counts?.flagged}
+                            </span>
+                        )}
+                        {(row.counts?.review ?? 0) === 0 ? null : (
+                            <span className="outline-tag mark-to-review" title="files to review in its since you approved, with nothing holding them">
+                                ◇{row.counts?.review}
                             </span>
                         )}
                         {(row.counts?.toRead ?? 0) === 0 ? null : (
                             <span className="outline-tag mark-news" title="what here is only to read, new to you">
                                 •{row.counts?.toRead}
-                            </span>
-                        )}
-                        {row.tag === null ? null : (
-                            <span className="outline-tag mark-to-review" title="files to review in its since you approved">
-                                {row.tag}
                             </span>
                         )}
                         {row.fresh ? <span className="outline-tag outline-fresh" title="new: its group not seen since it came">new</span> : null}
@@ -329,10 +339,13 @@ export function Outline({ following, laidOut, reading, narrow, open, setOpen, ju
                     <kbd>gO</kbd> here · <kbd>j</kbd> <kbd>k</kbd> · <kbd>⏎</kbd> go · <kbd>Esc</kbd> back
                 </div>
                 <div>
-                    <span className="mark-waiting">◆</span> asks you · <span className="mark-news">•</span> to read · <span className="mark-to-review">◇</span> to review
+                    <span className="mark-waiting">◆</span> stopped · <span className="mark-asking">◇</span> flagged
                 </div>
                 <div>
-                    <span className="outline-draft">» ✓ ✔</span> in your next <kbd>^⏎</kbd>: comment, read, approve
+                    <span className="mark-to-review">◇</span> to review · <span className="mark-news">•</span> to read
+                </div>
+                <div>
+                    <span className="outline-draft">¶ ✓ ✔</span> in your next <kbd>^⏎</kbd>: comment, read, approve
                 </div>
             </div>
         </nav>

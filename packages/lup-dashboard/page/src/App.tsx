@@ -494,8 +494,11 @@ export function App() {
         () => (inbox.reply?.kind === "inbox-items" ? inbox.reply.items.filter((each) => !flag(each)) : []),
         [inbox.reply],
     );
-    // What's only to read, which the top bar counts apart from what asks the operator.
+    // What's only to read, which the top bar counts apart from what asks the operator; and of what asks them, what holds
+    // something stopped until they answer it, apart from what only wants their eyes.
     const toReadCount = countToRead(waiting, draft, seeing, byThread ? (threadsRead?.threads ?? null) : null);
+    const stoppedOnYou = holdingOn(byThread ? threadsRead : null, landingIn, waiting, draft.parked ?? []);
+    const flaggedForYou = waitingOn(byThread ? threadsRead : null, landingIn, waiting, draft.parked ?? []) + checksWaiting.length + (panes === "agents" ? (threadsRead?.threads ?? []).filter((each) => each.state === "done to confirm").length : 0) - stoppedOnYou;
 
     // What the draft marks or comments on that's past waiting, answered or replaced since it was written: laid out with
     // what's drafted on it, which stays in view, saying so, until it's sent.
@@ -1276,7 +1279,14 @@ export function App() {
                 )}
                 <span className="spacer" />
                 <span className="count">
-                    {agents.length} {agents.length === 1 ? "agent" : "agents"} · <span className="mark-waiting">◆</span> {waitingOn(byThread ? threadsRead : null, landingIn, waiting, draft.parked ?? []) + checksWaiting.length + (panes === "agents" ? (threadsRead?.threads ?? []).filter((each) => each.state === "done to confirm").length : 0)} waiting on you
+                    {agents.length} {agents.length === 1 ? "agent" : "agents"} · <span className="mark-waiting">◆</span> {stoppedOnYou}
+                    {flaggedForYou === 0 ? null : (
+                        <>
+                            {" "}
+                            <span className="mark-asking">◇</span> {flaggedForYou}
+                        </>
+                    )}{" "}
+                    waiting on you
                     {toReadCount === 0 ? null : (
                         <>
                             {" · "}
@@ -1501,6 +1511,21 @@ export function waitingOn(read: ThreadsRead | null, landing: ReadonlyMap<number,
     const threads = read.threads.filter((each) => each.section === "waiting on you" || landing.has(each.thread.number));
     const asked = new Set(read.threads.flatMap((each) => (each.asks ?? []).map((ask) => ask.node)));
     const loose = new Set(asking.filter((each) => !asked.has(each.number)).map((each) => (each.sender.party === "conversation" ? whose(each.sender) : "lup")));
+    return threads.length + loose.size;
+}
+
+/**
+ * Say how many of what `waitingOn` counts hold something stopped until the operator answers (`Item.holds`, `Ask.holds`):
+ * threads with something in them that does, or a landing waiting on them; each agent with something in no thread that does.
+ */
+export function holdingOn(read: ThreadsRead | null, landing: ReadonlyMap<number, number>, waiting: readonly Item[], parked: readonly number[] = []): number {
+    const holding = waiting.filter((each) => each.holds && !parked.includes(each.number));
+    if (read === null) {
+        return holding.length;
+    }
+    const threads = read.threads.filter((each) => (each.section === "waiting on you" && (each.asks ?? []).some((ask) => ask.holds)) || landing.has(each.thread.number));
+    const asked = new Set(read.threads.flatMap((each) => (each.asks ?? []).map((ask) => ask.node)));
+    const loose = new Set(holding.filter((each) => !asked.has(each.number)).map((each) => (each.sender.party === "conversation" ? whose(each.sender) : "lup")));
     return threads.length + loose.size;
 }
 

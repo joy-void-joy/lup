@@ -453,7 +453,7 @@ kbd {
 }
 
 .remark::before {
-    content: "» ";
+    content: "¶ ";
     color: var(--muted);
 }
 
@@ -1502,7 +1502,7 @@ kbd {
 
 .buffer .cm-line.aside-to-try,
 .buffer .cm-line.aside-check {
-    color: var(--warn);
+    color: var(--orange);
     font-weight: 700;
 }
 
@@ -1635,22 +1635,24 @@ kbd {
     font-weight: 700;
 }
 
-/* How each thing stands, in the state's own colour: what asks the operator something orange, and nothing else, a
-   file's flagged writes among it; what's only theirs to read blue, an item solid and a file to review hollow; what's set
-   aside muted; an agent's activity in its banner's colour. What the draft does with an item is apart, in the colour of
-   what the operator writes. */
+/* How each thing stands, in the state's own colour: what waits on the operator a diamond, orange where it asks them,
+   solid where something stays stopped until they answer it and hollow where it only wants their eyes, as what's flagged;
+   cyan and hollow where it's to review as they come to it, with nothing holding it. What's only theirs to read blue; what's
+   set aside muted; an agent's activity in its banner's colour. What the draft does with an item is apart, in the colour
+   of what the operator writes, and what they've written, on the list's rows, quieter still (`list-written`). */
 .mark-waiting,
+.mark-asking,
 .mark-flagged {
     color: var(--orange);
 }
 
 .mark-calling,
-.mark-idle {
+.mark-idle,
+.mark-to-review {
     color: var(--cyan);
 }
 
-.mark-news,
-.mark-to-review {
+.mark-news {
     color: var(--info);
 }
 
@@ -1803,7 +1805,8 @@ kbd {
 }
 
 .list-sub,
-.list-count {
+.list-count,
+.list-written {
     color: var(--muted);
 }
 

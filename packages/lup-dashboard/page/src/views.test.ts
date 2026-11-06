@@ -306,7 +306,7 @@ describe("the views the page lays out itself", () => {
         const [source, tests] = (blocks?.blocks ?? []).map((each) => (each.block === "fold" && Array.isArray(each.content) ? each.content : []));
         expect(source?.map((each) => each.id)).toEqual(["file reader.py", "reviewed clock.py", "reviewed production"]);
         expect(tests?.map((each) => each.id)).toEqual(["file test_reader.py"]);
-        expect(blocks?.count).toBe(1);
+        expect(blocks?.tally).toEqual({ holds: 0, flagged: 2, review: 0 });
         expect(blocks?.waiting).toBe(true);
         expect(source?.[0]?.offers[0]?.argument).toEqual({ conversation: PARSER, worktree: "/w/feat", branch: "feat", files: [{ path: "reader.py", version: "b1" }] });
         // A file reviewed already, settled under its group's last fold, offers nothing, and the drawer whole leaves it out.
@@ -319,10 +319,10 @@ describe("the views the page lays out itself", () => {
     it("groups a place's files by role, each a fold saying what it holds, by each role's level: automatic folded and never to review, a test reviewed open", () => {
         const since = producerOf("judge", "since")?.answer(AGENT as never, shownOf(CASES["judge since"]![3]!.given), REPOSITORY);
         const blocks = since?.blocks;
-        expect((blocks?.summary ?? []).map((each) => each.text).join("")).toBe("since you approved · 3 to review · 1 flagged · 1 automatic · 0 of 4 reviewed");
+        expect((blocks?.summary ?? []).map((each) => each.text).join("")).toBe("since you approved · 2 to review · 1 flagged · 1 automatic · 0 of 4 reviewed");
         const groups = (blocks?.blocks ?? []).flatMap((each) => (each.block === "fold" ? [each] : []));
         expect(groups.map((each) => [each.kind, each.summary.map((span) => span.text).join(""), each.open])).toEqual([
-            ["role", "source · 2 to review · 1 flagged", true],
+            ["role", "source · 1 to review · 1 flagged", true],
             ["role", "tests · 1 to review", true],
             ["role", "docs · 1 automatic", false],
         ]);
@@ -336,7 +336,7 @@ describe("the views the page lays out itself", () => {
         const since = producerOf("judge", "since")?.answer(AGENT as never, shownOf(CASES["judge since"]![2]!.given), REPOSITORY);
         const blocks = since?.blocks;
         expect((blocks?.summary ?? []).map((each) => each.text).join("")).toBe("since you approved · 1 held at landing · 1 to review · 2 flagged · 0 of 4 reviewed");
-        expect([blocks?.count, blocks?.waiting]).toEqual([2, true]);
+        expect([blocks?.tally, blocks?.waiting]).toEqual([{ holds: 1, flagged: 2, review: 1 }, true]);
         expect(blocks?.blocks.map((each) => [each.id, each.block === "fold" ? each.kind : each.block])).toEqual([
             ["place", "branch"],
             ["place on fix", "branch"],

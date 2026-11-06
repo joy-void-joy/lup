@@ -10,6 +10,7 @@
 import type { components } from "./generated/api";
 
 export type Blocks = components["schemas"]["Blocks"];
+export type BlocksTally = components["schemas"]["Tally"];
 export type Block = components["schemas"]["Block"];
 export type Line = components["schemas"]["Line"];
 export type Markdown = components["schemas"]["Markdown"];
@@ -82,6 +83,9 @@ export interface PlacedFile {
     place: SincePlace;
     block: string;
 }
+
+/** What a view holds waiting on the operator where it holds nothing that does. */
+export const NOTHING_WAITS: BlocksTally = { holds: 0, flagged: 0, review: 0 };
 
 /** What a producer answers: the view's blocks, and what the page's own handling of it reads until the blocks say it all. */
 export interface Answer {

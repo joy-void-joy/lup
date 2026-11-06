@@ -131,6 +131,8 @@ def kinds() -> list[Item]:
         Question(text="?"),
         Message(kind="note", text="."),
         Message(kind="problem", text="."),
+        Message(kind="disagreement", text="."),
+        Message(kind="question", text="."),
         Message(kind="note", text=".", to=agent),
         Friction(text="."),
         HowItFelt(text="."),
@@ -175,6 +177,7 @@ def kinds_written() -> str:
                 "state": each.state.state,
                 "rank": each.rank.name,
                 "asks": each.asks,
+                "holds": each.holds,
                 "offers": [offer.model_dump(mode="json") for offer in each.offers],
                 "spent": [spent.model_dump(mode="json") for spent in each.spent],
             }

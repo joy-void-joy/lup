@@ -10,7 +10,7 @@
 import type { ChangedFile, Diff, Mark } from "../code";
 import type { components } from "../generated/api";
 import { filesOf, heldSaid, isHeld, placeSaid, reviewedLine } from "../since";
-import { conversationOf, whose, type Answer, type Blocks, type Fold, type Line, type OfAgent, type Offer, type PlacedFile, type Shown, type Span, type View } from "../views";
+import { conversationOf, NOTHING_WAITS, whose, type Answer, type Blocks, type BlocksTally, type Fold, type Line, type OfAgent, type Offer, type PlacedFile, type Shown, type Span, type View } from "../views";
 
 type Item = components["schemas"]["Item"];
 type Reading = components["schemas"]["Reading"];
@@ -270,7 +270,7 @@ export function changed(item: Item, what: string, text: string, shown: Shown, fi
     const blocks: Blocks = {
         summary: summary.map((each, at) => ({ text: at === 0 ? each : ` · ${each}`, tone: "plain" })),
         waiting: false,
-        count: 0,
+        tally: NOTHING_WAITS,
         offers: [],
         blocks: [
             { block: "markdown", id: "text", version: null, offers: [], text, tone: "plain" },
@@ -310,10 +310,10 @@ export const FLAGGED: View<OfItem> = {
 
 /**
  * Say a "since you approved" drawer's summary line: on which branch, where it reads one, how many files a landing
- * waits on, how many changed since the operator last saw them are to review, how many have flagged writes waiting on
- * them, which their branch's landing waits on, how many are tests or data files, folded whole and left out of what's
- * to review (`foldedOf`), and how many stand as they saw them, reviewed: the agent's flags in one line, as the inbox
- * lists them.
+ * waits on, how many changed since the operator last saw them are to review with nothing else said of them, how many
+ * have flagged writes waiting on them, which their branch's landing waits on, how many are tests or data files, folded
+ * whole and left out of what's to review (`foldedOf`), each counted once (`counts`), and how many stand as they saw them,
+ * reviewed: the agent's flags in one line, as the inbox lists them.
  */
 export function sinceSummary(shown: Since | null): string {
     if (shown === null) {
@@ -326,13 +326,14 @@ export function sinceSummary(shown: Since | null): string {
 }
 
 /**
- * What files of a "since you approved" drawer count, each in a few words: how many a landing waits on, held at landing;
- * how many to review; how many with flagged writes waiting on them; the tests and data files; and how many of them all
- * are settled, reviewed, the drawer's progress (`3 of 7 reviewed`). With how many wait on the operator, those held and
- * those to review, and whether any does.
+ * What files of a "since you approved" drawer count, each in a few words and once: how many a landing waits on, held at
+ * landing; how many with flagged writes waiting on them; how many to review with nothing holding them; the tests and data
+ * files; and how many of them all are settled, reviewed, the drawer's progress (`3 of 7 reviewed`). With what waits on
+ * the operator by what each is to them (`Blocks.tally`), and whether any does.
  */
-function counts(files: readonly SinceFile[]): { parts: string[]; open: number; waiting: boolean } {
+function counts(files: readonly SinceFile[]): { parts: string[]; tally: BlocksTally; waiting: boolean } {
     const held = files.filter(isHeld).length;
+    const hasFlags = (each: SinceFile) => (each.flags ?? []).length > 0;
     const changedFiles = files.filter((each) => each.file != null && !isHeld(each));
     // Each automatic file, folded whole and never counted as to review, said as its role's (`2 tests`), else `automatic`.
     const folded = new Map<string, { reason: Reason; count: number }>();
@@ -342,10 +343,10 @@ function counts(files: readonly SinceFile[]): { parts: string[]; open: number; w
             folded.set(why.one, { reason: why, count: (folded.get(why.one)?.count ?? 0) + 1 });
         }
     }
-    const open = changedFiles.length - [...folded.values()].reduce((sum, each) => sum + each.count, 0);
+    const open = changedFiles.filter((each) => !hasFlags(each) && automaticOf(each) === null).length;
     // Reviewed, settled: those standing as the operator saw them with no flagged write waiting, which fold at the end.
-    const kept = files.filter((each) => each.file == null && (each.flags ?? []).length === 0 && each.held == null).length;
-    const flagged = files.filter((each) => (each.flags ?? []).length > 0 && !isHeld(each)).length;
+    const kept = files.filter((each) => each.file == null && !hasFlags(each) && each.held == null).length;
+    const flagged = files.filter((each) => hasFlags(each) && !isHeld(each)).length;
     const said = [
         ...(held === 0 ? [] : [`${held} held at landing`]),
         ...(open === 0 ? [] : [`${open} to review`]),
@@ -353,7 +354,7 @@ function counts(files: readonly SinceFile[]): { parts: string[]; open: number; w
         ...[...folded.values()].map(({ reason, count }) => `${count} ${count === 1 ? reason.one : reason.many}`),
         ...(files.length === 0 ? [] : [`${kept} of ${files.length} reviewed`]),
     ];
-    return { parts: said, open: open + held, waiting: open > 0 || flagged > 0 || held > 0 };
+    return { parts: said, tally: { holds: held, flagged, review: open }, waiting: open > 0 || flagged > 0 || held > 0 };
 }
 
 /** What `automatic` says of a file folded whole for its role's level, beside a test's or a data file's own words. */
@@ -396,13 +397,14 @@ function roleOf(file: SinceFile): string {
 
 /**
  * Say what one role's group of a place holds, after its name: how many files are held at landing, to review, flagged,
- * automatic, and reviewed (`source · 3 to review`, `tests · 5 automatic`).
+ * automatic, and reviewed, each once (`source · 3 to review`, `tests · 5 automatic`).
  */
 function grouped(called: string, files: readonly SinceFile[]): string {
     const held = files.filter(isHeld).length;
+    const hasFlags = (each: SinceFile) => (each.flags ?? []).length > 0;
     const automatic = files.filter((each) => !isHeld(each) && automaticOf(each) !== null).length;
-    const open = files.filter((each) => each.file != null && !isHeld(each) && automaticOf(each) === null).length;
-    const flagged = files.filter((each) => (each.flags ?? []).length > 0 && !isHeld(each)).length;
+    const open = files.filter((each) => each.file != null && !isHeld(each) && !hasFlags(each) && automaticOf(each) === null).length;
+    const flagged = files.filter((each) => hasFlags(each) && !isHeld(each)).length;
     const kept = files.filter((each) => each.file == null && (each.flags ?? []).length === 0 && each.held == null).length;
     const parts = [
         ...(held === 0 ? [] : [`${held} held at landing`]),
@@ -575,7 +577,7 @@ function leveled(diff: Diff, file: SinceFile): Diff {
 
 /**
  * "Since you approved", the agent's drawer: its summary line (`sinceSummary`), bold where it has files to review,
- * flagged writes or files held at landing, the files held and to review counted for the overview; each place the
+ * flagged writes or files held at landing, each counted by what it is to the operator (`Blocks.tally`); each place the
  * agent worked laid out (`placed`), alone as the drawer's own, or, where they worked in several, each a fold of the
  * judge's `branch` kind, open, its line saying which and what it counts. None where their branches changed nothing, or
  * aren't read yet; where the host refused to read them, its line says it's unavailable, and the line under it why.
@@ -592,13 +594,13 @@ export const SINCE: View<OfAgent> = {
             // What the host refused to read is said in the drawer's place, rather than leaving it out as if nothing changed.
             const why: Line = { block: "line", id: "unread", version: null, offers: [], spans: [{ text: unread, tone: "refused" }] };
             const summary = [{ text: "since you approved · unavailable", tone: "plain" }];
-            return { blocks: { summary, waiting: false, count: 0, offers: [], blocks: [why] } };
+            return { blocks: { summary, waiting: false, tally: NOTHING_WAITS, offers: [], blocks: [why] } };
         }
         const files = since === null ? [] : filesOf(since);
         if (since === null || files.length === 0) {
             return null;
         }
-        const { parts, open, waiting } = counts(files);
+        const { parts, tally, waiting } = counts(files);
         // The drawer's line leaves out the branch its summary names: the banner over it says where the agent works.
         const label = ["since you approved", ...(parts.length === 0 ? ["nothing"] : parts)].join(" · ");
         const each = new Map<string, PlacedFile>();
@@ -632,7 +634,7 @@ export const SINCE: View<OfAgent> = {
             blocks: {
                 summary: [{ text: label, tone: "plain" }],
                 waiting,
-                count: open,
+                tally,
                 offers: first === undefined || reviewable.length === 0 ? [] : [reviewing(conversation, first, reviewable, "mark every file reviewed")],
                 blocks,
             },
@@ -735,7 +737,7 @@ export const BANNER: View<OfAgent> = {
                       },
                   ];
         const summary = parts.flatMap((each, at) => (at === 0 ? each : [{ text: " · ", tone: "plain" }, ...each]));
-        return { blocks: { summary, waiting: held > 0, count: 0, offers: hold, blocks: [] } };
+        return { blocks: { summary, waiting: held > 0, tally: NOTHING_WAITS, offers: hold, blocks: [] } };
     },
 };
 

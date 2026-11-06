@@ -3,8 +3,8 @@
 // its order: each agent, a subagent under their parent as the review nests them,
 // and each agent's items, a repository named where it changes, each with a mark of how it stands (waiting on the operator, news,
 // parked) and apart, in the draft's colour, what the next Ctrl+Enter does with
-// it (a comment goes, it's read, it's approved); an agent's files to review in
-// their "since you approved" counted beside them. What's in view is bracketed and
+// it (a comment goes, it's read, it's approved); what an agent's "since you
+// approved" holds counted beside them. What's in view is bracketed and
 // the cursor's entry highlighted as the view moves. Pure.
 import { cited, type Span } from "./comments";
 import { MOVE } from "./grammar";
@@ -22,16 +22,18 @@ import {
     type Region,
     type ThreadRead,
 } from "./review";
+import { NOTHING_WAITS, type BlocksTally } from "./views";
 
 /** What an entry of the overview is: a heading, a repository's or, grouped by thread, a section's; an agent; lup's approvals; a thread; an item. */
 export type OutlineKind = "repository" | "agent" | "approvals" | "thread" | "item";
 
 /**
- * How an entry stands, the state it's in, each in its own colour: an item waiting on the operator, news to read, or
- * parked; a file to review, one with flagged writes waiting, or one folded whole as a test or data, in the margin; an
- * agent calling, between calls or ended. What's settled, a file reviewed, isn't shown at all.
+ * How an entry stands, the state it's in, each in its own colour: what stays stopped until the operator answers it;
+ * what asks for their eyes with nothing stopped, as what's flagged, or to review with nothing holding it; news to read,
+ * or parked; a file with a line that matters, or one folded whole as a test or data, in the margin; an agent calling,
+ * between calls or ended. What's settled, a file reviewed, isn't shown at all.
  */
-export type OutlineMark = "waiting" | "news" | "parked" | "to-review" | "flagged" | "folded" | "calling" | "idle" | "ended";
+export type OutlineMark = "waiting" | "asking" | "news" | "parked" | "to-review" | "flagged" | "folded" | "calling" | "idle" | "ended";
 
 /**
  * What the draft does with an item on the next Ctrl+Enter, all in the draft's colour: comments on it go, it's marked
@@ -52,15 +54,12 @@ export interface OutlineRow extends Span {
     /** Whether it's new to the operator: its group not seen since it came, nor commented on in a reply sent. */
     fresh: boolean;
     at: number;
-    /** What waits beside it: an agent's files to review in their "since you approved", `◇3`; none else. */
-    tag: string | null;
-    /** What of a thread or an agent's own asks the operator, and what of it is only to read, each counted apart; none else. */
+    /** How much of a thread or an agent's own waits on the operator, each counted by what it is to them; none else. */
     counts?: Counts;
 }
 
-/** How much of a thread or an agent's own asks the operator, and how much is only to read. */
-export interface Counts {
-    asks: number;
+/** How much of a thread or an agent's own stays stopped until the operator answers it, what's flagged for their eyes with nothing stopped, what's to review with nothing holding it, and what's only to read. */
+export interface Counts extends BlocksTally {
     toRead: number;
 }
 
@@ -102,20 +101,29 @@ export interface Standing {
 }
 
 /**
- * Return how a thread's row stands in `section`: waiting on the operator where what the host says asks them is there, as
- * in waiting on you, a thread done for them to confirm among that; only to read where it's only that, as in new, whatever
- * else in it asks them, which its row there says; and how much of each it holds.
+ * Return how a thread's row stands in `section`: as what the host says asks the operator there, what stays stopped until
+ * they answer it, or, with nothing stopped, what wants their eyes, a thread done for them to confirm among that, as in
+ * waiting on you; only to read where it's only that, as in new, whatever else in it asks them, which its row there says;
+ * and how much of each it holds.
  */
 export function threadStanding(read: ThreadRead, section: string | undefined): { marks: OutlineMark[]; counts: Counts } {
-    const asks = (read.asks ?? []).length + (read.state === "done to confirm" ? 1 : 0);
+    const asks = read.asks ?? [];
+    const holds = asks.filter((each) => each.holds).length;
+    const flagged = asks.length - holds + (read.state === "done to confirm" ? 1 : 0);
     const reading = (read.new ?? []).length;
+    const asking: OutlineMark = holds === 0 && flagged > 0 ? "asking" : "waiting";
     if (section === "new") {
-        return { marks: ["news"], counts: { asks: 0, toRead: reading } };
+        return { marks: ["news"], counts: { ...NOTHING_WAITS, toRead: reading } };
     }
     if (section === "waiting on you") {
-        return { marks: ["waiting"], counts: { asks, toRead: 0 } };
+        return { marks: [asking], counts: { ...NOTHING_WAITS, holds, flagged, toRead: 0 } };
     }
-    return { marks: asks > 0 ? ["waiting"] : reading > 0 ? ["news"] : [], counts: { asks, toRead: reading } };
+    return { marks: holds + flagged > 0 ? [asking] : reading > 0 ? ["news"] : [], counts: { ...NOTHING_WAITS, holds, flagged, toRead: reading } };
+}
+
+/** Return the mark of a drawer holding `tally`: what stays stopped first, then what's flagged, then what's to review. */
+export function drawerMark(tally: BlocksTally): OutlineMark {
+    return tally.holds > 0 ? "waiting" : tally.flagged > 0 ? "asking" : "to-review";
 }
 
 /**
@@ -137,7 +145,7 @@ export function itemStanding(region: Pick<Region, "item">, draft: Draft, seeing:
     const approved = open && !declined && ((reason === "approval" && done) || (reason === "held" && (done || commented)));
     const answered: DraftMark[] = declined ? ["decline"] : approved ? ["approve"] : done && reason !== "approval" ? ["read"] : [];
     const drafted: DraftMark[] = parked ? [] : [...(commented ? ["comment" as const] : []), ...answered];
-    const marks: OutlineMark[] = parked ? ["parked"] : toAnswer(item, draft) ? ["waiting"] : toRead(item, draft, seeing) ? ["news"] : [];
+    const marks: OutlineMark[] = parked ? ["parked"] : toAnswer(item, draft) ? [item.holds ? "waiting" : "asking"] : toRead(item, draft, seeing) ? ["news"] : [];
     return { marks, draft: drafted, fresh: fresh(item, seeing) };
 }
 
@@ -147,9 +155,15 @@ function ownEnds(laidOut: Laid): number[] {
     return laidOut.groups.map((_, at) => (laidOut.groups[at + 1]?.banner.from ?? laidOut.text.length + 1) - 1);
 }
 
-/** Return how many of what a group's drawers hold wait on the operator, as each drawer's view counts them: its files to review in "since you approved". */
-function toReview(group: Group): number {
-    return group.drawers.reduce((sum, each) => sum + (each.view.answer?.blocks.count ?? 0), 0);
+/** Return what a group's drawers hold waiting on the operator, as each drawer's view counts it: its files in "since you approved". */
+function inDrawers(group: Group): BlocksTally {
+    const tallies = group.drawers.map((each) => each.view.answer?.blocks.tally ?? NOTHING_WAITS);
+    return tallies.reduce((sum, each) => ({ holds: sum.holds + each.holds, flagged: sum.flagged + each.flagged, review: sum.review + each.review }), NOTHING_WAITS);
+}
+
+/** Return `counts` with `drawers`, what's in their drawers, beside what's the group's own. */
+function withDrawers(counts: Counts, drawers: BlocksTally): Counts {
+    return { ...counts, holds: counts.holds + drawers.holds, flagged: counts.flagged + drawers.flagged, review: counts.review + drawers.review };
 }
 
 /**
@@ -174,7 +188,6 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
         from: at,
         to: at,
         at,
-        tag: null,
     });
     let repository: string | null = null;
     let later = false;
@@ -208,6 +221,7 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
         if (group.thread !== null) {
             const read = group.thread;
             const own = laidOut.regions.filter((each) => each.header.from > from && each.header.from <= to);
+            const standing = threadStanding(read, laidOut.sections.findLast((each) => each.header.from < from)?.name);
             rows.push({
                 key: `group ${group.place}`,
                 kind: "thread",
@@ -215,13 +229,13 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
                 text: `@${read.thread.name}`,
                 // Its title whole, which its banner cuts to keep to one row.
                 title: `@${read.thread.name} · ${read.thread.title}`,
-                ...threadStanding(read, laidOut.sections.findLast((each) => each.header.from < from)?.name),
+                marks: standing.marks,
+                counts: withDrawers(standing.counts, inDrawers(group)),
                 draft: [],
                 fresh: false,
                 from,
                 to,
                 at: from,
-                tag: toReview(group) === 0 ? null : `◇${toReview(group)}`,
             });
             own.forEach((region, index) => {
                 rows.push({
@@ -234,7 +248,6 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
                     from: region.header.from,
                     to: Math.min((own[index + 1]?.header.from ?? to + 1) - 1, to),
                     at: region.header.from,
-                    tag: null,
                 });
             });
             return;
@@ -242,7 +255,6 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
         const key = group.conversation === null ? null : whose(group.conversation);
         const state = key === null ? null : (states.get(key) ?? null);
         const path = group.conversation === null ? "lup's approvals" : called(group.conversation);
-        const files = toReview(group);
         const depth = group.depth + 1;
         const own = laidOut.regions.filter((each) => each.header.from > from && each.header.from <= to);
         rows.push({
@@ -257,11 +269,15 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
             from,
             to,
             at: from,
-            tag: files === 0 ? null : `◇${files}`,
-            counts: {
-                asks: own.filter((each) => toAnswer(each.item, draft)).length,
-                toRead: own.filter((each) => toRead(each.item, draft, seeing)).length,
-            },
+            counts: withDrawers(
+                {
+                    ...NOTHING_WAITS,
+                    holds: own.filter((each) => toAnswer(each.item, draft) && each.item.holds).length,
+                    flagged: own.filter((each) => toAnswer(each.item, draft) && !each.item.holds).length,
+                    toRead: own.filter((each) => toRead(each.item, draft, seeing)).length,
+                },
+                inDrawers(group),
+            ),
         });
         own.forEach((region, index) => {
             rows.push({
@@ -274,7 +290,6 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
                 from: region.header.from,
                 to: Math.min((own[index + 1]?.header.from ?? to + 1) - 1, to),
                 at: region.header.from,
-                tag: null,
             });
         });
     });
@@ -296,7 +311,6 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
                 from: run.from,
                 to: run.to,
                 at: run.header.from,
-                tag: null,
             });
             for (const entry of run.entries) {
                 const number = entry.item.number;
@@ -314,7 +328,6 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
                     from: entry.from,
                     to: entry.to,
                     at: entry.header.from,
-                    tag: null,
                 });
             }
         }

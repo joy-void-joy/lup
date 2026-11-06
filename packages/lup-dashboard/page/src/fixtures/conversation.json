@@ -171,7 +171,11 @@
           }
         ],
         "waiting": false,
-        "count": 0,
+        "tally": {
+          "holds": 0,
+          "flagged": 0,
+          "review": 0
+        },
         "offers": [
           {
             "action": "review-mark",
@@ -309,7 +313,11 @@
         ],
         "summary": [],
         "waiting": false,
-        "count": 0,
+        "tally": {
+          "holds": 0,
+          "flagged": 0,
+          "review": 0
+        },
         "offers": [],
         "sights": null
       }

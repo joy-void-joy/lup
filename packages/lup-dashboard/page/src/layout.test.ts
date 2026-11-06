@@ -8,7 +8,7 @@ import { sightsOf } from "./seeing";
 import { around, linesOver, pinned, stickies, type Geometry } from "./stack";
 import { STANDING } from "./fixtures/looks";
 import { merged } from "./looks";
-import { blockId, instanceOf, type Blocks, type Remote } from "./views";
+import { blockId, instanceOf, NOTHING_WAITS, type Blocks, type Remote } from "./views";
 
 const AT = "2026-10-17T12:00:00Z";
 const WAITING: Item["rank"] = { name: "waiting on you", order: 0, notifies: true };
@@ -67,7 +67,7 @@ const TALKED: Remote = new Map([
         {
             summary: [{ text: "trace · 2 steps", tone: "plain" }],
             waiting: false,
-            count: 0,
+            tally: NOTHING_WAITS,
             offers: [],
             blocks: [
                 { block: "line", id: "step 0", version: null, offers: [], spans: [{ text: "you: Go.", tone: "operator" }] },
@@ -173,7 +173,7 @@ describe("a drawer its module answers itself", () => {
     const answer: Blocks = {
         summary: [{ text: "notes · 2", tone: "plain" }],
         waiting: true,
-        count: 2,
+        tally: { holds: 1, flagged: 1, review: 0 },
         offers: [],
         blocks: [
             { block: "line", id: "1", version: null, offers: [], spans: [{ text: "warm ", tone: "warm" }, { text: "words", tone: "plain" }] },
@@ -198,7 +198,7 @@ describe("a drawer its module answers itself", () => {
             ["notes", "", true, false],
         ]);
         // Read, the fold holds what its view answered.
-        const older: Blocks = { summary: [], waiting: false, count: 0, offers: [], blocks: [{ block: "line", id: "o1", version: null, offers: [], spans: [{ text: "an old note", tone: "plain" }] }] };
+        const older: Blocks = { summary: [], waiting: false, tally: NOTHING_WAITS, offers: [], blocks: [{ block: "line", id: "o1", version: null, offers: [], spans: [{ text: "an old note", tone: "plain" }] }] };
         const read = laid([], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, {
             looks,
             remote: new Map([
@@ -221,7 +221,7 @@ describe("what a fold of a module's view sets off", () => {
         const talked: Blocks = {
             summary: [{ text: "trace · 3 steps", tone: "plain" }],
             waiting: false,
-            count: 0,
+            tally: NOTHING_WAITS,
             offers: [],
             blocks: [
                 {
@@ -264,7 +264,7 @@ describe("a comment in a drawer goes to whoever wrote what it's on", () => {
     const talked: Blocks = {
         summary: [{ text: "messages · 2", tone: "plain" }],
         waiting: false,
-        count: 0,
+        tally: NOTHING_WAITS,
         offers: [],
         blocks: [markdown("text 60", "Found it.\nThree places.", { runtime: "claude", session: "s1", agent: "a1" }), markdown("step 3", "Thanks.")],
     };
@@ -305,7 +305,7 @@ describe("what a drawer's view says is read by being on screen", () => {
     const talked: Blocks = {
         summary: [{ text: "messages · 3 · 2 new", tone: "plain" }],
         waiting: false,
-        count: 0,
+        tally: NOTHING_WAITS,
         offers: [offer],
         blocks: [
             { block: "fold", id: "earlier", version: null, offers: [], kind: "earlier", summary: [{ text: "1 earlier, 1 new", tone: "muted" }], open: false, barred: false, content: { view: "earlier_messages", argument: { until_last: 20 } } },

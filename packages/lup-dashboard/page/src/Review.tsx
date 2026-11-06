@@ -64,13 +64,13 @@ import { usePaced } from "./hooks";
 import { mapOutlineKey, mapScopeKeys, Outline, setOutlineFocus, setOutlineToggle, setScopeJump, useNarrow, type ScopeKey } from "./Outline";
 import { Stack, type Mark as StackMark } from "./Stack";
 import { redrawn, structureMargin, type Labelled, type Structured } from "./rails";
-import { itemStanding } from "./outline";
+import { drawerMark, itemStanding, threadStanding } from "./outline";
 import { DRAFTED, GLYPHS } from "./Outline";
 import { linesOver, stickies, type Sticky } from "./stack";
 import { depths, levelled } from "./folds";
 import { carried, chainAt, findNode, implied, isMarked, marking, marksOn, movedInto, reachOf, reachedIn, type Act, type Destination, type Marked } from "./grammar";
 import { Listing, type ListHandle, type Viewed as ListViewed } from "./Panes";
-import { arrivalIn, bufferKey, bufferSpans, conversationNamed, listedByAgent, listedByThread, marginFolds, pathTo, spanAt, titled, type PanesBy, type Showing } from "./panes";
+import { arrivalIn, bufferKey, bufferSpans, conversationNamed, listedByAgent, listedByThread, marginFolds, spanAt, titled, type PanesBy, type Showing } from "./panes";
 import { ThreadPalette } from "./Palette";
 import type { DrawerKind, FoldKind, Here } from "./keys";
 import type { Titled } from "./panes";
@@ -162,7 +162,7 @@ import {
     threadPlace,
 } from "./review";
 import { filesOf, freshRows, type Fresh } from "./since";
-import type { Instance, Offer, Remote, Running, Span as ViewSpan } from "./views";
+import { NOTHING_WAITS, type Instance, type Offer, type Remote, type Running, type Span as ViewSpan } from "./views";
 
 /** The least and the most time between two layouts of what the host answers, in milliseconds (`usePaced`). */
 const PACED_LEAST = 250;
@@ -953,7 +953,6 @@ export function Review({
     const goingTo = useRef<{ write: boolean; item: number | null; since: boolean } | null>(null);
     // What of the buffer on screen the second pane has in view, and under its cursor, by the list's rows; and the rows whose nesting is open for it.
     const [viewed, setViewed] = useState<ListViewed>({ seen: [], cursor: null });
-    const [nestsOpen, setNestsOpen] = useState<ReadonlySet<string>>(new Set());
     // The buffers `gt` and `gd` crossed from, which Ctrl+O goes back to: vim's own list of jumps knows one text.
     const crossed = useRef<Showing[]>([]);
     const listHandle = useRef<ListHandle | null>(null);
@@ -2107,9 +2106,10 @@ export function Review({
                 const read = group?.thread ?? null;
                 if (read !== null) {
                     const waiting = read.state === "waiting on the operator" || read.state === "done to confirm";
+                    const [asking = "waiting"] = threadStanding(read, "waiting on you").marks;
                     return {
                         ...plain(`@${read.thread.name}`),
-                        state: waiting ? { glyph: GLYPHS.waiting ?? "◆", mark: "waiting" } : (read.new ?? []).length > 0 ? { glyph: GLYPHS.news ?? "•", mark: "news" } : null,
+                        state: waiting ? { glyph: GLYPHS[asking] ?? "◆", mark: asking } : (read.new ?? []).length > 0 ? { glyph: GLYPHS.news ?? "•", mark: "news" } : null,
                     };
                 }
                 const conversation = group?.conversation ?? null;
@@ -2138,7 +2138,8 @@ export function Review({
                 // A drawer by its view's name, the trace's as it's called, marked where it holds what waits on the operator, as its view says.
                 const drawer = laidOut.drawers.find((each) => each.header.from === from);
                 const which = drawer?.kind ?? "";
-                return { ...plain(which === "conversation" ? "trace" : which), state: drawer?.waiting === true ? { glyph: "◇", mark: "to-review" } : null };
+                const mark = drawerMark(drawer?.view.answer?.blocks.tally ?? NOTHING_WAITS);
+                return { ...plain(which === "conversation" ? "trace" : which), state: drawer?.waiting === true ? { glyph: GLYPHS[mark] ?? "◇", mark } : null };
             }
             case "file": {
                 // A file by its name, flagged where a line in it matters, folded where its view folds it whole, else to review.
@@ -2505,10 +2506,10 @@ export function Review({
     }, [narrow]);
     // In panes, the list, read from what the review is laid out from: it lays out one buffer of it at a time.
     const listReading = useMemo(
-        () => ({ items, draft, agents, parents: arrangedBy.parents, called, banner: (item: Item) => bannerLine({ item }, false, ""), drawers, looks: arrangedBy.looks, remote: arrangedBy.remote, running: arrangedBy.running, activities, states, threads: threadsAll, landings: arrangedBy.landings, checks: arrangedBy.checks, seeing: panes === "agents" ? seenGiven : seeing, opened: nestsOpen }),
+        () => ({ items, draft, agents, parents: arrangedBy.parents, called, banner: (item: Item) => bannerLine({ item }, false, ""), drawers, looks: arrangedBy.looks, remote: arrangedBy.remote, running: arrangedBy.running, activities, states, threads: threadsAll, landings: arrangedBy.landings, checks: arrangedBy.checks, seeing: panes === "agents" ? seenGiven : seeing, showing }),
         // `bannerLine` says what `banner` does.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-        [items, draft, agents, arrangedBy.parents, called, banner, drawers, arrangedBy.looks, arrangedBy.remote, arrangedBy.running, activities, states, threadsAll, arrangedBy.landings, arrangedBy.checks, seeing, seenGiven, nestsOpen],
+        [items, draft, agents, arrangedBy.parents, called, banner, drawers, arrangedBy.looks, arrangedBy.remote, arrangedBy.running, activities, states, threadsAll, arrangedBy.landings, arrangedBy.checks, seeing, seenGiven, showing],
     );
     const listed = useMemo(() => (panes === null ? [] : panes === "agents" ? listedByAgent(listReading) : listedByThread(listReading)), [panes, listReading]);
     const title = panes === null ? null : titled(showing, listReading);
@@ -2553,17 +2554,6 @@ export function Review({
         // The editor's places are read from what it holds as it's measured, whichever render's editor it is.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [follower, spans, panes]);
-    // The nesting opens as the second pane's cursor comes to what's in it, and stays open while that buffer's on screen.
-    useEffect(() => {
-        if (panes === null) {
-            return;
-        }
-        const holding = (pathTo(listed, viewed.cursor ?? "") ?? []).map((each) => each.id);
-        const here = showing.kind === "agent" ? [`agent ${showing.key}`] : [];
-        setNestsOpen((before) => ([...holding, ...here].every((each) => before.has(each)) ? before : new Set([...before, ...holding, ...here])));
-        // The rows it's in, read as the cursor's row changes.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [viewed.cursor, showing, panes]);
 
     const naming = {
         // A group by its banner's words, the core's and each part's, as its banner says them.

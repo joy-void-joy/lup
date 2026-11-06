@@ -24,6 +24,7 @@ from lup.blocks import (
     OfAgent,
     Offer,
     Span,
+    Tally,
     Ticking,
 )
 
@@ -111,7 +112,7 @@ def test_a_fold_loads_only_a_view_and_what_it_takes() -> None:
 
 def test_a_diff_and_a_code_read_back_as_they_were_sent_and_by_their_kind() -> None:
     view = Blocks(
-        count=2,
+        tally=Tally(holds=1, flagged=2, review=3),
         blocks=[
             Diff(
                 id="file a.py",

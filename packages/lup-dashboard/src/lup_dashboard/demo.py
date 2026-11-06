@@ -1102,7 +1102,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 return Standing()
 
     def since(self, conversation: Conversation, seen: str | None) -> Since:
-        """Return what a stand-in conversation's branches changed since the operator last saw them (`drawn`): the parser subagent's new reader module and its test and, once `grew`, the reader grown and a change to the clock beside it; a worker's modules; the ended fix-clock subagent's clock module, held at landing while the landing waits, and a module on a branch no worktree has checked out; nothing for the rest."""
+        """Return what a stand-in conversation's branches changed since the operator last saw them (`drawn`): the parser subagent's new reader module and its test and, once `grew`, the reader grown and a change to the clock beside it; explore-auth's survey, to review with nothing flagged; a worker's modules; the ended fix-clock subagent's clock module, held at landing while the landing waits, and a module on a branch no worktree has checked out; nothing for the rest."""
         places = self.places(conversation)
         version = " | ".join(
             stand_in_id(Text(text=each.model_dump_json())) or "" for each in places
@@ -1127,6 +1127,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         if worker is not None and self.size > 0:
             tree = worker_worktree(worker)
             return [self.drawn(tree, f"worker-{worker}", self.worked_stands(worker))]
+        if conversation.agent == "a01":
+            return [self.drawn(dev, "auth-survey", self.survey_stands())]
         if conversation.agent == "a02":
             return [self.drawn(dev, "feat-reader", self.parser_stands())]
         if conversation.agent == FIX_CLOCK:
@@ -1241,6 +1243,17 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     def landed(self) -> None:
         """End the stand-in landing's wait, the operator having answered its file: landed where they approved it, not where they declined it; each watch answers again."""
         self.host.waits.ended(LANDING_KEY)
+
+    def survey_stands(self) -> list[Stands]:
+        """Return explore-auth's branch as it stands: their survey, written with nothing flagged, so it's only to review."""
+        return [
+            Stands(
+                path=Path("docs/auth-survey.md"),
+                before=None,
+                after=Text(text=SURVEY_SOURCE),
+                role="docs",
+            )
+        ]
 
     def parser_stands(self) -> list[Stands]:
         """Return the parser subagent's branch as it stands: their new reader module, flagged, and its test; once `grew`, the reader with a method more and the clock's change, flagged."""
@@ -3223,6 +3236,12 @@ NAMES_SOURCE = (
     'NAMES = {"s": "seconds", "m": "minutes", "h": "hours"}\n'
 )
 """The names module's text."""
+
+SURVEY_SOURCE = (
+    "# Where auth is checked\n\n"
+    "Each request's token is read once, in the middleware; no handler reads it again.\n"
+)
+"""explore-auth's survey's text."""
 
 
 def stand_in_id(content: Content | None) -> str | None:

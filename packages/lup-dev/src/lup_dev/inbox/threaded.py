@@ -242,6 +242,8 @@ class Ask(Model):
     node: int
     what: str
     came: datetime
+    holds: bool = False
+    """Whether something stays stopped until they answer it (`ItemKind.holds`): an item's kind says; a check, nothing does."""
 
 
 class ThreadRead(Model):
@@ -567,7 +569,12 @@ class Readings(Model, arbitrary_types_allowed=True):
             if item is not None:
                 waiting = asks(item.recipient, item.reason, item.state)
                 return (
-                    Ask(node=item.number, what=what(item), came=member.came)
+                    Ask(
+                        node=item.number,
+                        what=what(item),
+                        came=member.came,
+                        holds=item.holds,
+                    )
                     if waiting
                     else None
                 )

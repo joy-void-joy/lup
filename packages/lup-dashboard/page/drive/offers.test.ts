@@ -67,14 +67,14 @@ describe("what's offered, grouped by agent, in headless Chromium", () => {
     });
 
     it("counts an approval left for later as waiting no more", async () => {
-        const count = async () => Number(/(\d+) waiting on you/.exec(await dashboard.page.locator(".bar").first().innerText())?.[1]);
+        const count = async () => Number(/◆ (\d+)/.exec(await dashboard.page.locator(".bar").first().innerText())?.[1]);
         const before = await count();
         await review.goTo("── @54 approval");
         await dashboard.keys.press([" ", "s"]);
-        await counted(dashboard, `${before - 1} waiting on you`);
+        await counted(dashboard, `◆ ${before - 1}`);
         await review.goTo("── @54 approval");
         await dashboard.keys.press([" ", "s"]);
-        await counted(dashboard, `${before} waiting on you`);
+        await counted(dashboard, `◆ ${before}`);
     });
 
     it("keeps a held change answered elsewhere in view with what's on it, says where the comment goes, and sends it", async () => {

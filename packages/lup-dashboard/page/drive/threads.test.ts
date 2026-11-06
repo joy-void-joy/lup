@@ -24,7 +24,7 @@ beforeAll(async () => {
     // What waits on the operator and what's new in each thread read, and the review at rest.
     await review.holds(READER);
     await review.holds("── @51 question · lup-impl/parser");
-    await review.holds("◆ to try: ");
+    await review.holds("◇ to try: ");
     await review.holds("── @66 note · lup-impl/explore-auth");
     await review.settled(1500);
 });
@@ -69,7 +69,7 @@ describe("the review grouped by thread, in headless Chromium", () => {
             "settled",
             "agents",
         ]);
-        expect(lines).toContain("◆ to try: Read the voice section of AGENTS.md: each line says what is, and its examples are short.");
+        expect(lines).toContain("◇ to try: Read the voice section of AGENTS.md: each line says what is, and its examples are short.");
         // Open: every thread still open, a line each, folded, saying where it stands and how much waits on the operator or is new.
         const whole = lines.findIndex((each) => READER_WHOLE.test(each));
         expect(whole).toBeGreaterThan(0);
@@ -109,7 +109,7 @@ describe("the review grouped by thread, in headless Chromium", () => {
         await dashboard.page.waitForFunction(() => document.querySelector(".keys")?.textContent?.includes("␣d settle it: it works") === true);
         await dashboard.keys.press([" ", "d"]);
         await says("@guidance-voice settled");
-        await review.goTo("◆ check @311");
+        await review.goTo("◇ check @311");
         await dashboard.keys.press([" ", "d"]);
         await says("tick it: you tried it");
         await review.goTo(AUTH);
