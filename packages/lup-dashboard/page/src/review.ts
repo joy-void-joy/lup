@@ -472,7 +472,42 @@ export interface Group {
  * their conversation, live, what the operator writes at its end reaching them; every agent no longer running; or one
  * thread's conversation, whole. Each is a subset of the review's tree, laid out by the one layout.
  */
-export type Showing = { kind: "for you" } | { kind: "agent"; key: string } | { kind: "no agent" } | { kind: "thread"; number: number };
+export type Showing = { kind: "for you" } | { kind: "agent"; key: string } | { kind: "party"; name: string } | { kind: "thread"; number: number };
+
+/**
+ * A party beside the agents, a place for what no agent running answers, or, once the operator can make one, what they
+ * put there (#113): listed and laid out the same, whichever it is, by what it says of itself. `No agent` is one of them.
+ */
+export interface Party {
+    /** What names it among the others, by which its buffer's asked for. */
+    name: string;
+    /** What it's called on its row and over its buffer. */
+    called: string;
+    /** What the line of keys says it is. */
+    says: string;
+    /** What its buffer says, over it, of whom the operator's words reach from there. */
+    whom: string;
+    /** Whether the agent of this group sits in it, whatever's theirs with them, by who's running. */
+    holds: (group: Pick<Grouping, "key" | "conversation">, running: ReadonlyMap<string, unknown>) => boolean;
+    /** Whether this task, a thread still open, sits in it, by who's running; each listed under the first holding it. */
+    holdsTask: (read: ThreadRead, running: ReadonlyMap<string, unknown>) => boolean;
+}
+
+/** The party of what nobody running answers: each agent who's ended, with what they left, and each task nobody running owns, as nobody finished or reviewed it. */
+export const NO_AGENT: Party = {
+    name: "no agent",
+    called: "No agent",
+    says: "No agent: what nobody running answers",
+    whom: "nobody's running: an agent's main session reads what you write when it next runs",
+    holds: (group, running) => group.conversation !== null && !running.has(group.key),
+    holdsTask: (read, running) => {
+        const owner = taskOwner(read);
+        return owner === null || !running.has(whose(owner));
+    },
+};
+
+/** The parties the list lists and a buffer may show, in order; the operator's would go here. */
+export const PARTIES: readonly Party[] = [NO_AGENT];
 
 /** A check that waits on the operator, in the thread it's in: laid out by agent, under whoever owns that thread (`checkOwner`), where the review goes by agent and threads aren't what it's laid out by. */
 export interface OwnedCheck {
@@ -556,6 +591,8 @@ export interface Arranging {
     read?: boolean;
     /** The threads done, for the operator to confirm, each laid out under whoever owns it (`taskOwner`), where the panes go by agent; none else. */
     confirming?: readonly ThreadRead[];
+    /** The parties a buffer may show; unsaid, those declared here (`PARTIES`). */
+    parties?: readonly Party[];
 }
 
 /**
@@ -1658,11 +1695,11 @@ export function laid(
         for (const group of [...now, ...empty].filter((each) => each.key === showing.key)) {
             layGroup(group, false, 0, "own");
         }
-    } else if (showing?.kind === "no agent") {
-        // Every agent no longer running with something here, each under their banner, as lup's approvals aren't: those
-        // answer to the operator, and have a line of their own.
-        const gone = (group: Grouping) => group.conversation !== null && !shown.running.has(group.key);
-        for (const { group, depth } of nested(kept([...now, ...empty].filter(gone), false), arranging.parents ?? null)) {
+    } else if (showing?.kind === "party") {
+        // Each agent the party holds, under their banner, and what's theirs.
+        const party = (arranging.parties ?? PARTIES).find((each) => each.name === showing.name);
+        const inIt = (group: Grouping) => party?.holds(group, shown.running) === true;
+        for (const { group, depth } of nested(kept([...now, ...empty].filter(inIt), false), arranging.parents ?? null)) {
             layGroup(group, false, depth, "for you");
         }
     } else if (threading !== null) {

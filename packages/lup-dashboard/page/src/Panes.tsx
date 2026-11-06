@@ -138,7 +138,7 @@ export function Listing({ rows, showing, viewed, open, send, say, escaped, windo
         const made = same ? { changes: [], arrived: [] } : reconcile(state.doc, ownersOf(state.doc, runs), laid.text, laid.owners, () => 1);
         current.dispatch({ changes: state.changes(made.changes), annotations: rebuilt.of(true), effects: owned.of(laid.runs) });
         refold(current, laid.folds, editor.kept.current);
-        const showingId = rowIdOf(showing);
+        const showingId = bufferKey(showing);
         const seen = new Set(viewed.seen);
         const classes = (each: { look: string; row: string }) =>
             ["list-row", each.look, each.row === showingId ? "list-showing" : "", seen.has(each.row) ? "list-in-view" : "", each.row === viewed.cursor ? "list-cursor" : ""].filter((one) => one !== "").join(" ");
@@ -165,7 +165,7 @@ export function Listing({ rows, showing, viewed, open, send, say, escaped, windo
         }
         shownRow.current = key;
         if (!current.hasFocus) {
-            const row = laid.rows.find((each) => each.row.id === rowIdOf(showing));
+            const row = laid.rows.find((each) => each.row.id === bufferKey(showing));
             if (row !== undefined) {
                 current.dispatch({ selection: { anchor: row.from }, scrollIntoView: true, annotations: rebuilt.of(true) });
             }
@@ -203,7 +203,3 @@ export function Listing({ rows, showing, viewed, open, send, say, escaped, windo
     return <div className="buffer list-buffer" ref={editor.parent} />;
 }
 
-/** Return the id of the row `showing` is shown by (`panes.ts`). */
-function rowIdOf(showing: Showing): string {
-    return showing.kind === "no agent" ? "heading no agent" : bufferKey(showing);
-}

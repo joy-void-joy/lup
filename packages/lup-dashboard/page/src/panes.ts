@@ -17,6 +17,7 @@ import {
     grouped,
     nested,
     news,
+    PARTIES,
     rootThread,
     taskOwner,
     toAnswer,
@@ -29,6 +30,7 @@ import {
     type Item,
     type Laid,
     type OwnedCheck,
+    type Party,
     type Seeing,
     type Showing,
     type ThreadRead,
@@ -49,13 +51,15 @@ export function panesAsked(search: string): PanesBy | null {
     return asked === "agents" || asked === "threads" ? asked : null;
 }
 
-/** Return what names a buffer among the others, which the cursor is kept by while another is on screen. */
+/** Return what names a buffer among the others, which the cursor is kept by while another is on screen, and its row in the list. */
 export function bufferKey(showing: Showing): string {
     switch (showing.kind) {
         case "agent":
             return `agent ${showing.key}`;
         case "thread":
             return `thread ${showing.number}`;
+        case "party":
+            return `party ${showing.name}`;
         default:
             return showing.kind;
     }
@@ -171,6 +175,8 @@ export interface ListReading {
     seeing?: Seeing;
     /** The rows whose nest is open however little of it waits: what's on screen and where the second pane's cursor has been, by row. */
     opened?: ReadonlySet<string>;
+    /** The parties listed beside the agents; unsaid, those declared (`PARTIES`). */
+    parties?: readonly Party[];
 }
 
 /** Return the number of a check as the draft marks it answered: ticked, or a comment on it its answer in words. */
@@ -428,17 +434,25 @@ function repositoryNamed(path: string): string {
     return name.endsWith(".git") ? name.slice(0, -".git".length) : name;
 }
 
+/** Return `party`'s row, opening its buffer, with `count` of what's in it. */
+function partyRow(party: Party, count: number, tally: Tally): Row {
+    return heading(`party ${party.name}`, party.called, `${count}`, { kind: "party", name: party.name }, party.says, tally);
+}
+
 /**
  * Return the list by agent: what's for the operator; each agent running, a subagent under their parent, a repository
- * named where there are several; each agent no longer running with something here, under `No agent`, which opens them
- * together, nobody answering there; and lup's approvals.
+ * named where there are several; each party, each agent it holds with what's theirs nested under them, and each task it
+ * holds that nobody ever owned; and lup's approvals. What nobody's in, no party and not running, isn't an agent.
  */
 export function listedByAgent(reading: ListReading): Row[] {
     const groups = groupsOf(reading);
     const counted = groups.map((each) => ({ group: each, tally: agentTally(each, reading) }));
     const tallyOf = (group: Grouping) => counted.find((each) => each.group === group)?.tally ?? NOTHING;
     const rows: Row[] = [forYouRow(added(counted.map((each) => each.tally)))];
-    const runningGroups = groups.filter((each) => each.conversation !== null && reading.running.has(each.key));
+    const parties = reading.parties ?? PARTIES;
+    // Each agent under the first party holding them; the rest, running, on their own.
+    const partyOf = (group: Grouping) => parties.find((each) => each.holds(group, reading.running));
+    const runningGroups = groups.filter((each) => each.conversation !== null && reading.running.has(each.key) && partyOf(each) === undefined);
     rows.push(heading("heading running", "running", `${runningGroups.length}`));
     const repositories = new Set(runningGroups.map((each) => each.conversation?.repository));
     let repository: string | null = null;
@@ -450,19 +464,21 @@ export function listedByAgent(reading: ListReading): Row[] {
         }
         rows.push(agentRow(group, depth, reading));
     }
-    const gone = groups.filter((each) => each.conversation !== null && !reading.running.has(each.key));
     const threads = reading.threads;
-    // A task nobody's opened or holds, which no one running or ended owns.
-    const unowned = threads === null ? [] : threads.read.threads.filter((each) => taskShown(each) && taskOwner(each) === null);
-    if (gone.length > 0 || unowned.length > 0) {
-        rows.push(heading("heading no agent", "No agent", `${gone.length + unowned.length}`, { kind: "no agent" }, "No agent: what nobody running answers", added(gone.map(tallyOf))));
-        if (threads !== null) {
-            for (const { read, depth } of threadsNested(unowned, threads.read.threads)) {
-                rows.push(taskRow(read, "", depth, threads, reading));
+    for (const party of parties) {
+        const held = groups.filter((each) => partyOf(each) === party);
+        // A task no agent's ever owned sits in the party itself; one whose owner it holds, with them.
+        const unowned = threads === null ? [] : threads.read.threads.filter((each) => taskShown(each) && taskOwner(each) === null && party.holdsTask(each, reading.running));
+        if (held.length > 0 || unowned.length > 0) {
+            rows.push(partyRow(party, held.length + unowned.length, added(held.map(tallyOf))));
+            if (threads !== null) {
+                for (const { read, depth } of threadsNested(unowned, threads.read.threads)) {
+                    rows.push(taskRow(read, "", depth, threads, reading));
+                }
             }
-        }
-        for (const { group, depth } of nested(gone, reading.parents)) {
-            rows.push(agentRow(group, depth, reading));
+            for (const { group, depth } of nested(held, reading.parents)) {
+                rows.push(agentRow(group, depth, reading));
+            }
         }
     }
     for (const group of groups.filter((each) => each.conversation === null)) {
@@ -564,16 +580,19 @@ export function listedByThread(reading: ListReading): Row[] {
         rows.push(agentRow(group, depth, asAgents, false));
     }
     const open = reads.filter((each) => !closed(each));
-    const nobody = (read: ThreadRead) => (read.answering ?? null) === null && read.state !== "parked";
+    const parties = reading.parties ?? PARTIES;
+    const partyOf = (read: ThreadRead) => parties.find((each) => each.holdsTask(read, reading.running));
     rows.push(heading("heading threads", "threads", `${open.length} open`));
-    for (const { read, depth } of threadsNested(open.filter((each) => !nobody(each)), reads)) {
+    for (const { read, depth } of threadsNested(open.filter((each) => partyOf(each) === undefined), reads)) {
         rows.push(threadRow(read, depth, threads, reading));
     }
-    const gone = open.filter(nobody);
-    if (gone.length > 0) {
-        rows.push(heading("heading no agent", "No agent", `${gone.length}`, { kind: "no agent" }, "No agent: threads nobody answers for", added(gone.map((each) => threadTally(each, threads, reading.draft)))));
-        for (const { read, depth } of threadsNested(gone, reads)) {
-            rows.push(threadRow(read, depth, threads, reading));
+    for (const party of parties) {
+        const held = open.filter((each) => partyOf(each) === party);
+        if (held.length > 0) {
+            rows.push(partyRow(party, held.length, added(held.map((each) => threadTally(each, threads, reading.draft)))));
+            for (const { read, depth } of threadsNested(held, reads)) {
+                rows.push(threadRow(read, depth, threads, reading));
+            }
         }
     }
     const done = reads.filter(closed);
@@ -726,12 +745,14 @@ export interface Titled {
 }
 
 /** Return what the buffer `showing` says of itself over its pane. */
-export function titled(showing: Showing, reading: Pick<ListReading, "agents" | "called" | "running" | "threads" | "items" | "checks">): Titled {
+export function titled(showing: Showing, reading: Pick<ListReading, "agents" | "called" | "running" | "threads" | "items" | "checks" | "parties">): Titled {
     switch (showing.kind) {
         case "for you":
             return { name: "what's for you", whom: "a comment reaches who sent the item" };
-        case "no agent":
-            return { name: "No agent", whom: "nobody's running: an agent's main session reads what you write when it next runs" };
+        case "party": {
+            const party = (reading.parties ?? PARTIES).find((each) => each.name === showing.name);
+            return { name: party?.called ?? showing.name, whom: party?.whom ?? "" };
+        }
         case "thread": {
             const read = reading.threads?.read.threads.find((each) => each.thread.number === showing.number);
             if (read === undefined) {
