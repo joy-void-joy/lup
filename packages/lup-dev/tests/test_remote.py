@@ -19,7 +19,7 @@ import threading
 from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
 
@@ -27,6 +27,7 @@ from lup import events
 from lup.rooms.container import Mask, Mount
 from lup.types import Model
 from lup_dev import Project
+from lup_dev.codescan.contract import FileReport, Parser, Source
 from lup_dev.declaration.resolve import Declaration, resolve
 from lup_dev.errors import LupDevError
 from lup_dev.git import Git, GitError
@@ -957,11 +958,21 @@ def test_a_gated_push_the_limits_refuse_asks_nothing_of_what_it_lands(
     assert asking.asked == []
 
 
+class Unparsed(Parser):
+    """Reads no directive in any file."""
+
+    @override
+    def parsed(self, root: Path, sources: list[Source]) -> list[FileReport]:
+        return [FileReport(path=each.path) for each in sources]
+
+
 def read_from_the_diff(launch: Register, old: str | None, tip: str) -> list[Path]:
     """What a landing reads of its own diff, by lup's default roles: each file it asks about."""
     roles = Roles(root=Path("/nowhere"), declaration=Declaration.of(Project()))
     git_read = Git.pinned(launch.repository)
-    return [each.path for each in asked_files(git_read, roles, old, tip)]
+    return [
+        each.path for each in asked_files(git_read, roles, old, tip, parser=Unparsed())
+    ]
 
 
 def test_the_commit_a_room_s_push_names_is_read_from_the_store_it_shares_before_the_update_goes(

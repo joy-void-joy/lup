@@ -9625,6 +9625,106 @@ def test_a_version_the_operator_never_approved_asks_though_a_later_one_was_appro
     assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
 
 
+IGNORING = '"""Rooms."""\n\nx = 1  # lup: ignore("regex", why="a grammar")\n'
+"""A module of a production path adding an `ignore`, which no hook of these tests hears written."""
+
+
+def test_a_landing_holds_an_ignore_its_own_diff_adds_whatever_the_hooks_heard_and_lands_once_approved(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    path = "src/pkg/rooms.py"
+    landings.wrote(landings.feat, path, IGNORING)
+    old = landings.on_forge("refs/heads/dev")
+    tip = landings.merged()
+    session = lander(landings, "claude")
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, pool):
+        landing, wait = held_landing(machine, clock, delivery, pool)
+        meanwhile = landings.on_forge("refs/heads/dev")
+        place = drawer(machine, clock, session, "feat")
+        answering(machine, clock, session, place, path)
+        answer, error = landing.result(timeout=60)
+    assert not error
+    assert meanwhile == old
+    assert waited_on(wait) == [path]
+    [file] = [each for each in place.files if each.path == Path(path)]
+    assert file.file is not None
+    assert file.file.reading == Reading(
+        role="production", asks=[Ask(name="ignore", taken="held", line=3)]
+    )
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+    assert landings.on_forge("refs/heads/dev") == tip
+
+
+def test_a_landing_with_an_ignore_declined_lands_nothing(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    path = "src/pkg/rooms.py"
+    landings.wrote(landings.feat, path, IGNORING)
+    old = landings.on_forge("refs/heads/dev")
+    landings.merged()
+    session = lander(landings, "claude")
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, pool):
+        landing, _ = held_landing(machine, clock, delivery, pool)
+        place = drawer(machine, clock, session, "feat")
+        answering(machine, clock, session, place, path, decline=True)
+        answer, error = landing.result(timeout=60)
+    assert not error
+    assert "Landed" not in answer
+    assert landings.on_forge("refs/heads/dev") == old
+
+
+def test_an_ignore_approved_at_that_version_isn_t_asked_again_at_its_landing(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    path = "src/pkg/rooms.py"
+    landings.wrote(landings.feat, path, IGNORING)
+    tip = landings.merged()
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ) as delivery:
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        delivery.settle_hold = lambda _change, _approved, _comment: None
+        number = hold_on(landings, machine, clock, path, IGNORING)
+        inbox("answer", str(number), "--approve", "--comment", "")
+        answer, error = call(machine.host.launch("one").mcp, "land", {})
+    assert not error, answer
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+
+
+def test_a_landing_whose_ignores_can_t_be_read_lands_nothing_saying_why(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    old = landings.on_forge("refs/heads/dev")
+    landings.merged()
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=Unreadable()
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer, _ = call(machine.host.launch("one").mcp, "land", {})
+    assert answer.startswith("Not landed:"), answer
+    assert "node: not found" in answer
+    assert landings.on_forge("refs/heads/dev") == old
+
+
 def test_what_a_landing_asks_is_the_approved_declaration_s_never_the_one_it_lands(
     landings: Landings,
     machine: Layout,
@@ -9789,13 +9889,49 @@ def test_a_branch_changing_nothing_its_role_asks_about_lands_as_before(
     assert landings.on_forge("refs/heads/dev") == tip
 
 
-def checking_pushes(delivery: Delivery, machine: Layout, said: list[str]) -> Remotes:
+def checking_pushes(
+    delivery: Delivery, machine: Layout, said: list[str], parser: Parser
+) -> Remotes:
     """The remotes the host service pushes through, each push held to what the operator approved of what it lands, telling nothing after it."""
     coming = Coming(delivery=delivery, layout=machine, say=said.append)
-    served = cli.host_remotes(delivery, machine, coming, Predating())
+    served = cli.host_remotes(delivery, machine, coming, Predating(), parser)
     return served.model_copy(
         update={"say": said.append, "landed": None, "modules": None}
     )
+
+
+def test_a_push_to_a_gated_branch_is_refused_where_what_it_lands_adds_an_ignore(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    path = "src/pkg/rooms.py"
+    landings.wrote(landings.feat, path, IGNORING)
+    old = landings.on_forge("refs/heads/dev")
+    tip = landings.merged()
+    onto = Pushing(
+        remote="origin", updates=[Update(source=tip, destination="refs/heads/dev")]
+    )
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, _):
+        launch = landings.launched("claude", name="pushing")
+        handler = PushHandler(
+            remotes=checking_pushes(delivery, machine, said, landings.parser)
+        )
+        refused = asyncio.run(handler.answer(onto, launch))
+        hold = hold_on(landings, machine, clock, path, IGNORING)
+        inbox("answer", str(hold), "--approve", "--comment", "")
+        pushed = asyncio.run(handler.answer(onto, launch))
+    assert isinstance(refused, Pushed)
+    [update] = refused.updates
+    assert update.error is not None
+    assert f"`{path}`" in update.error
+    assert "an `ignore` it adds" in update.error
+    assert isinstance(pushed, Pushed)
+    assert [each.error for each in pushed.updates] == [None]
+    assert old != tip
+    assert landings.on_forge("refs/heads/dev") == tip
 
 
 def test_a_push_to_a_gated_branch_is_refused_where_what_it_lands_asks_and_goes_once_approved(
@@ -9818,7 +9954,9 @@ def test_a_push_to_a_gated_branch_is_refused_where_what_it_lands_asks_and_goes_o
     )
     with serving_landings(landings, machine, clock, notices, said) as (delivery, _):
         launch = landings.launched("claude", name="pushing")
-        handler = PushHandler(remotes=checking_pushes(delivery, machine, said))
+        handler = PushHandler(
+            remotes=checking_pushes(delivery, machine, said, landings.parser)
+        )
         refused = asyncio.run(handler.answer(onto, launch))
         kept = landings.on_forge("refs/heads/dev")
         other = asyncio.run(handler.answer(beside, launch))
@@ -9858,7 +9996,9 @@ def test_a_push_to_a_gated_branch_changing_nothing_its_role_asks_about_goes_as_b
     )
     with serving_landings(landings, machine, clock, notices, said) as (delivery, _):
         launch = landings.launched("claude", name="pushing")
-        handler = PushHandler(remotes=checking_pushes(delivery, machine, said))
+        handler = PushHandler(
+            remotes=checking_pushes(delivery, machine, said, landings.parser)
+        )
         pushed = asyncio.run(handler.answer(onto, launch))
     assert isinstance(pushed, Pushed)
     assert [each.error for each in pushed.updates] == [None]
@@ -9887,7 +10027,9 @@ def test_a_binary_file_a_landing_asks_about_approved_from_the_terminal_passes_it
             said,
             rooms=landings.room,
             parser=landings.parser,
-            remotes=lambda delivery: checking_pushes(delivery, machine, said),
+            remotes=lambda delivery: checking_pushes(
+                delivery, machine, said, landings.parser
+            ),
         ) as delivery,
         ThreadPoolExecutor(max_workers=1) as pool,
     ):
@@ -10725,10 +10867,16 @@ def test_land_of_dev_as_it_is_says_each_merged_branch_s_defer_comments_then_its_
 
 
 class Unreadable(Parser):
-    """The engine's reading of a file's parse, failing as it does on a host with no Node, or no engine built."""
+    """The engine's reading of a file's parse, failing as it does on a host with no Node, or no engine built, once it has answered `answering` requests."""
+
+    def __init__(self, answering: int = 0) -> None:
+        self.answering = answering
 
     @override
     def parsed(self, root: Path, sources: list[Source]) -> list[FileReport]:
+        if self.answering > 0:
+            self.answering -= 1
+            return [FileReport(path=each.path) for each in sources]
         message = "the engine's `parse` failed: node: not found"
         raise EngineError(message)
 
@@ -10742,7 +10890,7 @@ def test_land_where_the_defer_comments_can_t_be_read_says_so_and_lands_all_the_s
 ) -> None:
     landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
     with inboxed(
-        machine, clock, notices, said, rooms=landings.room, parser=Unreadable()
+        machine, clock, notices, said, rooms=landings.room, parser=Unreadable(1)
     ):
         landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
