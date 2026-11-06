@@ -6,6 +6,7 @@ network or a real service, and the clock is the test kit's.
 """
 
 import asyncio
+import hashlib
 import os
 import select
 import socket
@@ -20,6 +21,7 @@ import pytest
 from rich.text import Text
 from typer.testing import CliRunner
 
+from lup.programs import run
 from lup.types import Model
 from lup_dev import cli
 from lup_dev.approval import (
@@ -86,6 +88,7 @@ from lup_dev.launch.trust import (
     Unchanged,
     UvToolchain,
     building,
+    diffed,
     machine_trust,
 )
 from lup_dev.layout import CopyLayout, JudgeLayout, Layout
@@ -771,6 +774,117 @@ def test_a_change_inside_the_zone_shows_its_diff_since_the_approved_commit(
     assert "packages/lup/src/library/__init__.py" not in shown
     assert outcome.approval.commit == head
     assert approved(lup, kit, shell) == outcome.approval
+
+
+def test_a_zone_s_fingerprint_is_git_s_own_listing_of_it_so_an_approval_kept_still_holds(
+    lup: Path, kit: Kit
+) -> None:
+    trust = trusting(lup, kit, yes())
+    zone = trust.zone()
+    listed = run(
+        "git",
+        "ls-tree",
+        "-r",
+        "-z",
+        "--full-tree",
+        zone.commit,
+        "--",
+        *(str(path) for path in zone.paths),
+        cwd=lup,
+    ).output
+    digest = hashlib.sha256(listed)
+    digest.update(zone.tool.model_dump_json().encode())
+    assert trust.fingerprint(zone) == digest.hexdigest()
+
+
+def test_a_lock_whose_blob_isn_t_what_its_id_says_says_nothing_of_which_lup_dev_runs(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    trust = trusting(lup, kit, yes())
+    commit = shell.git(lup, "rev-parse", "HEAD")
+    blob = shell.git(lup, "rev-parse", f"{commit}:uv.lock")
+    shell.planted(lup / ".git" / "objects", blob, "blob", b"version = 1\n")
+    with pytest.raises(GitError, match=f"{blob} isn't that blob"):
+        trust.tool(commit)
+
+
+def test_a_tree_of_the_zone_that_isn_t_what_its_id_says_refuses_the_reading_rather_than_moving_the_fingerprint(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    trust = trusting(lup, kit, yes())
+    zone = trust.zone()
+    held = "packages/lup-dev/src/environment"
+    tree = shell.git(lup, "rev-parse", f"{zone.commit}:{held}")
+    other = shell.git(lup, "rev-parse", f"{zone.commit}:packages/lup/src/library")
+    content = run("git", "cat-file", "tree", other, cwd=lup).output
+    shell.planted(lup / ".git" / "objects", tree, "tree", content)
+    with pytest.raises(GitError, match=f"{tree} isn't that tree"):
+        trust.fingerprint(zone)
+
+
+def test_a_change_to_the_zone_whose_blob_isn_t_what_its_id_says_isn_t_shown_as_something_else(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    path = "packages/lup-dev/src/environment/__init__.py"
+    head = changed(lup, {path: '"""Changed."""\n'}, shell)
+    blob = shell.git(lup, "rev-parse", f"{head}:{path}")
+    was = shell.git(lup, "rev-parse", f"{first.approval.commit}:{path}")
+    content = run("git", "cat-file", "blob", was, cwd=lup).output
+    shell.planted(lup / ".git" / "objects", blob, "blob", content)
+    trust = trusting(lup, kit, yes(whole=True))
+    with pytest.raises(GitError, match=f"{blob} isn't that blob"):
+        trust.change(trust.standing(trust.repository()))
+
+
+def test_the_diff_of_a_zone_shows_each_change_whatever_the_attributes_a_room_writes_say(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    (lup / ".gitattributes").write_text("* -diff\n")
+    (lup / ".git" / "info" / "attributes").write_text("* -diff\n")
+    path = "packages/lup-dev/src/environment/__init__.py"
+    changed(lup, {path: '"""Changed."""\n'}, shell)
+    trust = trusting(lup, kit, yes(whole=True))
+    trust.ensure()
+    [shown] = answering(trust).shown
+    assert '+"""Changed."""' in shown
+
+
+def test_the_diff_of_a_zone_is_what_git_says_of_its_commits(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    """A change, a new file, a deletion, a mode changed and a file moved, each as git's own diff says it."""
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    start = first.approval.commit
+    root = lup / "packages" / "lup-dev" / "src" / "environment"
+    (root / "__init__.py").write_text('"""Changed."""\n')
+    (root / "new.py").write_text('"""New."""\n')
+    (root / "run.sh").write_text("#!/bin/sh\n")
+    (root / "run.sh").chmod(0o755)
+    shell.commit(lup, "more of the zone")
+    middle = shell.git(lup, "rev-parse", "HEAD")
+    (root / "new.py").rename(root / "moved.py")
+    (root / "run.sh").chmod(0o644)
+    (root / "__init__.py").unlink()
+    (root / "__init__.py").write_text('"""Changed again."""\n')
+    shell.commit(lup, "yet more")
+    end = shell.git(lup, "rev-parse", "HEAD")
+    paths = [Path("packages/lup-dev")]
+    git = Git(cwd=lup)
+    own = ["git", "diff", "--no-ext-diff", "--no-textconv", "--color=always"]
+    counted = ["--stat=100000", "--stat-graph-width=40", "--compact-summary"]
+    spec = ["--", "packages/lup-dev"]
+    for before, after in [(start, middle), (middle, end), (start, end)]:
+        got = diffed(git, before, after, paths)
+        assert got.diff == run(*own, before, after, *spec, cwd=lup).output.decode()
+        assert (
+            got.stat
+            == run(*own, *counted, before, after, *spec, cwd=lup).output.decode()
+        )
 
 
 def test_an_approval_carries_each_file_changed_whole_a_binary_by_its_size(

@@ -182,7 +182,7 @@ from lup_dev.declaration.project import Project
 from lup_dev.declaration.resolve import Declaration
 from lup_dev.errors import LupDevError
 from lup_dev.gate import Passed, Standing
-from lup_dev.git import LISTED, Git, Tracked, nul_separated
+from lup_dev.git import LISTED, Git, GitError, Tracked, nul_separated
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Conversations
 from lup_dev.host.protocol import HostError, Register
@@ -1739,7 +1739,7 @@ class Lander(Model, arbitrary_types_allowed=True):
             whole = await asyncio.to_thread(
                 deferred, git, self.parser, root, landing.old, landing.tip
             )
-        except EngineError as unread:
+        except (EngineError, GitError) as unread:
             return [f"lup couldn't read the `# lup: defer` comments it lands: {unread}"]
         own = whole.beyond(list(each.values()))
         gated = f"`{short(landing.onto)}`"

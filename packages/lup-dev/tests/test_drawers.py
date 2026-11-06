@@ -495,6 +495,22 @@ def test_a_file_is_shown_from_where_the_branch_left_the_integration_branch_so_wh
     )
 
 
+def test_a_file_whose_blob_isn_t_what_its_id_says_is_refused_rather_than_shown_as_something_else(
+    bare: Path, shell: Shell, clock: FakeClock, tmp_path: Path
+) -> None:
+    delivery = alone(tmp_path, clock)
+    branch = Branch(bare, shell, delivery, clock)
+    reader = branch.reader(tmp_path)
+    (branch.dev / "rooms.py").write_text("rooms = 1\n")
+    shell.commit(branch.dev, "rooms")
+    shell.git(branch.feat, "merge", "-q", "--ff-only", "dev")
+    blob = shell.git(branch.feat, "rev-parse", "HEAD:rooms.py")
+    branch.wrote("rooms.py", "rooms = 2\n")
+    shell.planted(bare / "objects", blob, "blob", b"rooms = 2\n")
+    with pytest.raises(InboxError, match=f"{blob} isn't that blob"):
+        reader.read(ShowSince(conversation=branch.party))
+
+
 def test_a_branch_is_shown_from_where_it_left_the_integration_branch_even_once_the_running_one_holds_it(
     bare: Path,
     shell: Shell,

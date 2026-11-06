@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from lup.programs import run
 from lup_dev.git import Git, GitError
 from lup_dev.layout import Layout
 from lup_dev.policy.store import Store
@@ -70,6 +71,55 @@ def test_a_replace_ref_a_room_plants_changes_neither_the_listing_nor_the_export(
     assert (into / "lup_project.py").read_text() == approved
 
 
+def test_an_export_refuses_a_blob_that_isn_t_what_its_id_says(
+    repo: Path, tmp_path: Path, shell: Shell
+) -> None:
+    commit = committed(repo, {"lup_project.py": '"""As approved."""\n'}, shell)
+    blob = shell.git(repo, "rev-parse", f"{commit}:lup_project.py")
+    listed = Git(cwd=repo).text("ls-tree", "-r", commit)
+    shell.planted(repo / ".git" / "objects", blob, "blob", b'"""Another."""\n')
+    assert Git(cwd=repo).text("ls-tree", "-r", commit) == listed
+    into = tmp_path / "export"
+    with pytest.raises(GitError, match=f"{blob} isn't that blob"):
+        Git(cwd=repo).export(commit, into)
+    assert not (into / "lup_project.py").exists()
+
+
+@pytest.mark.parametrize("kind", ["commit", "tree"])
+def test_an_export_refuses_a_commit_or_a_tree_that_isn_t_what_its_id_says(
+    repo: Path, tmp_path: Path, shell: Shell, kind: str
+) -> None:
+    first = committed(repo, {"a.py": "1\n"}, shell)
+    commit = committed(repo, {"a.py": "2\n"}, shell)
+    named = (
+        commit
+        if kind == "commit"
+        else shell.git(repo, "rev-parse", f"{commit}^{{tree}}")
+    )
+    other = (
+        first if kind == "commit" else shell.git(repo, "rev-parse", f"{first}^{{tree}}")
+    )
+    content = run("git", "cat-file", kind, other, cwd=repo).output
+    shell.planted(repo / ".git" / "objects", named, kind, content)
+    with pytest.raises(GitError, match=named):
+        Git(cwd=repo).export(commit, tmp_path / "export")
+
+
+def test_what_a_commit_holds_is_listed_from_its_objects_as_git_lists_it(
+    repo: Path, shell: Shell
+) -> None:
+    names = {"a-b": "1\n", "a/b.py": "2\n", "a.py": "3\n", "a0": "4\n", "é.py": "5\n"}
+    commit = committed(repo, names, shell)
+    (repo / "run.sh").write_text("#!/bin/sh\n")
+    (repo / "run.sh").chmod(0o755)
+    (repo / "link").symlink_to("a.py")
+    shell.commit(repo)
+    commit = shell.git(repo, "rev-parse", "HEAD")
+    git = Git(cwd=repo)
+    assert git.held(commit) == git.tracked(commit)
+    assert git.held("HEAD") == git.tracked(commit)
+
+
 def test_the_judges_export_keeps_python_and_project_files_from_the_objects(
     repo: Path, tmp_path: Path, shell: Shell
 ) -> None:
@@ -134,6 +184,17 @@ def test_an_export_reads_in_batches(repo: Path, tmp_path: Path, shell: Shell) ->
     assert [(into / f"many/{n}.py").read_text() for n in range(7)] == [
         f"N = {n}\n" for n in range(7)
     ]
+
+
+def test_contents_refuses_a_blob_that_isn_t_what_its_id_says(
+    repo: Path, shell: Shell
+) -> None:
+    commit = committed(repo, {"a.py": "1\n"}, shell)
+    blob = shell.git(repo, "rev-parse", f"{commit}:a.py")
+    assert Git(cwd=repo).contents([blob]) == [b"1\n"]
+    shell.planted(repo / ".git" / "objects", blob, "blob", b"2\n")
+    with pytest.raises(GitError, match=f"{blob} isn't that blob"):
+        Git(cwd=repo).contents([blob])
 
 
 def test_a_missing_object_is_refused(repo: Path) -> None:

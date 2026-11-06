@@ -20,6 +20,7 @@ import os
 import sys
 import time
 import tokenize
+import zlib
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePath, PurePosixPath
@@ -694,6 +695,16 @@ def declared_branches() -> Callable[[Layout, Path, Branches], None]:
 
 class Shell:
     """git in a test's repositories."""
+
+    def planted(self, objects: Path, name: str, kind: str, content: bytes) -> None:
+        """Keep `content` in the object store at `objects` under the id `name`, which isn't its own, as a room can, a loose object being read before a pack's."""
+        kept = objects / name[:2] / name[2:]
+        kept.parent.mkdir(exist_ok=True)
+        if kept.exists():
+            kept.chmod(0o644)
+        kept.write_bytes(
+            zlib.compress(f"{kind} {len(content)}".encode() + b"\0" + content)
+        )
 
     def git(self, root: Path, *arguments: str) -> str:
         return git(root, *arguments)

@@ -2175,6 +2175,31 @@ def test_an_approved_commit_gone_from_the_repository_has_the_stand_in(
     )
 
 
+def test_an_approved_declaration_whose_blob_isn_t_what_its_id_says_has_the_stand_in_and_never_runs(
+    kit: Kit, repo: Path, linked: Path, shell: Shell, tmp_path: Path
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    declare(repo, PROTECTING_CORE)
+    shell.commit(repo, "dev: protect the core")
+    start(kit, repo)
+    assert held(kit, lambda: before(kit.bench, core_edit(linked), SESSION, repo))
+    declare(repo, f"{PROTECTING_CORE}# Approved.\n")
+    shell.commit(repo, "dev: the declaration approved next")
+    commit = shell.git(repo, "rev-parse", "HEAD")
+    blob = shell.git(repo, "rev-parse", f"{commit}:lup_project.py")
+    ran = tmp_path / "ran"
+    planted = f"from pathlib import Path\nPath({str(ran)!r}).touch()\n{PROTECTING_CORE}"
+    shell.planted(repo / ".git" / "objects", blob, "blob", planted.encode())
+    approve(kit, repo, commit)
+    assert held(kit, lambda: before(kit.bench, core_edit(linked), SESSION, repo))
+    call(kit, linked, "c1")
+    (linked / "README.md").write_text("# Changed\n")
+    told = finish(kit, linked, "c1").context
+    assert f"lup can't load the project's declaration at {commit}: " in told
+    assert f"{blob} isn't that blob" in told
+    assert not ran.exists()
+
+
 def test_an_approved_commit_gone_with_nothing_kept_fails(
     kit: Kit, repo: Path, shell: Shell
 ) -> None:

@@ -95,7 +95,7 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from importlib.machinery import SOURCE_SUFFIXES, FileFinder, SourceFileLoader
 from importlib.util import resolve_name
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, override
 
 import typer
@@ -133,7 +133,7 @@ from lup_dev.declaration.requirements import Machine, Tools, check
 from lup_dev.declaration.resolve import Declaration, resolve
 from lup_dev.errors import LupDevError
 from lup_dev.gate import invoked
-from lup_dev.git import Git
+from lup_dev.git import Git, Tracked
 from lup_dev.host.client import Detached, HostClient, Outstanding
 from lup_dev.host.protocol import Branches, HostError
 from lup_dev.inbox.protocol import (
@@ -1428,45 +1428,95 @@ def declared(tree: Path, covered: list[Path]) -> Named:
     )
 
 
+class Sides(Model):
+    """Each file differing between two commits, by its path, with its entry on each side that has one."""
+
+    before: dict[Path, Tracked]
+    after: dict[Path, Tracked]
+
+
+def sides(git: Git, start: str | None, end: str, paths: list[Path]) -> Sides:
+    """Return each file under `paths` differing from the commit `start` to the commit `end`, or each `end` holds where there's no `start`, read from each object's own bytes (`Git.own_changes`): raise `GitError` where one can't be read or isn't what its id says."""
+
+    def under(changes: dict[PurePosixPath, Tracked | None]) -> dict[Path, Tracked]:
+        return {
+            Path(path): entry
+            for path, entry in changes.items()
+            if entry is not None
+            and any(Path(path).is_relative_to(each) for each in paths)
+        }
+
+    return Sides(
+        before={} if start is None else under(git.own_changes(end, start)),
+        after=under(git.own_changes(start, end)),
+    )
+
+
 def diffed(
     git: Git,
-    start: str,
+    start: str | None,
     end: str,
     paths: list[Path],
     *,
     width: int = 100_000,
     graph: int = 40,
 ) -> Diffed:
-    """Return git's diff of `paths` from `start` to `end`, coloured, and its count of each file.
+    """Return git's diff of `paths` from the commit `start`, or from nothing where there's none, to the commit `end`, coloured, and its count of each file.
 
     git's own diff, with no external diff command or text conversion the
-    repository's configuration could name. The count is git's `--stat`: each
-    file on a line with its lines changed and a bar of those added and removed,
-    a file created or removed marked (`--compact-summary`), then the totals. It's
+    repository's configuration could name, made in a scratch store holding only
+    the files that differ, each hashed against its id (`sides`, `Git.contents`),
+    so nothing a room writes in the repository's store, its attributes among it,
+    has a say in what the operator reads. The count is git's `--stat`: each file
+    on a line with its lines changed and a bar of those added and removed, a
+    file created or removed marked (`--compact-summary`), then the totals. It's
     `width` columns wide at most, so git never shortens a path to fit, its bar
     `graph` columns at most. Text that isn't UTF-8 is shown with replacement
     characters.
     """
     if not paths:
         return Diffed()
-    spec = ["--", *(str(path) for path in paths)]
-    own = [
-        "--literal-pathspecs",
-        "diff",
-        "--no-ext-diff",
-        "--no-textconv",
-        "--color=always",
-    ]
-    counted = git.run(
-        *own,
-        f"--stat={width}",
-        f"--stat-graph-width={graph}",
-        "--compact-summary",
-        start,
-        end,
-        *spec,
+    found = sides(git, start, end, paths)
+    blobs = list(
+        dict.fromkeys(
+            each.object
+            for each in [*found.before.values(), *found.after.values()]
+            if each.kind == "blob"
+        )
     )
-    shown = git.run(*own, start, end, *spec)
+    with tempfile.TemporaryDirectory(prefix="lup-diff-") as scratch:
+        root = Path(scratch)
+        Git(cwd=root).run("init", "--quiet", "--bare", "--template=", str(root))
+        apart = Git.pinned(root)
+        apart.run(
+            "fast-import",
+            "--quiet",
+            stdin=b"".join(
+                b"blob\ndata %d\n%b\n" % (len(content), content)
+                for content in git.contents(blobs)
+            ),
+        )
+
+        def tree(entries: dict[Path, Tracked], name: str) -> str:
+            staging = apart.model_copy(update={"index": root / name})
+            listed = b"".join(
+                f"{each.mode} {each.object}\t".encode() + os.fsencode(each.path) + b"\0"
+                for each in entries.values()
+            )
+            staging.run("update-index", "-z", "--index-info", stdin=listed)
+            return staging.text("write-tree")
+
+        was, now = tree(found.before, "before"), tree(found.after, "after")
+        own = ["diff", "--no-ext-diff", "--no-textconv", "--color=always"]
+        counted = apart.run(
+            *own,
+            f"--stat={width}",
+            f"--stat-graph-width={graph}",
+            "--compact-summary",
+            was,
+            now,
+        )
+        shown = apart.run(*own, was, now)
     return Diffed(
         stat=counted.output.decode(errors="replace"),
         diff=shown.output.decode(errors="replace"),
@@ -1522,27 +1572,24 @@ def compared(
 
 
 def files_between(
-    git: Git, start: str, end: str, paths: list[Path]
+    git: Git, start: str | None, end: str, paths: list[Path]
 ) -> list[ChangedFile]:
-    """Return each file under `paths` whose content differs from `start` to `end`, whole on each side, by path.
+    """Return each file under `paths` whose content differs from the commit `start`, or from nothing where there's none, to the commit `end`, whole on each side, by path.
 
     A file created or deleted has none on the side it's missing from. A
     submodule is left out, as a commit's export leaves it: its files aren't the
-    commit's. The contents are read by one `git cat-file`.
+    commit's. The contents are read by one `git cat-file`, each hashed against
+    its id (`sides`, `Git.contents`).
     """
     if not paths:
         return []
+    found = sides(git, start, end, paths)
 
-    def listed(tree: str) -> dict[Path, str]:
-        return {
-            Path(each.path): each.object
-            for each in git.tracked(tree)
-            if each.kind == "blob"
-            and any(Path(each.path).is_relative_to(path) for path in paths)
-        }
+    def files(side: dict[Path, Tracked]) -> dict[Path, str]:
+        return {path: each.object for path, each in side.items() if each.kind == "blob"}
 
-    before = listed(start)
-    after = listed(end)
+    before = files(found.before)
+    after = files(found.after)
     either = dict.fromkeys([*before, *after])
     changed = sorted(path for path in either if before.get(path) != after.get(path))
     wanted = [
@@ -1718,16 +1765,20 @@ class Trust(Model, arbitrary_types_allowed=True):
     def tool(self, commit: str) -> Tool:
         """Read which `lup-dev` the host runs from the commit's `uv.lock`."""
         lock = CheckoutLayout(root=Path()).lock
-        found = Git(cwd=self.root).run(
-            "cat-file", "blob", f"{commit}:{lock}", ok=[0, 128]
-        )
-        if found.status != 0:
+        git = Git(cwd=self.root)
+        found = [
+            each.object
+            for each in git.held(commit)
+            if Path(each.path) == lock and each.kind == "blob"
+        ]
+        if not found:
             message = (
                 f"{commit} holds no `{lock}`, so which `{self.name}` the host runs "
                 "isn't pinned"
             )
             raise TrustError(message)
-        return Lock.parse(found.output.decode()).tool(self.name, self.beside)
+        [content] = git.contents(found)
+        return Lock.parse(content.decode()).tool(self.name, self.beside)
 
     def named(self, commit: str, covered: list[Path], local: str | None) -> Named:
         """Find the files the commit's declaration, and `local` on top of it, run on the host, and the conditions modules they name.
@@ -1750,20 +1801,20 @@ class Trust(Model, arbitrary_types_allowed=True):
         """Fingerprint the zone: git's listing of its files, the `lup-dev` it runs, the person's own layer and their profiles.
 
         The listing names each file's path, mode and object, so any change to one
-        of them, or a file joining or leaving the zone, changes it. The person's
+        of them, or a file joining or leaving the zone, changes it: as `git
+        ls-tree` writes it, each entry read from the objects' own bytes
+        (`Git.held`), so what's fingerprinted is what the commit names. The person's
         own layer and their profiles count by their content, where there's each,
         so a zone without one keeps the fingerprint it had before it existed.
         """
-        listed = Git(cwd=self.root).run(
-            "ls-tree",
-            "-r",
-            "-z",
-            "--full-tree",
-            zone.commit,
-            "--",
-            *(str(path) for path in zone.paths),
+        listed = b"".join(
+            f"{each.mode} {each.kind} {each.object}\t".encode()
+            + os.fsencode(each.path)
+            + b"\0"
+            for each in Git(cwd=self.root).held(zone.commit)
+            if any(Path(each.path).is_relative_to(path) for path in zone.paths)
         )
-        digest = hashlib.sha256(listed.output)
+        digest = hashlib.sha256(listed)
         digest.update(zone.tool.model_dump_json().encode())
         if zone.local is not None:
             name = CheckoutLayout(root=Path()).local_declaration.name
@@ -1790,8 +1841,6 @@ class Trust(Model, arbitrary_types_allowed=True):
         git = Git(cwd=self.root)
         zone = standing.zone
         approval = standing.approval
-        empty = git.run("hash-object", "-t", "tree", "--stdin", stdin=b"")
-        nothing = empty.output.decode().strip()
         tool = zone.tool.said(approval.tool if approval is not None else None)
         before = approval.local if approval is not None else None
         local = compared(before, zone.local)
@@ -1807,12 +1856,12 @@ class Trust(Model, arbitrary_types_allowed=True):
             == 0
         )
         if approval is None or not held:
-            files = [*files_between(git, nothing, zone.commit, zone.paths), *layer]
+            files = [*files_between(git, None, zone.commit, zone.paths), *layer]
             change = Change(
                 commit=zone.commit,
                 approved=approval.commit if approval is not None else None,
                 since=None,
-                changed=diffed(git, nothing, zone.commit, zone.paths),
+                changed=diffed(git, None, zone.commit, zone.paths),
                 joined=Diffed(),
                 local=local,
                 profiles=profiles,
@@ -1825,7 +1874,7 @@ class Trust(Model, arbitrary_types_allowed=True):
             joined = [path for path in zone.paths if path not in approval.paths]
             files = [
                 *files_between(git, approval.commit, zone.commit, kept),
-                *files_between(git, nothing, zone.commit, joined),
+                *files_between(git, None, zone.commit, joined),
                 *layer,
             ]
             change = Change(
@@ -1833,7 +1882,7 @@ class Trust(Model, arbitrary_types_allowed=True):
                 approved=approval.commit,
                 since=approval.commit,
                 changed=diffed(git, approval.commit, zone.commit, kept),
-                joined=diffed(git, nothing, zone.commit, joined),
+                joined=diffed(git, None, zone.commit, joined),
                 local=local,
                 profiles=profiles,
                 files=files,

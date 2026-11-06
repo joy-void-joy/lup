@@ -61,7 +61,7 @@ from lup_dev.declaration.load import load
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.resolve import Declaration, resolve
 from lup_dev.errors import LupDevError
-from lup_dev.git import Git
+from lup_dev.git import Git, GitError
 from lup_dev.host.protocol import Branches, Register
 from lup_dev.inbox import ends
 from lup_dev.inbox.store import ChangedFile
@@ -568,7 +568,7 @@ class Worktree(Model):
 
         try:
             found = read(commit)
-        except ProjectError as failure:
+        except (ProjectError, GitError) as failure:
             last = read_model(kept, LastDeclaration)
             if last is None:
                 raise
