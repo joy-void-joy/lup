@@ -333,6 +333,20 @@ def test_the_page_trades_its_token_for_the_cookie_it_calls_with(page: Path) -> N
     assert asked.status_code == 200
 
 
+def test_a_cookie_left_from_an_earlier_token_doesn_t_refuse_the_token_just_handed(
+    page: Path,
+) -> None:
+    host = StandIn({"list": [Listed(launches=[])]})
+    served = client(host, page)
+    served.cookies.set("lup-dashboard-8766", "from-the-demo-before-this-one")
+    refused = served.post("/api/ask", json=ListLaunches().model_dump())
+    traded = served.post("/api/session", headers=bearing())
+    asked = served.post("/api/ask", json=ListLaunches().model_dump())
+    assert refused.status_code == 401
+    assert traded.status_code == 204
+    assert asked.status_code == 200
+
+
 def test_a_host_name_other_than_its_own_is_refused(page: Path) -> None:
     host = StandIn({"list": [Listed(launches=[])]})
     app = application(host, Access(token=GIVEN, port=8766), page)
