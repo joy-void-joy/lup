@@ -850,15 +850,15 @@ async def after_push(
     refs = [each.destination for each in updates]
     await proposed_after(delivery, launch, refs)
     await coming.pushed(launch, updates)
-    integration = approved_branches(Layout.of(LupDevSettings()), launch.repository)
-    if trying is None or f"refs/heads/{integration.integration}" not in refs:
+    branches = approved_branches(Layout.of(LupDevSettings()), launch.repository)
+    if trying is None or branches.integration_ref not in refs:
         return
     try:
         moved = await trying.moved_dev(launch.repository)
     except (LupDevError, LupError) as failure:
         typer.echo(
-            f"{launch.launch}: the push moved {integration.integration}, but "
-            f"{integration.running} wasn't computed again: {failure}"
+            f"{launch.launch}: the push moved {branches.integration}, but "
+            f"{branches.running} wasn't computed again: {failure}"
         )
         return
     for line in moved:
@@ -884,7 +884,7 @@ async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) 
     """
     branches = approved_branches(Layout.of(LupDevSettings()), launch.repository)
     running = branches.running
-    if f"refs/heads/{running}" not in refs:
+    if branches.running_ref not in refs:
         return
     if (launch.repository / "commondir").exists():
         typer.echo(

@@ -124,9 +124,8 @@ class Trying(Model, arbitrary_types_allowed=True):
 
     def dev_tip(self, git: Git, branches: Branches, trial: Trial, remote: str) -> str:
         """Return the integration branch's tip on `remote`, in the store, so a pick needs no room; where it can't be reached, what's kept of it, a pick being what a network down mustn't stop. Raise `HostError` where neither says."""
-        ref = f"refs/heads/{branches.integration}"
         try:
-            found = Origin(git=git, remote=remote).tip(ref)
+            found = Origin(git=git, remote=remote).tip(branches.integration_ref)
         except LupDevError as unreached:
             if trial.dev is None:
                 message = f"`{remote}` can't say where `{branches.integration}` is: {unreached}"
@@ -164,11 +163,10 @@ class Trying(Model, arbitrary_types_allowed=True):
         Copies(layout=self.layout.judge(repository)).pin(pins(stands))
         if computed.commit is None:
             return []
-        left = move_ref(git, branches.running, commit)
+        left = move_ref(git, branches, commit)
         said = [] if left is None else [f"{left}."]
-        ref = f"refs/heads/{branches.running}"
         try:
-            Origin(git=git, remote=remote).pushed(commit, ref)
+            Origin(git=git, remote=remote).pushed(commit, branches.running_ref)
         except LupDevError as failed:
             said.append(f"`{branches.running}` isn't on `{remote}` yet: {failed}")
         return said

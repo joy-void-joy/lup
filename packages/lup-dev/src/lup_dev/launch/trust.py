@@ -1751,8 +1751,8 @@ class Trust(Model, arbitrary_types_allowed=True):
         branches = approved_branches(self.layout, repository)
         commit = (
             running_tip(self.layout, repository)
-            or git.commit(f"refs/heads/{branches.running}")
-            or git.commit(f"refs/heads/{branches.integration}")
+            or git.commit(branches.running_ref)
+            or git.commit(branches.integration_ref)
             or git.commit("HEAD")
         )
         if commit is None:

@@ -149,6 +149,24 @@ class Branches(Model):
     """What the host runs, what trust reads and what `land` lands on:
     `Versions.running`, else the integration branch."""
 
+    @property
+    def integration_ref(self) -> str:
+        """Return the integration branch by its ref's full name.
+
+        >>> Branches(integration="trunk").integration_ref
+        'refs/heads/trunk'
+        """
+        return f"refs/heads/{self.integration}"
+
+    @property
+    def running_ref(self) -> str:
+        """Return the running branch by its ref's full name.
+
+        >>> Branches(running="live").running_ref
+        'refs/heads/live'
+        """
+        return f"refs/heads/{self.running}"
+
 
 class Limits(Model):
     """What the host does with the operator's credentials for a launch without asking.
