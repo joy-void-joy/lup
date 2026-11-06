@@ -152,7 +152,7 @@ A `Module` subclass (`declaration/module.py`):
 Defining the class checks it, each failure naming the module and the field: a module with no `name` or docstring; a field with no default, since a module added with nothing set stands on its own defaults; a plain `list` or `dict`, which a layer would replace whole, so it takes a selection; a default starting from `Kind.default()`, which would start from itself. At load, every module a selected one `requires` must be selected too, with no cycle: lup never adds or drops a module behind the project's back.
 
 **What a module serves a launch** (`declaration/serving.py`). It runs on the host, in the repository's process of its approved copy, which serves each of its launches, the launch travelling with each request (`docs/host.md`, *Each repository's judge and modules*):
-- **its methods,** grouped in `ModuleServing` classes the module lists in its `serving` (`Serving.of(GitHubServing)`), each behind one of the library's doors (*The doors*, below), reading the module's own context through `self`: its settings (`self.module`, which the class narrows to its module's class), its data directory for the repository (`self.data`), the other repositories the declaration names (`self.related`), where each runtime keeps its records (`self.records`), and the publishing door (`self.publish`, below);
+- **its methods,** grouped in `ModuleServing` classes the module lists in its `serving` (`Serving.of(GitHubServing)`), each behind one of the library's doors (*The doors*, below), reading the module's own context through `self`: its settings (`self.module`, which the class narrows to its module's class), its data directory for the repository (`self.data`), the other repositories the declaration names (`self.related`), where each runtime keeps its records (`self.records`), the branches the declaration names (`self.branches`, *The branches*), and the publishing door (`self.publish`, below);
 - **data,** `Mounted`: the module's own data directory for the repository, mounted at its host path in every room (`always=True`), or only where a launch lends it by name (`--mount transcripts`), read-only unless the module says. A guidance section names where with `{{ data(…) }}` and asks whether with `{% if mounted(…) %}`.
 
 ```python
@@ -246,18 +246,38 @@ A module's commands come under its name on the command line, `lup-dev transcript
 - **Each is built with typer from its method's model:** a field with no default is an argument, one with a default an option named for its alias, else its name (`Field(default=False, alias="all")` is `--all`), a `bool` a flag, a `list` repeated; each field's description is its help, and the method's docstring the command's. Who runs it is found only as it runs, so `--help` asks nothing, and lists what they couldn't run.
 - **It runs in the terminal's own process,** never in the repository's: typer prints help and errors to its process's standard output, which the repository's process shares among every session it serves. On the host, the installed `lup-dev` hands a module's command over to the repository's approved copy, becoming it (`exec`), so only code the operator approved runs a project's module there, as the operator (`Operator`); the copy knows it's the one to run it by its own path. Before any approval, the host runs no module's command. In a room, the room's own `lup-dev` runs it from the worktree's declaration, which the room contains, as the room (`Room`), its launch as the host recorded it (`room-launch`). A command in a room is room code: what needs the host, the operator's credentials or the inbox, it asks the host for, as any room code does. The hand-over costs a second start of Python on the host, about 0.9 s (#298 watches it).
 
+## The branches
+
+Two settings name the branches a project's work moves between:
+
+| Setting | By default | What it says |
+|---|---|---|
+| `Core.integration` | `dev` | What branches start from, where accepting one merges it, and what a pull request targets |
+| `Versions.running` | the integration branch | What the host runs, what trust reads, and what `land` lands on |
+
+```python
+project = Project(modules=Modules.default().add(Versions(running="live")))
+```
+
+- **A name is a branch's short name,** `live` and never `refs/heads/live`: one that's empty, reads as one of git's options or holds what no ref holds fails the load.
+- **Read from the declaration approved.** A commit changing either takes effect once the operator approves it, and `dev` is read before the first approval, since trust can't run a declaration to learn which commit to ask about (`docs/trust.md`, *Which branch*). What reads each is listed there.
+- **A branch a project names is gated:** it joins `Credentials.gated` as the declaration is resolved, since `land` lands only on a gated branch, and `delete-merged` deletes none (`docs/credentials.md`, *What the declaration allows*). So a project says it once. Only a branch some layer named joins, so a project that dropped `refs/heads/dev` from its gated refs keeps it dropped, and one that names another integration branch drops `dev`'s the same way where it no longer wants it gated.
+- **Naming a branch doesn't make it.** Until the repository holds the running branch, trust reads the integration branch's tip, and `land` refuses until the repository or its remote does.
+
 ## lup's modules
 
 `Modules.default()`, in order (`declaration/modules/shipped.py`):
 
 | Module | What it holds |
 |---|---|
-| `Core` | every protected path but the Python tools', the files that hold secrets (`.env*`, keys and key stores, credentials in JSON, logins kept in a file, Terraform's variables and state: `CorePaths.secret`), the operator's documents, TypeScript's tests (`*.test.ts`, `*.test.tsx`), scratch, docs and data; the standard machine; the package age, three days; lup's session defaults; the credentials' limits; the review's verbs, the shell's, the judge's and the runtime adapters'; guidance `core` |
+| `Core` | every protected path but the Python tools', the files that hold secrets (`.env*`, keys and key stores, credentials in JSON, logins kept in a file, Terraform's variables and state: `CorePaths.secret`), the operator's documents, TypeScript's tests (`*.test.ts`, `*.test.tsx`), scratch, docs and data; the standard machine; the package age, three days; lup's session defaults; the credentials' limits; the integration branch (*The branches*); the review's verbs, the shell's, the judge's and the runtime adapters'; guidance `core` |
 | `Python` | the Python tools' files (protected), source trees, Python files and `conftest.py`; the runner, `Uv()`; the test roots, `tests/`; the gate's `rules`, `format`, `pytest` and `lint-imports`; guidance `python` |
 | `CodeRules` | every rule but those `catalog/rules.py` leaves out, each with its reason (`runtime-mention` alone today); no exemptions; guidance `code-rules`. Requires Node `>=22.18` for the engine |
 | `GitHub` | the GitHub tools; the answer to a room's gate asking an issue's state |
 | `Transcripts` | copying the session records of each runtime's homes, the project's and each related repository's, when a launch opens and stops and before a room reads them; its data, mounted in every room; its commands reading them; each agent's conversation, live, as a view; guidance `transcripts` (`packages/lup-transcripts/README.md`) |
 | `Private` | what lup reads on the host never published, an inbox item's number in a commit's message or a post, and the person's own values; refusing at `publishing`; the gate's `private` step; guidance `private` (`docs/private.md`) |
+
+**`Versions`** is the one optional module lup ships, which `Modules.all()` selects and `.add(Versions(…))` brings in: the running branch (*The branches*).
 
 - **`Core` is every project's,** the part of the core a project can change. `Python` and `CodeRules` stay apart from it so each is one line to drop: dropping `CodeRules` turns off all of lup's code rules.
 - **`Core`, `Python` and `CodeRules` are data,** read from the catalog (`catalog/`), made of the same entry types a project writes; their guidance sections are files `lup_dev` ships. `GitHub` and `Private` live beside their machinery; `Transcripts` is a distribution of its own, `packages/lup-transcripts/`, its environment side in a subpackage its library side never imports (`packages/lup-transcripts/README.md`, *Layout*).
@@ -266,11 +286,13 @@ A module's commands come under its name on the command line, `lup-dev transcript
 
 ## What reads it
 
-**Resolving it** (`resolve`, `declaration/resolve.py`) applies every layer, then reads each kind from the modules holding it: the modules with their origins, each role's patterns, the gate's steps in order, each module's rule selection, the exemptions, test roots and conditions, the runner and every requirement, the packages, session settings, credentials, guidance, related repositories, what's held and flagged, and what's served. The runner, the session settings and the credentials each come from one module; a second holder fails the load, naming both, since a project runs one way.
+**Resolving it** (`resolve`, `declaration/resolve.py`) applies every layer, then reads each kind from the modules holding it: the modules with their origins, each role's patterns, the gate's steps in order, each module's rule selection, the exemptions, test roots and conditions, the runner and every requirement, the packages, session settings, credentials, the branches, guidance, related repositories, what's held and flagged, and what's served. The runner, the session settings and the credentials each come from one module; a second holder fails the load, naming both, since a project runs one way.
 
 **What judging reads** is kept apart as plain values (`Declaration`): the declaration's file, the roles, the test roots, the exemptions, the conditions, the rule selections, the runner as the commands it puts before a tool, and what's held and flagged. Plain values, since a module or a runner may be a class of the project's own, which JSON can't bring back, and the judge keeps the last declaration that loaded to stand in for one that can't (`docs/judging-writes.md`, *A declaration that can't load has a stand-in*).
 
 **What a launch reads,** at the approved commit (`approved_declaration`, `launch/session.py`): the packages, and whether the image carries pyright's source, at the release the launch's worktree's `uv.lock` pins; the package age (`docs/launch.md`, *The package age gate*); the session settings, with which fields some layer set, so those are imposed over the person's own runtime settings and the rest are lup's defaults theirs outrank; the credentials' limits, sent with the registration (`docs/credentials.md`, *What the declaration allows*); the guidance sections (`docs/launch.md`, *Guidance*); the profile the person's layer chooses (*Profiles*); the related repositories; the `secret` role's patterns, the files it hides from the room (`docs/launch.md`, *Files with a secret's name*); the runner's `room()`; and what each module serves.
+
+**What an approval keeps** of it: the branches, plain names, read as the operator says yes (`docs/trust.md`, *Which branch*).
 
 **Selecting the rules.** `CodeRules.rules` is a `Rules` selection, by default `Rules.all()` with a `.drop(…, why=…)` for each rule lup's default leaves out, so a rule a later release adds runs unless it's left out too. Python only composes and records a selection: each check request carries every module's, and the engine, which holds the table, resolves them and runs their union, refusing an id it doesn't have. Exemptions and `# lup: ignore` apply afterwards, in Python. `lup-dev rules list` lists what the worktree's declaration runs, resolved the same way, and a launch lists the approved one's in the guidance. A project's own rule tables are #175.
 

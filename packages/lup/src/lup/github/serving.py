@@ -13,9 +13,8 @@ the project's declaration sets (`Register.limits`): a tool's action
 beyond the limits is refused, saying the declaration doesn't allow it and that
 allowing it is the operator's call. What a tool that writes would post is put to
 every module's hooks at `Publishing` first (`ModuleServing.publish`), and
-refused there, it isn't posted. There's no merge tool: work lands on the
-integration branch through git, and what reaches `main` is the operator's to
-merge.
+refused there, it isn't posted. There's no merge tool: work lands through git
+and `land`, and what reaches `main` is the operator's to merge.
 
 Closing an issue posts its comment first, then closes it, so a close that fails
 leaves the comment said rather than an issue closed without its reason; the
