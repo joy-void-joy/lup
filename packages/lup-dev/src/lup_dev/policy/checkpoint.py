@@ -1855,6 +1855,10 @@ def orphans(bench: Bench, worktree: Worktree, session: Session) -> None:
     back and saved as a call's would be, and stays open. Each is logged, and
     what's left to tell of it is told at its session's next checkpoint
     (`late_answers`).
+
+    A hold the state still notes is settled however it's marked: a process
+    ending between marking one settled and noting it leaves its file held, and
+    each step of settling one does nothing more done twice.
     """
     store = worktree.store
     holds = worktree.holds()
@@ -1863,7 +1867,7 @@ def orphans(bench: Bench, worktree: Worktree, session: Session) -> None:
 
     def due(key: str) -> Hold | None:
         hold = holds.get(key)
-        if hold is None or not hold.waited() or holds.waited_on(key):
+        if hold is None or holds.waited_on(key):
             return None
         if hold.answer is None and now < hold.created + holds.patience:
             return None

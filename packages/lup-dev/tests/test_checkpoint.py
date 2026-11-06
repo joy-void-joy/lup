@@ -1424,6 +1424,82 @@ def test_an_approval_of_a_hold_whose_call_died_reaches_the_session_at_its_next_c
     assert finish(kit, repo, "p3").context == ""
 
 
+class StoppedError(Exception):
+    """The repository's process ending at a point a test chose."""
+
+
+def stops_as_it_notes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """End the process the next time a store's state is written, once."""
+    real = Store.remember
+
+    def stopping(_: Store, _state: object) -> None:
+        monkeypatch.setattr(Store, "remember", real)
+        raise StoppedError
+
+    monkeypatch.setattr(Store, "remember", stopping)
+
+
+@pytest.mark.parametrize("answered", ["approved", "declined", "unanswered"])
+def test_a_stop_between_settling_a_hold_and_noting_it_leaves_no_file_held_for_good(
+    holding_kit: Kit,
+    repo: Path,
+    dying: Dying,
+    monkeypatch: pytest.MonkeyPatch,
+    answered: str,
+) -> None:
+    """The next checkpoint settles it again, so a later write to the file is judged."""
+    kit = holding_kit
+    new = held_file(kit, repo)
+    key = orphaned(kit, repo, "p1", dying)
+    if answered == "unanswered":
+        kit.clock.sleep(timedelta(hours=25).total_seconds())
+    else:
+        answering = Response(approved=answered == "approved")
+        answer(kit.layout, key, answering, [], kit.clock)
+    call(kit, repo, "p2")
+    stops_as_it_notes(monkeypatch)
+    with pytest.raises(StoppedError):
+        finish(kit, repo, "p2")
+    store = worktree(kit, repo).store
+    assert [each.hold for each in store.state().holding] == [key]
+    call(kit, repo, "p3")
+    finish(kit, repo, "p3")
+    assert store.state().holding == []
+    settled = Holds(layout=kit.layout.store(repo)).get(key)
+    assert settled is not None
+    assert not settled.waited()
+    call(kit, repo, "p4")
+    new.write_text('"""Rewritten."""\n')
+    kit.announced.answering = Response(approved=True)
+    finish(kit, repo, "p4")
+    rewritten = b'"""Rewritten."""\n'
+    assert store.content(store.accepted(), Path("src/pkg/new.py")) == rewritten
+    # An approval covers a new file's asks for the session; what it left asks again.
+    assert len(kit.announced.holds) == (1 if answered == "approved" else 2)
+
+
+def test_a_stop_as_an_approved_hold_is_noted_keeps_the_change_with_nothing_asked_again(
+    holding_kit: Kit, repo: Path, dying: Dying, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    kit = holding_kit
+    held_file(kit, repo)
+    key = orphaned(kit, repo, "p1", dying)
+    answer(kit.layout, key, Response(approved=True), [], kit.clock)
+    call(kit, repo, "p2")
+    stops_as_it_notes(monkeypatch)
+    with pytest.raises(StoppedError):
+        finish(kit, repo, "p2")
+    call(kit, repo, "p3")
+    told = finish(kit, repo, "p3").context
+    assert "It's in place." in told
+    store = worktree(kit, repo).store
+    assert store.content(store.accepted(), Path("src/pkg/new.py")) == b'"""New."""\n'
+    assert len(kit.announced.holds) == 1
+    assert [
+        each.answer for each in log(kit, repo).read() if each.outcome == "hold"
+    ] == ["approved"]
+
+
 def test_a_decline_of_a_hold_whose_call_died_puts_it_back_at_any_sessions_checkpoint(
     holding_kit: Kit, repo: Path, dying: Dying
 ) -> None:
