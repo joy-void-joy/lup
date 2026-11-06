@@ -496,8 +496,9 @@ class Worktree(Model):
         common = Git(cwd=root).text(
             "rev-parse", "--path-format=absolute", "--git-common-dir"
         )
-        store = Store(layout=layout.store(root), worktree=root)
-        return cls(root=root, repository=Path(common), store=store)
+        repository = Path(common)
+        store = Store(layout=layout.store(root), worktree=root, within=repository)
+        return cls(root=root, repository=repository, store=store)
 
     @classmethod
     def of(cls, root: Path, repository: Path, services: Services) -> Worktree:
@@ -507,7 +508,9 @@ class Worktree(Model):
         before any approval at `dev`'s tip, never by its own, so a branch can't
         change what judges it (#21).
         """
-        store = Store(layout=services.layout.store(root), worktree=root)
+        store = Store(
+            layout=services.layout.store(root), worktree=root, within=repository
+        )
         judging = Judging(layout=services.layout)
         return cls(root=root, repository=repository, store=store, judging=judging)
 
@@ -522,7 +525,10 @@ class Worktree(Model):
         """
         root = Git.pinned(repository).main_worktree()
         store = Store(
-            layout=services.layout.store(root), worktree=root, common=repository
+            layout=services.layout.store(root),
+            worktree=root,
+            common=repository,
+            within=repository,
         )
         judging = Judging(layout=services.layout)
         return cls(root=root, repository=repository, store=store, judging=judging)
@@ -1762,12 +1768,10 @@ def late_answers(
     holds = worktree.holds()
 
     def in_place(held: HeldFile) -> bool:
-        there = worktree.root / held.path
+        current = Confined(root=worktree.root).read(held.path)
         if not held.blob:
-            return not there.is_file()
-        return there.is_file() and there.read_bytes() == worktree.store.object(
-            held.blob
-        )
+            return current is None
+        return current is not None and current == worktree.store.object(held.blob)
 
     def still_committed(hold: Hold) -> str:
         """Say that `HEAD` holds a version of `hold` the operator refused, where it does: the file was put back, the commit wasn't."""
@@ -1995,16 +1999,13 @@ def approve(
 ) -> bool:
     """Keep one file of an approved hold no call waits on any more, making a file tool's write that never landed where the file is still as it was accepted; say whether the content approved is on disk, a deletion approved being on disk where the file is gone."""
     store = worktree.store
-    there = worktree.root / held.path
-    current = there.read_bytes() if there.is_file() else None
+    current = Confined(root=worktree.root).read(held.path)
     if not held.blob:
         return current is None
     content = store.object(held.blob)
     left = store.content(accepted, held.path) if accepted else None
     if hold.proposed and content is not None and current == left:
-        there.parent.mkdir(parents=True, exist_ok=True)
-        there.write_bytes(content)
-        return True
+        return store.confined().written(held.path, content)
     return content is not None and current == content
 
 

@@ -1,7 +1,7 @@
 """The items of lup's inbox one conversation exchanged, as a module's view reads them: the core keeps them, and a view weaves them in.
 
-A conversation's view (`Transcripts`' drawer) shows each item the conversation
-sent or was sent where it happened. The items are the inbox's, which the host
+A conversation's view (`Transcripts`' trace, and its messages) shows each item
+the conversation sent or was sent where it happened. The items are the inbox's, which the host
 service holds, and no module owns: the core never imports a module, so a view
 asks the core for them (`Exchanges`), and the core answers from the host
 service, as `inbox-list-items` does (`HostExchanges`, in the repository's

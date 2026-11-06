@@ -1477,7 +1477,7 @@ describe("the drawers under each agent's banner", () => {
         expect(texts[0]).toEqual(["tasks 1/3", "✓ Write the sampler", "▶ Writing the models", "· Measure"]);
         expect(texts[1]?.slice(0, 2)).toEqual(["since you approved · 1 to review · 1 flagged · 0 of 1 reviewed", "reader.py · created · 8 lines · new file"]);
         expect(texts[2]).toEqual([
-            "conversation · 7 steps · 2 new",
+            "trace · 7 steps · 2 new",
             "you: Build the reader.",
             "Reading the records.",
             "Reading the records.",
@@ -1507,7 +1507,7 @@ describe("the drawers under each agent's banner", () => {
             ["earlier", "you: Build the reader.", true],
             ["items", "Twenty kinds of line.", false],
             ["earlier", "you: Ask me first.", false],
-            ["conversation", "conversation · 7 steps · 2 new", true],
+            ["conversation", "trace · 7 steps · 2 new", true],
         ]);
         expect(foldKey(talked.folds[1]!)).toBe(`conversation ${whose(S1)} earlier exchange 0`);
         expect([...talked.loads.values()].map((each) => [each.module, each.view, (each.argument as { step: number }).step])).toEqual([["transcripts", "exchange", 0]]);
@@ -1533,7 +1533,7 @@ describe("the drawers under each agent's banner", () => {
         expect(foldKey(since.folds[1]!)).toBe(`since ${whose(S1)} body reader.py ["Reader","turns"]`);
         // The drawers under the banner, before the items, the group after them where it is.
         expect(at("tasks 1/3")).toBeLessThan(at("── #51"));
-        expect(at("conversation · 7 steps")).toBeLessThan(at("━━ s2"));
+        expect(at("trace · 7 steps")).toBeLessThan(at("━━ s2"));
         // An agent the host hasn't answered of has no drawers; nor is a drawer with nothing under its summary line shown,
         // which would say only that it's empty.
         expect(laid([QUESTION], [S1], banner, header, EMPTY, NOTHING).drawers).toEqual([]);
@@ -1594,7 +1594,7 @@ describe("the drawers under each agent's banner", () => {
         expect(text.split("Which twenty?").length).toBe(2);
         expect(text).toContain("Twenty kinds of line.\nWhich twenty?\n\nFour carry what was said.\n· Grep");
         expect(text).toContain("Reading the records.\nGood.\n");
-        expect(text.indexOf("Good.")).toBeGreaterThan(text.indexOf("conversation · 7 steps"));
+        expect(text.indexOf("Good.")).toBeGreaterThan(text.indexOf("trace · 7 steps"));
         // Opened on a line of the earlier exchange, it's there, under that line, and the header says it's in that exchange.
         expect(blockAt(wrote, text.indexOf("Good."))?.comment).toBe("good");
         expect(heading(wrote, text.indexOf("Good."), true, written(draft), { group: () => "g", item: () => "i", party: () => "p" }).map((each) => each.kind)).toEqual([
@@ -1683,14 +1683,14 @@ describe("the drawers under each agent's banner", () => {
         const on = opened(out, words("Reading the records.")) as Remark;
         const draft: Draft = { ...EMPTY, remarks: [{ ...on, id: "read", text: "Which records?" }] };
         const unread = laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], drawers, undefined, { remote: DRAWER_ONLY });
-        expect(unread.text).toContain("conversation · 7 steps · 2 new\nWhich records?\nyou: Build the reader.\nreading…\n");
+        expect(unread.text).toContain("trace · 7 steps · 2 new\nWhich records?\nyou: Build the reader.\nreading…\n");
         const read = laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], drawers, undefined, { remote, previous: unread });
         expect(read.text).toContain("you: Build the reader.\nReading the records.\nReading the records.\nWhich records?\n· Bash");
         expect(read.seated.get("read")?.outdated).toBe(false);
         // One drafted before quotes named their block waits there unconverted until its step is laid out.
         const old: Remark = { id: "old", to: S1, quote: keptQuote("Reading the records.", 0, 20), text: "Which records?", step: 1 };
         const waiting = laid([QUESTION, NOTE], [S1], banner, header, { ...EMPTY, remarks: [old] }, NOTHING, [], drawers, undefined, { remote: DRAWER_ONLY });
-        expect(waiting.text).toContain("conversation · 7 steps · 2 new\nWhich records?\n");
+        expect(waiting.text).toContain("trace · 7 steps · 2 new\nWhich records?\n");
         expect(waiting.converted).toBeNull();
         const placed = laid([QUESTION, NOTE], [S1], banner, header, { ...EMPTY, remarks: [old] }, NOTHING, [], drawers, undefined, { remote });
         expect(placed.converted?.map((each) => ("quote" in each ? [each.quote?.block.endsWith(" step 1"), each.quote?.line] : "letter"))).toEqual([[true, 0]]);
@@ -1855,7 +1855,7 @@ describe("the drawers under each agent's banner", () => {
         // A task list offers nothing of its own: done reaches the agent, its news and drawers. A conversation offers
         // marking it read, up to its last step, which done in it does.
         expect(reaches(out, at("✓ Write"), "done")).toBe("s1: mark their drawers done, 1 left to answer");
-        expect(reaches(out, at("Twenty"), "done")).toBe("conversation · 7 steps · 2 new: mark it read");
+        expect(reaches(out, at("Twenty"), "done")).toBe("trace · 7 steps · 2 new: mark it read");
     });
 
     it("says in each summary line what the drawer holds: in since you approved, the files changed and those standing as reviewed", () => {

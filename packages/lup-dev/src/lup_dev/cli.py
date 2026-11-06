@@ -66,7 +66,7 @@ from lup_dev.codescan.ruff import Ruff
 from lup_dev.commanding import RoomExchanges, RoomMarks
 from lup_dev.confined import Confined
 from lup_dev.conversions import inbox_opened
-from lup_dev.copies import removable
+from lup_dev.copies import Kept, removable
 from lup_dev.declaration.load import declared_profiles, load, person_layer
 from lup_dev.declaration.profiles import chosen
 from lup_dev.declaration.project import Project
@@ -91,7 +91,7 @@ from lup_dev.gate import (
 )
 from lup_dev.gate import Ran as GateRan
 from lup_dev.git import Git, nul_separated
-from lup_dev.host.client import Detached, FromRoom, HostClient, RoomClient
+from lup_dev.host.client import FromRoom, HostClient, RoomClient
 from lup_dev.host.copying import Copying
 from lup_dev.host.courier import (
     Courier,
@@ -139,7 +139,7 @@ from lup_dev.inbox.delivery import (
     standing,
 )
 from lup_dev.inbox.marks import routes as marks_routes
-from lup_dev.inbox.notices import NotifySend
+from lup_dev.inbox.notices import NotifySend, Unsaid
 from lup_dev.inbox.protocol import (
     AnswerApproval,
     AnswerCheck,
@@ -286,9 +286,22 @@ from lup_dev.private.withheld import Facts, HostFacts, Withheld, kept
 from lup_dev.remote.config import Gating
 from lup_dev.remote.protocol import Remotes, Update
 from lup_dev.remote.protocol import routes as remote_routes
+from lup_dev.restoring import RestoreError, Restoring
 from lup_dev.settings import LupDevSettings, TerminalVariables
 from lup_dev.staging import Changed, Lines, StagingError
 from lup_dev.stored import read_model, write_model
+from lup_dev.switching import (
+    CopiesAnswering,
+    CopySwitch,
+    LastSwitch,
+    Programs,
+    Serving,
+    Switch,
+    Switched,
+    Switching,
+    host_starter,
+    restore_detached,
+)
 from lup_dev.worker import RepositoryModules, worked
 from lup_ledger.parties import Conversation as InboxConversation
 from lup_ledger.parties import Party
@@ -518,9 +531,10 @@ def hook(
 
 
 def host_client() -> HostClient:
-    """Return the host service's client, as this machine places the service."""
+    """Return the host service's client, as this machine places the service, the copy approved being what it starts."""
+    layout = Layout.of(LupDevSettings())
     return HostClient(
-        layout=Layout.of(LupDevSettings()).host, clock=SystemClock(), starter=Detached()
+        layout=layout.host, clock=SystemClock(), starter=host_starter(layout)
     )
 
 
@@ -569,6 +583,8 @@ def control_routes(
         *threaded_routes(delivery),
         *timings_routes(TimingsStore(home=layout.host.timings), delivery.clock),
         *([] if views is None else [Route.reading(views, watch=views.watched)]),
+        Route.to(CopiesAnswering(layout=layout)),
+        Route.to(CopySwitch(layout=layout, start=restore_detached(layout))),
     ]
 
 
@@ -581,6 +597,10 @@ def host_serve(context: typer.Context) -> None:
     and ends each launch whose launcher and container are both gone
     (`Sweeping`). `lup-dev host stop` or Ctrl-C stops it; the launches it serves
     stay recorded, and the next service serves them.
+
+    Tried on a state of its own (`LupDevSettings.lup_host_rehearsing`), it raises
+    no notice, wakes no thread parked in the ledger it copied, and reads no
+    approval's types, so nothing it does reaches past that state.
     """
     if context.invoked_subcommand is not None:
         return
@@ -588,6 +608,7 @@ def host_serve(context: typer.Context) -> None:
     couriers = Couriers(adapters=known)
     wakers = Wakers(adapters=known)
     settings = LupDevSettings()
+    rehearsing = settings.lup_host_rehearsing
     layout = Layout.of(settings)
     changes = Changes()
     pushes = Pushes()
@@ -597,7 +618,7 @@ def host_serve(context: typer.Context) -> None:
         waker=wakers,
         pushes=pushes,
         layout=layout.host,
-        notices=NotifySend(),
+        notices=Unsaid() if rehearsing else NotifySend(),
         clock=SystemClock(),
         say=typer.echo,
         settle_hold=lambda change, approved, said: hold_answered(
@@ -627,7 +648,7 @@ def host_serve(context: typer.Context) -> None:
         podman=podman,
         say=typer.echo,
         running=workers.commands,
-        coming=coming,
+        coming=None if rehearsing else coming,
     )
     remotes = host_remotes(delivery, layout, coming, workers, EngineParser())
     waits = Waits(changes=changes)
@@ -674,7 +695,11 @@ def host_serve(context: typer.Context) -> None:
         changes=changes,
         waker=wakers,
         pushes=pushes,
-        companions=[types, sweeping, *([] if dashboard is None else [dashboard])],
+        companions=[
+            *([] if rehearsing else [types]),
+            sweeping,
+            *([] if dashboard is None else [dashboard]),
+        ],
     )
     asyncio.run(service.serve())
 
@@ -2462,7 +2487,7 @@ def launching(say: Callable[[str], None]) -> Launcher:
     return Launcher(
         layout=layout,
         trust=trust,
-        host=HostClient(layout=layout.host, clock=clock, starter=Detached()),
+        host=HostClient(layout=layout.host, clock=clock, starter=host_starter(layout)),
         podman=Podman(),
         tools=Machine(),
         clock=clock,
@@ -3307,7 +3332,110 @@ def trust() -> None:
     approved before keeps running. Where nothing changed, it says so and stops.
     """
     inside = [runtime.name() for runtime in runtimes() if runtime.inside()]
-    typer.echo(trusted(toplevel(Path.cwd()), inside).report())
+    trust = machine_trust(toplevel(Path.cwd()), inside)
+    typer.echo(trust.ensure().report())
+    kept = trust.kept_first()
+    if kept is not None:
+        typer.echo(kept)
+
+
+@app.command("restore")
+def restore(
+    commit: Annotated[
+        str | None,
+        typer.Argument(
+            help="The commit of the copy to go back to, or its start; left out, the copies are listed and nothing changes."
+        ),
+    ] = None,
+    *,
+    ledger: Annotated[
+        bool,
+        typer.Option(
+            help="Put the ledger back as that copy left it too, losing what happened since, which it says and asks about first."
+        ),
+    ] = False,
+    attempt: Annotated[
+        bool,
+        typer.Option(
+            "--try",
+            help="Run that copy on a copy of your state, beside the service you have, and say whether it answers, moving nothing.",
+        ),
+    ] = False,
+) -> None:
+    """Go back to a copy of `lup-dev` kept, or list them, with or without a host service or a dashboard.
+
+    The last resort, in your own terminal. Your `lup-dev` hands this command to
+    the copy that answered before the one running, so it works whatever is wrong
+    with that one. It stops the host service if one runs, snapshots the ledger,
+    moves the host service, the judge and your `lup-dev` to the copy, with what
+    was approved with it, starts the service, and checks that it and the
+    dashboard answer, putting back what it moved where they don't. A later launch
+    asks about the running branch's tip again.
+
+    A commit you approved whose copy is gone is built again from the commit. The
+    ledger is left as it is unless you ask, or the copy can't read it as it stands.
+    """
+    inside = [runtime.name() for runtime in runtimes() if runtime.inside()]
+    if inside:
+        message = (
+            f"this runs inside a {inside[0]} session, and which `lup-dev` runs is "
+            "the operator's: run it in your own terminal"
+        )
+        raise RestoreError(message)
+    layout = Layout.of(LupDevSettings())
+    clock = SystemClock()
+    host = HostClient(
+        layout=layout.host,
+        clock=clock,
+        starter=host_starter(layout),
+        timeout=timedelta(seconds=10),
+    )
+
+    def built_again(kept: Kept, then: Callable[[Kept], Switch]) -> Switch:
+        root = Git.pinned(kept.repository).main_worktree()
+        trust = machine_trust(root, [])
+        with trust.built(kept.approval, layout.judge(kept.repository)) as built:
+            return then(built)
+
+    restoring = Restoring(
+        layout=layout,
+        host=host,
+        switcher=Switching(
+            layout=layout,
+            host=host,
+            answers=Serving(clock=clock),
+            processes=Programs(),
+            clock=clock,
+        ),
+        confirm=typer.confirm,
+        built_again=built_again,
+        say=typer.echo,
+    )
+    if commit is None:
+        typer.echo(restoring.listing())
+        return
+    if attempt:
+        why = restoring.tried(commit)
+        if why is not None:
+            typer.echo(f"It doesn't answer, and nothing moved. Why: {why}")
+            raise typer.Exit(1)
+        typer.echo("It answers, on a copy of your state, and nothing moved.")
+        return
+    try:
+        switch = restoring.restored(commit, ledger=ledger)
+    except (RestoreError, HostError) as refused:
+        # A page started this, and is waiting to hear: a terminal has been told.
+        if not sys.stdin.isatty():
+            write_model(
+                layout.host.switched,
+                LastSwitch(
+                    commit=commit, at=clock.now(), said=str(refused), answered=False
+                ),
+            )
+        raise
+    typer.echo(switch.report())
+    if not isinstance(switch, Switched):
+        raise typer.Exit(1)
 
 
 @app.command("verdicts")

@@ -297,3 +297,22 @@ def test_git_reads_a_commit_s_parents_from_the_commit_whatever_a_graft_says(
     git = Git.pinned(bare)
     assert git.text("merge-base", tip, side) == base
     assert git.text("log", "-1", "--format=%P", tip) != side
+
+
+def test_a_commits_subject_is_read_from_its_own_bytes(repo: Path, shell: Shell) -> None:
+    (repo / "a.txt").write_text("a\n")
+    shell.git(repo, "add", "a.txt")
+    shell.git(repo, "commit", "-q", "-m", "the subject\n\nthe body")
+    head = shell.git(repo, "rev-parse", "HEAD")
+    assert Git(cwd=repo).subject(head) == "the subject"
+
+
+def test_a_commits_subject_refuses_what_isnt_that_commit(
+    repo: Path, shell: Shell
+) -> None:
+    (repo / "a.txt").write_text("a\n")
+    shell.git(repo, "add", "a.txt")
+    shell.git(repo, "commit", "-q", "-m", "the subject")
+    blob = shell.git(repo, "rev-parse", "HEAD:a.txt")
+    with pytest.raises(GitError, match="isn't that commit"):
+        Git(cwd=repo).subject(blob)

@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 from ipaddress import ip_address
 from pathlib import Path
@@ -45,6 +46,14 @@ from lup_dev.inbox.threaded import (
     ThreadShown,
     ThreadsRead,
     ThreadStated,
+)
+from lup_dev.switching import (
+    CopiesListed,
+    CopyListed,
+    CopySwitching,
+    LastSwitch,
+    ListCopies,
+    SwitchCopy,
 )
 from lup_ledger.parties import Conversation, Operator
 
@@ -328,6 +337,20 @@ def test_the_page_trades_its_token_for_the_cookie_it_calls_with(page: Path) -> N
     assert asked.status_code == 200
 
 
+def test_a_cookie_left_from_an_earlier_token_doesn_t_refuse_the_token_just_handed(
+    page: Path,
+) -> None:
+    host = StandIn({"list": [Listed(launches=[])]})
+    served = client(host, page)
+    served.cookies.set("lup-dashboard-8766", "from-the-demo-before-this-one")
+    refused = served.post("/api/ask", json=ListLaunches().model_dump())
+    traded = served.post("/api/session", headers=bearing())
+    asked = served.post("/api/ask", json=ListLaunches().model_dump())
+    assert refused.status_code == 401
+    assert traded.status_code == 204
+    assert asked.status_code == 200
+
+
 def test_a_host_name_other_than_its_own_is_refused(page: Path) -> None:
     host = StandIn({"list": [Listed(launches=[])]})
     app = application(host, Access(token=GIVEN, port=8766), page)
@@ -442,13 +465,9 @@ def test_the_demo_serves_its_stand_in_launches_and_items_as_the_host_lists_them(
         59,
         60,
         62,
-        64,
-        65,
         66,
-        67,
         68,
         69,
-        70,
     ]
     assert shown.json()["item"]["number"] == 51
 
@@ -481,7 +500,7 @@ def test_the_demo_answers_a_module_s_view_with_the_module_s_own_layout_over_its_
     # The module's own layout: its summary, its folds, its items woven in, each
     # call read whole as its fold opens, from its own view.
     lines = [each.strip() for each in drawer.blocks.text().splitlines()]
-    assert lines[0].startswith("conversation · ")
+    assert lines[0].startswith("trace · ")
     assert any(
         each.startswith("▸ → @51 question to you · waiting on you") for each in lines
     )
@@ -505,6 +524,7 @@ def test_the_demo_answers_a_module_s_view_with_the_module_s_own_layout_over_its_
     ] == [
         ("adapters", "tasks", "t"),
         ("judge", "since", "s"),
+        ("transcripts", "messages", "M"),
         ("transcripts", "conversation", "v"),
     ]
     assert listed.standing == listed.looks[lup]
@@ -543,14 +563,14 @@ def test_the_demo_weaves_a_conversations_items_into_its_view_a_message_sent_from
     found = ItemsListing(delivery=demo.host.delivery).exchanged(
         parser, demo.host.inbox.exchanged(parser)
     )
-    assert [each.item.number for each in found.sent] == [47, 51, 57, 59, 67]
+    assert [each.item.number for each in found.sent] == [47, 51, 57, 59, 73]
     assert found.sent[0].item.call == "call-47"
-    assert [each.item.number for each in found.received] == [48, number]
+    assert [each.item.number for each in found.received] == [48, 74, number]
     # Each as it's told them: a reply on the item it replies to, a message as it's written.
     assert '<comment id="48.1">Good: keep the two readers apart.</comment>' in (
         found.received[0].text
     )
-    assert found.received[1].text == "Go on."
+    assert found.received[-1].text == "Go on."
     # Each a line where it happened in the conversation's view, as the core words it,
     # the message not told yet, since no agent runs here to be told it.
     lines = [each.strip() for each in viewed.blocks.text().splitlines()]
@@ -995,3 +1015,145 @@ def test_the_demos_approval_holds_as_many_lines_more_as_asked_half_of_them_tests
     assert roles == {"production", "test"}
     assert 20_000 <= total < 21_000
     assert sum(count for role, count in grown if role == "test") == total // 2
+
+
+PAGE_COPIES = CopiesListed(
+    copies=[
+        CopyListed(
+            commit="c0ffee",
+            subject="the one <running>",
+            approved=datetime(2026, 11, 6, 12, tzinfo=UTC),
+            answered=datetime(2026, 11, 6, 13, tzinfo=UTC),
+            running=True,
+        ),
+        CopyListed(
+            commit="beef00",
+            subject="the one before",
+            approved=datetime(2026, 11, 6, 10, tzinfo=UTC),
+            answered=datetime(2026, 11, 6, 11, tzinfo=UTC),
+        ),
+    ],
+    last=LastSwitch(
+        commit="dead00",
+        at=datetime(2026, 11, 6, 14, tzinfo=UTC),
+        said="`dead00` didn't answer <why>",
+        answered=False,
+    ),
+)
+
+
+def test_the_plain_page_lists_the_copies_with_a_button_to_each_but_the_one_running(
+    page: Path,
+) -> None:
+    host = StandIn({"copies": [PAGE_COPIES]})
+    response = client(host, page).get("/copies", headers=bearing())
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    shown = response.text
+    assert "the one &lt;running&gt;" in shown
+    assert "runs now" in shown
+    assert 'action="/copies/beef00"' in shown
+    assert 'action="/copies/c0ffee"' not in shown
+    assert "didn&#x27;t answer &lt;why&gt;" in shown
+    assert host.asked == [ListCopies()]
+
+
+def test_the_plain_page_needs_nothing_the_review_builds(tmp_path: Path) -> None:
+    empty = tmp_path / "unbuilt"
+    empty.mkdir()
+    host = StandIn({"copies": [PAGE_COPIES]})
+    response = client(host, empty).get("/copies", headers=bearing())
+    assert response.status_code == 200
+    assert "<script src" not in response.text
+    assert 'rel="stylesheet"' not in response.text
+    assert "/assets/" not in response.text
+
+
+def test_a_browser_without_the_cookie_gets_the_page_that_trades_its_token(
+    page: Path,
+) -> None:
+    host = StandIn({"copies": [PAGE_COPIES]})
+    response = client(host, page).get("/copies")
+    assert response.status_code == 401
+    assert "/api/session" in response.text
+    assert "the one before" not in response.text
+    assert host.asked == []
+
+
+def test_the_token_traded_opens_the_plain_page(page: Path) -> None:
+    host = StandIn({"copies": [PAGE_COPIES]})
+    browser = client(host, page)
+    assert browser.post("/api/session", headers=bearing()).status_code == 204
+    assert browser.get("/copies").status_code == 200
+
+
+def test_a_button_on_the_plain_page_moves_the_copy_and_waits_for_the_next_service(
+    page: Path,
+) -> None:
+    host = StandIn(
+        {
+            "copy-switch": [
+                CopySwitching(
+                    commit="beef00",
+                    log=Path("/state/service.log"),
+                    last=PAGE_COPIES.last,
+                )
+            ]
+        }
+    )
+    response = client(host, page).post("/copies/beef00", headers=bearing())
+    assert response.status_code == 200
+    assert host.asked == [SwitchCopy(commit="beef00")]
+    assert "Switching to beef00" in response.text
+    assert "/state/service.log" in response.text
+    assert PAGE_COPIES.last is not None
+    assert json.dumps(str(PAGE_COPIES.last.at)) in response.text
+
+
+def test_a_switch_the_host_refuses_says_why_above_the_list(page: Path) -> None:
+    host = StandIn(
+        {
+            "copy-switch": [Refused(error="beef00 can't read the ledger")],
+            "copies": [PAGE_COPIES],
+        }
+    )
+    response = client(host, page).post("/copies/beef00", headers=bearing())
+    assert response.status_code == 409
+    assert "beef00 can&#x27;t read the ledger" in response.text
+    assert "the one before" in response.text
+
+
+@pytest.mark.parametrize(
+    ("headers", "status"),
+    [
+        ({}, 401),
+        ({"Authorization": "Bearer another"}, 401),
+        (
+            {"Authorization": f"Bearer {GIVEN}", "Origin": "http://elsewhere.example"},
+            403,
+        ),
+    ],
+)
+def test_only_the_operators_page_may_press_the_button(
+    page: Path, headers: dict[str, str], status: int
+) -> None:
+    host = StandIn({"copy-switch": [Refused(error="unreached")]})
+    response = client(host, page).post("/copies/beef00", headers=headers)
+    assert response.status_code == status
+    assert host.asked == []
+
+
+def test_the_plain_page_says_where_the_host_is_out_of_reach(page: Path) -> None:
+    host = StandIn({}, reachable=False)
+    response = client(host, page).get("/copies", headers=bearing())
+    assert response.status_code == 503
+    assert "no host service answers" in response.text
+
+
+def test_the_copies_go_through_the_api_too(page: Path) -> None:
+    host = StandIn({"copies": [PAGE_COPIES]})
+    response = client(host, page).post(
+        "/api/ask", json=ListCopies().model_dump(mode="json"), headers=bearing()
+    )
+    assert response.status_code == 200
+    assert response.json()["kind"] == "copies-listed"

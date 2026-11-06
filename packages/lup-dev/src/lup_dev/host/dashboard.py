@@ -17,12 +17,15 @@ again where it's gone, and draws the address another device opens as a QR code
 (`QrCode`).
 """
 
+import asyncio
 import secrets
 import shlex
 from ipaddress import IPv6Address
 from pathlib import Path
 from typing import Literal, override
 from urllib.parse import urlsplit
+
+from pydantic import Field
 
 from lup.programs import ProgramError, Running, started
 from lup.types import MutableModel
@@ -106,6 +109,10 @@ class DashboardProcess(MutableModel, Companion, arbitrary_types_allowed=True):
     process: Running | None = None
     address: str | None = None
     """Where it listens on localhost, as its output's first line said."""
+    starting: asyncio.Lock = Field(default_factory=asyncio.Lock)
+    """Held while it's started, so one who asks for it meanwhile waits for it,
+    rather than starting a second on the port the first holds: the control socket
+    answers before the service's programs have begun."""
 
     @override
     async def begin(self) -> None:
@@ -125,8 +132,9 @@ class DashboardProcess(MutableModel, Companion, arbitrary_types_allowed=True):
         address says, since port 0 takes a free one. Raise `HostError` where
         it can't start, saying why.
         """
-        if self.process is None or self.process.status is not None:
-            self.address = await self.spawned()
+        async with self.starting:
+            if self.process is None or self.process.status is not None:
+                self.address = await self.spawned()
         token = self.kept()
         port = urlsplit(self.address).port
         return DashboardShown(

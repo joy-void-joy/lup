@@ -1764,10 +1764,10 @@ export function Review({
                 };
             }
             case "drawer": {
-                // A drawer by its view's name, the conversation's shorter, marked where it holds what waits on the operator, as its view says.
+                // A drawer by its view's name, the trace's as it's called, marked where it holds what waits on the operator, as its view says.
                 const drawer = laidOut.drawers.find((each) => each.header.from === from);
                 const which = drawer?.kind ?? "";
-                return { ...plain(which === "conversation" ? "talk" : which), state: drawer?.waiting === true ? { glyph: "◇", mark: "to-review" } : null };
+                return { ...plain(which === "conversation" ? "trace" : which), state: drawer?.waiting === true ? { glyph: "◇", mark: "to-review" } : null };
             }
             case "file": {
                 // A file by its name, flagged where a line in it matters, folded where its view folds it whole, else to review.

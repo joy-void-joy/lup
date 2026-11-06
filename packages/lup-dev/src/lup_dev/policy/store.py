@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Literal
 
 from lup.types import Model, MutableModel
+from lup_dev.confined import Confined
 from lup_dev.declaration.load import read_by_import
 from lup_dev.git import Git, nul_separated
 from lup_dev.layout import CheckoutLayout, StoreLayout
@@ -98,6 +99,10 @@ class Store(Model):
     """An index of the reader's own to snapshot through, in place of the
     store's (`StoreLayout.reading`), so a reader beside the judge never waits
     on its index's lock nor moves what it staged; none for the store's own."""
+    within: Path | None = None
+    """The repository's common git directory, which what's written in the
+    worktree is reached from where the worktree is inside it (`Confined.above`);
+    none reaches the worktree as it's named."""
 
     def snapshots(self) -> Git:
         """Return git on the store, with the worktree as its work tree."""
@@ -245,22 +250,32 @@ class Store(Model):
             )
         return store.text("write-tree")
 
+    def confined(self) -> Confined:
+        """Return the worktree as what the host writes there reaches it: a directory at a time, following no link (`Confined`)."""
+        return Confined(root=self.worktree, above=self.within)
+
     def restore(self, tree: str, paths: list[Path]) -> None:
-        """Put `paths` back on disk as `tree` has them, removing those it lacks."""
-        present = [path for path in paths if self.blob(tree, path) is not None]
-        if present:
-            self.snapshots().run(
-                "checkout", tree, "--", *(str(path) for path in present)
-            )
+        """Put `paths` back on disk as `tree` has them, a link as a link and a file with its bytes and whether it's executable, removing those it lacks, and leaving a submodule as it is: whatever a room left in the way is replaced, never followed. Raise `OSError` where the worktree can't be reached."""
+        store = self.snapshots()
+        entries = {Path(each.path): each for each in store.tracked(tree)}
+        confined = self.confined()
         for path in paths:
-            if path not in present:
-                (self.worktree / path).unlink(missing_ok=True)
+            entry = entries.get(path)
+            if entry is None:
+                confined.removed(path)
+                continue
+            if entry.kind != "blob":
+                continue
+            [content] = store.contents([entry.object])
+            if entry.mode == "120000":
+                confined.linked(path, content)
+            else:
+                confined.laid(path, content, executable=entry.mode == "100755")
 
     def save(self, number: int, path: Path, content: bytes) -> Path:
-        """Save the agent's version of `path` under refusal `number`; return where."""
+        """Save the agent's version of `path` under refusal `number`; return where. Whatever a room left in the way is replaced, never followed. Raise `OSError` where the worktree can't be reached."""
         saved = CheckoutLayout(root=self.worktree).saved_copy(number, path)
-        saved.parent.mkdir(parents=True, exist_ok=True)
-        saved.write_bytes(content)
+        self.confined().laid(saved.relative_to(self.worktree), content)
         return saved
 
     def head(self) -> str | None:

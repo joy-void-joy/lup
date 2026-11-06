@@ -67,9 +67,11 @@ zone at once wait on one approval. The answer:
   own step and runner, as the gate builds it): the host service starts the
   repository's process from it at its next request, and the approval is
   recorded. On
-  lup's own repository, whose copy is lup's own command, it's installed as the
-  user's `lup-dev` too, the one a person runs and the host service runs from, and
-  the service is restarted on it where one runs;
+  lup's own repository, whose copy is lup's own command, the dashboard is
+  installed with it, and it's what the person's `lup-dev` and the host service
+  run too: it's tried first, and the service moved to it with the way back
+  where it doesn't answer (`lup_dev/switching.py`), a copy that doesn't answer
+  leaving the approval where it was (`Unanswered`);
 - no: the copy approved before stays, and the launch says the tip isn't the code
   judging its session; with nothing approved yet, nothing launches.
 
@@ -120,6 +122,7 @@ from lup_dev.codescan.contract import Checker, Parser
 from lup_dev.codescan.engine import EngineChecker, EngineParser
 from lup_dev.codescan.ruff import Linter, Ruff
 from lup_dev.copies import Copies
+from lup_dev.copies import Kept as KeptCopy
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.load import (
     Pyproject,
@@ -134,7 +137,7 @@ from lup_dev.declaration.resolve import Declaration, resolve
 from lup_dev.errors import LupDevError
 from lup_dev.gate import invoked
 from lup_dev.git import Git, Tracked
-from lup_dev.host.client import Detached, HostClient, Outstanding
+from lup_dev.host.client import HostClient, Outstanding
 from lup_dev.host.protocol import Branches, HostError
 from lup_dev.inbox.protocol import (
     AnswerApproval,
@@ -161,6 +164,14 @@ from lup_dev.policy.roles import Roles
 from lup_dev.policy.store import Store
 from lup_dev.settings import LupDevSettings
 from lup_dev.stored import write_model
+from lup_dev.switching import (
+    Programs,
+    Serving,
+    Switched,
+    Switcher,
+    Switching,
+    host_starter,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterator
@@ -648,7 +659,7 @@ class Trusted(Model):
     approval: Approval
     restarted: bool
     """Whether a host service ran, and was restarted on the copy, which it runs
-    from only where the copy is lup's own command."""
+    from only where the copy is lup's own command: where none ran, it's started."""
     installed: bool = True
     """Whether the copy was installed: not where only the person's own layer
     or their profiles changed, the copy approved before being the commit's
@@ -699,7 +710,7 @@ class Trusted(Model):
         service = (
             "the host service restarted on it"
             if self.restarted
-            else "the next launch starts the host service on it"
+            else "the host service started on it"
         )
         return f"{approved}, and is the `lup-dev` you run; {service}."
 
@@ -722,8 +733,25 @@ class Kept(Model):
         )
 
 
-type Outcome = Unchanged | Trusted | Kept
-"""What `Trust.ensure` came to: approved before, approved at this check, or declined."""
+class Unanswered(Model):
+    """The operator approved the tip's host zone, but its copy doesn't answer as the host service and the dashboard: what's approved and what runs stay as they were."""
+
+    commit: str
+    approval: Approval
+    """What stays approved."""
+    said: str
+    """What came of the switch, why among it (`Stayed.report`, `FellBack.report`)."""
+
+    def report(self) -> str:
+        """Say what came of it, and that the tip is asked about again."""
+        return (
+            f"{self.said} The host zone at {self.commit} stays unapproved, so the "
+            "next launch asks about it again."
+        )
+
+
+type Outcome = Unchanged | Trusted | Kept | Unanswered
+"""What `Trust.ensure` came to: approved before, approved at this check, declined, or approved with a copy that doesn't answer."""
 
 
 class Elsewhere(ABC):
@@ -978,13 +1006,13 @@ class Toolchain(ABC):
     ) -> None:
         """Install `tool` at `commit`, in the repository at `root`, as the repository's `copy`, a directory no process runs.
 
-        With `users`, it's installed as the user's own `lup-dev` too, the one a
-        person runs and the host service runs from, replacing the one there.
+        With `users`, it's the copy a person runs and the host service runs from
+        too, which what's installed beside it for them comes with: the dashboard.
         """
 
     @abstractmethod
-    def command(self, name: str) -> list[str]:
-        """Return the command running the user's own copy of package `name`."""
+    def commands(self) -> Path:
+        """Return the directory of the person's own commands."""
 
 
 def building(resolved: Resolved) -> list[Step]:
@@ -1009,7 +1037,7 @@ class UvToolchain(Model, Toolchain, arbitrary_types_allowed=True):
 
     Each of the repository's copies is a uv tool of its own, in its own
     directories (`UV_TOOL_DIR` and `UV_TOOL_BIN_DIR`, set for that install
-    alone); the user's own is in uv's.
+    alone).
     """
 
     executable: str = "uv"
@@ -1028,21 +1056,18 @@ class UvToolchain(Model, Toolchain, arbitrary_types_allowed=True):
         commit's: each file written from git's objects, as the diff the operator
         approved read them, whatever the repository's `.gitattributes` say.
         """
-        places = [copy, *([None] if users else [])]
         match tool:
             case WorkspaceTool():
                 with tempfile.TemporaryDirectory() as scratch:
                     tree = Path(scratch)
                     Git(cwd=root).export(commit, tree)
                     self.build(tree)
-                    self.built(tool, tree, places)
+                    self.built(tool, tree, copy, users=users)
             case ReleaseTool():
-                self.released(tool, places)
+                self.released(tool, copy)
 
-    def uv(self, place: CopyLayout | None) -> list[str]:
-        """Return the command running uv's tools in `place`: a repository's own copy, or the user's where none."""
-        if place is None:
-            return [self.executable]
+    def uv(self, place: CopyLayout) -> list[str]:
+        """Return the command running uv's tools in the repository's copy `place`."""
         return [
             "env",
             f"UV_TOOL_DIR={place.tools}",
@@ -1051,10 +1076,10 @@ class UvToolchain(Model, Toolchain, arbitrary_types_allowed=True):
         ]
 
     @override
-    def command(self, name: str) -> list[str]:
-        """Return the copy uv installed, in its directory of tools' commands."""
+    def commands(self) -> Path:
+        """Return uv's directory of tools' commands, which is on the person's `PATH`."""
         found = run(self.executable, "tool", "dir", "--bin")
-        return [str(Path(found.text().strip()) / name)]
+        return Path(found.text().strip())
 
     def build(self, tree: Path) -> None:
         """Run the tree's own steps building what the copy carries, as the gate runs them.
@@ -1074,15 +1099,15 @@ class UvToolchain(Model, Toolchain, arbitrary_types_allowed=True):
             run(program, *arguments, cwd=tree, shown=True)
 
     def built(
-        self, tool: WorkspaceTool, tree: Path, places: list[CopyLayout | None]
+        self, tool: WorkspaceTool, tree: Path, place: CopyLayout, *, users: bool
     ) -> None:
-        """Install the package from `tree` in each of `places`, its dependencies held to its `uv.lock`.
+        """Install the package from `tree` in `place`, its dependencies held to its `uv.lock`.
 
         `uv tool install` resolves a tool's dependencies afresh, ignoring the
         workspace's lock, so the locked versions are exported as constraints, the
         whole workspace's, which hold what's installed beside it too. A workspace
-        package it needs is installed from the tree as a copy; the person's own
-        copy has each package beside it installed with it (`--with`).
+        package it needs is installed from the tree as a copy; with `users`, each
+        package beside it is installed with it (`--with`).
         """
         with tempfile.TemporaryDirectory() as scratch:
             constraints = Path(scratch) / "constraints.txt"
@@ -1101,43 +1126,41 @@ class UvToolchain(Model, Toolchain, arbitrary_types_allowed=True):
                 str(constraints),
                 cwd=tree,
             )
-            for place in places:
-                program, *arguments = self.uv(place)
-                withs = [] if place is not None else tool.beside
-                run(
-                    program,
-                    *arguments,
-                    "tool",
-                    "install",
-                    "--force",
-                    "--constraints",
-                    str(constraints),
-                    *(part for each in withs for part in ["--with", str(tree / each)]),
-                    str(tree / tool.package),
-                    cwd=tree,
-                    shown=True,
-                )
+            program, *arguments = self.uv(place)
+            withs = tool.beside if users else []
+            run(
+                program,
+                *arguments,
+                "tool",
+                "install",
+                "--force",
+                "--constraints",
+                str(constraints),
+                *(part for each in withs for part in ["--with", str(tree / each)]),
+                str(tree / tool.package),
+                cwd=tree,
+                shown=True,
+            )
 
-    def released(self, tool: ReleaseTool, places: list[CopyLayout | None]) -> None:
-        """Install the release from its index in each of `places`, its dependencies held to the pins."""
+    def released(self, tool: ReleaseTool, place: CopyLayout) -> None:
+        """Install the release from its index in `place`, its dependencies held to the pins."""
         with tempfile.TemporaryDirectory() as scratch:
             constraints = Path(scratch) / "constraints.txt"
             constraints.write_text(tool.constraints())
-            for place in places:
-                program, *arguments = self.uv(place)
-                run(
-                    program,
-                    *arguments,
-                    "tool",
-                    "install",
-                    "--force",
-                    "--constraints",
-                    str(constraints),
-                    "--default-index",
-                    tool.registry,
-                    tool.requirement(),
-                    shown=True,
-                )
+            program, *arguments = self.uv(place)
+            run(
+                program,
+                *arguments,
+                "tool",
+                "install",
+                "--force",
+                "--constraints",
+                str(constraints),
+                "--default-index",
+                tool.registry,
+                tool.requirement(),
+                shown=True,
+            )
 
 
 def dotted(name: str) -> list[str] | None:
@@ -1662,6 +1685,9 @@ class Trust(Model, arbitrary_types_allowed=True):
     any other."""
     toolchain: Toolchain
     host: HostClient
+    switcher: Switcher
+    """What moves the host service to a copy of lup's own, and back where it
+    doesn't answer."""
     clock: Clock
     checker: Checker
     """The engine the zone's change is judged with, for the review's reading of
@@ -2107,21 +2133,33 @@ class Trust(Model, arbitrary_types_allowed=True):
             standing = self.standing(repository)
             if standing.approval is not None and standing.approved():
                 return None
-            change = self.change(standing)
-            return self.approvals.asked(
-                AskApproval(
-                    question=change.question(),
-                    summary=change.summary(),
-                    diff=change.diff(),
-                    files=change.files,
-                    typing=change.typing,
-                    repository=repository,
-                    fingerprint=standing.fingerprint,
-                    worktree=self.reading or self.root,
-                    pushed_by=pushed_by,
-                    first=change.approved is None,
-                )
+            return self.inboxed(repository, standing, pushed_by=pushed_by)
+
+    def inboxed(
+        self,
+        repository: Path,
+        standing: Standing,
+        *,
+        pushed_by: Conversation | None = None,
+        said: str = "",
+    ) -> int:
+        """Put the approval of the zone `standing` read in the operator's inbox, asking nothing here, what came of the last time first, where `said` says; return its number."""
+        change = self.change(standing)
+        summary = change.summary()
+        return self.approvals.asked(
+            AskApproval(
+                question=change.question(),
+                summary=f"{said}\n\n{summary}" if said else summary,
+                diff=change.diff(),
+                files=change.files,
+                typing=change.typing,
+                repository=repository,
+                fingerprint=standing.fingerprint,
+                worktree=self.reading or self.root,
+                pushed_by=pushed_by,
+                first=change.approved is None,
             )
+        )
 
     def settle(self, fingerprint: str, given: Given) -> Outcome | None:
         """Act on the operator's answer to the approval of the zone `fingerprint`, given in the inbox: install and record it, or keep the copy approved before.
@@ -2130,6 +2168,10 @@ class Trust(Model, arbitrary_types_allowed=True):
         Return none where the tip's zone isn't that one any more, the
         running branch having moved since it was asked: approving it would
         approve what the operator didn't read, so `lup-dev trust` asks anew.
+
+        Answered from a page, nobody may be watching this run, so a copy that
+        doesn't answer puts the approval back in the inbox, why first, which the
+        host service that stayed or came back serves.
         """
         repository = self.repository()
         kept = self.layout.approved(repository)
@@ -2138,7 +2180,10 @@ class Trust(Model, arbitrary_types_allowed=True):
             standing = self.standing(repository)
             if standing.fingerprint != fingerprint:
                 return None
-            return self.answered(repository, standing, given)
+            outcome = self.answered(repository, standing, given)
+            if isinstance(outcome, Unanswered):
+                self.inboxed(repository, standing, said=outcome.said)
+            return outcome
 
     def answered(self, repository: Path, standing: Standing, given: Given) -> Outcome:
         """Act on the operator's answer about the zone `standing` read: install and record it, or keep the copy approved before.
@@ -2187,6 +2232,7 @@ class Trust(Model, arbitrary_types_allowed=True):
             # under running sessions.
             self.reinstall(now, zone.commit, copy)
             write_model(kept, recorded)
+            self.reapproved(recorded, copy)
             return Trusted(
                 approval=recorded,
                 restarted=False,
@@ -2195,11 +2241,17 @@ class Trust(Model, arbitrary_types_allowed=True):
                 profiles=now.profiles != zone.profiles,
                 branches=read.said,
             )
-        own = zone.tool.lups_own()
-        self.installed(zone.tool, zone.commit, copy, users=own)
-        restarted = own and self.restart()
-        write_model(kept, recorded)
-        return Trusted(approval=recorded, restarted=restarted, branches=read.said)
+        if not zone.tool.lups_own():
+            self.installed(zone.tool, zone.commit, copy)
+            write_model(kept, recorded)
+            return Trusted(approval=recorded, restarted=False, branches=read.said)
+        with self.built(recorded, copy) as built:
+            switch = self.switcher.to(built)
+        if isinstance(switch, Switched):
+            return Trusted(approval=recorded, restarted=switch.ran, branches=read.said)
+        if now is None:
+            raise TrustError(switch.report())
+        return Unanswered(commit=zone.commit, approval=now, said=switch.report())
 
     def read_branches(self, zone: Zone, now: Approval | None) -> BranchesRead:
         """Read the branches the declaration at `zone`'s commit names, and the declaration as judging reads it, its person's own layer on it: what the operator has just approved, so it may run.
@@ -2236,6 +2288,13 @@ class Trust(Model, arbitrary_types_allowed=True):
             declaration=declaration,
         )
 
+    def reapproved(self, recorded: Approval, copy: JudgeLayout) -> None:
+        """Keep what's approved with the copy the link names, where it's one kept: going back to it brings back this, the person's own layer and their profiles among it."""
+        copies = Copies(layout=copy)
+        running = copies.running()
+        if running is not None:
+            copies.recorded(running.model_copy(update={"approval": recorded}))
+
     def reinstall(self, approval: Approval, commit: str, copy: JudgeLayout) -> bool:
         """Install the repository's copy approved, from `commit`, where it's missing; say whether it was.
 
@@ -2252,32 +2311,72 @@ class Trust(Model, arbitrary_types_allowed=True):
                 "approve the running branch's tip once it changes the host zone"
             )
             raise TrustError(message)
-        self.installed(approval.tool, commit, copy, users=False)
+        self.installed(approval.tool, commit, copy, approval)
         return True
 
+    def kept_first(self) -> str | None:
+        """Install the copy approved as one kept, and move the host service to it, where lup's own repository has none yet: what's asked of `lup-dev trust` once, after the first approval of a lup that keeps them, which the lup before it carried out. Say what came of it; none where there was nothing to do.
+
+        The commit is the one the service runs already, and it's the operator's
+        own command, since it restarts what their sessions use, so a launch
+        leaves it for them. What ran stays where it is until this answers.
+        """
+        repository = self.repository()
+        approval = approved(self.layout, repository)
+        if approval is None or not approval.tool.lups_own() or self.inside:
+            return None
+        copy = self.layout.judge(repository)
+        if Copies(layout=copy).running() is not None:
+            return None
+        if Git(cwd=self.root).commit(approval.commit) is None:
+            return None
+        kept = self.layout.approved(repository)
+        with (
+            FileLock(kept.with_name(f"{kept.name}.lock")),
+            self.built(approval, copy) as built,
+        ):
+            return self.switcher.to(built).report()
+
     def installed(
-        self, tool: Tool, commit: str, copies: JudgeLayout, *, users: bool
+        self,
+        tool: Tool,
+        commit: str,
+        copies: JudgeLayout,
+        approval: Approval | None = None,
     ) -> None:
         """Install `tool` at `commit` as a copy of the repository's whose copies are `copies`, in a directory of its own, and switch to it once the install has finished, so no process ever runs a copy half installed (`Copies`).
 
-        With `users`, it's installed as the user's own `lup-dev` too.
+        A copy of lup's own has the dashboard beside it, and keeps a record of
+        `approval`, where it's given.
         """
         held = Copies(layout=copies)
         with held.installing() as copy:
-            self.toolchain.install(tool, self.root, commit, copy, users=users)
+            self.toolchain.install(tool, self.root, commit, copy, users=tool.lups_own())
+            if approval is not None and tool.lups_own():
+                held.recorded(self.kept(copy, approval))
             held.switch(copy)
 
-    def restart(self) -> bool:
-        """Restart the host service on the copy just installed, where one runs.
+    @contextmanager
+    def built(self, approval: Approval, copies: JudgeLayout) -> Generator[KeptCopy]:
+        """Install the copy `approval` approves, and keep its record, with nothing switched to it: the repository's lock is held while the context is open, so the sweep leaves it until it's switched to, or until what's done with it says otherwise."""
+        held = Copies(layout=copies)
+        with held.installing() as copy:
+            self.toolchain.install(
+                approval.tool, self.root, approval.commit, copy, users=True
+            )
+            kept = self.kept(copy, approval)
+            held.recorded(kept)
+            yield kept
 
-        Say whether one ran. Its launches stay recorded through the stop, and the
-        copy started serves them again in the directories their rooms mounted.
-        """
-        if not self.host.stop():
-            return False
-        starter = Detached(command=[*self.toolchain.command(self.name), "host"])
-        self.host.model_copy(update={"starter": starter}).ensure()
-        return True
+    def kept(self, copy: CopyLayout, approval: Approval) -> KeptCopy:
+        """Return the record of `copy`, installed for `approval`, with the first line of its commit, printable alone, since a room wrote it."""
+        subject = Git(cwd=self.root).subject(approval.commit)
+        return KeptCopy(
+            name=copy.home.name,
+            repository=self.repository(),
+            approval=approval,
+            subject="".join(each for each in subject if each.isprintable()),
+        )
 
 
 def machine_trust(root: Path, inside: list[str], reading: Path | None = None) -> Trust:
@@ -2289,15 +2388,24 @@ def machine_trust(root: Path, inside: list[str], reading: Path | None = None) ->
     settings = LupDevSettings()
     layout = Layout.of(settings)
     clock = SystemClock()
-    host = HostClient(layout=layout.host, clock=clock, starter=Detached())
+    host = HostClient(layout=layout.host, clock=clock, starter=host_starter(layout))
+    toolchain = UvToolchain()
     return Trust(
         root=root,
         reading=reading,
         layout=layout,
         asker=Terminal(),
         approvals=InboxApprovals(host=host),
-        toolchain=UvToolchain(),
+        toolchain=toolchain,
         host=host,
+        switcher=Switching(
+            layout=layout,
+            host=host,
+            answers=Serving(clock=clock),
+            processes=Programs(),
+            clock=clock,
+            commands=toolchain.commands,
+        ),
         clock=clock,
         checker=EngineChecker.configured(settings),
         parser=EngineParser(),

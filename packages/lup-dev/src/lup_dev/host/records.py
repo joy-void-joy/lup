@@ -272,6 +272,10 @@ class Transcript(Model):
     tasks: list[Task] = []
     """Its task list as it stands at the record's end, replayed from the calls
     that wrote it; empty where it keeps none."""
+    brief: str | None = None
+    """What the conversation that spawned them told them, for a subagent whose
+    record holds it apart from their steps: none for a session's own, or where it
+    doesn't (`docs/field-notes.md`, *What a subagent's record says spawned them*)."""
 
     def started(self) -> datetime | None:
         """Return when its first timed step happened; none where none is timed."""

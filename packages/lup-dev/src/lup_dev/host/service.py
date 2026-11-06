@@ -45,6 +45,7 @@ later checkpoint (`docs/judging-writes.md`, *Asking the operator*).
 """
 
 import asyncio
+import os
 import select
 import shutil
 import traceback
@@ -2113,6 +2114,7 @@ class HostService(Model, arbitrary_types_allowed=True):
         except Timeout as running:
             message = f"a host service runs already, on {self.layout.control}"
             raise HostError(message) from running
+        self.layout.pid.write_text(str(os.getpid()))
         launches = Launches(
             layout=self.layout,
             answerer=self.answerer,

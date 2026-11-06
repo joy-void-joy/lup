@@ -568,6 +568,16 @@ class HostLayout(Model):
         return self.sockets / "service.lock"
 
     @property
+    def switched(self) -> Path:
+        """What came of the last switch of copies (`lup_dev/switching.py`), in lup's state, for whoever didn't watch it: a page's, or an approval answered on one."""
+        return self.state / "last-switch.json"
+
+    @property
+    def pid(self) -> Path:
+        """The running service's process id, beside its lock, for one that stopped answering to be ended (`lup_dev/switching.py`); read only while the lock is held, since the file outlives a service killed."""
+        return self.sockets / "service.pid"
+
+    @property
     def launches(self) -> Path:
         """Each launch served: its socket directory, and its record beside it."""
         return self.sockets / "launches"
@@ -661,6 +671,21 @@ class JudgeLayout(Model):
     def in_place(self) -> Path:
         """The environment of a copy installed at the repository's home itself rather than in a directory of its own, which goes once the link names another and no process runs it."""
         return self.home / "tools"
+
+    @property
+    def back(self) -> Path:
+        """The link to the commands of the copy `lup-dev restore` runs from: the one that answered before the one that judges, so it runs where the one that judges can't (`docs/trust.md`, *The way back*)."""
+        return self.home / "back"
+
+    @property
+    def history(self) -> Path:
+        """Each copy built, a JSON line each saying how it stands (`Kept`, `lup_dev/copies.py`): it outlives the copy, for one gone to be built again from its commit."""
+        return self.home / "history.jsonl"
+
+    @property
+    def pins(self) -> Path:
+        """The commits whose copies are kept whatever ran since (`Copies.pin`)."""
+        return self.home / "pins.json"
 
 
 class CopyLayout(Model):
@@ -1044,6 +1069,16 @@ class Layout(Model):
     def judge(self, repository: Path) -> JudgeLayout:
         """Say where a repository's approved copies of `lup-dev` are installed, by its git directory."""
         return JudgeLayout(home=self.judges / digest(repository))
+
+    @property
+    def host_copies(self) -> Path:
+        """A link to the copies of the repository the host service runs from, lup's own, so its command is found from any directory (`Copies.commands`)."""
+        return self.data / "host-copies"
+
+    @property
+    def snapshots(self) -> Path:
+        """The ledger as each copy left it, a directory each, in lup's state, which no room mounts (`lup_dev/snapshots.py`)."""
+        return self.state / "ledger-snapshots"
 
     @property
     def launches(self) -> Path:

@@ -35,7 +35,10 @@ from lup_dashboard.host import Host
 from lup_dashboard.layout import DemoLayout
 from lup_dashboard.standins import StandInReader, StandInRecords, StoodIn
 from lup_dev import Project
+from lup_dev.approval import Approval as ApprovedZone
+from lup_dev.approval import WorkspaceTool
 from lup_dev.clock import Clock, SystemClock
+from lup_dev.copies import Copies, Kept, linked
 from lup_dev.declaration.kinds import Levels, Role
 from lup_dev.declaration.resolve import resolve
 from lup_dev.host.courier import Conversation as Talking
@@ -334,6 +337,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         changes = Changes()
         inbox = Inbox.kept_in(lup, changes)
         self.seeded(inbox)
+        self.copies_kept(lup)
         defaults = resolve(Project())
         made = handled(
             lup,
@@ -362,6 +366,42 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         )
         made.waits.began(self.landing())
         return made
+
+    def copies_kept(self, lup: Layout) -> None:
+        """Keep three copies of `lup-dev` in the demo's state, as a machine keeps them, for the plain page to list and switch between (`docs/dashboard.md`, *The plain page*): the first running, the second the one before it, the third on trial, never run."""
+        repository = self.lup_session().repository
+        copies = Copies(layout=lup.judge(repository))
+        subjects = [
+            "Merge the review's folds: what's folded stays folded across a reload",
+            "Merge fix-the-clock: a tick no longer drifts past the hour",
+            "Merge the way back: copies kept, a switch that falls back",
+        ]
+        now = self.clock.now()
+        kept = [
+            Kept(
+                name=f"copy-{at}",
+                repository=repository,
+                approval=ApprovedZone(
+                    commit=f"{at}c0ffee",
+                    fingerprint=f"the zone at {at}c0ffee",
+                    paths=[],
+                    tool=WorkspaceTool(
+                        name="lup-dev", package=Path("packages/lup-dev"), members=[]
+                    ),
+                    time=now - timedelta(hours=at + 1),
+                ),
+                subject=subject,
+                answered=now - timedelta(hours=at + 1) if at != 2 else None,
+            )
+            for at, subject in enumerate(subjects)
+        ]
+        for each in reversed(kept):
+            copies.place(each).bin.mkdir(parents=True)
+            copies.recorded(each)
+        copies.pin([kept[2].commit])
+        copies.switch(copies.place(kept[0]))
+        copies.back(copies.place(kept[1]))
+        linked(lup.host_copies, copies.layout.home)
 
     def seeded(self, inbox: Inbox) -> None:
         """Keep the demo's state in `inbox`, as the host keeps its own: each item (`every`), with the files of each that changes any; each conversation's whereabouts (`cast`); each thread, its check, what's in each and its status (`stand_in_threads`); how far the operator has read and seen each, as of 3 minutes before the demo began, so what came since is new; and their draft from before the pile to read was there, the voice session's how it felt, @58, left for later, a park the page drops."""
@@ -1729,55 +1769,73 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         ]
 
     def exchanges(self, session: Conversation, parser: Conversation) -> list[Item]:
-        """Return the operator's copies of messages between agents, each news to them from its sender saying whom it went to (`Message.to`): the lup-impl session asking explore-auth where auth is checked, and their answer, beside which explore-auth's note to the operator, new; and, read since, the parser subagent asking their own subagent grep-tokens to count the kinds of line, and the count."""
+        """Return messages between agents, each in its recipient's inbox, told, and the operator's copy of it, done as it's made, which holds it in its thread (`Message.to`): the lup-impl session asking explore-auth where auth is checked, and their answer, beside which explore-auth's note to the operator, new; and, read since, the parser subagent asking their own subagent grep-tokens to count the kinds of line, and the count."""
         explorer = session.model_copy(update={"agent": "a01"})
         grep = session.model_copy(update={"agent": "a03"})
         dev = session.repository / "tree" / "dev"
 
-        def copy(
+        def sent(
             number: int,
             sender: Conversation,
             to: Conversation,
             text: str,
             minutes: float,
-        ) -> Item:
-            return Item(
-                number=number,
-                reason=Message(kind="note", text=text, to=to),
-                sender=sender,
-                recipient=Operator(),
-                worktree=dev,
-                made=self.ago(minutes),
-            )
+            *,
+            copy: int,
+        ) -> list[Item]:
+            return [
+                Item(
+                    number=number,
+                    reason=Message(kind="note", text=text),
+                    sender=sender,
+                    recipient=to,
+                    worktree=dev,
+                    made=self.ago(minutes),
+                    state=Told(at=self.ago(minutes), how="call"),
+                ),
+                Item(
+                    number=copy,
+                    reason=Message(kind="note", text=text, to=to),
+                    sender=sender,
+                    recipient=Operator(),
+                    worktree=dev,
+                    made=self.ago(minutes),
+                    state=Done(at=self.ago(minutes)),
+                ),
+            ]
 
         return [
-            copy(
-                67,
+            *sent(
+                73,
                 parser,
                 grep,
                 "Count each kind of line in every record you can find, and say which carry words.",
                 20,
+                copy=67,
             ),
-            copy(
-                70,
+            *sent(
+                74,
                 grep,
                 parser,
                 "Twenty-one kinds. Four carry words: user, assistant, tool_use and tool_result.",
                 18,
+                copy=70,
             ),
-            copy(
-                64,
+            *sent(
+                71,
                 session,
                 explorer,
                 "Find every place auth is checked, and say which run before a session starts.",
                 6,
+                copy=64,
             ),
-            copy(
-                65,
+            *sent(
+                72,
                 explorer,
                 session,
                 "Three places: the hook, the launch and the sweep. Only the hook runs before a session starts; my note to the operator says where each is.",
                 2,
+                copy=65,
             ),
             Item(
                 number=66,

@@ -14,10 +14,12 @@ import sys
 import threading
 from collections.abc import Callable
 from contextlib import contextmanager
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import pytest
+from pydantic import Field
 from rich.text import Text
 from typer.testing import CliRunner
 
@@ -35,6 +37,7 @@ from lup_dev.codescan.contract import Checker, FileReport, Parser, Rule, Source
 from lup_dev.codescan.engine import EngineError
 from lup_dev.conversions import inbox_opened
 from lup_dev.copies import Copies
+from lup_dev.copies import Kept as KeptCopy
 from lup_dev.declaration.load import load
 from lup_dev.declaration.requirements import (
     Printed,
@@ -85,6 +88,7 @@ from lup_dev.launch.trust import (
     Trust,
     Trusted,
     TrustError,
+    Unanswered,
     Unchanged,
     UvToolchain,
     building,
@@ -93,6 +97,7 @@ from lup_dev.launch.trust import (
 )
 from lup_dev.layout import CopyLayout, JudgeLayout, Layout
 from lup_dev.stored import read_model, write_model
+from lup_dev.switching import FellBack, Stayed, Switch, Switched, Switcher
 from lup_ledger.parties import Conversation
 
 if TYPE_CHECKING:
@@ -102,6 +107,7 @@ if TYPE_CHECKING:
 
     from lup_dev.declaration.resolve import Selected
     from lup_dev.declaration.runner import Runner
+    from lup_dev.snapshots import Snapshot
 
 LUP_LOCK = """\
 version = 1
@@ -394,7 +400,7 @@ class Installed(Model):
 
 
 class Recording(Toolchain):
-    """Records each install, leaving the copy's command in place, and names the user's as uv would, under `/tools`."""
+    """Records each install, leaving the copy's command in place, and names the person's commands' directory as uv would, under `/tools`."""
 
     def __init__(self) -> None:
         self.installed: list[Installed] = []
@@ -409,23 +415,41 @@ class Recording(Toolchain):
         command.parent.mkdir(parents=True, exist_ok=True)
         command.write_text(f"#!/bin/sh\n# {commit}\n")
 
-    def command(self, name: str) -> list[str]:
-        return [f"/tools/{name}"]
+    def commands(self) -> Path:
+        return Path("/tools")
 
 
 class Service(HostClient):
-    """The host service's client, recording stops and starts, with no service behind."""
+    """The host service's client, with no service behind."""
 
     running: bool = True
-    calls: list[str] = []
 
-    def stop(self) -> bool:
-        self.calls.append("stop")
-        return self.running
 
-    def ensure(self) -> None:
-        assert isinstance(self.starter, Detached)
-        self.calls.append(" ".join(self.starter.command))
+class Accepting(Model, Switcher, arbitrary_types_allowed=True):
+    """Moves to each copy as `Switching` does, with no service: the link and the approval. What it comes to, it's told: `Switched` unless given another."""
+
+    layout: Layout
+    running: bool = True
+    outcome: Callable[[KeptCopy], Switch] | None = None
+    switched: list[KeptCopy] = Field(default_factory=list[KeptCopy])
+
+    def to(
+        self, kept: KeptCopy, *, ledger: Snapshot | None = None, returning: bool = False
+    ) -> Switch:
+        self.switched.append(kept)
+        if self.outcome is not None:
+            return self.outcome(kept)
+        copies = Copies(layout=self.layout.judge(kept.repository))
+        copies.switch(copies.place(kept))
+        write_model(self.layout.approved(kept.repository), kept.approval)
+        answering = kept.model_copy(update={"answered": kept.approval.time})
+        copies.recorded(answering)
+        return Switched(
+            kept=answering, ran=self.running, snapshot=None, took=timedelta()
+        )
+
+    def tried(self, kept: KeptCopy) -> str | None:
+        return None
 
 
 def trusting(
@@ -437,6 +461,7 @@ def trusting(
     running: bool = True,
     approvals: Approvals | None = None,
     layout: Layout | None = None,
+    outcome: Callable[[KeptCopy], Switch] | None = None,
 ) -> Trust:
     placed = layout or kit.layout
     return Trust(
@@ -451,6 +476,7 @@ def trusting(
             starter=Detached(),
             running=running,
         ),
+        switcher=Accepting(layout=placed, running=running, outcome=outcome),
         clock=kit.clock,
         checker=kit.engine,
         parser=kit.parser,
@@ -464,9 +490,14 @@ def recording(trust: Trust) -> Recording:
     return trust.toolchain
 
 
-def service(trust: Trust) -> Service:
-    assert isinstance(trust.host, Service)
-    return trust.host
+def switcher(trust: Trust) -> Accepting:
+    assert isinstance(trust.switcher, Accepting)
+    return trust.switcher
+
+
+def switched_to(trust: Trust) -> list[str]:
+    """The commits of the copies the host service was moved to, in order."""
+    return [each.commit for each in switcher(trust).switched]
 
 
 def answering(trust: Trust) -> Answering:
@@ -613,7 +644,7 @@ def test_the_first_time_shows_the_zone_whole_then_installs_restarts_and_records(
     assert install.into.home.parent == kit.layout.judge(common).copies
     assert kit.layout.judge(common).home.is_relative_to(kit.layout.data)
     assert kit.layout.judge(common).bin.resolve() == install.into.bin.resolve()
-    assert service(trust).calls == ["stop", "/tools/lup-dev host"]
+    assert switched_to(trust) == [head]
     assert outcome.restarted
     assert approved(lup, kit, shell) == outcome.approval
     assert outcome.approval.commit == head
@@ -635,7 +666,7 @@ def test_a_projects_release_is_its_own_copy_alone_and_restarts_nothing(
     [install] = recording(trust).installed
     assert install.commit == head
     assert not install.users
-    assert service(trust).calls == []
+    assert switched_to(trust) == []
     assert not outcome.restarted
     assert outcome.report() == (
         f"Approved: `lup-dev` from {head} judges this repository's sessions, from "
@@ -711,11 +742,11 @@ def test_a_missing_copy_is_installed_again_from_the_approved_zone(
     assert outcome == Unchanged(commit=head, approval=first.approval, again=True)
     [install] = recording(trust).installed
     assert install == Installed(
-        tool=first.approval.tool, root=lup, commit=head, into=install.into, users=False
+        tool=first.approval.tool, root=lup, commit=head, into=install.into, users=True
     )
     assert install.into.home.parent == copy.copies
     assert copy.command("lup-dev").is_file()
-    assert service(trust).calls == []
+    assert switched_to(trust) == []
     assert outcome.report().endswith(
         f"This repository's copy of `lup-dev` from {first.approval.commit} was "
         "missing, and is installed again."
@@ -745,7 +776,7 @@ def test_a_change_outside_the_zone_asks_nothing(
     assert answering(trust).said == []
     assert answering(trust).shown == []
     assert recording(trust).installed == []
-    assert service(trust).calls == []
+    assert switched_to(trust) == []
 
 
 def test_a_change_inside_the_zone_shows_its_diff_since_the_approved_commit(
@@ -1168,10 +1199,10 @@ def test_no_installs_the_copy_approved_before_where_its_missing(
         root=lup,
         commit=first.approval.commit,
         into=install.into,
-        users=False,
+        users=True,
     )
     assert install.into.home.parent == copy.copies
-    assert service(trust).calls == []
+    assert switched_to(trust) == []
 
 
 def test_no_keeps_the_copy_approved_before(lup: Path, kit: Kit, shell: Shell) -> None:
@@ -1187,7 +1218,7 @@ def test_no_keeps_the_copy_approved_before(lup: Path, kit: Kit, shell: Shell) ->
         f"host zone at {head} differs from it."
     )
     assert recording(trust).installed == []
-    assert service(trust).calls == []
+    assert switched_to(trust) == []
     assert approved(lup, kit, shell) == first.approval
 
 
@@ -1253,7 +1284,7 @@ def test_an_answer_given_in_the_inbox_installs_and_records_once(
     assert isinstance(outcome, Trusted)
     assert outcome.approval.commit == head
     assert len(recording(trust).installed) == 1
-    assert service(trust).calls == ["stop", "/tools/lup-dev host"]
+    assert switched_to(trust) == [head]
     assert approved(lup, kit, shell) == outcome.approval
     assert isinstance(again, Unchanged)
     assert answering(trust).asked == []
@@ -1378,7 +1409,7 @@ def test_a_changed_layer_shows_its_diff_in_the_summary_and_asks(
     assert outcome.approval.local == edited
     assert approved(lup, kit, shell) == outcome.approval
     assert recording(trust).installed == []
-    assert service(trust).calls == []
+    assert switched_to(trust) == []
     assert outcome.report() == (
         "Approved: your own layer, which judges this repository's sessions from "
         f"their next hook, beside `lup-dev` from {first.approval.commit} as before."
@@ -1503,7 +1534,7 @@ def test_profiles_changed_alone_install_nothing_and_say_so(
     assert isinstance(outcome, Trusted)
     assert outcome.approval.profiles == PROFILES
     assert recording(trust).installed == []
-    assert service(trust).calls == []
+    assert switched_to(trust) == []
     assert outcome.report() == (
         "Approved: your profiles, which its launches run on from the next, beside "
         f"`lup-dev` from {first.approval.commit} as before."
@@ -1581,7 +1612,7 @@ def test_nothing_approved_and_no_refuses_and_records_nothing(
     with pytest.raises(TrustError, match="none was approved before"):
         trust.ensure()
     assert recording(trust).installed == []
-    assert service(trust).calls == []
+    assert switched_to(trust) == []
     assert approved(lup, kit, shell) is None
 
 
@@ -1793,16 +1824,16 @@ def test_inside_an_agents_session_nothing_is_asked(
     assert isinstance(again.ensure(), Unchanged)
 
 
-def test_with_no_host_service_running_the_next_launch_starts_one(
+def test_with_no_host_service_running_the_copy_approved_is_started(
     lup: Path, kit: Kit
 ) -> None:
     trust = trusting(lup, kit, yes(), running=False)
     outcome = trust.ensure()
     assert isinstance(outcome, Trusted)
     assert not outcome.restarted
-    assert service(trust).calls == ["stop"]
+    assert len(switched_to(trust)) == 1
     assert outcome.report().endswith(
-        "the `lup-dev` you run; the next launch starts the host service on it."
+        "the `lup-dev` you run; the host service started on it."
     )
 
 
@@ -2076,7 +2107,7 @@ def test_uv_builds_and_installs_the_commits_copy_held_to_its_lock(
     assert Path(where) != lup
     assert not Path(where).exists()
     assert source == '"""The environment."""\n'
-    export, own, constraints, users, again = log.read_text().splitlines()
+    export, own, constraints = log.read_text().splitlines()
     assert export.startswith(
         "uv uv export --all-packages --no-dev --no-emit-workspace --no-hashes "
         "--frozen --format requirements-txt --quiet --output-file "
@@ -2084,13 +2115,10 @@ def test_uv_builds_and_installs_the_commits_copy_held_to_its_lock(
     assert own.startswith(
         f"{copy.tools} {copy.bin} tool install --force --constraints "
     )
-    assert "--with" not in own
-    assert own.endswith(f"{where}/packages/lup-dev")
-    assert users.startswith("uv uv tool install --force --constraints ")
-    assert users.endswith(
+    assert own.endswith(
         f"--with {where}/packages/lup-dashboard {where}/packages/lup-dev"
     )
-    assert constraints == again == "pydantic==2.12.0"
+    assert constraints == "pydantic==2.12.0"
 
 
 REQUIRING = BUILDING.replace(
@@ -2175,11 +2203,9 @@ def test_uv_installs_a_release_from_its_index_held_to_its_pins(
     assert constraints == ["lup==0.4.0", "pydantic==2.12.0"]
 
 
-def test_uv_names_the_copy_it_installed(tmp_path: Path) -> None:
+def test_uv_names_the_directory_of_the_persons_commands(tmp_path: Path) -> None:
     fake, _ = fake_uv(tmp_path)
-    assert UvToolchain(executable=str(fake)).command("lup-dev") == [
-        "/home/u/.local/bin/lup-dev"
-    ]
+    assert UvToolchain(executable=str(fake)).commands() == Path("/home/u/.local/bin")
 
 
 def test_a_declaration_building_no_engine_refuses(tmp_path: Path) -> None:
@@ -2205,7 +2231,7 @@ def test_lup_dev_trust_says_so_in_one_line_when_nothing_changed(
         data=tmp_path / "xdg-data" / "lup",
         config=tmp_path / "xdg-config" / "lup",
     )
-    first = trusting(lup, kit, yes()).model_copy(update={"layout": state})
+    first = trusting(lup, kit, yes(), layout=state)
     outcome = first.ensure()
     assert isinstance(outcome, Trusted)
     monkeypatch.chdir(lup)
@@ -3173,3 +3199,191 @@ def test_a_project_selecting_versions_gets_live_where_it_should_and_dev_where_it
     resolved = resolve(load(lup).project)
     assert resolved.limits.gated == ["refs/heads/dev", "refs/heads/live"]
     assert resolved.branches == branches
+
+
+def stayed(kept: KeptCopy) -> Switch:
+    return Stayed(kept=kept, why="the page is blank")
+
+
+def fell_back(kept: KeptCopy) -> Switch:
+    return FellBack(
+        kept=kept,
+        why="the dashboard doesn't serve its page",
+        back=None,
+        answered=True,
+        log=Path("service.log"),
+    )
+
+
+@pytest.mark.parametrize("outcome", [stayed, fell_back])
+def test_a_copy_that_doesnt_answer_leaves_the_approval_where_it_was(
+    lup: Path,
+    kit: Kit,
+    shell: Shell,
+    outcome: Callable[[KeptCopy], Switch],
+) -> None:
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    head = changed(lup, {"lup_project.py": DECLARED + "# changed\n"}, shell)
+    trust = trusting(lup, kit, yes(), outcome=outcome)
+
+    answered = trust.ensure()
+
+    assert isinstance(answered, Unanswered)
+    assert answered.approval == first.approval
+    assert approved(lup, kit, shell) == first.approval
+    assert head in answered.report()
+    assert "the next launch asks about it again" in answered.report()
+    [install] = recording(trust).installed
+    assert install.commit == head
+    assert switched_to(trust) == [head]
+
+
+def test_a_first_copy_that_doesnt_answer_runs_nothing(lup: Path, kit: Kit) -> None:
+    trust = trusting(lup, kit, yes(), outcome=stayed)
+    with pytest.raises(TrustError, match="the page is blank"):
+        trust.ensure()
+
+
+def test_answered_from_a_page_a_copy_that_doesnt_answer_comes_back_with_why(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    changed(lup, {"lup_project.py": DECLARED + "# changed\n"}, shell)
+    proposing = trusting(lup, kit, unasked())
+    fingerprint = proposing.check().fingerprint
+    here = Here()
+    trust = trusting(lup, kit, unasked(), approvals=here, outcome=stayed)
+
+    outcome = trust.settle(fingerprint, Given(approved=True, here=True))
+
+    assert isinstance(outcome, Unanswered)
+    [again] = here.asking
+    assert again.fingerprint == fingerprint
+    assert "the page is blank" in again.summary
+    assert "Approved before" in again.summary
+    assert approved(lup, kit, shell) == first.approval
+
+
+def test_a_copy_kept_records_what_was_approved_with_it(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    common = Path(shell.git(lup, "rev-parse", "--absolute-git-dir"))
+    trust = trusting(lup, kit, yes())
+    outcome = trust.ensure()
+    assert isinstance(outcome, Trusted)
+    copies = Copies(layout=kit.layout.judge(common))
+    [kept] = copies.history()
+    assert kept.approval == outcome.approval
+    assert kept.repository == common
+    assert kept.subject == "first"
+    assert kept.answered == outcome.approval.time
+    assert copies.running() == kept
+
+
+def test_a_projects_release_keeps_no_record(
+    audiobook: Path, kit: Kit, shell: Shell
+) -> None:
+    common = Path(shell.git(audiobook, "rev-parse", "--absolute-git-dir"))
+    trusting(audiobook, kit, yes()).ensure()
+    assert Copies(layout=kit.layout.judge(common)).history() == []
+
+
+def test_a_layer_approved_is_what_going_back_to_the_copy_brings_back(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    common = Path(shell.git(lup, "rev-parse", "--absolute-git-dir"))
+    trusting(lup, kit, yes()).ensure()
+    layered(lup, "# my own layer\n")
+    outcome = trusting(lup, kit, yes()).ensure()
+    assert isinstance(outcome, Trusted)
+    assert not outcome.installed
+    [kept] = Copies(layout=kit.layout.judge(common)).history()
+    assert kept.approval == outcome.approval
+    assert kept.approval.local == "# my own layer\n"
+
+
+def legacy(lup: Path, kit: Kit, shell: Shell) -> Path:
+    """Have an approval from a lup that kept no copies, its copy no record: what today's code leaves after approving the piece that keeps them."""
+    common = Path(shell.git(lup, "rev-parse", "--absolute-git-dir"))
+    trust = trusting(lup, kit, yes())
+    trust.ensure()
+    copies = Copies(layout=kit.layout.judge(common))
+    copies.layout.history.unlink()
+    return common
+
+
+def test_the_first_kept_copy_is_the_operators_to_ask_for(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    common = legacy(lup, kit, shell)
+    head = shell.git(lup, "rev-parse", "dev")
+    trust = trusting(lup, kit, unasked())
+
+    said = trust.kept_first()
+
+    assert said is not None
+    assert "from " + head in said
+    [install] = recording(trust).installed
+    assert install.commit == head
+    assert install.users
+    assert switched_to(trust) == [head]
+    assert Copies(layout=kit.layout.judge(common)).running() is not None
+    assert trust.kept_first() is None
+
+
+def test_a_launch_leaves_the_first_kept_copy_alone(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    legacy(lup, kit, shell)
+    trust = trusting(lup, kit, unasked())
+    assert isinstance(trust.ensure(), Unchanged)
+    assert recording(trust).installed == []
+    assert switched_to(trust) == []
+
+
+def test_an_agents_session_doesnt_get_the_first_kept_copy(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    legacy(lup, kit, shell)
+    trust = trusting(lup, kit, unasked(), inside=["first"])
+    assert trust.kept_first() is None
+    assert recording(trust).installed == []
+
+
+def test_a_projects_release_has_no_first_kept_copy(audiobook: Path, kit: Kit) -> None:
+    trusting(audiobook, kit, yes()).ensure()
+    trust = trusting(audiobook, kit, unasked())
+    assert trust.kept_first() is None
+
+
+def test_lup_dev_trust_keeps_the_first_copy_and_says_so(
+    lup: Path,
+    tmp_path: Path,
+    shell: Shell,
+    monkeypatch: pytest.MonkeyPatch,
+    kit: Kit,
+) -> None:
+    legacy(lup, kit, shell)
+    head = shell.git(lup, "rev-parse", "dev")
+    trust = trusting(lup, kit, unasked())
+
+    def stood_in(root: Path, inside: list[str]) -> Trust:
+        del root, inside
+        return trust
+
+    monkeypatch.setattr(cli, "machine_trust", stood_in)
+    monkeypatch.delenv("CLAUDE_CODE_CHILD_SESSION", raising=False)
+    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
+    monkeypatch.chdir(lup)
+    result = CliRunner().invoke(cli.app, ["trust"])
+    assert result.exit_code == 0, result.output
+    first, *rest = result.output.splitlines()
+    assert first.endswith("nothing to review.")
+    assert rest == [
+        (
+            f"The host service restarted on `lup-dev` from {head}, in 0.0 s: it and "
+            "the dashboard answer."
+        )
+    ]

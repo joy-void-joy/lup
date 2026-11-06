@@ -200,7 +200,7 @@ def test_the_conversation_view_reads_the_live_record(tmp_path: Path) -> None:
     viewed = OfAgent(runtime="claude", session="first-0000")
     blocks = asyncio.run(serving(tmp_path, session("first")).conversation(viewed))
     text = blocks.text()
-    assert text.startswith("conversation · 5 steps")
+    assert text.startswith("trace · 5 steps")
     assert "▸ you: Make the drawer a view.  [exchange step=0]" in text
     assert "you: Now land it." in text
 
@@ -223,7 +223,7 @@ def test_the_drawer_offers_marking_it_read_to_its_last_step_and_folds_what_its_m
     unread = asyncio.run(
         serving(tmp_path, session("first"), marks=marks()).conversation(viewed)
     )
-    assert unread.text().splitlines()[0] == "conversation · 5 steps · 1 new"
+    assert unread.text().splitlines()[0] == "trace · 5 steps · 1 new"
     key = {"runtime": "claude", "session": "first-0000", "agent": None}
     [offer] = unread.offers
     assert offer.argument == {
@@ -240,7 +240,7 @@ def test_the_drawer_offers_marking_it_read_to_its_last_step_and_folds_what_its_m
         serving(tmp_path, session("first"), marks=reading).conversation(viewed)
     )
     assert read.text().splitlines() == [
-        "conversation · 5 steps",
+        "trace · 5 steps",
         "▸ you: Make the drawer a view.  [exchange step=0]",
         "▾ you: Now land it.",
         "  ▸ 1 earlier step  [exchange step=3 through=4]",

@@ -413,6 +413,19 @@ class Git(Model):
             raise GitError(message)
         return contents
 
+    def subject(self, commit: str) -> str:
+        """Return the first line of the message of the commit whose id is `commit`, from its own bytes: raise `GitError` where it isn't what its id says.
+
+        A commit's headers end at its first empty line, a header's continuation
+        lines each starting with a space.
+        """
+        [content] = self.verified("commit", [commit])
+        lines = io.BytesIO(content)
+        for line in lines:
+            if line == b"\n":
+                break
+        return lines.readline().decode(errors="replace").strip()
+
     def own_changes(
         self, before: str | None, after: str
     ) -> dict[PurePosixPath, Tracked | None]:

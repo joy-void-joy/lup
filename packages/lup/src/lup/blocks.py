@@ -246,6 +246,10 @@ class Markdown(Model):
     verb's key or a chord of its own (`Offer`)."""
     text: str
     tone: str = "plain"
+    by: OfAgent | None = None
+    """Who wrote it, where that's another agent than the one whose drawer shows
+    it: a comment on it goes to them, whichever drawer it's written in. None
+    keeps it with the drawer's agent."""
 
 
 class Load(Model):

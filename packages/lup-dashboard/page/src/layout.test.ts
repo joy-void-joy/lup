@@ -3,7 +3,7 @@ import "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
 import { cursorRow, itemStanding, outlineOf, type Reading } from "./outline";
-import { EMPTY, barsOf, laid, nested, ownerOf, rowLabel, whose, UNREAD, UNSEEN, type AgentDrawers, type Around, type Conversation, type GroupHead, type Item, type Placed } from "./review";
+import { EMPTY, barsOf, holderOf, laid, nested, opened, ownerOf, quoted, rowLabel, whose, UNREAD, UNSEEN, type AgentDrawers, type Around, type Conversation, type Draft, type GroupHead, type Item, type Placed, type Remark } from "./review";
 import { around, linesOver, pinned, stickies, type Geometry } from "./stack";
 import { STANDING } from "./fixtures/looks";
 import { merged } from "./looks";
@@ -64,7 +64,7 @@ const TALKED: Remote = new Map([
     [
         instanceOf("/r/lup.git", "transcripts", "conversation", { runtime: "claude", session: "s1", agent: null }),
         {
-            summary: [{ text: "conversation · 2 steps", tone: "plain" }],
+            summary: [{ text: "trace · 2 steps", tone: "plain" }],
             waiting: false,
             count: 0,
             offers: [],
@@ -95,7 +95,7 @@ describe("subagents nested under their parent", () => {
             ["━━ a2 ━━", 2],
         ]);
         // After the parent's items and their drawers.
-        expect(out.text.indexOf("━━ a1")).toBeGreaterThan(out.text.indexOf("conversation · 2 steps"));
+        expect(out.text.indexOf("━━ a1")).toBeGreaterThan(out.text.indexOf("trace · 2 steps"));
         // A subagent whose parent has no group goes under their grandparent's.
         const skipped = nested(
             [
@@ -218,7 +218,7 @@ describe("what a fold of a module's view sets off", () => {
         const id = instanceOf("/r/lup.git", "transcripts", "conversation", { runtime: "claude", session: "s1", agent: null });
         const line = (key: string, text: string) => ({ block: "line" as const, id: key, version: null, offers: [], spans: [{ text, tone: "plain" }] });
         const talked: Blocks = {
-            summary: [{ text: "conversation · 3 steps", tone: "plain" }],
+            summary: [{ text: "trace · 3 steps", tone: "plain" }],
             waiting: false,
             count: 0,
             offers: [],
@@ -257,6 +257,46 @@ describe("what a fold of a module's view sets off", () => {
     });
 });
 
+describe("a comment in a drawer goes to whoever wrote what it's on", () => {
+    const id = instanceOf("/r/lup.git", "transcripts", "messages", { runtime: "claude", session: "s1", agent: null });
+    const markdown = (key: string, text: string, by: { runtime: string; session: string; agent: string | null } | null = null) => ({ block: "markdown" as const, id: key, version: null, offers: [], text, tone: "plain", by });
+    const talked: Blocks = {
+        summary: [{ text: "messages · 2", tone: "plain" }],
+        waiting: false,
+        count: 0,
+        offers: [],
+        blocks: [markdown("text 60", "Found it.\nThree places.", { runtime: "claude", session: "s1", agent: "a1" }), markdown("step 3", "Thanks.")],
+    };
+    const remote: Remote = new Map([[id, talked]]);
+    const drawers = new Map([[whose(PARENT), TASKED]]);
+    const out = laid([], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { remote });
+
+    it("to the agent another's words came from, to the drawer's agent on their own, on a line or a passage", () => {
+        const theirs = out.text.indexOf("Found it.");
+        expect((opened(out, theirs) as Remark).to).toEqual(CHILD);
+        expect((quoted(out, theirs, theirs + 5) as Remark).to).toEqual(CHILD);
+        const own = out.text.indexOf("Thanks.");
+        expect((opened(out, own) as Remark).to).toEqual(PARENT);
+        expect((quoted(out, own, own + 3) as Remark).to).toEqual(PARENT);
+    });
+
+    it("stays under the line it's on, in the drawer it's written in, under its agent's banner, and gives whom it goes to no group of their own", () => {
+        const on = opened(out, out.text.indexOf("Three places.")) as Remark;
+        expect(holderOf(on)).toEqual(PARENT);
+        const draft: Draft = { ...EMPTY, remarks: [{ ...on, id: "theirs", text: "Which places?" }] };
+        const wrote = laid([], [PARENT], banner, header, draft, NOTHING, [], drawers, undefined, { remote });
+        expect(wrote.text).toContain("Found it.\nThree places.\nWhich places?\nThanks.");
+        expect(wrote.groups.map((each) => each.conversation)).toEqual([PARENT]);
+        // Whichever agent's drawer it's on, as their group is what holds it.
+        expect(holderOf({ id: "", to: CHILD, quote: { ...on.quote, block: blockId(instanceOf("/r/lup.git", "transcripts", "conversation", { runtime: "claude", session: "s2", agent: "a9" }), "text 60") }, text: "" })).toEqual(from("s2", "a9"));
+    });
+
+    it("keeps a remark drafted before quotes named their block with whom it's to", () => {
+        const old: Remark = { id: "old", to: CHILD, quote: { text: "Reading.", block: "", version: "", line: 0, lines: [], start: 0, end: 8 }, text: "And?", step: 1 };
+        expect(holderOf(old)).toEqual(CHILD);
+    });
+});
+
 describe("the drawers under the banner", () => {
     const drawers = new Map([[whose(PARENT), TASKED]]);
     const tasks = ownerOf({ drawer: "tasks", conversation: PARENT });
@@ -265,7 +305,7 @@ describe("the drawers under the banner", () => {
         const out = laid([note(4, PARENT)], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { remote: TALKED });
         expect(out.text.split("\n").slice(0, 4)).toEqual(["━━ s1 ━━", "tasks 1/2", "✓ Read", "▶ Writing"]);
         // No line between them, one after the last.
-        expect(out.text).toContain("▶ Writing\nconversation · 2 steps\n");
+        expect(out.text).toContain("▶ Writing\ntrace · 2 steps\n");
         expect(out.text).toContain("\n\n── @4 note ──");
         expect(out.drawers.map((each) => [each.kind, each.folds.at(-1)?.closed])).toEqual([
             ["tasks", true],

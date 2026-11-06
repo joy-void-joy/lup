@@ -18,7 +18,8 @@ session's main conversation, saying whose it was. A subagent's end, and a copy
 of what they say of their work, go to the conversation that spawned them, which
 their whereabouts keep: quiet items, told at a call and never holding a turn's end.
 A message one conversation sends another, their parent or one of their own
-subagents, is that other's, and the operator reads a copy (`Message.to`).
+subagents, is that other's, and shows in both their drawers; the operator's copy
+holds its place in a thread, done as it's made (`Message.to`).
 
 An approval is trust on launch's: the launch's own question, put to the
 operator's inbox and answered at the launching terminal or any other, whichever
@@ -126,8 +127,9 @@ class Message(Model):
     either among its steps, the error as the runtime's text for it."""
     to: Conversation | None = None
     """The conversation it was sent to, where it's the operator's copy of a
-    message one conversation sent another (`send`), which they read as news
-    whatever its kind; none where its recipient is whom it was sent to."""
+    message one conversation sent another (`send`), which holds it in a thread
+    and asks nothing of them, done as it's made (`Delivery.copied`); none where
+    its recipient is whom it was sent to."""
     repository: Path | None = None
     """The repository it's about where no conversation is its party: the
     operator's words on a thread to no one, which stay in that thread
@@ -997,7 +999,7 @@ def kind_of(reason: Reason) -> ItemKind:
     | an approval | waiting on you | yes | approve, decline, leave for later, whoever asked |
     | a held change | waiting on you | yes | as an approval's, a comment on it approving it |
     | a question, a problem (`blocked`), a disagreement, a question sent as a message | waiting on you | yes | mark read, leave for later |
-    | a note, a turn's last words among them, a friction, how it felt, a stop by choice, the operator's copy of a message between conversations | news | no | mark read, leave for later |
+    | a note, a turn's last words among them, a friction, how it felt, a stop by choice, the operator's copy of a message between conversations, done as it's made | news | no | mark read, leave for later |
     | a subagent's end, lup's word on citations that didn't resolve | news | no | none |
     | a write that landed flagged | flag | no | mark read, leave for later |
     | the operator's own answer or review | waiting on you | no | none |
@@ -1007,7 +1009,8 @@ def kind_of(reason: Reason) -> ItemKind:
     its kind, whichever tool sent it: a note is a remark to read, where a doubt
     that needs the operator soon is a question, asked. A copy of one a
     conversation sent another is news of any kind, since it waits on that other,
-    not on them. The operator's own items go to agents, so neither the review nor
+    not on them, and it's done as it's made (`Delivery.copied`), an item of no
+    review of theirs. The operator's own items go to agents, so neither the review nor
     a notice reads theirs, nor asks anything of them; nor a subagent's end, which
     goes to their parent, nor lup's word on citations, which goes to the
     conversation that wrote them.
