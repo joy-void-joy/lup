@@ -103,7 +103,7 @@ async function aSecondOn(page: Page): Promise<void> {
 
 /** Open the palette of every key, search it for the page's timings, and return what it says of them. */
 async function timingsInPalette(dashboard: Dashboard): Promise<string> {
-    await dashboard.keys.press(["?"]);
+    await dashboard.keys.press(["g", "?"]);
     await dashboard.page.waitForSelector(".keys-palette input");
     await dashboard.keys.type("timings");
     const item = dashboard.page.locator(".keys-palette [cmdk-item]", { hasText: "measuring" });
@@ -130,7 +130,7 @@ describe("the page's timings, in headless Chromium", () => {
         await review.holds(DEMO_ITEM);
         await review.settled();
         await dashboard.keys.press(["z", "a", "z", "a"], 50);
-        await dashboard.keys.press(["?"]);
+        await dashboard.keys.press(["g", "?"]);
         await dashboard.page.waitForSelector(".keys-palette");
         await dashboard.keys.press(["Escape"]);
         await review.goTo(DEMO_ITEM);

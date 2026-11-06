@@ -1,6 +1,6 @@
 // What the review's keys do, said four ways: in the one line of keys under it,
 // what the cursor is on and what each verb would do to it (`Here`, from
-// `grammar.ts`'s walk); whole in the palette `?` opens, searchable, those that
+// `grammar.ts`'s walk); whole in the palette `g?` opens, searchable, those that
 // apply where the cursor is first (`Palette.tsx`'s `KeyPalette`); and, once a key leading a chord
 // is pressed, as Space is, in a panel listing the keys that may follow
 // (`chords`; `Keys.tsx`). One table, so they never disagree, made from the kinds
@@ -115,7 +115,7 @@ const LIST: Part[] = [
     {
         title: "This palette",
         keys: [
-            { keys: "?", does: "open it, every key searchable, what applies where the cursor is first; ⏎ does the one chosen, Esc closes it", short: "all keys" },
+            { keys: "g?", does: "open it, every key searchable, what applies where the cursor is first; ⏎ does the one chosen, Esc closes it", short: "all keys" },
             {
                 keys: "g<",
                 does: "what was said, whole, as vim's g< shows the last message: the top bar's last words, an error's whole text among them, what your reply sends with every item's number, and what's left for later; each line of the page says a sentence of it; Esc closes it",
@@ -232,8 +232,8 @@ export function reviewKeys(kinds: readonly Kind[], verbs: readonly Verb[] = []):
                 short: "whole thread",
             },
             {
-                keys: "/ n N",
-                does: "search, then the next and previous match, the folds hiding it opening, said under the review; / then N searches back, ? being this list",
+                keys: "/ ? n N",
+                does: "search forward or back, then the next match the way it searched and the previous, the folds hiding it opening, said under the review",
                 short: "search",
             },
             {
@@ -360,7 +360,7 @@ export function chords(parts: readonly Part[], pressed: string): Following[] {
     return [...found.values()];
 }
 
-/** The parts of the palette whose keys it runs as chosen, from normal mode: answering, moving, the overview and the folds. */
+/** The parts of the palette whose keys it runs as chosen: answering, moving, the overview and the folds. */
 const RUNNABLE = new Set(["Answering", "Moving", "The overview", "Folds"]);
 
 /**
