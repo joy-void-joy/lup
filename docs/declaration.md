@@ -254,7 +254,7 @@ Two settings name the branches a project's work moves between:
 | Setting | By default | What it says |
 |---|---|---|
 | `Core.integration` | `dev` | What branches start from, where accepting one merges it, and what a pull request targets |
-| `Versions.running` | the integration branch | What the host runs, what trust reads, and what `land` lands on |
+| `Versions.running` | the integration branch | What the host runs, what trust reads, and what `land` lands on: where it isn't the integration branch, the host computes it from that and what's on trial (`docs/trust.md`, *What the host runs while it's on trial*) |
 
 ```python
 project = Project(modules=Modules.default().add(Versions(running="live")))
@@ -263,7 +263,7 @@ project = Project(modules=Modules.default().add(Versions(running="live")))
 - **A name is a branch's short name,** `live` and never `refs/heads/live`: one that's empty, reads as one of git's options or holds what no ref holds fails the load.
 - **Read from the declaration approved.** A commit changing either takes effect once the operator approves it, and `dev` is read before the first approval, since trust can't run a declaration to learn which commit to ask about (`docs/trust.md`, *Which branch*). What reads each is listed there.
 - **A branch a project names is gated:** it joins `Credentials.gated` as the declaration is resolved, since `land` lands only on a gated branch, and `delete-merged` deletes none (`docs/credentials.md`, *What the declaration allows*). So a project says it once. Only a branch some layer named joins, so a project that dropped `refs/heads/dev` from its gated refs keeps it dropped, and one that names another integration branch drops `dev`'s the same way where it no longer wants it gated.
-- **Naming a branch doesn't make it.** Until the repository holds the running branch, trust reads the integration branch's tip, and `land` refuses until the repository or its remote does.
+- **Naming a branch doesn't make it.** Until the host has computed the running branch, trust reads the integration branch's tip, and the first landing or pick starts it there.
 
 ## lup's modules
 

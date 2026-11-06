@@ -25,13 +25,14 @@ What the host runs for a project (`Trust.zone`):
 
 ## Which branch
 
-A project's declaration names two branches (`docs/declaration.md`, *The branches*): the **integration branch**, what branches start from, and the **running branch**, what the host runs, what trust reads and what `land` lands on. Without `Versions` they're one branch, `dev` unless `Core` says.
+A project's declaration names two branches (`docs/declaration.md`, *The branches*): the **integration branch**, what branches start from, and the **running branch**, what the host runs, what trust reads and what `land` lands on. Without `Versions` they're one branch, `dev` unless `Core` says. Where they're two, the host computes the running branch (*What the host runs while it's on trial*).
 
 - **Read from the declaration already approved, `dev` before the first approval.** Trust never runs a project's code before the operator approves it, so it can't load the tip's declaration to learn which tip to read. A yes reads the branches the declaration it approved names, the person's own layer on it, and keeps them with the approval (`Trust.answered`, `Approval.branches`), so whatever needs them reads a file and runs nothing of the project's (`approved_branches`). An approval recorded before they were kept reads as `dev`. The declaration itself is kept beside them, as judging reads it (`Approval.declaration`), which each landing reads a file's role from (`docs/judging-writes.md`, *A landing reads what it asks from its own diff*); where the declaration doesn't load, what the approval before kept stands.
 - **A change to them goes through an approval, which shows it.** The declaration is in the zone, so a commit changing either is in the approval's diff, as a person's layer changing either is in its summary. Nothing moves until it's approved, and the answer says what moved; declined, they stay. Trust asks next about the tip of the branch just named.
 - **A running branch the repository doesn't hold yet** reads the integration branch's tip, then the worktree's `HEAD`. Naming a branch doesn't make it, and `HEAD` alone would ask the operator to approve whatever a launch's worktree has checked out.
+- **A running branch the host computes** is read where the host keeps it (`running_tip`, `lup_dev/trial.py`), once it has computed one, never by its ref, which a room writes.
 - **A declaration that doesn't load** leaves them as they stood, as the judge's last declaration stands in for one that can't (`docs/judging-writes.md`, *A declaration that can't load has a stand-in*), and the answer says so.
-- **A launch keeps the limits it registered,** the gated refs among them, so one already running refuses to `land` on a running branch approved since, until it's launched again (`docs/declaration.md`, *The branches*).
+- **A launch keeps the limits it registered,** the gated refs among them, so one already running refuses to `land` on a running branch approved since where it's merged onto as the integration branch is, until it's launched again (`docs/declaration.md`, *The branches*). A branch the host computes needs no such thing: what's on trial is read from what's approved.
 
 | What reads it | Branch |
 |---|---|
@@ -56,6 +57,34 @@ A project's declaration names two branches (`docs/declaration.md`, *The branches
 - **The judge's reading comes in two passes** after a first approval, so a type check, seconds on lup's zone, doesn't hold the question up. Before it's asked, each file is read from its parse alone; once it's in the inbox, the host service reads its types and replaces the reading.
 - **A push's approval has its types read in a checkout:** of the running branch, or where it has none of the integration branch, or else the repository's main worktree. A bare repository's own directory, trust's root for a push, holds no project, so from there nothing it imports resolves, which reads as findings the change doesn't have and hides those it does. Trust's own git stays in that directory, and git in the reading is pinned to the repository, since a room writes a worktree's `.git` and its push sets this off (`docs/credentials.md`, *Running git on the host*). A bare repository with neither checkout keeps the reading without its imports.
 - **Two launches asking about the same zone** wait on one approval, and either answer, or the inbox's, reaches both.
+
+## What the host runs while it's on trial
+
+With `Versions(running="live")`, what a landing brings is on trial before it's accepted: `dev` stays what's accepted, and `live` is what runs, `dev` plus the branches picked, by default each on trial that merges cleanly. Any number can be on trial at once, rivals among them.
+
+**Using it:**
+- **`land`** puts a branch on trial: its holds apply, the gate runs on what `live` would hold, and the branch and its worktree stay. A branch changing only docs and tests, by their roles and outside what the host zone covers, goes straight to `dev` and is cleaned up: a page's test the build runs is what the host runs, whatever its role (`hosted`, `lup_dev/policy/landing.py`). Agents can't accept: `land` onto `dev`, or a room's push there, refuses what the host runs.
+- **`lup-dev live`** lists what's on trial, what's in `live`, and what keeps each other out, and changes nothing.
+- **`lup-dev live pick [branch…]`** runs `dev` plus those; none, `dev` alone. `/copies` on the dashboard does the same (`docs/dashboard.md`, *The plain page*).
+- **`lup-dev live accept <branch>`** merges it onto `dev`, at the tip it landed with, and cleans up as a landing does. Threads parked on it wake then, and not before. Its merge's gate and its worktree's removal run in a session's room, so with none running it says so; a merge asking what the operator hasn't approved leaves that in their drawer, and they accept it again.
+- **`lup-dev live drop <branch> [--say …]`** takes it off trial, leaving it and its worktree, and what they say reaches who landed it, beside their next call. Landing it again puts it back.
+- All four but `land` are refused in an agent's session, as approving is.
+
+**`live` is computed, never merged into** (`lup_dev/trial.py`). Whenever what's in it changes, a landing, a pick, a drop, `dev` moving, the host merges `dev` and each branch in it, in their names' order so the same branches always come to the same tree, and commits that as its next commit: its parents the tip before, `dev`, and each branch. So landings stay fast-forwards, and dropping one is computing it again without it, with no revert. It starts at `dev`'s tip: there's no first step, and until the first landing or pick the host runs that tip.
+- **A room decides nothing of it.** What's on trial is kept on the host (`Layout.trial`), which no room mounts, each branch at the tip it landed with, so a commit added since doesn't run until it's landed and has passed what that holds; no room's push moves `live`; and trust reads its tip from there. A branch in `live` hasn't landed for `delete-merged` until `dev` holds it (`docs/credentials.md`, *Deleting a branch that has landed*).
+- **What's computed comes from what was hash-checked,** in a store of its own holding each file of each side as read from the repository's, hashed against its id, where git merges by trees (`lup_dev/composing.py`). Nothing of the repository's attributes or configuration has a say, and the commit is read back before it's named.
+- **What a landing holds on is read against `dev`,** not `live`: `dev` to what `live` would hold (`Lander.on_trial`). So a first landing asks only about its own files, and a merge two branches make of one protected file asks about what they make.
+- **Its gate runs without fixes,** since a fix would be lost at the next recompute. A pick has no room, so a set was gated only where a landing made that tree.
+- **Two that conflict can't run together.** A landing that conflicts with what's in `live` stays on trial, out of it, and says what with; a branch that stops merging as `dev` moves falls out, and comes back where it merges again. One the operator took out stays out, landed again or not, until they pick it.
+
+**What it asks, and what it builds.** A build runs the branch's own code on the host (`UvToolchain.build`: its declaration, its build scripts, the page's tests), so nothing is built before a yes, and holds alone aren't one: they stop only on what's flagged. What moves `live` goes by the fingerprint of the zone it comes to:
+- **the one approved:** nothing changes for the host, so nothing is asked and nothing restarts, as for a branch accepted that was in `live`;
+- **a copy kept at that fingerprint,** where the operator picked or dropped: the host moves to it at once, in seconds, with no build. It's kept while any branch in it is on trial at that tip (`pins`, `Copies.pin`);
+- **anything else:** the approval, as a push moving the running branch asks it. Its yes builds that copy and moves there. Asked again before it's answered, it's replaced, showing the diff since the last yes, so several landings in a row ask once.
+
+A switch that would need the ledger restored is refused before anything moves, which the terminal's `lup-dev restore --ledger` says the cost of (*The way back*). Where a switch falls back, `live` still names what was picked and the copy before runs, which the page and the next launch say.
+
+**Where it leaves agents' work:** branches start from `dev` while the host runs `live`, so what a session reads of lup isn't what judges it, and nothing stacks on what isn't accepted unless it says so.
 
 ## The way back
 
