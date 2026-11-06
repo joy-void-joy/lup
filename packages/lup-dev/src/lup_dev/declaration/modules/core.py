@@ -23,6 +23,7 @@ from lup_dev.declaration.kinds import (
 )
 from lup_dev.declaration.looks import BRANCH_FOLD, HOLD, ROLE_FOLD
 from lup_dev.declaration.module import Module
+from lup_dev.host.protocol import Branches, BranchName
 from lup_dev.host.records import PAUSE
 
 
@@ -96,6 +97,13 @@ class Core(Module):
     """What the host does with the operator's credentials for a launched session
     without asking, and the refs no push updates: lup's
     (`lup_dev.catalog.credentials`), unless the project says."""
+    integration: BranchName = Branches().integration
+    """The branch work is integrated on: what branches start from, where accepting
+    one merges it, and what a pull request targets, `dev` unless the project says.
+    It's what the host runs too, unless `Versions` names another. It's read from
+    the declaration approved, so a change to it takes effect once approved
+    (`docs/trust.md`, *Which branch*), and a project naming one has it gated
+    (`Credentials.gated`)."""
     guidance: Guidance = Guidance.of(
         Section(
             name="core",

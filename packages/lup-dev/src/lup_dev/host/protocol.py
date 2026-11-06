@@ -106,6 +106,50 @@ def actions() -> list[Action]:
     return list(get_args(Action.__value__))
 
 
+def branch_name(value: str) -> str:
+    """Return `value` if it can name a branch in a declaration: its short name, neither empty nor read as one of git's options, without the whitespace and characters no ref holds.
+
+    It reaches git's and `gh`'s command lines, and a full ref would be read as
+    `refs/heads/refs/heads/…`.
+
+    >>> branch_name("release/2")
+    'release/2'
+    >>> branch_name("refs/heads/dev")
+    Traceback (most recent call last):
+    ...
+    ValueError: a branch is named by its short name, as `dev` is, not 'refs/heads/dev'
+    """
+    wrong = (
+        not value
+        or value.startswith(("-", "refs/"))
+        or any(each.isspace() or each in "~^:?*[\\" for each in value)
+    )
+    if wrong:
+        message = f"a branch is named by its short name, as `dev` is, not {value!r}"
+        raise ValueError(message)
+    return value
+
+
+type BranchName = Annotated[str, AfterValidator(branch_name)]
+"""A branch, as a declaration names it: `dev`, never `refs/heads/dev`."""
+
+
+class Branches(Model):
+    """The two branches a repository's work moves between, by the names its approved declaration gives them (`docs/trust.md`, *Which branch*).
+
+    Plain names, kept with the approval (`Approval.branches`), so whatever reads
+    them on the host runs no project code. These defaults are what's read
+    before the first approval, and in a record from before approvals kept them.
+    """
+
+    integration: BranchName = "dev"
+    """What branches start from, where accepting one merges it, and what a pull
+    request targets: `Core.integration`."""
+    running: BranchName = "dev"
+    """What the host runs, what trust reads and what `land` lands on:
+    `Versions.running`, else the integration branch."""
+
+
 class Limits(Model):
     """What the host does with the operator's credentials for a launch without asking.
 
