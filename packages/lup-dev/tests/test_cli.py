@@ -393,6 +393,32 @@ def test_rules_check_lists_a_deferral_whose_issue_closed_without_failing(
     assert not (common / "lup" / "due.json").exists()
 
 
+def test_rules_check_asks_each_issue_once_and_lists_every_comment_waiting_on_it(
+    fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "src" / "pkg" / "core.py").write_text(
+        'x = 1  # lup: defer(issue=12, why="one")\n'
+        'y = 2  # lup: defer(issue=12, why="two")\n'
+    )
+    asked: list[int] = []
+
+    class Counting(Closed):
+        def state(self, issue: IssueRef) -> Literal["open", "closed"]:
+            asked.append(issue.number)
+            return super().state(issue)
+
+    def issues(root: Path) -> Issues:
+        return Counting()
+
+    monkeypatch.setattr(cli, "GitHubIssues", issues)
+    monkeypatch.chdir(repo)
+    result = runner.invoke(cli.app, ["rules", "check", "src/pkg/core.py"])
+    assert result.exit_code == 0, result.output
+    assert asked == [12]
+    assert "src/pkg/core.py:1: issue #12 is closed" in result.output
+    assert "src/pkg/core.py:2: issue #12 is closed" in result.output
+
+
 def test_rules_check_over_every_file_keeps_what_came_due_for_a_session(
     fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

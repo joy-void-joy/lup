@@ -1,5 +1,6 @@
 """Checking `# lup:` directives: ignore, defer, notes, malformed calls."""
 
+from threading import Barrier
 from typing import TYPE_CHECKING, Literal
 
 import httpx
@@ -17,6 +18,7 @@ from lup_dev.codescan.conditions import (
     loaded,
 )
 from lup_dev.codescan.directives import (
+    AskedOnce,
     Checking,
     Defer,
     Directive,
@@ -30,6 +32,7 @@ from lup_dev.codescan.directives import (
     added_suppressions,
     holding,
     missing,
+    waited_on,
 )
 
 if TYPE_CHECKING:
@@ -44,6 +47,42 @@ class FakeIssues(Issues):
 
     def unreachable(self) -> str | None:
         return None
+
+
+def test_each_issue_is_asked_once_however_many_comments_wait_on_it() -> None:
+    asked: list[int] = []
+
+    class Counting(FakeIssues):
+        def state(self, issue: IssueRef) -> Literal["open", "closed"]:
+            asked.append(issue.number)
+            return super().state(issue)
+
+    one, two = IssueRef(number=1), IssueRef(number=2)
+    answers = AskedOnce.of(Counting(closed=[2]), [one, two, one, one])
+    assert sorted(asked) == [1, 2]
+    assert (answers.state(one), answers.state(two)) == ("open", "closed")
+
+
+def test_issues_are_asked_several_at_a_time() -> None:
+    both = Barrier(2)
+
+    class Together(FakeIssues):
+        def state(self, issue: IssueRef) -> Literal["open", "closed"]:
+            # One asked after the other would wait here for good, but for the bound.
+            both.wait(timeout=30)
+            return "open"
+
+    answers = AskedOnce.of(Together(), [IssueRef(number=1), IssueRef(number=2)])
+    assert answers.state(IssueRef(number=1)) == "open"
+
+
+def test_an_ignore_and_a_defer_wait_on_the_issue_they_name_and_a_note_on_none() -> None:
+    assert waited_on(Defer(line=1, why="w", issue=7)) == IssueRef(number=7)
+    assert waited_on(Ignore(line=1, covers=1, rule="r", why="w", issue="o/r#7")) == (
+        IssueRef(repository="o/r", number=7)
+    )
+    assert waited_on(Defer(line=1, why="w", when="soon")) is None
+    assert waited_on(Note(line=1, text="look")) is None
 
 
 class Always(Condition):

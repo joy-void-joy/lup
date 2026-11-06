@@ -51,6 +51,7 @@ from lup_dev.clock import Clock, SystemClock
 from lup_dev.codescan.conditions import loaded
 from lup_dev.codescan.contract import Checker, Due, Finding, Parser, Rule, Source
 from lup_dev.codescan.directives import (
+    AskedOnce,
     Checking,
     Fired,
     GitHubIssues,
@@ -58,6 +59,7 @@ from lup_dev.codescan.directives import (
     Issues,
     Trackers,
     holding,
+    waited_on,
     without,
 )
 from lup_dev.codescan.engine import EngineChecker, EngineError, EngineParser
@@ -2898,7 +2900,18 @@ def scanned(paths: list[Path] | None, *, issues: bool) -> Scanned:
         )
         unreachable = tracker.unreachable()
     held = holding(conditions)
-    gate = Trackers(issues=tracker if unreachable is None else None, held=held)
+    named = [
+        issue
+        for report in reports
+        for directive in report.directives
+        if (issue := waited_on(directive)) is not None
+    ]
+    asked = (
+        AskedOnce.of(tracker, named)
+        if tracker is not None and unreachable is None
+        else None
+    )
+    gate = Trackers(issues=asked, held=held)
 
     def found(path: Path) -> list[Finding]:
         report = next(each for each in reports if each.path == path)

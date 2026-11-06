@@ -31,6 +31,7 @@ import tokenize
 from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal, Self, override
 from urllib.parse import urlparse
@@ -187,6 +188,34 @@ class HostIssues(Issues, arbitrary_types_allowed=True):
             return "unchecked"
 
 
+class AskedOnce(Issues):
+    """Issues' states as a tracker said them, each asked once, several at a time, before a check reads any.
+
+    A check reads an issue's state at every comment waiting on it, and each read
+    is a call to GitHub of about half a second: 49 comments on 21 issues in
+    lup's own tree took 15 of the gate's seconds, for reminders that don't decide
+    its verdict.
+    """
+
+    states: dict[IssueRef, Literal["open", "closed", "unchecked"]]
+
+    @classmethod
+    def of(cls, tracker: Issues, issues: list[IssueRef], at_once: int = 8) -> AskedOnce:
+        """Ask `tracker` about each of `issues`, `at_once` at a time."""
+        asking = list(dict.fromkeys(issues))
+        with ThreadPoolExecutor(max_workers=at_once) as pool:
+            states = list(pool.map(tracker.state, asking))
+        return cls(states=dict(zip(asking, states, strict=True)))
+
+    @override
+    def state(self, issue: IssueRef) -> Literal["open", "closed", "unchecked"]:
+        return self.states[issue]
+
+    @override
+    def unreachable(self) -> str | None:
+        return None
+
+
 class Trackers(Model, arbitrary_types_allowed=True):
     """What a deferral is tracked by, which the gate asks: issues and conditions."""
 
@@ -267,6 +296,9 @@ class Identity(Model):
 
 class Comment(Model, ABC):
     """What every `# lup:` comment answers for itself."""
+
+    issue: int | str | None = None
+    """An issue it waits on: only an `ignore` and a `defer` name one."""
 
     @abstractmethod
     def keeps(self, rule: str, line: int) -> bool:
@@ -492,6 +524,17 @@ type Directive = Annotated[
     Ignore | Defer | Note | Malformed, Field(discriminator="kind")
 ]
 """Any `# lup:` comment, as the engine reports it."""
+
+
+def waited_on(comment: Comment) -> IssueRef | None:
+    """Return the issue `comment` waits on, where it names one that reads as an issue.
+
+    >>> waited_on(Defer(line=1, why="w", issue=7))
+    IssueRef(repository=None, number=7)
+    >>> waited_on(Note(line=1, text="look")) is None
+    True
+    """
+    return None if comment.issue is None else IssueRef.read(comment.issue)
 
 
 def missing(kept: list[Directive], since: list[Directive]) -> list[Directive]:
