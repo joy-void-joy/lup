@@ -209,17 +209,19 @@ kbd {
     margin: 0;
 }
 
-/* The palette. */
+/* The palette: over the page, in place of its own, since cmdk's dialog puts the overlay and the palette side by side
+   at the page's end, where the overlay can't place it and it would sit below everything. */
 .palette-overlay {
     position: fixed;
     inset: 0;
     background: rgb(0 0 0 / 0.6);
-    display: flex;
-    justify-content: center;
-    padding-top: 12vh;
 }
 
 .palette {
+    position: fixed;
+    top: 12vh;
+    left: 50%;
+    transform: translateX(-50%);
     width: min(80ch, 92vw);
     background: var(--bg);
     border: 1px solid var(--border);
@@ -259,7 +261,7 @@ kbd {
     background: var(--float-bg);
 }
 
-/* The palette of every key, `?`: each key beside what it does, wrapped, the key's column its own. */
+/* The palette of every key, `g?`: each key beside what it does, wrapped, the key's column its own. */
 .keys-palette {
     width: min(110ch, 96vw);
 }
@@ -557,7 +559,7 @@ kbd {
 }
 
 /* The line of keys: where the cursor is, the keys that apply there, cut at the line's end where they don't fit, and
-   `?` at the end, always shown. One row. */
+   `g?` at the end, always shown. One row. */
 .keys {
     display: flex;
     gap: 0 2ch;
@@ -599,7 +601,7 @@ kbd {
     color: var(--fg);
 }
 
-/* The list of every key, `?`: in parts, each key beside what it does. */
+/* The list of every key, `g?`: in parts, each key beside what it does. */
 .keys-overlay {
     position: fixed;
     inset: 0;

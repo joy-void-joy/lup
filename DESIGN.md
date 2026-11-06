@@ -50,6 +50,17 @@ The dashboard is where the operator works: every agent, their batches, questions
 
 Everything in it is read and commented on as the review is: the operator points at any part, says something, and it goes with the one draft to the agent concerned. A module's data is typed Python an agent reads too; it's drawn from lup's building blocks or TypeScript the module ships, each piece saying what in it can be pointed at: a line, a moment of a video, a region of a frame, an element of a page. A project making an animation is commented on frame by frame; a site being built is used as its end product, with an overlay to point at its parts.
 
+What the operator can count on, wherever they are in it:
+- **Sending always works.** Each part of a reply goes, or stays visibly where it is with the reason, and one part never stops the rest.
+- **Space `d` clears what it's on.** It comes back only if something new happens in it.
+- **Every comment reaches an agent, now or later:** its sender while they run, else whoever answers for its thread, else it waits visibly for the next session. The line under the review says whom before it's sent.
+- **A key does the same thing wherever it's offered,** and is offered only where it does that.
+- **Each part shown has its fold,** and everything folds, opens and selects the same way.
+- **What's been cleared stays cleared,** across reloads, restarts and pages.
+- **Only what needs the operator counts as waiting.** Everything else is news that leaves once seen.
+
+The host decides and the page only draws, keeping no rule of its own beside the host's, and each of these is tested over a copy of real data rather than hand-picked cases.
+
 ## Defaults
 
 Every agent runs in a container. Commands run there without asking, because the container keeps them from harming the operator's machine, and it's the same standard machine whatever the host. The operator's credentials stay on the host, used on the agent's behalf within limits the project sets.

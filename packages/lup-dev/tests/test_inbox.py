@@ -2004,14 +2004,14 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
             if isinstance(each.reason, HowItFelt)
         ]
     # Each subagent has a parent, their session's own conversation, who gets a
-    # copy of their friction (@3); how it felt reaches the operator alone. Each
+    # copy of their friction (@3); how it felt is told to the operator alone. Each
     # session's root thread takes a number as their first item lands (@2, @7).
     assert [text for text, _ in answers] == [
         "Thanks: your friction is with the operator, @1, and your parent has it too. You can carry on.",
-        "Thank you for telling them. It's with the operator alone, as you wrote it, @4.",
+        "Thank you for telling them. It's with the operator, as you wrote it, @4.",
         "The operator will read why you stopped, @5. You can end your turn now.",
         "Thanks: your friction is with the operator, @6. You can carry on.",
-        "Thank you for telling them. It's with the operator alone, as you wrote it, @8.",
+        "Thank you for telling them. It's with the operator, as you wrote it, @8.",
         "The operator will read why you stopped, @9. You can end your turn now.",
     ]
     assert not any(error for _, error in answers)
@@ -3559,14 +3559,19 @@ def test_a_subagents_friction_reaches_its_parent_whole_and_how_it_felt_where_lup
         (each.reason, each.quiet) for each in items if each.recipient != Operator()
     ]
     if reach == "operator":
-        # How it felt reaches the operator alone, and its description says so.
+        # How it felt is told to the operator alone, and its description says so,
+        # and that it isn't private, which no reach changes.
         assert how == (
-            "Thank you for telling them. It's with the operator alone, as you wrote it, @4.",
+            "Thank you for telling them. It's with the operator, as you wrote it, @4.",
             False,
         )
         assert heard2 == ""
         assert copies == [(friction, True)]
-        assert described.endswith("\n\nIt reaches the operator alone, as you wrote it.")
+        assert described.endswith(
+            "\n\nIt reaches the operator as you wrote it, and nobody else is told. "
+            "It isn't private: other sessions can read it, as they can the rest of "
+            "the inbox."
+        )
     else:
         assert how == (
             "Thank you for telling them. It's with the operator, and your parent has it too, as you wrote it, @4.",
@@ -3576,7 +3581,10 @@ def test_a_subagents_friction_reaches_its_parent_whole_and_how_it_felt_where_lup
         assert told2.startswith('<item item="6" from="v/lexer" kind="how it felt">')
         assert how_it_felt.text in told2
         assert copies == [(friction, True), (how_it_felt, True)]
-        assert described.endswith("your parent too, whole, at their next call.")
+        assert described.endswith(
+            "your parent too, whole, at their next call. It isn't private: other "
+            "sessions can read it, as they can the rest of the inbox."
+        )
 
 
 def to_parent(text: str, kind: str = "note") -> dict[str, JsonValue]:

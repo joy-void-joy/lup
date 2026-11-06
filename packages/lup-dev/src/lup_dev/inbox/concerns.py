@@ -20,8 +20,8 @@
   or else the holder of the nearest thread above, each item whole; everyone
   else on it, one line. A subagent's items are told to none of the
   conversations above them (`forebears`), who hear them through their
-  runtime already, and whose context is what threads are meant to spare. How it felt is told to nobody, as it reaches the
-  operator alone, nor a flag or a hold, the judge's, which its writer hears.
+  runtime already, and whose context is what threads are meant to spare. How it felt is told to nobody, as the operator
+  alone is told of it, nor a flag or a hold, the judge's, which its writer hears.
   The mirror: a subagent hears only what's addressed to them in the thread
   they started on, their parent's, until they join, hold or are handed it
   (`quiet`), since what lands there is their parent's and their siblings'.
@@ -121,7 +121,7 @@ class Reach(Model):
 def told(item: Item) -> Reach:
     """Say how `item`, landing in a thread, is told to whoever answers for it, then to everyone else on it.
 
-    How it felt reaches the operator alone, so nobody. A flag or a hold is the
+    How it felt is told to the operator alone, so nobody. A flag or a hold is the
     judge's, the operator's to answer, and its writer is told of it already:
     nobody else, since a worker's writes would each make a line for whoever
     leads its thread. A turn's last words are its sender's answer to the
