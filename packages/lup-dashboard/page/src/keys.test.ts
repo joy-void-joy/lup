@@ -60,9 +60,9 @@ describe("what may follow a chord", () => {
             "e earlier exchanges and steps",
             "b bodies",
             "u unchanged lines",
-            "k runs of calls",
+            "m messages",
             "c context",
-            "m items' text",
+            "k runs of calls",
             "d calls' input and output",
         ];
         expect(following("␣f")).toEqual(kinds);
@@ -88,9 +88,9 @@ describe("what may follow a chord", () => {
             "e what came earlier",
             "b the body",
             "u the unchanged lines",
-            "k the run of calls",
+            "m the message",
             "c the context",
-            "m the item's text",
+            "k the run of calls",
             "d the call's input and output",
         ]);
     });

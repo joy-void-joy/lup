@@ -242,8 +242,8 @@ def test_the_drawer_offers_marking_it_read_to_its_last_step_and_folds_what_its_m
     assert read.text().splitlines() == [
         "conversation · 5 steps",
         "▸ you: Make the drawer a view.  [exchange step=0]",
-        "you: Now land it.",
-        "▸ 1 earlier step  [exchange step=3 through=4]",
+        "▾ you: Now land it.",
+        "  ▸ 1 earlier step  [exchange step=3 through=4]",
     ]
     assert read.offers == []
     assert [each.key for each in reading.read] == [keyed(key)]

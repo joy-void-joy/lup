@@ -901,6 +901,10 @@ Read in this machine's Claude Code records, every session's own conversation, wh
 - **The next end says something new.** Each of the 42 held ends that ended again before the operator's next words ended with text other than the held end's; the other one had no later end. So a note made at each end that says something doesn't repeat one (`docs/inbox.md`, *A turn's last message*).
 - **An end with no text is rare:** 2 of the 2,507 ends in those records. What `last_assistant_message` holds then, and whether it can be an earlier message's words, wasn't checked. Codex's ends weren't read: none of the records were its.
 
+## A turn's last words against its record (Claude Code to 2.1.318, Codex 0.128.0 to 0.163.0, measured 2026-11-06)
+
+What a conversation's drawer folds as a turn's end reads the note lup made of it against the record's steps, to the letter, so the two had to agree. In a copy of the operator's inbox, 403 of the 405 notes of a turn's end whose conversation's record could be read say exactly one of that record's agent's steps, made 0.02 to 20 seconds after it, 0.14 at the median, never before it; the other two say what no step does, and stand as items. On Codex, read from 203 kept rollouts, each of 1,068 turns' `last_agent_message` is the rollout's last agent message. A step's next step was a call for 209 of the 403, as a turn woken again by something lup told it, with no words of the operator's between: so a turn's end isn't the record's last step, nor its exchange's.
+
 ## A subagent's end (Claude Code 2.1.308 read, its `StopFailure` measured on 2.1.309; Codex read at `rust-v0.163.0`; 2026-10-22 and 23)
 
 Behind `docs/inbox.md`, *Parties and items*: what each runtime reports of a subagent's end, and what it hands the parent itself. Claude Code read in its 2.1.308 binary (`strings`) and in this machine's records of lup's sessions, and its `StopFailure` read in the 2.1.309 binary and measured live on it; Codex read in its source and hook schemas, not measured live.

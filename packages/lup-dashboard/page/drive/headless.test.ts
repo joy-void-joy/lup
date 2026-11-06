@@ -77,12 +77,12 @@ describe("the review's editor, in headless Chromium", () => {
             for (const value of (view.state as unknown as { values: unknown[] }).values) {
                 const ranges = value as { between?: (from: number, to: number, each: (from: number, to: number, value: { spec?: { class?: string } }) => void) => void };
                 ranges?.between?.(0, view.state.doc.length, (_from, _to, decoration) => {
-                    count += (decoration.spec?.class ?? "").split(" ").includes("tone-run") ? 1 : 0;
+                    count += (decoration.spec?.class ?? "").split(" ").includes("tone-call") ? 1 : 0;
                 });
             }
             return count;
         });
-        const counted = await review.decorated("tone-run");
+        const counted = await review.decorated("tone-call");
         expect(counted).toBeGreaterThan(0);
         expect(held).toBe(2 * counted);
     });

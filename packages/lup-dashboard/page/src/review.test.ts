@@ -1462,6 +1462,8 @@ describe("the drawers under each agent's banner", () => {
     const out = laid([QUESTION, NOTE], [S1], banner, header, EMPTY, NOTHING, [], drawers, undefined, { remote });
     const at = (text: string) => out.text.indexOf(text);
     const lines = (from: number, to: number) => out.text.slice(from, to).split("\n");
+    /** Where the agent's words starting `text` are, under the line of their fold saying how they start. */
+    const words = (text: string) => out.text.indexOf(text, at(text) + 1);
 
     it("lays the drawers under the banner, before the items, each its own fold, folded, a new module's bodies folded too", () => {
         const [group] = out.groups;
@@ -1474,9 +1476,11 @@ describe("the drawers under each agent's banner", () => {
             "conversation · 7 steps · 2 new",
             "you: Build the reader.",
             "Reading the records.",
+            "Reading the records.",
             "· Bash",
             "· Read",
             "you: Ask me first.",
+            "Twenty kinds of line.",
             "Twenty kinds of line.",
             "",
             "Four carry what was said.",
@@ -1491,13 +1495,17 @@ describe("the drawers under each agent's banner", () => {
             ["conversation", true, `conversation ${whose(S1)}`],
         ]);
         // In the conversation, `Transcripts`' view drawn, each exchange before the operator's last words folds under
-        // their words, read from its own view as it opens; the agent's words are its own lines, each of its block.
+        // their words, read from its own view as it opens, and the last under its own, open; each of the agent's words
+        // is a fold, open, under a line saying how they start, its lines its own, each of its block.
         const talked = out.drawers[2]!;
         expect(talked.folds.map((each) => [each.kind, each.label, each.closed])).toEqual([
+            ["items", "Reading the records.", false],
             ["earlier", "you: Build the reader.", true],
+            ["items", "Twenty kinds of line.", false],
+            ["earlier", "you: Ask me first.", false],
             ["conversation", "conversation · 7 steps · 2 new", true],
         ]);
-        expect(foldKey(talked.folds[0]!)).toBe(`conversation ${whose(S1)} earlier exchange 0`);
+        expect(foldKey(talked.folds[1]!)).toBe(`conversation ${whose(S1)} earlier exchange 0`);
         expect([...talked.loads.values()].map((each) => [each.module, each.view, (each.argument as { step: number }).step])).toEqual([["transcripts", "exchange", 0]]);
         expect(talked.lines.map((each) => [out.text.slice(each.from, each.to), each.block.slice(each.block.lastIndexOf("step")), each.line])).toEqual([
             ["Reading the records.", "step 1", 0],
@@ -1506,8 +1514,9 @@ describe("the drawers under each agent's banner", () => {
             ["Four carry what was said.", "step 5", 2],
         ]);
         expect(talked.texts.map((each) => out.text.slice(each.from, each.to))).toEqual(["Reading the records.", "Twenty kinds of line.\n\nFour carry what was said."]);
-        expect(talked.toned.map((each) => [out.text.slice(each.from, each.to), each.tone]).slice(0, 2)).toEqual([
+        expect(talked.toned.map((each) => [out.text.slice(each.from, each.to), each.tone]).slice(0, 3)).toEqual([
             ["you: Build the reader.", "operator"],
+            ["Reading the records.", "muted"],
             ["· Bash", "call"],
         ]);
         const since = out.drawers[1]!;
@@ -1537,14 +1546,14 @@ describe("the drawers under each agent's banner", () => {
     });
 
     it("opens a remark on the agent's words in the conversation, and on a file's line since you approved, recording the version", () => {
-        const twenty = opened(out, at("Twenty"));
+        const twenty = opened(out, words("Twenty"));
         expect(twenty).toMatchObject({ id: "", to: S1, quote: { text: "Twenty kinds of line.", line: 0, start: 0, end: 21 }, text: "" });
         expect(twenty !== undefined && "quote" in twenty ? twenty.quote?.block.endsWith(" step 5") : false).toBe(true);
         expect(twenty !== undefined && "code" in twenty).toBe(false);
         // On the agent's words read as its fold opened, on that step's block; on a passage of two of its lines, both quoted.
-        const reading = opened(out, at("Reading the records."));
+        const reading = opened(out, words("Reading the records."));
         expect(reading !== undefined && "quote" in reading ? [reading.quote?.block.endsWith(" step 1"), reading.quote?.lines] : null).toEqual([true, ["Reading the records."]]);
-        const passage = quoted(out, at("kinds"), at("Four carry") + 4);
+        const passage = quoted(out, words("kinds"), at("Four carry") + 4);
         expect(passage !== undefined && "quote" in passage ? [passage.quote?.text, passage.quote?.line, passage.quote?.lines] : null).toEqual([
             "kinds of line.\n\nFour",
             0,
@@ -1589,6 +1598,7 @@ describe("the drawers under each agent's banner", () => {
             "group",
             "conversation",
             "earlier",
+            "items",
         ]);
         expect(text).toContain("        a = 1\nName it.\n");
         const naming: Naming = { group: () => "g", item: (each) => `#${each.item.number}`, party: (party) => `agent ${party.session}/${party.agent}` };
@@ -1621,7 +1631,7 @@ describe("the drawers under each agent's banner", () => {
         const marked = marking(draft, reach.on === null ? [] : reach.acts, "done");
         expect(implied(wrote, marked)).toEqual([]);
         // A remark on the agent's words implies nothing: the conversation's steps offer nothing a comment implies.
-        const twenty = opened(out, at("Twenty")) as Remark;
+        const twenty = opened(out, words("Twenty")) as Remark;
         const talked: Draft = { ...EMPTY, remarks: [{ ...twenty, id: "how", text: "How many?" }] };
         expect(implied(laid([QUESTION, NOTE], [S1], banner, header, talked, NOTHING, [], drawers, undefined, { remote }), talked)).toEqual([]);
     });
@@ -1666,12 +1676,12 @@ describe("the drawers under each agent's banner", () => {
     });
 
     it("keeps a remark on a step under a fold not read yet under the drawer's line until it's read, then under its line", () => {
-        const on = opened(out, at("Reading the records.")) as Remark;
+        const on = opened(out, words("Reading the records.")) as Remark;
         const draft: Draft = { ...EMPTY, remarks: [{ ...on, id: "read", text: "Which records?" }] };
         const unread = laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], drawers, undefined, { remote: DRAWER_ONLY });
         expect(unread.text).toContain("conversation · 7 steps · 2 new\nWhich records?\nyou: Build the reader.\nreading…\n");
         const read = laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], drawers, undefined, { remote, previous: unread });
-        expect(read.text).toContain("you: Build the reader.\nReading the records.\nWhich records?\n· Bash");
+        expect(read.text).toContain("you: Build the reader.\nReading the records.\nReading the records.\nWhich records?\n· Bash");
         expect(read.seated.get("read")?.outdated).toBe(false);
         // One drafted before quotes named their block waits there unconverted until its step is laid out.
         const old: Remark = { id: "old", to: S1, quote: keptQuote("Reading the records.", 0, 20), text: "Which records?", step: 1 };
@@ -1683,9 +1693,9 @@ describe("the drawers under each agent's banner", () => {
     });
 
     it("keeps a remark drafted before quotes named their block on a step of no words of the agent's as a message to them", () => {
-        const old: Remark = { id: "", to: S1, quote: keptQuote("Ask me first.", 0, 13), text: "And?", step: 4 };
+        const old: Remark = { id: "", to: S1, quote: keptQuote("· Grep", 0, 6), text: "And?", step: 6 };
         const wrote = laid([QUESTION, NOTE], [S1], banner, header, { ...EMPTY, remarks: [old] }, NOTHING, [], drawers, undefined, { remote });
-        expect(wrote.converted).toEqual([{ id: "kept remark 0", to: S1, text: "> Ask me first.\nAnd?" }]);
+        expect(wrote.converted).toEqual([{ id: "kept remark 0", to: S1, text: "> · Grep\nAnd?" }]);
     });
 
     it("keeps each remark under its line as the agent writes above it, in its own file or one before it, its lines untouched by the changes (#311)", () => {

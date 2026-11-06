@@ -93,11 +93,12 @@
             }
           },
           {
-            "block": "line",
-            "id": "step 4",
+            "block": "fold",
+            "id": "exchange 4",
             "version": null,
             "offers": [],
-            "spans": [
+            "kind": "earlier",
+            "summary": [
               {
                 "text": "you: Ask me first.",
                 "tone": "operator",
@@ -106,29 +107,54 @@
                 "ticking": null,
                 "gauge": null
               }
-            ]
-          },
-          {
-            "block": "markdown",
-            "id": "step 5",
-            "version": null,
-            "offers": [],
-            "text": "Twenty kinds of line.\n\nFour carry what was said.",
-            "tone": "plain"
-          },
-          {
-            "block": "line",
-            "id": "step 6",
-            "version": null,
-            "offers": [],
-            "spans": [
+            ],
+            "open": true,
+            "barred": false,
+            "content": [
               {
-                "text": "· Grep",
-                "tone": "call",
-                "conversation": null,
-                "item": null,
-                "ticking": null,
-                "gauge": null
+                "block": "fold",
+                "id": "said 5",
+                "version": null,
+                "offers": [],
+                "kind": "items",
+                "summary": [
+                  {
+                    "text": "Twenty kinds of line.",
+                    "tone": "muted",
+                    "conversation": null,
+                    "item": null,
+                    "ticking": null,
+                    "gauge": null
+                  }
+                ],
+                "open": true,
+                "barred": false,
+                "content": [
+                  {
+                    "block": "markdown",
+                    "id": "step 5",
+                    "version": null,
+                    "offers": [],
+                    "text": "Twenty kinds of line.\n\nFour carry what was said.",
+                    "tone": "plain"
+                  }
+                ]
+              },
+              {
+                "block": "line",
+                "id": "step 6",
+                "version": null,
+                "offers": [],
+                "spans": [
+                  {
+                    "text": "· Grep",
+                    "tone": "call",
+                    "conversation": null,
+                    "item": null,
+                    "ticking": null,
+                    "gauge": null
+                  }
+                ]
               }
             ]
           }
@@ -180,12 +206,33 @@
       "answer": {
         "blocks": [
           {
-            "block": "markdown",
-            "id": "step 1",
+            "block": "fold",
+            "id": "said 1",
             "version": null,
             "offers": [],
-            "text": "Reading the records.",
-            "tone": "plain"
+            "kind": "items",
+            "summary": [
+              {
+                "text": "Reading the records.",
+                "tone": "muted",
+                "conversation": null,
+                "item": null,
+                "ticking": null,
+                "gauge": null
+              }
+            ],
+            "open": true,
+            "barred": false,
+            "content": [
+              {
+                "block": "markdown",
+                "id": "step 1",
+                "version": null,
+                "offers": [],
+                "text": "Reading the records.",
+                "tone": "plain"
+              }
+            ]
           },
           {
             "block": "line",

@@ -451,7 +451,7 @@ class TranscriptsServing(ModuleServing):
         watch=GROWING,
     )
     async def conversation(self, viewed: OfAgent) -> lup.Blocks:
-        """Show an agent's whole conversation from their runtime's record, live: everything since you last read it open, by its review mark or your last words, each earlier exchange folded under your words that opened it, each run of calls under one line, and the items of lup's inbox they sent and were sent where they happened."""
+        """Show an agent's whole conversation from their runtime's record, live: everything since you last read it open, by its review mark or your last words, each earlier exchange folded under your words that opened it, each call on a line saying what it was given, each run of them under one line it folds under, and the items of lup's inbox they sent and were sent where they happened, a turn's last words folded under theirs."""
         read = await asyncio.to_thread(
             self.recording.read,
             self.recorded,
