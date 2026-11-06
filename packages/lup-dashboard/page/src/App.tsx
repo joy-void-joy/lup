@@ -33,6 +33,7 @@ import { adopt, merged } from "./looks";
 import { instanceOf, type Instance } from "./views";
 import { producerOf } from "./views/index";
 import { useNarrow } from "./Outline";
+import { panesAsked } from "./panes";
 import { Palette } from "./Palette";
 import { Whole, type Said } from "./Whole";
 import { brief, partSaid, partsCounted, partsSaid, shortened, type ReplyPart } from "./brief";
@@ -247,7 +248,11 @@ export function App() {
     );
     // The review is grouped by agent; `?threads` in the page's address groups it by thread (`docs/dashboard.md`, *The
     // review*). Without it the host is never asked for threads, and everything below reads none.
-    const byThread = new URLSearchParams(location.search).has("threads");
+    // Where the address asks for panes (`?panes=agents`, `?panes=threads`, `panes.ts`), to compare with this, those go by one or the other.
+    const panes = panesAsked(location.search);
+    const byThread = panes === null ? new URLSearchParams(location.search).has("threads") : panes === "threads";
+    // Whether the keys of the page do nothing but move between panes (`Pane mode`).
+    const [paneMode, setPaneMode] = useState(false);
     // The review's threads, as the host reads them for it (`docs/inbox.md`, *Threads in the review*): the same object
     // while the host says the same of them, which it says again at every hook.
     const threadsWatch = useWatched(byThread ? { kind: "inbox-threads" } : null);
@@ -1277,7 +1282,9 @@ export function App() {
                         overview={overview}
                         setOverview={setOverview}
                         order={ready ? kept : null}
-                        keepOrder={whole ? keepOrder : null}
+                        keepOrder={whole && panes === null ? keepOrder : null}
+                        panes={panes}
+                        paning={setPaneMode}
                         looks={looks}
                         running={runningNow}
                         landings={landings}
@@ -1312,6 +1319,7 @@ export function App() {
                         pending={chord}
                         measuring={switching}
                         cut={cut}
+                        paneMode={paneMode}
                     />
                 </div>
             </main>

@@ -462,6 +462,42 @@ export interface Group {
     thread: ThreadRead | null;
     /** Where its last line ends, its fold's end, or its banner's where nothing's under it. */
     end: number;
+    /** The line at the end of its own buffer the messages to its agent are written under (`Showing`), so they're under what's live; none where they're under its banner. */
+    writing?: Span;
+}
+
+/**
+ * What the second pane shows, one buffer at a time, where the page lays the review out in panes (`?panes=`,
+ * `panes.ts`): what's for the operator, across everyone; one agent's own buffer, by `whose` they are, their items and
+ * their conversation, live, what the operator writes at its end reaching them; every agent no longer running; or one
+ * thread's conversation, whole. Each is a subset of the review's tree, laid out by the one layout.
+ */
+export type Showing = { kind: "for you" } | { kind: "agent"; key: string } | { kind: "no agent" } | { kind: "thread"; number: number };
+
+/** What a comment is followed from as the review is laid out anew (`placed`, `anchors.ts`): where each comment was last seated on its block, and that block's lines then. */
+export type Followed = Pick<Laid, "seated" | "lines">;
+
+/**
+ * Return what each comment is followed from once `now` is laid out, where a layout holds a subset of the review (`Showing`):
+ * each one's seat and its block's lines as `now` holds them, else as `was` did, so a comment whose block another buffer
+ * was on screen for is followed through what its block did meanwhile, as it would be had it stayed on screen. A seat on
+ * a block `now` doesn't lay out says nothing of where it is.
+ */
+export function followedFrom(was: Followed | null, now: Laid): Followed {
+    const seated = new Map(was?.seated ?? []);
+    for (const [id, seat] of now.seated) {
+        if (now.lines.has(seat.block) || !seated.has(id)) {
+            seated.set(id, seat);
+        }
+    }
+    const lines = new Map<string, Lines>();
+    for (const seat of seated.values()) {
+        const held = now.lines.get(seat.block) ?? was?.lines.get(seat.block);
+        if (held !== undefined) {
+            lines.set(seat.block, held);
+        }
+    }
+    return { seated, lines };
 }
 
 /**
@@ -478,9 +514,11 @@ export interface Arranging {
     landings?: readonly Wait[];
     remote?: Remote;
     /** The review as the page last laid it out, which each comment is followed from, through its block's change since (`placed`, `anchors.ts`); none as it's first laid out. */
-    previous?: Laid | null;
+    previous?: Followed | null;
     /** The review's threads, which it's grouped by where given (`layThreaded`); none groups it by agent. */
     threads?: Threading | null;
+    /** The one buffer to lay out of the review, where it's laid out in panes; none lays it out whole. */
+    showing?: Showing | null;
 }
 
 /**
@@ -864,6 +902,13 @@ function filedIn(blocks: readonly ViewBlock[]): Filed[] {
     return blocks.flatMap((block) => (isFiled(block) ? [block] : block.block === "fold" && Array.isArray(block.content) ? filedIn(block.content) : []));
 }
 
+/**
+ * How an agent's group is laid out: whole, as the review grouped by agent lays it, each drawer under its banner, then
+ * its items, what's written to them under the banner; `for you`, of its drawers only what waits on the operator; or as
+ * their `own` buffer, their conversation live after their items, what's written to them after it.
+ */
+type GroupShape = "whole" | "for you" | "own";
+
 /** A group as it's laid out: what names it among the others, the agent it's of, what its banner names it by, and its items. */
 export interface Grouping {
     key: string;
@@ -891,7 +936,7 @@ export function flag(item: Item): boolean {
  * earlier one, at the end of its group or in a group of its own after the others, and a change of an item's rank or
  * state moves nothing: `Item.rank` orders nothing here, saying only which items `]a` and `[a` stop at (`toAnswer`).
  */
-function grouped(items: Item[], banner: (item: Item) => string): Grouping[] {
+export function grouped(items: Item[], banner: (item: Item) => string): Grouping[] {
     const groups = new Map<string, Grouping>();
     for (const item of items.toSorted((a, b) => a.number - b.number)) {
         const sender = item.sender;
@@ -1540,15 +1585,42 @@ export function laid(
     // Each agent whose "since you approved" is laid out at the end of the thread they work in, by `whose` they are.
     const sinceLaid = new Set<string>();
     const threading = arranging.threads ?? null;
-    if (threading === null) {
+    const showing = arranging.showing ?? null;
+    if (showing?.kind === "agent") {
+        // One agent's own buffer: what's left for later of theirs, then their group, what's live and what's written to
+        // them last.
+        for (const group of later.filter((each) => each.key === showing.key)) {
+            layGroup(group, true, 0);
+        }
+        for (const group of [...now, ...empty].filter((each) => each.key === showing.key)) {
+            layGroup(group, false, 0, "own");
+        }
+    } else if (showing?.kind === "no agent") {
+        // Every agent no longer running with something here, each under their banner, as lup's approvals aren't: those
+        // answer to the operator, and have a line of their own.
+        const gone = (group: Grouping) => group.conversation !== null && !shown.running.has(group.key);
+        for (const { group, depth } of nested(kept([...now, ...empty].filter(gone), false), arranging.parents ?? null)) {
+            layGroup(group, false, depth, "for you");
+        }
+    } else if (threading !== null) {
+        layThreaded(threading);
+    } else if (showing?.kind === "for you") {
+        // What's for the operator: each group with an item, or something it holds waits on them, or written to under its
+        // banner; of its drawers, only what waits on them.
+        const holds = (group: Grouping) => group.items.length > 0 || letters.some((each) => each.to != null && whose(each.to) === group.key) || sinceWaits(group) !== null;
+        for (const { group, depth } of nested(kept([...now, ...empty].filter(holds), false), arranging.parents ?? null)) {
+            layGroup(group, false, depth, "for you");
+        }
+        for (const group of kept(later, true)) {
+            layGroup(group, true, 0);
+        }
+    } else {
         for (const { group, depth } of nested(kept([...now, ...empty], false), arranging.parents ?? null)) {
             layGroup(group, false, depth);
         }
         for (const group of kept(later, true)) {
             layGroup(group, true, 0);
         }
-    } else {
-        layThreaded(threading);
     }
     // Each group folds whole under its banner, up to the next as deep or shallower, a subagent's inside their parent's,
     // a thread's under its parent's in its section, and never past its section's end.
@@ -1764,6 +1836,14 @@ export function laid(
             items.filter((each) => each.asks && !asked.has(each.number) && !parked.includes(each.number)),
             (item) => banner({ item }, false, ""),
         );
+        // One thread's own buffer: its whole conversation, open, and no section.
+        if (showing?.kind === "thread") {
+            const own = reads.find((each) => each.thread.number === showing.number);
+            if (own !== undefined) {
+                layWhole(own, 0, closed(own) ? "settled" : "open");
+            }
+            return;
+        }
         layThreadSection("waiting on you", `${blocked.length + confirming.length + loose.length}`, () => {
             for (const each of [...blocked, ...confirming]) {
                 layAsking(each);
@@ -1891,8 +1971,11 @@ export function laid(
             return (under.get(null) ?? []).flatMap((each) => walk(each, 0));
         }
 
-        /** Lay a section's line, saying what it holds, then what `lay` lays in it. */
+        /** Lay a section's line, saying what it holds, then what `lay` lays in it; in what's for the operator, only those holding what's for them. */
         function layThreadSection(name: SectionName, holds: string, lay: () => void): void {
+            if (showing?.kind === "for you" && name !== "waiting on you" && name !== "new" && name !== "to read") {
+                return;
+            }
             const id = `section ${name}`;
             const header = w.line(`${name} · ${holds}`, id);
             sections.push({ name, header, fold: null });
@@ -2028,7 +2111,12 @@ export function laid(
          */
         function layWhole(read: ThreadRead, depth: number, section: "open" | "settled"): void {
             const number = read.thread.number;
-            const { made, node, id } = layHeader(read, section, depth, true);
+            const own = showing?.kind === "thread";
+            if (own) {
+                // In its own buffer, what's written on it goes under what's live, at the end.
+                lettered.add(number);
+            }
+            const { made, node, id } = layHeader(read, section, depth, !own);
             const status = read.status ?? null;
             if (status !== null && status.kind === "ledger:parked" && (status.why ?? "") !== "") {
                 const parkedLine = w.line(`parked: ${status.why ?? ""}`, `${id} parked`);
@@ -2044,6 +2132,10 @@ export function laid(
                 layEntries(whole.entries, whole, number, node.children, section);
             }
             laySince(read, made, node, id);
+            if (own) {
+                const answering = read.answering ?? null;
+                layWriting(made, node, id, answering === null ? `nobody answers for @${read.thread.name}: what you write stays on it` : `to ${name(answering)} on @${read.thread.name}`, (each) => each.thread === number);
+            }
         }
 
         /** Lay a line saying the thread whose group is `id`, at `node`, is being read from the host. */
@@ -2249,7 +2341,43 @@ export function laid(
         ];
     }
 
-    function layGroup(group: Grouping, isParked: boolean, depth: number): void {
+    /**
+     * Return the view of "since you approved" of `group`'s agent where it holds what waits on the operator; none else, or
+     * where it isn't read.
+     */
+    function sinceWaits(group: Grouping): Mounted | null {
+        const conversation = group.conversation;
+        if (conversation === null || !drawers.has(group.key)) {
+            return null;
+        }
+        const drawn = looks.drawers(conversation.repository).find((each) => each.view === "since");
+        if (drawn === undefined) {
+            return null;
+        }
+        const of = { runtime: conversation.runtime, session: conversation.session, agent: conversation.agent ?? null };
+        const view = mount(conversation.repository, drawn.module, drawn.view, of, shown, remote);
+        return view.answer?.blocks.waiting === true ? view : null;
+    }
+
+    /**
+     * Lay the line a buffer's messages are written under, at its end, saying whom they reach, `saying`, under what's live
+     * there, so what's written stays in view as it grows; then each message `of` the group `made`, at `node`, whose id is
+     * `id`.
+     */
+    function layWriting(made: Group, node: Placed, id: string, saying: string, of: (letter: Letter) => boolean): void {
+        const line = w.line(`── ${saying} ──`, `${id} writing`);
+        asides.push({ kind: "writing", ...line });
+        made.writing = line;
+        const writtenParts: Placed[] = [part(`${id} writing`, "frame", line.from, line.to)];
+        for (const letter of letters) {
+            if (of(letter)) {
+                writeWritten(letter, made.blocks, writtenParts);
+            }
+        }
+        node.children.push(...writtenParts);
+    }
+
+    function layGroup(group: Grouping, isParked: boolean, depth: number, shape: GroupShape = "whole"): void {
         const conversation = group.conversation;
         const repository = conversation?.repository ?? "";
         const of = conversation === null ? null : { runtime: conversation.runtime, session: conversation.session, agent: conversation.agent ?? null };
@@ -2284,7 +2412,8 @@ export function laid(
         const data = conversation !== null && !isParked ? drawers.get(group.key) : undefined;
         const blocks: Block[] = [];
         const writtenParts: Placed[] = [];
-        if (!isParked) {
+        const talksTo = (letter: Letter) => letter.to != null && letter.thread == null && whose(letter.to) === group.key;
+        if (!isParked && shape !== "own") {
             // A message written on a thread is laid out there, never again under its agent's banner.
             for (const letter of letters) {
                 if (letter.to != null && letter.thread == null && whose(letter.to) === group.key) {
@@ -2313,28 +2442,42 @@ export function laid(
             part(`${id} banner`, "banner", opening.from, opening.to, { children: parts.map((each) => part(each.id, "view", opening.from, opening.to, { view: each })) }),
             ...writtenParts,
         );
-        // Under the banner, before the items, one under the other: each drawer a label, folded until opened in place.
-        if (conversation !== null && of !== null && data !== undefined) {
-            // An agent's "since you approved" laid out at the end of the thread they work in isn't laid out again here.
-            for (const drawn of looks.drawers(repository).filter((each) => !(each.view === "since" && sinceLaid.has(group.key)))) {
+        // Each of `list` of its drawers, one under the other: a label, folded until opened in place, but `live`, open.
+        const layDrawers = (list: readonly { view: string; module: string }[], owner: string, live: boolean) => {
+            if (conversation === null || of === null) {
+                return;
+            }
+            let laidHere = false;
+            for (const drawn of list) {
                 const view = mount(repository, drawn.module, drawn.view, of, shown, remote);
-                const drawer = layDrawer(drawn.view, conversation, view);
+                const drawer = layDrawer(drawn.view, conversation, view, "", live);
                 if (drawer !== null) {
                     made.drawers.push(drawer);
                     laidDrawers.push(drawer);
                     node.children.push(drawer.node);
+                    laidHere = true;
                 }
             }
             const lastDrawer = made.drawers.at(-1);
-            if (lastDrawer !== undefined) {
+            if (laidHere && lastDrawer !== undefined) {
                 // The blank line after them is the last one's, as an item's is its own.
-                lastDrawer.end = w.line("", `${id} drawers`).from;
+                lastDrawer.end = w.line("", owner).from;
             }
-        }
+        };
+        // An agent's "since you approved" laid out at the end of the thread they work in isn't laid out again here.
+        const declared = data === undefined ? [] : looks.drawers(repository).filter((each) => !(each.view === "since" && sinceLaid.has(group.key)));
+        // Under the banner, before the items, each drawer; in what's for the operator, only what waits on them; in the
+        // agent's own buffer, all but their conversation, which comes after the items, live, what's written to them under it.
+        layDrawers(shape === "for you" ? declared.filter((each) => each.view === "since" && sinceWaits(group) !== null) : shape === "own" ? declared.filter((each) => each.view !== "conversation") : declared, `${id} drawers`, false);
         for (const item of group.items) {
             node.children.push(layItem(item, isParked));
         }
-        if (group.items.length === 0 && made.drawers.length === 0 && blocks.length > 0) {
+        if (shape === "own") {
+            layDrawers(declared.filter((each) => each.view === "conversation"), `${id} live`, true);
+            if (conversation !== null) {
+                layWriting(made, node, id, `to ${name(conversation)}`, talksTo);
+            }
+        } else if (group.items.length === 0 && made.drawers.length === 0 && blocks.length > 0) {
             w.line("", `${id} end`);
         }
     }
@@ -2589,9 +2732,9 @@ export function laid(
      * remarks to its agent on one of its blocks go under the line they're on; one on a block not laid out now, as one
      * under a fold not read yet, under its summary line. One drafted before quotes named their block, on the agent's
      * words at a step or on a file's lines, is anchored to it once its block is laid out, else, where what it was on
-     * isn't there, kept as a message to the agent.
+     * isn't there, kept as a message to the agent. `live`, as a conversation in its agent's own buffer, it starts open.
      */
-    function layDrawer(kind: DrawerKind, conversation: Conversation, view: Mounted, owner: string = ""): (Drawer & { node: Placed }) | null {
+    function layDrawer(kind: DrawerKind, conversation: Conversation, view: Mounted, owner: string = "", live: boolean = false): (Drawer & { node: Placed }) | null {
         const answer = view.answer;
         const labelled = wording(answer?.blocks.summary ?? []);
         const label = labelled.text;
@@ -2866,9 +3009,10 @@ export function laid(
         }
         // Folded until opened, a line under the banner; marked done, as a conversation marked read, it folds however
         // the operator left it, but where it holds what they wrote.
-        const drawerFold: Fold = { of, kind, name: "", label: `${said}${label}`, closed: true, summary, from: summary.to, to: last, scope: true };
+        const foldedByMark = markedDone.has(view.id) && into.blocks.length === 0;
+        const drawerFold: Fold = { of, kind, name: "", label: `${said}${label}`, closed: !live || foldedByMark, summary, from: summary.to, to: last, scope: true };
         into.folds.push(drawerFold);
-        if (markedDone.has(view.id) && into.blocks.length === 0) {
+        if (foldedByMark || live) {
             byMarks.add(drawerFold);
         }
         const node = part(view.id, "view", summary.from, last, { view, children });
@@ -3597,7 +3741,8 @@ export function shownAt(scope: Scope, offset: number): number {
  */
 export function aboutAt(laidOut: Laid, written: Written, block: Block): number | undefined {
     if (isLetter(written)) {
-        return groupAt(laidOut, block.from)?.banner.from;
+        const group = groupAt(laidOut, block.from);
+        return group?.writing?.from ?? group?.banner.from;
     }
     const scope = scopeAt(laidOut, block.from);
     if (scope === undefined) {

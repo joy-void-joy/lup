@@ -113,7 +113,13 @@ export async function review(page: Page, thrown: readonly Error[] = []): Promise
                 throw new Error(`a search finds a line's text, and ${JSON.stringify(text)} is more than one`);
             }
             await holds(text);
-            await keyboard("Escape", "/");
+            await evaluate((view) => view.focus());
+            // Whatever was begun ends first; in normal mode with nothing begun there's nothing to end, and in panes Esc
+            // would leave the pane.
+            if ((await page.evaluate(mode)) !== "normal") {
+                await page.keyboard.press("Escape");
+            }
+            await page.keyboard.press("/");
             // The review's vim searches with JavaScript's regular expressions (`pcre`), each of their own characters
             // escaped so the text is matched as written, and the search's own `/`.
             await page.keyboard.type(text.replaceAll(/[\\^$.*+?()[\]{}|/]/g, "\\$&"));

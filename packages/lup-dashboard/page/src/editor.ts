@@ -125,6 +125,10 @@ interface Actions {
     folds: (state?: EditorState) => readonly Folding[];
     undo: (way: "undo" | "redo" | "earlier" | "later") => void;
     send: () => void;
+    /** Esc with nothing left for vim to end, in normal mode with no key of a command held; whether it was taken, none taking it where the view isn't in panes. */
+    escaped: () => boolean;
+    /** Enter in normal mode, where the view has its own use for it, as the list of the panes opening a row; whether it was taken. */
+    pressedEnter: () => boolean;
     blocks: () => Block[];
     chord: (keys: string) => void;
     say: (text: string) => void;
@@ -838,6 +842,15 @@ const keys = Prec.highest(
                     event.preventDefault();
                     return true;
                 }
+            }
+            // Esc with nothing left for vim to end: out of the pane, where the view has panes (`Panes.tsx`).
+            if (event.key === "Escape" && !modified && event.target === view.contentDOM && idle(cm) && bound.actions?.escaped() === true) {
+                event.preventDefault();
+                return true;
+            }
+            if (event.key === "Enter" && !modified && event.target === view.contentDOM && idle(cm) && bound.actions?.pressedEnter() === true) {
+                event.preventDefault();
+                return true;
             }
             if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
                 if (cm.state.vim.insertMode) {
@@ -1583,8 +1596,12 @@ interface Config<D, C> {
     moved?: (head: number) => void;
     /** Changed each time the draft is replaced from outside, as when it's sent: what was done before can't be undone. */
     epoch: number;
-    /** Whether the editor is shown: shown again, it takes the keyboard. */
+    /** Whether the editor is shown: shown again, it takes the keyboard. Not shown so, as the list of the panes, it waits to be given the keyboard. */
     shownNow: boolean;
+    /** Whether long lines stay one row, cut at the pane's edge, as a list's do; else they wrap, as the review's do. */
+    rows?: boolean;
+    /** Told Esc with nothing left for vim to end: out of the pane, in panes (`Panes.tsx`). None lets vim have it. */
+    escaped?: () => void;
     /** Open the list of every key (`g?`). */
     list: () => void;
     /** Open the panel of what was said, whole (`g<`). */
@@ -1641,6 +1658,8 @@ export interface Own<C> {
     chooseIn?: (position: number) => { from: number; to: number } | undefined;
     /** Do what the verb named `name` does on each of `folds`, a visual selection's, as one mark; none where the view has no verbs. */
     verbOn?: (name: string, folds: readonly Folding[]) => void;
+    /** What Enter does in normal mode where it isn't vim's; none leaves it vim's. */
+    enter?: () => void;
 }
 
 /** One editor, as a view uses it. */
@@ -1788,7 +1807,7 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                     outOfFolds,
                     foldsTold,
                     offHidden,
-                    EditorView.lineWrapping,
+                    ...(config.rows === true ? [] : [EditorView.lineWrapping]),
                     placeheld(margined),
                     drawing,
                     painting,
@@ -1831,11 +1850,20 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                     keys,
                     typed,
                     ahead,
+                    // What's run from the palette goes to the editor last given the keyboard.
+                    EditorView.domEventHandlers({
+                        focus: (_, focused) => {
+                            fed = focused;
+                            return false;
+                        },
+                    }),
                 ],
             }),
         });
         view.current = created;
-        fed = created;
+        if (config.shownNow) {
+            fed = created;
+        }
         shifting(created);
         getCM(created)?.on("vim-mode-change", (event: { mode: string }) => {
             // Leaving visual mode, as Esc does, ends a fold-wise selection.
@@ -1860,7 +1888,9 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 bound.current.actions?.left();
             }
         });
-        created.focus();
+        if (config.shownNow) {
+            created.focus();
+        }
         return () => {
             created.destroy();
             view.current = null;
@@ -2224,6 +2254,20 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 }
             },
             send: own.send,
+            escaped: () => {
+                if (config.escaped === undefined) {
+                    return false;
+                }
+                config.escaped();
+                return true;
+            },
+            pressedEnter: () => {
+                if (own.enter === undefined) {
+                    return false;
+                }
+                own.enter();
+                return true;
+            },
             paint: (from, to) => {
                 const painted = own.paint?.(toLaid(from), toLaid(to)) ?? [];
                 const changes = changesNow();

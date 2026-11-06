@@ -52,6 +52,8 @@ export interface DemoOptions {
      * thread (`?threads`), which most of these tests drive.
      */
     byAgent?: boolean;
+    /** Open the review in two panes (`?panes=`, `page/src/panes.ts`), its list by agent or by thread; it takes the place of `byAgent`. */
+    panes?: "agents" | "threads";
 }
 
 /** A demo running, until it's closed. */
@@ -99,7 +101,9 @@ export async function demo(options: DemoOptions = {}): Promise<Demo> {
     }
     const served = await start("uv", args, { what: "`lup-dashboard demo`", cwd: ROOT });
     const url = new URL(served.first);
-    if (options.byAgent !== true) {
+    if (options.panes !== undefined) {
+        url.searchParams.set("panes", options.panes);
+    } else if (options.byAgent !== true) {
         url.searchParams.set("threads", "");
     }
     return { url: url.href, close: served.stop, [Symbol.asyncDispose]: served.stop };
