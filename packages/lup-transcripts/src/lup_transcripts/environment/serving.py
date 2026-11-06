@@ -26,11 +26,14 @@ records, for the operator or a room, saying whose home each was kept from. In a
 room, each asks the host to keep first (`Keep`), one request, so what it reads
 is what the host holds as it asks.
 
-Its views read a conversation live, from the runtime's own record as it grows
-(`conversation`, the drawer under each agent's banner; `exchange`, one earlier
-exchange; `call`, one call, its output and each long argument read as each opens), laid out in lup's blocks
-(`environment/conversation.py`), each record read again only once it changed
-(`Recording`). The drawer opens what came after the operator last read it,
+Its views read a conversation live, from the runtime's own record as it grows,
+each laid out in lup's blocks, each record read again only once it changed
+(`Recording`): `messages`, the drawer of the agent's words alone, and
+`earlier_messages`, what came earlier in it (`environment/messages.py`);
+`conversation`, the drawer called the trace, of everything they did;
+`exchange`, one earlier exchange of it; `call`, one call, its output and each
+long argument read as each opens (`environment/conversation.py`). The trace
+opens what came after the operator last read it,
 by its review mark (`self.marks`, keyed by the conversation's runtime's ids,
 `drawn`) or their own last words, and offers moving the mark to its last step,
 Space `d` on its line; it keeps open at most the agent's last words its fold
@@ -38,7 +41,9 @@ kind of what came earlier keeps (`FoldKind.keeps_open`, 20 unless a person's
 layer says), as the module's layers leave it. Shown, the drawer and each
 exchange opened in it are answered again at their agent's turns and calls and
 a minute apart at most; a call, open in it, as a call of the agent's finishes,
-so one still running shows what it returned once it has.
+so one still running shows what it returned once it has. The messages drawer
+keeps a review mark of its own (`read_messages`), as each drawer is its own scope
+of the review.
 """
 
 import asyncio
@@ -59,8 +64,9 @@ from lup_dev.declaration.serving import Lup, ModuleServing, Operator, Related, R
 from lup_dev.git import Git, GitError
 from lup_dev.host.client import FromRoom, RoomClient
 from lup_dev.host.protocol import HostError, Reply, Request
-from lup_dev.host.records import Home, Whose
+from lup_dev.host.records import Home, Said, Whose
 from lup_dev.inbox.context import Recording
+from lup_dev.inbox.store import InboxError
 from lup_dev.layout import digest
 from lup_transcripts.environment import views
 from lup_transcripts.environment.conversation import (
@@ -71,6 +77,11 @@ from lup_transcripts.environment.conversation import (
     call_blocks,
     conversation_blocks,
     exchange_blocks,
+)
+from lup_transcripts.environment.messages import (
+    OfMessages,
+    earlier_messages_blocks,
+    messages_blocks,
 )
 
 if TYPE_CHECKING:
@@ -93,6 +104,11 @@ def drawn(viewed: OfAgent) -> JsonObject:
     return OfAgent(
         runtime=viewed.runtime, session=viewed.session, agent=viewed.agent
     ).model_dump(mode="json")
+
+
+def read_messages(viewed: OfAgent) -> JsonObject:
+    """Return the key of the review mark on the messages drawer of the conversation `viewed` names: a mark of its own, beside the trace's (`drawn`), each drawer being its own scope of the review."""
+    return {**drawn(viewed), "drawer": "messages"}
 
 
 class Every(Model):
@@ -446,12 +462,79 @@ class TranscriptsServing(ModuleServing):
             EARLIER_KIND,
         )
 
+    def last_words(self, of: OfAgent) -> str:
+        """Return what `of` last said, from their runtime's record, each read again only once it changed (`Recording`): what a subagent's parent is handed by their runtime, which no item holds; nothing where their record isn't read."""
+        try:
+            read = self.recording.read(self.recorded, of.runtime, of.session, of.agent)
+        except InboxError:
+            return ""
+        said = [
+            each.text
+            for each in read.transcript.entries
+            if isinstance(each, Said) and each.by == "agent"
+        ]
+        return said[-1] if said else ""
+
     @lup.view(
-        place=lup.Drawer(letter="v", called="the conversation", colour="cyan"),
+        place=lup.Drawer(letter="M", called="the messages", colour="info"),
+        watch=GROWING,
+    )
+    async def messages(self, viewed: OfAgent) -> lup.Blocks:
+        """Show an agent's words alone, from their runtime's record and lup's inbox, live: what you said to them, their turns' ends, and what they sent and were sent, in the order it came, each saying who's talking to whom; what came after you last read it open, by its review mark or your last words."""
+        read = await asyncio.to_thread(
+            self.recording.read,
+            self.recorded,
+            viewed.runtime,
+            viewed.session,
+            viewed.agent,
+        )
+        exchanged = await self.exchanges.exchanged(viewed)
+        entries = read.transcript.entries
+        key = read_messages(viewed)
+        return await asyncio.to_thread(
+            messages_blocks,
+            viewed,
+            entries,
+            exchanged,
+            view=TranscriptsServing.earlier_messages,
+            report=self.last_words,
+            brief=read.transcript.brief,
+            earlier=self.earlier(),
+            mark=await self.marks.mark(key),
+            reading=self.marks.offer(
+                key, str(len(entries) - 1), "mark their messages read"
+            ),
+        )
+
+    @lup.view(watch=GROWING)
+    async def earlier_messages(self, viewed: OfMessages) -> lup.Blocks:
+        """Show what came earlier among an agent's messages: what you had read, up to one message with `--through`; or, with `--until-last`, what came before the last that many."""
+        read = await asyncio.to_thread(
+            self.recording.read,
+            self.recorded,
+            viewed.runtime,
+            viewed.session,
+            viewed.agent,
+        )
+        exchanged = await self.exchanges.exchanged(viewed)
+        return await asyncio.to_thread(
+            earlier_messages_blocks,
+            viewed,
+            read.transcript.entries,
+            exchanged,
+            view=TranscriptsServing.earlier_messages,
+            report=self.last_words,
+            brief=read.transcript.brief,
+            earlier=self.earlier(),
+            mark=await self.marks.mark(read_messages(viewed)),
+        )
+
+    @lup.view(
+        place=lup.Drawer(letter="v", called="the trace", colour="cyan"),
         watch=GROWING,
     )
     async def conversation(self, viewed: OfAgent) -> lup.Blocks:
-        """Show an agent's whole conversation from their runtime's record, live: everything since you last read it open, by its review mark or your last words, each earlier exchange folded under your words that opened it, each call on a line saying what it was given, each run of them under one line it folds under, and the items of lup's inbox they sent and were sent where they happened, a turn's last words folded under theirs."""
+        """Show everything an agent did, their trace, from their runtime's record, live: everything since you last read it open, by its review mark or your last words, each earlier exchange folded under your words that opened it, each call on a line saying what it was given, each run of them under one line it folds under, and the items of lup's inbox they sent and were sent where they happened, a turn's last words folded under theirs."""
         read = await asyncio.to_thread(
             self.recording.read,
             self.recorded,

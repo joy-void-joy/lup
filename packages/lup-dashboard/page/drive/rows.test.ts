@@ -71,7 +71,7 @@ describe("every line of the page on one row, at the demo's width, in headless Ch
     });
 
     it("keeps the line of keys and the line under the review to one row on every section's line, banner and item header", async () => {
-        // The demo's late question first, however fast this runs: it gives the lines around it, @64's the longest of them,
+        // The demo's late question first, however fast this runs: it gives the lines around it, @66's the longest of them,
         // Space h on the parser, and nothing the demo brings after it makes a line longer.
         await review.holds("── @61 question · lup-impl/parser");
         const wrong: string[] = [];
@@ -127,8 +127,8 @@ describe("every line of the page on one row, at the demo's width, in headless Ch
     it("counts what the reply marks and what's left for later on one row, and shows each by its number with g<", async () => {
         // One item read is named; more are counted.
         for (const [header, read] of [
-            ["── @64 note", "read @64"],
-            ["── @65 note", "read 2 items"],
+            ["── @52 note", "read @52"],
+            ["── @56 turn", "read 2 items"],
             ["── @66 note", "read 3 items"],
         ] as const) {
             await review.goTo(header);
@@ -145,7 +145,7 @@ describe("every line of the page on one row, at the demo's width, in headless Ch
         await dashboard.keys.press(["g", "<"]);
         await dashboard.page.waitForSelector(".whole-palette");
         const whole = (await dashboard.page.locator(".whole-palette").innerText()).replace(/\s+/g, " ");
-        expect(whole).toContain("read @64, @65, @66");
+        expect(whole).toContain("read @52, @56, @66");
         expect(whole).toContain("Left for later @62");
         await dashboard.keys.press(["Escape"]);
         await dashboard.page.waitForSelector(".whole-palette", { state: "detached" });

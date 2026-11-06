@@ -65,7 +65,7 @@ describe("settling any thread, in headless Chromium", () => {
     });
 
     it("reads a thread's news with Space d, then settles it with Space d again", async () => {
-        await review.goTo("━━ @auth-survey · Where auth is checked · lup-impl/explore-auth holds · 2 new");
+        await review.goTo("━━ @auth-survey · Where auth is checked · lup-impl/explore-auth holds · 1 new");
         await offers("␣d mark its news read, each item with it");
         await offers("␣x decline it: nothing more will be done");
         await dashboard.keys.press([" ", "d"]);

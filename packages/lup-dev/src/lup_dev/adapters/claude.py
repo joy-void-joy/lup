@@ -2379,6 +2379,7 @@ class ClaudeTranscripts(Model, Reader):
             ],
             usage=self.usage(own, record),
             tasks=tasks(lines),
+            brief=briefed(lines) if sidechain else None,
         )
 
     @override
@@ -2696,6 +2697,19 @@ def entries(line: Line, *, sidechain: bool = False) -> list[Entry]:
             return [Spoken(by="operator", text=queued.prompt, at=at)]
         case _:
             return []
+
+
+def briefed(lines: list[Line]) -> str | None:
+    """Return what the conversation that spawned a subagent told them: the first user line of their own record, all of it sidechain and so none of the operator's (`UserLine.operators`), the prompt its parent's `Agent` gave; none where it holds no text."""
+    first = next((each for each in lines if isinstance(each, UserLine)), None)
+    if first is None:
+        return None
+    match first.message.content:
+        case str() as text:
+            return text or None
+        case blocks:
+            texts = [each.text for each in blocks if isinstance(each, TextBlock)]
+            return "\n".join(texts) if texts else None
 
 
 def said_by_agent(block: Block, at: datetime | None) -> Entry | None:

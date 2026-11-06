@@ -75,6 +75,7 @@ import {
     type Drawers,
     type Instance,
     type Mounted,
+    type OfAgent,
     type Offer,
     type PlacedFile,
     type Remote,
@@ -533,6 +534,8 @@ export interface Drawer extends Scope {
     toned: (Span & { tone: string })[];
     /** Each Markdown block it shows, from its first line to its last, the remarks under its lines among them: what's highlighted as Markdown. */
     texts: Span[];
+    /** Who wrote each of its Markdown blocks, by the block's id, where that's another agent than its own (`Markdown.by`): whom a remark on it goes to. */
+    writers: ReadonlyMap<string, Conversation>;
     /** What each fold its view says is set off under its summary line holds (`Fold.barred`), with the fold's kind: drawn set in, a bar in the kind's colour beside it. */
     bars: Bar[];
     /** What its "since you approved" shows, each file with its place and the block it's in, where it's that drawer. */
@@ -635,6 +638,21 @@ export function withWritten(draft: Draft, list: Written[]): Draft {
 /** Return whether what's written is a message, to an agent or on a thread, rather than a comment on an item or a remark in a drawer. */
 export function isLetter(each: Written): each is Letter {
     return !("item" in each) && !("quote" in each);
+}
+
+/**
+ * Return the agent whose drawer `remark` is on, which their group is laid out for: the one its block's view is of, as the
+ * block's id names it (`instanceOf`, `blockId`), who's another than whom it goes to where it's on what another agent
+ * wrote; else, on no such block, as one drafted before quotes named theirs, whom it goes to.
+ */
+export function holderOf(remark: Remark): Conversation {
+    const block = remark.quote.block ?? "";
+    const end = block.indexOf("}] ");
+    if (end < 0) {
+        return remark.to;
+    }
+    const [repository, , , argument] = JSON.parse(block.slice(0, end + 2)) as [string, string, string, OfAgent];
+    return conversationOf(repository, argument);
 }
 
 /** Return whether what's written is a remark in one of an agent's drawers. */
@@ -1493,7 +1511,7 @@ export function laid(
         called: name,
     };
     const now = grouped(items.filter((each) => !parked.includes(each.number)), (item) => banner({ item }, false, ""));
-    const empty = emptyGroups([...agents, ...letters.flatMap((each) => (each.to == null ? [] : [each.to])), ...remarks.map((each) => each.to)], now);
+    const empty = emptyGroups([...agents, ...letters.flatMap((each) => (each.to == null ? [] : [each.to])), ...remarks.map(holderOf)], now);
     const later = grouped(items.filter((each) => parked.includes(each.number)), (item) => banner({ item }, true, ""));
     const w = new Writer();
     const groups: Group[] = [];
@@ -1795,7 +1813,7 @@ export function laid(
         // Each agent's group, their banner and their own views, as an agent's group was: those running, those holding
         // what waits on the operator, and each a message is written to under their banner.
         const agentGroups = emptyGroups(
-            [...agents, ...letters.flatMap((each) => (each.to != null && each.thread == null ? [each.to] : [])), ...remarks.map((each) => each.to)],
+            [...agents, ...letters.flatMap((each) => (each.to != null && each.thread == null ? [each.to] : [])), ...remarks.map(holderOf)],
             [],
         );
         layThreadSection("agents", `${agentGroups.length}`, () => {
@@ -2585,14 +2603,15 @@ export function laid(
         const into = gathering();
         const key = whose(conversation);
         const ours = `${view.id} `;
-        // The remarks to its agent this drawer shows, its own and those it takes from before quotes named their block.
+        // The remarks this drawer shows: each on one of its blocks, to whoever wrote what it's on, and those to its agent
+        // it takes from before quotes named their block.
         const mine = (taking: (remark: Remark) => boolean): Remark[] =>
             wrote.flatMap((each) => {
-                if (!isRemark(each) || whose(each.to) !== key) {
+                if (!isRemark(each)) {
                     return [];
                 }
                 const block = each.quote.block ?? "";
-                return (block === "" ? taking(each) : block.startsWith(ours)) ? [each] : [];
+                return (block === "" ? whose(each.to) === key && taking(each) : block.startsWith(ours)) ? [each] : [];
             });
         const reviewed: ReviewedLine[] = [];
         let settled: Span | null = null;
@@ -2600,6 +2619,7 @@ export function laid(
         const loads = new Map<string, Instance>();
         const toned: (Span & { tone: string })[] = [];
         const texts: Span[] = [];
+        const writers = new Map<string, Conversation>();
         const bars: Bar[] = [];
         // A view its module answers is drawn in its tones; the page's own views' lines in what the review draws them as.
         const remotely = producerOf(view.module, view.view) === undefined;
@@ -2792,6 +2812,9 @@ export function laid(
                             }
                         });
                         texts.push({ from, to: w.at - 1 });
+                        if (block.by != null) {
+                            writers.set(id, conversationOf(view.repository, block.by));
+                        }
                         within.push(part(id, "block", from, w.at - 1, { block }));
                         break;
                     }
@@ -2859,6 +2882,7 @@ export function laid(
             loads,
             toned,
             texts,
+            writers,
             bars,
             files: [...(answer.files?.values() ?? [])],
             reviewed,
@@ -3413,7 +3437,12 @@ function openedIn(laidOut: Laid, drawer: Drawer, position: number): Remark | und
         return undefined;
     }
     const quote = onLines(laidOut, line, line, 0, shown.length, said(laidOut.text, drawer, [line], line.from, line.to));
-    return quote === null ? undefined : { id: "", to: drawer.conversation, quote, text: "", ...coded(drawer, [line]) };
+    return quote === null ? undefined : { id: "", to: writerOf(drawer, line), quote, text: "", ...coded(drawer, [line]) };
+}
+
+/** Return whom a remark on `line` of `drawer` goes to: whoever wrote what it's on, as its block says where that's another agent (`Markdown.by`), else the drawer's agent. */
+function writerOf(drawer: Drawer, line: OwnLine): Conversation {
+    return drawer.writers.get(line.block) ?? drawer.conversation;
 }
 
 /** Return what a remark on `lines` of `drawer` records of a file: its version and the lines quoted, for one on a file of "since you approved"; nothing on any other line. */
@@ -3482,7 +3511,7 @@ function quotedIn(laidOut: Laid, drawer: Drawer, from: number, to: number): Rema
     const lines = drawer.lines.slice(drawer.lines.indexOf(first), drawer.lines.indexOf(last) + 1);
     const top = ofLastBlock(drawer, first, last, offsets.start);
     const quote = onLines(laidOut, top.first, last, top.start, offsets.end - top.first.own, said(laidOut.text, drawer, lines, from, to));
-    return quote === null ? undefined : { id: "", to: drawer.conversation, quote, text: "", ...coded(drawer, lines) };
+    return quote === null ? undefined : { id: "", to: writerOf(drawer, last), quote, text: "", ...coded(drawer, lines) };
 }
 
 /** Say an item's comments as one answer, as its agent reads them: each under the passage it quotes, set off as a mail quotes, in the order of what they're on, each block's by its lines; those on the whole after. */

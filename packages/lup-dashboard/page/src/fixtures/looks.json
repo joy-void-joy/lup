@@ -313,6 +313,18 @@
       "like": "muted",
       "colour": null,
       "weight": null
+    },
+    {
+      "name": "heard",
+      "like": null,
+      "colour": "purple",
+      "weight": null
+    },
+    {
+      "name": "new",
+      "like": "strong",
+      "colour": null,
+      "weight": null
     }
   ],
   "drawers": [
@@ -338,11 +350,21 @@
     },
     {
       "module": "transcripts",
+      "view": "messages",
+      "place": {
+        "under": "agent",
+        "letter": "M",
+        "called": "the messages",
+        "colour": "info"
+      }
+    },
+    {
+      "module": "transcripts",
       "view": "conversation",
       "place": {
         "under": "agent",
         "letter": "v",
-        "called": "the conversation",
+        "called": "the trace",
         "colour": "cyan"
       }
     }

@@ -17,10 +17,10 @@ const OTHER: Looks = {
 describe("the looks, merged across repositories", () => {
     it("knows each kind of fold by its name, the core's first, outermost first, a drawer's among them", () => {
         const looks = merged({}, STANDING);
-        expect(looks.kinds.map((each) => `${each.letter}${each.drawer ? "·" : ""}`).join(" ")).toBe("w a i t· s· v· o r f p l e b u m c k d x");
+        expect(looks.kinds.map((each) => `${each.letter}${each.drawer ? "·" : ""}`).join(" ")).toBe("w a i t· s· M· v· o r f p l e b u m c k d x");
         expect(looks.kinds.find((each) => each.name === "item")).toMatchObject({ chord: false, whole: true, counts: true });
         expect(looks.kinds.find((each) => each.name === "lines")).toMatchObject({ counts: false });
-        expect(looks.drawers("/r/any.git").map((each) => each.view)).toEqual(["tasks", "since", "conversation"]);
+        expect(looks.drawers("/r/any.git").map((each) => each.view)).toEqual(["tasks", "since", "messages", "conversation"]);
         expect(looks.banners("/r/any.git").map((each) => `${each.module} ${each.view}`)).toEqual(["adapters banner", "judge banner"]);
         expect(looks.refused).toEqual([]);
         // Pause is declared, its key kept, but it isn't built: no verb of the review's.
@@ -34,8 +34,8 @@ describe("the looks, merged across repositories", () => {
         expect(looks.kinds.find((each) => each.name === "scenes")?.letter).toBe("q");
         expect(looks.refused).toEqual(["zoetrope's fold kind `episodes` takes the letter e, which `earlier` has: za, zr and zm reach its folds, e doesn't."]);
         // Each repository's drawers its own; one whose process hasn't said, the stand-in's.
-        expect(looks.drawers("/r/zoetrope.git").map((each) => each.view)).toEqual(["tasks", "since", "conversation", "reel"]);
-        expect(looks.drawers("/r/new.git").map((each) => each.view)).toEqual(["tasks", "since", "conversation"]);
+        expect(looks.drawers("/r/zoetrope.git").map((each) => each.view)).toEqual(["tasks", "since", "messages", "conversation", "reel"]);
+        expect(looks.drawers("/r/new.git").map((each) => each.view)).toEqual(["tasks", "since", "messages", "conversation"]);
     });
 
     it("draws each kind in its colour and each tone in its look, through the tone it takes it from", () => {

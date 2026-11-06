@@ -724,9 +724,10 @@ class Speaker(Model, arbitrary_types_allowed=True):
         brief found wrong on what matters, rather than at the end. It's told
         to them at their next call, their turn's end or their `wait_inbox`,
         whichever comes first, and an idle session is woken for it where their
-        runtime can be; the answer says which. The operator reads a copy, as
-        news. One that has ended, or isn't yours, is refused, saying why.
-        Nothing holds: your work goes on.
+        runtime can be; the answer says which. The operator can read it in both
+        your drawers on their dashboard, where it asks nothing of them. One that
+        has ended, or isn't yours, is refused, saying why. Nothing holds: your
+        work goes on.
         """
         try:
             recipient = self.addressed(sending.to)
@@ -750,11 +751,16 @@ class Speaker(Model, arbitrary_types_allowed=True):
                     self.launch.worktree,
                     call=self.call,
                 )
-                copy = await self.said(
-                    message.model_copy(update={"to": recipient}), thread
+                copy = await self.delivery.copied(
+                    message,
+                    recipient,
+                    self.party,
+                    self.launch.worktree,
+                    call=self.call,
+                    thread=thread,
                 )
                 return self.answered(
-                    self.arriving(recipient, item.number, copy.number, thread), copy
+                    self.arriving(recipient, item.number, thread), copy
                 )
 
     def addressed(self, to: str) -> Party:
@@ -831,10 +837,9 @@ class Speaker(Model, arbitrary_types_allowed=True):
         self,
         recipient: Conversation,
         number: int,
-        copy: int,
         thread: Thread | None = None,
     ) -> str:
-        """Say where message `number` to `recipient`, another conversation, is, and how it'll be told, with the number of the operator's `copy`, and the thread it landed in where the call named one."""
+        """Say where message `number` to `recipient`, another conversation, is, and how it'll be told, and the thread it landed in where the call named one."""
         whose = (
             "your parent"
             if recipient == self.delivery.parent(self.party)
@@ -842,9 +847,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         )
         return (
             f"Your message is in the inbox of {whose} {self.called(recipient)}, "
-            f"{cited(number)}, "
-            f"and the operator has a copy, {cited(copy)}{self.landing(thread)}. It's "
-            "told at their "
+            f"{cited(number)}{self.landing(thread)}. It's told at their "
             "next call, their turn's end or their `wait_inbox`, whichever comes first"
             f"{self.idle(recipient)}."
         )

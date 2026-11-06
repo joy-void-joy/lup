@@ -461,13 +461,9 @@ def test_the_demo_serves_its_stand_in_launches_and_items_as_the_host_lists_them(
         59,
         60,
         62,
-        64,
-        65,
         66,
-        67,
         68,
         69,
-        70,
     ]
     assert shown.json()["item"]["number"] == 51
 
@@ -500,7 +496,7 @@ def test_the_demo_answers_a_module_s_view_with_the_module_s_own_layout_over_its_
     # The module's own layout: its summary, its folds, its items woven in, each
     # call read whole as its fold opens, from its own view.
     lines = [each.strip() for each in drawer.blocks.text().splitlines()]
-    assert lines[0].startswith("conversation · ")
+    assert lines[0].startswith("trace · ")
     assert any(
         each.startswith("▸ → @51 question to you · waiting on you") for each in lines
     )
@@ -524,6 +520,7 @@ def test_the_demo_answers_a_module_s_view_with_the_module_s_own_layout_over_its_
     ] == [
         ("adapters", "tasks", "t"),
         ("judge", "since", "s"),
+        ("transcripts", "messages", "M"),
         ("transcripts", "conversation", "v"),
     ]
     assert listed.standing == listed.looks[lup]
@@ -562,14 +559,14 @@ def test_the_demo_weaves_a_conversations_items_into_its_view_a_message_sent_from
     found = ItemsListing(delivery=demo.host.delivery).exchanged(
         parser, demo.host.inbox.exchanged(parser)
     )
-    assert [each.item.number for each in found.sent] == [47, 51, 57, 59, 67]
+    assert [each.item.number for each in found.sent] == [47, 51, 57, 59, 73]
     assert found.sent[0].item.call == "call-47"
-    assert [each.item.number for each in found.received] == [48, number]
+    assert [each.item.number for each in found.received] == [48, 74, number]
     # Each as it's told them: a reply on the item it replies to, a message as it's written.
     assert '<comment id="48.1">Good: keep the two readers apart.</comment>' in (
         found.received[0].text
     )
-    assert found.received[1].text == "Go on."
+    assert found.received[-1].text == "Go on."
     # Each a line where it happened in the conversation's view, as the core words it,
     # the message not told yet, since no agent runs here to be told it.
     lines = [each.strip() for each in viewed.blocks.text().splitlines()]

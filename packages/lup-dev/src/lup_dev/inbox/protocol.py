@@ -81,7 +81,7 @@ from lup_ledger.records import Edge
 from lup_ledger.threads import Check
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
 
 class ListInbox(Request, Span, reads=True):
@@ -514,6 +514,21 @@ class Context(Reply):
     """Which of `entries` is the call that made the item."""
 
 
+class Words(Model):
+    """One item as a view of a conversation's words alone shows it (`inbox/lines.py`, `Lined.heading`): who says what to whom, and what they said, as the operator reads it back."""
+
+    line: list[blocks.Span]
+    """`@53 you → lup-impl/parser · answer to @51`, each conversation a span of
+    their own, as in `Exchange.line`."""
+    text: str
+    """What they said, in Markdown: a conversation's as they wrote it, the
+    operator's as `Delivery.read_back` says it; empty where it says nothing more
+    than its line."""
+    reported: bool = False
+    """Whether its sender's last words go with it, which only their record holds:
+    a subagent's end, whose words their runtime hands their parent."""
+
+
 class Exchange(Model):
     """One item a conversation sent or was sent, with its text whole, as the conversation wrote it or as they're told it, and its line as a view of the conversation shows it, which the core words (`inbox/lines.py`)."""
 
@@ -535,6 +550,12 @@ class Exchange(Model):
     """Whether sending it is all the call that made it did, that call's input
     being its text: one of lup's tools, as `note` or `ask`, rather than a write
     lup flagged or held."""
+    by: blocks.OfAgent | None = None
+    """Who wrote it, where it's another conversation than this one: whom a
+    comment on its text goes to, whichever drawer it's written in."""
+    words: Words | None = None
+    """It as a view of the conversation's words alone shows it; none where it's
+    no words of theirs (`lines.worded`)."""
 
 
 class Pathed(Model):
@@ -552,11 +573,13 @@ class Pathed(Model):
         return f"{self.path} ({ids(self.conversation)})" if self.alike else self.path
 
 
-def pathed(roster: Roster, items: list[Item]) -> list[Pathed]:
-    """Return each conversation `items` name with their path, once, where lup knows it (`Roster`): each an item is from, for, was addressed to or sent to (`Message.to`), and each a review writes to (`named_by`)."""
+def pathed(
+    roster: Roster, items: list[Item], also: Sequence[Conversation] = ()
+) -> list[Pathed]:
+    """Return each conversation `items` name with their path, once, where lup knows it (`Roster`): each an item is from, for, was addressed to or sent to (`Message.to`), and each a review writes to (`named_by`); then each of `also`."""
     return [
         Pathed(conversation=each, path=path, alike=bool(roster.alike(each)))
-        for each in named_by(items)
+        for each in dict.fromkeys([*named_by(items), *also])
         if (path := roster.path(each)) is not None
     ]
 
@@ -613,6 +636,16 @@ class Exchanged(Reply):
     their path, where lup knows their session's name: a view says a
     conversation by it, and refers to them by their runtime's ids, which never
     change as they're renamed."""
+    parent: blocks.OfAgent | None = None
+    """The conversation that spawned them, where one did."""
+    typed: list[blocks.Span] = []
+    """The heading of what their record says was said to them, which no item
+    holds, in a view of the conversation's words alone: the operator's words,
+    `you → lup-impl`; a subagent's from their parent, `lup-impl → lup-impl/parser`,
+    since nobody types to one, and a runtime records what spawned them so."""
+    last_words: list[blocks.Span] = []
+    """The heading of a subagent's last words, which their runtime hands their
+    parent and no item holds: `lup-impl/parser → lup-impl · their last words`."""
 
     def path(self, conversation: Conversation) -> str | None:
         """Return `conversation`'s path, as the exchange gives it; none where lup knows none."""
@@ -629,8 +662,11 @@ def exchanged(
     written: Callable[[Item], str],
     told: Callable[[Item], str],
     paths: list[Pathed],
+    read: Callable[[Item], str] | None = None,
+    parent: Conversation | None = None,
 ) -> Exchanged:
-    """Return `items`, those `party` sent, with the text as they wrote it (`written`), and those they were sent, as they're told them (`told`), lup's word on their citations among those, though it's their own item; each with its line as a view of `party` shows it (`lines.lined`), each conversation it names called by their path among `paths`, else by their runtime's ids."""
+    """Return `items`, those `party` sent, with the text as they wrote it (`written`), and those they were sent, as they're told them (`told`), lup's word on their citations among those, though it's their own item; each with its line as a view of `party` shows it (`lines.lined`), and, where it's words of theirs, its heading and its text as the operator reads it back (`read`, else as they wrote it), each conversation it names called by their path among `paths`, else by their runtime's ids; and the headings of what no item holds, the operator's words typed to `party`, and `party`'s last words to `parent`, who spawned them."""
+    reading = written if read is None else read
 
     def named(conversation: Conversation) -> str:
         return called(conversation, paths)
@@ -645,6 +681,22 @@ def exchanged(
             comment=each.comment,
             echoes=each.echoes,
             call_sends_it=each.call_sends_it,
+            by=each.by,
+            words=None
+            if each.heading is None
+            else Words(line=each.heading, text=reading(item), reported=each.reported),
+        )
+
+    def of_agent(conversation: Conversation) -> blocks.OfAgent:
+        return blocks.OfAgent(
+            runtime=conversation.runtime,
+            session=conversation.session,
+            agent=conversation.agent,
+        )
+
+    def referring(conversation: Conversation) -> blocks.Span:
+        return blocks.Span(
+            text=named(conversation), conversation=of_agent(conversation)
         )
 
     lined = lines.lined(party, items, named)
@@ -652,6 +704,17 @@ def exchanged(
         sent=[exchange(each) for each in lined if each.sent],
         received=[exchange(each) for each in lined if not each.sent],
         paths=paths,
+        parent=None if parent is None else of_agent(parent),
+        typed=[
+            blocks.Span(text="you") if parent is None else referring(parent),
+            blocks.Span(text=" → "),
+            referring(party),
+        ],
+        last_words=[
+            referring(party),
+            *([] if parent is None else [blocks.Span(text=" → "), referring(parent)]),
+            blocks.Span(text=" · their last words"),
+        ],
     )
 
 
@@ -1144,10 +1207,17 @@ class ItemsListing(Model, Reading[ListItems], arbitrary_types_allowed=True):
         return self.exchanged(party, [each for each in items if each.of(repository)])
 
     def exchanged(self, party: Conversation, items: list[Item]) -> Exchanged:
-        """Return `items` as `party` sent them, as they wrote them, and as they were sent them, as they're told them, each with its line (`exchanged`); and each conversation among the items' parties by their path, as lup names them (`pathed`)."""
-        paths = pathed(self.delivery.roster(), items)
+        """Return `items` as `party` sent them, as they wrote them, and as they were sent them, as they're told them, each with its line (`exchanged`), and as the operator reads them back (`Delivery.read_back`); and each conversation among the items' parties, `party` and their parent among them, by their path, as lup names them (`pathed`)."""
+        parent = self.delivery.parent(party)
+        also = [party, *([] if parent is None else [parent])]
         return exchanged(
-            party, items, written=written, told=self.delivery.words, paths=paths
+            party,
+            items,
+            written=written,
+            told=self.delivery.words,
+            paths=pathed(self.delivery.roster(), items, also),
+            read=self.delivery.read_back,
+            parent=parent,
         )
 
 

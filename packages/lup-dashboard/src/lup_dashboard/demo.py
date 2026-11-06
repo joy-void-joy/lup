@@ -1769,55 +1769,73 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         ]
 
     def exchanges(self, session: Conversation, parser: Conversation) -> list[Item]:
-        """Return the operator's copies of messages between agents, each news to them from its sender saying whom it went to (`Message.to`): the lup-impl session asking explore-auth where auth is checked, and their answer, beside which explore-auth's note to the operator, new; and, read since, the parser subagent asking their own subagent grep-tokens to count the kinds of line, and the count."""
+        """Return messages between agents, each in its recipient's inbox, told, and the operator's copy of it, done as it's made, which holds it in its thread (`Message.to`): the lup-impl session asking explore-auth where auth is checked, and their answer, beside which explore-auth's note to the operator, new; and, read since, the parser subagent asking their own subagent grep-tokens to count the kinds of line, and the count."""
         explorer = session.model_copy(update={"agent": "a01"})
         grep = session.model_copy(update={"agent": "a03"})
         dev = session.repository / "tree" / "dev"
 
-        def copy(
+        def sent(
             number: int,
             sender: Conversation,
             to: Conversation,
             text: str,
             minutes: float,
-        ) -> Item:
-            return Item(
-                number=number,
-                reason=Message(kind="note", text=text, to=to),
-                sender=sender,
-                recipient=Operator(),
-                worktree=dev,
-                made=self.ago(minutes),
-            )
+            *,
+            copy: int,
+        ) -> list[Item]:
+            return [
+                Item(
+                    number=number,
+                    reason=Message(kind="note", text=text),
+                    sender=sender,
+                    recipient=to,
+                    worktree=dev,
+                    made=self.ago(minutes),
+                    state=Told(at=self.ago(minutes), how="call"),
+                ),
+                Item(
+                    number=copy,
+                    reason=Message(kind="note", text=text, to=to),
+                    sender=sender,
+                    recipient=Operator(),
+                    worktree=dev,
+                    made=self.ago(minutes),
+                    state=Done(at=self.ago(minutes)),
+                ),
+            ]
 
         return [
-            copy(
-                67,
+            *sent(
+                73,
                 parser,
                 grep,
                 "Count each kind of line in every record you can find, and say which carry words.",
                 20,
+                copy=67,
             ),
-            copy(
-                70,
+            *sent(
+                74,
                 grep,
                 parser,
                 "Twenty-one kinds. Four carry words: user, assistant, tool_use and tool_result.",
                 18,
+                copy=70,
             ),
-            copy(
-                64,
+            *sent(
+                71,
                 session,
                 explorer,
                 "Find every place auth is checked, and say which run before a session starts.",
                 6,
+                copy=64,
             ),
-            copy(
-                65,
+            *sent(
+                72,
                 explorer,
                 session,
                 "Three places: the hook, the launch and the sweep. Only the hook runs before a session starts; my note to the operator says where each is.",
                 2,
+                copy=65,
             ),
             Item(
                 number=66,

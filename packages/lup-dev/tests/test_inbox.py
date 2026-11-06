@@ -159,6 +159,7 @@ from lup_dev.inbox.store import (
     ChangedFile,
     Comment,
     Decided,
+    Decision,
     Done,
     Draft,
     Edit,
@@ -184,6 +185,7 @@ from lup_dev.inbox.store import (
     Remark,
     Review,
     ReviewedAt,
+    Ruling,
     Sent,
     Talk,
     TalkComment,
@@ -3608,11 +3610,10 @@ def to_parent(text: str, kind: str = "note") -> dict[str, JsonValue]:
 
 
 def arriving(whose: str, number: int, idle: str = "") -> str:
-    """What `send` answers for a message to another conversation, item `number`, with the operator's copy the next."""
+    """What `send` answers for a message to another conversation, item `number`."""
     return (
-        f"Your message is in the inbox of {whose}, {cited(number)}, and the operator "
-        f"has a copy, {cited(number + 1)}. It's told at their next call, their turn's "
-        f"end or their `wait_inbox`, whichever comes first{idle}."
+        f"Your message is in the inbox of {whose}, {cited(number)}. It's told at their "
+        f"next call, their turn's end or their `wait_inbox`, whichever comes first{idle}."
     )
 
 
@@ -3620,7 +3621,48 @@ WOKEN = "; idle between turns, their session is woken for it"
 """What `send`'s answer adds for a main conversation whose runtime wakes them."""
 
 
-def test_a_subagent_tells_its_parent_at_its_next_call_and_the_operator_reads_a_copy(
+def test_what_a_subagent_tells_their_parent_is_no_item_of_the_operator_s_and_what_they_tell_the_operator_is(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    records = Subagents(tmp_path)
+    worktree = tmp_path / "w"
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, worktree, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, records.spawn("t1", name="parser"))
+        records.recorded("a1", "Explore", "t1", name="parser")
+        send(hook, records.call("a1", "Explore", "c1"))
+
+        def called(tool: str, **given: JsonValue) -> None:
+            records.lup((hook, mcp), tool, given, "a1", "Explore")
+
+        called("send", to="parent", kind="problem", text="To my parent.")
+        called("send", to="operator", kind="note", text="To the operator.")
+        called("note", remark="A doubt.")
+        called("friction", text="The gate hung.")
+        called("how_it_felt", text="Calm.")
+        waiting = delivery.inbox.waiting(Operator())
+        every = list(delivery.inbox.items.values())
+    assert [(type(each.reason).__name__, each.rank.name) for each in waiting] == [
+        ("Message", "news"),
+        ("Message", "news"),
+        ("Friction", "news"),
+        ("HowItFelt", "news"),
+    ]
+    [message, copy] = [
+        each
+        for each in every
+        if isinstance(each.reason, Message) and each.reason.text == "To my parent."
+    ]
+    assert isinstance(message.recipient, Conversation)
+    assert isinstance(copy.state, Done)
+    assert copy.recipient == Operator()
+    # A copy raises no notice, and the operator's words in a review answer the message's sender as any item's.
+    assert notices.raised == []
+
+
+def test_a_subagent_tells_its_parent_at_its_next_call_and_the_operator_s_copy_waits_on_nobody(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     records = Subagents(tmp_path)
@@ -3654,15 +3696,11 @@ def test_a_subagent_tells_its_parent_at_its_next_call_and_the_operator_reads_a_c
     assert told == (
         f'<message item="1" from="w/parser" kind="problem">{found}</message>'
     )
-    assert listed.splitlines() == [
-        (
-            f"   @2  {clocked(clock.now())}  a problem from `w/parser` to `w` in "
-            f"{worktree}: {found}"
-        )
-    ]
+    # What one agent tells another is no item of the operator's: it's in both agents' drawers.
+    assert "@2" not in listed
     assert shown == (
         f"@2, a problem from `w/parser` in {worktree} to `w`, your copy, made "
-        f"{clocked(clock.now())}, waiting:\n{found}\n"
+        f"{clocked(clock.now())}, done at {clocked(clock.now())}:\n{found}\n"
     )
     # The subagent's own `inbox` lists their message, and the copy as whom it went to.
     assert theirs == (
@@ -3674,13 +3712,13 @@ def test_a_subagent_tells_its_parent_at_its_next_call_and_the_operator_reads_a_c
                 ),
                 (
                     f"@2  {clocked(clock.now())}  a problem from you to `w`, the "
-                    f"operator's copy, waiting: {found}"
+                    f"operator's copy, done at {clocked(clock.now())}: {found}"
                 ),
             ]
         ),
         False,
     )
-    # The copy is news, whatever its kind: it waits on the parent, not the operator.
+    # The copy raises no notice, whatever its kind: it waits on the parent, not the operator.
     assert notices.raised == []
     assert [each.reason for each in items] == [
         Message(kind="problem", text=found),
@@ -4220,6 +4258,71 @@ def test_a_room_lists_and_shows_its_repositorys_sessions_and_items_alone(
     assert isinstance(done.exception, InboxError)
 
 
+def test_the_operator_s_words_read_back_in_their_own_words_never_in_the_tags_an_agent_is_told(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    worktree = tmp_path / "w"
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, worktree, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        party = Conversation(
+            repository=worktree / ".git", runtime="claude", session="s1"
+        )
+        asked = delivery.inbox.made(
+            Message(kind="note", text="Which parser?"),
+            party,
+            Operator(),
+            worktree,
+            clock.now(),
+        )
+        review = delivery.inbox.made(
+            Review(
+                covers=[asked.number],
+                comments=[
+                    Comment(
+                        item=asked.number,
+                        quote=Quote(text="Which parser?", start=0, end=13),
+                        text="The fast one.",
+                    )
+                ],
+                letters=[Letter(to=party, text="And rename it.")],
+            ),
+            Operator(),
+            party,
+            None,
+            clock.now(),
+        )
+        which = delivery.inbox.made(
+            Question(
+                text="Which reader?",
+                decisions=[Decision(text="A model per kind", lean="yes")],
+            ),
+            party,
+            Operator(),
+            worktree,
+            clock.now(),
+        )
+        answer = delivery.inbox.made(
+            Answer(
+                question=which.number,
+                rulings=[Ruling(decision=1, verdict="leaning", comment="Fine.")],
+            ),
+            Operator(),
+            party,
+            None,
+            clock.now(),
+        )
+        read = delivery.read_back(review)
+        told = delivery.words(review)
+        answered = delivery.read_back(answer)
+    assert "<reply" in told
+    assert read == "And rename it.\n\n> Which parser?\n\nThe fast one."
+    # What each decision was, and their verdict: what it asked is above it.
+    assert answered == (
+        "> 1. A model per kind\n\nleaning: they go with the lean\n\nFine."
+    )
+
+
 def test_a_room_reads_its_repositorys_conversations_alone_and_never_the_operators_drafts(
     machine: Layout,
     clock: FakeClock,
@@ -4260,7 +4363,7 @@ def test_a_room_reads_its_repositorys_conversations_alone_and_never_the_operator
                 room.ask(request, Conversed)
             refusals.append(str(refusal.value))
     assert read.total == 2
-    assert items == Exchanged(sent=[], received=[])
+    assert (items.sent, items.received) == ([], [])
     assert holding == Holding(on=False)
     assert refusals == [
         "the conversation isn't one of this repository's",

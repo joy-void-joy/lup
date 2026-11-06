@@ -84,8 +84,9 @@ conversation that spawned them, or to one of their own subagents) is an item
 for its recipient, told as the operator's are: at their next call, their turn's
 end, by `wait_inbox`, or waking their idle session where they're a main
 conversation.
-The operator reads a copy, news whatever its kind (`Message.to`), from its
-sender, which a review's comment answers as any message's.
+The operator's copy (`Message.to`), from its sender, is done as it's made
+(`copied`): it holds the message's place in a thread, and asks nothing of them,
+who read it in both agents' drawers, so it's no item of their review.
 
 **A subagent's end, and what they say of their work,** reach the conversation
 that spawned them (`Whereabouts.parent`): which subagent ended and how, with
@@ -194,7 +195,7 @@ from lup_dev.inbox.store import (
     cited,
 )
 from lup_dev.inbox.tags import Tag, inside
-from lup_dev.inbox.texts import body, kind, opening, what
+from lup_dev.inbox.texts import body, kind, opening, what, written
 from lup_dev.inbox.threads import (
     Anchor,
     addressed_to,
@@ -259,6 +260,59 @@ def on(item: Item, attributes: dict[str, str], parts: list[Tag | str]) -> Tag:
     """Tag what the operator said on one of an agent's items, holding `parts`: which item, its kind, and `attributes`."""
     head = {"item": str(item.number), "kind": kind(item)}
     return Tag(name="on", attributes={**head, **attributes}, parts=parts)
+
+
+def readable(parts: list[Tag | str]) -> str:
+    r"""Say what a tag holds as the operator reads it back, in Markdown rather than tags: what it's on as a quote, their words as they wrote them, what they only marked read said nowhere, as what a question asked, which they read above it; on several items, each after which.
+
+    >>> yours = [Tag(name="quote", parts=["The gate hung."]), Tag(name="reply", parts=["Fix it."])]
+    >>> print(readable([Tag(name="on", attributes={"item": "7", "kind": "note"}, parts=yours), Tag(name="read", attributes={"items": "8"})]))
+    > The gate hung.
+    <BLANKLINE>
+    Fix it.
+    >>> print(readable([Tag(name="on", attributes={"item": "7", "kind": "note"}, parts=["Yes."]), Tag(name="on", attributes={"item": "9", "kind": "friction"}, parts=["No."])]))
+    On @7, note:
+    <BLANKLINE>
+    Yes.
+    <BLANKLINE>
+    On @9, friction:
+    <BLANKLINE>
+    No.
+    """
+    several = (
+        sum(1 for each in parts if isinstance(each, Tag) and each.name == "on") > 1
+    )
+
+    def quoted(text: str) -> str:
+        return "\n".join(f"> {line}" if line else ">" for line in text.splitlines())
+
+    def said(part: Tag | str) -> list[str]:
+        match part:
+            case str():
+                return [part] if part.strip() else []
+            case Tag(name="read" | "asked"):
+                return []
+            case Tag(name="quote" | "opening", parts=inner):
+                return [quoted(readable(inner))]
+            case Tag(
+                name="on", attributes={"item": number, "kind": what_of}, parts=inner
+            ):
+                which = f"On @{number}, {what_of}:"
+                return [*([which] if several else []), readable(inner)]
+            case Tag(
+                name="decision",
+                attributes={"number": number, "verdict": verdict},
+                parts=[str() as text, *rest],
+            ):
+                return [
+                    quoted(f"{number}. {text}"),
+                    verdict,
+                    *(each for one in rest for each in said(one)),
+                ]
+            case Tag(parts=inner):
+                return [each for one in inner for each in said(one)]
+
+    return "\n\n".join(each for part in parts for each in said(part))
 
 
 def told_under(numbers: list[int]) -> str:
@@ -1254,6 +1308,25 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         """Return what `item` tells the conversation it's told to, inside its tag: a message's text, a reply on the item it replies to, an answer beside its question, a review said to its recipient."""
         return inside(self.tagged(item).parts)
 
+    def read_back(self, item: Item) -> str:
+        """Return what `item` says as the operator reads it among a conversation's words: what they wrote themselves as it's told to whom it's for, less what they said to others, in Markdown (`readable`); a subagent's end what their parent wouldn't otherwise have, what they said where lup hands it on, or how they ended where that's no plain end of their turn; a conversation's as they wrote it."""
+        match item.reason, item.sender:
+            case Ended(
+                stopped=stopped,
+                failed=failed,
+                heading=heading,
+                passed=passed,
+                kept=kept,
+            ), _:
+                said = [*([] if passed is None else [passed]), *kept]
+                return "\n\n".join(
+                    [heading, *said] if stopped or failed is not None else said
+                )
+            case _, Operator():
+                return readable(self.tagged(item, context=False).parts)
+            case _:
+                return written(item)
+
     def roster(self) -> Roster:
         """Return the conversations the inbox knows, each by the name lup calls them (`inbox/roster.py`): made anew once the inbox, or a session's name, changed since the last."""
         names = Names(path=self.layout.names).all()
@@ -2170,6 +2243,29 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         self.landed(item, thread)
         await self.delivered(item)
         return item
+
+    async def copied(
+        self,
+        message: Message,
+        to: Conversation,
+        sender: Conversation,
+        worktree: Path | None,
+        *,
+        call: str | None = None,
+        thread: Thread | None = None,
+    ) -> Item:
+        """Make the operator's copy of `message`, from `sender` to `to`, in `thread`, else where `sender` works, done as it's made: what lands in a thread is what's sent the operator, so it's what holds the message there, and it asks nothing of them, who read the message in both agents' drawers."""
+        copy = await self.posted(
+            message.model_copy(update={"to": to}),
+            sender,
+            Operator(),
+            worktree,
+            call=call,
+            thread=thread,
+        )
+        return self.inbox.kept(
+            copy.model_copy(update={"state": Done(at=self.clock.now())})
+        )
 
     def concerns(self) -> Concerns:
         """Return the threads as agents work in them, read from the inbox as it stands (`inbox/concerns.py`)."""

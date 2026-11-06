@@ -16,6 +16,7 @@ from lup_dev.inbox.store import (
     Decided,
     Done,
     Flagged,
+    Friction,
     HeldChange,
     Item,
     Letter,
@@ -283,3 +284,122 @@ def test_only_an_item_sending_is_all_its_call_did_stands_for_that_call() -> None
     assert [
         each.call_sends_it for each in listed(held, flagged, noted, uncalled).sent
     ] == [False, False, True, False]
+
+
+def headed(each: Exchange) -> str | None:
+    """Say an item's heading among the conversation's words as text; none where it has none."""
+    return (
+        None if each.words is None else "".join(span.text for span in each.words.line)
+    )
+
+
+def test_a_heading_says_who_s_talking_to_whom_what_it_is_and_where_it_stands() -> None:
+    asked = item(
+        51,
+        Question(text="Which?", decisions=[]),
+        3,
+        state=Answered(at=at(4), answer=53),
+    )
+    answered = item(
+        53,
+        Answer(question=51, rulings=[]),
+        4,
+        sender=OPERATOR,
+        recipient=SESSION,
+        state=Told(at=at(5), how="call"),
+    )
+    told = item(60, note("Found it."), 6, sender=SURVEY, recipient=SESSION)
+    done = listed(asked, answered, told)
+    assert [headed(each) for each in [*done.sent, *done.received]] == [
+        "@51 lup-impl → you · question · answered by @53",
+        "@53 you → lup-impl · answer to @51",
+        "@60 lup-impl/a04 → lup-impl · note · not told yet",
+    ]
+    # Each conversation it names is a span of their own, referring to them.
+    [to_survey] = listed(item(61, note("Then stop."), 7, recipient=SURVEY)).sent
+    assert to_survey.words is not None
+    assert [
+        (each.text, each.conversation.agent)
+        for each in to_survey.words.line
+        if each.conversation is not None
+    ] == [("lup-impl", None), ("lup-impl/a04", "a04")]
+
+
+def test_what_s_no_words_has_no_heading_and_the_operator_s_copy_is_neither_sent_nor_received() -> (
+    None
+):
+    flagged = item(
+        70,
+        Flagged(
+            text="a.py landed, flagged.",
+            summary="a.py is new",
+            worktree=Path("/w"),
+            path=Path("a.py"),
+        ),
+        1,
+    )
+    held = item(
+        71,
+        HeldChange(text="Land it?", summary="a.py", worktree=Path("/w"), key="k"),
+        2,
+    )
+    unresolved = item(72, Unresolved(of=70, citations=[]), 3, recipient=SESSION)
+    copy = item(73, note("Found it.").model_copy(update={"to": SURVEY}), 4)
+    seen = listed(flagged, held, unresolved, copy)
+    assert [each.item.number for each in seen.sent] == [70, 71]
+    assert [each.item.number for each in seen.received] == [72]
+    assert [each.words for each in [*seen.sent, *seen.received]] == [None, None, None]
+
+
+def test_a_subagent_s_news_for_their_parent_has_a_heading_in_their_parent_s_view_and_none_in_their_own() -> (
+    None
+):
+    quiet = item(
+        80,
+        Friction(text="The gate hung."),
+        1,
+        sender=SURVEY,
+        recipient=SESSION,
+        quiet=True,
+    )
+    [theirs] = listed(quiet, party=SURVEY).sent
+    assert theirs.words is None
+    [told] = listed(quiet).received
+    assert headed(told) == "@80 lup-impl/a04 → lup-impl · friction · not told yet"
+
+
+def test_a_comment_on_it_goes_to_whoever_wrote_it_where_that_s_another_conversation() -> (
+    None
+):
+    from_survey = item(60, note("Found it."), 6, sender=SURVEY, recipient=SESSION)
+    yours = item(61, note("Good."), 7, sender=OPERATOR, recipient=SESSION)
+    own = item(62, note("Thanks."), 8, recipient=SURVEY)
+    seen = listed(from_survey, yours, own)
+    assert [(each.item.number, each.by) for each in [*seen.sent, *seen.received]] == [
+        (62, None),
+        (60, OfAgent(runtime="claude", session="s1", agent="a04")),
+        (61, None),
+    ]
+
+
+def test_the_headings_of_what_no_item_holds_say_who_s_talking_their_parent_for_a_subagent() -> (
+    None
+):
+    def spans(line: list[Span]) -> str:
+        return "".join(each.text for each in line)
+
+    own = listed()
+    assert spans(own.typed) == "you → lup-impl"
+    assert spans(own.last_words) == "lup-impl · their last words"
+    assert own.parent is None
+    theirs = exchanged(
+        SURVEY,
+        [],
+        written=lambda each: str(each.number),
+        told=lambda each: str(each.number),
+        paths=PATHS,
+        parent=SESSION,
+    )
+    assert spans(theirs.typed) == "lup-impl → lup-impl/a04"
+    assert spans(theirs.last_words) == "lup-impl/a04 → lup-impl · their last words"
+    assert theirs.parent == OfAgent(runtime="claude", session="s1")
