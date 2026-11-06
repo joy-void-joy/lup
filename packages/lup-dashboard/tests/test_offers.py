@@ -19,6 +19,7 @@ from lup_dev.inbox.store import (
     Done,
     Item,
     Superseded,
+    Waiting,
 )
 
 if TYPE_CHECKING:
@@ -223,6 +224,16 @@ def test_an_approval_answered_before_isn_t_installed_again_by_answering_it_again
     assert isinstance(state, Decided)
     assert not state.approved
     assert served.demo.host.withheld.settled == []
+
+
+def test_an_approval_left_for_later_is_cleared_as_it_s_superseded_its_successor_waiting(
+    served: Served,
+) -> None:
+    served.drafted({"parked": [APPROVAL]})
+    later = served.superseded(APPROVAL)
+
+    assert served.demo.host.inbox.draft().parked == []
+    assert isinstance(served.item(later).state, Waiting)
 
 
 def test_what_s_left_for_later_and_no_longer_waits_clears_as_the_draft_is_sent_saying_nothing(

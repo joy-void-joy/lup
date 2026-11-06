@@ -1225,7 +1225,7 @@ export function App() {
                 )}
                 <span className="spacer" />
                 <span className="count">
-                    {agents.length} {agents.length === 1 ? "agent" : "agents"} · {waitingOn(threadsRead, landingIn, waiting)} waiting on you
+                    {agents.length} {agents.length === 1 ? "agent" : "agents"} · {waitingOn(threadsRead, landingIn, waiting, draft.parked ?? [])} waiting on you
                 </span>
                 <button type="button" className="overview-button" onClick={() => setOverview(!overview)} title="the overview of every agent and item">
                     Overview <kbd>{"\\"}</kbd>
@@ -1428,10 +1428,11 @@ interface Naming {
 
 /**
  * Say how many threads wait on the operator, as the review's first section counts them, what asks them in no thread
- * among them, by whom it's from; how many items do, before the threads are read.
+ * among them, by whom it's from; how many items do, before the threads are read. What's left for later, `parked`, counts
+ * neither way: the operator said not now, and it comes back as it's unparked.
  */
-export function waitingOn(read: ThreadsRead | null, landing: ReadonlyMap<number, number>, waiting: readonly Item[]): number {
-    const asking = waiting.filter((each) => each.asks);
+export function waitingOn(read: ThreadsRead | null, landing: ReadonlyMap<number, number>, waiting: readonly Item[], parked: readonly number[] = []): number {
+    const asking = waiting.filter((each) => each.asks && !parked.includes(each.number));
     if (read === null) {
         return asking.length;
     }

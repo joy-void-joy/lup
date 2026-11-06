@@ -571,6 +571,9 @@ describe("the review grouped by thread", () => {
         const approval = { ...QUESTION, number: 54, sender: { party: "operator" } } as Item;
         expect(waitingOn(threading().read, new Map(), [QUESTION, approval])).toBe(3);
         expect(waitingOn(null, new Map(), [QUESTION, approval])).toBe(2);
+        // What's left for later isn't waiting: the operator said not now.
+        expect(waitingOn(null, new Map(), [QUESTION, approval], [approval.number])).toBe(1);
+        expect(waitingOn(threading().read, new Map(), [QUESTION, approval], [approval.number])).toBe(2);
     });
 
     it("lists each section and thread in the overview, nested as the review is", () => {

@@ -1566,9 +1566,24 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         )
 
     def drafted(self, draft: Draft) -> Draft:
-        """Keep the operator's draft reply, and return it; refused where a message in it is for a conversation lup's inbox has never heard of (`heard`)."""
+        """Keep the operator's draft reply, and return it, without what it leaves for later that's past waiting on them, but where it holds their words (`unparked`); refused where a message in it is for a conversation lup's inbox has never heard of (`heard`)."""
         self.heard(draft)
-        return self.inbox.drafted(draft)
+        return self.inbox.drafted(self.unparked(draft))
+
+    def unparked(self, draft: Draft) -> Draft:
+        """Return `draft` with nothing left for later that there's nothing to come back to: each it parks standing past waiting on the operator goes, unsaid, so a park never outlives what it's on, but for one with their words on it, which the next send takes (`past`)."""
+        worded = [each.item for each in draft.comments if each.text.strip()]
+        parked = [
+            each
+            for each in draft.parked
+            if each in worded
+            or ((item := self.inbox.items.get(each)) is not None and item.waits)
+        ]
+        return (
+            draft
+            if parked == draft.parked
+            else draft.model_copy(update={"parked": parked})
+        )
 
     def heard(self, draft: Draft) -> None:
         """Refuse a draft with a message, or a remark, for a conversation lup's inbox has never heard of, which no reply could reach: it's known once one of its hooks is heard; and a message on a thread lup doesn't keep, of another repository than whom it's to, or to no one on none."""
@@ -2774,6 +2789,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             self.say(
                 f"{cited(each.number)}, an approval, is superseded by {cited(item.number)}"
             )
+        if replaced:
+            self.inbox.drafted(self.unparked(self.inbox.draft()))
         await self.noticed(item)
         return item
 
