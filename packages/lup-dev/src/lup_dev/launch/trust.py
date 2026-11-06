@@ -589,12 +589,15 @@ def reinstalled(approval: Approval, *, again: bool) -> str:
 
 
 class BranchesRead(Model):
-    """The branches a declaration just approved names, and what the approval's answer says of them."""
+    """The branches a declaration just approved names, what the approval's answer says of them, and the declaration as judging reads it."""
 
     branches: Branches
     said: str | None = None
     """What changed of them, or why they couldn't be read; none where they stand
     as they did."""
+    declaration: Declaration | None = None
+    """What the approval keeps of it (`Approval.declaration`): where it doesn't
+    load, what the approval before kept."""
 
 
 def branches_moved(before: Branches, after: Branches) -> str | None:
@@ -2126,6 +2129,7 @@ class Trust(Model, arbitrary_types_allowed=True):
             local=zone.local,
             profiles=zone.profiles,
             branches=read.branches,
+            declaration=read.declaration,
         )
         if now is not None and now.commit == zone.commit and now.tool == zone.tool:
             # Only the person's own layer or their profiles changed, which the
@@ -2149,7 +2153,7 @@ class Trust(Model, arbitrary_types_allowed=True):
         return Trusted(approval=recorded, restarted=restarted, branches=read.said)
 
     def read_branches(self, zone: Zone, now: Approval | None) -> BranchesRead:
-        """Read the branches the declaration at `zone`'s commit names, its person's own layer on it: what the operator has just approved, so it may run.
+        """Read the branches the declaration at `zone`'s commit names, and the declaration as judging reads it, its person's own layer on it: what the operator has just approved, so it may run.
 
         Exported from git's objects and imported as a launch imports the
         declaration approved (`approved_declaration`). Where it doesn't load,
@@ -2163,15 +2167,25 @@ class Trust(Model, arbitrary_types_allowed=True):
                 Git(cwd=self.root).export(zone.commit, source, read_by_import)
                 if zone.local is not None:
                     CheckoutLayout(root=source).local_declaration.write_text(zone.local)
-                after = resolve(load(source).project).branches
+                declared = load(source)
+                after = resolve(declared.project).branches
+                declaration = Declaration.of(declared.project, declared.source)
         except ProjectError as failure:
             said = (
                 f"The branches stay `{before.integration}` to integrate on and "
                 f"`{before.running}` to run, since its declaration doesn't load: "
                 f"{failure}"
             )
-            return BranchesRead(branches=before, said=said)
-        return BranchesRead(branches=after, said=branches_moved(before, after))
+            return BranchesRead(
+                branches=before,
+                said=said,
+                declaration=None if now is None else now.declaration,
+            )
+        return BranchesRead(
+            branches=after,
+            said=branches_moved(before, after),
+            declaration=declaration,
+        )
 
     def reinstall(self, approval: Approval, commit: str, copy: JudgeLayout) -> bool:
         """Install the repository's copy approved, from `commit`, where it's missing; say whether it was.
