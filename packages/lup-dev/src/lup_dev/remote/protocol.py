@@ -26,10 +26,12 @@
   read from its own diff against that ref's tip on the remote (`Remotes.asking`):
   a push can't wait for them, so the refusal names `land`, which can, and whose
   own push passes here once they've answered. What can't be read isn't pushed;
-- where the project computes its running branch (`Versions`, `Remotes.trying`), no
-  room's push moves that branch, which the host alone computes (`lup_dev.trial`),
-  and none puts what the host runs on the integration branch, since that's
-  accepting it, the operator's: `land`'s own pushes are the ones that go there;
+- where the project computes its running branch (`Versions`, `Remotes.trying`), a
+  room's push is kept off that branch, which the host alone computes
+  (`lup_dev.trial`), and from putting what the host runs on the integration branch,
+  since that's accepting it, the operator's (`PushHandler`). These two are a room's
+  alone: everything else here is what any push the host makes passes (`Pusher`),
+  `land`'s among them, which calls that directly;
 - what each update would publish is put to the launch's modules' hooks at
   `Publishing` before git runs (`lup.publishing`), with what the
   remote holds already: the listing git asked for before the push
@@ -387,6 +389,15 @@ def oneline(said: str) -> str:
     return " ".join(said.split())
 
 
+class Tip(Model):
+    """What a ref names on a remote, as a push about to change it reads it."""
+
+    old: str | None = None
+    """The commit; none where the remote doesn't hold the ref."""
+    moved: bool = False
+    """It moved while lup read it, so what it reads isn't there."""
+
+
 class Listings(MutableModel):
     """What each launch's remotes held when git last listed them before a push, kept for that push."""
 
@@ -591,6 +602,21 @@ class Remotes(Model, arbitrary_types_allowed=True):
             )
         return Lease(ref=branch, expected=tip)
 
+    async def tip_of(self, launch: Register, remote: str, ref: str) -> Tip:
+        """Return what `ref` names on `launch`'s `remote`, fetched into the store, read by id, never by anything the room writes.
+
+        Raise `HostError` where the store reads from elsewhere, or the remote
+        can't be listed or fetched from.
+        """
+        await self.contained(launch)
+        refs = await self.listed(launch, remote, push=True)
+        old = next((each.object for each in refs if each.name == ref), None)
+        wanted = [] if old is None else [Wanted(object=old, name=ref)]
+        moved = bool(wanted) and bool(
+            await self.fetched(launch, remote, wanted, push=True)
+        )
+        return Tip(old=old, moved=moved)
+
     def computed(self, launch: Register) -> str | None:
         """Return the full name of the branch the host computes for `launch`'s repository; none where it computes none (`trying`)."""
         branches = None if self.trying is None else self.trying(launch)
@@ -665,6 +691,14 @@ class Remotes(Model, arbitrary_types_allowed=True):
             )
             raise HostError(message)
 
+    def refused(self, launch: Register, remote: str, reasons: dict[str, str]) -> None:
+        """Say each update of `launch`'s push to `remote` refused, by its destination, with why."""
+        for destination, reason in reasons.items():
+            self.say(
+                f"{launch.launch}: refused a push to `{destination}` on `{remote}`: "
+                f"{reason}"
+            )
+
     def told(self, launch: Register, what: str, ran: Ran) -> None:
         """Say what one git command did for `launch`, with what git wrote to its standard error, once."""
         outcome = "done" if ran.status == 0 else f"failed (status {ran.status})"
@@ -694,21 +728,17 @@ class ListHandler(Model, RoomHandler[Listing]):
         return Advertised(refs=refs)
 
 
-class PushHandler(Model, RoomHandler[Pushing]):
-    """Answers `Pushing`: each update held to the launch's limits, then pushed by object id to the remote's push URL."""
+class Pusher(Model):
+    """A push the host makes for a launch, whoever asks it: each update held to the launch's limits, a deletion to `delete-merged`, what it puts on a gated ref to what the operator approved, and what it publishes to the modules' hooks; then pushed by object id to the remote's push URL.
+
+    A room's push passes this behind what only a room's must (`PushHandler`).
+    `land` calls it directly, having read what it holds on and being what moves
+    the branch the host computes.
+    """
 
     remotes: Remotes
-    own: bool = False
-    """It's `land`'s own push, of what the host computed or a landing held, rather
-    than a room's: it alone moves the branch the host computes, or puts what the
-    host runs on the integration branch."""
 
-    @override
-    def request(self) -> type[Pushing]:
-        return Pushing
-
-    @override
-    async def answer(self, request: Pushing, launch: Register) -> Reply:
+    async def push(self, request: Pushing, launch: Register) -> Pushed:
         """Push each update the limits allow, and say how each ended.
 
         An atomic push with an update refused pushes none of them.
@@ -722,12 +752,6 @@ class PushHandler(Model, RoomHandler[Pushing]):
             )
             if checked.status != 0:
                 return f"`{update.destination}` isn't a ref's name git accepts"
-            if not self.own and update.destination == self.remotes.computed(launch):
-                return (
-                    f"`{update.destination}` is computed by the host, from the "
-                    "integration branch and what's on trial, so no push moves it: "
-                    "`land` puts a branch on trial, as a push can't"
-                )
             forced = request.force or update.forced or update.destination in leases
             return refusal(update, forced=forced, launch=launch)
 
@@ -764,11 +788,7 @@ class PushHandler(Model, RoomHandler[Pushing]):
             else await self.barred(request, launch, within)
         )
         refused = {**stopped, **barred.refused}
-        for destination, reason in refused.items():
-            self.remotes.say(
-                f"{launch.launch}: refused a push to `{destination}` on "
-                f"`{request.remote}`: {reason}"
-            )
+        self.remotes.refused(launch, request.remote, refused)
         allowed = [each for each in request.updates if each.destination not in refused]
         if refused and (request.atomic or not allowed):
             first = next(iter(refused))
@@ -787,7 +807,7 @@ class PushHandler(Model, RoomHandler[Pushing]):
         batches = [allowed] if request.atomic else [[each] for each in allowed]
         leased = {**leases, **merging.leases}
         errors = [
-            await self.pushed(request, launch, url, leased, batch) for batch in batches
+            await self.batch(request, launch, url, leased, each) for each in batches
         ]
         pushed = {
             each.destination: error
@@ -853,7 +873,9 @@ class PushHandler(Model, RoomHandler[Pushing]):
         with the commit by their ids, never by anything the room writes; a store
         reading from elsewhere, or a commit git can't read, refuses it: what
         can't be read doesn't land. A push can't wait hours for the operator, so
-        it's refused, naming `land`, which can.
+        it's refused, naming `land`, which can. A branch the host computes isn't
+        read here: `land` is what moves it, having read what it holds on against
+        the integration branch, which its own history wouldn't say (`Lander.on_trial`).
         """
         asking = self.remotes.asking
         computed = self.remotes.computed(launch)
@@ -862,7 +884,7 @@ class PushHandler(Model, RoomHandler[Pushing]):
             for each in allowed
             if each.source is not None
             and matching(each.destination, launch.limits.gated)
-            and not (self.own and each.destination == computed)
+            and each.destination != computed
         ]
         if asking is None or not gated:
             return {}
@@ -870,28 +892,12 @@ class PushHandler(Model, RoomHandler[Pushing]):
         async def why(update: Update, tip: str) -> str | None:
             named = update.destination
             try:
-                await self.remotes.contained(launch)
-                refs = await self.remotes.listed(launch, request.remote, push=True)
-                old = next((ref.object for ref in refs if ref.name == named), None)
-                wanted = [] if old is None else [Wanted(object=old, name=named)]
-                if wanted and await self.remotes.fetched(
-                    launch, request.remote, wanted, push=True
-                ):
-                    return f"`{named}` moved on `{request.remote}` while lup read it: push again"
-                paths = await asking(launch, old, tip)
-                accepting = await self.accepting(launch, named, old, tip)
+                found = await self.remotes.tip_of(launch, request.remote, named)
+                if found.moved:
+                    return moved_while_read(named, request.remote)
+                paths = await asking(launch, found.old, tip)
             except LupDevError as failed:
-                return (
-                    f"lup couldn't read what this puts on `{named}`, so it isn't "
-                    f"pushed: {oneline(str(failed))}"
-                )
-            if accepting:
-                files = oneline(", ".join(f"`{each}`" for each in accepting))
-                return (
-                    f"this puts on `{named}` what the host runs: {files}. That's "
-                    "accepting it, the operator's: `land` puts it on trial, without "
-                    "`onto`"
-                )
+                return unread(named, failed)
             if not paths:
                 return None
             files = oneline(", ".join(f"`{each}`" for each in paths))
@@ -911,21 +917,6 @@ class PushHandler(Model, RoomHandler[Pushing]):
             for destination, reason in reasons.items()
             if reason is not None
         }
-
-    async def accepting(
-        self, launch: Register, destination: str, old: str | None, tip: str
-    ) -> list[Path]:
-        """Return each file a room's push of `tip` to `destination`, at `old` on the remote, changes that the host runs, where `destination` is the integration branch of a project computing its running branch; none where it isn't, or this is `land`'s own push."""
-        trying = None if self.remotes.trying is None else self.remotes.trying(launch)
-        hosted = self.remotes.hosted
-        if (
-            self.own
-            or trying is None
-            or hosted is None
-            or destination != trying.integration_ref
-        ):
-            return []
-        return await hosted(launch, old, tip)
 
     async def barred(
         self, request: Pushing, launch: Register, allowed: list[Update]
@@ -974,7 +965,7 @@ class PushHandler(Model, RoomHandler[Pushing]):
             said="\n\n".join(said),
         )
 
-    async def pushed(
+    async def batch(
         self,
         request: Pushing,
         launch: Register,
@@ -1025,6 +1016,121 @@ class PushHandler(Model, RoomHandler[Pushing]):
         if ran.status == 0:
             return None
         return oneline(ran.said()) or f"git push ended with status {ran.status}"
+
+
+def moved_while_read(ref: str, remote: str) -> str:
+    """Say that `ref` moved on `remote` while lup read it.
+
+    >>> moved_while_read("refs/heads/dev", "origin")
+    '`refs/heads/dev` moved on `origin` while lup read it: push again'
+    """
+    return f"`{ref}` moved on `{remote}` while lup read it: push again"
+
+
+def unread(ref: str, failed: LupDevError) -> str:
+    """Say that what a push puts on `ref` isn't pushed, lup having failed to read it, as `failed` says."""
+    return (
+        f"lup couldn't read what this puts on `{ref}`, so it isn't pushed: "
+        f"{oneline(str(failed))}"
+    )
+
+
+class PushHandler(Model, RoomHandler[Pushing]):
+    """Answers `Pushing`, a room's push: what only a room's must pass, then the push itself (`Pusher`).
+
+    Where the project computes its running branch, a room's push doesn't move that
+    branch, and doesn't put what the host runs on the integration branch, which is
+    accepting it, the operator's. `land` and the operator's `live` commands are
+    what do each, and they don't come through here.
+    """
+
+    remotes: Remotes
+
+    @override
+    def request(self) -> type[Pushing]:
+        return Pushing
+
+    @override
+    async def answer(self, request: Pushing, launch: Register) -> Reply:
+        """Refuse what a room's push can't do, push the rest, and say how each ended.
+
+        An atomic push with an update refused pushes none of them.
+        """
+        require("push", launch)
+        pusher = Pusher(remotes=self.remotes)
+        kept_off = await self.kept_off(request, launch)
+        if not kept_off:
+            return await pusher.push(request, launch)
+        self.remotes.refused(launch, request.remote, kept_off)
+        rest = [each for each in request.updates if each.destination not in kept_off]
+        first = next(iter(kept_off))
+        held = f"not pushed: the push is atomic, and `{first}` was refused"
+        outcome = (
+            Pushed(updates=[])
+            if request.atomic or not rest
+            else await pusher.push(request.model_copy(update={"updates": rest}), launch)
+        )
+        ended = {each.destination: each.error for each in outcome.updates}
+        return Pushed(
+            updates=[
+                Updated(
+                    destination=each.destination,
+                    error=kept_off.get(
+                        each.destination,
+                        held if request.atomic else ended.get(each.destination),
+                    ),
+                )
+                for each in request.updates
+            ],
+            said=outcome.said,
+        )
+
+    async def kept_off(self, request: Pushing, launch: Register) -> dict[str, str]:
+        """Say why each update of `request` is one only a room's push can't make, by its destination; none where the repository computes no running branch."""
+        branches = None if self.remotes.trying is None else self.remotes.trying(launch)
+        if branches is None:
+            return {}
+        reasons = {
+            each.destination: await self.kept_from(
+                each, request.remote, launch, branches
+            )
+            for each in request.updates
+        }
+        return {
+            destination: reason
+            for destination, reason in reasons.items()
+            if reason is not None
+        }
+
+    async def kept_from(
+        self, update: Update, remote: str, launch: Register, branches: Branches
+    ) -> str | None:
+        """Say why a room's push doesn't make `update`, where it's to the branch the host computes, or puts what the host runs on the integration branch; none where it's neither."""
+        named = update.destination
+        if named == branches.running_ref:
+            return (
+                f"`{named}` is computed by the host, from the integration branch and "
+                "what's on trial, so no push moves it: `land` puts a branch on trial, "
+                "as a push can't"
+            )
+        hosted = self.remotes.hosted
+        tip = update.source
+        if named != branches.integration_ref or tip is None or hosted is None:
+            return None
+        try:
+            found = await self.remotes.tip_of(launch, remote, named)
+            if found.moved:
+                return moved_while_read(named, remote)
+            files = await hosted(launch, found.old, tip)
+        except LupDevError as failed:
+            return unread(named, failed)
+        if not files:
+            return None
+        said = oneline(", ".join(f"`{each}`" for each in files))
+        return (
+            f"this puts on `{named}` what the host runs: {said}. That's accepting it, "
+            "the operator's: `land` puts it on trial, without `onto`"
+        )
 
 
 class FetchHandler(Model, RoomHandler[Fetching]):

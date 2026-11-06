@@ -45,7 +45,8 @@ by default, or the gated branch it's told to:
    Marked reviewed, each flag on it is approved; declined, or commented on
    without being marked reviewed, nothing is pushed, and the call answers
    with the operator's words (`Waits.declined`);
-7. the push goes the remote helper's way (`PushHandler`): held to the launch's
+7. the push goes the way a room's does, past what only a room's must pass
+   (`Pusher`, `PushHandler`): held to the launch's
    limits, through `Publishing`, and told to `Remotes.landed`, which
    asks trust's approval where it moved the running branch. It names the
    remote's URL, so the gated branch's remote-tracking ref is moved to what
@@ -245,8 +246,7 @@ from lup_dev.private.refusing import refused as refusals_of
 from lup_dev.private.withheld import Withheld
 from lup_dev.private.withheld import kept as listed_at
 from lup_dev.remote.protocol import (
-    Pushed,
-    PushHandler,
+    Pusher,
     Pushing,
     Ref,
     RemoteName,
@@ -1606,13 +1606,10 @@ class Lander(Model, arbitrary_types_allowed=True):
         waited = await self.waited(holds)
         if not all(each.approved for each in waited.outcomes):
             return unapproved(waited, made.moved)
-        reply = await PushHandler(remotes=self.remotes, own=True).answer(
+        reply = await Pusher(remotes=self.remotes).push(
             Pushing(remote=remote, updates=[Update(source=lands, destination=onto)]),
             self.launch,
         )
-        if not isinstance(reply, Pushed):
-            message = f"the push answered {reply.kind}"
-            raise HostError(message)
         [update] = reply.updates
         if update.error is not None:
             kept = " What the operator approved stays approved." if holds else ""
@@ -1936,14 +1933,10 @@ class Lander(Model, arbitrary_types_allowed=True):
             ),
         ]
         await asyncio.to_thread(trials.write, stands)
-        reply = await PushHandler(remotes=self.remotes, own=True).answer(
+        reply = await Pusher(remotes=self.remotes).push(
             Pushing(remote=remote, updates=updates, atomic=True),
             self.launch,
         )
-        if not isinstance(reply, Pushed):
-            await asyncio.to_thread(trials.write, now.before)
-            message = f"the push answered {reply.kind}"
-            raise HostError(message)
         failed = [each for each in reply.updates if each.error is not None]
         if failed:
             await asyncio.to_thread(trials.write, now.before)
@@ -2916,14 +2909,12 @@ class Lander(Model, arbitrary_types_allowed=True):
     async def remote_deleted(self, remote: str, ref: str) -> Cleaned:
         """Delete `ref` on `remote` as a push from the room would, `delete-merged` checking its commits are in a gated branch there, and say how it went."""
         try:
-            reply = await PushHandler(remotes=self.remotes).answer(
+            reply = await Pusher(remotes=self.remotes).push(
                 Pushing(remote=remote, updates=[Update(source=None, destination=ref)]),
                 self.launch,
             )
         except LupDevError as refused:
             return Cleaned(left=[f"`{short(ref)}` on `{remote}`: {refused}"])
-        if not isinstance(reply, Pushed):
-            return Cleaned(left=[f"`{short(ref)}` on `{remote}`: {reply.kind}"])
         [update] = reply.updates
         if update.error is not None:
             return Cleaned(left=[f"`{short(ref)}` on `{remote}`: {update.error}"])

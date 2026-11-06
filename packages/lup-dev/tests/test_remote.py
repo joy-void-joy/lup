@@ -34,6 +34,7 @@ from lup_dev.git import Git, GitError
 from lup_dev.host.client import HostClient, RoomClient, Starter, asked
 from lup_dev.host.courier import Courier, Heard, Telling
 from lup_dev.host.protocol import (
+    Branches,
     Done,
     GitHubRepository,
     HostError,
@@ -52,12 +53,14 @@ from lup_dev.private import serving as private_serving
 from lup_dev.private.withheld import Facts, Held, Machine, Withheld, kept
 from lup_dev.remote.config import Gating, room_config
 from lup_dev.remote.protocol import (
+    BARRED,
     Advertised,
     Fetched,
     Fetching,
     Lease,
     Listing,
     Pushed,
+    Pusher,
     PushHandler,
     Pushing,
     Ref,
@@ -1012,6 +1015,85 @@ def test_a_commit_git_can_t_read_named_to_the_socket_isn_t_pushed(world: World) 
         "lup couldn't read what this puts on `refs/heads/dev`, so it isn't pushed: "
     )
     assert world.on_forge("refs/heads/dev") is None
+
+
+def test_only_a_room_is_kept_off_what_the_host_computes_and_the_push_itself_holds_land_to_the_rest(
+    world: World, guarded: InProcess
+) -> None:
+    """`land` calls the push without a room's rules, so nothing there asks who's pushing; what any push passes, the limits and the door, it passes too."""
+    world.wrote("docs/clean.md", "Nothing here.\n", "clean")
+    clean = git(world.worktree, "rev-parse", "HEAD")
+    world.wrote("docs/notes.md", "See /home/op.\n", "notes")
+    carrying = git(world.worktree, "rev-parse", "HEAD")
+    limits = Limits(
+        actions=["fetch", "push"],
+        protected=["refs/heads/held"],
+        gated=["refs/heads/dev", "refs/heads/live"],
+    )
+    launch = world.registered(limits)
+
+    def trying(_launch: Register) -> Branches:
+        return Branches(integration="dev", running="live")
+
+    remotes = Remotes(say=world.said.append, trying=trying, modules=guarded)
+
+    def onto(destination: str, source: str = clean) -> Pushing:
+        return Pushing(
+            remote="origin", updates=[Update(source=source, destination=destination)]
+        )
+
+    room = asyncio.run(
+        PushHandler(remotes=remotes).answer(onto("refs/heads/live"), launch)
+    )
+    assert isinstance(room, Pushed)
+    assert "is computed by the host" in (room.updates[0].error or "")
+    assert world.on_forge("refs/heads/live") is None
+
+    pusher = Pusher(remotes=remotes)
+    protected = asyncio.run(pusher.push(onto("refs/heads/held"), launch))
+    assert "is protected" in (protected.updates[0].error or "")
+    barred = asyncio.run(pusher.push(onto("refs/heads/live", carrying), launch))
+    assert barred.updates[0].error == BARRED
+    assert world.on_forge("refs/heads/live") is None
+
+    landed = asyncio.run(pusher.push(onto("refs/heads/live"), launch))
+    assert [each.error for each in landed.updates] == [None]
+    assert world.on_forge("refs/heads/live") == clean
+
+
+def test_an_atomic_room_push_with_an_update_kept_off_pushes_none_and_another_pushes_the_rest(
+    world: World,
+) -> None:
+    world.wrote("docs/clean.md", "Nothing here.\n", "clean")
+    clean = git(world.worktree, "rev-parse", "HEAD")
+    launch = world.registered(
+        Limits(actions=["fetch", "push"], protected=[], gated=["refs/heads/live"])
+    )
+
+    def trying(_launch: Register) -> Branches:
+        return Branches(integration="dev", running="live")
+
+    handler = PushHandler(remotes=Remotes(say=world.said.append, trying=trying))
+    updates = [
+        Update(source=clean, destination="refs/heads/live"),
+        Update(source=clean, destination="refs/heads/feat"),
+    ]
+    atomic = asyncio.run(
+        handler.answer(Pushing(remote="origin", updates=updates, atomic=True), launch)
+    )
+    assert isinstance(atomic, Pushed)
+    assert "is computed by the host" in (atomic.updates[0].error or "")
+    assert "not pushed: the push is atomic" in (atomic.updates[1].error or "")
+    assert world.on_forge("refs/heads/feat") is None
+
+    each = asyncio.run(
+        handler.answer(Pushing(remote="origin", updates=updates), launch)
+    )
+    assert isinstance(each, Pushed)
+    assert "is computed by the host" in (each.updates[0].error or "")
+    assert each.updates[1].error is None
+    assert world.on_forge("refs/heads/feat") == clean
+    assert world.on_forge("refs/heads/live") is None
 
 
 # Deleting a branch that has landed
