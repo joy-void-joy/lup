@@ -329,6 +329,53 @@ def by_role(roles: Roles, path: Path) -> Judgement | None:
     )
 
 
+def added_ignores(
+    path: Path, before: list[Directive], after: list[Directive]
+) -> list[Ask]:
+    """List an ask for each `# lup: ignore` the directives `after` add to those `before`, on its line."""
+    return [
+        Ask(
+            kind="ignore",
+            reason=f"adds `# lup: {added.identity().text}` to {path}",
+            line=added.line,
+        )
+        for added in added_suppressions(before, after)
+    ]
+
+
+def by_directives(
+    roles: Roles, path: Path, before: list[Directive], after: list[Directive]
+) -> Judgement | None:
+    """Return what a change to `path` gets by its role (`by_role`) and the `ignore`s it adds, which the declaration holds or flags whatever the role's level, as a write to it is judged (`Judge.ruled`), from each version's directives alone; none where that's nothing.
+
+    >>> from lup_dev import Project
+    >>> from lup_dev.declaration.resolve import Declaration
+    >>> roles = Roles(root=Path("/nowhere"), declaration=Declaration.of(Project()))
+    >>> by_directives(roles, Path("docs/a.md"), [], []) is None
+    True
+    """
+    judged = by_role(roles, path)
+    declared = roles.declaration
+    ignores = added_ignores(path, before, after) if roles.ruled(path) else []
+    held = [
+        *(judged.asks if judged else []),
+        *(ignores if "ignore" in declared.held else []),
+    ]
+    flagged = [
+        *(judged.flags if judged else []),
+        *(ignores if "ignore" in declared.flagged else []),
+    ]
+    if not held and not flagged:
+        return None
+    return Judgement(
+        path=path,
+        role=roles.role(path),
+        outcome="ask" if held else "allow",
+        asks=held,
+        flags=flagged,
+    )
+
+
 def touched_lines(before: str | None, after: str) -> list[int]:
     r"""List the lines of `after` a change from `before` touches, counted from 1.
 
@@ -838,11 +885,4 @@ class Judge(Model, arbitrary_types_allowed=True):
         if versions.after is None:
             return []
         before = versions.before.directives if versions.before else []
-        return [
-            Ask(
-                kind="ignore",
-                reason=f"adds `# lup: {added.identity().text}` to {path}",
-                line=added.line,
-            )
-            for added in added_suppressions(before, versions.after.directives)
-        ]
+        return added_ignores(path, before, versions.after.directives)

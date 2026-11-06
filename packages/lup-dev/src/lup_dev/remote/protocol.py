@@ -410,7 +410,7 @@ class Remotes(Model, arbitrary_types_allowed=True):
     it brings (`cli.py`).
     None tells nothing."""
     asking: Callable[[Register, str | None, str], Awaitable[list[Path]]] | None = None
-    """What says which files of a push to a gated ref its role asks the operator about, unapproved at that version, given the ref's tip on the remote, none where it isn't there, and the commit pushed (`unapproved_files`, `lup_dev.policy.landing`): any it names refuses the update, since a push can't wait for them. None asks nothing, for a service serving no landings."""
+    """What says which files of a push to a gated ref ask the operator by their role or an `ignore` they add, unapproved at that version, given the ref's tip on the remote, none where it isn't there, and the commit pushed (`unapproved_files`, `lup_dev.policy.landing`): any it names refuses the update, since a push can't wait for them. None asks nothing, for a service serving no landings."""
     modules: LaunchModules | None = None
     """Each launch's modules, whose hooks at `Publishing` see what a push would
     publish before git runs; none asks nothing, for a service serving no
@@ -844,8 +844,8 @@ class PushHandler(Model, RoomHandler[Pushing]):
             files = oneline(", ".join(f"`{each}`" for each in paths))
             return (
                 f"this puts on `{named}` what the operator hasn't approved, by each "
-                f"file's role: {files}. `land` holds for their answer, as a push "
-                "can't: land it with lup's tool"
+                f"file's role or an `ignore` it adds: {files}. `land` holds for "
+                "their answer, as a push can't: land it with lup's tool"
             )
 
         reasons = {

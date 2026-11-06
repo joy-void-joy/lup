@@ -49,7 +49,7 @@ from lup_dev.clipboard.desktop import Desktop
 from lup_dev.clipboard.protocol import routes as clipboard_routes
 from lup_dev.clock import Clock, SystemClock
 from lup_dev.codescan.conditions import loaded
-from lup_dev.codescan.contract import Checker, Due, Finding, Rule, Source
+from lup_dev.codescan.contract import Checker, Due, Finding, Parser, Rule, Source
 from lup_dev.codescan.directives import (
     Checking,
     Fired,
@@ -60,7 +60,7 @@ from lup_dev.codescan.directives import (
     holding,
     without,
 )
-from lup_dev.codescan.engine import EngineChecker, EngineError
+from lup_dev.codescan.engine import EngineChecker, EngineError, EngineParser
 from lup_dev.codescan.reference import reference
 from lup_dev.codescan.ruff import Ruff
 from lup_dev.commanding import RoomExchanges, RoomMarks
@@ -629,7 +629,7 @@ def host_serve(context: typer.Context) -> None:
         running=workers.commands,
         coming=coming,
     )
-    remotes = host_remotes(delivery, layout, coming, workers)
+    remotes = host_remotes(delivery, layout, coming, workers, EngineParser())
     waits = Waits(changes=changes)
     delivery.landing = waits.holding
     service = HostService(
@@ -711,13 +711,17 @@ def approval_reading(git: Git, branches: Branches, main: Path) -> Path:
 
 
 def host_remotes(
-    delivery: Delivery, layout: Layout, coming: Coming, modules: LaunchModules
+    delivery: Delivery,
+    layout: Layout,
+    coming: Coming,
+    modules: LaunchModules,
+    parser: Parser,
 ) -> Remotes:
-    """Return git on the host for each launch's room: each push held to what the operator approved of what it lands (`unapproved_files`), put to `modules`, and told to what follows a push (`after_push`)."""
+    """Return git on the host for each launch's room: each push held to what the operator approved of what it lands (`unapproved_files`), each file read from its parse alone by `parser`, put to `modules`, and told to what follows a push (`after_push`)."""
     return Remotes(
         say=typer.echo,
         landed=partial(after_push, delivery, coming),
-        asking=partial(unapproved_files, delivery, layout),
+        asking=partial(unapproved_files, delivery, layout, parser=parser),
         modules=modules,
     )
 

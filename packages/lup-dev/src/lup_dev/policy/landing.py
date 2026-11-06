@@ -31,10 +31,11 @@ by default, or the gated branch it's told to:
    (`lup_dev.gate`, `Passes`): the gate needs the project's environment, which
    the host doesn't run, so `land` reads the pass and never runs the gate. The
    room writes the passes, so this steers and guards nothing;
-5. the landing reads what it asks from its own diff, by each file's role and
-   the declaration approved, as the judge reads a write (`Lander.asks`,
-   `asked_files`), so what it holds doesn't depend on the hooks: each such file
-   the operator hasn't approved at that version is flagged there and then;
+5. the landing reads what it asks from its own diff, by each file's role, the
+   `ignore`s it adds and the declaration approved, as the judge reads a write
+   (`Lander.asks`, `asked_files`), so what it holds doesn't depend on the hooks:
+   each such file the operator hasn't approved at that version is flagged there
+   and then;
 6. each file the landing changes that's flagged on a branch it lands, and not
    approved, holds it: the landing waits on each, every flag on it (`Wait`,
    `lup_dev.policy.waits`), raising one desktop notice for them all, and each
@@ -213,7 +214,7 @@ from lup_dev.merging import Conflicted, Failed, Merged, Merging
 from lup_dev.policy.checkpoint import LastDeclaration
 from lup_dev.policy.coming import Coming
 from lup_dev.policy.holds import unified
-from lup_dev.policy.judge import Judgement, by_role
+from lup_dev.policy.judge import Judgement, by_directives
 from lup_dev.policy.reviewed import Mark, Reviews
 from lup_dev.policy.roles import Roles, matches
 from lup_dev.policy.waits import Awaited, Wait, Waits
@@ -590,7 +591,7 @@ class Brought(Model):
 
 
 class AskedFile(Model):
-    """A file a landing's own diff asks the operator about by its role, as a write to it would, whatever its hooks heard: what it changes it to, and what it gets."""
+    """A file a landing's own diff asks the operator about, by its role or the `ignore` it adds, as a write to it would, whatever its hooks heard: what it changes it to, and what it gets."""
 
     path: Path
     """From the repository's root."""
@@ -600,14 +601,90 @@ class AskedFile(Model):
     """Its content there; none where it isn't a file's, or the landing deletes it."""
     judgement: Judgement
 
+    def asked_by(self) -> str:
+        """Say what of it asks the operator, for the item it's put before them in.
 
-def asked_files(git: Git, roles: Roles, old: str | None, tip: str) -> list[AskedFile]:
-    """Return each file the landing of `tip` changes against `old` that its role asks about (`by_role`): the same reading the judge makes of a write to it, of the diff alone, so no hook need have heard it. Read from the objects' own bytes (`Git.own_changes`), each what its id says, so only the ids say what it lands; raise `GitError` where one can't be read or isn't."""
+        >>> from lup_dev.policy.judge import Ask
+        >>> judged = Judgement(path=Path("a.py"), role="production", outcome="ask")
+        >>> held = Ask(kind="ignore", reason="adds an ignore")
+        >>> file = AskedFile(
+        ...     path=Path("a.py"),
+        ...     version="b",
+        ...     content=b"",
+        ...     judgement=judged.model_copy(update={"asks": [held]}),
+        ... )
+        >>> file.asked_by()
+        'the `ignore` it adds asks'
+        """
+        judged = self.judgement
+        kinds = [each.kind for each in [*judged.asks, *judged.flags]]
+        return (
+            "the `ignore` it adds asks"
+            if all(kind == "ignore" for kind in kinds)
+            else "its role asks"
+        )
+
+
+def asked_files(
+    git: Git, roles: Roles, old: str | None, tip: str, *, parser: Parser | None = None
+) -> list[AskedFile]:
+    """Return each file the landing of `tip` changes against `old` that asks by its role or an `ignore` it adds (`by_directives`): the same reading the judge makes of a write to it, of the diff alone, so no hook need have heard it. Read from the objects' own bytes (`Git.own_changes`), each what its id says, so only the ids say what it lands, each module lup's rules read from its parse alone by `parser`, none the engine's; raise `GitError` where one can't be read or isn't, and `EngineError` where it can't read them: what can't be read lands nothing."""
     changed = {Path(path): entry for path, entry in git.own_changes(old, tip).items()}
+    was = (
+        {}
+        if old is None
+        else {Path(path): entry for path, entry in git.own_changes(tip, old).items()}
+    )
+    ruled = [
+        path
+        for path, entry in changed.items()
+        if entry is not None and entry.kind == "blob" and roles.ruled(path)
+    ]
+
+    def in_side(side: dict[Path, Tracked | None], path: Path) -> str | None:
+        entry = side.get(path)
+        return None if entry is None or entry.kind != "blob" else entry.object
+
+    versions = list(
+        dict.fromkeys(
+            found
+            for path in ruled
+            for found in [in_side(changed, path), in_side(was, path)]
+            if found is not None
+        )
+    )
+    read = {
+        version: content.decode(errors="replace")
+        for version, content in zip(
+            versions, git.verified("blob", versions), strict=True
+        )
+    }
+    sources = list(
+        dict.fromkeys(
+            Source(path=path, content=read[found])
+            for path in ruled
+            for found in [in_side(changed, path), in_side(was, path)]
+            if found is not None
+        )
+    )
+    reports = (parser or EngineParser()).parsed(roles.root, sources) if sources else []
+    parsed = dict(zip(sources, reports, strict=True))
+
+    def directives(side: dict[Path, Tracked | None], path: Path) -> list[Directive]:
+        found = in_side(side, path)
+        if found is None or path not in ruled:
+            return []
+        return parsed[Source(path=path, content=read[found])].directives
+
     judged = {
         path: judgement
         for path in changed
-        if (judgement := by_role(roles, path)) is not None
+        if (
+            judgement := by_directives(
+                roles, path, directives(was, path), directives(changed, path)
+            )
+        )
+        is not None
     }
     held = list(
         dict.fromkeys(
@@ -1809,7 +1886,7 @@ class Lander(Model, arbitrary_types_allowed=True):
             approved_roles, self.layout, self.launch.repository
         )
         files = await asyncio.to_thread(
-            asked_files, git, roles, landing.old, landing.tip
+            asked_files, git, roles, landing.old, landing.tip, parser=self.parser
         )
         baseline = self.baseline
         names = [short(each) for each in [*branches, landing.onto]]
@@ -1862,7 +1939,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         await self.delivery.flagged(
             Flagged(
                 text=(
-                    f"{path} is in what `{branch}` lands, and its role asks the "
+                    f"{path} is in what `{branch}` lands, and {file.asked_by()} the "
                     f"operator about it. It holds at landing: `{branch}` lands once "
                     "they approve it."
                 ),
@@ -2827,9 +2904,15 @@ def left_alone(source: str, branches: Branches) -> list[str]:
 
 
 async def unapproved_files(
-    delivery: Delivery, layout: Layout, launch: Register, old: str | None, tip: str
+    delivery: Delivery,
+    layout: Layout,
+    launch: Register,
+    old: str | None,
+    tip: str,
+    *,
+    parser: Parser,
 ) -> list[Path]:
-    """Return each file putting `tip` on a gated branch at `old` on the remote changes that its role asks about, the operator not having approved it at that version: the reading a landing holds on (`Lander.asks`), for a push, which can't hold (`Remotes.asking`). Raise what git raises, read through `launch`'s repository pinned."""
+    """Return each file putting `tip` on a gated branch at `old` on the remote changes that asks by its role or an `ignore` it adds, the operator not having approved it at that version: the reading a landing holds on (`Lander.asks`), for a push, which can't hold (`Remotes.asking`). Raise what git and `parser` raise, read through `launch`'s repository pinned."""
     repository = launch.repository
     baseline = Baseline(
         inbox=delivery.inbox,
@@ -2839,7 +2922,8 @@ async def unapproved_files(
 
     def read() -> list[Path]:
         git = Git.pinned(repository)
-        files = asked_files(git, approved_roles(layout, repository), old, tip)
+        roles = approved_roles(layout, repository)
+        files = asked_files(git, roles, old, tip, parser=parser)
         return [each.path for each in files if not baseline.approves(each)]
 
     return await asyncio.to_thread(read)
