@@ -1,0 +1,58 @@
+// What comes to the demo as it runs (`docs/dashboard.md`, *The demo*), through the host's own handlers: a question
+// arriving in the thread its asker works in, two writes to a branch, each flagged, and a landing done waiting once the
+// file it waits on is answered. Each waits on what it checks, the demo's stand-in agents taking their seconds.
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+
+import { open, type Dashboard } from "./dashboard.ts";
+import { demo, type Demo } from "./demo.ts";
+import type { Review } from "./review.ts";
+
+/** The fix-clock subagent's drawer as the landing holds its file, in the lup-impl session's thread. */
+const HELD = "lup-impl/fix-clock · since you approved · 1 held at landing";
+
+let served: Demo;
+let dashboard: Dashboard;
+let review: Review;
+
+beforeAll(async () => {
+    served = await demo({ size: 0 });
+    dashboard = await open(served.url);
+    review = await dashboard.review();
+    await review.holds("── @66 note · lup-impl/explore-auth");
+    await review.settled(1500);
+});
+
+afterEach(() => {
+    expect(dashboard.thrown).toEqual([]);
+});
+
+afterAll(async () => {
+    await dashboard?.close();
+    await served?.close();
+});
+
+/** Return once the top line says `text`. */
+const said = (text: string) => dashboard.page.waitForFunction((text) => document.querySelector(".bar .said")?.textContent?.includes(text) === true, text);
+
+describe("what comes to the demo as it runs, in headless Chromium", () => {
+    it("brings a late question into the thread its asker works in, with its moment", async () => {
+        await review.holds("━━ @transcript-reader · The transcript reader · lup-impl/parser holds · 2 questions, a check ━━");
+        await review.holds("── @61 question · lup-impl/parser · new · ");
+        await review.holds("→ called mcp__lup__ask · this item");
+    });
+
+    it("brings two writes to a branch into its drawer, each flagged", async () => {
+        await review.holds("lup-impl/parser · since you approved · 2 to review · 2 flagged");
+    });
+
+    it("holds a file at landing in its writer's drawer, and ends the landing's wait once it's marked reviewed", async () => {
+        await review.holds("landing `fix-clock` on `dev` waits on 1 file in lup-impl/fix-clock's drawer");
+        await review.goTo(HELD);
+        await dashboard.keys.press([" ", "d"]);
+        await dashboard.page.waitForFunction(() => document.querySelector(".status")?.textContent?.includes("files reviewed") !== true);
+        await dashboard.keys.press(["Control+Enter"]);
+        await said("Sent");
+        await review.until("end the landing's wait", (view) => !view.state.doc.toString().includes("landing `fix-clock` on `dev` waits on 1 file"));
+        expect(await review.text()).not.toContain(HELD);
+    });
+});

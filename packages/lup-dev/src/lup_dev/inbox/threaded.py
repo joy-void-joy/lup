@@ -53,7 +53,6 @@ served changed (`ThreadReading`), since the page's watch asks again at each
 hook any agent makes.
 """
 
-from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Literal, Self, override
 
@@ -465,37 +464,17 @@ class Beside(Model):
     """In the order they came (`Standing.unanswered`)."""
 
 
-class ThreadSource(ABC):
-    """What the review's threads are read from beside the ledger's records (`Ledgered`): the inbox's items, what each thread is read with (`Beside`), and how each conversation is called.
-
-    The host's is its inbox (`Concerned`); the demo's, its stand-ins
-    (`lup_dashboard/demo.py`), so both read the threads alike.
-    """
-
-    @abstractmethod
-    def items(self) -> Mapping[int, Item]:
-        """Return every item, by its number."""
-
-    @abstractmethod
-    def beside(self, thread: Thread, *, moved: bool) -> Beside:
-        """Return what `thread` is read with: its unanswered parts only where a part was `moved` in, which is all that reads them."""
-
-    @abstractmethod
-    def paths(self, conversations: Sequence[Conversation]) -> list[Pathed]:
-        """Return each of `conversations` lup knows a path for, with it, once (`Pathed`)."""
-
-
-class Concerned(Model, ThreadSource, arbitrary_types_allowed=True):
-    """The host's threads' source: its inbox, through what it says of its threads (`Concerns`)."""
+class Concerned(Model, arbitrary_types_allowed=True):
+    """What the review's threads are read from beside the ledger's records (`Ledgered`): the inbox, through what it says of its threads (`Concerns`)."""
 
     concerns: Concerns
 
-    @override
     def items(self) -> Mapping[int, Item]:
+        """Return every item, by its number."""
         return self.concerns.inbox.items
 
-    @override
     def beside(self, thread: Thread, *, moved: bool) -> Beside:
+        """Return what `thread` is read with: its unanswered parts only where a part was `moved` in, which is all that reads them."""
         standing = self.concerns.threads.standing(thread.number) if moved else None
         return Beside(
             mark=self.concerns.inbox.marks.of(
@@ -510,8 +489,8 @@ class Concerned(Model, ThreadSource, arbitrary_types_allowed=True):
             ],
         )
 
-    @override
     def paths(self, conversations: Sequence[Conversation]) -> list[Pathed]:
+        """Return each of `conversations` lup knows a path for, with it, once (`Pathed`)."""
         roster = self.concerns.roster
         return [
             Pathed(conversation=each, path=path, alike=bool(roster.alike(each)))
@@ -539,7 +518,7 @@ class Concerned(Model, ThreadSource, arbitrary_types_allowed=True):
 class Readings(Model, arbitrary_types_allowed=True):
     """The threads, read once from the ledger (`Ledgered`) and their `source`, as the review reads each, and where each conversation going on works."""
 
-    source: ThreadSource
+    source: Concerned
     ledgered: Ledgered
     working: list[Working] = []
 

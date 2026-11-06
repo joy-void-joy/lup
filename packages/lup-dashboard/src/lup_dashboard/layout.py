@@ -1,4 +1,4 @@
-"""Where the dashboard's own files are, and where its demo keeps a copy of the operator's dashboard state."""
+"""Where the dashboard's own files are, and where a demo keeps its state."""
 
 from pathlib import Path
 
@@ -20,14 +20,14 @@ class DashboardLayout(Model):
         return self.package / "page"
 
 
-class CopyLayout(Model):
-    """Where the demo keeps a copy of the operator's dashboard state (`lup_dashboard/copied.py`): a directory of its own, everything the copy's handlers write inside it."""
+class DemoLayout(Model):
+    """Where a demo keeps its state, stand-ins (`lup_dashboard/demo.py`) or a copy of the operator's dashboard state (`lup_dashboard/copied.py`): a directory of its own, everything the host's handlers write there inside it."""
 
     home: Path
 
     @property
     def lup(self) -> Layout:
-        """The places of lup's in the copy, each inside it, none left at its default on the machine: the host's state and runtime directory, laid out as the host keeps them, and the data, configuration and cache a handler or a module would write."""
+        """The places of lup's in the demo, each inside it, none left at its default on the machine: the host's state and runtime directory, laid out as the host keeps them, and the data, configuration and cache a handler or a module would write."""
         return Layout(
             state=self.home / "state",
             runtime=self.home / "run",
@@ -37,7 +37,7 @@ class CopyLayout(Model):
         )
 
     def records(self, runtime: str) -> Path:
-        """Say where the records of runtime `runtime` copied as they're read are kept, laid out as the home they're kept in on the host."""
+        """Say where the records of runtime `runtime` are kept: a copy's as they're read, laid out as the home they're kept in on the host; the stand-ins' as they're written."""
         return self.home / "records" / runtime
 
 
