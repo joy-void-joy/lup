@@ -415,6 +415,7 @@ Behind `packages/lup-dashboard/page/drive/vitest.config.ts`'s `maxWorkers` (#162
 - **All at once,** vitest's default of one file per core, the 13 files reached the room's 2,048 (`pids.peak` read 2048): Chromium's renderers crashed ("Target crashed"), `xdotool` couldn't start (`spawn xdotool EAGAIN`), a demo answered 500, and the run took 94 to 159 s, failing 8 or 9 of 50 tests. The session running the gate was cut off once around then; whether by this or by the host service's restart at the same minute isn't known from the room.
 - **Three files at a time** peaked at 722, every test passing, in 29 s.
 - The limit is the room's, shared by every session, subagent and gate in it, so a step that runs browsers in parallel caps itself well under it.
+- **Gates overlapping** reached the limit all the same on 2026-11-06, the 18 files then peaking at about 900 alone: with three gates in the room the `pids.current` read 2,048, and each of two gates' `drive` failed (`spawn xdotool EAGAIN`, Chromium's "browser has been closed", a hook's 60 s running out). With `pnpm run drive` taking a lock in the room's `/tmp` (`flock`), two started at once took 123 s, the second waiting 59.8 s for the first, both passing, with a peak of 1,131.
 
 ## A route just set in Chromium (Chromium 151 headless, Playwright 1.64.1, a 32-core host, measured in a room 2026-11-06)
 
