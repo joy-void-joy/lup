@@ -71,18 +71,37 @@ describe("the review's editor, in headless Chromium", () => {
         expect(await review.text()).not.toContain("kept on the host");
     });
 
+    it("closes a run of calls with zc from any of its rows, each a closed fold of its own, as vim's closes what holds a closed fold", async () => {
+        const run = (await review.text()).split("\n").find((line) => /^· \d+ calls: /.test(line));
+        if (run === undefined) {
+            throw new Error("the demo holds no run of calls");
+        }
+        await review.goTo(run);
+        await dashboard.keys.press(["j"]);
+        await review.until("went on to a row of the run", (view) => view.state.doc.lineAt(view.state.selection.main.head).text.startsWith("· "));
+        const row = await review.line();
+        await dashboard.page.waitForFunction((text) => [...document.querySelectorAll(".review-buffer .cm-line")].some((line) => line.textContent?.includes(text)), row);
+
+        await dashboard.keys.press(["z", "c"]);
+        await review.until("went to the run's line", (view, run) => view.state.doc.lineAt(view.state.selection.main.head).text === run, run);
+        await dashboard.page.waitForFunction((text) => ![...document.querySelectorAll(".review-buffer .cm-line")].some((line) => line.textContent?.includes(text)), row);
+
+        await dashboard.keys.press(["z", "a"]);
+        await dashboard.page.waitForFunction((text) => [...document.querySelectorAll(".review-buffer .cm-line")].some((line) => line.textContent?.includes(text)), row);
+    });
+
     it("counts a mark once, though the editor's state holds its decorations twice", async () => {
         const held = await review.evaluate((view) => {
             let count = 0;
             for (const value of (view.state as unknown as { values: unknown[] }).values) {
                 const ranges = value as { between?: (from: number, to: number, each: (from: number, to: number, value: { spec?: { class?: string } }) => void) => void };
                 ranges?.between?.(0, view.state.doc.length, (_from, _to, decoration) => {
-                    count += (decoration.spec?.class ?? "").split(" ").includes("tone-call") ? 1 : 0;
+                    count += (decoration.spec?.class ?? "").split(" ").includes("tone-run") ? 1 : 0;
                 });
             }
             return count;
         });
-        const counted = await review.decorated("tone-call");
+        const counted = await review.decorated("tone-run");
         expect(counted).toBeGreaterThan(0);
         expect(held).toBe(2 * counted);
     });
