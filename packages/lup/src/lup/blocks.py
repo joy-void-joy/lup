@@ -603,6 +603,37 @@ def lines(blocks: list[Block], indent: str = "") -> list[str]:
     return [line for block in blocks for line in said(block)]
 
 
+class Sight(Model):
+    """One thing of a view read by being on screen: the block that has to be, and how far its view's mark moves once it has (`Sights`).
+
+    Inside a closed fold a block isn't on screen, so which block a view names says
+    whether a fold has to be open: the agent's words themselves in the messages, a
+    call's or an item's own line in the trace.
+    """
+
+    block: str
+    """The block's id."""
+    up_to: str
+    """How far it reads its view's mark, in its module's own terms."""
+    through: datetime | None = None
+    """What had come by there (`ReviewMark.through`)."""
+    folded: bool = False
+    """Whether it stands for what its block, a fold read as it opens, holds:
+    closed, it holds the mark back; open, what it holds says so itself."""
+
+
+class Sights(Model):
+    """What of a view is read by being on screen: its mark, moved as `offer` moves it, and each thing that moves it, in the order they come.
+
+    `docs/dashboard.md`, *Review marks*. The page reports what's been on screen;
+    a mark is one position, so it moves as far as the first of these not yet seen.
+    """
+
+    offer: Offer
+    """Moving the view's mark: each of `sights` says how far."""
+    sights: list[Sight] = []
+
+
 class Blocks(Model):
     """What a view answers: its blocks, and, for a drawer, the summary line under its banner."""
 
@@ -620,6 +651,8 @@ class Blocks(Model):
     offers: list[Offer] = []
     """What the view offers as a whole, as a drawer marking every file it
     shows reviewed: what a verb's key does where no block within offers it."""
+    sights: Sights | None = None
+    """What of it is read by being on screen; none where nothing is."""
 
     def text(self) -> str:
         """Say the view as text, as its command prints it and an agent reads it: its summary, then its blocks, a closed fold as its summary line.

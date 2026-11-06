@@ -131,6 +131,22 @@ def exchange(
     )
 
 
+def read_back(
+    entries: list[Entry], beside: Exchanged = ALONE, of: OfAgent = OF, step: int = 0
+) -> Blocks:
+    """Return what the fold of what the operator has read shows as it opens, in the exchange at `step`: where they've spoken through lup since, the conversation's items where they happened."""
+    asked = OfExchange(
+        runtime=of.runtime,
+        session=of.session,
+        agent=of.agent,
+        step=step,
+        through=len(entries) - 1,
+    )
+    return exchange_blocks(
+        asked, entries, beside, exchange=Viewing.exchange, call=Viewing.call
+    )
+
+
 def opened(blocks: list[Block]) -> list[Block]:
     """Return `blocks` with every fold whose content is given opened, as the operator opening them all sees them."""
     return [
@@ -835,28 +851,32 @@ def lines(view: Blocks, *marks: str) -> list[str]:
 def test_each_item_is_a_line_its_text_under_it_one_sent_after_the_call_that_made_it_one_received_when_told() -> (
     None
 ):
-    view = drawer(CALLED, EXCHANGED)
-    assert whole(view) == said(
-        "trace · 7 steps · 6 new",
+    # Their last words came after it all: it's read, and it's what that fold shows.
+    assert drawer(CALLED, EXCHANGED).text().splitlines() == [
+        "trace · 7 steps",
         "▾ you: Look into reading transcripts.",
-        "  ▾ Each session is a JSONL file.",
-        "    Each session is a JSONL file.",
-        "  ▸ · Bash  [call id=b1]",
-        "  ▾ → @51 question to you · answered by @53 · Which parser?",
-        "    Which parser?",
-        "    1. A model per kind (lean: yes)",
-        "    ▸ · mcp__lup__ask  [call id=q1]",
-        "  ▸ · Read  [call id=r1]",
-        "  ▾ ← @53 your answer to @51",
-        "    Asked: Which parser?",
-        "    1. A model per kind (lean: yes): leaning: they go with the lean.",
-        "  ▾ Reading the second runtime's.",
-        "    Reading the second runtime's.",
-        "  ▾ → @52 note to you · answered by @54 · I assumed UTF-8.",
-        "    I assumed UTF-8.",
-        "  ▸ · Grep  [call id=g1]",
-        "  ▾ ← @54 your reply to @52 · not told yet",
-        "    Good.",
+        "  ▸ 6 earlier steps, 4 items  [exchange step=0 through=6]",
+    ]
+    view = read_back(CALLED, EXCHANGED)
+    assert whole(view) == said(
+        "▾ Each session is a JSONL file.",
+        "  Each session is a JSONL file.",
+        "▸ · Bash  [call id=b1]",
+        "▾ → @51 question to you · answered by @53 · Which parser?",
+        "  Which parser?",
+        "  1. A model per kind (lean: yes)",
+        "  ▸ · mcp__lup__ask  [call id=q1]",
+        "▸ · Read  [call id=r1]",
+        "▾ ← @53 your answer to @51",
+        "  Asked: Which parser?",
+        "  1. A model per kind (lean: yes): leaning: they go with the lean.",
+        "▾ Reading the second runtime's.",
+        "  Reading the second runtime's.",
+        "▾ → @52 note to you · answered by @54 · I assumed UTF-8.",
+        "  I assumed UTF-8.",
+        "▸ · Grep  [call id=g1]",
+        "▾ ← @54 your reply to @52 · not told yet",
+        "  Good.",
     )
     # Each item's text folds under its line, closed, set off by a bar; sent in its tone, received in its own.
     assert [each for each in folds(view.blocks) if each[0].startswith("item ")] == [
@@ -971,7 +991,7 @@ def test_an_item_s_line_says_how_its_text_starts_only_as_far_as_its_row_holds() 
     assert len(line) <= 100
     # What they were sent says only what it is: they didn't say it, and its first line is as lup told it.
     told = item(54, note("Good.", of=52), 9, sender=OPERATOR, recipient=SESSION)
-    fold = block(drawer(CALLED, listed((told, "Good."))).blocks, "item 54")
+    fold = block(read_back(CALLED, listed((told, "Good."))).blocks, "item 54")
     assert isinstance(fold, Fold)
     assert [span.text for span in fold.summary] == [
         "← @54 your reply to @52 · not told yet"
@@ -981,7 +1001,7 @@ def test_an_item_s_line_says_how_its_text_starts_only_as_far_as_its_row_holds() 
 def test_each_item_is_cited_by_at_and_its_number_which_nobody_takes_for_a_github_issue() -> (
     None
 ):
-    assert not re.search(r"#\d", whole(drawer(CALLED, EXCHANGED)))
+    assert not re.search(r"#\d", whole(read_back(CALLED, EXCHANGED)))
 
 
 TURN_S_END = item(55, note("Reading the second runtime's.", ending=True), 8)
@@ -998,7 +1018,7 @@ def test_a_turn_s_last_words_lup_made_a_note_of_fold_under_its_line_the_review_s
         (REPLIED, "Good."),
         (TURN_S_END, "Reading the second runtime's."),
     )
-    view = drawer(CALLED, beside)
+    view = read_back(CALLED, beside)
     fold = block(view.blocks, "said 5")
     assert fold == Fold(
         id="said 5",
@@ -1131,8 +1151,8 @@ def test_one_passed_on_from_an_ended_subagent_is_in_both_its_session_s_view_and_
         addressed=SURVEY,
         state=Told(at=at(4), how="call"),
     )
-    session = drawer(STEPS[:3], listed((reply, "Right.")))
-    subagent = drawer(
+    session = read_back(STEPS[:3], listed((reply, "Right.")))
+    subagent = read_back(
         STEPS[:3],
         listed((noted, "No cache."), (reply, "Right."), party=SURVEY),
         OfAgent(runtime="claude", session="s1", agent="a04"),
@@ -1159,7 +1179,7 @@ def test_a_conversation_an_item_s_line_names_keeps_its_span_referring_to_it_in_t
         state=Told(at=at(4), how="call"),
     )
     asked = item(51, Question(text="Which?", decisions=[]), 2, recipient=SURVEY)
-    view = drawer(STEPS[:3], listed((asked, "Which?"), (reply, "Right.")))
+    view = read_back(STEPS[:3], listed((asked, "Which?"), (reply, "Right.")))
     survey = OfAgent(runtime="claude", session="s1", agent="a04")
     passed = block(view.blocks, "item 46")
     assert isinstance(passed, Fold)
@@ -1244,19 +1264,6 @@ def test_an_item_arriving_is_added_and_its_question_s_line_changes_as_its_answer
     answered = listed((ASKED, "Which parser?"), (ANSWERED, "Asked."))
     before, after = drawer(CALLED, asked), drawer(CALLED, answered)
     assert "▸ → @51 question to you · waiting on you · Which parser?" in before.text()
-    assert whole(after).endswith(
-        said(
-            "▾ → @51 question to you · answered by @53 · Which parser?",
-            "    Which parser?",
-            "    ▸ · mcp__lup__ask  [call id=q1]",
-            "  ▸ · Read  [call id=r1]",
-            "  ▾ ← @53 your answer to @51",
-            "    Asked.",
-            "  ▾ Reading the second runtime's.",
-            "    Reading the second runtime's.",
-            "  ▸ · Grep  [call id=g1]",
-        )
-    )
 
     def within(view: Blocks) -> list[Block]:
         """Return what's in the exchange `view` shows."""
@@ -1265,11 +1272,27 @@ def test_an_item_arriving_is_added_and_its_question_s_line_changes_as_its_answer
         assert isinstance(fold.content, list)
         return fold.content
 
-    # Every other block is as it was: the question's own changes, and its answer is added.
-    kept = [each for each in within(before) if each.id != "item 51"]
-    assert [
-        each for each in within(after) if each.id not in {"item 51", "item 53"}
-    ] == kept
+    # Their answer reads what came before it, the question among it, which says so as that fold opens.
+    assert whole(read_back(CALLED, answered)).startswith(
+        said(
+            "▾ Each session is a JSONL file.",
+            "  Each session is a JSONL file.",
+            "▸ · Bash  [call id=b1]",
+            "▾ → @51 question to you · answered by @53 · Which parser?",
+            "  Which parser?",
+            "  ▸ · mcp__lup__ask  [call id=q1]",
+            "▸ · Read  [call id=r1]",
+            "▾ ← @53 your answer to @51",
+            "  Asked.",
+        )
+    )
+    # Everything after it is as it was: nothing of it moved for the answer.
+    assert [each.id for each in within(after)] == [
+        "exchange 0 through 4",
+        "said 5",
+        "call g1",
+    ]
+    assert within(after)[1:] == within(before)[-2:]
 
 
 def test_an_item_with_no_text_is_a_line_with_nothing_folded_under_it() -> None:
@@ -1556,6 +1579,182 @@ def test_the_operator_s_words_typed_after_the_mark_count_as_reading_what_came_be
         "  ▸ 3 earlier steps  [exchange step=10 through=13]",
         "  ▾ Word 6.",
     ]
+
+
+def test_what_they_said_through_lup_reads_what_came_before_it_as_their_typed_words_do() -> (
+    None
+):
+    # A session driven from the dashboard: nothing typed, the operator's words through lup alone.
+    sent = item(
+        80,
+        note("Go on."),
+        4,
+        sender=OPERATOR,
+        recipient=SESSION,
+        state=Told(at=at(4), how="call"),
+    )
+    # `talking` has a call and words a minute each: what came by then is read.
+    view = drawer(talking(10), listed((sent, "Go on.")), reading=READING)
+    assert view.text().splitlines()[:2] == [
+        "trace · 20 steps · 10 new",
+        "▸ 10 earlier steps, 1 item  [exchange through=9]",
+    ]
+    assert view.offers == [READING]
+    # Nothing since: nothing's new, and nothing's offered, though nothing was ever typed or marked.
+    done = drawer(talking(4), listed((sent, "Go on.")), reading=READING)
+    assert done.text().splitlines() == [
+        "trace · 8 steps",
+        "▸ 8 earlier steps, 1 item  [exchange through=7]",
+    ]
+    assert done.offers == []
+
+
+def test_what_came_while_their_words_waited_to_be_told_stays_new() -> None:
+    # Told at the agent's next hook, a long call later: the operator had read only what came by the time they said it.
+    sent = item(
+        80,
+        note("Go on."),
+        4,
+        sender=OPERATOR,
+        recipient=SESSION,
+        state=Told(at=at(12), how="call"),
+    )
+    other = item(
+        81,
+        note("Meanwhile."),
+        8,
+        sender=SURVEY,
+        recipient=SESSION,
+        state=Told(at=at(8), how="call"),
+    )
+    view = drawer(talking(10), listed((sent, "Go on."), (other, "Meanwhile.")))
+    assert view.text().splitlines()[:2] == [
+        "trace · 20 steps · 10 new",
+        "▸ 10 earlier steps  [exchange through=9]",
+    ]
+    assert "@81" in whole(view)
+    assert "@80" in whole(view)
+
+
+def test_a_subagent_s_record_says_what_their_parent_told_them_as_typed_which_reads_nothing() -> (
+    None
+):
+    told: list[Entry] = [
+        Said(by="operator", text="Find every call site.", at=at(0)),
+        *talking(3, start=1),
+    ]
+    ran = conversation_blocks(
+        OfAgent(runtime="claude", session="s1", agent="a04"),
+        [
+            *told,
+            Said(by="operator", text="Now these.", at=at(30)),
+            *talking(1, start=40),
+        ],
+        Exchanged(sent=[], received=[], parent=OfAgent(runtime="claude", session="s1")),
+        exchange=Viewing.exchange,
+        call=Viewing.call,
+    )
+    assert ran.text().splitlines()[0] == "trace · 10 steps · 10 new"
+
+
+def test_what_s_new_is_read_by_being_on_screen_each_thing_shown_saying_how_far_it_moves_the_mark() -> (
+    None
+):
+    view = drawer(talking(4), mark=marked(3), reading=READING)
+    assert view.sights is not None
+    assert view.sights.offer == READING
+    assert [
+        (each.block, each.up_to, each.folded, each.through)
+        for each in view.sights.sights
+    ] == [
+        ("step 4", "4", False, at(2)),
+        ("said 5", "5", False, at(2)),
+        ("step 6", "6", False, at(3)),
+        ("said 7", "7", False, at(3)),
+    ]
+    # All read, nothing is.
+    assert drawer(talking(4), mark=marked(7), reading=READING).sights is None
+    # A view's text form, and one nobody can mark, says none.
+    assert drawer(talking(4), mark=marked(3)).sights is None
+
+
+def test_a_run_of_calls_is_read_by_its_line_and_an_item_by_its_own_a_closed_fold_s_line_being_what_s_shown() -> (
+    None
+):
+    entries: list[Entry] = [
+        Said(by="agent", text="Going.", at=at(0)),
+        Called(tool="Bash", id="b1", at=at(1)),
+        Called(tool="Bash", id="b2", at=at(2)),
+        Called(tool="Read", id="r1", at=at(3)),
+    ]
+    told = item(
+        60,
+        note("Done."),
+        4,
+        sender=SURVEY,
+        recipient=SESSION,
+        state=Told(at=at(4), how="call"),
+    )
+    view = drawer(entries, listed((told, "Done.")), reading=READING)
+    assert view.sights is not None
+    assert [(each.block, each.up_to) for each in view.sights.sights] == [
+        ("said 0", "0"),
+        ("calls 1", "3"),
+        ("item 60", "3"),
+    ]
+    assert view.sights.sights[-1].through == at(4)
+
+
+def test_what_s_new_under_a_fold_holds_the_mark_back_and_says_so_itself_once_it_s_opened() -> (
+    None
+):
+    entries = talking(30)
+    view = drawer(entries, mark=marked(9), reading=READING)
+    assert view.sights is not None
+    first, *rest = view.sights.sights
+    assert first.block == "exchange before until last 20"
+    assert first.folded
+    assert not any(each.folded for each in rest)
+    page = exchange_blocks(
+        OfExchange(runtime="claude", session="s1", until_last=20),
+        entries,
+        ALONE,
+        exchange=Viewing.exchange,
+        call=Viewing.call,
+        mark=marked(9),
+        reading=READING,
+    )
+    assert page.sights is not None
+    assert not any(each.folded for each in page.sights.sights)
+    # What they'd read, opened, reads nothing more.
+    read = exchange_blocks(
+        OfExchange(runtime="claude", session="s1", through=9),
+        entries,
+        ALONE,
+        exchange=Viewing.exchange,
+        call=Viewing.call,
+        mark=marked(9),
+        reading=READING,
+    )
+    assert read.sights is None
+
+
+def test_what_came_after_where_a_mark_is_up_to_stays_new_however_long_before_it_was_moved() -> (
+    None
+):
+    # Moved at minute 59, as what was on screen left it; it read as far as what had come by minute 5.
+    mark = ReviewMark(
+        key=OF.model_dump(mode="json"), up_to="5", at=at(59), through=at(5)
+    )
+    told = item(50, note("Seen."), 2)
+    late = item(51, note("Late."), 8)
+    view = drawer(talking(6), listed((told, "Seen."), (late, "Late.")), mark=mark)
+    lines = view.text().splitlines()
+    assert lines[:2] == [
+        "trace · 12 steps · 6 new",
+        "▸ 6 earlier steps, 1 item  [exchange through=5]",
+    ]
+    assert any("@51" in each for each in lines)
 
 
 def test_a_drawer_long_unread_since_its_mark_keeps_the_cap_its_fold_saying_how_many_are_new() -> (

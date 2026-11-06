@@ -11,8 +11,8 @@ import { MOVE } from "./grammar";
 import {
     fresh,
     type Seeing,
-    news,
     toAnswer,
+    toRead,
     waits,
     whose,
     type Conversation,
@@ -20,6 +20,7 @@ import {
     type Group,
     type Laid,
     type Region,
+    type ThreadRead,
 } from "./review";
 
 /** What an entry of the overview is: a heading, a repository's or, grouped by thread, a section's; an agent; lup's approvals; a thread; an item. */
@@ -53,6 +54,14 @@ export interface OutlineRow extends Span {
     at: number;
     /** What waits beside it: an agent's files to review in their "since you approved", `◇3`; none else. */
     tag: string | null;
+    /** What of a thread or an agent's own asks the operator, and what of it is only to read, each counted apart; none else. */
+    counts?: Counts;
+}
+
+/** How much of a thread or an agent's own asks the operator, and how much is only to read. */
+export interface Counts {
+    asks: number;
+    toRead: number;
 }
 
 /** What the overview reads beside the review as laid out. */
@@ -93,7 +102,24 @@ export interface Standing {
 }
 
 /**
- * Return how an item stands: parked, waiting on the operator or news, each but where the draft settles it; what the
+ * Return how a thread's row stands in `section`: waiting on the operator where what the host says asks them is there, as
+ * in waiting on you, a thread done for them to confirm among that; only to read where it's only that, as in new, whatever
+ * else in it asks them, which its row there says; and how much of each it holds.
+ */
+export function threadStanding(read: ThreadRead, section: string | undefined): { marks: OutlineMark[]; counts: Counts } {
+    const asks = (read.asks ?? []).length + (read.state === "done to confirm" ? 1 : 0);
+    const reading = (read.new ?? []).length;
+    if (section === "new") {
+        return { marks: ["news"], counts: { asks: 0, toRead: reading } };
+    }
+    if (section === "waiting on you") {
+        return { marks: ["waiting"], counts: { asks, toRead: 0 } };
+    }
+    return { marks: asks > 0 ? ["waiting"] : reading > 0 ? ["news"] : [], counts: { asks, toRead: reading } };
+}
+
+/**
+ * Return how an item stands: parked, asking the operator or only to read, each but where the draft settles it; what the
  * draft does with it on the next Ctrl+Enter, as the reply does: comments on it go, it's marked read, or approved, an
  * approval marked read alone, one commented on left unanswered, a held change marked read or commented on approved, a
  * mark on one past waiting doing nothing, which the host drops; and whether it's new.
@@ -111,7 +137,7 @@ export function itemStanding(region: Region, draft: Draft, seeing: Seeing): Stan
     const approved = open && !declined && ((reason === "approval" && done) || (reason === "held" && (done || commented)));
     const answered: DraftMark[] = declined ? ["decline"] : approved ? ["approve"] : done && reason !== "approval" ? ["read"] : [];
     const drafted: DraftMark[] = parked ? [] : [...(commented ? ["comment" as const] : []), ...answered];
-    const marks: OutlineMark[] = parked ? ["parked"] : toAnswer(item, draft) ? ["waiting"] : news(item) && open && !done ? ["news"] : [];
+    const marks: OutlineMark[] = parked ? ["parked"] : toAnswer(item, draft) ? ["waiting"] : toRead(item, draft, seeing) ? ["news"] : [];
     return { marks, draft: drafted, fresh: fresh(item, seeing) };
 }
 
@@ -189,9 +215,9 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
                 text: `@${read.thread.name}`,
                 // Its title whole, which its banner cuts to keep to one row.
                 title: `@${read.thread.name} · ${read.thread.title}`,
-                marks: read.state === "waiting on the operator" || read.state === "done to confirm" ? ["waiting"] : (read.new ?? []).length > 0 ? ["news"] : [],
+                ...threadStanding(read, laidOut.sections.findLast((each) => each.header.from < from)?.name),
                 draft: [],
-                fresh: (read.new ?? []).length > 0,
+                fresh: false,
                 from,
                 to,
                 at: from,
@@ -218,6 +244,7 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
         const path = group.conversation === null ? "lup's approvals" : called(group.conversation);
         const files = toReview(group);
         const depth = group.depth + 1;
+        const own = laidOut.regions.filter((each) => each.header.from > from && each.header.from <= to);
         rows.push({
             key: `group ${group.place}`,
             kind: group.conversation === null ? "approvals" : "agent",
@@ -231,8 +258,11 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
             to,
             at: from,
             tag: files === 0 ? null : `◇${files}`,
+            counts: {
+                asks: own.filter((each) => toAnswer(each.item, draft)).length,
+                toRead: own.filter((each) => toRead(each.item, draft, seeing)).length,
+            },
         });
-        const own = laidOut.regions.filter((each) => each.header.from > from && each.header.from <= to);
         own.forEach((region, index) => {
             rows.push({
                 key: `item ${region.item.number}`,

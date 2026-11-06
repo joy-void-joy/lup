@@ -226,12 +226,16 @@ def test_the_drawer_offers_marking_it_read_to_its_last_step_and_folds_what_its_m
     assert unread.text().splitlines()[0] == "trace · 5 steps · 1 new"
     key = {"runtime": "claude", "session": "first-0000", "agent": None}
     [offer] = unread.offers
+    # What had come by then goes with it, so what comes before the reply is sent stays new, and it only goes forward.
     assert offer.argument == {
         "repository": str(repository),
         "module": "transcripts",
         "key": key,
         "up_to": "4",
+        "through": offer.argument["through"],
+        "forward": True,
     }
+    assert offer.argument["through"] is not None
     MarkStore.kept_in(layout).moved(
         repository, "transcripts", [ReviewMark(key=key, up_to="4", at=AT)]
     )

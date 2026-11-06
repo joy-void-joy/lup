@@ -391,15 +391,16 @@ describe("laid", () => {
         expect(toAnswer(NOTE, { ...EMPTY, done: [52] })).toBe(false);
     });
 
-    it("counts what's to answer and what's new for the header over the review, those settled in the draft left out", () => {
+    it("counts what's to answer and what's only to read apart for the header over the review, those settled in the draft left out", () => {
         const friction: Item = hosted({ ...NOTE, number: 60, reason: { reason: "friction", text: "`ls` failed", title: "" }, rank: NEWS });
         const items = [QUESTION, PROBLEM, friction, FLAGGED];
         // Each group seen up to an item, as the operator marked it with Space d on its banner.
         const seen = (upTo: number): Seeing => ({ groups: new Map([[whose(from("s1", "a1")), upTo], [whose(from("s2")), upTo]]), commented: new Set() });
-        expect(tallied(items, EMPTY, UNSEEN)).toBe("2 to answer · 4 new");
+        expect(tallied(items, EMPTY, UNSEEN)).toBe("2 to answer · 1 to read");
+        // Seen, it's no longer to read, though it stays where it is, and what asks them is counted all the same.
         expect(tallied(items, EMPTY, seen(100))).toBe("2 to answer");
-        expect(tallied(items, EMPTY, seen(55))).toBe("2 to answer · 2 new");
-        expect(tallied(items, { ...EMPTY, done: [51], parked: [70] }, UNSEEN)).toBe("1 to answer · 2 new");
+        expect(tallied(items, EMPTY, seen(55))).toBe("2 to answer · 1 to read");
+        expect(tallied(items, { ...EMPTY, done: [51], parked: [70] }, UNSEEN)).toBe("1 to answer · 1 to read");
         expect(tallied([friction], EMPTY, seen(60))).toBe("0 to answer");
         expect(tallied([], EMPTY, UNSEEN)).toBe("");
     });

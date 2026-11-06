@@ -342,13 +342,14 @@ class ListItems(Request, reads=True):
 
 
 class Seen(Model):
-    """How far the operator has seen an agent's group, as the core's review mark on it says (`lup_dev.inbox.marks`): its items up to `item` aren't new to them."""
+    """How far the operator has seen an agent's group, as the core's review mark on it says (`lup_dev.inbox.marks`), or their own last words to the agent, which they said having seen what came before: its items up to `item` aren't new to them."""
 
     conversation: Conversation
     item: int
-    """The last item of the group they'd seen as they marked it."""
+    """The last item of the group they'd seen as they marked it, or their words to
+    the agent, whichever is later."""
     at: datetime
-    """When they marked it, as their reply was sent."""
+    """When they marked it, as their reply was sent, or said those words."""
 
 
 class Items(Reply):
@@ -358,8 +359,8 @@ class Items(Reply):
     items: list[Item]
     seen: list[Seen] = []
     """How far the operator has seen the group of each conversation among the
-    items' senders, where they've marked it seen: an item after it is new to
-    them, unless they commented on it in a reply sent (`answers`)."""
+    items' senders, where they've marked it seen or spoken to them: an item after
+    it is new to them, unless they commented on it in a reply sent (`answers`)."""
     answers: list[Item] = []
     """The operator's own items about those listed: those a turn's end listed
     answers or cites, which the page lays out above it, and a review, a reply
@@ -822,7 +823,7 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
         )
 
     def seen(self, items: list[Item]) -> list[Seen]:
-        """Return how far the operator has seen the group of each conversation among `items`' senders, by the core's review mark on it, each repository's marks read once; none for one never marked."""
+        """Return how far the operator has seen the group of each conversation among `items`' senders, by the core's review mark on it, each repository's marks read once, or their own last words to them, whichever is later; none for one never marked or spoken to."""
         senders = list(
             dict.fromkeys(
                 each.sender for each in items if isinstance(each.sender, Conversation)
@@ -833,12 +834,48 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
             repository: store.kept(repository, CORE)
             for repository in dict.fromkeys(each.repository for each in senders)
         }
+        spoken = {
+            party: each
+            for each in sorted(
+                (
+                    item
+                    for item in self.delivery.inbox.items.values()
+                    if isinstance(item.sender, Operator)
+                ),
+                key=lambda item: item.number,
+            )
+            for party in (each.recipient, each.addressed)
+            if party in senders
+        }
 
         def of(conversation: Conversation) -> Seen | None:
             mark = kept[conversation.repository].of(marks.seen(conversation))
-            if mark is None or mark.up_to is None:
-                return None
-            return Seen(conversation=conversation, item=int(mark.up_to), at=mark.at)
+            said = spoken.get(conversation)
+            found = [
+                *(
+                    []
+                    if mark is None or mark.up_to is None
+                    else [
+                        Seen(
+                            conversation=conversation,
+                            item=int(mark.up_to),
+                            at=mark.at,
+                        )
+                    ]
+                ),
+                *(
+                    []
+                    if said is None
+                    else [
+                        Seen(
+                            conversation=conversation,
+                            item=said.number,
+                            at=said.made,
+                        )
+                    ]
+                ),
+            ]
+            return max(found, key=lambda each: each.item, default=None)
 
         return [found for each in senders if (found := of(each)) is not None]
 

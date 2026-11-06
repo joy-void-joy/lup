@@ -1635,11 +1635,11 @@ kbd {
     font-weight: 700;
 }
 
-/* How each thing stands, in the state's own colour: what waits on the operator orange, an item solid and a file
-   hollow; news blue; what's set aside muted; an agent's activity in its banner's colour. What the draft does with
-   an item is apart, in the colour of what the operator writes. */
+/* How each thing stands, in the state's own colour: what asks the operator something orange, and nothing else, a
+   file's flagged writes among it; what's only theirs to read blue, an item solid and a file to review hollow; what's set
+   aside muted; an agent's activity in its banner's colour. What the draft does with an item is apart, in the colour of
+   what the operator writes. */
 .mark-waiting,
-.mark-to-review,
 .mark-flagged {
     color: var(--orange);
 }
@@ -1649,7 +1649,8 @@ kbd {
     color: var(--cyan);
 }
 
-.mark-news {
+.mark-news,
+.mark-to-review {
     color: var(--info);
 }
 

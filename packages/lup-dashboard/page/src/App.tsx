@@ -49,6 +49,7 @@ import {
     messages,
     pruned,
     remarks,
+    countToRead,
     seeingOf,
     whose,
     type AgentDrawers,
@@ -463,6 +464,8 @@ export function App() {
         () => (inbox.reply?.kind === "inbox-items" ? inbox.reply.items.filter((each) => !flag(each)) : []),
         [inbox.reply],
     );
+    // What's only to read, which the top bar counts apart from what asks the operator.
+    const toReadCount = countToRead(waiting, draft, seeing, threadsRead?.threads ?? null);
 
     // What the draft marks or comments on that's past waiting, answered or replaced since it was written: laid out with
     // what's drafted on it, which stays in view, saying so, until it's sent.
@@ -949,7 +952,7 @@ export function App() {
         const applied: string[] = [];
         const said: ReplyPart[] = [];
         const reviews = new Map<string, { conversation: InboxConversation; place: Placing; decline: boolean; files: Viewed[]; ids: string[] }>();
-        const moving = new Map<string, { repository: string; module: string; marks: { key: Record<string, unknown>; up_to: string | null }[]; ids: string[] }>();
+        const moving = new Map<string, { repository: string; module: string; marks: { key: Record<string, unknown>; up_to: string | null; through: string | null; forward: boolean; seen: boolean }[]; ids: string[] }>();
         // What's moved from the pile, by where it goes: one request each, a thread opened once for all of them.
         const gathering = new Map<string, { thread: number | null; title: string | null; numbers: number[]; says: string; ids: string[] }>();
         for (const mark of marks) {
@@ -979,7 +982,7 @@ export function App() {
                     const argument = mark.argument as unknown as Moved;
                     const key = JSON.stringify([argument.repository, argument.module]);
                     const was = moving.get(key) ?? { repository: argument.repository, module: argument.module, marks: [], ids: [] };
-                    moving.set(key, { ...was, marks: [...was.marks, { key: argument.key, up_to: argument.up_to ?? null }], ids: [...was.ids, mark.id] });
+                    moving.set(key, { ...was, marks: [...was.marks, { key: argument.key, up_to: argument.up_to ?? null, through: argument.through ?? null, forward: argument.forward ?? false, seen: false }], ids: [...was.ids, mark.id] });
                     break;
                 }
                 case "set-holding": {
@@ -1225,7 +1228,13 @@ export function App() {
                 )}
                 <span className="spacer" />
                 <span className="count">
-                    {agents.length} {agents.length === 1 ? "agent" : "agents"} · {waitingOn(threadsRead, landingIn, waiting, draft.parked ?? [])} waiting on you
+                    {agents.length} {agents.length === 1 ? "agent" : "agents"} · <span className="mark-waiting">◆</span> {waitingOn(threadsRead, landingIn, waiting, draft.parked ?? [])} waiting on you
+                    {toReadCount === 0 ? null : (
+                        <>
+                            {" · "}
+                            <span className="mark-news">•</span> {toReadCount} to read
+                        </>
+                    )}
                 </span>
                 <button type="button" className="overview-button" onClick={() => setOverview(!overview)} title="the overview of every agent and item">
                     Overview <kbd>{"\\"}</kbd>

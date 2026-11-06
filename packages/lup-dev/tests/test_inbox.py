@@ -8065,6 +8065,52 @@ def test_review_marks_are_read_through_the_host_by_a_module_and_a_room_of_its_re
     assert roomed == read
 
 
+def test_an_agents_group_is_seen_up_to_the_operators_own_words_to_them_a_mark_further_on_the_later(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        mcp = machine.host.launch("one").mcp
+        call(mcp, "note", {"remark": "First."})
+        host = client(machine.host, clock)
+        assert host.ask(ListInbox(), Items).seen == []
+        clock.sleep(60)
+        words = host.ask(SendItem(launch="one", text="Carry on."), Shown).item
+        call(mcp, "note", {"remark": "Second."})
+        after = host.ask(ListInbox(), Items)
+        first, second = after.items
+        assert isinstance(first.sender, Conversation)
+        assert after.seen == [
+            Seen(conversation=first.sender, item=words.number, at=words.made)
+        ]
+        assert first.number < words.number < second.number
+        # A mark past their words is the later word, and one behind them changes nothing.
+        clock.sleep(60)
+        host.ask(
+            MoveMarks(
+                repository=first.sender.repository,
+                module=CORE,
+                marks=[Moving(key=seen(first.sender), up_to=str(first.number))],
+            ),
+            MarksMoved,
+        )
+        assert [each.item for each in host.ask(ListInbox(), Items).seen] == [
+            words.number
+        ]
+        host.ask(
+            MoveMarks(
+                repository=first.sender.repository,
+                module=CORE,
+                marks=[Moving(key=seen(first.sender), up_to=str(second.number))],
+            ),
+            MarksMoved,
+        )
+        assert [each.item for each in host.ask(ListInbox(), Items).seen] == [
+            second.number
+        ]
+
+
 def test_the_operators_list_says_how_far_they_have_seen_each_group_by_its_review_mark(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:

@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -200,6 +200,81 @@ def test_marks_are_moved_at_the_host_s_time_each_told_and_read_by_the_operator_o
     with pytest.raises(HostError, match="aren't this repository's"):
         asyncio.run(reading.scoped(asked, Path("/other/.git")))
     assert not MoveMarks.reads
+
+
+def test_a_mark_on_what_comes_in_order_only_goes_forward_so_a_page_behind_takes_nothing_back(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    store = MarkStore.kept_in(layout(tmp_path))
+    changes = Changes()
+    moving = MarksMoving(store=store, clock=clock, changes=changes)
+
+    def move(module: str, **fields: object) -> MarksMoved:
+        moved = asyncio.run(
+            moving.answer(
+                MoveMarks(
+                    repository=REPOSITORY,
+                    module=module,
+                    marks=[Moving.model_validate({"key": CONVERSATION, **fields})],
+                )
+            )
+        )
+        assert isinstance(moved, MarksMoved)
+        return moved
+
+    assert len(move("transcripts", up_to="7", forward=True).marks) == 1
+    # Behind where it stands, as a phone's reply drafted before, it's left there, telling nothing.
+    touched = dict(changes.touches)
+    assert move("transcripts", up_to="3", forward=True).marks == []
+    assert changes.touches == touched
+    kept = store.of(REPOSITORY, "transcripts", CONVERSATION)
+    assert kept is not None
+    assert kept.up_to == "7"
+    # At the same step, what had come by then says which is further.
+    early = clock.now() - timedelta(minutes=5)
+    late = clock.now() + timedelta(minutes=5)
+    assert move("transcripts", up_to="7", forward=True, through=early).marks == []
+    assert len(move("transcripts", up_to="7", forward=True, through=late).marks) == 1
+    assert move("transcripts", up_to="7", forward=True, through=early).marks == []
+    # One that says nothing of it moves where it's told, as a file's mark does, its versions in no order.
+    assert len(move("judge", up_to="abc").marks) == 1
+    assert len(move("judge", up_to="012").marks) == 1
+    assert len(move("transcripts", up_to="3").marks) == 1
+    assert len(move("transcripts", up_to="9", forward=True).marks) == 1
+    # The core's always go forward: a group or a thread, by what's in it.
+    assert len(move(CORE, up_to="50").marks) == 1
+    assert move(CORE, up_to="40").marks == []
+
+
+def test_a_mark_moved_by_being_seen_says_so_and_what_had_come_by_then_across_a_restart(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    store = MarkStore.kept_in(layout(tmp_path))
+    moving = MarksMoving(store=store, clock=clock, changes=Changes())
+    through = clock.now() - timedelta(minutes=5)
+    asyncio.run(
+        moving.answer(
+            MoveMarks(
+                repository=REPOSITORY,
+                module="transcripts",
+                marks=[
+                    Moving(
+                        key=CONVERSATION,
+                        up_to="7",
+                        through=through,
+                        forward=True,
+                        seen=True,
+                    )
+                ],
+            )
+        )
+    )
+    kept = MarkStore.kept_in(layout(tmp_path)).of(
+        REPOSITORY, "transcripts", CONVERSATION
+    )
+    assert kept == ReviewMark(
+        key=CONVERSATION, up_to="7", at=clock.now(), through=through, seen=True
+    )
 
 
 def test_a_module_s_marks_are_read_by_its_key_each_recorded_as_read(

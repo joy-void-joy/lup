@@ -57,6 +57,8 @@ import { arrivedLines, arriving, owned, owning, ownersOf, readBy, reconcile, set
 import { clock, ticked, ticking, type Tick } from "./ticking";
 import { doing, since, type Activity } from "./agents";
 import { Following } from "./follow";
+import { sightsOf } from "./seeing";
+import { useSeeing } from "./useSeeing";
 import { usePaced } from "./hooks";
 import { mapOutlineKey, mapScopeKeys, Outline, setOutlineFocus, setOutlineToggle, setScopeJump, useNarrow, type ScopeKey } from "./Outline";
 import { Stack, type Mark as StackMark } from "./Stack";
@@ -84,6 +86,7 @@ import {
     arrival,
     blockAt,
     blocksOf,
+    countToRead,
     codeAt,
     codeFrom,
     drawerAt,
@@ -318,12 +321,11 @@ function tallyWords(whats: readonly string[]): string[] {
     return [...counted].map(([what, count]) => (count === 1 ? what : `${count} ${what.replace(/^an? /, "")}s`));
 }
 
-/** Say what waits below, grouped by thread, for the header over the review: how many threads wait on the operator, and how many are new. */
-function threadTally(laidOut: Laid): string {
-    const count = (name: string) => laidOut.groups.filter((group) => group.depth === 0 && laidOut.sections.findLast((each) => each.header.from < group.banner.from)?.name === name).length;
-    const waiting = count("waiting on you");
-    const fresh = count("new");
-    return [`${waiting} waiting on you`, ...(fresh === 0 ? [] : [`${fresh} new`])].join(" · ");
+/** Say what waits below, grouped by thread, for the header over the review: how many threads wait on the operator, and how many items are only to read, apart. */
+function threadTally(laidOut: Laid, reads: readonly ThreadRead[], draft: Draft, seeing: Seeing): string {
+    const waiting = laidOut.groups.filter((group) => group.depth === 0 && laidOut.sections.findLast((each) => each.header.from < group.banner.from)?.name === "waiting on you").length;
+    const reading = countToRead([], draft, seeing, reads);
+    return [`${waiting} waiting on you`, ...(reading === 0 ? [] : [`${reading} to read`])].join(" · ");
 }
 
 /** How a changed file's line is marked after its number: added, removed, or neither. */
@@ -1041,6 +1043,17 @@ export function Review({
     // clear, so the cursor's line never goes under the stack. Read as it scrolls, of what's laid out then.
     const over = useRef<(position: number) => number>(() => 0);
     over.current = (position) => linesOver(roots, editor.toLaid(position), narrow) * (view.current?.defaultLineHeight ?? 18);
+    // What's read by being on screen, and for how long it has been (`useSeeing.ts`).
+    const sights = useMemo(() => sightsOf(laidOut, seeing, draft, arrangedBy.remote, threadsRead?.read.threads ?? null), [laidOut, seeing, draft, arrangedBy.remote, threadsRead]);
+    useSeeing({
+        following: follower,
+        sights,
+        over: (position) => over.current(position),
+        toLaid: (position) => editor.toLaid(position),
+        fromLaid: (position) => editor.fromLaid(position),
+        typing: commenting,
+        covered: narrow && overview,
+    });
     // The margin, the review's structure: with its labels where there's room for them.
     const gutters = useMemo(() => new Compartment(), []);
     // Where the scroll being made is to, which its margins are read for.
@@ -2105,7 +2118,7 @@ export function Review({
             .filter((each) => each.thread.repository === repository && each.state !== "settled" && each.state !== "declined" && !landed.has(each.thread.number))
             .toSorted((a, b) => a.thread.number - b.thread.number);
     }, [moving, threads, laidOut.pile]);
-    const where = <Heading parts={heading(laidOut, Math.min(head, laidOut.text.length), commenting, laidOut.written, naming)} tally={threads === null ? tallied(items, draft, seeing) : threadTally(laidOut)} />;
+    const where = <Heading parts={heading(laidOut, Math.min(head, laidOut.text.length), commenting, laidOut.written, naming)} tally={threads === null ? tallied(items, draft, seeing) : threadTally(laidOut, threads.read.threads, draft, seeing)} />;
     // Each header pinned is drawn as the buffer draws its line.
     const classesOf = (sticky: Sticky): string => {
         switch (sticky.kind) {

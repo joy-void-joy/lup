@@ -21,6 +21,8 @@ export interface OpenOptions {
     windowed?: Layout;
     /** The page's size, in pixels: 1600 by 1000 unless given, as #341's measures took it. */
     viewport?: { width: number; height: number };
+    /** A clock a script moves, Playwright's (`page.clock.runFor`), which goes on by itself until then: as what's timed on the page is, a time on screen among it. */
+    clock?: boolean;
 }
 
 /** The dashboard open in the room's Chromium, until it's closed. */
@@ -84,6 +86,9 @@ export async function open(url: string, options: OpenOptions = {}): Promise<Dash
         const thrown: Error[] = [];
         page.on("pageerror", (error) => thrown.push(error));
         const session = await page.context().newCDPSession(page);
+        if (options.clock ?? false) {
+            await page.clock.install();
+        }
         await page.goto(url);
         if (screen !== null) {
             await keyboardReached(page, screen);

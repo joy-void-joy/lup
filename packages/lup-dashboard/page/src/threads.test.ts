@@ -9,10 +9,11 @@ import { describe, expect, it } from "vitest";
 import { MOVE, implied, isMarked, listed, marking, movedInto, reachOf, reachedIn, threadsRead, type Act } from "./grammar";
 import { toSend, waitingOn } from "./App";
 import { partSaid } from "./brief";
-import { outlineOf } from "./outline";
+import { itemStanding, outlineOf, threadStanding } from "./outline";
 import {
     EMPTY,
     checkAt,
+    countToRead,
     groupAt,
     headerClasses,
     heading,
@@ -35,6 +36,7 @@ import {
     type Threading,
 } from "./review";
 import { agentNamed, threadBanner, threadTarget } from "./Review";
+import { sightsOf } from "./seeing";
 import { adopted } from "./looks";
 
 const AT = "2026-10-30T12:00:00Z";
@@ -183,6 +185,91 @@ function lay(draft: Draft = EMPTY, whole: boolean = false, places: string[] = []
 function lines(out: Laid): string[] {
     return out.text.split("\n");
 }
+
+describe("what asks the operator, and what's only to read, in the overview and the top bar", () => {
+    const reading = (draft: Draft = EMPTY) => ({ draft, seeing: UNSEEN, states: new Map(), called });
+    const stands = (out: Laid, draft: Draft = EMPTY) => outlineOf(out, reading(draft)).map((each) => [each.text, each.marks, each.counts ?? null]);
+
+    it("marks a thread by what the host says asks them, or only to read where it's in new, each counted apart", () => {
+        const both = { ...READER, new: [47] } as ThreadRead;
+        expect(threadStanding(READER, "waiting on you")).toEqual({ marks: ["waiting"], counts: { asks: 2, toRead: 0 } });
+        // In new, what it's there for is what it says, whatever else in it asks them, as its row in waiting on you says.
+        expect(threadStanding(both, "new")).toEqual({ marks: ["news"], counts: { asks: 0, toRead: 1 } });
+        expect(threadStanding(both, "open")).toEqual({ marks: ["waiting"], counts: { asks: 2, toRead: 1 } });
+        expect(threadStanding(AUTH, "open")).toEqual({ marks: ["news"], counts: { asks: 0, toRead: 1 } });
+        expect(threadStanding(VOICE, "waiting on you")).toEqual({ marks: ["waiting"], counts: { asks: 1, toRead: 0 } });
+        expect(threadStanding(CACHE, "settled")).toEqual({ marks: [], counts: { asks: 0, toRead: 0 } });
+    });
+
+    it("says so of each item, by the host's asks, a seen one saying neither", () => {
+        const out = lay();
+        const rows = outlineOf(out, reading());
+        expect(rows.find((each) => each.text.startsWith("@51"))?.marks).toEqual(["waiting"]);
+        const seen = { ...UNSEEN, groups: new Map(), threaded: new Set<number>() };
+        const region = out.regions.find((each) => each.item.number === 70);
+        expect(region === undefined ? null : itemStanding(region, EMPTY, { ...UNSEEN, threaded: new Set([70]) }).marks).toEqual(["news"]);
+        expect(region === undefined ? null : itemStanding(region, EMPTY, seen).marks).toEqual([]);
+        // What a kind asks is the host's word, whatever its rank says.
+        const asking = { ...LATE, asks: true } as Item;
+        expect(region === undefined ? null : itemStanding({ ...region, item: asking }, EMPTY, seen).marks).toEqual(["waiting"]);
+        expect(stands(out).find((each) => each[0] === "@reader")?.[1]).toEqual(["waiting"]);
+    });
+
+    it("counts an agent's own apart, by agent", () => {
+        const out = laid([QUESTION, LATE, NOTE], [WORKER], banner, header, EMPTY, NOTHING, [], new Map(), called);
+        const row = outlineOf(out, reading()).find((each) => each.kind === "agent");
+        expect(row?.counts).toEqual({ asks: 1, toRead: 2 });
+        const later = outlineOf(out, reading({ ...EMPTY, parked: [51], done: [47] })).find((each) => each.kind === "agent");
+        expect(later?.counts).toEqual({ asks: 0, toRead: 1 });
+    });
+
+    it("counts what's only to read in the same number by thread and by agent, what's on the pile among it", () => {
+        const read = [{ ...AUTH, new: [70, 71], pile: [81] } as ThreadRead, { ...READER, pile: [81, 82] } as ThreadRead];
+        expect(countToRead([], EMPTY, UNSEEN, read)).toBe(4);
+        expect(countToRead([], { ...EMPTY, done: [70], parked: [82] }, UNSEEN, read)).toBe(2);
+        const felt = item(83, LEAD, { reason: "how it felt", text: "Fine." } as unknown as Item["reason"]);
+        const items = [QUESTION, LATE, felt];
+        expect(countToRead(items, EMPTY, UNSEEN, null)).toBe(2);
+        expect(countToRead(items, EMPTY, { ...UNSEEN, commented: new Set([70]) }, null)).toBe(1);
+    });
+});
+
+describe("what's read by being on screen, grouped by thread or by agent", () => {
+    const read = threading().read.threads;
+
+    it("reads a thread's news and what asks them, each moving its thread's mark", () => {
+        const sights = sightsOf(lay(), UNSEEN, EMPTY, new Map(), read);
+        const news = sights.find((each) => each.id === "item 70");
+        expect(news?.moves).toEqual({ repository: REPOSITORY, module: "core", key: { node: 303 }, up_to: "70", forward: true, seen: true });
+        expect(news?.asks).toBe(false);
+        const asks = sights.find((each) => each.id === "item 51");
+        expect(asks?.asks).toBe(true);
+        expect(asks?.moves?.key).toEqual({ node: 302 });
+    });
+
+    it("leaves what the draft marks to the draft, and holds the mark back from what holds their words", () => {
+        expect(sightsOf(lay(), UNSEEN, { ...EMPTY, done: [70] }, new Map(), read).some((each) => each.id === "item 70")).toBe(false);
+        const held = sightsOf(lay(), UNSEEN, { ...EMPTY, comments: [{ id: "c1", item: 70, quote: { text: "", block: "", version: "", line: 0, lines: [], start: 0, end: 0 }, text: "Why?" }] } as unknown as Draft, new Map(), read);
+        expect(held.find((each) => each.id === "item 70")?.held).toBe(true);
+    });
+
+    it("holds a thread's mark at what's new in it that's laid out nowhere", () => {
+        const late = { ...AUTH, new: [70, 71] } as ThreadRead;
+        const sights = sightsOf(lay(), UNSEEN, EMPTY, new Map(), [late]);
+        const [first, second] = sights;
+        expect(first?.id).toBe("item 70");
+        expect(second?.id).toBe("item 71");
+        expect(second?.held).toBe(true);
+    });
+
+    it("reads an agent's group by its own mark, where threads aren't read", () => {
+        const out = laid([LATE], [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called);
+        const [sight] = sightsOf(out, UNSEEN, EMPTY, new Map(), null);
+        expect(sight?.moves).toEqual({ repository: REPOSITORY, module: "core", key: { runtime: "claude", session: "s1", agent: "a1" }, up_to: "70", forward: true, seen: true });
+        // Seen since it came, it's no longer new, and nothing's left to read of it.
+        expect(sightsOf(out, { ...UNSEEN, groups: new Map([[JSON.stringify([REPOSITORY, "claude", "s1", "a1"]), 70]]) }, EMPTY, new Map(), null)).toEqual([]);
+    });
+});
 
 describe("the review grouped by thread", () => {
     it("lays out each section under its line: waiting on you, what asks under each thread's header, new, open, every thread still open, to read, settled and agents", () => {
@@ -499,7 +586,7 @@ describe("the review grouped by thread", () => {
     });
 
     it("folds each of the few read entries shown before what's new to its header, as context", () => {
-        const read = { ...AUTH, mark: { key: { node: 303 }, up_to: "47", at: AT } } as ThreadRead;
+        const read = { ...AUTH, mark: { key: { node: 303 }, up_to: "47", at: AT, seen: false } } as ThreadRead;
         const seen = shown(
             read,
             [
@@ -606,7 +693,7 @@ const FELT = item(81, LEAD, { reason: "how it felt", text: "Steady.\nThe brief n
 function piling(draft: Draft = EMPTY): Laid {
     const threads = threading();
     // Auth read before, so its conversation shows whole.
-    const read = { ...AUTH, pile: [81], mark: { key: { node: 303 }, up_to: "40", at: AT } } as ThreadRead;
+    const read = { ...AUTH, pile: [81], mark: { key: { node: 303 }, up_to: "40", at: AT, seen: false } } as ThreadRead;
     const reads = threads.read.threads.map((each) => (each.thread.number === 302 ? { ...each, pile: [80, 82] } : each.thread.number === 303 ? read : each));
     const auth = shown(
         read,
@@ -679,7 +766,7 @@ describe("the pile to read", () => {
         const said = (number: number) => out.text.slice(out.regions.find((each) => each.item.number === number)?.header.from ?? 0).split("\n")[0];
         // The test's header says only the number; the core's says what the view and the note say, which `laid` gives it.
         const told: string[] = [];
-        const marked = { ...AUTH, mark: { key: { node: 303 }, up_to: "40", at: AT } } as ThreadRead;
+        const marked = { ...AUTH, mark: { key: { node: 303 }, up_to: "40", at: AT, seen: false } } as ThreadRead;
         laid([FELT], [LEAD], banner, (shownItem, _, words) => {
             told.push(`${shownItem.number}: ${words}`);
             return header(shownItem);

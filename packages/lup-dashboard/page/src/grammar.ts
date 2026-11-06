@@ -868,6 +868,10 @@ export interface Moved {
     module: string;
     key: Record<string, unknown>;
     up_to?: string | null;
+    /** What had come by there, as the view showing it said; none reads by when it moved. */
+    through?: string | null;
+    /** Whether it only goes forward. */
+    forward?: boolean;
 }
 
 /**

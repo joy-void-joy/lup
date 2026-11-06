@@ -300,6 +300,16 @@ export function Outline({ following, laidOut, reading, narrow, open, setOpen, ju
                     <div key={row.key} data-key={row.key} className={classes} style={{ paddingLeft: `calc(${row.depth * 2}ch + 1ch)` }} title={row.title} onClick={() => go(row)}>
                         <span className={`outline-glyph mark-${mark}`}>{glyph}</span>
                         <span className="outline-text">{row.text}</span>
+                        {(row.counts?.asks ?? 0) === 0 ? null : (
+                            <span className="outline-tag mark-waiting" title="what here asks you something">
+                                ◆{row.counts?.asks}
+                            </span>
+                        )}
+                        {(row.counts?.toRead ?? 0) === 0 ? null : (
+                            <span className="outline-tag mark-news" title="what here is only to read, new to you">
+                                •{row.counts?.toRead}
+                            </span>
+                        )}
                         {row.tag === null ? null : (
                             <span className="outline-tag mark-to-review" title="files to review in its since you approved">
                                 {row.tag}
@@ -319,7 +329,7 @@ export function Outline({ following, laidOut, reading, narrow, open, setOpen, ju
                     <kbd>gO</kbd> here · <kbd>j</kbd> <kbd>k</kbd> · <kbd>⏎</kbd> go · <kbd>Esc</kbd> back
                 </div>
                 <div>
-                    <span className="mark-waiting">◆</span> waiting on you · <span className="mark-to-review">◇</span> to review · <span className="mark-news">•</span> news
+                    <span className="mark-waiting">◆</span> asks you · <span className="mark-news">•</span> to read · <span className="mark-to-review">◇</span> to review
                 </div>
                 <div>
                     <span className="outline-draft">» ✓ ✔</span> in your next <kbd>^⏎</kbd>: comment, read, approve
