@@ -135,11 +135,7 @@ def branch_row(letter: str, trial: TrialListed, branch: BranchListed) -> str:
         if branch.within
         else escape(
             branch.conflict
-            or (
-                "out: you took it out"
-                if branch.out
-                else f"not in {trial.running} yet"
-            )
+            or ("out: you took it out" if branch.out else f"not in {trial.running} yet")
         )
     )
     built = "; its copy is built" if branch.built else ""

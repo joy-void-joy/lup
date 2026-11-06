@@ -32,7 +32,7 @@ A project's declaration names two branches (`docs/declaration.md`, *The branches
 - **A running branch the repository doesn't hold yet** reads the integration branch's tip, then the worktree's `HEAD`. Naming a branch doesn't make it, and `HEAD` alone would ask the operator to approve whatever a launch's worktree has checked out.
 - **A running branch the host computes** is read where the host keeps it (`running_tip`, `lup_dev/trial.py`), once it has computed one, never by its ref, which a room writes.
 - **A declaration that doesn't load** leaves them as they stood, as the judge's last declaration stands in for one that can't (`docs/judging-writes.md`, *A declaration that can't load has a stand-in*), and the answer says so.
-- **A launch keeps the limits it registered,** the gated refs among them, so one already running refuses to `land` on a running branch approved since where it's merged onto as the integration branch is, until it's launched again (`docs/declaration.md`, *The branches*). A branch the host computes needs no such thing: what's on trial is read from what's approved.
+- **A launch keeps the limits it registered,** the gated refs among them, so one already running refuses to `land` on an integration branch approved since, until it's launched again (`docs/declaration.md`, *The branches*). A running branch the host computes needs no such thing, what's on trial being read from what's approved.
 
 | What reads it | Branch |
 |---|---|
@@ -68,7 +68,7 @@ With `Versions(running="live")`, what a landing brings is on trial before it's a
 - **`lup-dev live pick [branch…]`** runs `dev` plus those; none, `dev` alone. `/copies` on the dashboard does the same (`docs/dashboard.md`, *The plain page*).
 - **`lup-dev live accept <branch>`** merges it onto `dev`, at the tip it landed with, and cleans up as a landing does. Threads parked on it wake then, and not before. Its merge's gate and its worktree's removal run in a session's room, so with none running it says so; a merge asking what the operator hasn't approved leaves that in their drawer, and they accept it again.
 - **`lup-dev live drop <branch> [--say …]`** takes it off trial, leaving it and its worktree, and what they say reaches who landed it, beside their next call. Landing it again puts it back.
-- All four but `land` are refused in an agent's session, as approving is.
+- All of these but `land` are refused in an agent's session, as approving is.
 
 **`live` is computed, never merged into** (`lup_dev/trial.py`). Whenever what's in it changes, a landing, a pick, a drop, `dev` moving, the host merges `dev` and each branch in it, in their names' order so the same branches always come to the same tree, and commits that as its next commit: its parents the tip before, `dev`, and each branch. So landings stay fast-forwards, and dropping one is computing it again without it, with no revert. It starts at `dev`'s tip: there's no first step, and until the first landing or pick the host runs that tip.
 - **A room decides nothing of it.** What's on trial is kept on the host (`Layout.trial`), which no room mounts, each branch at the tip it landed with, so a commit added since doesn't run until it's landed and has passed what that holds; no room's push moves `live`; and trust reads its tip from there. A branch in `live` hasn't landed for `delete-merged` until `dev` holds it (`docs/credentials.md`, *Deleting a branch that has landed*).
