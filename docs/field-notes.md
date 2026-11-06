@@ -416,6 +416,13 @@ Behind `packages/lup-dashboard/page/drive/vitest.config.ts`'s `maxWorkers` (#162
 - **Three files at a time** peaked at 722, every test passing, in 29 s.
 - The limit is the room's, shared by every session, subagent and gate in it, so a step that runs browsers in parallel caps itself well under it.
 
+## A route just set in Chromium (Chromium 151 headless, Playwright 1.64.1, a 32-core host, measured in a room 2026-11-06)
+
+Behind `Dashboard.route` (`packages/lup-dashboard/page/drive/dashboard.ts`, #365): `await page.route(...)` returns before the page's requests go through the route.
+- **What's sent straight after can pass it.** A key's `fetch`, pressed as `page.route` returned, went to the server and the route never saw it, in 28 of 3,000 tries with the browser, the demo and vitest on 2 CPUs beside 8 busy loops, and in 1 of 100 on all 32, shared with other sessions' work. A `fetch` asked through `page.evaluate` first, and answered by the route, was never followed by one that passed it: 0 of 3,000 under the same load.
+- **Playwright reports no such request.** With interception on, it holds `Network.requestWillBeSent` until the same request's `Fetch.requestPaused`, which one that passed never gets, so neither `page.on("request")` nor the handler hears of it (`_onRequestWillBeSent`, its `crNetworkManager`).
+- **How it showed:** `rows.test.ts`'s refusal failed in 2 of 75 runs under such load, each at the wait for "Not sent": Ctrl+Enter's keeping of the draft reached the demo, which took it, so the reply was sent for real. Its steps alone, repeated on one draft under that load, did so in 35 of 521 tries, a second DevTools session seeing the browser send it and neither the handler nor `page.on("request")` hearing of it each time; through `Dashboard.route`, in 0 of 1,500.
+
 ## The room's hook when the host service goes away (socat 1.8.1.3, Linux 7.2.6, measured 2026-10-22)
 
 Behind `docs/host.md`, *The one hook*. A stand-in service, a process of its own on a Unix socket, read a hook's payload to its end, then closed the connection, exited with it open, or was killed with `SIGKILL` while the hook waited; the hook was the room's command of the time (`sh -c 'socat -t 600 - UNIX-CONNECT:<socket>,retry=120,interval=0.5 || …'`). In all three, `socat` ended with status 0 and printed nothing, as for an empty answer: only a reset ends it with status 1. The host service's own stop closes each hook's connection cleanly (`close_clients`). With the service answering every hook with something and the command telling an empty answer apart, the same three ended with status 2 and lup's line, and a socket nobody listened on with status 1.

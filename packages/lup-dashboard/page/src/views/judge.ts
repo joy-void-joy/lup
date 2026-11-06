@@ -745,7 +745,7 @@ export const BANNER: View<OfAgent> = {
                           chord: null,
                           runs: "send",
                           commented: false,
-                          says: running.holding ? "let their flagged writes land" : "hold their flagged writes",
+                          says: running.holding ? "let their writes land" : "hold their writes",
                       },
                   ];
         const summary = parts.flatMap((each, at) => (at === 0 ? each : [{ text: " · ", tone: "plain" }, ...each]));

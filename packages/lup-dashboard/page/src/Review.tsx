@@ -1286,10 +1286,11 @@ export function Review({
         }
         held.current = holding;
         refold(current, laidFor.folds, kept.current);
-        // Where a fold closed over the cursor, as an item marked read folds, it goes to the fold's summary line.
+        // Where a fold closed over the cursor, as an item marked read folds, it goes to the fold's summary line: never a
+        // selection's head, as a fold-wise one's under its section's closed fold, which that would end as an item arrives.
         const closed = laidFor.folds.filter((each) => isFolded(current.state, each));
         const seen = uncovered(closed, current.state.selection.main.head);
-        if (seen !== current.state.selection.main.head) {
+        if (visual === null && seen !== current.state.selection.main.head) {
             current.dispatch({ selection: { anchor: seen }, annotations: rebuilt.of(true) });
         }
         // A comment opened where a closed fold hides it opens the folds over it, as a jump does, saying so, so the
