@@ -181,8 +181,8 @@ export interface ListReading {
     checks?: readonly OwnedCheck[];
     /** What's new to the operator, which an item's row says. */
     seeing?: Seeing;
-    /** The rows whose nest is open however little of it waits: what's on screen and where the second pane's cursor has been, by row. */
-    opened?: ReadonlySet<string>;
+    /** The buffer on screen: an agent's row keeps their nest open while it's theirs, however little of it waits. */
+    showing?: Showing;
     /** The parties listed beside the agents; unsaid, those declared (`PARTIES`). */
     parties?: readonly Party[];
 }
@@ -340,7 +340,8 @@ function agentRow(group: Grouping, depth: number, reading: ListReading, nesting:
 /**
  * Return what's nested under the agent `group` is of, `depth` deep: each item of theirs, as the review lays it out, marked
  * as the overview marks it; then each task of theirs, a line each, quiet, but what waits on the operator there, its checks
- * among it. Folded where nothing of it asks them, until what's on screen comes to it; none where there's nothing.
+ * among it. Folded where nothing of it asks them and their buffer isn't on screen, so where the second pane's cursor goes
+ * moves no row (`nearestShown`); none where there's nothing.
  */
 function nestOf(group: Grouping, depth: number, tally: Tally, reading: ListReading): Row["under"] {
     const set = "  ".repeat(depth + 1);
@@ -352,7 +353,8 @@ function nestOf(group: Grouping, depth: number, tally: Tally, reading: ListReadi
         return undefined;
     }
     const id = `agent ${group.key}`;
-    return { key: `nest ${id}`, closed: tally.asks === 0 && reading.opened?.has(id) !== true, kind: "section", rows };
+    const onScreen = reading.showing !== undefined && bufferKey(reading.showing) === id;
+    return { key: `nest ${id}`, closed: tally.asks === 0 && !onScreen, kind: "section", rows };
 }
 
 /** Return the first words of what an item says, for its row: its own title where it has one; none where it says nothing of its own. */
@@ -624,6 +626,11 @@ export function pathTo(rows: readonly Row[], id: string): Row[] | null {
         }
     }
     return null;
+}
+
+/** Return the row that shows the row named `id`: itself, else the nearest holding it that a closed nest doesn't hide, as `hidden` says; none where no row's named so. */
+export function nearestShown(rows: readonly Row[], id: string, hidden: (row: Row) => boolean): Row | undefined {
+    return pathTo(rows, id)?.findLast((each) => !hidden(each));
 }
 
 /** One part of the buffer on screen a row of the list stands for: the row's id, where it is, and how deep. */

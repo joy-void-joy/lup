@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { carried, implied, reachOf, type Marked, type Verb } from "./grammar";
 import { adopted } from "./looks";
-import { arrivalIn, bufferKey, bufferSpans, listLaid, listedByAgent, listedByThread, panesAsked, pathTo, rowAt, spanAt, titled, type ListReading, type Row } from "./panes";
+import { arrivalIn, bufferKey, bufferSpans, listLaid, listedByAgent, listedByThread, nearestShown, panesAsked, pathTo, rowAt, spanAt, titled, type ListReading, type Row } from "./panes";
 import { EMPTY, NO_AGENT, PARTIES, ROOT_TITLE, aboutAt, checkOwner, followedFrom, groupAt, laid, opened, whose as whoseOf, type Around, type Conversation, type Draft, type Drawers, type Item, type Laid, type OwnedCheck, type Party, type Showing, type ThreadRead, type ThreadShown, type Threading } from "./review";
 import { partyNamed, threadBanner } from "./Review";
 
@@ -234,12 +234,12 @@ describe("what a comment implies, as another buffer is on screen", () => {
 describe("the list by agent", () => {
     const rows = () => listedByAgent(reading());
 
-    it("nests each item under its sender, marked as the overview marks it, what asks open, the rest folded until the second pane's cursor comes to it", () => {
+    it("nests each item under its sender, marked as the overview marks it, what asks open, the rest folded until their own buffer's on screen", () => {
         const worker = rows().find((each) => each.id === `agent ${whoseOf(WORKER)}`);
         expect(worker?.under?.closed).toBe(false);
         const lead = rows().find((each) => each.id === `agent ${whoseOf(LEAD)}`);
         expect(lead?.under?.closed).toBe(true);
-        const opened = listedByAgent({ ...reading(), opened: new Set([`agent ${whoseOf(LEAD)}`]) }).find((each) => each.id === `agent ${whoseOf(LEAD)}`);
+        const opened = listedByAgent({ ...reading(), showing: { kind: "agent", key: whoseOf(LEAD) } }).find((each) => each.id === `agent ${whoseOf(LEAD)}`);
         expect(opened?.under?.closed).toBe(false);
         expect(listLaid(rows()).text).toContain("◆ @51 question new Which parser?");
         expect(listLaid(rows()).text).toContain("• @70 note");
@@ -250,6 +250,23 @@ describe("the list by agent", () => {
     it("finds the rows holding a row, outermost first", () => {
         expect(pathTo(rows(), "item 70")?.map((each) => each.id)).toEqual([`agent ${whoseOf(LEAD)}`, "item 70"]);
         expect(pathTo(rows(), "nothing")).toBeNull();
+    });
+
+    it("opens a nest for what asks and the agent on screen alone: what's for the operator on screen, or another's, opens none", () => {
+        const lead = (showing?: Showing) => listedByAgent({ ...reading(), ...(showing === undefined ? {} : { showing }) }).find((each) => each.id === `agent ${whoseOf(LEAD)}`);
+        expect(lead()?.under?.closed).toBe(true);
+        expect(lead({ kind: "for you" })?.under?.closed).toBe(true);
+        expect(lead({ kind: "agent", key: whoseOf(WORKER) })?.under?.closed).toBe(true);
+        expect(lead({ kind: "agent", key: whoseOf(LEAD) })?.under?.closed).toBe(false);
+    });
+
+    it("shows what's in a closed nest on the nearest row showing, and what's showing on its own", () => {
+        const lead = `agent ${whoseOf(LEAD)}`;
+        const closed = (row: Row) => row.id !== lead && row.id !== `agent ${whoseOf(WORKER)}`;
+        expect(nearestShown(rows(), "item 70", closed)?.id).toBe(lead);
+        expect(nearestShown(rows(), "item 70", () => false)?.id).toBe("item 70");
+        expect(nearestShown(rows(), lead, closed)?.id).toBe(lead);
+        expect(nearestShown(rows(), "nothing", closed)).toBeUndefined();
     });
 
     it("says which row the second pane's cursor is on, the deepest it knows", () => {

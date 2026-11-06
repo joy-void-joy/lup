@@ -143,7 +143,7 @@ describe("the panes by agent", () => {
         expect(await cursors()).toBe(1);
     });
 
-    it("keeps what the second pane's cursor is on in sight in the list, its nesting open, a highlight and no cursor", async () => {
+    it("keeps what the second pane's cursor is on in sight in the list, a highlight and no cursor", async () => {
         const { page } = dashboard;
         const highlighted = () => page.evaluate(() => [...document.querySelectorAll(".list-buffer .cm-line.list-cursor")].map((each) => each.textContent ?? ""));
         await review.goTo("── @52 note");
@@ -162,6 +162,51 @@ describe("the panes by agent", () => {
         await page.keyboard.press("Enter");
         await review.until("put the cursor on the item", (view) => view.state.doc.lineAt(view.state.selection.main.head).text.includes("@53 problem"));
         expect(await review.text()).toContain("@54 approval");
+    });
+
+    it("moves no row for the second pane's cursor: what's folded in the list highlights the nearest row showing, a nest opening for the agent on screen alone", async () => {
+        const { page } = dashboard;
+        const highlighted = () => page.evaluate(() => [...document.querySelectorAll(".list-buffer .cm-line.list-cursor")].map((each) => each.textContent ?? ""));
+        const until = (text: string) =>
+            page.waitForFunction((wanted) => [...document.querySelectorAll(".list-buffer .cm-line.list-cursor")].some((each) => (each.textContent ?? "").includes(wanted)), text, { polling: 50 });
+        const named = (lines: readonly string[]) => lines.findIndex((each) => each.includes("▶ parser"));
+        // explore-auth's note: nothing of theirs asks the operator, so their nest's closed.
+        const number = "@66";
+        const before = await listText(dashboard);
+        expect(before.some((each) => each.includes(`${number} `))).toBe(false);
+        await review.goTo(`── ${number} note`);
+        await until("explore-auth");
+        // The row's there, and nothing under it opened: what follows it stays on its line.
+        const after = await listText(dashboard);
+        // Their row is two lines: their name, and what they're doing.
+        expect(await highlighted()).toHaveLength(2);
+        expect(after.some((each) => each.includes(`${number} `))).toBe(false);
+        expect(named(after)).toBe(named(before));
+        // Going in, the list's cursor lands on that row.
+        await dashboard.keys.press([" ", "w", "h"]);
+        await page.waitForFunction(() => document.activeElement?.closest(".list-buffer") != null, undefined, { polling: 50 });
+        expect(await page.evaluate(() => document.querySelector(".list-buffer .cm-activeLine")?.textContent ?? "")).toContain("explore-auth");
+        // Their own buffer on screen, their nest's open; another's, shut again.
+        const listed = (wanted: string, is: boolean) =>
+            page.waitForFunction(([text, there]) => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes(text as string)) === there, [wanted, is] as const, { polling: 50 });
+        await page.keyboard.press("Enter");
+        await listed(`${number} `, true);
+        await listRow(dashboard, "what's for you");
+        await page.keyboard.press("Enter");
+        await listed(`${number} `, false);
+        // Opened by the operator, the row's its own, and the highlight goes there; closed, back.
+        await review.goTo(`── ${number} note`);
+        await until("explore-auth");
+        await dashboard.keys.press([" ", "w", "h"]);
+        await page.waitForFunction(() => document.activeElement?.closest(".list-buffer") != null, undefined, { polling: 50 });
+        await page.keyboard.type("za");
+        await until(`${number} `);
+        await page.keyboard.type("za");
+        await until("explore-auth");
+        await page.keyboard.press("Enter");
+        await listRow(dashboard, "what's for you");
+        await page.keyboard.press("Enter");
+        await review.holds(THEIR_ITEM);
     });
 
     it("keeps vim's keys in the list, Enter opening a row's buffer and going into it", async () => {
