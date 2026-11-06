@@ -7,15 +7,20 @@ from typing import TYPE_CHECKING
 import pytest
 
 from lup_dev.policy.holds import (
+    Answer,
     HeldFile,
     Hold,
     HoldError,
     Holds,
     Response,
     answer,
+    answer_unheard,
+    said_answering,
     waiting,
 )
+from lup_dev.policy.store import Held, WorktreeState
 from lup_dev.policy.verdicts import Verdict, VerdictLog
+from lup_dev.stored import write_model
 
 if TYPE_CHECKING:
     from conftest import FakeRuntime, Kit
@@ -220,3 +225,94 @@ def test_a_key_two_stores_keep_is_answered_in_the_worktree_named_and_refused_unn
     assert answered.worktree == tmp_path / "b"
     assert holds(kit, tmp_path / "a").get(first.key) == first
     assert [hold.worktree for hold in waiting(kit.layout)] == [tmp_path / "a"]
+
+
+def noted(kit: Kit, worktree: Path) -> Hold:
+    """Keep a hold of `worktree`'s, noted as a checkpoint notes it, its call gone."""
+    hold = held(kit, worktree)
+    kept = Held(hold=hold.key, path=FILES[0].path, blob=FILES[0].blob)
+    write_model(holds(kit, worktree).layout.state, WorktreeState(holding=[kept]))
+    return hold
+
+
+GONE = (
+    "lup's host service went away while your call waited for the operator's answer "
+    "to the change to"
+)
+
+
+def test_an_answer_no_call_hears_says_what_a_checkpoint_will_do_of_it(
+    kit: Kit, tmp_path: Path
+) -> None:
+    key = noted(kit, tmp_path).key
+    fine = Response(approved=True, comment="fine")
+    approved = answer(kit.layout, key, fine, [], kit.clock, telling=True)
+    assert approved.told
+    assert said_answering(kit.layout, approved) == (
+        f"{GONE} {tmp_path}/src/new.py, which they have since approved: fine. The next "
+        "checkpoint in its worktree keeps it, and you hear more only where the file "
+        "has changed since and it isn't in place."
+    )
+    no = Answer(approved=False, time=kit.clock.now())
+    declined = approved.model_copy(update={"answer": no})
+    assert said_answering(kit.layout, declined) == (
+        f"{GONE} {tmp_path}/src/new.py, which they have since declined. The next "
+        "checkpoint in its worktree puts it back, or it never lands, and saves your "
+        "version."
+    )
+
+
+def test_an_answer_to_a_hold_nothing_notes_says_it_changes_nothing(
+    kit: Kit, tmp_path: Path
+) -> None:
+    """A write outside the worktree, or a hold whose process ended before noting it: no checkpoint settles it."""
+    key = held(kit, tmp_path).key
+    yes = Response(approved=True)
+    hold = answer(kit.layout, key, yes, [], kit.clock, telling=True)
+    assert said_answering(kit.layout, hold).endswith(
+        "lup lost its hold as it went away, so their answer changes nothing: a change "
+        "still there is asked again at a checkpoint, and one that never landed is "
+        "yours to make again if it's still wanted."
+    )
+
+
+def test_an_answer_a_call_waits_to_hear_isnt_for_the_inbox_to_tell(
+    kit: Kit, tmp_path: Path
+) -> None:
+    key = noted(kit, tmp_path).key
+    yes = Response(approved=True)
+    with holds(kit, tmp_path).waiting(key):
+        hold = answer(kit.layout, key, yes, [], kit.clock, telling=True)
+    assert not hold.told
+
+
+def test_a_moves_answer_isnt_for_the_inbox_to_tell(kit: Kit, repo: Path) -> None:
+    key = held(kit, repo, commit="c0ffee").key
+    yes = Response(approved=True)
+    assert not answer(kit.layout, key, yes, [], kit.clock, telling=True).told
+
+
+def test_an_answer_nothing_told_is_said_once_its_call_is_gone(
+    kit: Kit, tmp_path: Path
+) -> None:
+    key = noted(kit, tmp_path).key
+    yes = Response(approved=True)
+    assert answer_unheard(kit.layout, tmp_path, key) is None
+    with holds(kit, tmp_path).waiting(key):
+        answer(kit.layout, key, yes, [], kit.clock, telling=True)
+        assert answer_unheard(kit.layout, tmp_path, key) is None
+    said = answer_unheard(kit.layout, tmp_path, key)
+    assert said is not None
+    assert said.startswith(
+        f"{GONE} {tmp_path}/src/new.py, which they have since approved."
+    )
+    assert answer_unheard(kit.layout, tmp_path, key) is None
+
+
+def test_an_answer_settled_since_isnt_said(kit: Kit, tmp_path: Path) -> None:
+    key = noted(kit, tmp_path).key
+    store = holds(kit, tmp_path)
+    with store.waiting(key):
+        answer(kit.layout, key, Response(approved=True), [], kit.clock, telling=True)
+    write_model(store.layout.state, WorktreeState())
+    assert answer_unheard(kit.layout, tmp_path, key) is None

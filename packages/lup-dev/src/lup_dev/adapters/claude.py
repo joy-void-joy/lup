@@ -283,11 +283,13 @@ from lup_dev.host.records import (
     Task,
     Transcript,
     Usage,
-    first,
+    argued,
     gist,
     head,
     homes,
+    ran,
     reached,
+    tail,
     within,
 )
 from lup_dev.host.records import Said as Spoken
@@ -2045,16 +2047,26 @@ class CommandRun(Model, extra="ignore"):
 
 
 class FileRead(Model, extra="ignore"):
-    """`Read`'s input: the file, and the line it starts at, where it isn't the first."""
+    """`Read`'s input: the file, the line it starts at, where it isn't the first, and how many lines, where it isn't the rest."""
 
     file_path: str
     offset: int | None = None
+    limit: int | None = None
+
+
+class FileEdited(Model, extra="ignore"):
+    """`Edit`'s input: the file, and what it takes out and puts in."""
+
+    file_path: str
+    old_string: str = ""
+    new_string: str = ""
 
 
 class FileWritten(Model, extra="ignore"):
-    """The input of a tool writing one file, `Edit`'s or `Write`'s: the file."""
+    """`Write`'s input: the file, and what it holds."""
 
     file_path: str
+    content: str = ""
 
 
 class NotebookWritten(Model, extra="ignore"):
@@ -2063,42 +2075,57 @@ class NotebookWritten(Model, extra="ignore"):
     notebook_path: str
 
 
-class Searched(Model, extra="ignore"):
-    """A search's input, `Grep`'s or `Glob`'s: its pattern."""
+def lined_up(start: int | None, many: int | None) -> str:
+    """Say which lines of a file a `Read` asks for, as vim's ranges do: from `start`, to the end unless `many` says how many; nothing for the file whole.
 
-    pattern: str
+    >>> lined_up(480, 40), lined_up(480, None), lined_up(None, 40), lined_up(None, None)
+    (':480,519', ':480', ':1,40', '')
+    """
+    if start is None and many is None:
+        return ""
+    begun = 1 if start is None else start
+    return f":{begun}" if many is None else f":{begun},{begun + many - 1}"
 
 
 def gisted(call: ToolUse) -> str | None:
-    """Return what a call did, in a line: `Bash`'s description, else its command; the file a `Read` reads, at the line it starts at; the file an `Edit`, a `Write` or a `NotebookEdit` writes; a search's pattern; any other's first argument, as its input is read where it isn't its tool's.
+    r"""Return what a call was given, in a line: `Bash`'s description and its command (`ran`); the file a `Read` reads, and the lines it asks for; the file an `Edit` changes, with how many lines it takes out and puts in, a `Write` writes, with how many it holds, or a `NotebookEdit` writes; any other's arguments, each after its name (`argued`), as its input is read where it isn't its tool's.
 
-    >>> gisted(ToolUse(type="tool_use", name="Read", input={"file_path": "/w/src/review.ts", "offset": 480}))
-    'review.ts:480'
-    >>> gisted(ToolUse(type="tool_use", name="Bash", input={"command": "uv run pytest", "description": "Run the tests"}))
-    'Run the tests'
+    >>> gisted(ToolUse(type="tool_use", name="Read", input={"file_path": "/w/page/src/review.ts", "offset": 480, "limit": 40}))
+    'page/src/review.ts:480,519'
+    >>> gisted(ToolUse(type="tool_use", name="Bash", input={"command": "cd /w && uv run pytest", "description": "Run the tests"}))
+    'Run the tests · uv run pytest'
+    >>> gisted(ToolUse(type="tool_use", name="Edit", input={"file_path": "/w/a.py", "old_string": "a", "new_string": "b\nc"}))
+    '/w/a.py -1 +2'
+    >>> gisted(ToolUse(type="tool_use", name="mcp__lup__inbox", input={"since": "PT6H", "every": True}))
+    'since=PT6H · every=true'
     """
     try:
         match call.name:
             case "Bash":
                 run = CommandRun.model_validate(call.input)
-                return gist(run.description or run.command)
+                said = [run.description] if run.description else []
+                return gist(" · ".join([*said, ran(run.command)]))
             case "Read":
                 read = FileRead.model_validate(call.input)
-                name = PurePosixPath(read.file_path).name
-                return gist(name if read.offset is None else f"{name}:{read.offset}")
-            case "Edit" | "Write":
+                lines = lined_up(read.offset, read.limit)
+                return gist(f"{tail(read.file_path)}{lines}")
+            case "Edit":
+                edit = FileEdited.model_validate(call.input)
+                out = len(edit.old_string.splitlines())
+                put = len(edit.new_string.splitlines())
+                return gist(f"{tail(edit.file_path)} -{out} +{put}")
+            case "Write":
                 written = FileWritten.model_validate(call.input)
-                return gist(PurePosixPath(written.file_path).name)
+                held = len(written.content.splitlines())
+                return gist(f"{tail(written.file_path)} · {held} lines")
             case "NotebookEdit":
                 notebook = NotebookWritten.model_validate(call.input)
-                return gist(PurePosixPath(notebook.notebook_path).name)
-            case "Grep" | "Glob":
-                return gist(Searched.model_validate(call.input).pattern)
+                return gist(tail(notebook.notebook_path))
             case _:
                 pass
     except ValidationError:
         pass
-    return gist(first(call.input))
+    return argued(call.input)
 
 
 class TaskCreated(

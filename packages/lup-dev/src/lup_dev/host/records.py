@@ -161,17 +161,17 @@ class Said(Model):
 
 
 class Called(Model):
-    """A tool the agent called, by their runtime's name for it, and what the call did, in a line."""
+    """A tool the agent called, by their runtime's name for it, and what the call was given, in a line."""
 
     kind: Literal["called"] = "called"
     tool: str
     gist: str | None = None
-    """What the call did, in a line, read from its input by its runtime's
-    reader: a command's description or the command, the file read or written, a
-    search's pattern, else its first argument; none where its input says
-    nothing. The input and what the call returned are read whole on asking
-    (`Reader.calls`), so a conversation read at each hook carries a line a
-    call."""
+    """What the call was given, in a line, read from its input by its runtime's
+    reader: a command's description and the command (`ran`), the file read or
+    written and how much of it, the files a patch touches, else each argument
+    after its name (`argued`); none where it was given nothing. The input and
+    what the call returned are read whole on asking (`Reader.calls`), so a
+    conversation read at each hook carries a line a call."""
     id: str | None = None
     """The runtime's id for the call, where its record keeps one: what an inbox
     item made by the call is anchored to, and what reads the call whole."""
@@ -395,13 +395,48 @@ def gist(value: JsonValue, width: int = 160) -> str | None:
     return f"{said[:width]}…"
 
 
-def first(arguments: JsonObject) -> JsonValue:
-    """Return a call's first argument, as its input names them in order; none where it has none.
+def argued(arguments: JsonObject, width: int = 160, long: int = 32) -> str | None:
+    r"""Say a call's arguments in a line, each after its name, those longer than `long` after the others so a text doesn't push them off it: each as `gist` says it, cut at `width` as a whole; none where nothing was given.
 
-    >>> first({"pattern": "def ", "path": "src"}), first({})
-    ('def ', None)
+    >>> argued({"text": "Found it.\nIt's here.", "to": "parent", "kind": "note"})
+    'text=Found it. · to=parent · kind=note'
+    >>> argued({"body": "x" * 40, "number": 3, "labels": ["a"]})
+    'number=3 · labels=["a"] · body=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+    >>> argued({"on": None, "within": ""}), argued({})
+    (None, None)
     """
-    return next(iter(arguments.values()), None)
+    said = {name: gist(value) for name, value in arguments.items()}
+    shown = {name: each for name, each in said.items() if each is not None}
+    ordered = sorted(shown, key=lambda name: len(shown[name]) > long)
+    return gist(" · ".join(f"{name}={shown[name]}" for name in ordered), width)
+
+
+def ran(command: str) -> str:
+    r"""Say a shell command in a line: its lines and spaces run together, and without the `cd` it starts with, which most of an agent's commands do, into a worktree whose path would fill the line with where it ran rather than what it did.
+
+    >>> ran("cd /w/tree/dev && uv run pytest -q"), ran("cd /w; ls")
+    ('uv run pytest -q', 'ls')
+    >>> ran("sed -n 1,5p a.py |\n  head")
+    'sed -n 1,5p a.py | head'
+    >>> ran("cd /w")
+    'cd /w'
+    """
+    match command.split():
+        case ["cd", _, "&&", *rest] if rest:
+            return " ".join(rest)
+        case ["cd", place, *rest] if rest and place.endswith(";"):
+            return " ".join(rest)
+        case words:
+            return " ".join(words)
+
+
+def tail(path: str, parts: int = 3) -> str:
+    """Say a file's path by its last `parts` parts: its name alone says little of an `__init__.py`, and its whole path, a worktree's among it, would fill the line.
+
+    >>> tail("/w/tree/dev/page/src/review.ts"), tail("/a.py"), tail("a.py")
+    ('page/src/review.ts', '/a.py', 'a.py')
+    """
+    return str(PurePosixPath(*PurePosixPath(path).parts[-parts:]))
 
 
 def within(directory: Path, under: list[Path]) -> bool:

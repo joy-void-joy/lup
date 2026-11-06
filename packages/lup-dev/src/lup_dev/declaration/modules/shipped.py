@@ -11,6 +11,7 @@ from lup.github.module import GitHub
 from lup_dev.declaration.modules.code_rules import CodeRules
 from lup_dev.declaration.modules.core import Core
 from lup_dev.declaration.modules.python import Python
+from lup_dev.declaration.modules.versions import Versions
 from lup_dev.private.module import Private
 from lup_transcripts.environment.module import Transcripts
 
@@ -24,8 +25,5 @@ def default() -> list[Module]:
 
 
 def shipped() -> list[Module]:
-    """List every module lup ships: the default ones, then the optional ones.
-
-    lup ships no optional module yet.
-    """
-    return default()
+    """List every module lup ships: the default ones, then the optional ones, `Versions` alone so far."""
+    return [*default(), Versions()]

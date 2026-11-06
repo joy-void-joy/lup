@@ -2,74 +2,70 @@
 
 `lup-dashboard demo` serves it, for looking at a view while it's built (a session
 in a room screenshots it headless) and for the operator to try one before it
-lands. Its data are the host's own models, so it shows what the page would show.
+lands. Its state is seeded as the host keeps its own, in a directory of its own:
+the items, threads, checks, review marks and draft on a ledger of its own, each
+conversation's whereabouts, the launches and their names, the landing waiting.
+Each request the page sends is answered by the host's own handler of its kind
+(`lup_dashboard/handled.py`), so what the host refuses is refused here, and the
+drive tests run over the host's rules rather than a stand-in's.
+
+What stands in is what's beyond the host's handlers: each conversation's record
+(`lup_dashboard/standins.py`); what an agent's branches changed since the
+operator saw them, which the host reads with git in worktrees no demo has
+(`since`, `reviewed`); the agents themselves, whose hooks and calls are a few
+timers set going as the page first asks (`asking`): a question that arrives,
+an approval's types read, two writes to a branch.
 """
 
 import asyncio
 import hashlib
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from functools import cached_property
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, override
 
-from pydantic import Field, JsonValue, ValidationError
+from pydantic import Field, JsonValue
 
-from lup.blocks import OfAgent
+from lup.events import CallFinished, CallStarted
 from lup.types import Model, MutableModel
+from lup_dashboard.handled import Handled, handled
 from lup_dashboard.host import Host
-from lup_dashboard.standins import StandInViews
-from lup_dashboard.threads import StandInThreads, StoodIn
+from lup_dashboard.layout import DemoLayout
+from lup_dashboard.standins import StandInReader, StandInRecords, StoodIn
+from lup_dev import Project
 from lup_dev.clock import Clock, SystemClock
 from lup_dev.declaration.kinds import Levels, Role
-from lup_dev.errors import LupDevError
+from lup_dev.declaration.resolve import resolve
+from lup_dev.host.courier import Conversation as Talking
+from lup_dev.host.courier import Conversations
+from lup_dev.host.names import Names
 from lup_dev.host.protocol import (
     Activity,
-    Holding,
     Limits,
-    Listed,
     ListLaunches,
     Refused,
     Register,
-    SetHolding,
-    Talker,
 )
-from lup_dev.host.records import Call, Called, Entry, Said, Task, Transcript, Usage
-from lup_dev.host.timings import KeepTimings, Report, TimingsKept, TimingsStore
-from lup_dev.host.workers import Viewed, Viewing
+from lup_dev.host.records import (
+    Call,
+    Called,
+    Entry,
+    Recorded,
+    Said,
+    Task,
+    Transcript,
+    Usage,
+)
+from lup_dev.host.service import Route, Served
+from lup_dev.host.watch import Changes, Touched
 from lup_dev.inbox import marks
 from lup_dev.inbox.citations import resolved
-from lup_dev.inbox.concerns import slugged
-from lup_dev.inbox.marks import CORE, MarksMoved, MoveMarks, ReviewMark
+from lup_dev.inbox.concerns import ROOT
+from lup_dev.inbox.marks import CORE, ReviewMark
 from lup_dev.inbox.parts import PartId
-from lup_dev.inbox.protocol import (
-    AnswerCheck,
-    CheckShown,
-    Context,
-    Conversed,
-    Drafted,
-    Exchanged,
-    Files,
-    Items,
-    KeepDraft,
-    KeepOrder,
-    KeepTalk,
-    ListInbox,
-    Ordered,
-    Pathed,
-    Reviewed,
-    Seen,
-    SendDraft,
-    SendItem,
-    ShowContext,
-    ShowConversation,
-    ShowDraft,
-    ShowFiles,
-    Shown,
-    ShowOrder,
-    ShowTalk,
-    Talked,
-    exchanged,
-)
+from lup_dev.inbox.protocol import Files, ListInbox, ShowFiles
 from lup_dev.inbox.store import (
     ApiChanged,
     Approval,
@@ -77,6 +73,7 @@ from lup_dev.inbox.store import (
     ChangedFile,
     Comment,
     Content,
+    Decided,
     Decision,
     Done,
     Draft,
@@ -86,39 +83,25 @@ from lup_dev.inbox.store import (
     Friction,
     HeldChange,
     HowItFelt,
+    Inbox,
     Item,
     Letter,
     Message,
-    Order,
     Question,
     Quote,
     Reading,
     Reply,
     Review,
-    Talk,
     Text,
     Told,
     Unresolved,
     Waiting,
+    Whereabouts,
     cited,
 )
 from lup_dev.inbox.store import Asked as Ask
-from lup_dev.inbox.texts import (
-    body,
-    written,
-)
-from lup_dev.inbox.threaded import (
-    DeclineThread,
-    Joined,
-    ListThreads,
-    MovedIntoThread,
-    MoveIntoThread,
-    ReopenThread,
-    SettleThread,
-    ShowThread,
-    ThreadStated,
-    Working,
-)
+from lup_dev.inbox.texts import opening
+from lup_dev.inbox.threaded import Joined
 from lup_dev.inbox.threads import spoken
 from lup_dev.policy.reviewed import Mark, Marks
 from lup_dev.policy.since import (
@@ -131,15 +114,26 @@ from lup_dev.policy.since import (
     SinceReviewed,
     ViewedFile,
 )
-from lup_dev.policy.waits import Awaited, LandingsWaiting, ShowLandings, Wait
+from lup_dev.policy.waits import Awaited, Declined, Wait
+from lup_dev.stored import write_model
 from lup_ledger.parties import Conversation, Lup, Operator
-from lup_ledger.threads import Check, Parked, Settled, Thread, TimeCame
+from lup_ledger.threads import (
+    Check,
+    In,
+    Moved,
+    Parked,
+    Settled,
+    Status,
+    Thread,
+    TimeCame,
+)
 from lup_ledger.threads import Done as ThreadDone
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable
+    from collections.abc import AsyncGenerator
 
     from lup_dashboard.api import Asked, Replied
+    from lup_dev.layout import Layout
 
 
 class StandIn(Model):
@@ -158,7 +152,7 @@ def stand_in(
     *,
     output: str | None = None,
 ) -> StandIn:
-    """Return a stand-in call to `tool` saying `gist`, given `given`, which returned `output`; none while it runs."""
+    """Return a stand-in call to `tool` saying `gist`, what it was given as its runtime's reader would say it, given `given`, which returned `output`; none while it runs."""
     return StandIn(
         step=Called(tool=tool, gist=gist, id=id_, at=at),
         whole=Call(id=id_, input=given, output=output),
@@ -190,45 +184,70 @@ class Standing(MutableModel):
     tasks: list[Task] = []
 
 
+class StandInThread(Model):
+    """One of the demo's threads, as it seeds them: the thread, and what's in it, each by when it came, a part moved in by the part's place in its item."""
+
+    thread: Thread
+    members: list[Joined] = []
+
+
+class Changing(Model):
+    """What a stand-in item changes, as the host keeps it beside it: its number, and each file whole."""
+
+    number: int
+    files: list[ChangedFile]
+
+
+class Threaded(Model):
+    """The demo's threads as it seeds them: each with what's in it, the check in one, and each one's latest status."""
+
+    threads: list[StandInThread]
+    check: Check
+    statuses: list[Status]
+
+
+class Cast(Model):
+    """One of the demo's conversations, as the host would have heard them: the launch they run in, by its id, what they're called, who spawned them, what they're doing, the thread they work in, by its name, and when they ended."""
+
+    launch: str
+    session: str
+    agent: str | None = None
+    own: str | None = None
+    """A subagent's name; none for a session's own conversation, named as their launch."""
+    kind: str | None = None
+    parent: str | None = None
+    """The runtime's id for the subagent that spawned them; none where their session's own conversation did."""
+    activity: Activity
+    works: str | None = None
+    """For a session's own conversation, their root thread; for a subagent, the thread they joined or hold; none for one who works in their session's root."""
+    ended: datetime | None = None
+
+    def id(self) -> str:
+        """Return lup's id for them."""
+        return f"{self.launch}-{self.agent or self.session}"
+
+
 class Demo(MutableModel, Host, arbitrary_types_allowed=True):
-    """A host serving stand-in launches, conversations and items, as of the clock's time, and keeping the operator's draft and where the review lays out its groups in memory; what it can't answer it refuses, saying it's a demo."""
+    """A host over stand-in state, as of the clock's time: launches, conversations and items seeded in a directory of its own as the host keeps its own, as the page first asks, and each request answered by the host's own handler (`handled`); what's beyond those, the records, the branches and the agents, stands in."""
 
     clock: Clock = SystemClock()
     # lup: ignore("runtime-mention", why="stand-in data: the runtimes the demo's launches show, not a feature built for one")
     runtimes: list[str] = ["claude", "codex"]
     """The runtimes the demo's launches run, by name: the first for most, the second for one."""
-    draft: Draft = Draft(parked=[58])
-    """The operator's draft, kept in memory: the voice session's how it felt, @58,
-    left for later as items were before the pile to read was there, a park the
-    page drops, the pile being where it's read."""
-    order: Order = Order()
-    """Where the review lays out its groups, kept in memory, as the host keeps it: each page open on the demo shares it."""
-    talks: dict[str, Talk] = {}
-    """What the operator writes on each conversation, by its key, kept in memory."""
-    sent: list[Item] = []
-    """The items the operator's messages sent from the page made, kept in memory:
-    they reach no agent, and are told at once."""
-    covered: list[int] = []
-    """The items each draft sent covered, by number, taken off the operator's
-    list as the host takes them, kept in memory: each done."""
+    say: Callable[[str], None] = lambda _: None
+    """Where what the handlers say is said, a refusal or a failure among it."""
+    kept: TemporaryDirectory[str] = Field(default_factory=TemporaryDirectory)
+    """Where its state is kept, removed as the demo ends."""
     grown: int = 0
-    """How many steps the parser subagent's conversation has taken since the demo began: one more each time it's asked, so a page following it sees it grow."""
-    holding: list[SetHolding] = []
-    """The operator's switch turned on for each conversation it holds every flagged write of, kept in memory."""
-    changed: asyncio.Event = Field(default_factory=asyncio.Event)
-    """Set once something the page watches changes, and replaced: each watch answers again."""
-    typing: bool = True
-    """Whether the approval's types are being read, its files carrying the reading of their parse alone, as the host reads them in the background: until `types_read` after the page first asks for them."""
+    """How many steps the parser subagent's conversation has taken since the demo began: one more each time their record is read, so a page following it sees it grow."""
     types_read: timedelta = timedelta(seconds=4)
-    """How long the approval's types take to read."""
+    """How long the approval's types take to read, its files carrying the reading of their parse alone until then, as the host reads them in the background."""
     reading: asyncio.TimerHandle | None = None
     """The reading of the approval's types under way, once the page asked for its files."""
     arrives: timedelta = timedelta(seconds=10)
     """How long after the page first asks for the inbox a question of the parser subagent's arrives, so a session can watch the review keep its place as an item comes to a group above."""
     arriving: asyncio.TimerHandle | None = None
     """The arrival under way, once the page asked for the inbox."""
-    arrived: datetime | None = None
-    """When the late question arrived; none until it has."""
     size: int = 36
     """How many flagged writes of a busy day the review holds beside the demo's own items (`worked`), each of a module of hundreds of lines, from `workers` workers of the lup-impl session, each with a note and a friction, the first with a long conversation: none for the demo's own items alone, as its tests ask it."""
     first_worked: int = 1000
@@ -248,11 +267,9 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     """The next stand-in hook call, once the page first asked for the launches."""
     began: datetime | None = None
     """When the demo began, as of the clock the first time it's asked (`ago`)."""
-    approved: list[int] = []
-    """The flagged writes approved from the drawer, by number, kept in memory."""
     marks: dict[str, Marks] = {}
     """The files the operator marked reviewed in a drawer, by branch, kept in
-    memory."""
+    memory: what stands in for the judge's marks, read with git."""
     versions: dict[str, Content | None] = {}
     """Each version of a file a drawer showed, by its stand-in of git's id for
     it, which marking it reviewed keeps."""
@@ -260,21 +277,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     """How long after the page first asks what the parser subagent's branch changed since the operator approved it two more writes come to it, so a session can watch the drawer bring them in."""
     growth: asyncio.TimerHandle | None = None
     """The growth under way, once the page asked."""
-    editing: bool = False
-    """Whether the parser subagent is making the two writes: calling a tool that
-    isn't lup's, whose end the page reads its drawer at."""
     grew: bool = False
     """Whether the two writes came."""
-    seeded: bool = False
-    """Whether each group has been marked seen up to its last item made 3
-    minutes before the demo began (`seen`), as the first listing does."""
-    landing: bool = True
-    """Whether the lup-impl session's landing of the ended fix-clock subagent's
-    branch still waits on the operator: until they mark its file reviewed, or
-    decline it, when the stand-in call is done waiting (`landed`)."""
-    declined: bool = False
-    """Whether the operator declined the landing's file, which the drawer says
-    until the stand-in call is done waiting."""
     lands: timedelta = timedelta(seconds=2)
     """How long after the operator answers the landing's file its stand-in call
     is done waiting, as a call wakes to the answer."""
@@ -290,173 +294,130 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     """The number of the demo's first thread (`stand_in_threads`), the rest and
     their check numbered after it: past the demo's own items, as the ledger
     numbers every node from one sequence."""
-    root_title: str = "a main session's root thread"
-    """What every root thread is titled (`lup_dev.inbox.concerns.ROOT`)."""
 
     @override
     async def ask(self, request: Asked) -> Replied:
-        match request:
-            case ListLaunches():
-                if self.hooks > 0 and self.hooking is None:
-                    self.hooking = asyncio.get_running_loop().call_later(
-                        60 / self.hooks, self.hook
-                    )
-                return self.listed()
-            case SetHolding(on=on) as switched:
-                others = [
-                    each
-                    for each in self.holding
-                    if each.session != switched.session or each.agent != switched.agent
-                ]
-                self.holding = [*others, switched] if on else others
-                self.changed.set()
-                self.changed = asyncio.Event()
-                return Holding(on=on)
-            case ListInbox():
-                if self.arriving is None:
-                    self.arriving = asyncio.get_running_loop().call_later(
-                        self.arrives.total_seconds(), self.arrive
-                    )
-                return self.items()
-            case ShowDraft():
-                return Drafted(draft=self.draft)
-            case KeepDraft(draft=draft):
-                self.draft = draft
-                return Drafted(draft=draft)
-            case SendDraft():
-                return self.send()
-            case ShowOrder():
-                return Ordered(order=self.order)
-            case KeepOrder(places=places, gone=gone):
-                self.order = self.order.laid(places, gone)
-                self.changed.set()
-                self.changed = asyncio.Event()
-                return Ordered(order=self.order)
-            case ShowTalk(conversation=conversation):
-                return Talked(talk=self.talks.get(conversation.key(), Talk()))
-            case KeepTalk(conversation=conversation, talk=talk):
-                self.talks = {**self.talks, conversation.key(): talk}
-                return Talked(talk=talk)
-            case ShowFiles(number=number):
-                if number >= self.first_worked:
-                    return self.worked_files(number)
-                if number == 54 and self.typing and self.reading is None:
-                    self.reading = asyncio.get_running_loop().call_later(
-                        self.types_read.total_seconds(), self.typed
-                    )
-                return files(number, typed=not self.typing, lines=self.approval_lines)
-            case ShowContext(number=number):
-                return self.context(number)
-            case SendItem() as sending:
-                return self.sending(sending)
-            case ShowConversation(session=session, agent=agent, since=since):
-                if (session, agent) == ("s1", "a02"):
-                    self.grown += 1
-                steps = self.conversation(session, agent)
-                standing = self.standing(session, agent)
-                return Conversed(
-                    entries=steps[since:],
-                    since=since,
-                    total=len(steps),
-                    usage=standing.usage,
-                    tasks=standing.tasks,
-                )
-            case ShowSince(conversation=conversation, seen=seen):
-                if self.growth is None:
-                    self.growth = asyncio.get_running_loop().call_later(
-                        self.grows.total_seconds(), self.grow
-                    )
-                return self.since(conversation, seen)
-            case ReviewSince(
-                conversation=conversation,
-                branch=branch,
-                files=viewed,
-                seen=seen,
-                decline=decline,
-            ):
-                return self.reviewed(
-                    conversation, branch, viewed, seen, decline=decline
-                )
-            case ShowLandings():
-                return LandingsWaiting(waiting=self.waiting())
-            case MoveMarks() as moving:
-                return self.moved(moving)
-            case ListThreads():
-                return self.threads.listed()
-            case ShowThread(number=number, whole=whole):
-                try:
-                    return self.threads.shown(number, whole=whole)
-                except KeyError as missing:
-                    return Refused(error=str(missing.args[0]))
-            case SettleThread(number=number):
-                return self.stated(
-                    lambda: self.threads.settled(number, self.clock.now())
-                )
-            case DeclineThread(number=number, why=why):
-                return self.stated(
-                    lambda: self.threads.declined(number, why, self.clock.now())
-                )
-            case ReopenThread(number=number, why=why):
-                return self.stated(
-                    lambda: self.threads.reopened(number, why, self.clock.now())
-                )
-            case MoveIntoThread(numbers=numbers, thread=number, title=title):
-                return self.gathered(numbers, number, title)
-            case AnswerCheck(number=number, text=text):
-                try:
-                    check = self.threads.checked(number, text, self.clock.now())
-                except KeyError as missing:
-                    return Refused(error=str(missing.args[0]))
-                self.changed.set()
-                self.changed = asyncio.Event()
-                thread = self.threads.containing(number)
-                return CheckShown(
-                    check=check, thread=None if thread is None else thread.name
-                )
-            case Viewing() as viewing:
-                return await self.viewed(viewing)
-            case KeepTimings(report=report):
-                return self.timed(report)
-            case _:
-                return Refused(error=f"the demo doesn't answer `{request.kind}`")
+        self.asking(request)
+        return await self.host.ask(request)
 
     @override
     async def watch(self, request: Asked) -> AsyncGenerator[Replied]:
-        """Yield the reply at once, then again at each change where it differs from the one yielded last, as the host service's watch does (`docs/host.md`, *Watching*): a stand-in hook call sends the launches again, with what a worker does, and the inbox only where it changed."""
-        sent = ""
-        while True:
-            changed = self.changed
-            replied = await self.ask(request)
-            line = replied.model_dump_json()
-            if line != sent:
-                yield replied
-                sent = line
-            await changed.wait()
+        """Yield the reply at once, then again as the host's handlers answer it again (`Handled.watch`)."""
+        self.asking(request)
+        async for replied in self.host.watch(request):
+            yield replied
 
     @override
     async def settle(self, number: int) -> None:
-        """Install nothing: the demo's approvals are stand-ins."""
-        del number
+        await self.host.settle(number)
+
+    def asking(self, request: Asked) -> None:
+        """Set going what the page's first asking for it sets going: the workers' hook calls, the late question, the reading of the approval's types, the two writes to the parser subagent's branch."""
+        later = asyncio.get_running_loop().call_later
+        match request:
+            case ListLaunches() if self.hooks > 0 and self.hooking is None:
+                self.hooking = later(60 / self.hooks, self.hook)
+            case ListInbox() if self.arriving is None:
+                self.arriving = later(self.arrives.total_seconds(), self.arrive)
+            case ShowFiles(number=54) if self.reading is None:
+                self.reading = later(self.types_read.total_seconds(), self.typed)
+            case ShowSince() if self.growth is None:
+                self.growth = later(self.grows.total_seconds(), self.grow)
+            case _:
+                pass
 
     @cached_property
-    def views(self) -> StandInViews:
-        """Return the modules' views over the demo's stand-ins, made once asked."""
-        return StandInViews(runtimes=self.runtimes, exchanged=self.exchanged)
+    def host(self) -> Handled:
+        """Return the host's handlers over the demo's state, seeded (`seeded`) the first time it's asked."""
+        layout = DemoLayout(home=Path(self.kept.name))
+        lup = layout.lup
+        changes = Changes()
+        inbox = Inbox.kept_in(lup, changes)
+        self.seeded(inbox)
+        defaults = resolve(Project())
+        made = handled(
+            lup,
+            inbox,
+            changes,
+            {
+                runtime: Recorded(
+                    records=StandInRecords(
+                        runtime=runtime,
+                        directory=layout.records(runtime),
+                        stands=self.stood,
+                    ),
+                    reader=StandInReader(),
+                )
+                for runtime in self.runtimes
+            },
+            own=self.lup_session().repository,
+            declared=defaults,
+            defaults=defaults,
+            served=self.served(lup),
+            beyond=self.branches(),
+            who="the demo",
+            clock=self.clock,
+            say=self.say,
+            timings=self.timings,
+        )
+        made.waits.began(self.landing())
+        return made
 
-    @cached_property
-    def threads(self) -> StandInThreads:
-        """Return the demo's threads, made once asked (`stand_in_threads`), and kept, with their check, on the ledger the demo keeps its review marks on, as the host keeps them on its own; each first read up to the last of what's in it that came 3 minutes before the demo began, so what came since is new."""
-        made = self.stand_in_threads()
-        ledger = self.views.marks.ledger
-        for node in [*(each.thread for each in made.threads), *made.checks]:
-            ledger.kept(node)
-        items = made.items()
-        for each in made.threads:
+    def seeded(self, inbox: Inbox) -> None:
+        """Keep the demo's state in `inbox`, as the host keeps its own: each item (`every`), with the files of each that changes any; each conversation's whereabouts (`cast`); each thread, its check, what's in each and its status (`stand_in_threads`); how far the operator has read and seen each, as of 3 minutes before the demo began, so what came since is new; and their draft from before the pile to read was there, the voice session's how it felt, @58, left for later, a park the page drops."""
+        items = sorted(self.every(), key=lambda each: each.number)
+        threaded = self.stand_in_threads()
+        numbered = {each.thread.name: each.thread.number for each in threaded.threads}
+        ledger = inbox.ledger
+        with ledger.writing():
+            for item in items:
+                inbox.kept(item)
+            for each in self.changing(items):
+                inbox.filed(each.number, each.files)
+            for place in self.places_heard(numbered):
+                inbox.placed(place)
+            for each in threaded.threads:
+                ledger.kept(each.thread)
+            ledger.kept(threaded.check)
+            writers = {
+                **{each.number: each.sender for each in items},
+                threaded.check.number: threaded.check.by,
+            }
+            for each in threaded.threads:
+                thread = each.thread
+                for member in each.members:
+                    ledger.drawn(
+                        In(
+                            source=member.node,
+                            target=thread.number,
+                            repository=thread.repository,
+                            by=writers[member.node],
+                            at=member.came,
+                        )
+                        if member.part is None
+                        else Moved(
+                            source=member.node,
+                            part=member.part,
+                            target=thread.number,
+                            repository=thread.repository,
+                            by=Operator(),
+                            at=member.came,
+                        )
+                    )
+            for status in threaded.statuses:
+                ledger.drawn(status)
+            self.read_before(inbox, items, threaded)
+            inbox.drafted(Draft(parked=[58]))
+
+    def read_before(self, inbox: Inbox, items: list[Item], threaded: Threaded) -> None:
+        """Mark what the operator has read and seen as of 3 minutes before the demo began: each thread up to the last item in it that came by then, and each agent's group up to the last of theirs still waiting that was made by then."""
+        known = [each.number for each in items]
+        for each in threaded.threads:
             before = [
                 member.node
                 for member in each.members
                 if member.part is None
-                and member.node in items
+                and member.node in known
                 and member.came <= self.ago(3)
             ]
             if before:
@@ -465,90 +426,309 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     up_to=str(before[-1]),
                     at=self.ago(3),
                 )
-                self.views.marks.moved(each.thread.repository, CORE, [mark])
-        return made
-
-    def gathered(
-        self, numbers: list[int], number: int | None, title: str | None
-    ) -> MovedIntoThread | Refused:
-        """Move the frictions and how it felt `numbers` into thread `number`, or one opened titled `title` under the root above where the first landed, as the host does (`Concerns.gathered`), telling no agent: each marked read, staying where it landed; a thread done, to confirm, reopened. Refused, saying why, as the host refuses."""
-        by_number = {each.number: each for each in self.every()}
-        items = [by_number.get(each) for each in numbers]
-        found = [each for each in items if each is not None]
-        if len(found) < len(items) or not found:
-            return Refused(error="the demo holds no such item")
-        if any(not isinstance(each.reason, Friction | HowItFelt) for each in found):
-            return Refused(
-                error="only frictions and how it felt are moved from the pile to read"
-            )
-        landed = [self.threads.containing(each.number) for each in found]
-        first = landed[0]
-        if first is None or None in landed:
-            return Refused(error="an item is in no thread")
-        repositories = dict.fromkeys(
-            each.repository for each in landed if each is not None
+                inbox.marks.moved(each.thread.repository, CORE, [mark])
+        waiting = [
+            each
+            for each in items
+            if each.recipient == Operator() and isinstance(each.state, Waiting)
+        ]
+        senders = dict.fromkeys(
+            each.sender for each in waiting if isinstance(each.sender, Conversation)
         )
-        if len(repositories) > 1:
-            return Refused(
-                error="the frictions are of several repositories: move each repository's apart"
-            )
-        now = self.clock.now()
-        if number is None:
-            taken = [each.thread.name for each in self.threads.threads]
-            wanted = slugged(title or "")
-            name, tried = wanted, 1
-            while name in taken:
-                tried += 1
-                name = f"{wanted}-{tried}"
-            thread = Thread(
-                number=max(
-                    [
-                        *(each.thread.number for each in self.threads.threads),
-                        *(each.number for each in self.threads.checks),
-                    ]
+        for sender in senders:
+            before = [
+                each.number
+                for each in waiting
+                if each.sender == sender and each.made <= self.ago(3)
+            ]
+            if before:
+                mark = ReviewMark(
+                    key=marks.seen(sender), up_to=str(max(before)), at=self.ago(3)
                 )
-                + 1,
-                repository=first.repository,
-                by=Operator(),
-                at=now,
-                name=name,
-                title=(title or "").strip(),
-                parent=self.threads.rooted(first).number,
-            )
-            self.views.marks.ledger.kept(thread)
-            self.threads.opened(thread)
-        else:
-            try:
-                thread = self.threads.stood(number).thread
-            except KeyError as missing:
-                return Refused(error=str(missing.args[0]))
-            if any(each is not None and each.number == number for each in landed):
-                return Refused(error=f"they landed in @{thread.name} already")
-            self.threads.written_on(number, now)
-        self.threads.gathered(numbers, thread.number, now)
-        self.covered = [*self.covered, *numbers]
-        self.changed.set()
-        self.changed = asyncio.Event()
-        stated = self.threads.readings().read(thread.number)
-        answering = [] if stated.answering is None else [stated.answering]
-        return MovedIntoThread(
-            read=stated,
-            opened=number is None,
-            moved=numbers,
-            paths=self.threads.paths(answering),
+                inbox.marks.moved(sender.repository, CORE, [mark])
+
+    def changing(self, items: list[Item]) -> list[Changing]:
+        """Return the files each of `items` that changes any changes, as the host keeps them beside it: the approval's with the reading of their parse alone, until its types are read (`typed`)."""
+        fix_clock = {
+            68: self.clock_stands(),
+            69: self.names_stands(),
+        }
+
+        def files_of(number: int) -> list[ChangedFile]:
+            if number >= self.first_worked:
+                return self.worked_changed(number)
+            stands = fix_clock.get(number)
+            if stands is None:
+                return kept_files(number, typed=False, lines=self.approval_lines)
+            return [
+                ChangedFile(
+                    path=each.path,
+                    before=each.before,
+                    after=each.after,
+                    reading=each.reading,
+                )
+                for each in stands
+            ]
+
+        return [
+            Changing(number=each.number, files=files_of(each.number))
+            for each in items
+            if isinstance(each.reason, Approval | HeldChange | Flagged)
+        ]
+
+    def worked_changed(self, number: int) -> list[ChangedFile]:
+        """Return the files a worker's flagged write changes (`worked_files`)."""
+        found = self.worked_files(number)
+        return found.files if isinstance(found, Files) else []
+
+    def launches(self) -> list[Register]:
+        """Return four launches over three repositories: one with subagents working, asking and ended; one idle; one on the second runtime; one whose session hasn't started."""
+        first, second = self.runtimes
+        return [
+            launch(LUP_IMPL, "lup-impl", first, Path("/home/op/lup.git/tree/dev")),
+            launch(
+                "b2e1",
+                "guidance-voice",
+                first,
+                Path("/home/op/lup.git/tree/guidance-voice"),
+            ),
+            launch("c3d2", "main", second, Path("/home/op/zoetrope.git/tree/main")),
+            launch(
+                "d4c3", "magpie-search", first, Path("/home/op/magpie.git/tree/main")
+            ),
+        ]
+
+    def ended_launch(self) -> Register:
+        """Return the launch the docs session ran in, which has ended since: no record of it is kept, and nothing of it served."""
+        first, _ = self.runtimes
+        return launch(
+            "e5f4", "docs-pass", first, Path("/home/op/lup.git/tree/docs-pass")
         )
 
-    def stated(self, stating: Callable[[], ThreadStated]) -> ThreadStated | Refused:
-        """Settle, decline or reopen a stand-in thread as `stating` does, and let each watch answer again; refused where the demo has no such thread."""
-        try:
-            stated = stating()
-        except KeyError as missing:
-            return Refused(error=str(missing.args[0]))
-        self.changed.set()
-        self.changed = asyncio.Event()
-        return stated
+    def cast(self) -> list[Cast]:
+        """Return each conversation the host would have heard: the lup-impl session, their subagents working, asking and ended, and each worker of a busy day; the voice session, idle; zoetrope's session and their subagent; no one in the demo's last launch, whose session hasn't started; and the docs session, whose launch has ended."""
+        calling = Activity(state="calling", since=self.ago(0.4), tool="Bash")
+        ended = [
+            Cast(
+                launch=LUP_IMPL,
+                session="s1",
+                agent=f"a0{at + 4}",
+                own=name,
+                kind="Explore",
+                activity=Activity(state="ended", since=self.ago(minutes)),
+                works=works,
+                ended=self.ago(minutes),
+            )
+            for at, (name, minutes, works) in enumerate(
+                [
+                    ("survey-legacy", 52, "legacy-cache"),
+                    ("probe-meta", 40, None),
+                    ("nest-probe", 33, None),
+                ]
+            )
+        ]
+        return [
+            Cast(
+                launch=LUP_IMPL,
+                session="s1",
+                activity=calling,
+                works="lup-impl",
+            ),
+            Cast(
+                launch=LUP_IMPL,
+                session="s1",
+                agent="a01",
+                own="explore-auth",
+                kind="Explore",
+                activity=Activity(state="calling", since=self.ago(1.5), tool="Grep"),
+                works="auth-survey",
+            ),
+            Cast(
+                launch=LUP_IMPL,
+                session="s1",
+                agent="a02",
+                own="parser",
+                kind="general-purpose",
+                activity=self.parser_waiting(),
+                works="transcript-reader",
+            ),
+            Cast(
+                launch=LUP_IMPL,
+                session="s1",
+                agent="a03",
+                own="grep-tokens",
+                kind="general-purpose",
+                parent="a02",
+                activity=Activity(state="idle", since=self.ago(0.2)),
+                works="transcript-reader",
+            ),
+            *ended,
+            Cast(
+                launch=LUP_IMPL,
+                session="s1",
+                agent=FIX_CLOCK,
+                own="fix-clock",
+                kind="general-purpose",
+                activity=Activity(state="ended", since=self.ago(25)),
+                works="clock-ticks",
+                ended=self.ago(25),
+            ),
+            *(
+                Cast(
+                    launch=LUP_IMPL,
+                    session="s1",
+                    agent=worker_agent(n),
+                    own=f"worker-{n}",
+                    kind="general-purpose",
+                    activity=self.worker_doing(n),
+                    works=f"module-{n}",
+                )
+                for n in range(1, self.workers + 1)
+                if self.size > 0
+            ),
+            Cast(
+                launch="b2e1",
+                session="s2",
+                activity=Activity(state="idle", since=self.ago(12)),
+                works="guidance-voice",
+            ),
+            Cast(
+                launch="c3d2",
+                session="s3",
+                activity=Activity(
+                    state="calling", since=self.ago(2), tool="exec_command"
+                ),
+                works="main",
+            ),
+            Cast(
+                launch="c3d2",
+                session="s3",
+                agent="th-7",
+                own="render_frames",
+                kind="default",
+                activity=Activity(
+                    state="calling", since=self.ago(0.7), tool="exec_command"
+                ),
+            ),
+            Cast(
+                launch="e5f4",
+                session="s4",
+                activity=Activity(state="ended", since=self.ago(190)),
+                works="docs-pass",
+                ended=self.ago(190),
+            ),
+        ]
 
-    def stand_in_threads(self) -> StandInThreads:
+    def places_heard(self, numbered: dict[str, int]) -> list[Whereabouts]:
+        """Return where each conversation was last heard, as the inbox keeps it (`cast`), each thread they work in by its number in `numbered`."""
+        launches = {
+            each.launch: each for each in [*self.launches(), self.ended_launch()]
+        }
+
+        def heard(each: Cast) -> Whereabouts:
+            register = launches[each.launch]
+            party = Conversation(
+                repository=register.repository,
+                runtime=register.runtime,
+                session=each.session,
+                agent=each.agent,
+            )
+            main = party.main()
+            thread = None if each.works is None else numbered[each.works]
+            return Whereabouts(
+                conversation=party,
+                launch=each.launch,
+                worktree=register.worktree,
+                since=self.ago(480),
+                ended=each.ended,
+                parent=None
+                if each.agent is None
+                else main
+                if each.parent is None
+                else main.model_copy(update={"agent": each.parent}),
+                name=each.own,
+                thread=None if each.agent is None else thread,
+                root=thread if each.agent is None else None,
+            )
+
+        return [heard(each) for each in self.cast()]
+
+    def served(self, lup: Layout) -> list[Served]:
+        """Return each launch as the host serves it, its record and each session's name written where the host keeps them, which say whose conversations still hold what they hold, and how they're called."""
+        cast = self.cast()
+        names = Names(path=lup.host.names)
+
+        def talking(each: Cast) -> Talking:
+            own = [other for other in cast if other.launch == each.launch]
+            [main] = [other for other in own if other.agent is None]
+            spawner = next((other for other in own if other.agent == each.parent), main)
+            return Talking(
+                id=each.id(),
+                session=each.session,
+                agent=each.agent,
+                name=each.own,
+                parent=None if each.agent is None else spawner.id(),
+                kind=each.kind,
+            )
+
+        def of(register: Register) -> Served:
+            write_model(lup.host.record(register.launch), register)
+            own = [each for each in cast if each.launch == register.launch]
+            sessions = list(dict.fromkeys(each.session for each in own))
+            for session in sessions:
+                names.keep(session, register.name or register.launch)
+            return Served(
+                launch=register,
+                conversations=Conversations(
+                    known=[talking(each) for each in own],
+                    session=next(iter(sessions), None),
+                    activities={each.id(): each.activity for each in own},
+                ),
+                servers=[],
+            )
+
+        return [of(each) for each in self.launches()]
+
+    def branches(self) -> list[Route]:
+        """Route what an agent's branches changed since the operator saw them, and marking it reviewed, to what stands in for reading them with git (`since`, `reviewed`), since no demo has their worktrees."""
+
+        async def showing(raw: str) -> Since:
+            asked = ShowSince.model_validate_json(raw)
+            return self.since(asked.conversation, asked.seen)
+
+        async def reviewing(raw: str) -> SinceReviewed | Refused:
+            asked = ReviewSince.model_validate_json(raw)
+            return self.reviewed(
+                asked.conversation,
+                asked.branch,
+                asked.files,
+                asked.seen,
+                decline=asked.decline,
+            )
+
+        return [
+            Route(kind=ShowSince.named(), answer=showing),
+            Route(kind=ReviewSince.named(), answer=reviewing),
+        ]
+
+    def stood(self, runtime: str, session: str, agent: str | None) -> StoodIn:
+        """Return the record of a conversation as it stands: the parser subagent's a step longer each time it's read, as when the page reads their drawer."""
+        if (session, agent) == ("s1", "a02"):
+            self.grown += 1
+        recorded = self.recorded(session, agent)
+        standing = self.standing(session, agent)
+        return StoodIn(
+            transcript=Transcript(
+                runtime=runtime,
+                session=session,
+                entries=steps(recorded),
+                usage=standing.usage,
+                tasks=standing.tasks,
+            ),
+            calls=[each.whole for each in recorded if isinstance(each, StandIn)],
+        )
+
+    def stand_in_threads(self) -> Threaded:
         """Return the demo's threads, over its items (`every`): each session's root, held by them; the lup-impl session's work under theirs, the parser's reader with its question, a check and the parser's exchange with their subagent, explore-auth's survey new with its exchange with the session, the clock's ticks whose landing waits on a file, the legacy reader's cache settled, the reader's names parked; the voice session's root done, to confirm, with a part of the operator's words moved under it; zoetrope's render, its problem asking; the docs pass, the root of a session that has ended, its last note read, which its end settles not; and each worker's module, of a busy day."""
         first, second = self.runtimes
         lup = Path("/home/op/lup.git")
@@ -556,13 +736,11 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         session = self.lup_session()
         parser = session.model_copy(update={"agent": "a02"})
         explorer = session.model_copy(update={"agent": "a01"})
-        grep = session.model_copy(update={"agent": "a03"})
         survey = session.model_copy(update={"agent": "a04"})
         clock = session.model_copy(update={"agent": FIX_CLOCK})
         voice = Conversation(repository=lup, runtime=first, session="s2")
         docs = Conversation(repository=lup, runtime=first, session="s4")
         main = Conversation(repository=zoetrope, runtime=second, session="s3")
-        frames = main.model_copy(update={"agent": "th-7"})
         items = {each.number: each for each in self.every()}
         (
             lup_root,
@@ -616,7 +794,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             ),
         )
         workers = [
-            StoodIn(
+            StandInThread(
                 thread=thread(
                     workers_from + n,
                     f"module-{n}",
@@ -634,13 +812,12 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             for n in range(1, self.workers + 1)
             if self.size > 0
         ]
-        root = self.root_title
         stood = [
-            StoodIn(
-                thread=thread(lup_root, "lup-impl", root, holder=session, minutes=480),
+            StandInThread(
+                thread=thread(lup_root, "lup-impl", ROOT, holder=session, minutes=480),
                 members=[came(60), came(55), came(62)],
             ),
-            StoodIn(
+            StandInThread(
                 thread=thread(
                     reader,
                     "transcript-reader",
@@ -657,10 +834,9 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     came(51),
                     Joined(node=reached, came=tried.at),
                     came(57),
-                    *([] if self.arrived is None else [came(61)]),
                 ],
             ),
-            StoodIn(
+            StandInThread(
                 thread=thread(
                     auth,
                     "auth-survey",
@@ -671,7 +847,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 ),
                 members=[came(64), came(65), came(66)],
             ),
-            StoodIn(
+            StandInThread(
                 thread=thread(
                     ticks,
                     "clock-ticks",
@@ -682,7 +858,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 ),
                 members=[came(68), came(69)],
             ),
-            StoodIn(
+            StandInThread(
                 thread=thread(
                     cache,
                     "legacy-cache",
@@ -693,7 +869,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 ),
                 members=[came(44)],
             ),
-            StoodIn(
+            StandInThread(
                 thread=thread(
                     names,
                     "reader-names",
@@ -703,13 +879,13 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     minutes=15,
                 ),
             ),
-            StoodIn(
+            StandInThread(
                 thread=thread(
-                    voice_root, "guidance-voice", root, holder=voice, minutes=30
+                    voice_root, "guidance-voice", ROOT, holder=voice, minutes=30
                 ),
                 members=[came(52), came(45), came(56), came(58)],
             ),
-            StoodIn(
+            StandInThread(
                 thread=thread(
                     branch,
                     "voice-branch",
@@ -720,32 +896,30 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 ),
                 members=[Joined(node=50, part=3, came=self.ago(7))],
             ),
-            StoodIn(
+            StandInThread(
                 thread=thread(
                     zoetrope_root,
                     "main",
-                    root,
+                    ROOT,
                     holder=main,
                     minutes=90,
                     repository=zoetrope,
                 ),
                 members=[came(53)],
             ),
-            StoodIn(thread=thread(past, "dev", root, holder=None, minutes=2880)),
-            StoodIn(
-                thread=thread(docs_root, "docs-pass", root, holder=docs, minutes=240),
+            StandInThread(thread=thread(past, "dev", ROOT, holder=None, minutes=2880)),
+            StandInThread(
+                thread=thread(docs_root, "docs-pass", ROOT, holder=docs, minutes=240),
                 members=[came(43)],
             ),
             *workers,
         ]
-        return StandInThreads(
+        return Threaded(
             threads=stood,
-            checks=[tried],
-            statuses={
-                cache: Settled(
-                    target=cache, repository=lup, by=Operator(), at=self.ago(16)
-                ),
-                names: Parked(
+            check=tried,
+            statuses=[
+                Settled(target=cache, repository=lup, by=Operator(), at=self.ago(16)),
+                Parked(
                     target=names,
                     repository=lup,
                     by=parser,
@@ -753,7 +927,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     until=[TimeCame(at=self.ago(-120))],
                     why="named once the reader lands",
                 ),
-                voice_root: ThreadDone(
+                ThreadDone(
                     target=voice_root,
                     repository=lup,
                     by=voice,
@@ -763,130 +937,91 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                         "is, and its examples are short."
                     ),
                 ),
-                past: Settled(
+                Settled(
                     target=past,
                     repository=lup,
                     by=Lup(),
                     at=self.ago(2000),
                     why="nothing waited when threads came: converted",
                 ),
-            },
-            every=self.every,
-            pathed=self.paths,
-            ended=lambda: [survey, clock, docs],
-            marks=self.views.marks,
-            working=[
-                Working(conversation=session, thread=lup_root),
-                Working(conversation=explorer, thread=auth),
-                Working(conversation=parser, thread=reader),
-                Working(conversation=grep, thread=reader),
-                Working(conversation=voice, thread=voice_root),
-                Working(conversation=main, thread=zoetrope_root),
-                Working(conversation=frames, thread=zoetrope_root),
-                *(
-                    Working(conversation=self.worker(n), thread=workers_from + n)
-                    for n in range(1, self.workers + 1)
-                    if self.size > 0
-                ),
             ],
         )
 
-    async def viewed(self, viewing: Viewing) -> Viewed | Refused:
-        """Answer a module's view with its module's own layout over the demo's stand-ins (`lup_dashboard/standins.py`), the conversation it's of written as its record first, as it stands: the parser subagent's a step longer each time their drawer is asked, as when the page reads it (`ShowConversation`); a view the module refuses, refused, saying why."""
-        try:
-            of = OfAgent.model_validate(viewing.argument)
-        except ValidationError:
-            of = None
-        if of is not None:
-            if (of.session, of.agent, viewing.view) == ("s1", "a02", "conversation"):
-                self.grown += 1
-            recorded = self.recorded(of.session, of.agent)
-            standing = self.standing(of.session, of.agent)
-            transcript = Transcript(
-                runtime=of.runtime,
-                session=of.session,
-                entries=steps(recorded),
-                usage=standing.usage,
-                tasks=standing.tasks,
-            )
-            wholes = [each.whole for each in recorded if isinstance(each, StandIn)]
-            self.views.record(of, transcript, wholes)
-        try:
-            return await self.views.view(viewing)
-        except LupDevError as refused:
-            return Refused(error=str(refused))
-
-    def timed(self, report: Report) -> TimingsKept:
-        """Keep what the page measured of itself as the host keeps it, where `timings` says, else in the demo's own directory."""
-        home = self.timings or self.views.layout.host.timings
-        kept = TimingsStore(home=home).keep(report, self.clock.now())
-        return TimingsKept(windows=len(kept))
-
-    def moved(self, moving: MoveMarks) -> MarksMoved:
-        """Move the review marks `moving` names at the demo's time, as the host does (`lup_dev.inbox.marks`); each watch answers again, a view that read one among them."""
-        at = self.clock.now()
-        marks = [
-            ReviewMark(key=each.key, up_to=each.up_to, at=at) for each in moving.marks
-        ]
-        self.views.marks.moved(moving.repository, moving.module, marks)
-        self.changed.set()
-        self.changed = asyncio.Event()
-        return MarksMoved(marks=marks)
-
-    def seen(self, items: list[Item]) -> list[Seen]:
-        """Return how far the operator has seen each group among `items`' senders, by the core's review mark on it, as the host reads it: each group first marked seen up to its last item made 3 minutes before the demo began, so those since are new."""
-        senders = list(
-            dict.fromkeys(
-                each.sender for each in items if isinstance(each.sender, Conversation)
-            )
-        )
-        if not self.seeded:
-            self.seeded = True
-            for sender in senders:
-                before = [
-                    each.number
-                    for each in items
-                    if each.sender == sender and each.made <= self.ago(3)
-                ]
-                if before:
-                    mark = ReviewMark(
-                        key=marks.seen(sender), up_to=str(max(before)), at=self.ago(3)
-                    )
-                    self.views.marks.moved(sender.repository, CORE, [mark])
-
-        def of(sender: Conversation) -> Seen | None:
-            mark = self.views.marks.of(sender.repository, CORE, marks.seen(sender))
-            if mark is None or mark.up_to is None:
-                return None
-            return Seen(conversation=sender, item=int(mark.up_to), at=mark.at)
-
-        return [found for each in senders if (found := of(each)) is not None]
-
     def typed(self) -> None:
-        """End the reading of the approval's types: its files carry their whole reading, and each watch answers again."""
-        self.typing = False
-        self.changed.set()
-        self.changed = asyncio.Event()
+        """End the reading of the approval's types, as the host's does (`lup_dev.inbox.typed`): its files kept with their whole reading, and the approval kept, which each watch sees."""
+        inbox = self.host.inbox
+        inbox.filed(54, kept_files(54, typed=True, lines=self.approval_lines))
+        item = inbox.item(54)
+        if isinstance(item.reason, Approval):
+            read = item.reason.model_copy(update={"typing": False})
+            inbox.kept(item.model_copy(update={"reason": read}))
 
     def arrive(self) -> None:
-        """Let the parser subagent's late question arrive, made at the clock's time, and each watch answer again."""
-        self.arrived = self.clock.now()
-        self.changed.set()
-        self.changed = asyncio.Event()
+        """Let the parser subagent's late question arrive, made at the clock's time, in the thread they work in, as an item a call of theirs made does."""
+        delivery = self.host.delivery
+        parser = self.lup_session().model_copy(update={"agent": "a02"})
+        question = Question(
+            text=(
+                "The reader is done but for its name. Which, for the module and the "
+                "class?"
+            ),
+            decisions=[
+                Decision(
+                    text="`transcripts.reader`, as the first lup called it",
+                    lean="yes: sessions looking for it will look there first",
+                )
+            ],
+        )
+        item = delivery.inbox.kept(
+            Item(
+                number=61,
+                reason=question,
+                sender=parser,
+                recipient=Operator(),
+                worktree=parser.repository / "tree" / "dev",
+                call="call-61",
+                made=self.clock.now(),
+            )
+        )
+        delivery.landed(item)
 
     def grow(self) -> None:
         """Let the parser subagent start the two writes to their branch, calling `Edit`, and end the call a moment later (`wrote`), as their hooks would say."""
-        self.editing = True
-        self.changed.set()
-        self.changed = asyncio.Event()
+        self.doing(
+            "a02",
+            Activity(state="calling", since=self.ago(0), tool="Edit"),
+            CallStarted.named(),
+        )
         asyncio.get_running_loop().call_later(1.5, self.wrote)
 
     def wrote(self) -> None:
         """Let the two writes land on the parser subagent's branch as their call ends: their drawer brings them in as the page reads it at that hook."""
-        self.editing = False
         self.grew = True
-        self.changed.set()
-        self.changed = asyncio.Event()
+        self.doing("a02", self.parser_waiting(), CallFinished.named())
+
+    def doing(self, agent: str, activity: Activity, by: str) -> None:
+        """Say what subagent `agent` of the lup-impl session is doing, as a hook of theirs at event `by` says, and tell each watch, a view of theirs among them."""
+        session = self.lup_session()
+        served = self.host.launches.served[LUP_IMPL].conversations
+        known = next(each for each in served.known if each.agent == agent)
+        served.activities = {**served.activities, known.id: activity}
+        self.host.changes.changed(
+            [
+                Touched(
+                    repository=session.repository,
+                    runtime=session.runtime,
+                    session=session.session,
+                    agent=agent,
+                    by=by,
+                )
+            ]
+        )
+
+    def parser_waiting(self) -> Activity:
+        """Return what the parser subagent does but while they write: waiting on the operator's answer to their question."""
+        return Activity(
+            state="calling", since=self.ago(4), tool="mcp__lup__ask", lups=True
+        )
 
     def standing(self, session: str, agent: str | None) -> Standing:
         """Return what a stand-in conversation's record says of it: the parser subagent's three tasks and a ninth of the long window; their session's half of it and no task; the second runtime's session's own window and plan; none for the rest."""
@@ -957,7 +1092,9 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         if conversation.agent == FIX_CLOCK:
             tree = conversation.repository / "tree" / "fix-clock"
             return [
-                self.drawn(tree, "fix-clock", self.clock_stands()),
+                self.drawn(
+                    tree, "fix-clock", self.clock_stands(self.held_at_landing())
+                ),
                 self.drawn(None, "clock-names", self.names_stands()),
             ]
         return [SincePlace(worktree=dev, branch=None)]
@@ -988,19 +1125,21 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             ]
         ]
 
-    def clock_stands(self) -> list[Stands]:
-        """Return the fix-clock subagent's branch as it stands: the clock module, flagged, held at landing while the session's landing waits on it."""
-        held = (
-            HeldAt(
-                key=LANDING_KEY,
-                lander=self.lup_session(),
-                named="`fix-clock` on `dev`",
-                tip=LANDING_TIP,
-                declined=self.declined,
-            )
-            if self.landing
-            else None
+    def held_at_landing(self) -> HeldAt | None:
+        """Return the landing waiting on the fix-clock subagent's clock module, as their drawer shows it held there; none once it's done waiting."""
+        waiting = self.host.waits.waits.get(LANDING_KEY)
+        if waiting is None:
+            return None
+        return HeldAt(
+            key=LANDING_KEY,
+            lander=waiting.lander,
+            named=waiting.named,
+            tip=waiting.tip,
+            declined=any(each.declined is not None for each in waiting.files),
         )
+
+    def clock_stands(self, held: HeldAt | None = None) -> list[Stands]:
+        """Return the fix-clock subagent's branch as it stands: the clock module, flagged, `held` at landing while the session's landing waits on it."""
         return [
             Stands(
                 path=self.ticker,
@@ -1044,36 +1183,29 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             repository=Path("/home/op/lup.git"), runtime=first, session="s1"
         )
 
-    def waiting(self) -> list[Wait]:
-        """Return the landings waiting on the operator: the lup-impl session's landing of `fix-clock` on `dev`, waiting on its clock module, held in the fix-clock subagent's drawer, while it waits (`landing`)."""
-        if not self.landing:
-            return []
+    def landing(self) -> Wait:
+        """Return the landing waiting on the operator: the lup-impl session's landing of `fix-clock` on `dev`, waiting on its clock module, held in the fix-clock subagent's drawer."""
         writer = self.lup_session().model_copy(update={"agent": FIX_CLOCK})
-        return [
-            Wait(
-                key=LANDING_KEY,
-                repository=Path("/home/op/lup.git"),
-                lander=self.lup_session(),
-                onto="refs/heads/dev",
-                old=None,
-                tip=LANDING_TIP,
-                branches=["fix-clock"],
-                files=[Awaited(path=self.ticker, flags=[68], writers=[writer])],
-                began=self.ago(3),
-            )
-        ]
+        return Wait(
+            key=LANDING_KEY,
+            repository=Path("/home/op/lup.git"),
+            lander=self.lup_session(),
+            onto="refs/heads/dev",
+            old=None,
+            tip=LANDING_TIP,
+            branches=["fix-clock"],
+            files=[Awaited(path=self.ticker, flags=[68], writers=[writer])],
+            began=self.ago(3),
+        )
 
     def landed(self) -> None:
         """End the stand-in landing's wait, the operator having answered its file: landed where they approved it, not where they declined it; each watch answers again."""
-        self.landing = False
-        self.declined = False
-        self.changed.set()
-        self.changed = asyncio.Event()
+        self.host.waits.ended(LANDING_KEY)
 
     def parser_stands(self) -> list[Stands]:
         """Return the parser subagent's branch as it stands: their new reader module, flagged, and its test; once `grew`, the reader with a method more and the clock's change, flagged."""
-        [reader] = flagged_files(59)
-        [clock] = flagged_files(60)
+        [reader] = kept_files(59)
+        [clock] = kept_files(60)
         grown = Text(text=READER + READER_GROWN)
         test = Stands(
             path=Path("packages/lup/tests/test_reader.py"),
@@ -1125,6 +1257,13 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             for file in found.files
         ]
 
+    def flag_approved(self, number: int) -> bool:
+        """Say whether flagged write `number` is approved, as the inbox has it."""
+        item = self.host.inbox.items.get(number)
+        return (
+            item is not None and isinstance(item.state, Decided) and item.state.approved
+        )
+
     def drawn(
         self, worktree: Path | None, branch: str, stands: list[Stands]
     ) -> SincePlace:
@@ -1147,7 +1286,9 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     None if mark.version is None else self.versions.get(mark.version)
                 )
             flags = (
-                [] if each.flag is None or each.flag in self.approved else [each.flag]
+                []
+                if each.flag is None or self.flag_approved(each.flag)
+                else [each.flag]
             )
             held = each.held if flags else None
             shown = SinceFile(
@@ -1185,7 +1326,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         *,
         decline: bool = False,
     ) -> SinceReviewed | Refused:
-        """Mark each file of `viewed` reviewed at the version shown on the place of `branch`, the conversation's first where it names none, in memory, approving the flag on each still standing at it, or, `decline`, declining the landing waiting on it, as the host does (`lup_dev.policy.since`), with the drawer after where it stood at `seen`, the version the page shows; each watch answers again. A landing waiting on a file answered ends its wait a moment after (`lands`)."""
+        """Mark each file of `viewed` reviewed at the version shown on the place of `branch`, the conversation's first where it names none, in memory, as stands in for the judge's marks, approving the flag on each still standing at it on the inbox, or, `decline`, declining the landing waiting on it on what the host keeps of it (`Waits`), as the host does (`lup_dev.policy.since`), with the drawer after where it stood at `seen`, the version the page shows. A landing waiting on a file answered ends its wait a moment after (`lands`)."""
         standing = self.since(conversation, None)
         place = next(
             (
@@ -1213,18 +1354,26 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 for number in flags.get(each.path, [])
             ]
         )
-        self.approved = [*self.approved, *approved]
+        for number in approved:
+            self.host.delivery.flag_approved(number)
         declined = [each.path for each in viewed if decline and each.path in held]
         answered = [
             each.path for each in viewed if each.path in held and each.path not in moved
         ]
-        if declined:
-            self.declined = True
+        at = self.clock.now()
+        waits = self.host.waits
+        for wait in [
+            found
+            for path in declined
+            for found in waits.declined(
+                conversation.repository, place.branch, path, Declined(at=at)
+            )
+        ]:
+            waits.told(wait)
         if answered:
             asyncio.get_running_loop().call_later(
                 self.lands.total_seconds(), self.landed
             )
-        at = self.clock.now()
         before = self.marks.get(place.branch, Marks(branch=place.branch))
         latest = {
             each.path: each
@@ -1237,8 +1386,6 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             **self.marks,
             place.branch: Marks(branch=place.branch, files=list(latest.values())),
         }
-        self.changed.set()
-        self.changed = asyncio.Event()
         reviewed = SinceReviewed(
             reviewed=[each.path for each in viewed],
             approved=approved,
@@ -1263,335 +1410,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             self.began = self.clock.now()
         return self.began - timedelta(minutes=minutes)
 
-    def listed(self) -> Listed:
-        """Return four launches over three repositories: one with subagents working, asking and ended; one idle; one on the second runtime; one whose session hasn't started."""
-        first, second = self.runtimes
-        lup = launch("a1f0", "lup-impl", first, Path("/home/op/lup.git/tree/dev"))
-        voice = launch(
-            "b2e1",
-            "guidance-voice",
-            first,
-            Path("/home/op/lup.git/tree/guidance-voice"),
-        )
-        zoetrope = launch(
-            "c3d2", "main", second, Path("/home/op/zoetrope.git/tree/main")
-        )
-        waiting = launch(
-            "d4c3", "magpie-search", first, Path("/home/op/magpie.git/tree/main")
-        )
-        calling = Activity(state="calling", since=self.ago(0.4), tool="Bash")
-        ended = [
-            talker(
-                name,
-                "s1",
-                Activity(state="ended", since=self.ago(minutes)),
-                agent=f"a0{at + 4}",
-                kind="Explore",
-                parent="lup-impl",
-                depth=1,
-            )
-            for at, (name, minutes) in enumerate(
-                [("survey-legacy", 52), ("probe-meta", 40), ("nest-probe", 33)]
-            )
-        ]
-        fix_clock = talker(
-            "fix-clock",
-            "s1",
-            Activity(state="ended", since=self.ago(25)),
-            agent=FIX_CLOCK,
-            kind="general-purpose",
-            parent="lup-impl",
-            depth=1,
-        )
-        talkers = {
-            "a1f0": [
-                talker("lup-impl", "s1", calling),
-                talker(
-                    "explore-auth",
-                    "s1",
-                    Activity(state="calling", since=self.ago(1.5), tool="Grep"),
-                    agent="a01",
-                    kind="Explore",
-                    parent="lup-impl",
-                    depth=1,
-                ),
-                talker(
-                    "parser",
-                    "s1",
-                    Activity(state="calling", since=self.ago(0), tool="Edit")
-                    if self.editing
-                    else Activity(
-                        state="calling",
-                        since=self.ago(4),
-                        tool="mcp__lup__ask",
-                        lups=True,
-                    ),
-                    agent="a02",
-                    kind="general-purpose",
-                    parent="lup-impl",
-                    depth=1,
-                ),
-                talker(
-                    "grep-tokens",
-                    "s1",
-                    Activity(state="idle", since=self.ago(0.2)),
-                    agent="a03",
-                    kind="general-purpose",
-                    parent="lup-impl/parser",
-                    depth=2,
-                ),
-                *ended,
-                fix_clock,
-                *self.working(),
-            ],
-            "b2e1": [
-                talker(
-                    "guidance-voice", "s2", Activity(state="idle", since=self.ago(12))
-                )
-            ],
-            "c3d2": [
-                talker(
-                    "main",
-                    "s3",
-                    Activity(state="calling", since=self.ago(2), tool="exec_command"),
-                ),
-                talker(
-                    "render_frames",
-                    "s3",
-                    Activity(state="calling", since=self.ago(0.7), tool="exec_command"),
-                    agent="th-7",
-                    kind="default",
-                    parent="main",
-                    depth=1,
-                ),
-            ],
-        }
-        launches = [lup, voice, zoetrope, waiting]
-        return Listed(
-            launches=launches,
-            sessions={"s1": "lup-impl", "s2": "guidance-voice", "s3": "main"},
-            talkers={
-                launch: [
-                    each.model_copy(update={"holding": self.holds(each)})
-                    for each in conversations
-                ]
-                for launch, conversations in talkers.items()
-            },
-            looks={each.repository: self.views.looks() for each in launches},
-            standing=self.views.looks(),
-        )
-
-    def send(self) -> Reviewed:
-        """Send the draft as the host does, telling no agent: each item it covers taken off the list, the marks left drafted for the page to apply; saying what it read, approved and declined, as the host's reply does (`Delivery.reviewed`)."""
-        draft = self.draft
-        covered = draft.covered()
-        by_number = {each.number: each for each in self.every()}
-        commented = [each.item for each in draft.comments if each.text.strip()]
-        asked = [
-            by_number[each]
-            for each in covered
-            if each in by_number
-            and isinstance(by_number[each].reason, Approval | HeldChange)
-        ]
-        declined = [each for each in asked if each.number in draft.declined]
-        approved = [
-            each
-            for each in asked
-            if each not in declined
-            and (
-                each.number in draft.done
-                or each.number not in commented
-                or isinstance(each.reason, HeldChange)
-            )
-        ]
-        read = [
-            each
-            for each in covered
-            if each in by_number
-            and by_number[each] not in asked
-            and each not in commented
-            and not isinstance(by_number[each].reason, Question)
-        ]
-        self.covered = [*self.covered, *covered]
-        self.threads.replied(commented, self.clock.now())
-        sent = self.written(draft)
-        self.draft = draft.kept()
-        self.changed.set()
-        self.changed = asyncio.Event()
-        return Reviewed(items=sent, read=read, approved=approved, declined=declined)
-
-    def written(self, draft: Draft) -> list[Item]:
-        """Keep each message of `draft` as the host does, telling no agent (`kept_letter`), and return the reviews they make."""
-        now = self.clock.now()
-        return [
-            each
-            for letter in draft.written()
-            if (each := self.kept_letter(letter, now)) is not None
-        ]
-
-    def kept_letter(self, letter: Letter, now: datetime) -> Item | None:
-        """Keep `letter`, written at `now`, as the host does: to a conversation, as a review of the operator's to them, its part put in the thread it's written on, open there, which is returned; to no one, as a note of theirs to themselves, done, in its thread. Writing on a thread done, to confirm, reopens it."""
-        number = 100 + len(self.sent) + 1
-        thread = None if letter.thread is None else self.threads.stood(letter.thread)
-        if thread is not None:
-            self.threads.written_on(thread.thread.number, now)
-        if letter.to is None:
-            if thread is None:
-                return None
-            note = Item(
-                number=number,
-                reason=Message(
-                    kind="note", text=letter.text, repository=thread.thread.repository
-                ),
-                sender=Operator(),
-                recipient=Operator(),
-                made=now,
-                state=Done(at=now),
-            )
-            self.sent = [*self.sent, note]
-            self.threads.joined(thread.thread.number, Joined(node=number, came=now))
-            return None
-        review = Item(
-            number=number,
-            reason=Review(covers=[], letters=[letter]),
-            sender=Operator(),
-            recipient=letter.to,
-            made=now,
-            state=Told(at=now, how="call"),
-        )
-        self.sent = [*self.sent, review]
-        if thread is not None:
-            self.threads.joined(
-                thread.thread.number, Joined(node=number, part=1, came=now)
-            )
-        return review
-
-    def holds(self, talker: Talker) -> bool:
-        """Say whether the operator holds each flagged write of `talker`."""
-        return any(
-            each.session == talker.session and each.agent == talker.agent
-            for each in self.holding
-        )
-
-    def items(self) -> Items:
-        """Return what waits for the operator: a subagent's question of numbered decisions, a session's note, another's problem, an approval of a host zone, a session's write held for them, another's last words of a turn answering the operator's review, citing it, one citation edited and one naming no passage, the note that review was on, edited since, a friction and how it felt, and two writes that landed flagged, the subagent's new module gathering three; each group seen up to its last item made 3 minutes before the demo began, so those since are new (`seen`)."""
-        every = self.every()
-        waiting = [
-            each
-            for each in every
-            if each.recipient == Operator() and isinstance(each.state, Waiting)
-        ]
-        numbers = [each.number for each in waiting]
-        followed = [
-            number
-            for each in waiting
-            if isinstance(each.reason, Message)
-            for number in each.reason.answers
-        ]
-        answers = [
-            each
-            for each in every
-            if each.sender == Operator()
-            and (
-                each.number in followed
-                or (
-                    isinstance(each.reason, Review)
-                    and any(comment.item in numbers for comment in each.reason.comments)
-                )
-            )
-        ]
-        return Items(
-            items=waiting,
-            seen=self.seen(waiting),
-            answers=answers,
-            commented=[
-                each
-                for each in every
-                if any(
-                    isinstance(answer.reason, Review)
-                    and any(
-                        comment.item == each.number
-                        for comment in answer.reason.comments
-                    )
-                    for answer in answers
-                )
-            ],
-            paths=self.paths(),
-        )
-
-    def sending(self, sending: SendItem) -> Shown | Refused:
-        """Keep the operator's message to a conversation of a launch as the item it makes, told at once; refused for a launch whose session hasn't started."""
-        listed = self.listed()
-        launch = next(
-            (each for each in listed.launches if each.launch == sending.launch), None
-        )
-        own = next(
-            (
-                each
-                for each in listed.talkers.get(sending.launch, [])
-                if each.agent is None
-            ),
-            None,
-        )
-        if launch is None or own is None:
-            return Refused(error=f"no session of launch `{sending.launch}` has started")
-        now = self.clock.now()
-        item = Item(
-            number=100 + len(self.sent) + 1,
-            reason=Message(kind="note", text=sending.text),
-            sender=Operator(),
-            recipient=Conversation(
-                repository=launch.repository,
-                runtime=launch.runtime,
-                session=own.session,
-                agent=sending.agent,
-            ),
-            made=now,
-            state=Told(at=now, how="call"),
-        )
-        self.sent = [*self.sent, item]
-        self.changed.set()
-        self.changed = asyncio.Event()
-        return Shown(item=item)
-
-    def exchanged(self, conversation: Conversation) -> Exchanged:
-        """Return the stand-in items `conversation` sent, as they wrote them, and those they were sent, as they're told them, and each conversation among the items' parties by their path, as the listing has it."""
-        items = [
-            each
-            for each in self.every()
-            if conversation in (each.sender, each.recipient, each.addressed)
-        ]
-
-        paths = [
-            each
-            for each in self.paths()
-            if any(
-                each.conversation in (item.sender, item.recipient, item.addressed)
-                for item in items
-            )
-        ]
-        return exchanged(conversation, items, written=written, told=body, paths=paths)
-
-    def paths(self) -> list[Pathed]:
-        """Return each stand-in conversation the listing has, with its path."""
-        listed = self.listed()
-        launches = {each.launch: each for each in listed.launches}
-        return [
-            Pathed(
-                conversation=Conversation(
-                    repository=launches[launch].repository,
-                    runtime=launches[launch].runtime,
-                    session=talker.session,
-                    agent=talker.agent,
-                ),
-                path=talker.path,
-            )
-            for launch, talkers in listed.talkers.items()
-            for talker in talkers
-        ]
-
     def every(self) -> list[Item]:
-        """Return every stand-in item, by number: those waiting for the operator; the parser subagent's note they replied to, at the call that sent it; an ended subagent's note whose reply went to their session; the docs session's last note, read, their session ended since; the voice session's note the operator reviewed, edited since, and their review, which the session answers in the last words of a turn (`answer`); the parser subagent's late question, once it has arrived (`arrives`); and the messages sent from the page. Each a draft sent covered is done."""
+        """Return every stand-in item the demo begins with: those waiting for the operator, a subagent's question of numbered decisions, a session's note, another's problem, an approval of a host zone, a session's write held for them, another's last words of a turn answering the operator's review, citing it, one citation edited and one naming no passage, the note that review was on, edited since, a friction and how it felt, and two writes that landed flagged, the subagent's new module gathering three; the parser subagent's note they replied to, at the call that sent it; an ended subagent's note whose reply went to their session; the docs session's last note, read, their session ended since; and the voice session's note the operator reviewed, and their review, which the session answers in the last words of a turn (`answer`)."""
         first, second = self.runtimes
         lup = Path("/home/op/lup.git")
         parser = Conversation(repository=lup, runtime=first, session="s1", agent="a02")
@@ -1646,7 +1466,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             ),
             repository=lup,
             fingerprint="demo",
-            typing=self.typing,
+            typing=True,
         )
         made = [
             (51, question, parser, "dev", 4),
@@ -1768,7 +1588,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 ],
             ),
         ]
-        made = [
+        return [
             *settled,
             *(
                 Item(
@@ -1895,32 +1715,6 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 made=self.ago(2.5),
             ),
             *self.fix_clock_flags(),
-            *(
-                []
-                if self.arrived is None
-                else [
-                    Item(
-                        number=61,
-                        reason=Question(
-                            text=(
-                                "The reader is done but for its name. Which, for "
-                                "the module and the class?"
-                            ),
-                            decisions=[
-                                Decision(
-                                    text="`transcripts.reader`, as the first lup called it",
-                                    lean="yes: sessions looking for it will look there first",
-                                )
-                            ],
-                        ),
-                        sender=parser,
-                        recipient=Operator(),
-                        worktree=dev,
-                        call="call-61",
-                        made=self.arrived,
-                    )
-                ]
-            ),
             Item(
                 number=62,
                 reason=Message(kind="note", text=MARKDOWN_NOTE),
@@ -1932,13 +1726,6 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             ),
             *self.exchanges(session, parser),
             *self.worked(),
-            *self.sent,
-        ]
-        return [
-            each.model_copy(update={"state": Done(at=self.clock.now())})
-            if each.number in self.covered
-            else each
-            for each in made
         ]
 
     def exchanges(self, session: Conversation, parser: Conversation) -> list[Item]:
@@ -2061,20 +1848,6 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             edits=[Edit(at=self.ago(1.2), before=VOICE_SENT)],
         )
 
-    def context(self, number: int) -> Context | Refused:
-        """Return a stand-in moment for each item an agent's call made: the operator's last words, what the agent said and called after them, the call, and what came after; the approval, which no call made, has none; a worker's item has its own (`worked_context`)."""
-        if number >= self.first_worked:
-            return self.worked_context(number)
-        entries = steps(self.moments().get(number, []))
-        anchors = [
-            at
-            for at, each in enumerate(entries)
-            if isinstance(each, Called) and each.id == f"call-{number}"
-        ]
-        if not anchors:
-            return Refused(error=f"{cited(number)} was made by no agent's call")
-        return Context(number=number, entries=entries, anchor=anchors[0])
-
     def moments(self) -> dict[int, list[Said | StandIn]]:
         """Return the stand-in moment of each item an agent's call made, by its number, each call with what reading it whole answers."""
 
@@ -2118,7 +1891,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Bash",
                     8,
-                    "Count each kind of line in the session records",
+                    "Count each kind of line in the session records · python3 - <<'EOF' import collections, glob, json",
                     {
                         "command": (
                             "python3 - <<'EOF'\nimport collections, glob, json\n"
@@ -2142,7 +1915,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Bash",
                     7.8,
-                    "Show the start of one record",
+                    "Show the start of one record · head -c 400 /home/op/records/projects/-home-op-lup-git-tree-dev/0a1f3339.jsonl",
                     {
                         "command": f"head -c 400 {records}/0a1f3339.jsonl",
                         "description": "Show the start of one record",
@@ -2156,7 +1929,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Read",
                     7.5,
-                    "records.py:40",
+                    "lup_dev/host/records.py:40,51",
                     {
                         "file_path": f"{tree}/packages/lup-dev/src/lup_dev/host/records.py",
                         "offset": 40,
@@ -2178,7 +1951,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "mcp__lup__ask",
                     4,
-                    "Which way should the reader read each kind of line?",
+                    'question=Which way should the reader read each kind of line? · decisions=[{"text": "A model per kind", "lean": "yes"}, {"text": "A dict walked by hand", "lean": "no"}]',
                     {
                         "question": "Which way should the reader read each kind of line?",
                         "decisions": [
@@ -2192,7 +1965,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Grep",
                     3.8,
-                    "rollout-",
+                    "pattern=rollout- · path=/home/op/records/sessions",
                     {"pattern": "rollout-", "path": "/home/op/records/sessions"},
                 ),
             ],
@@ -2202,14 +1975,14 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Bash",
                     13,
-                    "Check the records' encoding",
+                    "file /home/op/records/projects/-home-op-lup-git-tree-dev/*.jsonl | sort | uniq -c",
                     {"command": f"file {records}/*.jsonl | sort | uniq -c"},
                     "  45 JSON text data\n",
                 ),
                 called(
                     "mcp__lup__note",
                     12,
-                    "The records are UTF-8 JSON lines; no other encoding found.",
+                    "remark=The records are UTF-8 JSON lines; no other encoding found.",
                     {
                         "remark": "The records are UTF-8 JSON lines; no other encoding found."
                     },
@@ -2248,7 +2021,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "blocked",
                     2,
-                    "The source clip clips/harbour.mov is truncated: its moov atom is missing.",
+                    "why=The source clip clips/harbour.mov is truncated: its moov atom is missing.",
                     {
                         "why": "The source clip clips/harbour.mov is truncated: its moov atom is missing."
                     },
@@ -2265,7 +2038,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Bash",
                     0.8,
-                    "Add CodeMirror's language packages",
+                    "Add CodeMirror's language packages · npm install --save-exact @codemirror/lang-python @codemirror/lang-javascript",
                     {
                         "command": "npm install --save-exact @codemirror/lang-python @codemirror/lang-javascript",
                         "description": "Add CodeMirror's language packages",
@@ -2275,7 +2048,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Edit",
                     0.5,
-                    "code.ts",
+                    "page/src/code.ts -1 +2",
                     {
                         "file_path": f"{tree}/packages/lup-dashboard/page/src/code.ts",
                         "old_string": 'import { tags } from "@lezer/highlight";',
@@ -2290,7 +2063,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Bash",
                     7.4,
-                    "Run the gate",
+                    "Run the gate · uv run lup-dev check",
                     {"command": "uv run lup-dev check", "description": "Run the gate"},
                     "passed   rules\npassed   ruff\npassed   pyright\n"
                     "passed   pytest (1,214 tests, 41.2s)\n\nThe gate passed.\n",
@@ -2298,7 +2071,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "mcp__lup__friction",
                     3,
-                    "the gate's 41 seconds",
+                    "got_in_the_way=the gate's 41 seconds · trying=to iterate on the reader · would_change=run only the tests the change touches",
                     {
                         "got_in_the_way": "the gate's 41 seconds",
                         "trying": "to iterate on the reader",
@@ -2314,7 +2087,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "mcp__lup__how_it_felt",
                     1.4,
-                    "The rewrite went smoothly once the voice was settled.",
+                    "text=The rewrite went smoothly once the voice was settled.",
                     {"text": "The rewrite went smoothly once the voice was settled."},
                     id_="call-58",
                 ),
@@ -2327,7 +2100,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Write",
                     6,
-                    "reader.py",
+                    "lup/transcripts/reader.py · 5 lines",
                     {
                         "file_path": f"{tree}/packages/lup/src/lup/transcripts/reader.py",
                         "content": '"""Reading a session\'s record."""\n\nclass Turn(BaseModel):\n    said: str\n',
@@ -2337,7 +2110,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Edit",
                     5.5,
-                    "reader.py",
+                    "lup/transcripts/reader.py -1 +1",
                     {
                         "file_path": f"{tree}/packages/lup/src/lup/transcripts/reader.py",
                         "old_string": "class Turn(BaseModel):",
@@ -2347,7 +2120,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Edit",
                     5,
-                    "reader.py",
+                    "lup/transcripts/reader.py -1 +2",
                     {
                         "file_path": f"{tree}/packages/lup/src/lup/transcripts/reader.py",
                         "old_string": "    said: str",
@@ -2361,7 +2134,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Edit",
                     2.5,
-                    "clock.py",
+                    "src/lup_dev/clock.py -1 +2",
                     {
                         "file_path": f"{tree}/packages/lup-dev/src/lup_dev/clock.py",
                         "old_string": "    def sleep(self, seconds: float) -> None:",
@@ -2379,7 +2152,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "Bash",
                     1.1,
-                    "Count the parts of each kind of line",
+                    "Count the parts of each kind of line · jq -r '.type' /home/op/records/projects/-home-op-lup-git-tree-dev/*.jsonl | sort | uniq -c | sort -rn | head",
                     {
                         "command": f"jq -r '.type' {records}/*.jsonl | sort | uniq -c | sort -rn | head",
                         "description": "Count the parts of each kind of line",
@@ -2389,7 +2162,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called(
                     "mcp__lup__note",
                     0.8,
-                    "Four kinds of line carry what was said.",
+                    "remark=Four kinds of line carry what was said.",
                     {"remark": "Four kinds of line carry what was said."},
                     "Noted for the operator: @62.",
                     id_="call-62",
@@ -2397,15 +2170,115 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             ],
         }
 
-    def conversation(self, session: str, agent: str | None) -> list[Entry]:
-        """Return a stand-in conversation's steps (`recorded`)."""
-        return steps(self.recorded(session, agent))
-
     def recorded(self, session: str, agent: str | None) -> list[Said | StandIn]:
-        """Return a stand-in conversation, each call with what reading it whole answers: for the parser subagent, the call that sent @47, then their moment around @51 with what led to it, then what they read since the demo began; for the first worker, a day's work (`long_conversation`); for the second runtime's session and their subagent, a render that broke; for any other, a short exchange."""
+        """Return a stand-in conversation, each call with what reading it whole answers, in the order it came: what it says of itself (`spoken`), and each call that made an item of theirs, whose moment the host reads from it (`lup_dev.inbox.context`), with what led to it where `moments` says (`called` else)."""
+        said = self.spoken(session, agent)
+        held = [each.step.id for each in said if isinstance(each, StandIn)]
+        moments = self.moments()
+        return in_order(
+            [
+                *said,
+                *(
+                    step
+                    for item in self.host.inbox.items.values()
+                    if isinstance(item.sender, Conversation)
+                    and item.sender.session == session
+                    and item.sender.agent == agent
+                    and item.call is not None
+                    and item.call not in held
+                    for step in moments.get(item.number) or self.called(item)
+                ),
+            ],
+            self.ago(0),
+        )
+
+    def called(self, item: Item) -> list[Said | StandIn]:
+        """Return the steps of the call that made `item`, where no moment says more: its own tool's, given what it says; a flagged write's between the agent's words around it."""
+        call, said = item.call or "", opening(item)
+        match item.reason:
+            case Flagged(path=path):
+                return [
+                    Said(
+                        by="agent",
+                        text="Writing the module, a function a step, with a docstring each.",
+                        at=item.made - timedelta(minutes=2),
+                    ),
+                    stand_in(
+                        call,
+                        "Write",
+                        path.name,
+                        item.made,
+                        {"file_path": str(path)},
+                        output=f"The file {path} has been updated successfully.",
+                    ),
+                    Said(
+                        by="agent",
+                        text="On to its tests.",
+                        at=item.made + timedelta(seconds=6),
+                    ),
+                ]
+            case Question():
+                return [
+                    stand_in(call, "mcp__lup__ask", said, item.made, {"question": said})
+                ]
+            case Friction():
+                tool = "mcp__lup__friction"
+            case _:
+                tool = "mcp__lup__note"
+        return [
+            stand_in(
+                call,
+                tool,
+                said,
+                item.made,
+                {"text": said},
+                output=f"Noted for the operator: {cited(item.number)}.",
+            )
+        ]
+
+    def briefed(self) -> list[Said | StandIn]:
+        """Return how a worker's conversation begins: their brief, and the reading it asks for."""
+        begun = self.ago(400)
+        return [
+            Said(
+                by="operator",
+                text=(
+                    "Build the piece your brief names, on a branch of your own; ask "
+                    "before you build on a shape."
+                ),
+                at=begun,
+            ),
+            Said(
+                by="agent",
+                text="Reading the files the brief names first.",
+                at=begun + timedelta(minutes=1),
+            ),
+            stand_in(
+                "toolu_b1",
+                "Read",
+                "reader.py",
+                begun + timedelta(minutes=2),
+                {"file_path": "packages/lup/src/lup/transcripts/reader.py"},
+                output='1\t"""Reading a runtime\'s records of its sessions, a line at a time."""\n',
+            ),
+            stand_in(
+                "toolu_b2",
+                "Grep",
+                "class Reader",
+                begun + timedelta(minutes=3),
+                {"pattern": "class Reader", "path": "packages"},
+                output="packages/lup/src/lup/transcripts/reader.py:16:class Reader(BaseModel):\n",
+            ),
+        ]
+
+    def spoken(self, session: str, agent: str | None) -> list[Said | StandIn]:
+        """Return what a stand-in conversation says of itself, beside the calls that made its items (`recorded`): for the parser subagent, what led to the call that sent @47, then what they read since the demo began; for the first worker, a day's work (`long_conversation`), and any other, their brief (`briefed`); for the second runtime's session and their subagent, a render that broke; for any other, a short exchange."""
         tree = "/home/op/lup.git/tree/dev"
-        if (session, agent) == ("s1", worker_agent(1)) and self.size > 0:
-            return self.long_conversation()
+        workers = [worker_agent(n) for n in range(1, self.workers + 1)]
+        if session == "s1" and agent in workers and self.size > 0:
+            return (
+                self.long_conversation() if agent == worker_agent(1) else self.briefed()
+            )
         if (session, agent) == ("s1", "a02"):
             return [
                 Said(
@@ -2424,7 +2297,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 stand_in(
                     "toolu_p1",
                     "Bash",
-                    "List the session records",
+                    "List the session records · ls /home/op/records/projects/-home-op-lup-git-tree-dev | head -4",
                     self.ago(28),
                     {
                         "command": "ls /home/op/records/projects/-home-op-lup-git-tree-dev | head -4",
@@ -2438,7 +2311,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 stand_in(
                     "toolu_p2",
                     "Read",
-                    "field-notes.md:613",
+                    "tree/dev/docs/field-notes.md:613,616",
                     self.ago(27),
                     {
                         "file_path": f"{tree}/docs/field-notes.md",
@@ -2453,7 +2326,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 stand_in(
                     "call-47",
                     "mcp__lup__note",
-                    "Each session's record is a JSONL file; a subagent's is beside it.",
+                    "remark=Each session's record is a JSONL file; a subagent's is beside it.",
                     self.ago(26),
                     {
                         "remark": "Each session's record is a JSONL file; a subagent's is beside it."
@@ -2468,7 +2341,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 stand_in(
                     "toolu_p3",
                     "Read",
-                    "records.py",
+                    "src/lup_dev/host/records.py",
                     self.ago(24),
                     {
                         "file_path": f"{tree}/packages/lup-dev/src/lup_dev/host/records.py"
@@ -2479,13 +2352,12 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 stand_in(
                     "toolu_p4",
                     "Grep",
-                    "class Transcript",
+                    "pattern=class Transcript · path=/home/op/lup.git/tree/dev/packages",
                     self.ago(22),
                     {"pattern": "class Transcript", "path": f"{tree}/packages"},
                     output="packages/lup-dev/src/lup_dev/host/records.py:118:"
                     "class Transcript(Model):\n",
                 ),
-                *self.moments()[51],
                 *self.growing(),
             ]
         if session == "s3":
@@ -2500,7 +2372,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             stand_in(
                 "toolu_d1",
                 "Grep",
-                "def laid",
+                "pattern=def laid · output_mode=content · path=/home/op/lup.git/tree/dev/packages",
                 self.ago(18),
                 {
                     "pattern": "def laid",
@@ -2512,7 +2384,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             stand_in(
                 "toolu_d2",
                 "Read",
-                "review.ts:871",
+                "page/src/review.ts:871,873",
                 self.ago(17),
                 {
                     "file_path": f"{tree}/packages/lup-dashboard/page/src/review.ts",
@@ -2525,7 +2397,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             stand_in(
                 "toolu_d3",
                 "Read",
-                "conversation.ts",
+                "page/src/conversation.ts",
                 self.ago(17),
                 {
                     "file_path": f"{tree}/packages/lup-dashboard/page/src/conversation.ts"
@@ -2563,7 +2435,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             stand_in(
                 "call_r2",
                 "apply_patch",
-                "second.toml",
+                "scenes/second.toml",
                 self.ago(16),
                 patch,
                 output="Success. Updated the following files:\nM scenes/second.toml\n",
@@ -2578,7 +2450,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             stand_in(
                 f"toolu_g{step}",
                 "Read",
-                f"rollout-{step // 2 + 1}.jsonl",
+                f"rollouts/rollout-{step // 2 + 1}.jsonl",
                 self.ago(0),
                 {"file_path": f"{rollouts}/rollout-{step // 2 + 1}.jsonl"},
                 output='1\t{"type":"session_meta","payload":{"id":"th-1","cwd":"/w"}}\n'
@@ -2594,35 +2466,27 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         ]
 
     def hook(self) -> None:
-        """Let a stand-in hook call come: what one worker does changes (`working`), each watch answers again, and the next comes after the interval `hooks` gives."""
+        """Let a stand-in hook call come: what one worker does changes (`worker_doing`), each watch answers again, and the next comes after the interval `hooks` gives."""
         self.hooked += 1
-        self.changed.set()
-        self.changed = asyncio.Event()
+        if self.size > 0:
+            n = self.hooked % self.workers + 1
+            self.doing(worker_agent(n), self.worker_doing(n), CallStarted.named())
+        else:
+            self.host.changes.changed()
         self.hooking = asyncio.get_running_loop().call_later(60 / self.hooks, self.hook)
 
-    def working(self) -> list[Talker]:
-        """Return the workers' conversations (`workers`), subagents of the lup-impl session, each calling a tool or between calls as the stand-in hook calls have it (`hook`); none without a busy day's writes (`size`)."""
-        if self.size == 0:
-            return []
+    def worker_doing(self, n: int) -> Activity:
+        """Return what worker `n` does as the stand-in hook calls have it (`hook`): calling a tool, or between calls."""
         tools = ["Read", "Edit", "Bash"]
-        return [
-            talker(
-                f"worker-{n}",
-                "s1",
-                Activity(
-                    state="calling",
-                    since=self.ago(0.3),
-                    tool=tools[(self.hooked + n) % len(tools)],
-                )
-                if (self.hooked + n) % 2 == 0
-                else Activity(state="idle", since=self.ago(0.1)),
-                agent=worker_agent(n),
-                kind="general-purpose",
-                parent="lup-impl",
-                depth=1,
+        return (
+            Activity(
+                state="calling",
+                since=self.ago(0.3),
+                tool=tools[(self.hooked + n) % len(tools)],
             )
-            for n in range(1, self.workers + 1)
-        ]
+            if (self.hooked + n) % 2 == 0
+            else Activity(state="idle", since=self.ago(0.1))
+        )
 
     def worker(self, n: int) -> Conversation:
         """Return worker `n`'s conversation: a subagent of the lup-impl session."""
@@ -2743,41 +2607,6 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             ],
         )
 
-    def worked_context(self, number: int) -> Context | Refused:
-        """Return the stand-in moment of a worker's item (`worked`): their brief, the reading before the item, the call that made it, and what came after."""
-        item = next((each for each in self.worked() if each.number == number), None)
-        if item is None:
-            return Refused(error=f"{cited(number)} was made by no agent's call")
-
-        def before(minutes: float) -> datetime:
-            return item.made - timedelta(minutes=minutes)
-
-        entries: list[Entry] = [
-            Said(
-                by="operator",
-                text=(
-                    "Build the piece your brief names, on a branch of your own; ask "
-                    "before you build on a shape."
-                ),
-                at=before(50),
-            ),
-            Said(
-                by="agent",
-                text="Reading the files the brief names first.",
-                at=before(49),
-            ),
-            Called(tool="Read", at=before(48)),
-            Called(tool="Grep", at=before(47)),
-            Said(
-                by="agent",
-                text="Writing the module, a function a step, with a docstring each.",
-                at=before(2),
-            ),
-            Called(tool="Write", id=f"call-{number}", at=item.made),
-            Said(by="agent", text="On to its tests.", at=before(-0.1)),
-        ]
-        return Context(number=number, entries=entries, anchor=5)
-
     def long_conversation(self, length: int = 300) -> list[Said | StandIn]:
         """Return the first worker's conversation, `length` steps after their brief, as a day's work reads: what they're on, then a run of calls reading a module, changing a function, running its tests and reading them, in turn. A subagent never has the operator's typed words after their brief, so their whole run is one exchange, their drawer keeping only the agent's last words open (`EARLIER_KIND.keeps_open`)."""
         tree = worker_worktree(1)
@@ -2798,7 +2627,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     return stand_in(
                         f"toolu_w{at}",
                         "Read",
-                        f"step_{k}.py",
+                        f"lup/worker1/step_{k}.py",
                         when,
                         {"file_path": str(tree / module)},
                         output=function(k),
@@ -2807,7 +2636,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     return stand_in(
                         f"toolu_w{at}",
                         "Edit",
-                        f"step_{k}.py",
+                        f"lup/worker1/step_{k}.py -1 +1",
                         when,
                         {
                             "file_path": str(tree / module),
@@ -2821,7 +2650,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     return stand_in(
                         f"toolu_w{at}",
                         "Bash",
-                        f"Run step {k}'s tests",
+                        f"Run step {k}'s tests · uv run pytest {tests} -q",
                         when,
                         {
                             "command": f"uv run pytest {tests} -q",
@@ -2833,7 +2662,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     return stand_in(
                         f"toolu_w{at}",
                         "Read",
-                        f"test_step_{k}.py",
+                        f"packages/lup/tests/test_step_{k}.py:1,20",
                         when,
                         {"file_path": str(tree / tests), "limit": 20},
                         output=f"1\tfrom lup.worker1.step_{k} import step_{k}\n",
@@ -2968,8 +2797,8 @@ def inbox_send(
 CLI_PUSH_BEFORE = '''
 async def proposed_after(launch: Register, refs: list[str]) -> None:
     """Put the approval of the zone at the integration branch's tip in the inbox."""
-    integration = LupDevSettings().lup_integration_branch
-    if f"refs/heads/{integration}" not in refs:
+    running = approved_branches(LAYOUT, launch.repository).running
+    if f"refs/heads/{running}" not in refs:
         return
     root = Git.pinned(launch.repository).main_worktree()
     number = await asyncio.to_thread(machine_trust(root, []).proposed)
@@ -2979,8 +2808,8 @@ async def proposed_after(
     delivery: Delivery, launch: Register, refs: list[str]
 ) -> None:
     """Put the approval of the zone at the integration branch's tip in the inbox, naming the session that pushed."""
-    integration = LupDevSettings().lup_integration_branch
-    if f"refs/heads/{integration}" not in refs:
+    running = approved_branches(LAYOUT, launch.repository).running
+    if f"refs/heads/{running}" not in refs:
         return
     root = Git.pinned(launch.repository).main_worktree()
     pushed_by = delivery.running(launch.launch)
@@ -3310,6 +3139,8 @@ See [the field notes](docs/field-notes.md) and `records.py`.
 """A session's note written in Markdown, as agents write them: a table, emphasis, a list, a heading, code and a link, for the page to show as such."""
 
 
+LUP_IMPL = "a1f0"
+"""The launch of the lup-impl session, by its id: the demo's busiest."""
 FIX_CLOCK = "a07"
 """The ended fix-clock subagent of the lup-impl session, by their runtime's id:
 their branch's landing waits on the operator, its clock module held in their
@@ -3346,10 +3177,21 @@ def stand_in_id(content: Content | None) -> str | None:
     ).hexdigest()
 
 
-def flagged_files(number: int) -> list[ChangedFile]:
-    """Return the files a stand-in flagged write changes (`files`), none where it changes none."""
-    found = files(number)
+def kept_files(number: int, *, typed: bool = True, lines: int = 0) -> list[ChangedFile]:
+    """Return the files a stand-in item changes (`files`), none where it changes none."""
+    found = files(number, typed=typed, lines=lines)
     return found.files if isinstance(found, Files) else []
+
+
+def in_order(recorded: list[Said | StandIn], latest: datetime) -> list[Said | StandIn]:
+    """Return a record's steps in the order they came, each once, as a record holds them, `latest` for one saying no time: two moments of one conversation share the operator's words that led to them."""
+
+    def came(each: Said | StandIn) -> datetime:
+        at = each.step.at if isinstance(each, StandIn) else each.at
+        return at or latest
+
+    once = {each.model_dump_json(): each for each in recorded}
+    return sorted(once.values(), key=came)
 
 
 def text(*parts: str) -> Text:
@@ -3587,28 +3429,4 @@ def launch(id_: str, name: str, runtime: str, worktree: Path) -> Register:
         limits=Limits(actions=["fetch", "push"], protected=["refs/heads/main"]),
         github=None,
         name=name,
-    )
-
-
-def talker(
-    own: str,
-    session: str,
-    activity: Activity,
-    *,
-    agent: str | None = None,
-    kind: str | None = None,
-    parent: str | None = None,
-    depth: int = 0,
-) -> Talker:
-    """Return a stand-in conversation, `depth` spawns below its session's own: its own name, under `parent`'s path where it has one."""
-    path = own if parent is None else f"{parent}/{own}"
-    return Talker(
-        path=path,
-        own=own,
-        session=session,
-        agent=agent,
-        kind=kind,
-        parent=parent,
-        depth=depth,
-        activity=activity,
     )

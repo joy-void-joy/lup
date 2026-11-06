@@ -44,12 +44,12 @@ from lup_dev.accounts import AccountError, Accounts, Login, RuntimeLogin
 
 # lup: ignore("runtime-mention", why="the one place listing the adapters")
 from lup_dev.adapters import Adapter, claude, codex
-from lup_dev.approval import approved
+from lup_dev.approval import approved, approved_branches
 from lup_dev.clipboard.desktop import Desktop
 from lup_dev.clipboard.protocol import routes as clipboard_routes
 from lup_dev.clock import Clock, SystemClock
 from lup_dev.codescan.conditions import loaded
-from lup_dev.codescan.contract import Checker, Due, Finding, Rule, Source
+from lup_dev.codescan.contract import Checker, Due, Finding, Parser, Rule, Source
 from lup_dev.codescan.directives import (
     Checking,
     Fired,
@@ -60,7 +60,7 @@ from lup_dev.codescan.directives import (
     holding,
     without,
 )
-from lup_dev.codescan.engine import EngineChecker, EngineError
+from lup_dev.codescan.engine import EngineChecker, EngineError, EngineParser
 from lup_dev.codescan.reference import reference
 from lup_dev.codescan.ruff import Ruff
 from lup_dev.commanding import RoomExchanges, RoomMarks
@@ -109,6 +109,7 @@ from lup_dev.host.dashboard import (
 )
 from lup_dev.host.names import shaped
 from lup_dev.host.protocol import (
+    Branches,
     GitHubRepository,
     HostError,
     Listed,
@@ -259,10 +260,16 @@ from lup_dev.migration import HostRuntime, Migrating
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
 from lup_dev.policy.coming import Coming
 from lup_dev.policy.flags import InboxFlagging
-from lup_dev.policy.holds import InboxAnnouncing, Response, answer
+from lup_dev.policy.holds import (
+    InboxAnnouncing,
+    Response,
+    answer,
+    answer_unheard,
+    said_answering,
+)
 from lup_dev.policy.importers import BackgroundSpawner
 from lup_dev.policy.judge import finding
-from lup_dev.policy.landing import LandingTools
+from lup_dev.policy.landing import LandingTools, unapproved_files
 from lup_dev.policy.report import finding_lines
 from lup_dev.policy.since import routes as since_routes
 from lup_dev.policy.tools import JudgeTools, judge_call
@@ -467,7 +474,6 @@ def services(environments: Path | None = None) -> Services:
         clock=SystemClock(),
         layout=Layout.of(settings),
         spawner=BackgroundSpawner(environments=environments),
-        integration=settings.lup_integration_branch,
         announcing=InboxAnnouncing(layout=host, clock=SystemClock()),
         flagging=InboxFlagging(layout=host, clock=SystemClock()),
         facts=HostFacts(),
@@ -557,7 +563,7 @@ def control_routes(
     return [
         *inbox_routes(delivery, recorded),
         Route.to(dashboard_shown(dashboard)),
-        *since_routes(delivery, layout, LupDevSettings().lup_integration_branch, waits),
+        *since_routes(delivery, layout, waits),
         *waits_routes(waits),
         *marks_routes(delivery.inbox.marks, delivery.clock, delivery.inbox.changes),
         *threaded_routes(delivery),
@@ -597,6 +603,7 @@ def host_serve(context: typer.Context) -> None:
         settle_hold=lambda change, approved, said: hold_answered(
             layout, change, approved=approved, comment=said
         ),
+        hold_unheard=lambda change: hold_unheard(layout, change),
         queues={
             adapter.runtime.name(): adapter.queues
             for adapter in known.known
@@ -612,11 +619,7 @@ def host_serve(context: typer.Context) -> None:
         approved=partial(approved_command, layout),
     )
     asking = WorkersAsking(workers=workers)
-    coming = Coming(
-        delivery=delivery,
-        integration=settings.lup_integration_branch,
-        say=typer.echo,
-    )
+    coming = Coming(delivery=delivery, layout=layout, say=typer.echo)
     delivery.starting = coming.started
     sweeping = Sweeping(
         layout=layout,
@@ -626,11 +629,7 @@ def host_serve(context: typer.Context) -> None:
         running=workers.commands,
         coming=coming,
     )
-    remotes = Remotes(
-        say=typer.echo,
-        landed=partial(after_push, delivery, coming),
-        modules=workers,
-    )
+    remotes = host_remotes(delivery, layout, coming, workers, EngineParser())
     waits = Waits(changes=changes)
     delivery.landing = waits.holding
     service = HostService(
@@ -642,7 +641,7 @@ def host_serve(context: typer.Context) -> None:
         operators={name: each.records for name, each in recorded().items()},
         post=delivery,
         bearings=RepositoryBearings(
-            delivery=delivery, integration=settings.lup_integration_branch
+            delivery=delivery, running=partial(running_branch, layout)
         ),
         roots=RootNames(delivery=delivery),
         routes=control_routes(
@@ -686,6 +685,11 @@ def approval_of(layout: Layout, repository: Path) -> str | None:
     return None if approval is None else approval.fingerprint
 
 
+def running_branch(layout: Layout, repository: Path) -> str:
+    """Return the branch work lands on in the repository at `repository`, as the declaration approved for it names it; `dev` before the first approval."""
+    return approved_branches(layout, repository).running
+
+
 def approved_command(layout: Layout, repository: Path) -> Path | None:
     """Return the command of the copy approved for the repository at `repository`, which a request put with no launch starts its process from; none before the first approval."""
     approval = approved(layout, repository)
@@ -701,50 +705,78 @@ def typed_reading(
     return machine_trust(worktree, []).typed(approval.repository, files)
 
 
+def approval_reading(git: Git, branches: Branches, main: Path) -> Path:
+    """Return the worktree a push's approval has its types read in: the checkout of the running branch, whose tip it's about; else of the integration branch, what that branch is made from, as `live` may have none; else `main`, the repository's main worktree."""
+    return git.checkout(branches.running) or git.checkout(branches.integration) or main
+
+
+def host_remotes(
+    delivery: Delivery,
+    layout: Layout,
+    coming: Coming,
+    modules: LaunchModules,
+    parser: Parser,
+) -> Remotes:
+    """Return git on the host for each launch's room: each push held to what the operator approved of what it lands (`unapproved_files`), each file read from its parse alone by `parser`, put to `modules`, and told to what follows a push (`after_push`)."""
+    return Remotes(
+        say=typer.echo,
+        landed=partial(after_push, delivery, coming),
+        asking=partial(unapproved_files, delivery, layout, parser=parser),
+        modules=modules,
+    )
+
+
 async def after_push(
     delivery: Delivery, coming: Coming, launch: Register, updates: list[Update]
 ) -> None:
-    """Once a launch's push updated `updates`: put the approval of the host zone at the integration branch's tip in the operator's inbox where it moved there (`proposed_after`), and wake each thread parked until a commit it brings (`Coming.pushed`)."""
+    """Once a launch's push updated `updates`: put the approval of the host zone at the running branch's tip in the operator's inbox where it moved there (`proposed_after`), and wake each thread parked until a commit it brings (`Coming.pushed`)."""
     await proposed_after(delivery, launch, [each.destination for each in updates])
     await coming.pushed(launch, updates)
 
 
 async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) -> None:
-    """Put the approval of the host zone at the integration branch's tip in the operator's inbox, where a launch's push moved that branch and the zone isn't the one approved.
+    """Put the approval of the host zone at the running branch's tip in the operator's inbox, where a launch's push moved that branch and the zone isn't the one approved.
 
     Trust reads the zone with git and asks the service itself, so it runs off
     the event loop. Its repository is the launch's git directory, found
     through git from its main worktree; one holding a `commondir`, which would
     lead git elsewhere, isn't read (`docs/credentials.md`, *Running git on the
-    host*). The approval names the main conversation of the session the launch
+    host*). That main worktree is a bare repository's own directory, where
+    lup's own is laid out so, which holds no project to read types in, so the
+    approval's are read in a checkout (`approval_reading`), while trust's git
+    stays where it is, out of a worktree the room can aim at a `config` of its
+    own. The approval names the main conversation of the session the launch
     runs, as `delivery` last heard it, which the operator's comment on their
     answer is told to: a push comes from the room's git, not from a call, so
     which of the session's conversations pushed isn't known. What fails is said
     in the service's log, and the push stands.
     """
-    integration = LupDevSettings().lup_integration_branch
-    if f"refs/heads/{integration}" not in refs:
+    branches = approved_branches(Layout.of(LupDevSettings()), launch.repository)
+    running = branches.running
+    if f"refs/heads/{running}" not in refs:
         return
     if (launch.repository / "commondir").exists():
         typer.echo(
-            f"{launch.launch}: the push moved {integration}, but its approval "
+            f"{launch.launch}: the push moved {running}, but its approval "
             f"wasn't asked: {launch.repository} holds a `commondir`, which would "
             "lead git to another repository"
         )
         return
-    root = Git.pinned(launch.repository).main_worktree()
+    git = Git.pinned(launch.repository)
+    root = git.main_worktree()
     pushed_by = delivery.running(launch.launch)
     try:
-        number = await asyncio.to_thread(machine_trust(root, []).proposed, pushed_by)
+        trust = machine_trust(root, [], approval_reading(git, branches, root))
+        number = await asyncio.to_thread(trust.proposed, pushed_by)
     except (LupDevError, LupError) as failure:
         typer.echo(
-            f"{launch.launch}: the push moved {integration}, but its approval "
+            f"{launch.launch}: the push moved {running}, but its approval "
             f"wasn't asked: {failure}"
         )
         return
     if number is not None:
         typer.echo(
-            f"{launch.launch}: the push moved {integration}, and with it the code "
+            f"{launch.launch}: the push moved {running}, and with it the code "
             f"the host runs: approval {cited(number)} is in the inbox"
         )
 
@@ -758,7 +790,7 @@ def room_tools(
     waits: Waits,
     coming: Coming | None = None,
 ) -> list[RoomTools]:
-    """List the core's tools the host service serves each launched session: the inbox's; the judge's, reading lup's state at `layout` by the delivery's clock, and running `quiet` in each launch's repository's process (`modules`); and `land`, pushing through `remotes` onto the integration branch the settings name, each landing waiting kept in `waits`, which the drawers read, waking through `coming` the threads parked until what it lands."""
+    """List the core's tools the host service serves each launched session: the inbox's; the judge's, reading lup's state at `layout` by the delivery's clock, and running `quiet` in each launch's repository's process (`modules`); and `land`, pushing through `remotes` onto the running branch the declaration approved names, each landing waiting kept in `waits`, which the drawers read, waking through `coming` the threads parked until what it lands."""
     return [
         InboxTools(delivery=delivery),
         JudgeTools(layout=layout, clock=delivery.clock, modules=modules),
@@ -766,7 +798,6 @@ def room_tools(
             delivery=delivery,
             remotes=remotes,
             layout=layout,
-            integration=LupDevSettings().lup_integration_branch,
             waits=waits,
             coming=coming,
         ),
@@ -950,18 +981,27 @@ def heading(item: Item, paths: Sequence[Pathed] = ()) -> str:
 
 def hold_answered(
     layout: Layout, change: HeldChange, *, approved: bool, comment: str
-) -> None:
-    """Write the operator's answer to a held change where its hook waits for it, or a later checkpoint tells it; a hold at landing has no hook, its answer its item's own state."""
+) -> str | None:
+    """Write the operator's answer to a held change where its hook waits for it, and return what to tell the conversation that made it where no call waits to hear it; a hold at landing has no hook, its answer its item's own state."""
     if change.key is None:
-        return
-    answer(
+        return None
+    hold = answer(
         layout,
         change.key,
         Response(approved=approved, comment=comment),
         runtimes(),
         SystemClock(),
         worktree=change.worktree,
+        telling=True,
     )
+    return said_answering(layout, hold) if hold.told else None
+
+
+def hold_unheard(layout: Layout, change: HeldChange) -> str | None:
+    """Return what to tell the conversation that made a held change answered already, where nothing told them (`answer_unheard`); none else, as for a hold at landing."""
+    if change.key is None:
+        return None
+    return answer_unheard(layout, change.worktree, change.key)
 
 
 def shown(item: Item, paths: Sequence[Pathed] = ()) -> str:
@@ -1488,7 +1528,7 @@ def acted_on(approval: Approval, given: Given) -> str | None:
     """Act on an approval approved at this terminal, as a launch waiting on it would, once between them, and say what came of it; none for an approval declined, which leaves the copy approved before.
 
     An approval may have nobody waiting on it: a push that moved the
-    integration branch asks it from the host (`proposed_after`).
+    running branch asks it from the host (`proposed_after`).
     """
     if not given.approved:
         return None
@@ -1496,7 +1536,7 @@ def acted_on(approval: Approval, given: Given) -> str | None:
     outcome = machine_trust(root, []).settle(approval.fingerprint, given)
     if outcome is None:
         return (
-            "The integration branch moved since this was asked, so its tip isn't "
+            "The running branch moved since this was asked, so its tip isn't "
             "the code you read: `lup-dev trust` asks about it."
         )
     return outcome.report()
@@ -3073,7 +3113,8 @@ def check(
     The steps are the worktree's declaration's, and so is how the project runs
     its tools: lup's rules (`rules check`), ruff, the formatter, pyright, pytest
     and the import contracts by default, with what its modules add, such as lup's
-    own engine, rebuilt when stale. Its modules' requirements are checked first,
+    own engine, rebuilt unless it passed on its sources as they stand. Its modules'
+    requirements are checked first,
     all at once: a required tool missing stops the gate before any step. Each
     step's outcome is reported, then each failure's output in full; the exit code
     is non-zero when any step failed. With `--fix`, ruff's safe fixes and the
@@ -3083,8 +3124,8 @@ def check(
     directory, and a later run on the same files finds it and runs nothing but
     the builds stale in its worktree, unless `--again`. With `--at`, the gate
     runs on a commit, in a worktree made at it and removed after, unless it
-    passed on the commit's files already: a push to the integration branch
-    from a room runs it so. With `--fix` too, where the fixes change files,
+    passed on the commit's files already: a push to a gated branch from a
+    room runs it so. With `--fix` too, where the fixes change files,
     they're committed in a commit with the same parents and message, which it
     names and no branch does: `land` runs it so on the merge it makes.
     """
@@ -3194,7 +3235,7 @@ def stage(
 def merge(
     base: Annotated[
         str,
-        typer.Argument(help="The commit it goes onto: the integration branch's tip."),
+        typer.Argument(help="The commit it goes onto: the running branch's tip."),
     ],
     tip: Annotated[str, typer.Argument(help="The commit merged: the branch's tip.")],
 ) -> None:
@@ -3255,7 +3296,7 @@ def trust() -> None:
     """Approve what the host runs for this repository, as a launch does first.
 
     Run it yourself, in your own terminal. It reads the host zone at the
-    integration branch's tip, running none of it: the declaration, the files it
+    running branch's tip, running none of it: the declaration, the files it
     runs on the host, and the `lup-dev` the host runs. Where that isn't the zone you
     approved last, it puts the approval in your inbox, starting the host service
     where none runs, and here prints a summary of what changed since (git's count

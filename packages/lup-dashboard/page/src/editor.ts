@@ -2088,10 +2088,15 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
             whole: config.whole,
             fold: (how) => {
                 const editor = view.current;
+                if (editor === null) {
+                    return;
+                }
                 const at = head();
-                // Of folds one inside another, the innermost the cursor is in.
-                const fold = around(live().folds, at).at(-1);
-                if (editor === null || fold === undefined) {
+                // Of folds one inside another, the innermost the cursor is in; closing, the innermost still open, as vim's
+                // `zc` does, so it closes what holds a line that's a fold's closed summary, a call among a run's.
+                const holding = around(live().folds, at);
+                const fold = how === "close" ? holding.findLast((each) => !isFolded(editor.state, each)) : holding.at(-1);
+                if (fold === undefined) {
                     return;
                 }
                 const closed = isFolded(editor.state, fold);

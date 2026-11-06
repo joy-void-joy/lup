@@ -46,6 +46,7 @@ from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.requirements import Printed, Tools
 from lup_dev.declaration.resolve import Selected, resolve
 from lup_dev.forge.github import GitHubError, Visibility
+from lup_dev.git import GitError
 from lup_dev.host.client import HostClient, Starter
 from lup_dev.host.homes import home_of
 from lup_dev.host.names import container_name
@@ -719,6 +720,26 @@ def test_a_repository_whose_config_the_room_could_change_doesnt_launch(
     assert not machine.layout.launches.exists() or not any(
         machine.layout.launches.iterdir()
     )
+
+
+def test_a_declaration_whose_blob_isn_t_what_its_id_says_is_never_imported(
+    project: Path, tmp_path: Path, shell: Shell
+) -> None:
+    commit = shell.git(project, "rev-parse", "dev")
+    blob = shell.git(project, "rev-parse", f"{commit}:lup_project.py")
+    ran = tmp_path / "ran"
+    shell.planted(
+        project / ".git" / "objects",
+        blob,
+        "blob",
+        (f"from pathlib import Path\nPath({str(ran)!r}).touch()\n{DECLARED}").encode(),
+    )
+    with (
+        pytest.raises(GitError, match=f"{blob} isn't that blob"),
+        approved_declaration(project, commit, local=None),
+    ):
+        pass
+    assert not ran.exists()
 
 
 def test_a_launch_compiles_the_approved_declarations_guidance_and_hooks(
@@ -1544,9 +1565,10 @@ GONE = (
     "it restarts,"
 )
 HELD = (
-    "A write lup held for the operator's review stays held, and their answer "
-    "reaches you at a later call."
+    "A write lup held for the operator's review still waits for their answer, which "
+    "reaches you beside a later call or through `wait_inbox`."
 )
+UNJUDGED = f"{GONE} so what was written may not have been judged. {HELD}"
 
 
 @pytest.mark.parametrize(
@@ -1560,17 +1582,17 @@ HELD = (
         (
             events.CallFinished,
             2,
-            f"{GONE} so what was written is judged at your next call. {HELD}",
+            UNJUDGED,
         ),
         (
             events.TurnEnded,
             2,
-            f"{GONE} so what was written is judged at your next call. {HELD}",
+            UNJUDGED,
         ),
         (
             events.ConversationEnded,
             2,
-            f"{GONE} so what was written is judged at your next call. {HELD}",
+            UNJUDGED,
         ),
         (events.SessionStarted, 1, f"{GONE} so its answer was lost."),
         (events.TurnStarted, 1, f"{GONE} so its answer was lost."),

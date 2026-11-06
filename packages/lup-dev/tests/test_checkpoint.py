@@ -39,10 +39,11 @@ from lup_dev.policy.checkpoint import (
     on_disk,
     over,
 )
-from lup_dev.policy.holds import Holds, Response, answer, waiting
+from lup_dev.policy.holds import Hold, Holds, Response, answer, waiting
 from lup_dev.policy.importers import Conversation, ImportersPass
 from lup_dev.policy.quiet import quieted
 from lup_dev.policy.report import Kind, Quiet
+from lup_dev.policy.store import Store
 from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.policy.worktrees import SessionIndex
 from lup_dev.private.withheld import Held, Withheld, kept
@@ -1106,6 +1107,48 @@ def test_a_file_on_disk_linking_out_of_the_worktree_is_one_lup_doesnt_read(
     assert on_disk(repo, Path("src/pkg/near.py")) == (repo / CORE).read_text()
 
 
+def test_a_link_made_at_a_protected_directory_s_name_is_held_and_a_decline_removes_it(
+    holding_kit: Kit, repo: Path
+) -> None:
+    kit = holding_kit
+    kit.announced.holding_all = False
+    (repo / "elsewhere").mkdir()
+    (repo / "elsewhere" / "settings.json").write_text("{}\n")
+    start(kit, repo)
+    call(kit, repo, "c1")
+    (repo / ".claude").symlink_to("elsewhere")
+
+    def declines() -> None:
+        [hold] = waiting(kit.layout)
+        answer(kit.layout, hold.key, Response(approved=False), [], kit.clock)
+
+    kit.clock.on_sleep.append(declines)
+    finish(kit, repo, "c1")
+    [hold] = kit.announced.holds
+    [held] = hold.files
+    assert (held.path, held.reasons) == (Path(".claude"), ["protected"])
+    assert not (repo / ".claude").is_symlink()
+    assert (repo / "elsewhere" / "settings.json").is_file()
+
+
+@pytest.mark.parametrize("through", ["into/settings.json", "linked.json"])
+def test_a_shell_write_through_a_link_into_a_protected_directory_is_held_as_the_file_it_reaches(
+    kit: Kit, repo: Path, shell: Shell, through: str
+) -> None:
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "settings.json").write_text("{}\n")
+    (repo / "into").symlink_to(".claude")
+    (repo / "linked.json").symlink_to(".claude/settings.json")
+    shell.commit(repo, "links into a protected directory")
+    start(kit, repo)
+    call(kit, repo, "c1")
+    (repo / through).write_text("{}\n# more\n")
+    finish(kit, repo, "c1")
+    [hold] = kit.announced.holds
+    [held] = hold.files
+    assert (held.path, held.reasons) == (Path(".claude/settings.json"), ["protected"])
+
+
 EXEMPTING_REGEX = (
     "from lup_dev import CodeRules, Exemption, Exemptions, Modules, Project\n"
     "lifted = Exemption(rule='regex', paths=['src/pkg/**'], why='a grammar')\n"
@@ -1423,6 +1466,82 @@ def test_an_approval_of_a_hold_whose_call_died_reaches_the_session_at_its_next_c
     assert finish(kit, repo, "p3").context == ""
 
 
+class StoppedError(Exception):
+    """The repository's process ending at a point a test chose."""
+
+
+def stops_as_it_notes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """End the process the next time a store's state is written, once."""
+    real = Store.remember
+
+    def stopping(_: Store, _state: object) -> None:
+        monkeypatch.setattr(Store, "remember", real)
+        raise StoppedError
+
+    monkeypatch.setattr(Store, "remember", stopping)
+
+
+@pytest.mark.parametrize("answered", ["approved", "declined", "unanswered"])
+def test_a_stop_between_settling_a_hold_and_noting_it_leaves_no_file_held_for_good(
+    holding_kit: Kit,
+    repo: Path,
+    dying: Dying,
+    monkeypatch: pytest.MonkeyPatch,
+    answered: str,
+) -> None:
+    """The next checkpoint settles it again, so a later write to the file is judged."""
+    kit = holding_kit
+    new = held_file(kit, repo)
+    key = orphaned(kit, repo, "p1", dying)
+    if answered == "unanswered":
+        kit.clock.sleep(timedelta(hours=25).total_seconds())
+    else:
+        answering = Response(approved=answered == "approved")
+        answer(kit.layout, key, answering, [], kit.clock)
+    call(kit, repo, "p2")
+    stops_as_it_notes(monkeypatch)
+    with pytest.raises(StoppedError):
+        finish(kit, repo, "p2")
+    store = worktree(kit, repo).store
+    assert [each.hold for each in store.state().holding] == [key]
+    call(kit, repo, "p3")
+    finish(kit, repo, "p3")
+    assert store.state().holding == []
+    settled = Holds(layout=kit.layout.store(repo)).get(key)
+    assert settled is not None
+    assert not settled.waited()
+    call(kit, repo, "p4")
+    new.write_text('"""Rewritten."""\n')
+    kit.announced.answering = Response(approved=True)
+    finish(kit, repo, "p4")
+    rewritten = b'"""Rewritten."""\n'
+    assert store.content(store.accepted(), Path("src/pkg/new.py")) == rewritten
+    # An approval covers a new file's asks for the session; what it left asks again.
+    assert len(kit.announced.holds) == (1 if answered == "approved" else 2)
+
+
+def test_a_stop_as_an_approved_hold_is_noted_keeps_the_change_with_nothing_asked_again(
+    holding_kit: Kit, repo: Path, dying: Dying, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    kit = holding_kit
+    held_file(kit, repo)
+    key = orphaned(kit, repo, "p1", dying)
+    answer(kit.layout, key, Response(approved=True), [], kit.clock)
+    call(kit, repo, "p2")
+    stops_as_it_notes(monkeypatch)
+    with pytest.raises(StoppedError):
+        finish(kit, repo, "p2")
+    call(kit, repo, "p3")
+    told = finish(kit, repo, "p3").context
+    assert "It's in place." in told
+    store = worktree(kit, repo).store
+    assert store.content(store.accepted(), Path("src/pkg/new.py")) == b'"""New."""\n'
+    assert len(kit.announced.holds) == 1
+    assert [
+        each.answer for each in log(kit, repo).read() if each.outcome == "hold"
+    ] == ["approved"]
+
+
 def test_a_decline_of_a_hold_whose_call_died_puts_it_back_at_any_sessions_checkpoint(
     holding_kit: Kit, repo: Path, dying: Dying
 ) -> None:
@@ -1468,6 +1587,191 @@ def test_a_hold_whose_call_died_is_put_back_once_its_day_is_up(
     assert finish(kit, repo, "p4").context.startswith(
         f"After the hold timed out, the operator approved the change to {new}."
     )
+
+
+def orphaned_of(kit: Kit, repo: Path, agent: str, dying: Dying) -> tuple[Path, str]:
+    """Have subagent `agent` write a new file with a shell call, held, their call dying while it waits; return the file and the hold's key."""
+    start(kit, repo)
+    call(kit, repo, "w0", agent=agent)
+    new = repo / "src" / "pkg" / "new.py"
+    new.write_text('"""New."""\n')
+    dying.at_next_wait(kit.clock)
+    with pytest.raises(dying.died):
+        finish(kit, repo, "w0", agent=agent)
+    [hold] = waiting(kit.layout)
+    assert hold.agent == agent
+    return new, hold.key
+
+
+def test_a_late_answer_reaches_the_subagent_that_made_the_change_at_their_own_next_call(
+    holding_kit: Kit, repo: Path, dying: Dying
+) -> None:
+    """Whoever's checkpoint settles it, what it says is the writer's to hear: not the session's own conversation, nor another subagent's."""
+    kit = holding_kit
+    new, key = orphaned_of(kit, repo, "writer", dying)
+    answer(kit.layout, key, Response(approved=True), [], kit.clock)
+    call(kit, repo, "o1", agent="other")
+    assert finish(kit, repo, "o1", agent="other").context == ""
+    assert end(kit, repo).block == ""
+    call(kit, repo, "w1", agent="writer")
+    assert finish(kit, repo, "w1", agent="writer").context == (
+        f"{GONE} {new}, which they have since approved. It's in place."
+    )
+    call(kit, repo, "w2", agent="writer")
+    assert finish(kit, repo, "w2", agent="writer").context == ""
+
+
+def test_a_late_answer_for_a_subagent_who_ended_is_told_to_whoever_settles_it(
+    holding_kit: Kit, repo: Path, dying: Dying
+) -> None:
+    """Nobody would read mail for them."""
+    kit = holding_kit
+    new, key = orphaned_of(kit, repo, "writer", dying)
+    ConversationEnded(session=SESSION, agent="writer", cwd=repo, final=True).apply(
+        kit.bench
+    )
+    answer(kit.layout, key, Response(approved=True), [], kit.clock)
+    call(kit, repo, "m1")
+    assert finish(kit, repo, "m1").context == (
+        f"{GONE} {new}, which they have since approved. It's in place."
+    )
+
+
+def test_a_hold_whose_call_died_with_a_deletion_approved_is_told_it_is_in_place(
+    holding_kit: Kit, repo: Path, shell: Shell, dying: Dying
+) -> None:
+    """A deletion in place is the file being gone."""
+    kit = holding_kit
+    agents = repo / "AGENTS.md"
+    agents.write_text("# Agents\n")
+    shell.commit(repo, "agents")
+    start(kit, repo)
+    call(kit, repo, "p1")
+    agents.unlink()
+    key = orphaned(kit, repo, "p1", dying)
+    answer(kit.layout, key, Response(approved=True), [], kit.clock)
+    call(kit, repo, "p2")
+    assert finish(kit, repo, "p2").context == (
+        f"{GONE} {agents}, which they have since approved. It's in place."
+    )
+
+
+def test_an_answer_told_through_the_inbox_is_acted_on_by_the_next_checkpoint_saying_nothing(
+    holding_kit: Kit, repo: Path, dying: Dying
+) -> None:
+    kit = holding_kit
+    new = held_file(kit, repo)
+    key = orphaned(kit, repo, "p1", dying)
+    answer(kit.layout, key, Response(approved=True), [], kit.clock, telling=True)
+    call(kit, repo, "p2")
+    assert finish(kit, repo, "p2").context == ""
+    store = worktree(kit, repo).store
+    assert store.content(store.accepted(), Path("src/pkg/new.py")) == b'"""New."""\n'
+    assert store.state().holding == []
+    assert session(kit, repo).approved == [Path("src/pkg/new.py")]
+    assert new.exists()
+
+
+def test_a_decline_told_through_the_inbox_puts_it_back_at_the_next_checkpoint_saying_nothing(
+    holding_kit: Kit, repo: Path, dying: Dying
+) -> None:
+    kit = holding_kit
+    new = held_file(kit, repo)
+    key = orphaned(kit, repo, "p1", dying)
+    answer(kit.layout, key, Response(approved=False), [], kit.clock, telling=True)
+    call(kit, repo, "p2")
+    assert finish(kit, repo, "p2").context == ""
+    assert not new.exists()
+    saved = repo / ".lup" / "saved" / "1" / "src" / "pkg" / "new.py"
+    assert saved.read_text() == '"""New."""\n'
+
+
+def test_an_approval_told_through_the_inbox_that_isnt_in_place_is_said_to_its_writer(
+    holding_kit: Kit, repo: Path, dying: Dying
+) -> None:
+    """All the answer couldn't say, and it's theirs to hear, whoever's checkpoint found it."""
+    kit = holding_kit
+    new, key = orphaned_of(kit, repo, "writer", dying)
+    answer(kit.layout, key, Response(approved=True), [], kit.clock, telling=True)
+    new.write_text('"""Rewritten."""\n')
+    call(kit, repo, "m1")
+    assert "isn't in place" not in finish(kit, repo, "m1").context
+    call(kit, repo, "w1", agent="writer")
+    assert finish(kit, repo, "w1", agent="writer").context.startswith(
+        f"The change to {new} the operator approved isn't in place, the file having "
+        "changed since: make the change again if it's still wanted."
+    )
+
+
+def test_a_hold_reaches_the_operator_with_its_call_already_waiting_on_it(
+    holding_kit: Kit, repo: Path
+) -> None:
+    """So an answer however quick isn't taken for one no call hears."""
+    kit = holding_kit
+    held_file(kit, repo)
+    waited: list[bool] = []
+    holds = Holds(layout=kit.layout.store(repo))
+    announcing = kit.announced.announced
+
+    def announced(
+        hold: Hold, runtime: str, repository: Path, files: list[ChangedFile]
+    ) -> None:
+        waited.append(holds.waited_on(hold.key))
+        kit.announced.answering = Response(approved=True)
+        announcing(hold, runtime, repository, files)
+
+    kit.announced.announced = announced
+    assert finish(kit, repo, "p1").context.startswith("lup held the write to")
+    assert waited == [True]
+    [hold] = holds.all()
+    assert not holds.waited_on(hold.key)
+
+
+def test_a_hold_given_up_on_as_its_announcement_failed_keeps_no_call_waiting(
+    holding_kit: Kit, repo: Path, dying: Dying
+) -> None:
+    kit = holding_kit
+    held_file(kit, repo)
+
+    def gone(
+        hold: Hold, runtime: str, repository: Path, files: list[ChangedFile]
+    ) -> None:
+        del hold, runtime, repository, files
+        raise dying.died
+
+    kit.announced.announced = gone
+    with pytest.raises(dying.died):
+        finish(kit, repo, "p1")
+    holds = Holds(layout=kit.layout.store(repo))
+    [hold] = holds.all()
+    assert not holds.waited_on(hold.key)
+
+
+def test_an_approval_settled_as_the_process_ends_isnt_asked_again(
+    holding_kit: Kit, repo: Path, dying: Dying, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What the checkpoint settling it accepts is kept before the file stops being held."""
+    kit = holding_kit
+    new = held_file(kit, repo)
+    key = orphaned(kit, repo, "p1", dying)
+    answer(kit.layout, key, Response(approved=True), [], kit.clock)
+    real = Store.snapshot
+    ending = [True]
+
+    def snapshot(store: Store) -> str:
+        if ending.pop() if ending else False:
+            raise dying.died
+        return real(store)
+
+    monkeypatch.setattr(Store, "snapshot", snapshot)
+    call(kit, repo, "p2")
+    with pytest.raises(dying.died):
+        finish(kit, repo, "p2")
+    call(kit, repo, "p3")
+    finish(kit, repo, "p3")
+    assert len(kit.announced.holds) == 1
+    store = worktree(kit, repo).store
+    assert store.content(store.accepted(), Path("src/pkg/new.py")) == new.read_bytes()
 
 
 def test_a_hold_a_call_still_waits_on_is_left_to_that_call(
@@ -1987,6 +2291,31 @@ def test_an_approved_commit_gone_from_the_repository_has_the_stand_in(
         f"lup can't load the project's declaration at {gone}: the commit approved "
         f"last, {gone}, isn't in the repository" in told
     )
+
+
+def test_an_approved_declaration_whose_blob_isn_t_what_its_id_says_has_the_stand_in_and_never_runs(
+    kit: Kit, repo: Path, linked: Path, shell: Shell, tmp_path: Path
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    declare(repo, PROTECTING_CORE)
+    shell.commit(repo, "dev: protect the core")
+    start(kit, repo)
+    assert held(kit, lambda: before(kit.bench, core_edit(linked), SESSION, repo))
+    declare(repo, f"{PROTECTING_CORE}# Approved.\n")
+    shell.commit(repo, "dev: the declaration approved next")
+    commit = shell.git(repo, "rev-parse", "HEAD")
+    blob = shell.git(repo, "rev-parse", f"{commit}:lup_project.py")
+    ran = tmp_path / "ran"
+    planted = f"from pathlib import Path\nPath({str(ran)!r}).touch()\n{PROTECTING_CORE}"
+    shell.planted(repo / ".git" / "objects", blob, "blob", planted.encode())
+    approve(kit, repo, commit)
+    assert held(kit, lambda: before(kit.bench, core_edit(linked), SESSION, repo))
+    call(kit, linked, "c1")
+    (linked / "README.md").write_text("# Changed\n")
+    told = finish(kit, linked, "c1").context
+    assert f"lup can't load the project's declaration at {commit}: " in told
+    assert f"{blob} isn't that blob" in told
+    assert not ran.exists()
 
 
 def test_an_approved_commit_gone_with_nothing_kept_fails(

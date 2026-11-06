@@ -1,8 +1,9 @@
 """The landings waiting on the operator: each file a landing holds on, shown in its writer's "since you approved" drawer and answered there.
 
 `docs/judging-writes.md`, *Landing a branch*. A landing waits on each file it
-changes that's flagged on a branch it lands, the flags not approved
-(`lup_dev.policy.landing`). It makes no item of the inbox for it: each file is
+changes that's flagged on a branch it lands, the flags not approved, its own
+diff's asks among them, flagged as it reads them (`lup_dev.policy.landing`). It
+makes no other item of the inbox for it: each file is
 a state of the file in its writer's drawer (`lup_dev.policy.since`), held at
 landing, where Space `d` marks it reviewed, approving its flags, and Space `x`
 declines its landing. So a landing's wait is kept here, in the host service's
@@ -16,6 +17,8 @@ inbox's, and an answer the operator gave reached them.
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, override
+
+from pydantic import Field
 
 from lup.types import Model, MutableModel
 from lup_dev.host.protocol import Reply, Request
@@ -44,6 +47,10 @@ class Awaited(Model):
     writers: list[Conversation]
     """The conversations that wrote it, the flags' senders: whose "since you
     approved" shows it."""
+    holds: list[int] = Field(default=[], exclude=True)
+    """The holds still open on it at the version the landing's tip holds: their
+    answer answers it too, so the operator needn't answer it twice. The call's
+    alone, the page having nothing to do with it."""
     declined: Declined | None = None
 
 

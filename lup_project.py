@@ -34,9 +34,10 @@ from lup_dev import (
 class LupDevelopment(Module):
     """What only lup's repository needs: building lup's engine and its dashboard's page, guarding its policy, its guidance.
 
-    - The engine is built before the gate's first step, and again only when its
-      bundle is older than one of its sources, since tests that ask a stale engine
-      fail for reasons the change didn't cause. Its command is the tool alone, which
+    - The engine is built before the gate's first step, and again unless it passed
+      on its sources as they stand, leaving its bundle as it is, since tests that
+      ask a stale engine fail for reasons the change didn't cause, and a bundle
+      built by hand was never type-checked. Its command is the tool alone, which
       the gate runs through the project's runner, and trust on launch runs the same
       step the same way to build the copy the operator approves
       (`lup_dev/launch/trust.py`). pnpm installs its bundler, from the engine's
@@ -52,8 +53,8 @@ class LupDevelopment(Module):
     - The dashboard's page is built the same way, after the engine: its types
       generated from the API's description, type-checked, tested and bundled
       (`packages/lup-dashboard/build.py`), its packages installed by pnpm from
-      its own lockfile, again only when one of its sources, the host's models
-      the API describes among them, is newer than the page.
+      its own lockfile, and again on the same terms, the host's models the API
+      describes among its sources.
     - The data that sets lup's policy (`lup_dev.catalog`) is protected, so the
       operator reviews every change to it before it lands.
     - Working on lup is `AGENTS.md`, the project's own section of the guidance,

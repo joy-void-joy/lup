@@ -249,7 +249,37 @@ def test_a_conversation_a_line_names_is_a_span_said_by_its_path_else_its_runtime
 
 def test_a_turn_s_last_words_lup_made_a_note_of_echo_the_conversation_s_own() -> None:
     ended = item(55, note("Reading the second runtime's.", ending=True), 8)
-    assert [each.echoes for each in listed(ended, item(56, note("Done."), 8)).sent] == [
-        True,
-        False,
-    ]
+    sent = listed(ended, item(56, note("Done."), 8)).sent
+    assert [each.echoes for each in sent] == [True, False]
+    # By the kind lup's inbox names them, rather than the note it made of them.
+    assert [each.text for each in sent[0].line] == ["→ @55 turn's end to you · unread"]
+
+
+def test_only_an_item_sending_is_all_its_call_did_stands_for_that_call() -> None:
+    held = item(
+        57,
+        HeldChange(
+            text="Let the change land?",
+            summary="AGENTS.md: the operator's",
+            worktree=Path("/w"),
+            key="k",
+        ),
+        9,
+        call="c1",
+    )
+    flagged = item(
+        58,
+        Flagged(
+            text="a.py landed, flagged.",
+            summary="a.py",
+            path=Path("a.py"),
+            worktree=Path("/w"),
+        ),
+        9,
+        call="c2",
+    )
+    noted = item(59, note("Done."), 9, call="c3")
+    uncalled = item(60, note("Done."), 9)
+    assert [
+        each.call_sends_it for each in listed(held, flagged, noted, uncalled).sent
+    ] == [False, False, True, False]

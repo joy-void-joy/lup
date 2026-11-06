@@ -165,6 +165,71 @@ def test_a_project_adds_protected_paths(repo: Path) -> None:
     assert roles(repo, project).protecting(Path("tests/spec/a.py")) == "tests/spec/**"
 
 
+@pytest.mark.parametrize(
+    "directory",
+    [
+        ".github",
+        ".git",
+        ".githooks",
+        ".husky",
+        ".vscode",
+        ".devcontainer",
+        ".claude",
+        ".codex",
+    ],
+)
+def test_a_protected_directory_s_own_name_is_protected(
+    repo: Path, directory: str
+) -> None:
+    """A link at the name, or a file, decides what's read under it, with nothing under it changed."""
+    assert roles(repo).role(Path(directory)) == "protected"
+    assert roles(repo).protecting(Path(directory)) == f"{directory}/**"
+
+
+def test_each_directory_on_the_way_to_a_protected_pattern_is_protected(
+    repo: Path,
+) -> None:
+    project = core(Paths().add(protected=["config/deep/**", "lib/*/hooks/*.sh"]))
+    judged = roles(repo, project)
+    for path, pattern in {
+        "config": "config/deep/**",
+        "config/deep": "config/deep/**",
+        "lib": "lib/*/hooks/*.sh",
+        "lib/a/hooks": "lib/*/hooks/*.sh",
+    }.items():
+        assert judged.protecting(Path(path)) == pattern
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".claude-notes",
+        "sub/.claude",
+        "config/other.py",
+        "config/deeper",
+        "lib/a",
+        "lib/a/other",
+        "pkg/pyproject",
+    ],
+)
+def test_a_name_a_protected_pattern_doesn_t_pass_through_isn_t_protected(
+    repo: Path, path: str
+) -> None:
+    project = core(Paths().add(protected=["config/deep/**", "lib/*/hooks/*.sh"]))
+    assert roles(repo, project).role(Path(path)) == "production"
+
+
+def test_a_pattern_starting_anywhere_protects_its_named_directory_alone(
+    repo: Path,
+) -> None:
+    """`**/pyproject.toml` names no directory, so it protects none; a wildcard isn't a name."""
+    project = core(Paths().add(protected=["**/conf/keys.toml"]))
+    judged = roles(repo, project)
+    assert judged.role(Path("a/conf")) == "protected"
+    assert judged.role(Path("a/other")) == "production"
+    assert judged.role(Path("anything")) == "production"
+
+
 def test_a_project_drops_a_protected_path(repo: Path) -> None:
     project = core(Paths().drop(protected=["**/.gitignore"], why="a test"))
     assert roles(repo, project).role(Path(".gitignore")) == "production"

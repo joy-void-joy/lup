@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import JsonValue, TypeAdapter
 
-from lup.blocks import Fold, Load, OfAgent
+from lup.blocks import Block, Fold, Load, OfAgent
 from lup_dashboard.demo import Demo, files
 from lup_dashboard.host import Host
 from lup_dashboard.server import Access, application
@@ -26,6 +26,7 @@ from lup_dev.inbox.protocol import (
     Conversed,
     Files,
     Items,
+    ItemsListing,
     ListInbox,
     ListItems,
     Reviewed,
@@ -107,6 +108,19 @@ def page(tmp_path: Path) -> Path:
     built.mkdir()
     (built / "index.html").write_text("<!doctype html><title>lup</title>")
     return built
+
+
+def folded_in(blocks: list[Block]) -> list[Fold]:
+    """Return every fold among `blocks`, those inside each after it, whose content is given."""
+    return [
+        found
+        for each in blocks
+        if isinstance(each, Fold)
+        for found in [
+            each,
+            *(folded_in(each.content) if isinstance(each.content, list) else []),
+        ]
+    ]
 
 
 def client(host: Host, page: Path) -> TestClient:
@@ -398,13 +412,15 @@ class Fixed(Clock):
         del seconds
 
 
-def test_the_demo_serves_its_stand_in_launches_and_refuses_the_rest(page: Path) -> None:
+def test_the_demo_serves_its_stand_in_launches_and_items_as_the_host_lists_them(
+    page: Path,
+) -> None:
     served = client(Demo(clock=Fixed(), size=0), page)
     listed = served.post(
         "/api/ask", json=ListLaunches().model_dump(), headers=bearing()
     )
     items = served.post("/api/ask", json=ListInbox().model_dump(), headers=bearing())
-    other = served.post(
+    shown = served.post(
         "/api/ask", json={"kind": "inbox-show", "number": 51}, headers=bearing()
     )
     names = [each["name"] for each in listed.json()["launches"]]
@@ -421,19 +437,16 @@ def test_the_demo_serves_its_stand_in_launches_and_refuses_the_rest(page: Path) 
         58,
         59,
         60,
-        68,
-        69,
         62,
-        67,
-        70,
         64,
         65,
         66,
+        67,
+        68,
+        69,
+        70,
     ]
-    assert other.json() == {
-        "kind": "refused",
-        "error": "the demo doesn't answer `inbox-show`",
-    }
+    assert shown.json()["item"]["number"] == 51
 
 
 def test_the_demo_answers_a_module_s_view_with_the_module_s_own_layout_over_its_stand_ins(
@@ -463,14 +476,15 @@ def test_the_demo_answers_a_module_s_view_with_the_module_s_own_layout_over_its_
     assert isinstance(drawer, Viewed)
     # The module's own layout: its summary, its folds, its items woven in, each
     # call read whole as its fold opens, from its own view.
-    lines = drawer.blocks.text().splitlines()
+    lines = [each.strip() for each in drawer.blocks.text().splitlines()]
     assert lines[0].startswith("conversation · ")
-    assert "▸ → @51 question to you · waiting on you" in lines
+    assert any(
+        each.startswith("▸ → @51 question to you · waiting on you") for each in lines
+    )
     [loaded] = [
         each.content
-        for each in drawer.blocks.blocks
-        if isinstance(each, Fold)
-        and isinstance(each.content, Load)
+        for each in folded_in(drawer.blocks.blocks)
+        if isinstance(each.content, Load)
         and each.content.view == "call"
         and each.content.argument.get("id") == "call-51"
     ]
@@ -521,18 +535,25 @@ def test_the_demo_weaves_a_conversations_items_into_its_view_a_message_sent_from
     )
     elsewhere = SendItem(launch="d4c3", text="Hello?")
     unsent = served.post("/api/ask", json=elsewhere.model_dump(), headers=bearing())
-    found = demo.exchanged(parser)
-    assert sent.json()["item"]["number"] == 101
+    number = sent.json()["item"]["number"]
+    found = ItemsListing(delivery=demo.host.delivery).exchanged(
+        parser, demo.host.inbox.exchanged(parser)
+    )
     assert [each.item.number for each in found.sent] == [47, 51, 57, 59, 67]
     assert found.sent[0].item.call == "call-47"
-    assert [(each.item.number, each.text) for each in found.received] == [
-        (48, "Good: keep the two readers apart."),
-        (101, "Go on."),
-    ]
-    # Each a line where it happened in the conversation's view, as the core words it.
-    lines = viewed.blocks.text().splitlines()
-    assert "▸ ← @101 your message" in lines
-    assert "▸ → @51 question to you · waiting on you" in lines
+    assert [each.item.number for each in found.received] == [48, number]
+    # Each as it's told them: a reply on the item it replies to, a message as it's written.
+    assert '<comment id="48.1">Good: keep the two readers apart.</comment>' in (
+        found.received[0].text
+    )
+    assert found.received[1].text == "Go on."
+    # Each a line where it happened in the conversation's view, as the core words it,
+    # the message not told yet, since no agent runs here to be told it.
+    lines = [each.strip() for each in viewed.blocks.text().splitlines()]
+    assert f"▸ ← @{number} your message · not told yet" in lines
+    assert any(
+        each.startswith("▸ → @51 question to you · waiting on you") for each in lines
+    )
     # The page reads a conversation's items only through that view.
     listed = served.post(
         "/api/ask",
@@ -542,7 +563,10 @@ def test_the_demo_weaves_a_conversations_items_into_its_view_a_message_sent_from
     assert listed.status_code == 422
     assert unsent.json() == {
         "kind": "refused",
-        "error": "no session of launch `d4c3` has started",
+        "error": (
+            "no session of launch `d4c3` has reached lup yet, so nothing there can be "
+            "told"
+        ),
     }
 
 
@@ -587,7 +611,12 @@ def test_the_demo_keeps_a_draft_and_sends_it_taking_what_it_covers_off_the_list_
     assert 51 not in numbers
     assert 52 not in numbers
     assert 53 in numbers
-    assert sent.json() == {
+    # One review, to the question's asker, which answers it; @52 read, telling its sender nothing.
+    reply = sent.json()
+    [review] = reply["items"]
+    assert review["recipient"]["agent"] == "a02"
+    assert review["reason"]["covers"] == [51, 52]
+    assert reply | {"items": []} == {
         "kind": "inbox-reviewed",
         "items": [],
         "read": [52],
@@ -595,6 +624,7 @@ def test_the_demo_keeps_a_draft_and_sends_it_taking_what_it_covers_off_the_list_
         "declined": [],
         "noted": [],
         "kept": [],
+        "unanswerable": [],
     }
     assert left.json()["draft"] == {
         "comments": [
@@ -607,6 +637,54 @@ def test_the_demo_keeps_a_draft_and_sends_it_taking_what_it_covers_off_the_list_
         "parked": [53],
         "marks": [],
     }
+
+
+def test_the_demo_answers_a_draft_as_the_host_does_a_mark_on_the_operator_s_own_item_dropped_and_said_beside_an_approval(
+    page: Path,
+) -> None:
+    demo = Demo(clock=Fixed(), size=0)
+    served = client(demo, page)
+    draft = {"kind": "inbox-keep-draft", "draft": {"done": [50, 54]}}
+    served.post("/api/ask", json=draft, headers=bearing())
+
+    sent = served.post("/api/ask", json={"kind": "inbox-send-draft"}, headers=bearing())
+
+    reply = Reviewed.model_validate(sent.json())
+    assert [each.number for each in reply.approved] == [54]
+    said = (
+        "@50 not marked done: it's a review from the operator, which a reply doesn't "
+        "answer"
+    )
+    assert [(each.number, each.part, each.said) for each in reply.unanswerable] == [
+        (50, "done", said)
+    ]
+    # Acted on as the host acts on it, the demo keeping what it would do.
+    assert demo.host.withheld.settled == [54]
+
+
+def test_the_demo_refuses_a_draft_declining_what_isnt_an_approval_or_a_held_change_whole_as_the_host_does(
+    page: Path,
+) -> None:
+    served = client(Demo(clock=Fixed(), size=0), page)
+    draft = {"kind": "inbox-keep-draft", "draft": {"declined": [52], "done": [54]}}
+    served.post("/api/ask", json=draft, headers=bearing())
+
+    sent = served.post("/api/ask", json={"kind": "inbox-send-draft"}, headers=bearing())
+
+    assert sent.json() == {
+        "kind": "refused",
+        "error": (
+            "the draft declines @52, a note: only an approval or a held change is "
+            "declined, anything else marked done or commented on"
+        ),
+    }
+    left = served.post("/api/ask", json={"kind": "inbox-draft"}, headers=bearing())
+    assert (left.json()["draft"]["declined"], left.json()["draft"]["done"]) == (
+        [52],
+        [54],
+    )
+    waiting = served.post("/api/ask", json={"kind": "inbox-list"}, headers=bearing())
+    assert {52, 54} <= {each["number"] for each in waiting.json()["items"]}
 
 
 def test_the_demo_reads_its_threads_as_the_host_does_and_the_operator_settles_one_and_answers_a_check(
@@ -681,7 +759,7 @@ def test_the_demo_reads_its_threads_as_the_host_does_and_the_operator_settles_on
     )
     assert refused.json() == {
         "kind": "refused",
-        "error": "the demo has no thread @9999",
+        "error": "the ledger holds no @9999",
     }
 
 
@@ -731,7 +809,10 @@ def test_the_demo_moves_frictions_and_how_it_felt_from_the_pile_into_a_thread_as
     refused = asked(MoveIntoThread(numbers=[51], thread=gate.number))
     assert refused == {
         "kind": "refused",
-        "error": "only frictions and how it felt are moved from the pile to read",
+        "error": (
+            "@51 is a question: only frictions and how it felt are moved from the "
+            "pile to read"
+        ),
     }
 
 

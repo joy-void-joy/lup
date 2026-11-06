@@ -27,7 +27,7 @@ from lup import events
 from lup.github.module import GitHub
 from lup.github.serving import GitHubServing
 from lup.tools.serving import Answer
-from lup_dev import Modules, Project
+from lup_dev import Core, Modules, Project, Versions
 from lup_dev.codescan.directives import HostIssues, IssueRef
 from lup_dev.declaration.resolve import resolve
 from lup_dev.declaration.serving import tools
@@ -235,9 +235,10 @@ def called(
     arguments: JsonValue,
     registered: Register,
     withheld: Withheld | None = PRIVATE,
+    modules: Modules | None = None,
 ) -> Answer:
     """Call one of the GitHub module's tools as the launch's repository's process calls it, `Private`'s list for the repository `withheld`, or none."""
-    declared = Project(modules=Modules.default().edit(GitHub()))
+    declared = Project(modules=modules or Modules.default().edit(GitHub()))
     layout = Layout(state=registered.worktree, data=registered.worktree)
     if withheld is not None:
         write_model(
@@ -627,15 +628,15 @@ def test_comment_gives_its_body_on_standard_input(gh: Gh, tmp_path: Path) -> Non
 
 
 def test_draft_pull_request_opens_a_draft_into_the_integration_branch(
-    gh: Gh, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    gh: Gh, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("LUP_INTEGRATION_BRANCH", "next")
     gh.answer("api graphql", '{"data":{"repository":{"ref":{"name":"feat-forge"}}}}')
     gh.answer("pr create", "https://github.com/joy-void-joy/lup/pull/70\n")
     answer = called(
         "draft_pull_request",
         {"branch": "feat-forge", "title": "GitHub's tools", "body": "Why."},
         launch(tmp_path),
+        modules=Modules.default().edit(Core(integration="next")),
     )
     assert answer == Answer(
         text=(
@@ -1395,3 +1396,27 @@ def test_a_post_whose_list_can_t_be_built_is_refused_saying_why(
         "  all of it - a list of private values that couldn't be built" in answer.text
     )
     assert gh.calls() == []
+
+
+def test_draft_pull_request_targets_dev_with_no_setting_and_with_live_running(
+    gh: Gh, tmp_path: Path
+) -> None:
+    gh.answer("api graphql", '{"data":{"repository":{"ref":{"name":"feat-forge"}}}}')
+    gh.answer("pr create", "https://github.com/joy-void-joy/lup/pull/70\n")
+    asked: JsonValue = {"branch": "feat-forge", "title": "Why", "body": "Why."}
+    plain = called("draft_pull_request", asked, launch(tmp_path))
+    running = called(
+        "draft_pull_request",
+        asked,
+        launch(tmp_path),
+        modules=Modules.default().add(Versions(running="live")),
+    )
+    expected = (
+        "Opened a draft pull request from `feat-forge` into `dev`: "
+        "https://github.com/joy-void-joy/lup/pull/70"
+    )
+    assert plain.text == expected
+    assert running.text == expected
+    [first, second] = [each for each in gh.calls() if each.arguments[0] == "pr"]
+    assert "--base=dev" in first.arguments
+    assert "--base=dev" in second.arguments

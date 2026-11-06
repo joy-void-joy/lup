@@ -165,13 +165,13 @@ def lost(event: type[SessionEvent]) -> Lost:
         "when it restarts,"
     )
     held = (
-        "A write lup held for the operator's review stays held, and their answer "
-        "reaches you at a later call."
+        "A write lup held for the operator's review still waits for their answer, "
+        "which reaches you beside a later call or through `wait_inbox`."
     )
     dropped = Lost(status=1, said=f"{gone} so its answer was lost.")
     unjudged = Lost(
         status=2,
-        said=f"{gone} so what was written is judged at your next call. {held}",
+        said=f"{gone} so what was written may not have been judged. {held}",
     )
     losses: dict[type[SessionEvent], Lost] = {
         SessionStarted: dropped,

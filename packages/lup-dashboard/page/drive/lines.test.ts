@@ -74,43 +74,8 @@ async function stepped(key: "j" | "k"): Promise<string[]> {
     return [...wrong, `${key} never reached the review's end`];
 }
 
-/**
- * Where the cursor's line is, by its number; each line a group's key lands on, a closed fold's line standing for the
- * groups under it; and the text's length, which says whether the review was laid out anew in between.
- */
-const groups = () =>
-    review.evaluate((view) => {
-        const doc = view.state.doc;
-        const found: number[] = [];
-        for (let number = 1; number <= doc.lines; number += 1) {
-            const line = doc.line(number);
-            if (line.text.startsWith("━━ ")) {
-                found.push(doc.lineAt(view.lineBlockAt(line.from).from).number);
-            }
-        }
-        return { here: doc.lineAt(view.state.selection.main.head).number, landings: [...new Set(found)], length: doc.length };
-    });
-
-/**
- * Press `keys`, `]g` or `[g`, from where the cursor is until no group is left that way, each press going to the next;
- * return what went otherwise. A step the review was laid out anew during, as an item arriving, is taken again from where
- * it landed, the lines having moved.
- */
-async function grouped(keys: ["]" | "[", "g"]): Promise<string[]> {
-    for (let step = 0; step < 500; step += 1) {
-        const from = await groups();
-        const next = keys[0] === "]" ? from.landings.find((each) => each > from.here) : from.landings.findLast((each) => each < from.here);
-        if (next === undefined) {
-            return [];
-        }
-        await dashboard.keys.press(keys);
-        const to = await groups();
-        if (to.length === from.length && to.here !== next) {
-            return [`${keys.join("")} from line ${from.here} went to ${to.here}, not ${next} (step ${step + 1})`];
-        }
-    }
-    return [`${keys.join("")} never reached the last group`];
-}
+/** The line the cursor is on, by its number. */
+const here = async () => (await position("j")).number;
 
 /** Put the cursor on the review's first line, or its last. */
 const to = async (end: "first" | "last") => {
@@ -132,9 +97,38 @@ describe("moving through the review grouped by thread, line by line, in headless
     });
 
     it("goes ]g and [g to each group in turn across the sections, a closed fold's line standing for the groups under it", async () => {
-        await to("first");
-        expect(await grouped(["]", "g"])).toEqual([]);
-        expect(await grouped(["[", "g"])).toEqual([]);
+        // Walked again where the review was laid out anew meanwhile, as the demo's arrivals lay it out, moving what's below.
+        for (let tried = 0; tried < 5; tried += 1) {
+            const length = await review.evaluate((view) => view.state.doc.length);
+            const landings = await review.evaluate((view) => {
+                const doc = view.state.doc;
+                const found: number[] = [];
+                for (let number = 1; number <= doc.lines; number += 1) {
+                    const line = doc.line(number);
+                    if (line.text.startsWith("━━ ")) {
+                        found.push(doc.lineAt(view.lineBlockAt(line.from).from).number);
+                    }
+                }
+                return [...new Set(found)];
+            });
+            await to("first");
+            const forward: number[] = [];
+            for (const _ of landings) {
+                await dashboard.keys.press(["]", "g"]);
+                forward.push(await here());
+            }
+            const back: number[] = [];
+            for (const _ of landings.slice(1)) {
+                await dashboard.keys.press(["[", "g"]);
+                back.push(await here());
+            }
+            if ((await review.evaluate((view) => view.state.doc.length)) === length) {
+                expect(forward).toEqual(landings);
+                expect(back).toEqual(landings.toReversed().slice(1));
+                return;
+            }
+        }
+        expect.unreachable("the review was laid out anew at every walk");
     });
 
     it("moves j and k exactly one line shown at a time with every section open, and a thread whole in open, its lines pointing to items above among it", async () => {

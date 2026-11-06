@@ -22,7 +22,10 @@ hold it, by the kind's type (`docs/declaration.md`, *Resolving it*):
 - the package age is `Core`'s own field, read from it by name, since a
   duration isn't a kind: another module's `timedelta` would be its own setting;
 - pyright's source is in the room's image where any module holds a
-  `PyrightSource`, as lup's own `LupDevelopment` does.
+  `PyrightSource`, as lup's own `LupDevelopment` does;
+- the branches are `Core`'s and `Versions`' own fields, read from each by name,
+  since a name isn't a kind, and a branch the project names is gated with the
+  refs the credentials gate (`gating`).
 
 Rule selections are kept as recorded, one per module beside the module's own
 default, for the engine to resolve.
@@ -78,11 +81,12 @@ from lup_dev.declaration.looks import CORE_LOOKS
 from lup_dev.declaration.module import Module
 from lup_dev.declaration.modules.core import Core
 from lup_dev.declaration.modules.shipped import default, shipped
+from lup_dev.declaration.modules.versions import Versions
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.requirements import Needed
 from lup_dev.declaration.runner import Plain, Prefixed, Runner
 from lup_dev.declaration.serving import ModuleServing, made_with, requests, tools
-from lup_dev.host.protocol import Bannered, Drawn, Limits, Looks
+from lup_dev.host.protocol import Bannered, Branches, Drawn, Limits, Looks
 
 
 class PathRoles(Model, extra="forbid"):
@@ -229,7 +233,10 @@ class Resolved(Model):
     limits: Limits
     """What the host does with the operator's credentials for a launched
     session without asking, and the refs no push updates: `Core`'s
-    `credentials`, resolved."""
+    `credentials`, resolved, the branches it names among the refs gated."""
+    branches: Branches = Branches()
+    """The integration branch and the one the host runs: `Core`'s and `Versions`'.
+    An approval keeps them, which is what the host reads (`Approval.branches`)."""
     guidance: list[Section]
     """The sections of guidance, in the order of their modules but where one is
     placed by another's name."""
@@ -573,6 +580,56 @@ def limited(found: list[Part[Credentials]]) -> Limits:
     return credentials.resolve(default)
 
 
+def named_branches(modules: list[Module]) -> Branches:
+    """Return the branches `modules` name: `Core`'s integration branch, and `Versions`' running branch, which without one is the integration branch.
+
+    >>> named_branches([Core(), Versions(running="live")])
+    Branches(integration='dev', running='live')
+    >>> named_branches([Core(integration="trunk"), Versions()])
+    Branches(integration='trunk', running='trunk')
+    """
+    integration = next(
+        module.integration for module in modules if isinstance(module, Core)
+    )
+    running = next(
+        (
+            module.running
+            for module in modules
+            if isinstance(module, Versions) and module.running is not None
+        ),
+        integration,
+    )
+    return Branches(integration=integration, running=running)
+
+
+def gating(limits: Limits, modules: list[Module]) -> Limits:
+    """Return `limits` with each branch a project names among the refs gated, after those it has: `land` lands only on a gated branch, `delete-merged` never deletes one, and saying one branch twice is what a declaration shouldn't have to do.
+
+    Only a branch some layer named joins them, so `Core`'s default isn't added
+    back to a project that dropped `refs/heads/dev` from its gated refs.
+
+    >>> gating(Limits(actions=[], protected=[], gated=["refs/heads/dev"]), [Core(integration="trunk"), Versions(running="dev")]).gated
+    ['refs/heads/dev', 'refs/heads/trunk']
+    >>> gating(Limits(actions=[], protected=[], gated=[]), [Core()]).gated
+    []
+    """
+    named = [
+        *(
+            module.integration
+            for module in modules
+            if isinstance(module, Core) and "integration" in set_fields(module)
+        ),
+        *(
+            module.running
+            for module in modules
+            if isinstance(module, Versions) and module.running is not None
+        ),
+    ]
+    refs = [f"refs/heads/{each}" for each in named]
+    gated = list(dict.fromkeys([*limits.gated, *refs]))
+    return limits.model_copy(update={"gated": gated})
+
+
 def checked(modules: list[Module]) -> list[Module]:
     """Return `modules` once `Core` and every module required are among them."""
     if not any(type(module) is Core for module in modules):
@@ -716,7 +773,8 @@ def resolve(project: Project) -> Resolved:
         package_age=next(
             module.package_age for module in modules if isinstance(module, Core)
         ),
-        limits=limited(parts(modules, Credentials)),
+        limits=gating(limited(parts(modules, Credentials)), modules),
+        branches=named_branches(modules),
         guidance=held(Guidance(), parts(modules, Guidance), "Guidance"),
         repositories=neighbours(modules),
         held=project.held,

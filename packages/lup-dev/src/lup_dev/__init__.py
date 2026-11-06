@@ -51,6 +51,7 @@ from lup_dev.declaration.module import Module, Modules
 from lup_dev.declaration.modules.code_rules import CodeRules
 from lup_dev.declaration.modules.core import Core
 from lup_dev.declaration.modules.python import Python
+from lup_dev.declaration.modules.versions import Versions
 from lup_dev.declaration.package_managers.uv import Uv
 from lup_dev.declaration.profiles import (
     Lend,
@@ -127,4 +128,5 @@ __all__ = [
     "Tools",
     "Uv",
     "Values",
+    "Versions",
 ]

@@ -424,7 +424,7 @@ class Approval(Model):
     """The zone's fingerprint: a launch asking about the same zone joins the
     approval waiting for it."""
     pushed_by: Conversation | None = None
-    """The main conversation of the session whose push to the integration branch
+    """The main conversation of the session whose push to the running branch
     asked it, which the operator's comment on their answer is told to; none for
     one a launch asked at its terminal."""
     typing: bool = False
@@ -499,9 +499,11 @@ class HeldChange(Model):
 class Flagged(Model):
     """A write that landed flagged for the operator's review, holding no one: what the file's whole change since the item was made flags, its diff and the file kept beside the item (`Inbox.diff`, `Inbox.files`).
 
-    The judge's (`lup_dev.policy.flags`). A later write to the same file by the
-    same conversation, flagged or not, joins the item while it gathers them
-    (`Inbox.gathering`), the file kept whole since the first and as it stands.
+    The judge's (`lup_dev.policy.flags`), or a landing's, of a file its own diff
+    asks about by its role (`Lander.asks`, `lup_dev.policy.landing`). A later write
+    to the same file by the same conversation, flagged or not, joins the item while
+    it gathers them (`Inbox.gathering`), the file kept whole since the first and as
+    it stands.
     Marked read with nothing to add, it's approved (`Decided`); commented on or
     replied to, it's read and not approved (`Done`), and the landing of its
     branch waits on it (`lup_dev.policy.landing`). Still waiting once it's left
@@ -530,6 +532,12 @@ class Flagged(Model):
     """How many writes it gathers, the flagged one that made it and each by the
     same conversation to the file since: the page reads its file again as it
     grows."""
+    version: str | None = None
+    """git's id for the file's content, for a flag a landing made from its own
+    diff: the version it asks about, which tells a binary file's apart, its
+    content not being kept (`Lander.asks`, `lup_dev.policy.landing`). None for
+    the judge's, and where the landing deletes the file, the file kept beside
+    the item saying what it holds."""
 
 
 class Quote(Model):
@@ -863,6 +871,12 @@ class Done(Model):
     at: datetime
 
 
+class ReviewedAt(Model):
+    """The version of its file a flagged write was approved at, by marking the file reviewed in its agent's drawer: git's id for it, none where they approved its deletion."""
+
+    version: str | None
+
+
 class Decided(Model):
     """An approval or a held change the operator answered, wherever they answered it: yes or no, and what they add; or a flagged write they approved, marking it read with nothing to add."""
 
@@ -870,10 +884,15 @@ class Decided(Model):
     at: datetime
     approved: bool
     comment: str = ""
+    reviewed: ReviewedAt | None = None
+    """For a flagged write approved by marking its file reviewed, the version
+    they marked, which may not be the one kept beside the item: what they
+    approved, and all they approved (`Baseline.approves`,
+    `lup_dev.policy.landing`). None where they approved what the item keeps."""
 
 
 class Superseded(Model):
-    """An approval of a host zone a later approval of the same repository replaced, the integration branch's tip having moved; a hold at landing a later landing's hold on the same file replaced; or lup's word on citations that didn't resolve, its item edited before it was told, its citations read again."""
+    """An approval of a host zone a later approval of the same repository replaced, the running branch's tip having moved; a hold at landing a later landing's hold on the same file replaced; or lup's word on citations that didn't resolve, its item edited before it was told, its citations read again."""
 
     state: Literal["superseded"] = "superseded"
     at: datetime
