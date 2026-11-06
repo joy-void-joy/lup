@@ -1116,6 +1116,10 @@ class Layout(Model):
         """Say where the verdict log of a repository lives, by its git directory."""
         return self.repository(repository) / "verdicts.jsonl"
 
+    def trial(self, repository: Path) -> Path:
+        """Say where what's on trial in a repository is kept, by its git directory: the host's alone, so no room says what `live` holds (`lup_dev.trial`)."""
+        return self.repository(repository) / "trial.json"
+
     def reviewed(self, repository: Path) -> ReviewedLayout:
         """Say where the versions of a repository's files the operator marked reviewed are kept, by its git directory."""
         return ReviewedLayout(home=self.repository(repository) / "reviewed")

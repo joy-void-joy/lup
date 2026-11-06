@@ -240,6 +240,14 @@ def stray(objects: Path) -> list[Path]:
     return [*alternates, *linked()]
 
 
+def refs_astray(git: Git) -> str | None:
+    """Say why git mustn't write a ref of the repository: a link under its `refs/`, which it would write through, and a room writes `refs/`; none where there's none (`stray`), or `git` isn't pinned to the repository."""
+    found = [] if git.common is None else stray(git.common / "refs")
+    if not found:
+        return None
+    return f"its refs hold a link, {', '.join(str(each) for each in found)}"
+
+
 class Git(Model):
     """git, run in one place with what could run code turned off."""
 
