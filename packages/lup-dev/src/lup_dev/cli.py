@@ -91,7 +91,7 @@ from lup_dev.gate import (
 )
 from lup_dev.gate import Ran as GateRan
 from lup_dev.git import Git, nul_separated
-from lup_dev.host.client import Detached, FromRoom, HostClient, RoomClient
+from lup_dev.host.client import FromRoom, HostClient, RoomClient
 from lup_dev.host.copying import Copying
 from lup_dev.host.courier import (
     Courier,
@@ -283,6 +283,9 @@ from lup_dev.remote.protocol import routes as remote_routes
 from lup_dev.settings import LupDevSettings, TerminalVariables
 from lup_dev.staging import Changed, Lines, StagingError
 from lup_dev.stored import read_model, write_model
+from lup_dev.switching import (
+    host_starter,
+)
 from lup_dev.worker import RepositoryModules, worked
 from lup_ledger.parties import Conversation as InboxConversation
 from lup_ledger.parties import Party
@@ -512,9 +515,10 @@ def hook(
 
 
 def host_client() -> HostClient:
-    """Return the host service's client, as this machine places the service."""
+    """Return the host service's client, as this machine places the service, the copy approved being what it starts."""
+    layout = Layout.of(LupDevSettings())
     return HostClient(
-        layout=Layout.of(LupDevSettings()).host, clock=SystemClock(), starter=Detached()
+        layout=layout.host, clock=SystemClock(), starter=host_starter(layout)
     )
 
 
@@ -2443,7 +2447,7 @@ def launching(say: Callable[[str], None]) -> Launcher:
     return Launcher(
         layout=layout,
         trust=trust,
-        host=HostClient(layout=layout.host, clock=clock, starter=Detached()),
+        host=HostClient(layout=layout.host, clock=clock, starter=host_starter(layout)),
         podman=Podman(),
         tools=Machine(),
         clock=clock,
@@ -3287,7 +3291,11 @@ def trust() -> None:
     approved before keeps running. Where nothing changed, it says so and stops.
     """
     inside = [runtime.name() for runtime in runtimes() if runtime.inside()]
-    typer.echo(trusted(toplevel(Path.cwd()), inside).report())
+    trust = machine_trust(toplevel(Path.cwd()), inside)
+    typer.echo(trust.ensure().report())
+    kept = trust.kept_first()
+    if kept is not None:
+        typer.echo(kept)
 
 
 @app.command("verdicts")

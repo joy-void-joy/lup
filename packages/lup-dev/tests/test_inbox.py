@@ -4050,7 +4050,12 @@ def test_a_reading_command_in_an_agents_session_says_no_service_runs_and_starts_
     arguments: list[str],
 ) -> None:
     starter = Recording()
-    monkeypatch.setattr(cli, "Detached", lambda: starter)
+
+    def starting(layout: Layout) -> Recording:
+        del layout
+        return starter
+
+    monkeypatch.setattr(cli, "host_starter", starting)
     monkeypatch.setenv(variable, "1")
     result = runner.invoke(cli.app, arguments)
     assert isinstance(result.exception, HostError), (result.output, runtime)
@@ -4066,7 +4071,12 @@ def test_a_reading_command_in_the_operators_terminal_starts_the_service_where_no
     machine: Layout, monkeypatch: pytest.MonkeyPatch, arguments: list[str]
 ) -> None:
     starter = Recording()
-    monkeypatch.setattr(cli, "Detached", lambda: starter)
+
+    def starting(layout: Layout) -> Recording:
+        del layout
+        return starter
+
+    monkeypatch.setattr(cli, "host_starter", starting)
     result = runner.invoke(cli.app, arguments)
     assert isinstance(result.exception, HostError)
     assert "the host service didn't answer" in str(result.exception)
