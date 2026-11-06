@@ -211,9 +211,9 @@ def test_each_thread_s_section_says_what_asks_the_operator_what_s_new_and_the_pi
     assert sorted(read) == ["docs", "lag", "lead", "voice"]
     lag, voice, root, docs = read["lag"], read["voice"], read["lead"], read["docs"]
     assert (lag.section, lag.state) == ("waiting on you", "waiting on the operator")
-    assert [(each.node, each.what) for each in lag.asks] == [
-        (work.question, "a question"),
-        (work.check, "a check"),
+    assert [(each.node, each.what, each.holds) for each in lag.asks] == [
+        (work.question, "a question", True),
+        (work.check, "a check", False),
     ]
     assert lag.since == lag.asks[0].came
     assert (voice.section, voice.state, voice.asks) == (

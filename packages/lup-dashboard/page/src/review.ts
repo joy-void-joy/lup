@@ -2169,7 +2169,7 @@ export function laid(
             const toldFrom = w.at;
             if (status !== null && status.kind === "ledger:done") {
                 const [first = "", ...rest] = status.to_try.split("\n");
-                asides.push({ kind: "to-try", ...w.line(`◆ to try: ${first}`, `${id} to try`) });
+                asides.push({ kind: "to-try", ...w.line(`◇ to try: ${first}`, `${id} to try`) });
                 for (const line of rest) {
                     asides.push({ kind: "to-try", ...w.line(`${SET_IN}${line}`, `${id} to try`) });
                 }
@@ -2421,7 +2421,7 @@ export function laid(
         }
         const named = only?.thread.thread.name ?? `${number}`;
         const id = `checks ${number}`;
-        const said = `◆ ${checks.length} checks in @${named}`;
+        const said = `◇ ${checks.length} checks in @${named}`;
         const summary = w.line(said, id);
         asides.push({ kind: "check", ...summary });
         const children: Placed[] = [];
@@ -2441,7 +2441,7 @@ export function laid(
         const id = `check ${check.check.number}`;
         const answer = check.answer ?? null;
         const [first = "", ...rest] = check.check.text.split("\n");
-        const head = w.line(`${answer === null ? "◆" : "✓"} check ${cited(check.check.number)}${of === null ? "" : ` in @${of}`}: ${first}`, id);
+        const head = w.line(`${answer === null ? "◇" : "✓"} check ${cited(check.check.number)}${of === null ? "" : ` in @${of}`}: ${first}`, id);
         asides.push({ kind: answer === null ? "check" : "checked", ...head });
         for (const line of rest) {
             asides.push({ kind: "check-text", ...w.line(`${SET_IN}${line}`, id) });
@@ -2649,7 +2649,7 @@ export function laid(
                 const status = each.status ?? null;
                 const toTry = status !== null && status.kind === "ledger:done" ? (status.to_try.split("\n")[0] ?? "") : "";
                 const confirm = `confirm ${each.thread.number}`;
-                const line = w.line(`◆ @${each.thread.name} is done, to confirm: ${toTry} · gt goes there`, confirm);
+                const line = w.line(`◇ @${each.thread.name} is done, to confirm: ${toTry} · gt goes there`, confirm);
                 asides.push({ kind: "to-try", ...line });
                 confirmLines.push({ ...line, thread: each });
                 node.children.push(part(confirm, "frame", line.from, line.to));

@@ -15,6 +15,7 @@ export interface Said {
     recipient: string;
     state: string;
     asks: boolean;
+    holds: boolean;
     offers: Item["offers"];
     spent: Item["spent"];
 }
@@ -23,18 +24,15 @@ export interface Said {
 export const KINDS = declared as unknown as Said[];
 
 /** An item as a test writes it: all but what the host says of it. */
-export type Written = Omit<Item, "asks" | "offers" | "spent"> & Partial<Pick<Item, "asks" | "offers" | "spent">>;
+export type Written = Omit<Item, "asks" | "holds" | "offers" | "spent"> & Partial<Pick<Item, "asks" | "holds" | "offers" | "spent">>;
 
-/** Say which of a message's kinds a kind's rows are of: a copy of one between agents, a note, or one asking; none for what's no message. */
+/** Say which of a message's kinds a kind's rows are of: a copy of one between agents, whichever kind it is, or its own kind; none for what's no message. */
 function asking(kind: string | null, to: boolean): string | null {
-    if (to) {
-        return "copy";
-    }
-    return kind === null ? null : kind === "note" ? "note" : "asks";
+    return to ? "copy" : kind;
 }
 
 /**
- * Return `item` with what the host says of it, numbered as it is: whether it asks, its offers, each answer of its kind
+ * Return `item` with what the host says of it, numbered as it is: whether it asks, whether it holds, its offers, each answer of its kind
  * while it waits on the operator, and what's spent on one replaced, by the row of `kinds.json` of its kind and sender.
  */
 export function hosted(item: Written): Item {
@@ -53,6 +51,7 @@ export function hosted(item: Written): Item {
     return {
         ...item,
         asks: waits && found.asks,
+        holds: waits && found.holds,
         offers: named(waits ? found.offers : found.offers.filter((each) => each.verb === "comment")),
         spent: state === "superseded" && answered ? named(of("conversation", "superseded")?.spent ?? []) : [],
     };

@@ -4,7 +4,7 @@
 // an agent's answer to them. Each a summary, what it is and, for a message between conversations, whom it went to; and
 // a body, its text as written, a question's decisions numbered with their leans. Pure.
 import type { components } from "../generated/api";
-import type { Answer, Span, View } from "../views";
+import { NOTHING_WAITS, type Answer, type Span, type View } from "../views";
 import type { OfItem } from "./judge";
 
 type Item = components["schemas"]["Item"];
@@ -77,7 +77,7 @@ function itemView(name: string, reason: Item["reason"]["reason"]): View<OfItem> 
                 blocks: {
                     summary,
                     waiting: false,
-                    count: 0,
+                    tally: NOTHING_WAITS,
                     offers: [],
                     blocks: [{ block: "markdown", id: "text", version: null, offers: [], text: body(item), tone: "plain" }],
                 },

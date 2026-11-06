@@ -4,7 +4,7 @@
 // tokens in use against their model's window (`◔ 112k/1M`). Each from what the page last read of the agent's record. Pure.
 import { ring } from "../agents";
 import type { components } from "../generated/api";
-import { conversationOf, whose, type Line, type OfAgent, type Span, type View } from "../views";
+import { conversationOf, NOTHING_WAITS, whose, type Line, type OfAgent, type Span, type View } from "../views";
 
 type Task = components["schemas"]["Task"];
 
@@ -34,7 +34,7 @@ export const TASKS: View<OfAgent> = {
             const said = task.status === "in_progress" ? (task.active ?? task.subject) : task.subject;
             return { block: "line", id: `task ${task.id}`, version: null, offers: [], spans: [{ text: `${TASK_MARKS[task.status]} ${said}`, tone: "task" }] };
         });
-        return { blocks: { summary: [{ text: `tasks ${done}/${tasks.length}`, tone: "plain" }], waiting: false, count: 0, offers: [], blocks: lines } };
+        return { blocks: { summary: [{ text: `tasks ${done}/${tasks.length}`, tone: "plain" }], waiting: false, tally: NOTHING_WAITS, offers: [], blocks: lines } };
     },
 };
 
@@ -54,6 +54,6 @@ export const BANNER: View<OfAgent> = {
             ...(usage === null ? [] : [[{ text: ring(usage.used, usage.window), tone: "plain", gauge: { used: usage.used, of: usage.window ?? null } }]]),
         ];
         const summary = parts.flatMap((each, at) => (at === 0 ? each : [{ text: " · ", tone: "plain" }, ...each]));
-        return { blocks: { summary, waiting: false, count: 0, offers: [], blocks: [] } };
+        return { blocks: { summary, waiting: false, tally: NOTHING_WAITS, offers: [], blocks: [] } };
     },
 };

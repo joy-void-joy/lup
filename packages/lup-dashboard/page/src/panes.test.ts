@@ -303,7 +303,7 @@ describe("the list by agent", () => {
     it("counts what's drafted to an agent or on their items", () => {
         const draft: Draft = { ...EMPTY, comments: [{ id: "c1", item: 51, quote: null, text: "Pydantic." }], letters: [{ id: "m1", to: WORKER, text: "Go on." }] };
         const laidOut = listLaid(listedByAgent(reading(draft)));
-        expect(laidOut.text.split("\n").find((each) => each.includes("a1"))).toContain("»2");
+        expect(laidOut.text.split("\n").find((each) => each.includes("a1"))).toContain("¶2");
     });
 
     it("opens each row's buffer, and says which rows are written to", () => {
@@ -322,6 +322,80 @@ describe("the list by agent", () => {
         for (const each of laidOut.marks) {
             expect(laidOut.text.slice(each.from, each.to)).not.toContain("\n");
         }
+    });
+});
+
+describe("the list's marks", () => {
+    const AGENT = from("marked");
+    const asking = (number: number, reason: unknown) => item(number, AGENT, reason as Item["reason"], WAITING);
+    const message = (number: number, kind: string) => asking(number, { reason: "message", passages: [], answers: [], ending: false, kind, text: `A ${kind}.`, to: null });
+    const change = (reason: string) => ({ reason, text: "?", summary: "", repository: REPOSITORY, fingerprint: "f", worktree: "/w", key: "k" });
+    const reader = (shown: Item[], rest: Partial<ListReading> = {}): ListReading => ({ ...reading(), items: shown, agents: [AGENT], parents: new Map(), running: running(AGENT), states: new Map(), ...rest });
+    const rowOf = (shown: Item[], rest: Partial<ListReading> = {}) => {
+        const laidOut = listLaid(listedByAgent(reader(shown, rest)));
+        const at = laidOut.text.indexOf("marked");
+        const end = laidOut.text.indexOf("\n", at);
+        return {
+            text: laidOut.text.slice(at, end),
+            marks: laidOut.marks.filter((each) => each.from >= at && each.to <= end && each.look !== "list-name").map((each) => [laidOut.text.slice(each.from, each.to), each.look]),
+        };
+    };
+
+    it("marks what holds something stopped solid and orange: a question, a problem, a held change, an approval", () => {
+        const items = [asking(51, { reason: "question", text: "Which?", decisions: [] }), message(52, "problem"), asking(53, change("held")), asking(54, change("approval"))];
+        expect(rowOf(items).marks).toEqual([["◆4", "mark-waiting"]]);
+        const list = listLaid(listedByAgent(reader(items))).text;
+        expect(list).toContain("◆ @51 question");
+        expect(list).toContain("◆ @52 problem");
+    });
+
+    it("marks what wants the operator's eyes with nothing stopped hollow and orange: a disagreement, a question that waits on no answer", () => {
+        const items = [message(52, "disagreement"), message(53, "question")];
+        expect(rowOf(items).marks).toEqual([["◇2", "mark-asking"]]);
+        const laidOut = listLaid(listedByAgent(reader(items)));
+        expect(laidOut.text).toContain("◇ @52 disagreement");
+        // Their nest opens all the same: they ask.
+        expect(listedByAgent(reader(items)).find((each) => each.id === `agent ${whoseOf(AGENT)}`)?.under?.closed).toBe(false);
+    });
+
+    describe("in what their \"since you approved\" holds", () => {
+        const file = (path: string, rest: object) => ({ path, version: `${path}1`, flags: [], file: { path, before: null, after: { kind: "text", text: "x = 1\n" }, reading: { role: "production", asks: [], findings: [] } }, ...rest });
+        const since = (...files: object[]) => new Map([[whoseOf(AGENT), { since: { kind: "policy-since", places: [{ worktree: "/w", branch: "feat", files }] } }]]) as unknown as Drawers;
+        const HELD_FILE = { held: { lands: "feat", onto: "dev", at: AT } };
+
+        it("counts each file once, by what it is: a landing's solid, a flagged one hollow and orange, the rest hollow and cyan", () => {
+            const drawers = since(file("held.py", HELD_FILE), file("flagged.py", { flags: [70] }), file("seen.py", { flags: [71], file: null }), file("plain.py", {}), file("other.py", {}));
+            expect(rowOf([], { drawers }).marks).toEqual([
+                ["◆1", "mark-waiting"],
+                ["◇2", "mark-asking"],
+                ["◇2", "mark-to-review"],
+            ]);
+        });
+
+        it("counts neither a file the judge's role folds, asking nothing, nor one reviewed", () => {
+            const drawers = since(file("test_a.py", { level: "automatic" }), file("kept.py", { file: null }));
+            expect(rowOf([], { drawers }).marks).toEqual([]);
+        });
+    });
+
+    it("draws what they've drafted apart and muted, before what stands, which stays where it is as they write", () => {
+        const items = [asking(51, { reason: "question", text: "Which?", decisions: [] }), note(52, AGENT, "News.")];
+        const bare = rowOf(items);
+        const draft: Draft = { ...EMPTY, comments: [{ id: "c1", item: 51, quote: null, text: "This." }], letters: [{ id: "m1", to: AGENT, text: "Go on." }] };
+        const written = rowOf(items, { draft });
+        expect(written.marks).toEqual([["¶2", "list-written"], ["◆1", "mark-waiting"], ["•1", "mark-news"]]);
+        expect(written.text).toMatch(/¶2 {2}◆1 •1$/);
+        expect(written.text.length).toBe(bare.text.length);
+        expect(written.text.slice(written.text.indexOf("◆"))).toBe(bare.text.slice(bare.text.indexOf("◆")));
+        // On the item's row, its comment is as quiet; the rest of the draft in its own colour.
+        const laidOut = listLaid(listedByAgent(reader(items, { draft: { ...draft, done: [51] } })));
+        const row = laidOut.text.indexOf("@51");
+        expect(laidOut.marks.filter((each) => each.from >= row && each.to <= laidOut.text.indexOf("\n", row) && ["list-written", "outline-draft"].includes(each.look)).map((each) => [laidOut.text.slice(each.from, each.to), each.look])).toEqual([[" ¶", "list-written"], [" ✓", "outline-draft"]]);
+    });
+
+    it("draws no status for what's drafted alone, nor counts it among what waits", () => {
+        const draft: Draft = { ...EMPTY, letters: [{ id: "m1", to: AGENT, text: "Go on." }] };
+        expect(rowOf([], { draft }).marks).toEqual([["¶1", "list-written"]]);
     });
 });
 
@@ -435,7 +509,7 @@ describe("the checks, going by agent", () => {
         state: "waiting on the operator",
         section: "waiting on you",
         since: AT,
-        asks: [{ node: 311, what: "a check", came: AT }],
+        asks: [{ node: 311, what: "a check", came: AT, holds: false }],
         answering: null,
     } as unknown as ThreadRead;
     const CHECK: OwnedCheck = { thread: THREAD, check: { check: { kind: "ledger:check", number: 311, name: null, text: "Search a long record.", repository: REPOSITORY, by: WORKER, at: AT }, answer: null } as unknown as OwnedCheck["check"] };
@@ -456,7 +530,7 @@ describe("the checks, going by agent", () => {
 
     it("sits in its owner's own buffer, naming its thread, and where they've ended, under No agent", () => {
         const own = checked({ kind: "agent", key: whoseOf(LEAD) }, [{ ...CHECK, thread: heldByLead }]);
-        expect(own.text).toContain("◆ check @311 in @reader: Search a long record.");
+        expect(own.text).toContain("◇ check @311 in @reader: Search a long record.");
         expect(own.checks.map((each) => each.check.check.number)).toEqual([311]);
         expect(checked({ kind: "party", name: "no agent" }).text).toContain("check @311");
         expect(checked({ kind: "agent", key: whoseOf(LEAD) }).text).not.toContain("check @311");
@@ -466,8 +540,9 @@ describe("the checks, going by agent", () => {
         const out = checked({ kind: "for you" });
         expect(out.text).toContain("check @311");
         const list = listLaid(listedByAgent({ ...reading(), checks: [CHECK] }));
-        expect(list.text.split("\n")[0]).toContain("◆2");
-        expect(list.text.split("\n").find((each) => each.includes("s2"))).toContain("◆1");
+        // A check stops nobody: it's flagged, beside the worker's question, which holds.
+        expect(list.text.split("\n")[0]).toContain("◆1 ◇1");
+        expect(list.text.split("\n").find((each) => each.includes("s2"))).toContain("◇1");
         // No row of its own: it's its task's, which counts it.
         expect(list.text).not.toContain("check @311");
     });
@@ -502,7 +577,7 @@ describe("the checks, going by agent", () => {
             { ...CHECK, thread: heldByLead },
             { ...second, thread: heldByLead },
         ]);
-        expect(out.text).toContain("◆ 2 checks in @reader");
+        expect(out.text).toContain("◇ 2 checks in @reader");
         const fold = out.outer.find((each) => each.of === "checks 302");
         expect(fold?.closed).toBe(true);
         expect(out.text.slice(fold?.from, fold?.to)).toContain("check @311: Search a long record.");
@@ -536,7 +611,7 @@ describe("the list by thread", () => {
             ...read,
         } as ThreadRead;
     }
-    const READER = thread(302, "reader", { state: "waiting on the operator", section: "waiting on you", asks: [{ node: 51, what: "a question", came: AT }] as ThreadRead["asks"] });
+    const READER = thread(302, "reader", { state: "waiting on the operator", section: "waiting on you", asks: [{ node: 51, what: "a question", came: AT, holds: true }] as ThreadRead["asks"] });
     const CHILD = (() => {
         const made = thread(303, "child", { new: [70] });
         return { ...made, thread: { ...made.thread, parent: 302 } } as ThreadRead;
@@ -579,7 +654,7 @@ describe("the list by thread", () => {
 
     it("lists each task, by agent, under whoever owns it, a line each, quiet but for what waits on the operator", () => {
         const owner = (agent: Conversation) => {
-            const made = thread(310, "owned", { answering: agent, asks: [{ node: 51, what: "a question", came: AT }] as ThreadRead["asks"], state: "waiting on the operator" });
+            const made = thread(310, "owned", { answering: agent, asks: [{ node: 51, what: "a question", came: AT, holds: true }] as ThreadRead["asks"], state: "waiting on the operator" });
             return { ...made, thread: { ...made.thread, holder: agent } } as ThreadRead;
         };
         const quietly = thread(311, "quiet", { answering: LEAD });
@@ -646,10 +721,10 @@ describe("the list by thread", () => {
         const finished = thread(315, "finished", { answering: LEAD, state: "done to confirm", status: { kind: "ledger:done", to_try: "Read the voice section.\nThen the next." } as NonNullable<ThreadRead["status"]> });
         const done = { ...finished, thread: { ...finished.thread, holder: LEAD } } as ThreadRead;
         const out = laid(ITEMS, [LEAD, WORKER], banner, header, EMPTY, NOTHING, [], new Map(), called, { showing: { kind: "agent", key: whoseOf(LEAD) }, running: running(LEAD, WORKER), looks: adopted(), confirming: [done] });
-        expect(out.text).toContain("◆ @finished is done, to confirm: Read the voice section. · gt goes there");
+        expect(out.text).toContain("◇ @finished is done, to confirm: Read the voice section. · gt goes there");
         expect(out.confirms.map((each) => each.thread.thread.number)).toEqual([315]);
         const rows = listLaid(listedByAgent({ ...reading(), threads: { ...threads, read: { ...threads.read, threads: [done] } } }));
-        expect(rows.text.split("\n")[0]).toContain("◆2");
+        expect(rows.text.split("\n")[0]).toContain("◆1 ◇1");
     });
 
     it("lays out one thread's own buffer: open, whoever answers named on its last line", () => {

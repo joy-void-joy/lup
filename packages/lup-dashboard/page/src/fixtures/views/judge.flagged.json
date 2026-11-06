@@ -95,7 +95,11 @@
         }
       ],
       "waiting": false,
-      "count": 0,
+      "tally": {
+        "holds": 0,
+        "flagged": 0,
+        "review": 0
+      },
       "offers": [],
       "blocks": [
         {

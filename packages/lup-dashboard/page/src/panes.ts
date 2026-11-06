@@ -38,7 +38,7 @@ import {
 } from "./review";
 import { currentTask } from "./views/adapters";
 import { mount } from "./views/index";
-import type { Remote, Running, Shown } from "./views";
+import { NOTHING_WAITS, type BlocksTally, type Remote, type Running, type Shown } from "./views";
 
 export type { Showing };
 
@@ -73,20 +73,24 @@ export function bufferKey(showing: Showing): string {
     }
 }
 
-/** How much of what a row stands for waits on the operator: what asks them, what's news, the files to review, the pile to read; and what they've drafted there. */
-export interface Tally {
-    asks: number;
+/**
+ * How much of what a row stands for waits on the operator, each counted once by what it is to them: what stays stopped
+ * until they answer it (an approval, a held change, a question, a problem, a file a landing waits on); what's flagged for
+ * their eyes, with nothing stopped (a file with flagged writes, a check, a thread done for them to confirm, a
+ * disagreement, a question that waits on no answer); the files to review with nothing holding them; what's news; the pile
+ * to read; and, no status at all, what they've drafted there themselves.
+ */
+export interface Tally extends BlocksTally {
     news: number;
-    files: number;
     pile: number;
     written: number;
 }
 
-const NOTHING: Tally = { asks: 0, news: 0, files: 0, pile: 0, written: 0 };
+const NOTHING: Tally = { ...NOTHING_WAITS, news: 0, pile: 0, written: 0 };
 
 /** Return `tallies` added up. */
 function added(tallies: readonly Tally[]): Tally {
-    return tallies.reduce((sum, each) => ({ asks: sum.asks + each.asks, news: sum.news + each.news, files: sum.files + each.files, pile: sum.pile + each.pile, written: sum.written + each.written }), NOTHING);
+    return tallies.reduce((sum, each) => ({ holds: sum.holds + each.holds, flagged: sum.flagged + each.flagged, review: sum.review + each.review, news: sum.news + each.news, pile: sum.pile + each.pile, written: sum.written + each.written }), NOTHING);
 }
 
 /** A stretch of a row's line, in the look it's drawn in, a class of the review's. */
@@ -119,23 +123,24 @@ export interface Row {
 /** How wide the list writes a row, tallies at its end, in characters. */
 const COLUMNS = 46;
 
-/** The glyphs of how a row stands, as the overview's (`Outline.tsx`). */
-const WAITING = "◆";
-const NEWS = "•";
-const TO_REVIEW = "◇";
+/** What the pile to read is marked with, which only the list counts. */
 const PILE = "≈";
-const WRITTEN = "»";
 
-/** Return the stretches of `tally`, each count in its colour; none where nothing's counted. */
+/**
+ * Return the stretches of `tally`, each count in its colour, at the row's end, what stands in the order it asks of the
+ * operator; what they've drafted before them, muted and set apart, being no status, so what stands stays where it is as
+ * they write. None where nothing's counted.
+ */
 function tallied(tally: Tally): Stretch[] {
-    const each = [
-        { count: tally.asks, glyph: WAITING, look: "mark-waiting" },
-        { count: tally.news, glyph: NEWS, look: "mark-news" },
-        { count: tally.files, glyph: TO_REVIEW, look: "mark-to-review" },
+    const standing = [
+        { count: tally.holds, glyph: GLYPHS.waiting, look: "mark-waiting" },
+        { count: tally.flagged, glyph: GLYPHS.asking, look: "mark-asking" },
+        { count: tally.review, glyph: GLYPHS["to-review"], look: "mark-to-review" },
+        { count: tally.news, glyph: GLYPHS.news, look: "mark-news" },
         { count: tally.pile, glyph: PILE, look: "mark-pile" },
-        { count: tally.written, glyph: WRITTEN, look: "outline-draft" },
     ].filter((one) => one.count > 0);
-    return each.flatMap((one, at) => [...(at === 0 ? [] : [{ text: " " }]), { text: `${one.glyph}${one.count}`, look: one.look }]);
+    const marks = standing.flatMap((one, at) => [...(at === 0 ? [] : [{ text: " " }]), { text: `${one.glyph}${one.count}`, look: one.look }]);
+    return tally.written === 0 ? marks : [{ text: `${DRAFTED.comment.glyph}${tally.written}`, look: "list-written" }, ...(marks.length === 0 ? [] : [{ text: "  " }]), ...marks];
 }
 
 /** Return the stretches of a row's first line: `left`, cut where it's too long, then its tally at the list's width. */
@@ -218,28 +223,36 @@ function confirmingOf(key: string, reading: Pick<ListReading, "threads">): Threa
     return tasksOf(key, reading).filter((each) => each.state === "done to confirm");
 }
 
-/** Return how the agent `group` is of stands: what of theirs asks the operator, what's news, what's left to review in their "since you approved", and what's drafted to them. */
+/** Return what of the agent `group` is of asks the operator from what's nested under their row: their items, what stays stopped until they're answered apart from what only wants their eyes, their checks and their threads done, for them to confirm, among that. */
+function askedOf(group: Grouping, reading: ListReading): Pick<BlocksTally, "holds" | "flagged"> {
+    const parked = reading.draft.parked ?? [];
+    const asking = group.items.filter((each) => !parked.includes(each.number) && toAnswer(each, reading.draft));
+    const holds = asking.filter((each) => each.holds).length;
+    return { holds, flagged: asking.length - holds + checksWaiting(group.key, reading) + confirmingOf(group.key, reading).length };
+}
+
+/** Return how the agent `group` is of stands: what of theirs waits on the operator, what's asked of them and what their "since you approved" holds, what's news, and what's drafted to them. */
 function agentTally(group: Grouping, reading: ListReading): Tally {
     const { draft, drawers, looks, remote, called } = reading;
     const conversation = group.conversation;
     const parked = draft.parked ?? [];
     const open = group.items.filter((each) => !parked.includes(each.number));
-    const asks = open.filter((each) => toAnswer(each, draft)).length + checksWaiting(group.key, reading) + confirmingOf(group.key, reading).length;
+    const asked = askedOf(group, reading);
     const newsCount = open.filter((each) => toRead(each, draft, reading.seeing ?? UNSEEN)).length;
     const numbers = new Set(group.items.map((each) => each.number));
     const comments = (draft.comments ?? []).filter((each) => numbers.has(each.item) && each.text.trim() !== "").length;
     const letters = conversation === null ? 0 : (draft.letters ?? []).filter((each) => each.to != null && whose(each.to) === group.key && each.text.trim() !== "").length;
     const remarks = conversation === null ? 0 : (draft.remarks ?? []).filter((each) => whose(each.to) === group.key && each.text.trim() !== "").length;
-    let files = 0;
+    let files = NOTHING_WAITS;
     if (conversation !== null && drawers.has(group.key)) {
         const drawn = looks.drawers(conversation.repository).find((each) => each.view === "since");
         if (drawn !== undefined) {
             const of = { runtime: conversation.runtime, session: conversation.session, agent: conversation.agent ?? null };
             const shown: Shown = { items: new Map(), beyond: { contexts: new Map(), files: new Map() }, drawers, running: reading.running, landings: reading.landings ?? [], called };
-            files = mount(conversation.repository, drawn.module, drawn.view, of, shown, remote).answer?.blocks.count ?? 0;
+            files = mount(conversation.repository, drawn.module, drawn.view, of, shown, remote).answer?.blocks.tally ?? NOTHING_WAITS;
         }
     }
-    return { asks, news: newsCount, files, pile: 0, written: comments + letters + remarks };
+    return { holds: asked.holds + files.holds, flagged: asked.flagged + files.flagged, review: files.review, news: newsCount, pile: 0, written: comments + letters + remarks };
 }
 
 /** Return whoever owns a check waiting on the operator, or a task the list shows (`taskShown`). */
@@ -301,7 +314,7 @@ function agentRow(group: Grouping, depth: number, reading: ListReading, nesting:
     const conversation = group.conversation;
     const tally = agentTally(group, reading);
     const set = "  ".repeat(depth);
-    const under = nesting ? nestOf(group, depth, tally, reading) : undefined;
+    const under = nesting ? nestOf(group, depth, reading) : undefined;
     if (conversation === null) {
         return {
             id: `agent ${group.key}`,
@@ -343,7 +356,7 @@ function agentRow(group: Grouping, depth: number, reading: ListReading, nesting:
  * among it. Folded where nothing of it asks them and their buffer isn't on screen, so where the second pane's cursor goes
  * moves no row (`nearestShown`); none where there's nothing.
  */
-function nestOf(group: Grouping, depth: number, tally: Tally, reading: ListReading): Row["under"] {
+function nestOf(group: Grouping, depth: number, reading: ListReading): Row["under"] {
     const set = "  ".repeat(depth + 1);
     const items = group.items.map((each) => itemRow(each, group, set, reading));
     const tasks = tasksOf(group.key, reading).filter(taskShown);
@@ -354,7 +367,8 @@ function nestOf(group: Grouping, depth: number, tally: Tally, reading: ListReadi
     }
     const id = `agent ${group.key}`;
     const onScreen = reading.showing !== undefined && bufferKey(reading.showing) === id;
-    return { key: `nest ${id}`, closed: tally.asks === 0 && !onScreen, kind: "section", rows };
+    const asked = askedOf(group, reading);
+    return { key: `nest ${id}`, closed: asked.holds + asked.flagged === 0 && !onScreen, kind: "section", rows };
 }
 
 /** Return the first words of what an item says, for its row: its own title where it has one; none where it says nothing of its own. */
@@ -375,13 +389,14 @@ function itemRow(item: Item, group: Grouping, set: string, reading: ListReading)
     const standing = itemStanding({ item }, reading.draft, reading.seeing ?? UNSEEN);
     const mark = standing.marks[0];
     const glyph = mark === undefined ? " " : (GLYPHS[mark] ?? " ");
-    const drafted = standing.draft.map((each) => DRAFTED[each].glyph).join("");
+    const drafted = standing.draft.filter((each) => each !== "comment").map((each) => DRAFTED[each].glyph).join("");
     const named = `@${item.number} ${itemKind(item)}`;
     const left: Stretch[] = [
         { text: `${set}` },
         { text: `${glyph} `, look: mark === undefined ? "list-sub" : `mark-${mark}` },
-        { text: named, look: mark === "waiting" ? "list-asks" : "list-sub" },
+        { text: named, look: mark === "waiting" || mark === "asking" ? "list-asks" : "list-sub" },
         ...(standing.fresh ? [{ text: " new", look: "outline-fresh" }] : []),
+        ...(standing.draft.includes("comment") ? [{ text: ` ${DRAFTED.comment.glyph}`, look: "list-written" }] : []),
         ...(drafted === "" ? [] : [{ text: ` ${drafted}`, look: "outline-draft" }]),
         { text: ` ${itemWords(item)}`, look: "list-sub" },
     ];
@@ -399,7 +414,7 @@ function fitted(left: readonly Stretch[]): Stretch[] {
  */
 function taskRow(read: ThreadRead, set: string, depth: number, threads: Threading, reading: ListReading): Row {
     const tally = threadTally(read, threads, reading.draft);
-    const waiting = tally.asks + tally.files > 0;
+    const waiting = tally.holds + tally.flagged > 0;
     // Working in the ledger's word, though whoever held it has ended and someone else answers for it: nobody is.
     const holder = read.thread.holder ?? null;
     const answering = read.answering ?? null;
@@ -518,12 +533,20 @@ function threadState(read: ThreadRead): { text: string; look: string } {
     }
 }
 
-/** Return how thread `read` stands: what asks the operator, what's news, the files a landing waits on and the pile; and what's drafted on it. */
+/** Return how thread `read` stands: what stays stopped on the operator in it, the files a landing waits on among that; what's flagged for their eyes, its being done for them to confirm among that; what's news and the pile; and what's drafted on it. */
 function threadTally(read: ThreadRead, threads: Threading, draft: Draft): Tally {
     const written = (draft.letters ?? []).filter((each) => each.thread === read.thread.number && each.text.trim() !== "").length;
     const settled = new Set([...(draft.done ?? []), ...(draft.declined ?? []), ...(draft.parked ?? [])]);
     const asking = (read.asks ?? []).filter((each) => !settled.has(each.node) && !checkAnswered(each.node, draft));
-    return { asks: asking.length + (read.state === "done to confirm" ? 1 : 0), news: (read.new ?? []).length, files: threads.landing.get(read.thread.number) ?? 0, pile: (read.pile ?? []).length, written };
+    const holds = asking.filter((each) => each.holds).length;
+    return {
+        holds: holds + (threads.landing.get(read.thread.number) ?? 0),
+        flagged: asking.length - holds + (read.state === "done to confirm" ? 1 : 0),
+        review: 0,
+        news: (read.new ?? []).length,
+        pile: (read.pile ?? []).length,
+        written,
+    };
 }
 
 /** Return thread `read`'s row, set in `depth` deep: its name, how it stands and its tally; under it, what it's about and who holds it. */
@@ -576,8 +599,8 @@ export function listedByThread(reading: ListReading): Row[] {
     const counted = added(reads.map((each) => threadTally(each, threads, reading.draft)));
     // What asks the operator in no thread, as lup's own approvals, by whom it's from.
     const asked = new Set(reads.flatMap((each) => (each.asks ?? []).map((ask) => ask.node)));
-    const loose = reading.items.filter((each) => toAnswer(each, reading.draft) && !asked.has(each.number)).length;
-    const rows: Row[] = [forYouRow({ ...counted, asks: counted.asks + loose })];
+    const loose = reading.items.filter((each) => toAnswer(each, reading.draft) && !asked.has(each.number));
+    const rows: Row[] = [forYouRow({ ...counted, holds: counted.holds + loose.filter((each) => each.holds).length, flagged: counted.flagged + loose.filter((each) => !each.holds).length })];
     const runningGroups = groups.filter((each) => each.conversation !== null && reading.running.has(each.key));
     rows.push(heading("heading running", "running", `${runningGroups.length}`));
     // Whom to talk to, a line each: what's theirs is under the threads here, each a row of its own.

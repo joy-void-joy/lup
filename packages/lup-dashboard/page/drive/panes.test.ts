@@ -209,6 +209,47 @@ describe("the panes by agent", () => {
         await review.holds(THEIR_ITEM);
     });
 
+    it("draws each mark in its own colour, the theme's, and what's drafted muted, apart from them", async () => {
+        const { page } = dashboard;
+        /** What the first stretch of `look` saying `text` is drawn in, on the row saying `on`, once it's there. */
+        const colourOf = async (look: string, text: string, on = "") => {
+            const found = await page.waitForFunction(
+                ([wanted, said, row]) => {
+                    const lines = [...document.querySelectorAll(".list-buffer .cm-line")].filter((each) => (each.textContent ?? "").includes(row as string));
+                    const stretch = lines.flatMap((each) => [...each.querySelectorAll(`.${wanted}`)]).find((each) => (each.textContent ?? "").includes(said as string));
+                    return stretch === undefined ? null : { said: stretch.textContent, colour: getComputedStyle(stretch).color, weight: getComputedStyle(stretch).fontWeight };
+                },
+                [look, text, on] as const,
+                { polling: 50 },
+            );
+            return (await found.jsonValue()) as { said: string; colour: string; weight: string };
+        };
+        const ORANGE = "rgb(255, 153, 51)";
+        expect((await colourOf("mark-waiting", "◆")).colour).toBe(ORANGE);
+        expect((await colourOf("mark-asking", "◇")).colour).toBe(ORANGE);
+        // The theme's own cyan, as it's the agent's name's, apart from the blue of what's only to read.
+        expect((await colourOf("mark-to-review", "◇")).colour).toBe("rgb(102, 204, 204)");
+        expect((await colourOf("mark-news", "•")).colour).toBe("rgb(153, 204, 255)");
+        const row = () => page.evaluate(() => [...document.querySelectorAll(".list-buffer .cm-line")].find((each) => (each.textContent ?? "").includes("explore-auth"))?.textContent ?? "");
+        await page.waitForFunction(() => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("explore-auth") && (each.textContent ?? "").includes("◇1")), undefined, { polling: 50 });
+        const bare = await row();
+        await review.goTo("── @66 note");
+        await review.comment();
+        await page.keyboard.type("Drafted");
+        await page.keyboard.press("Escape");
+        const written = await colourOf("list-written", "¶", "explore-auth");
+        expect(written.said).toBe("¶1");
+        expect(written.colour).toBe("rgb(179, 179, 179)");
+        expect(written.weight).toBe("400");
+        // What stands stays where it was as they write.
+        const after = await row();
+        expect(after).toMatch(/¶1 {2}◇1 •\d$/);
+        expect(after.length).toBe(bare.length);
+        expect(after.slice(after.indexOf("◇"))).toBe(bare.slice(bare.indexOf("◇")));
+        await page.keyboard.press("u");
+        await page.waitForFunction(() => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("explore-auth") && !(each.textContent ?? "").includes("¶")), undefined, { polling: 50 });
+    });
+
     it("keeps vim's keys in the list, Enter opening a row's buffer and going into it", async () => {
         const { page } = dashboard;
         await listRow(dashboard, "main");
@@ -315,20 +356,19 @@ describe("the panes by agent", () => {
         await listRow(dashboard, "parser");
         await page.keyboard.press("Enter");
         await review.holds("check @");
-        const line = (await review.text()).split("\n").find((each) => each.startsWith("◆ check @")) ?? "";
+        const line = (await review.text()).split("\n").find((each) => each.startsWith("◇ check @")) ?? "";
         expect(line).toContain(" in @transcript-reader:");
         const number = /check @(\d+)/.exec(line)?.[1] ?? "";
-        // Counted with what waits on the operator, as the list says.
-        // Beside what asks them in the items, the question the demo brings ten seconds in among them.
-        const rowSays = (mark: string) => page.waitForFunction((wanted) => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("parser") && (each.textContent ?? "").includes(wanted)), mark, { polling: 50 });
-        await rowSays("◆3");
+        // Counted with what wants the operator's eyes, on its task's row, whose question holds apart from it.
+        const taskSays = (flagged: boolean) => page.waitForFunction((wanted) => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("@transcript-reader") && (each.textContent ?? "").includes("◇1") === wanted), flagged, { polling: 50 });
+        await taskSays(true);
         await review.goTo(`check @${number}`);
         await dashboard.keys.press([" ", "d"]);
         await page.waitForFunction(() => (document.querySelector(".status")?.textContent ?? "").includes("No reply drafted") === false, undefined, { polling: 50 });
-        await rowSays("◆2");
+        await taskSays(false);
         // Undone: nothing of it is sent by what follows.
         await page.keyboard.press("u");
-        await rowSays("◆3");
+        await taskSays(true);
     });
 
     it("lists tasks under whoever owns them, and reads one across agents from its row", async () => {

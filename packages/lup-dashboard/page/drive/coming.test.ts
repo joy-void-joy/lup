@@ -43,7 +43,7 @@ describe("what comes to the demo as it runs, in headless Chromium", () => {
     });
 
     it("brings two writes to a branch into its drawer, each flagged", async () => {
-        await review.holds("lup-impl/parser · since you approved · 2 to review · 2 flagged");
+        await review.holds("lup-impl/parser · since you approved · 2 flagged");
     });
 
     it("holds a file at landing in its writer's drawer, and ends the landing's wait once it's marked reviewed", async () => {

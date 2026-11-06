@@ -983,6 +983,9 @@ class ItemKind(Model):
     """Whether it needs the operator: one of this kind, theirs and waiting, is
     what counts as waiting on them (`asks`); any other is news to read, or none
     of theirs."""
+    holds: bool = False
+    """Whether something stays stopped until they answer one, of what asks them:
+    what it asks to do, or whoever asked; else it wants their eyes alone."""
     answers: list[Answering] = []
     """How they answer one, offered only while it waits on them (`Item.offers`):
     none for what a reply doesn't answer."""
@@ -994,15 +997,16 @@ class ItemKind(Model):
 def kind_of(reason: Reason) -> ItemKind:
     """Return what an item of `reason`'s kind is to the operator: the one table of kinds, which every rank, every count of what's waiting and every offer reads, the page's among them.
 
-    | Kinds | Rank | Asks | Answers |
-    |---|---|---|---|
-    | an approval | waiting on you | yes | approve, decline, leave for later, whoever asked |
-    | a held change | waiting on you | yes | as an approval's, a comment on it approving it |
-    | a question, a problem (`blocked`), a disagreement, a question sent as a message | waiting on you | yes | mark read, leave for later |
-    | a note, a turn's last words among them, a friction, how it felt, a stop by choice, the operator's copy of a message between conversations, done as it's made | news | no | mark read, leave for later |
-    | a subagent's end, lup's word on citations that didn't resolve | news | no | none |
-    | a write that landed flagged | flag | no | mark read, leave for later |
-    | the operator's own answer or review | waiting on you | no | none |
+    | Kinds | Rank | Asks | Holds | Answers |
+    |---|---|---|---|---|
+    | an approval | waiting on you | yes | yes | approve, decline, leave for later, whoever asked |
+    | a held change | waiting on you | yes | yes | as an approval's, a comment on it approving it |
+    | a question, a problem (`blocked`) | waiting on you | yes | yes | mark read, leave for later |
+    | a disagreement, a question sent as a message | waiting on you | yes | no | mark read, leave for later |
+    | a note, a turn's last words among them, a friction, how it felt, a stop by choice, the operator's copy of a message between conversations, done as it's made | news | no | no | mark read, leave for later |
+    | a subagent's end, lup's word on citations that didn't resolve | news | no | no | none |
+    | a write that landed flagged | flag | no | no | mark read, leave for later |
+    | the operator's own answer or review | waiting on you | no | no | none |
 
     The rank says where the review shows a kind among the rest, and whether one
     raises a desktop notice as it reaches them. A message to the operator ranks by
@@ -1013,10 +1017,15 @@ def kind_of(reason: Reason) -> ItemKind:
     review of theirs. The operator's own items go to agents, so neither the review nor
     a notice reads theirs, nor asks anything of them; nor a subagent's end, which
     goes to their parent, nor lup's word on citations, which goes to the
-    conversation that wrote them.
+    conversation that wrote them. What asks holds where something stays stopped
+    until they answer: what it asks to do, or whoever asked, who `blocked` or
+    `ask`ed, though `ask` may hold no call, the ledger keeping no word of its
+    `wait`; a disagreement or a question sent as a message says their sender goes on.
 
     >>> kind_of(Stop(why="Done.")).asks
     False
+    >>> [kind_of(each).holds for each in (Question(text="?"), Message(kind="question", text="?"))]
+    [True, False]
     >>> [each.says for each in kind_of(Question(text="Which?")).answers]
     ['mark it read', 'leave it for later']
     """
@@ -1025,6 +1034,7 @@ def kind_of(reason: Reason) -> ItemKind:
             return ItemKind(
                 rank=WAITS_ON_YOU,
                 asks=True,
+                holds=True,
                 answers=[APPROVE, DECLINE, LATER],
                 whoever=True,
             )
@@ -1033,6 +1043,7 @@ def kind_of(reason: Reason) -> ItemKind:
             return ItemKind(
                 rank=WAITS_ON_YOU,
                 asks=True,
+                holds=True,
                 answers=[approving, DECLINE, LATER],
                 whoever=True,
             )
@@ -1048,7 +1059,11 @@ def kind_of(reason: Reason) -> ItemKind:
             return ItemKind(rank=NEWS, asks=False)
         case Flagged():
             return ItemKind(rank=FLAG, asks=False, answers=[READ, LATER])
-        case Message() | Question():
+        case Message(kind="problem") | Question():
+            return ItemKind(
+                rank=WAITS_ON_YOU, asks=True, holds=True, answers=[READ, LATER]
+            )
+        case Message():
             return ItemKind(rank=WAITS_ON_YOU, asks=True, answers=[READ, LATER])
         case Answer() | Review():
             return ItemKind(rank=WAITS_ON_YOU, asks=False)
@@ -1156,6 +1171,12 @@ class Item(Model):
     def asks(self) -> bool:
         """Whether it needs the operator as it stands (`asks`): what counts as waiting on them, carried with it to the page, whose counts read it."""
         return asks(self.recipient, self.reason, self.state)
+
+    @computed_field
+    @property
+    def holds(self) -> bool:
+        """Whether, as it asks, something stays stopped until they answer it (`ItemKind.holds`): what the page marks apart from what asks only for their eyes."""
+        return self.asks and kind_of(self.reason).holds
 
     @property
     def waits(self) -> bool:

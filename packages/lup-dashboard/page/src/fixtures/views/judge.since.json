@@ -90,12 +90,16 @@
     "answer": {
       "summary": [
         {
-          "text": "since you approved · 1 to review · 2 flagged · 1 test · 1 of 4 reviewed",
+          "text": "since you approved · 2 flagged · 1 test · 1 of 4 reviewed",
           "tone": "plain"
         }
       ],
       "waiting": true,
-      "count": 1,
+      "tally": {
+        "holds": 0,
+        "flagged": 2,
+        "review": 0
+      },
       "offers": [
         {
           "action": "policy-review-since",
@@ -170,7 +174,7 @@
           "kind": "role",
           "summary": [
             {
-              "text": "source · 1 to review · 2 flagged · 1 reviewed",
+              "text": "source · 2 flagged · 1 reviewed",
               "tone": "summary"
             }
           ],
@@ -548,7 +552,11 @@
         }
       ],
       "waiting": true,
-      "count": 2,
+      "tally": {
+        "holds": 1,
+        "flagged": 2,
+        "review": 1
+      },
       "offers": [
         {
           "action": "policy-review-since",
@@ -1015,12 +1023,16 @@
     "answer": {
       "summary": [
         {
-          "text": "since you approved · 3 to review · 1 flagged · 1 automatic · 0 of 4 reviewed",
+          "text": "since you approved · 2 to review · 1 flagged · 1 automatic · 0 of 4 reviewed",
           "tone": "plain"
         }
       ],
       "waiting": true,
-      "count": 3,
+      "tally": {
+        "holds": 0,
+        "flagged": 1,
+        "review": 2
+      },
       "offers": [
         {
           "action": "policy-review-since",
@@ -1099,7 +1111,7 @@
           "kind": "role",
           "summary": [
             {
-              "text": "source · 2 to review · 1 flagged",
+              "text": "source · 1 to review · 1 flagged",
               "tone": "summary"
             }
           ],

@@ -97,15 +97,18 @@ const MARKS: Part[] = [
     {
         title: "Marks in the margin and the overview",
         keys: [
-            { keys: "◆", does: "an item waiting on you: a question, a held change, an approval, a hold at landing; a check to try; a thread waiting on you, or done for you to confirm", short: "waiting" },
-            { keys: "◇", does: "a file to review; beside an agent in the overview, how many their \"since you approved\" has (◇3)", short: "to review" },
-            { keys: "⚑", does: "a file with a line that matters, held or flagged; lup's approvals in the overview", short: "flagged" },
+            { keys: "◆", does: "what stays stopped until you answer it: a question, a problem, a held change, an approval, a file a landing waits on", short: "stopped on you" },
+            { keys: "◇ orange", does: "what's flagged for your eyes, with nothing stopped: a file with flagged writes, a check to try, a thread done for you to confirm, a disagreement, a question that waits on no answer", short: "flagged" },
+            { keys: "◇ cyan", does: "a file to review as you come to it, with nothing holding it", short: "to review" },
+            { keys: "⚑", does: "a file with a line that matters, held or flagged; lup's approvals in the overview", short: "matters" },
             { keys: "·", does: "a file folded whole: automatic, a test, data, a first approval's", short: "folded" },
             { keys: "•", does: "news, to read rather than answer: a note, a turn's last words, a friction, how it felt, a stop", short: "news" },
             { keys: "‖", does: "an item left for later", short: "parked" },
             { keys: "new", does: "an item that came after you last read its thread, Space d on its banner, or, by agent, marked its agent seen, and that you haven't commented on", short: "new" },
             { keys: "▶ ○ ✕", does: "an agent calling a tool, between calls, ended", short: "agents" },
-            { keys: "» ✓ ✔ ✗ →", does: "in yellow, what your next Ctrl+Enter does with it: your comment on it goes, it's marked read, it's approved, it's declined, it's moved into a thread from the pile to read", short: "your reply" },
+            { keys: "≈", does: "in the list by thread, what's on the pile to read: its frictions and how it felt", short: "pile" },
+            { keys: "¶", does: "your own words drafted there, unsent: a comment, a message, a remark; muted beside an agent in the list, how many, and no status (¶2)", short: "your draft" },
+            { keys: "¶ ✓ ✔ ✗ →", does: "in yellow, what your next Ctrl+Enter does with it: your comment on it goes, it's marked read, it's approved, it's declined, it's moved into a thread from the pile to read", short: "your reply" },
         ],
     },
 ];

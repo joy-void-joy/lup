@@ -7,7 +7,7 @@ import "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
 import { MOVE, implied, isMarked, listed, marking, movedInto, reachOf, reachedIn, threadsRead, type Act } from "./grammar";
-import { toSend, waitingOn } from "./App";
+import { holdingOn, toSend, waitingOn } from "./App";
 import { partSaid } from "./brief";
 import { itemStanding, outlineOf, threadStanding } from "./outline";
 import {
@@ -103,8 +103,8 @@ const READER = thread(302, "reader", {
     state: "waiting on the operator",
     section: "waiting on you",
     asks: [
-        { node: 51, what: "a question", came: AT },
-        { node: 311, what: "a check", came: AT },
+        { node: 51, what: "a question", came: AT, holds: true },
+        { node: 311, what: "a check", came: AT, holds: false },
     ],
     members: 4,
     earlier: 2,
@@ -192,13 +192,17 @@ describe("what asks the operator, and what's only to read, in the overview and t
 
     it("marks a thread by what the host says asks them, or only to read where it's in new, each counted apart", () => {
         const both = { ...READER, new: [47] } as ThreadRead;
-        expect(threadStanding(READER, "waiting on you")).toEqual({ marks: ["waiting"], counts: { asks: 2, toRead: 0 } });
+        const counts = (holds: number, flagged: number, toRead: number) => ({ holds, flagged, review: 0, toRead });
+        expect(threadStanding(READER, "waiting on you")).toEqual({ marks: ["waiting"], counts: counts(1, 1, 0) });
         // In new, what it's there for is what it says, whatever else in it asks them, as its row in waiting on you says.
-        expect(threadStanding(both, "new")).toEqual({ marks: ["news"], counts: { asks: 0, toRead: 1 } });
-        expect(threadStanding(both, "open")).toEqual({ marks: ["waiting"], counts: { asks: 2, toRead: 1 } });
-        expect(threadStanding(AUTH, "open")).toEqual({ marks: ["news"], counts: { asks: 0, toRead: 1 } });
-        expect(threadStanding(VOICE, "waiting on you")).toEqual({ marks: ["waiting"], counts: { asks: 1, toRead: 0 } });
-        expect(threadStanding(CACHE, "settled")).toEqual({ marks: [], counts: { asks: 0, toRead: 0 } });
+        expect(threadStanding(both, "new")).toEqual({ marks: ["news"], counts: counts(0, 0, 1) });
+        expect(threadStanding(both, "open")).toEqual({ marks: ["waiting"], counts: counts(1, 1, 1) });
+        expect(threadStanding(AUTH, "open")).toEqual({ marks: ["news"], counts: counts(0, 0, 1) });
+        // Nothing's stopped on a thread done, nor on a check alone: they want their eyes.
+        expect(threadStanding(VOICE, "waiting on you")).toEqual({ marks: ["asking"], counts: counts(0, 1, 0) });
+        const checking = { ...READER, asks: (READER.asks ?? []).filter((each) => !each.holds) } as ThreadRead;
+        expect(threadStanding(checking, "waiting on you")).toEqual({ marks: ["asking"], counts: counts(0, 1, 0) });
+        expect(threadStanding(CACHE, "settled")).toEqual({ marks: [], counts: counts(0, 0, 0) });
     });
 
     it("says so of each item, by the host's asks, a seen one saying neither", () => {
@@ -211,16 +215,17 @@ describe("what asks the operator, and what's only to read, in the overview and t
         expect(region === undefined ? null : itemStanding(region, EMPTY, seen).marks).toEqual([]);
         // What a kind asks is the host's word, whatever its rank says.
         const asking = { ...LATE, asks: true } as Item;
-        expect(region === undefined ? null : itemStanding({ ...region, item: asking }, EMPTY, seen).marks).toEqual(["waiting"]);
+        expect(region === undefined ? null : itemStanding({ ...region, item: asking }, EMPTY, seen).marks).toEqual(["asking"]);
+        expect(region === undefined ? null : itemStanding({ ...region, item: { ...asking, holds: true } }, EMPTY, seen).marks).toEqual(["waiting"]);
         expect(stands(out).find((each) => each[0] === "@reader")?.[1]).toEqual(["waiting"]);
     });
 
     it("counts an agent's own apart, by agent", () => {
         const out = laid([QUESTION, LATE, NOTE], [WORKER], banner, header, EMPTY, NOTHING, [], new Map(), called);
         const row = outlineOf(out, reading()).find((each) => each.kind === "agent");
-        expect(row?.counts).toEqual({ asks: 1, toRead: 2 });
+        expect(row?.counts).toEqual({ holds: 1, flagged: 0, review: 0, toRead: 2 });
         const later = outlineOf(out, reading({ ...EMPTY, parked: [51], done: [47] })).find((each) => each.kind === "agent");
-        expect(later?.counts).toEqual({ asks: 0, toRead: 1 });
+        expect(later?.counts).toEqual({ holds: 0, flagged: 0, review: 0, toRead: 1 });
     });
 
     it("counts what's only to read in the same number by thread and by agent, what's on the pile among it", () => {
@@ -314,7 +319,7 @@ describe("the review grouped by thread", () => {
         const out = lay();
         const text = lines(out);
         expect(text.slice(1, 3)).toEqual(["━━ @reader · The reader · s1/a1 holds · a question, a check ━━", "── @51 ──"]);
-        expect(text).toContain("◆ check @311: Search a long record.");
+        expect(text).toContain("◇ check @311: Search a long record.");
         // Each thread of open and settled is read whole as it opens.
         expect(out.loading.map((each) => [each.number, each.whole])).toEqual([
             [302, true],
@@ -352,7 +357,7 @@ describe("the review grouped by thread", () => {
     });
     it("lays a check where it came, what's to try waiting on the operator, Space d ticking it, a comment under it their answer in words", () => {
         const out = lay();
-        const at = out.text.indexOf("◆ check @311: Search a long record.");
+        const at = out.text.indexOf("◇ check @311: Search a long record.");
         expect(at).toBeGreaterThan(0);
         expect(checkAt(out, at)?.check.check.number).toBe(311);
         const done = adopted().verbs.find((each) => each.name === "done");
@@ -366,7 +371,7 @@ describe("the review grouped by thread", () => {
 
     it("lays what's to try under a thread done, Space d settling it and Space x declining it, as marks sent with the reply", () => {
         const out = lay();
-        expect(lines(out)).toContain("◆ to try: Read the voice section.");
+        expect(lines(out)).toContain("◇ to try: Read the voice section.");
         const voice = out.groups.find((each) => each.thread?.thread.name === "voice");
         expect(voice).toBeDefined();
         const at = voice?.banner.from ?? 0;
@@ -421,7 +426,7 @@ describe("the review grouped by thread", () => {
             return { ...made, thread: { ...made.thread, title: ROOT_TITLE, holder: gone, by: gone }, answering: null } as ThreadRead;
         };
         const idle = root(320, "old-session");
-        const asked = root(321, "older-session", { state: "waiting on the operator", section: "waiting on you", asks: [{ node: 51, what: "a question", came: AT }] });
+        const asked = root(321, "older-session", { state: "waiting on the operator", section: "waiting on you", asks: [{ node: 51, what: "a question", came: AT, holds: true }] });
         const under = { ...thread(322, "kept-on", {}), thread: { ...thread(322, "kept-on", {}).thread, parent: 320 } } as ThreadRead;
         const threads = threading();
         const reads = { ...threads.read, threads: [...threads.read.threads, idle, asked, under] };
@@ -607,7 +612,7 @@ describe("the review grouped by thread", () => {
     });
     it("folds what no longer waits in a thread's conversation to its header, its history", () => {
         const answered = hosted({ ...QUESTION, state: { state: "answered", at: AT, answer: 60 } });
-        const read = { ...READER, asks: [{ node: 311, what: "a check", came: AT }] } as ThreadRead;
+        const read = { ...READER, asks: [{ node: 311, what: "a check", came: AT, holds: false }] } as ThreadRead;
         const threads = threading(false, [[302, shown(read, READER_WHOLE.entries, [NOTE, BETWEEN, answered], { checks: [CHECK] })]]);
         const reads = { ...threads.read, threads: threads.read.threads.map((each) => (each.thread.number === 302 ? read : each)) };
         const out = laid([], [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called, { threads: { ...threads, read: reads, shown: new Map([[302, shown(read, READER_SHOWN.entries, [answered], { checks: [CHECK] })]]) } });
@@ -661,6 +666,17 @@ describe("the review grouped by thread", () => {
         // What's left for later isn't waiting: the operator said not now.
         expect(waitingOn(null, new Map(), [QUESTION, approval], [approval.number])).toBe(1);
         expect(waitingOn(threading().read, new Map(), [QUESTION, approval], [approval.number])).toBe(2);
+    });
+
+    it("says of what it counts what holds something stopped, the rest wanting the operator's eyes alone", () => {
+        const flagged = { ...QUESTION, number: 54, asks: true, holds: false } as Item;
+        expect(holdingOn(null, new Map(), [QUESTION, flagged])).toBe(1);
+        expect(holdingOn(null, new Map(), [QUESTION, flagged], [QUESTION.number])).toBe(0);
+        // By thread: the reader's question holds, the voice session's done doesn't, though both wait on them.
+        expect(holdingOn(threading().read, new Map(), [QUESTION])).toBe(1);
+        expect(waitingOn(threading().read, new Map(), [QUESTION])).toBe(2);
+        // A landing waiting holds, on whichever thread it's counted.
+        expect(holdingOn(threading().read, new Map([[VOICE.thread.number, 1]]), [QUESTION])).toBe(2);
     });
 
     it("lists each section and thread in the overview, nested as the review is", () => {

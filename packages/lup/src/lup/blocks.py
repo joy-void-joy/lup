@@ -634,6 +634,17 @@ class Sights(Model):
     sights: list[Sight] = []
 
 
+class Tally(Model):
+    """How many of what a view holds wait on the operator, by what each is to them, each counted once: said beside its agent, each in its mark (`docs/dashboard.md`, *The panes*)."""
+
+    holds: int = 0
+    """Stopped until they answer, as a file a landing waits on: `◆`."""
+    flagged: int = 0
+    """Flagged for their eyes, with nothing stopped: `◇`, in orange."""
+    review: int = 0
+    """To review as they come to it, with nothing holding it: `◇`, in cyan."""
+
+
 class Blocks(Model):
     """What a view answers: its blocks, and, for a drawer, the summary line under its banner."""
 
@@ -645,9 +656,9 @@ class Blocks(Model):
     waited); none for a view nothing shows a line of."""
     waiting: bool = False
     """Whether it holds what waits on the operator: its summary line is bold."""
-    count: int = 0
-    """How many of what it holds wait on the operator, said beside its agent in
-    the overview (`◇3`): none where nothing does."""
+    tally: Tally = Tally()
+    """How many of what it holds wait on the operator, by what each is to them,
+    said beside its agent: none where nothing does."""
     offers: list[Offer] = []
     """What the view offers as a whole, as a drawer marking every file it
     shows reviewed: what a verb's key does where no block within offers it."""

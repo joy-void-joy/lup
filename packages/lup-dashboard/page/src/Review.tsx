@@ -64,7 +64,7 @@ import { usePaced } from "./hooks";
 import { mapOutlineKey, mapScopeKeys, Outline, setOutlineFocus, setOutlineToggle, setScopeJump, useNarrow, type ScopeKey } from "./Outline";
 import { Stack, type Mark as StackMark } from "./Stack";
 import { redrawn, structureMargin, type Labelled, type Structured } from "./rails";
-import { itemStanding } from "./outline";
+import { drawerMark, itemStanding, threadStanding } from "./outline";
 import { DRAFTED, GLYPHS } from "./Outline";
 import { linesOver, stickies, type Sticky } from "./stack";
 import { depths, levelled } from "./folds";
@@ -162,7 +162,7 @@ import {
     threadPlace,
 } from "./review";
 import { filesOf, freshRows, type Fresh } from "./since";
-import type { Instance, Offer, Remote, Running, Span as ViewSpan } from "./views";
+import { NOTHING_WAITS, type Instance, type Offer, type Remote, type Running, type Span as ViewSpan } from "./views";
 
 /** The least and the most time between two layouts of what the host answers, in milliseconds (`usePaced`). */
 const PACED_LEAST = 250;
@@ -2106,9 +2106,10 @@ export function Review({
                 const read = group?.thread ?? null;
                 if (read !== null) {
                     const waiting = read.state === "waiting on the operator" || read.state === "done to confirm";
+                    const [asking = "waiting"] = threadStanding(read, "waiting on you").marks;
                     return {
                         ...plain(`@${read.thread.name}`),
-                        state: waiting ? { glyph: GLYPHS.waiting ?? "◆", mark: "waiting" } : (read.new ?? []).length > 0 ? { glyph: GLYPHS.news ?? "•", mark: "news" } : null,
+                        state: waiting ? { glyph: GLYPHS[asking] ?? "◆", mark: asking } : (read.new ?? []).length > 0 ? { glyph: GLYPHS.news ?? "•", mark: "news" } : null,
                     };
                 }
                 const conversation = group?.conversation ?? null;
@@ -2137,7 +2138,8 @@ export function Review({
                 // A drawer by its view's name, the trace's as it's called, marked where it holds what waits on the operator, as its view says.
                 const drawer = laidOut.drawers.find((each) => each.header.from === from);
                 const which = drawer?.kind ?? "";
-                return { ...plain(which === "conversation" ? "trace" : which), state: drawer?.waiting === true ? { glyph: "◇", mark: "to-review" } : null };
+                const mark = drawerMark(drawer?.view.answer?.blocks.tally ?? NOTHING_WAITS);
+                return { ...plain(which === "conversation" ? "trace" : which), state: drawer?.waiting === true ? { glyph: GLYPHS[mark] ?? "◇", mark } : null };
             }
             case "file": {
                 // A file by its name, flagged where a line in it matters, folded where its view folds it whole, else to review.
