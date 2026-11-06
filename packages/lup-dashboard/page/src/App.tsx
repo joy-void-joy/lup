@@ -464,6 +464,13 @@ export function App() {
         [inbox.reply],
     );
 
+    // What the draft marks or comments on that's past waiting, answered or replaced since it was written: laid out with
+    // what's drafted on it, which stays in view, saying so, until it's sent.
+    const past = useMemo(() => (inbox.reply?.kind === "inbox-items" ? inbox.reply.past : []), [inbox.reply]);
+    const laidItems = useMemo(() => (past.length === 0 ? waiting : [...waiting, ...past]), [waiting, past]);
+    // What sending the draft sets aside, as the host says it, each part said before it's sent.
+    const setAside = useMemo(() => (inbox.reply?.kind === "inbox-items" ? inbox.reply.set_aside : []), [inbox.reply]);
+
     const threading = useMemo<Omit<Threading, "banner"> | null>(
         () => (threadsRead === null ? null : { read: threadsRead, shown: conversations.shown, whole: conversations.whole, landing: landingIn }),
         [threadsRead, conversations, landingIn],
@@ -1169,6 +1176,8 @@ export function App() {
         holder: (argument) => holderOf(argument)?.talker.path ?? null,
         thread: threadNamed,
         checks,
+        past,
+        setAside,
     });
     // The reply, each part whole, as `g<` says it.
     const goingWhole = going.map(partSaid);
@@ -1228,7 +1237,7 @@ export function App() {
             <main className="win" ref={main}>
                 <div className="review">
                     <Review
-                        items={ready ? waiting : NONE}
+                        items={ready ? laidItems : NONE}
                         threads={ready ? threading : null}
                         openThread={openThread}
                         agents={ready ? agentsShown : NO_ONE}
@@ -1411,6 +1420,10 @@ interface Naming {
     thread?: (number: number) => string | null;
     /** The checks shown, by number: a comment on one answers it. */
     checks?: ReadonlySet<number>;
+    /** What the draft marks or comments on that's past waiting on the operator, as it stands: a comment on one of a kind a reply answers goes to its sender, leaving it there. */
+    past?: readonly Item[];
+    /** What sending the draft sets aside, part by part, as the host says it: each mark dropped, each comment written elsewhere or kept drafted. */
+    setAside?: readonly { said: string }[];
 }
 
 /**
@@ -1432,7 +1445,7 @@ export function waitingOn(read: ThreadsRead | null, landing: ReadonlyMap<number,
  * Return what the next Ctrl+Enter sends, part by part, by where each goes (#264, as the page knows it): to each agent
  * the reply reaches, what reaches them, a message, a remark, the comments on their items, a question answered; then
  * what's marked, each item read, approved and declined, each agent's files of "since you approved" reviewed and their
- * writes held.
+ * writes held; and what the host says it sets aside, each mark on what's past waiting dropped.
  * Nothing where nothing's drafted.
  */
 export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): ReplyPart[] {
@@ -1458,6 +1471,11 @@ export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): 
     }
     for (const [who, count] of tallyOf(remarks(draft).map((each) => naming.called(each.to)))) {
         reaching(who, count === 1 ? "a remark" : `${count} remarks`);
+    }
+    // A comment on what's past waiting goes to its sender, leaving it there; on an approval or a held change, the host
+    // says where it goes (`setAside`).
+    for (const item of (naming.past ?? []).filter((each) => commented.includes(each.number) && !asked(each))) {
+        reaching(naming.named(item), `comments on ${cited(item.number)}`);
     }
     for (const item of items) {
         const words = commented.includes(item.number);
@@ -1506,6 +1524,7 @@ export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): 
         ...[...reviewing].map(([who, count]): ReplyPart => ({ kind: "said", text: `${count === 1 ? "a file" : `${count} files`} of ${who} reviewed` })),
         ...[...declining].map(([who, count]): ReplyPart => ({ kind: "said", text: `the landing of ${count === 1 ? "a file" : `${count} files`} of ${who} declined` })),
         ...marked,
+        ...(naming.setAside ?? []).map((each): ReplyPart => ({ kind: "said", text: each.said })),
     ];
 }
 

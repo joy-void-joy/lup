@@ -2993,17 +2993,18 @@ export function waits(item: Item): boolean {
 /**
  * Return the classes of an item's header line: new to the operator, news; struck through where the draft marks it done,
  * declined or left for later, which the next Ctrl+Enter does; and muted where it no longer waits, answered, read or
- * decided, a thread's history, never struck through as the draft's own marks are.
+ * decided, a thread's history, never struck through, as a mark on it does nothing.
  */
 export function headerClasses(item: Item, draft: Draft, seeing: Seeing): string {
     const number = item.number;
+    const open = waits(item);
     return [
         "review-header",
         fresh(item, seeing) ? "is-new" : "",
         news(item) ? "is-news" : "",
-        (draft.done ?? []).includes(number) ? "is-done" : waits(item) ? "" : "is-past",
-        (draft.declined ?? []).includes(number) ? "is-declined" : "",
-        (draft.parked ?? []).includes(number) ? "is-parked" : "",
+        !open ? "is-past" : (draft.done ?? []).includes(number) ? "is-done" : "",
+        open && (draft.declined ?? []).includes(number) ? "is-declined" : "",
+        open && (draft.parked ?? []).includes(number) ? "is-parked" : "",
     ].join(" ");
 }
 
@@ -3038,7 +3039,7 @@ export function tallied(items: Item[], draft: Draft, seeing: Seeing): string {
         return "";
     }
     const settled = [...(draft.done ?? []), ...(draft.declined ?? []), ...(draft.parked ?? [])];
-    const open = items.filter((each) => !settled.includes(each.number));
+    const open = items.filter((each) => waits(each) && !settled.includes(each.number));
     const answering = open.filter((each) => toAnswer(each, draft)).length;
     const arrived = open.filter((each) => fresh(each, seeing)).length;
     return [`${answering} to answer`, ...(arrived === 0 ? [] : [`${arrived} new`])].join(" · ");

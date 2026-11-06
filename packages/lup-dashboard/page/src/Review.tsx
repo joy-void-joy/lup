@@ -933,8 +933,8 @@ export function Review({
             (item, later, said) => {
                 // Grouped by thread, an item says whose it is, as a conversation's line does: several agents write in one.
                 const whose = threads !== null && item.sender.party === "conversation" ? [called(item.sender)] : [];
-                // Grouped by thread, one no longer waiting says where it stands: answered, done, decided.
-                const stands = threads !== null && !waits(item) ? [item.state.state] : [];
+                // One no longer waiting says where it stands: answered, done, decided, superseded.
+                const stands = !waits(item) ? [item.state.state] : [];
                 const told = [
                     `${cited(item.number)} ${said}`,
                     ...whose,
