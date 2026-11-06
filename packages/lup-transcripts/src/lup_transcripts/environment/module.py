@@ -20,7 +20,8 @@ class Transcripts(Module):
     conversation, live."""
     folds: Folds = Folds.of(*FOLD_KINDS)
     """What its conversation folds under: earlier exchanges, messages, the agent's
-    and each item's, runs of calls, and calls' input and output."""
+    and each item's, runs of calls, calls' input and output, and calls' outputs and
+    long arguments."""
     tones: Tones = Tones.of(*TONES)
     """What its conversation's lines are drawn in: calls, the items sent and
     received, runs of calls."""

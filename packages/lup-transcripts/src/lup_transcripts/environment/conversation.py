@@ -16,9 +16,10 @@ layout answering `Blocks`, the layout of one of `Transcripts`' views:
   the same way, so the drawer's answer stays small however long the
   conversation grows, and each fold opened brings in 20 more of the agent's
   words;
-- `call_blocks`, one call's input and output, which the call's fold reads as
-  it opens (`OfCall`), since each call's whole input and output is read from
-  the record only on asking.
+- `call_blocks`, one call as its fold reads it as it opens (`OfCall`), since a
+  call is read from the record only on asking: what it was given, straight away,
+  each long argument and what it returned folded under a line of its own, each
+  read whole as that opens.
 
 Within an exchange, the operator's words come after `you:`, each of the agent's
 words as Markdown folded under a line saying how they start, open but for a
@@ -36,9 +37,11 @@ before the agent's last 20 words in it, `exchange 5 through 40` for what the
 operator had read of it up to step 40, `said 6` for the agent's words at step 6,
 `calls 2`, `call <the call's id>` or `item 51`; a line is `step 6` (`step 6.1` on, for the
 operator's further lines), `item 64 line` for an item with no text, `text 51` for
-an item's text, and `input <id>`, `output <id>` (`.1` on) or `unread <id>` in a
-call's view. The agent's words are a block `step 6` under their fold, so a
-comment on them stays on them whether they're open or folded.
+an item's text, and in a call's view, `input <id> <name>` for an argument
+(`.1` on), `output <id>` where it returned nothing or hasn't yet, and `unread <id>`,
+its folds `argument <id> <name>` and `output <id>` read as lines `.1` on. The
+agent's words are a block `step 6` under their fold, so a comment on them stays on
+them whether they're open or folded.
 """
 
 import json
@@ -46,6 +49,7 @@ import textwrap
 from collections import Counter
 from datetime import datetime
 from itertools import accumulate, groupby, pairwise
+from math import ceil
 from typing import TYPE_CHECKING
 
 from pydantic import Field
@@ -143,8 +147,22 @@ CALL_KIND = FoldKind(
 )
 """A call's input and output, under its line: opened only by its own keys, since
 each is read from the record as it opens."""
+DETAIL_KIND = FoldKind(
+    name="detail",
+    letter="x",
+    called="calls' outputs and long arguments",
+    one="the output or long argument",
+    level=5,
+    opens="deep",
+    colour="muted",
+    counts=False,
+)
+"""What a call returned, and each argument too long to read at a glance, under a
+line of its own in an opened call: so opening a call shows what it was given, and
+what it returned, however long, is one key further. Opened only by its own keys,
+since each is read from the record as it opens; its line says how much it holds."""
 
-FOLD_KINDS = [EARLIER_KIND, ITEMS_KIND, CALLS_KIND, CALL_KIND]
+FOLD_KINDS = [EARLIER_KIND, ITEMS_KIND, CALLS_KIND, CALL_KIND, DETAIL_KIND]
 """The fold kinds `Transcripts` declares, which its conversation folds under."""
 
 
@@ -170,9 +188,16 @@ class OfExchange(OfAgent):
 
 
 class OfCall(OfAgent):
-    """One call of an agent's conversation, read whole as its fold in the drawer opens."""
+    """One call of an agent's conversation, as its fold in the drawer reads it opening: what it was given; or, as a fold of that opens, what it returned, or one argument, whole."""
 
     id: str = Field(description="The runtime's id for the call.")
+    output: bool | None = Field(
+        default=None, description="Only what it returned, whole."
+    )
+    argument: str | None = Field(
+        default=None,
+        description="Only this argument, whole, by its name; `input` where it was given a text rather than arguments.",
+    )
 
 
 class Inboxed(Model):
@@ -331,40 +356,33 @@ def lined(text: str, indent: str) -> list[str]:
     ]
 
 
-def given(value: JsonValue, indent: str = "", inline: int = 100) -> list[str]:
-    r"""Return what a call was given as the lines it's shown in, set in by `indent`: each argument after its name, a value of several lines, or longer than `inline` as JSON, under it; text as it is.
+def said_as(value: JsonValue, inline: int = 100) -> list[str]:
+    r"""Return a value a call was given as the lines it's shown in: text as it is, any other value as JSON, spread over lines where it's longer than `inline`.
 
-    >>> given({"command": "uv run pytest -q", "limit": 3, "tags": ["a"]})
-    ['command: uv run pytest -q', 'limit: 3', 'tags: ["a"]']
-    >>> given({"question": "Which?\nOr neither?"})
-    ['question:', '  Which?', '  Or neither?']
-    >>> given(None, "  ")
-    ['  null']
+    >>> said_as("uv run pytest -q"), said_as(3), said_as(["a"])
+    (['uv run pytest -q'], ['3'], ['["a"]'])
+    >>> said_as("Which?\nOr neither?")
+    ['Which?', 'Or neither?']
+    >>> said_as({"text": "A model per kind"}, inline=10)
+    ['{', '  "text": "A model per kind"', '}']
+    >>> said_as(None)
+    ['null']
     """
-    inner = f"{indent}  "
+    if isinstance(value, str):
+        return lined(value, "")
+    compact = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    if len(compact) <= inline:
+        return [compact]
+    return lined(json.dumps(value, ensure_ascii=False, indent=2), "")
 
-    def argument(name: str, each: JsonValue) -> list[str]:
-        match each:
-            case str() if "\n" in each:
-                return [f"{indent}{name}:", *lined(each, inner)]
-            case str():
-                return [f"{indent}{name}: {each}"]
-            case _:
-                compact = json.dumps(each, ensure_ascii=False, separators=(",", ":"))
-                if len(compact) <= inline:
-                    return [f"{indent}{name}: {compact}"]
-                spread = json.dumps(each, ensure_ascii=False, indent=2)
-                return [f"{indent}{name}:", *lined(spread, inner)]
 
-    match value:
-        case str():
-            return lined(value, indent)
-        case dict():
-            return [
-                line for name, each in value.items() for line in argument(name, each)
-            ]
-        case _:
-            return lined(json.dumps(value, ensure_ascii=False, indent=2), indent)
+def rows_of(lines: list[str], row: int = 100) -> int:
+    """Return how many rows of `row` characters `lines` take, a long line wrapping.
+
+    >>> rows_of(["a", "", "b" * 250])
+    5
+    """
+    return sum(max(1, ceil(len(line) / row)) for line in lines)
 
 
 def since(start: datetime, until: datetime) -> str:
@@ -961,11 +979,22 @@ def exchange_blocks(
     return Blocks(blocks=[*further, *shown])
 
 
-def call_blocks(of: OfCall, call: Call | None, *, inline: int = 100) -> Blocks:
-    """Lay out one call read whole as its fold in the drawer shows it opened: what it was given after `input:`, each argument after its name, and what it returned after `output:`, or `failed:` where the runtime says it failed, `none yet` while it runs.
+def call_blocks(
+    of: OfCall,
+    call: Call | None,
+    *,
+    view: Method,
+    inline: int = 100,
+    most: int = 10,
+    row: int = 100,
+) -> Blocks:
+    """Lay out one call as its fold shows it opened: what it was given straight away, each argument after its name, on a line, or set in under it where it's several, one taking more than `most` rows of `row` characters folded under a line saying how it starts and how long it is; then what it returned, folded under a line saying how much, or `failed` where the runtime says it failed, `none yet` while it runs.
 
-    A call its record doesn't hold, `call` none, says it wasn't read. A value
-    longer than `inline` as JSON is laid out under its argument's name.
+    What's folded is read from `view`, this view, as it opens, with `of.output`
+    what it returned whole, or with `of.argument` that argument whole, so opening a
+    call reads no more of it than its input, and a command printing this view says
+    which to ask for. A call its record doesn't hold, `call` none, says it wasn't
+    read. A value longer than `inline` as JSON is spread over lines.
     """
     ran = of.id
     if call is None:
@@ -979,24 +1008,78 @@ def call_blocks(of: OfCall, call: Call | None, *, inline: int = 100) -> Blocks:
             ]
         )
 
-    def numbered(part: str, lines: list[str]) -> list[Block]:
+    def numbered(part: str, lines: list[str], indent: str = "") -> list[Block]:
         return [
-            Line.of(f"{part} {ran}.{at}", line)
+            Line.of(f"{part}.{at}", f"{indent}{line}" if line else "")
             for at, line in enumerate(lines, start=1)
         ]
 
-    if call.output is None:
-        returned = [Line.of(f"output {ran}", "output: none yet")]
-    else:
-        said = "failed:" if call.failed else "output:"
-        returned = [
-            Line.of(f"output {ran}", said),
-            *numbered("output", lined(call.output, "  ")),
-        ]
-    return Blocks(
-        blocks=[
-            Line.of(f"input {ran}", "input:"),
-            *numbered("input", given(call.input, "  ", inline)),
-            *returned,
-        ]
-    )
+    if of.output:
+        return Blocks(blocks=numbered(f"output {ran}", lined(call.output or "", "")))
+    if of.argument is not None:
+        match call.input:
+            case dict() as arguments:
+                wanted = arguments.get(of.argument)
+            case _ as given:
+                wanted = given
+        return Blocks(
+            blocks=numbered(f"argument {ran} {of.argument}", said_as(wanted, inline))
+        )
+
+    def folded_under(name: str, value: JsonValue, lines: list[str]) -> Block:
+        """Return `lines`, too long to read at a glance, folded under a line saying how `value`, called `name`, starts, and how long it is."""
+        compact = (
+            None if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+        )
+        start = next((line for line in lines if line.strip()), "")
+        tail = f" · {counted(len(lines), 'line')}"
+        line = cut(f"{name}: {start if compact is None else compact}", row - len(tail))
+        return Fold(
+            id=f"argument {ran} {name}",
+            kind=DETAIL_KIND.name,
+            summary=[Span(text=f"{line}{tail}")],
+            barred=True,
+            content=Load.of(view, of.model_copy(update={"argument": name})),
+        )
+
+    def argument(name: str, value: JsonValue) -> list[Block]:
+        lines = said_as(value, inline)
+        key = f"input {ran} {name}"
+        if rows_of(lines, row) > most:
+            return [folded_under(name, value, lines)]
+        match lines:
+            case [only]:
+                return [Line.of(key, f"{name}: {only}")]
+            case _:
+                return [Line.of(key, f"{name}:"), *numbered(key, lines, "  ")]
+
+    def inputs() -> list[Block]:
+        match call.input:
+            case dict() as arguments:
+                return [
+                    block
+                    for name, value in arguments.items()
+                    for block in argument(name, value)
+                ]
+            case _ as given:
+                lines = said_as(given, inline)
+                if rows_of(lines, row) > most:
+                    return [folded_under("input", given, lines)]
+                return numbered(f"input {ran}", lines)
+
+    def returned() -> Block:
+        if call.output is None:
+            return Line.of(f"output {ran}", "output: none yet")
+        said = "failed" if call.failed else "output"
+        lines = lined(call.output, "")
+        if not lines:
+            return Line.of(f"output {ran}", f"{said}: nothing")
+        return Fold(
+            id=f"output {ran}",
+            kind=DETAIL_KIND.name,
+            summary=[Span(text=f"{said} · {counted(len(lines), 'line')}")],
+            barred=True,
+            content=Load.of(view, of.model_copy(update={"output": True})),
+        )
+
+    return Blocks(blocks=[*inputs(), returned()])

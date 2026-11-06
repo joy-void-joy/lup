@@ -64,6 +64,7 @@ describe("what may follow a chord", () => {
             "c context",
             "k runs of calls",
             "d calls' input and output",
+            "x calls' outputs and long arguments",
         ];
         expect(following("␣f")).toEqual(kinds);
         expect(following("␣F")).toEqual(kinds);
@@ -92,6 +93,7 @@ describe("what may follow a chord", () => {
             "c the context",
             "k the run of calls",
             "d the call's input and output",
+            "x the output or long argument",
         ]);
     });
 

@@ -224,6 +224,21 @@
       "keeps_open": null,
       "starts_open": null,
       "by_all": true
+    },
+    {
+      "name": "detail",
+      "letter": "x",
+      "called": "calls' outputs and long arguments",
+      "one": "the output or long argument",
+      "level": 5,
+      "opens": "deep",
+      "colour": "muted",
+      "chord": true,
+      "whole": false,
+      "counts": false,
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
     }
   ],
   "tones": [

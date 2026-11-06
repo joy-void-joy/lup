@@ -258,4 +258,7 @@ def test_an_earlier_exchange_and_a_call_are_views_of_their_own(tmp_path: Path) -
     call = OfCall(runtime="claude", session="first-0000", id="t1")
     shown = asyncio.run(kept.call(call)).text()
     assert "command: uv run pytest" in shown
-    assert "2 passed" in shown
+    assert "▸ output · 1 line  [call id=t1 output=True]" in shown
+    assert "2 passed" not in shown
+    returned = OfCall(runtime="claude", session="first-0000", id="t1", output=True)
+    assert asyncio.run(kept.call(returned)).text() == "2 passed"

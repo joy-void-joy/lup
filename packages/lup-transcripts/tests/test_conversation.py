@@ -60,7 +60,6 @@ from lup_transcripts.environment.conversation import (
     call_blocks,
     conversation_blocks,
     exchange_blocks,
-    given,
 )
 
 if TYPE_CHECKING:
@@ -84,7 +83,7 @@ class Viewing(BaseModel):
 
     @lup.view
     async def call(self, viewed: OfCall) -> Blocks:
-        """One call read whole."""
+        """One call, or a part of it, read as its fold opens."""
         del viewed
         return Blocks()
 
@@ -386,7 +385,14 @@ def test_each_call_is_a_line_of_its_own_saying_what_it_was_given_a_run_of_them_o
     assert not call.open
     assert call.content == Load(
         view="call",
-        argument={"runtime": "claude", "session": "s1", "agent": None, "id": "t2"},
+        argument={
+            "runtime": "claude",
+            "session": "s1",
+            "agent": None,
+            "id": "t2",
+            "output": None,
+            "argument": None,
+        },
     )
     # A call its record gives no id has nothing to read: a line, named by its step.
     assert block(view.blocks, "step 6") == Line.of("step 6", "· Bash", "call")
@@ -465,7 +471,15 @@ def test_a_call_s_line_stays_one_row_whole_under_its_fold() -> None:
     assert isinstance(call.content, Load)
 
 
-def test_a_call_s_view_shows_each_argument_after_its_name_what_it_returned_or_that_it_s_still_running() -> (
+def opened_call(read: Call | None, key: str = "t1", **part: object) -> Blocks:
+    """Return the call's view of `read`, of the part named: as its fold opens with none, or as a fold in it does."""
+    of = OfCall.model_validate(
+        {"runtime": "claude", "session": "s1", "id": key, **part}
+    )
+    return call_blocks(of, read, view=Viewing.call)
+
+
+def test_a_call_opened_shows_what_it_was_given_its_output_folded_read_as_that_opens() -> (
     None
 ):
     read = Call(
@@ -473,36 +487,49 @@ def test_a_call_s_view_shows_each_argument_after_its_name_what_it_returned_or_th
         input={"command": "uv run pytest -q", "description": "Run the tests"},
         output="2 failed\n3 passed\n",
     )
-    shown = call_blocks(OfCall(runtime="claude", session="s1", id="t1"), read)
+    shown = opened_call(read)
     assert shown.text() == said(
-        "input:",
-        "  command: uv run pytest -q",
-        "  description: Run the tests",
-        "output:",
-        "  2 failed",
-        "  3 passed",
+        "command: uv run pytest -q",
+        "description: Run the tests",
+        "▸ output · 2 lines  [call id=t1 output=True]",
     )
     assert ids(shown.blocks) == [
-        "input t1",
-        "input t1.1",
-        "input t1.2",
+        "input t1 command",
+        "input t1 description",
         "output t1",
-        "output t1.1",
-        "output t1.2",
     ]
-    running = Call(id="t2", input={"file_path": "/w/review.ts", "offset": 480})
-    assert call_blocks(
-        OfCall(runtime="claude", session="s1", id="t2"), running
-    ).text() == said(
-        "input:", "  file_path: /w/review.ts", "  offset: 480", "output: none yet"
+    output = block(shown.blocks, "output t1")
+    assert isinstance(output, Fold)
+    assert (output.kind, output.open, output.barred) == ("detail", False, True)
+    assert output.content == Load(
+        view="call",
+        argument={
+            "runtime": "claude",
+            "session": "s1",
+            "agent": None,
+            "id": "t1",
+            "output": True,
+            "argument": None,
+        },
     )
-    unread = call_blocks(OfCall(runtime="claude", session="s1", id="t3"), None)
-    assert unread.blocks == [
+    # Read as it opens: what it returned, whole, on lines of its own.
+    whole_output = opened_call(read, output=True)
+    assert whole_output.text() == said("2 failed", "3 passed")
+    assert ids(whole_output.blocks) == ["output t1.1", "output t1.2"]
+    # Still running, it says so; once it's returned nothing, that; a call the record doesn't hold, that it wasn't read.
+    running = Call(id="t2", input={"file_path": "/w/review.ts", "offset": 480})
+    assert opened_call(running, "t2").text() == said(
+        "file_path: /w/review.ts", "offset: 480", "output: none yet"
+    )
+    assert opened_call(Call(id="t2", input={"a": 1}, output=""), "t2").text() == said(
+        "a: 1", "output: nothing"
+    )
+    assert opened_call(None, "t3").blocks == [
         Line.of("unread t3", "not read: its record doesn't hold the call", "muted")
     ]
 
 
-def test_a_failed_call_says_it_failed_text_given_is_laid_out_as_it_is_a_long_value_under_its_name() -> (
+def test_a_failed_call_says_so_on_its_output_s_line_text_given_is_laid_out_as_it_is() -> (
     None
 ):
     failed = Call(
@@ -511,28 +538,31 @@ def test_a_failed_call_says_it_failed_text_given_is_laid_out_as_it_is_a_long_val
         output="a.py: no such file",
         failed=True,
     )
-    assert call_blocks(
-        OfCall(runtime="claude", session="s1", id="x"), failed
-    ).text() == said(
-        "input:",
-        "  *** Begin Patch",
-        "  *** Update File: a.py",
-        "  *** End Patch",
-        "failed:",
-        "  a.py: no such file",
+    assert opened_call(failed, "x").text() == said(
+        "*** Begin Patch",
+        "*** Update File: a.py",
+        "*** End Patch",
+        "▸ failed · 1 line  [call id=x output=True]",
     )
-    decisions: JsonValue = [
-        {"text": "A model per kind, read by pydantic", "lean": "yes"},
-        {"text": "A dict walked by hand, key by key", "lean": "no"},
-    ]
-    assert given(
-        {
+    assert opened_call(failed, "x", output=True).text() == "a.py: no such file"
+
+
+def test_a_call_s_arguments_are_each_on_a_line_several_lines_set_in_under_its_name_any_value_as_json() -> (
+    None
+):
+    read = Call(
+        id="t1",
+        input={
             "question": "Which?\nOr neither?",
             "limit": 3,
             "tags": ["a"],
-            "decisions": decisions,
-        }
-    ) == [
+            "decisions": [
+                {"text": "A model per kind, read by pydantic", "lean": "yes"},
+                {"text": "A dict walked by hand, key by key", "lean": "no"},
+            ],
+        },
+    )
+    assert opened_call(read).text().splitlines() == [
         "question:",
         "  Which?",
         "  Or neither?",
@@ -549,8 +579,67 @@ def test_a_failed_call_says_it_failed_text_given_is_laid_out_as_it_is_a_long_val
         '      "lean": "no"',
         "    }",
         "  ]",
+        "output: none yet",
     ]
-    assert given(None, "  ") == ["  null"]
+    assert len(ids(opened_call(read).blocks)) == len(set(ids(opened_call(read).blocks)))
+
+
+def test_an_argument_too_long_to_read_at_a_glance_folds_in_its_place_read_whole_as_it_opens() -> (
+    None
+):
+    content = "\n".join(f"line {each}" for each in range(58))
+    prose = "word " * 300
+    decisions: JsonValue = [
+        {"text": f"Choice {each}", "lean": "no"} for each in range(9)
+    ]
+    read = Call(
+        id="t1",
+        input={
+            "file_path": "/w/a.py",
+            "content": content,
+            "prose": prose,
+            "decisions": decisions,
+        },
+    )
+    shown = opened_call(read)
+    assert shown.text().splitlines() == [
+        "file_path: /w/a.py",
+        "▸ content: line 0 · 58 lines  [call id=t1 argument=content]",
+        f"▸ prose: {'word ' * 15}word… · 1 line  [call id=t1 argument=prose]",
+        '▸ decisions: [{"text": "Choice 0", "lean": "no"}, {"text": "Choice 1", "lean": "no"},… · 38 lines  [call id=t1 argument=decisions]',
+        "output: none yet",
+    ]
+    fold = block(shown.blocks, "argument t1 content")
+    assert isinstance(fold, Fold)
+    assert (fold.kind, fold.open, fold.barred) == ("detail", False, True)
+    line = "".join(span.text for span in fold.summary)
+    assert len(line) <= 100
+    # Each read whole as it opens: the text as it is, any other value spread.
+    assert opened_call(read, argument="content").text().splitlines() == [
+        f"line {each}" for each in range(58)
+    ]
+    assert opened_call(read, argument="decisions").text().splitlines()[:3] == [
+        "[",
+        "  {",
+        '    "text": "Choice 0",',
+    ]
+    # An argument it wasn't given reads as nothing there; a text it was given whole folds as `input`.
+    assert opened_call(read, argument="absent").text() == "null"
+    patch = Call(id="t2", input=content, output="ok")
+    assert opened_call(patch, "t2").text().splitlines() == [
+        "▸ input: line 0 · 58 lines  [call id=t2 argument=input]",
+        "▸ output · 1 line  [call id=t2 output=True]",
+    ]
+    assert opened_call(patch, "t2", argument="input").text().splitlines()[0] == "line 0"
+
+
+def test_a_long_output_is_read_only_as_its_fold_opens_the_call_s_fold_holding_its_input() -> (
+    None
+):
+    read = Call(id="t1", input={"a": 1}, output="\n".join(["x"] * 5000))
+    shown = opened_call(read)
+    assert shown.text().splitlines()[-1].startswith("▸ output · 5000 lines")
+    assert len(shown.model_dump_json()) < 2000
 
 
 # The agent's words, which comments are on
@@ -1574,6 +1663,7 @@ def test_every_block_has_an_id_of_its_own_a_fold_s_never_a_line_s() -> None:
         call_blocks(
             OfCall(runtime="claude", session="s1", id="q1"),
             Call(id="q1", input={"a": 1}, output="ok"),
+            view=Viewing.call,
         ),
     ]
     every = [each for view in views for each in ids(view.blocks)]
@@ -1614,6 +1704,7 @@ def test_the_fold_kinds_keep_their_letters_and_colours() -> None:
         ("items", "m", "cyan", 2, "together"),
         ("calls", "k", "purple", 3, "together"),
         ("call", "d", "orange", 4, "deep"),
+        ("detail", "x", "muted", 5, "deep"),
     ]
     assert [(each.name, each.like, each.colour) for each in TONES] == [
         ("call", None, "orange"),
