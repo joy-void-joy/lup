@@ -35,6 +35,8 @@ The homes:
   which its worktrees and their rooms share, and which outlast a room's session
   as lup's state there doesn't; and `lup/reports/`, the judge's reports too
   long for a hook, kept whole where every room reads them;
+- inside a checkout's own part of the git directory, `lup/built/`, what the gate's
+  steps that build a file last passed on there (`CheckoutGitLayout`);
 - inside `lup_dev`, the built engine (`Bundle`).
 """
 
@@ -396,6 +398,17 @@ class GitDirectoryLayout(Model):
     def reports(self) -> Path:
         """The judge's reports too long for a hook to tell whole, each kept whole in a file of its own, which the shortened report names (`policy.report.Reports`); in the git directory, so a report spanning several worktrees has one home every room reads."""
         return self.common / "lup" / "reports"
+
+
+class CheckoutGitLayout(Model):
+    """What lup keeps in one checkout's own part of the git directory: its alone, among no files git would commit, and gone with it."""
+
+    own: Path
+    """The checkout's git directory, as git names it: a clone's `.git`, or `worktrees/<its name>` in the common one for a worktree `git worktree add` made, of a clone or a bare clone alike."""
+
+    def built(self, step: str) -> Path:
+        """Return where what the gate's step named `step`, which builds a file, last passed on in this checkout is kept (`lup_dev.gate`, `Built`)."""
+        return self.own / "lup" / "built" / f"{step}.json"
 
 
 class PackageLayout(Model):

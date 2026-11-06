@@ -3085,7 +3085,8 @@ def check(
     The steps are the worktree's declaration's, and so is how the project runs
     its tools: lup's rules (`rules check`), ruff, the formatter, pyright, pytest
     and the import contracts by default, with what its modules add, such as lup's
-    own engine, rebuilt when stale. Its modules' requirements are checked first,
+    own engine, rebuilt unless it passed on its sources as they stand. Its modules'
+    requirements are checked first,
     all at once: a required tool missing stops the gate before any step. Each
     step's outcome is reported, then each failure's output in full; the exit code
     is non-zero when any step failed. With `--fix`, ruff's safe fixes and the

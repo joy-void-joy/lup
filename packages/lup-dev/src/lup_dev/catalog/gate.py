@@ -19,10 +19,13 @@ class Step(Model):
     """Whether the gate runs `command` through the project's runner; otherwise
     it runs as written."""
     builds: str | None = None
-    """A file the step builds, from the root: it runs only when that file is
-    missing or older than one of its `sources`."""
+    """A file the step builds, from the root: the gate skips the step only where it
+    already passed on its `sources` as they stand, leaving that file as it is
+    (`lup_dev.gate`, `Check.stale`)."""
     sources: list[str] = []
-    """Patterns, from the root, of the files `builds` is made from."""
+    """Patterns, from the root, of the files `builds` is made from, among those git
+    would commit: what the step generates beside them, which git ignores, isn't
+    one."""
 
 
 class Gate(Model):
