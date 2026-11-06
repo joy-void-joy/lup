@@ -1,6 +1,6 @@
 // The dashboard open in the room's Chromium: headless, or with a window on a virtual display of its own for real key
 // events, its review's editor, keys sent without waiting on the page, and its CPU slowed.
-import { chromium, errors, type Browser, type CDPSession, type Page } from "playwright";
+import { chromium, errors, type Browser, type CDPSession, type Page, type Route } from "playwright";
 
 import { display, type Display, type Layout } from "./display.ts";
 import { keys, type Keys } from "./keys.ts";
@@ -8,6 +8,9 @@ import { review, type Review } from "./review.ts";
 
 /** The room's Chromium, a package of its image: Playwright's own browser isn't installed. */
 const CHROMIUM = "/usr/sbin/chromium";
+
+/** Where `Dashboard.route` asks whether the page's requests reach a route, which answers 204: the server answers nothing here. */
+const ROUTED = "/lup-drive-routed";
 
 /** How the dashboard is opened. */
 export interface OpenOptions {
@@ -37,6 +40,13 @@ export interface Dashboard extends AsyncDisposable {
     thrown: Error[];
     /** The review's editor, once the page has made it. */
     review(): Promise<Review>;
+    /**
+     * Route what the page asks of `url` through `handler`, as `page.route` does, and return once the page's requests
+     * reach a route. `page.route` returns before that's so: a key pressed straight after it, on a loaded machine, can
+     * make a request that goes past the route to the server, as if there were none, and Playwright reports no such
+     * request (`docs/field-notes.md`, *A route just set in Chromium*).
+     */
+    route(url: string, handler: (route: Route) => unknown): Promise<void>;
     /** Slow the page's CPU `rate` times, standing for a slower machine or browser; 1 for its own speed. */
     slow(rate: number): Promise<void>;
     close(): Promise<void>;
@@ -86,6 +96,7 @@ export async function open(url: string, options: OpenOptions = {}): Promise<Dash
             display: screen,
             thrown,
             review: () => review(page, thrown),
+            route: (url, handler) => routed(page, url, handler),
             async slow(rate) {
                 await session.send("Emulation.setCPUThrottlingRate", { rate });
             },
@@ -96,6 +107,19 @@ export async function open(url: string, options: OpenOptions = {}): Promise<Dash
         await close();
         throw failed;
     }
+}
+
+/** Route what `page` asks of `url` through `handler`, and return once a request of the page's has reached a route, asking until one does. */
+async function routed(page: Page, url: string, handler: (route: Route) => unknown): Promise<void> {
+    await page.route(url, handler);
+    await page.route(`**${ROUTED}`, (route) => route.fulfill({ status: 204 }));
+    for (let asked = 0; asked < 100; asked += 1) {
+        if (await page.evaluate(async (at) => (await fetch(at)).status === 204, ROUTED)) {
+            await page.unroute(`**${ROUTED}`);
+            return;
+        }
+    }
+    throw new Error("the page's requests never reached a route set on it");
 }
 
 /**

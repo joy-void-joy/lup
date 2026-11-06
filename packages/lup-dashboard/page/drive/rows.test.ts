@@ -155,7 +155,7 @@ describe("every line of the page on one row, at the demo's width, in headless Ch
             "the draft writes to lup-impl/gone of /r/lup.git, which lup's inbox has never heard of. Write to an agent the dashboard shows running: " +
             "a conversation is known once one of its hooks is heard, and one whose session ended long ago, or that ran in another repository, " +
             "can't be reached by any reply, so the message would wait for good.";
-        await dashboard.page.route("**/api/ask", async (route) => {
+        await dashboard.route("**/api/ask", async (route) => {
             if ((route.request().postData() ?? "").includes('"inbox-keep-draft"')) {
                 await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ kind: "refused", error: why }) });
                 return;

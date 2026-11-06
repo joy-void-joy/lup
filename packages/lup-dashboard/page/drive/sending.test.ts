@@ -54,7 +54,7 @@ describe("Ctrl+Enter, in headless Chromium", () => {
         // The host answering slowly, as it does for seconds just after the page loads at the operator's size.
         const held: Route[] = [];
         let sends = 0;
-        await dashboard.page.route("**/api/ask", async (route) => {
+        await dashboard.route("**/api/ask", async (route) => {
             const body = route.request().postData() ?? "";
             if (body.includes('"inbox-send-draft"')) {
                 sends += 1;
@@ -80,13 +80,13 @@ describe("Ctrl+Enter, in headless Chromium", () => {
     it("says the host can't be reached, the draft kept, and sends it at the next Ctrl+Enter", async () => {
         await read("── @62 note", 62);
         // The dashboard gone with the host service, as while lup restarts.
-        await dashboard.page.route("**/api/ask", (route) => route.abort("connectionrefused"));
+        await dashboard.route("**/api/ask", (route) => route.abort("connectionrefused"));
         await dashboard.keys.press(["Control+Enter"]);
         await says("Not sent, your draft kept: the dashboard can't be reached: the host is restarting, or out of reach.");
         expect(await status()).toContain("Your reply: read @62");
         // The dashboard there, the host behind it not.
         await dashboard.page.unrouteAll({ behavior: "ignoreErrors" });
-        await dashboard.page.route("**/api/ask", (route) =>
+        await dashboard.route("**/api/ask", (route) =>
             route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "lup's host service isn't listening" }) }),
         );
         await dashboard.keys.press(["Control+Enter"]);
