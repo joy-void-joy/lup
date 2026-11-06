@@ -9,10 +9,11 @@ import { describe, expect, it } from "vitest";
 import { MOVE, implied, isMarked, listed, marking, movedInto, reachOf, reachedIn, threadsRead, type Act } from "./grammar";
 import { toSend, waitingOn } from "./App";
 import { partSaid } from "./brief";
-import { outlineOf } from "./outline";
+import { itemStanding, outlineOf, threadStanding } from "./outline";
 import {
     EMPTY,
     checkAt,
+    countToRead,
     groupAt,
     headerClasses,
     heading,
@@ -184,6 +185,54 @@ function lay(draft: Draft = EMPTY, whole: boolean = false, places: string[] = []
 function lines(out: Laid): string[] {
     return out.text.split("\n");
 }
+
+describe("what asks the operator, and what's only to read, in the overview and the top bar", () => {
+    const reading = (draft: Draft = EMPTY) => ({ draft, seeing: UNSEEN, states: new Map(), called });
+    const stands = (out: Laid, draft: Draft = EMPTY) => outlineOf(out, reading(draft)).map((each) => [each.text, each.marks, each.counts ?? null]);
+
+    it("marks a thread by what the host says asks them, or only to read where it's in new, each counted apart", () => {
+        const both = { ...READER, new: [47] } as ThreadRead;
+        expect(threadStanding(READER, "waiting on you")).toEqual({ marks: ["waiting"], counts: { asks: 2, toRead: 0 } });
+        // In new, what it's there for is what it says, whatever else in it asks them, as its row in waiting on you says.
+        expect(threadStanding(both, "new")).toEqual({ marks: ["news"], counts: { asks: 0, toRead: 1 } });
+        expect(threadStanding(both, "open")).toEqual({ marks: ["waiting"], counts: { asks: 2, toRead: 1 } });
+        expect(threadStanding(AUTH, "open")).toEqual({ marks: ["news"], counts: { asks: 0, toRead: 1 } });
+        expect(threadStanding(VOICE, "waiting on you")).toEqual({ marks: ["waiting"], counts: { asks: 1, toRead: 0 } });
+        expect(threadStanding(CACHE, "settled")).toEqual({ marks: [], counts: { asks: 0, toRead: 0 } });
+    });
+
+    it("says so of each item, by the host's asks, a seen one saying neither", () => {
+        const out = lay();
+        const rows = outlineOf(out, reading());
+        expect(rows.find((each) => each.text.startsWith("@51"))?.marks).toEqual(["waiting"]);
+        const seen = { ...UNSEEN, groups: new Map(), threaded: new Set<number>() };
+        const region = out.regions.find((each) => each.item.number === 70);
+        expect(region === undefined ? null : itemStanding(region, EMPTY, { ...UNSEEN, threaded: new Set([70]) }).marks).toEqual(["news"]);
+        expect(region === undefined ? null : itemStanding(region, EMPTY, seen).marks).toEqual([]);
+        // What a kind asks is the host's word, whatever its rank says.
+        const asking = { ...LATE, asks: true } as Item;
+        expect(region === undefined ? null : itemStanding({ ...region, item: asking }, EMPTY, seen).marks).toEqual(["waiting"]);
+        expect(stands(out).find((each) => each[0] === "@reader")?.[1]).toEqual(["waiting"]);
+    });
+
+    it("counts an agent's own apart, by agent", () => {
+        const out = laid([QUESTION, LATE, NOTE], [WORKER], banner, header, EMPTY, NOTHING, [], new Map(), called);
+        const row = outlineOf(out, reading()).find((each) => each.kind === "agent");
+        expect(row?.counts).toEqual({ asks: 1, toRead: 2 });
+        const later = outlineOf(out, reading({ ...EMPTY, parked: [51], done: [47] })).find((each) => each.kind === "agent");
+        expect(later?.counts).toEqual({ asks: 0, toRead: 1 });
+    });
+
+    it("counts what's only to read in the same number by thread and by agent, what's on the pile among it", () => {
+        const read = [{ ...AUTH, new: [70, 71], pile: [81] } as ThreadRead, { ...READER, pile: [81, 82] } as ThreadRead];
+        expect(countToRead([], EMPTY, UNSEEN, read)).toBe(4);
+        expect(countToRead([], { ...EMPTY, done: [70], parked: [82] }, UNSEEN, read)).toBe(2);
+        const felt = item(83, LEAD, { reason: "how it felt", text: "Fine." } as unknown as Item["reason"]);
+        const items = [QUESTION, LATE, felt];
+        expect(countToRead(items, EMPTY, UNSEEN, null)).toBe(2);
+        expect(countToRead(items, EMPTY, { ...UNSEEN, commented: new Set([70]) }, null)).toBe(1);
+    });
+});
 
 describe("what's read by being on screen, grouped by thread or by agent", () => {
     const read = threading().read.threads;

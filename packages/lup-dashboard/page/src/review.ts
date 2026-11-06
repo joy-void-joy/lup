@@ -1038,6 +1038,29 @@ export function fresh(item: Item, seeing: Seeing): boolean {
     return seen === undefined || item.number > seen;
 }
 
+/**
+ * Say whether an item is only to read: new to the operator, still waiting and left as it is in the draft, asking them
+ * nothing (`Item.asks`, the host's). Being seen takes it out of this, though it stays where it is until Space d marks it
+ * read; what asks them never is, and is counted apart (`toAnswer`).
+ */
+export function toRead(item: Item, draft: Draft, seeing: Seeing): boolean {
+    const settled = [...(draft.done ?? []), ...(draft.declined ?? []), ...(draft.parked ?? [])];
+    return !item.asks && news(item) && waits(item) && !settled.includes(item.number) && fresh(item, seeing);
+}
+
+/**
+ * Return how many items are only to read, what the top bar and the header over the review say apart from what asks the
+ * operator: of `items`, as `toRead` says; grouped by thread, what the host says is new in each of `threads` and on its pile
+ * to read, those the draft marks left out.
+ */
+export function countToRead(items: readonly Item[], draft: Draft, seeing: Seeing, threads: readonly ThreadRead[] | null): number {
+    if (threads === null) {
+        return items.filter((each) => toRead(each, draft, seeing)).length;
+    }
+    const settled = new Set([...(draft.done ?? []), ...(draft.declined ?? []), ...(draft.parked ?? [])]);
+    return new Set(threads.flatMap((each) => [...(each.new ?? []), ...(each.pile ?? [])]).filter((number) => !settled.has(number))).size;
+}
+
 /** Say how many of a thing there are: `1 step`, `5 steps`. */
 function counted(count: number, one: string): string {
     return `${count} ${one}${count === 1 ? "" : "s"}`;
@@ -3062,11 +3085,9 @@ export function tallied(items: Item[], draft: Draft, seeing: Seeing): string {
     if (items.length === 0) {
         return "";
     }
-    const settled = [...(draft.done ?? []), ...(draft.declined ?? []), ...(draft.parked ?? [])];
-    const open = items.filter((each) => waits(each) && !settled.includes(each.number));
-    const answering = open.filter((each) => toAnswer(each, draft)).length;
-    const arrived = open.filter((each) => fresh(each, seeing)).length;
-    return [`${answering} to answer`, ...(arrived === 0 ? [] : [`${arrived} new`])].join(" · ");
+    const answering = items.filter((each) => waits(each) && toAnswer(each, draft)).length;
+    const reading = countToRead(items, draft, seeing, null);
+    return [`${answering} to answer`, ...(reading === 0 ? [] : [`${reading} to read`])].join(" · ");
 }
 
 /** Return the last of `spans`, in the text's order, starting at or before `position`. */

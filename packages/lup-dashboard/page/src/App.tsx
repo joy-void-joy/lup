@@ -49,6 +49,7 @@ import {
     messages,
     pruned,
     remarks,
+    countToRead,
     seeingOf,
     whose,
     type AgentDrawers,
@@ -463,6 +464,8 @@ export function App() {
         () => (inbox.reply?.kind === "inbox-items" ? inbox.reply.items.filter((each) => !flag(each)) : []),
         [inbox.reply],
     );
+    // What's only to read, which the top bar counts apart from what asks the operator.
+    const toReadCount = countToRead(waiting, draft, seeing, threadsRead?.threads ?? null);
 
     // What the draft marks or comments on that's past waiting, answered or replaced since it was written: laid out with
     // what's drafted on it, which stays in view, saying so, until it's sent.
@@ -1225,7 +1228,13 @@ export function App() {
                 )}
                 <span className="spacer" />
                 <span className="count">
-                    {agents.length} {agents.length === 1 ? "agent" : "agents"} · {waitingOn(threadsRead, landingIn, waiting, draft.parked ?? [])} waiting on you
+                    {agents.length} {agents.length === 1 ? "agent" : "agents"} · <span className="mark-waiting">◆</span> {waitingOn(threadsRead, landingIn, waiting, draft.parked ?? [])} waiting on you
+                    {toReadCount === 0 ? null : (
+                        <>
+                            {" · "}
+                            <span className="mark-news">•</span> {toReadCount} to read
+                        </>
+                    )}
                 </span>
                 <button type="button" className="overview-button" onClick={() => setOverview(!overview)} title="the overview of every agent and item">
                     Overview <kbd>{"\\"}</kbd>
