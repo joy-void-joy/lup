@@ -57,6 +57,45 @@ def test_a_replacement_applies_as_the_tool_does() -> None:
     )
 
 
+def test_a_write_through_a_link_into_a_protected_directory_is_held_as_the_file_it_reaches(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "settings.json").write_text("{}\n")
+    (repo / "into").symlink_to(".claude")
+    shell.commit(repo, "a link into a protected directory")
+    SessionStarted(session="s1", cwd=repo).apply(kit.bench)
+    write = Overwrite(
+        call="w1", tool="Write", path=repo / "into" / "settings.json", text="{}\n#\n"
+    )
+    before(kit.bench, write, "s1", repo)
+    [hold] = kit.announced.holds
+    [held] = hold.files
+    assert (held.path, held.reasons) == (Path(".claude/settings.json"), ["protected"])
+
+
+def test_a_write_to_a_linked_file_into_a_protected_directory_is_held_at_its_call_s_finish(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    """Its path says nothing of where it leads, so it's let through as its own; what it reaches is judged at the checkpoint, as a shell's write is."""
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "settings.json").write_text("{}\n")
+    (repo / "linked.json").symlink_to(".claude/settings.json")
+    shell.commit(repo, "a linked file into a protected directory")
+    SessionStarted(session="s1", cwd=repo).apply(kit.bench)
+    CallStarted(session="s1", cwd=repo, call="w1", tool="Write").apply(kit.bench)
+    write = Overwrite(
+        call="w1", tool="Write", path=repo / "linked.json", text="{}\n#\n"
+    )
+    assert before(kit.bench, write, "s1", repo).outcome == "allow"
+    assert kit.announced.holds == []
+    (repo / "linked.json").write_text(write.text)
+    CallFinished(session="s1", cwd=repo, call="w1", tool="Write").apply(kit.bench)
+    [hold] = kit.announced.holds
+    [held] = hold.files
+    assert (held.path, held.reasons) == (Path(".claude/settings.json"), ["protected"])
+
+
 def test_a_write_to_a_file_linking_out_of_the_worktree_is_let_through_unread(
     kit: Kit, repo: Path, tmp_path: Path
 ) -> None:

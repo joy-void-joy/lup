@@ -1107,6 +1107,48 @@ def test_a_file_on_disk_linking_out_of_the_worktree_is_one_lup_doesnt_read(
     assert on_disk(repo, Path("src/pkg/near.py")) == (repo / CORE).read_text()
 
 
+def test_a_link_made_at_a_protected_directory_s_name_is_held_and_a_decline_removes_it(
+    holding_kit: Kit, repo: Path
+) -> None:
+    kit = holding_kit
+    kit.announced.holding_all = False
+    (repo / "elsewhere").mkdir()
+    (repo / "elsewhere" / "settings.json").write_text("{}\n")
+    start(kit, repo)
+    call(kit, repo, "c1")
+    (repo / ".claude").symlink_to("elsewhere")
+
+    def declines() -> None:
+        [hold] = waiting(kit.layout)
+        answer(kit.layout, hold.key, Response(approved=False), [], kit.clock)
+
+    kit.clock.on_sleep.append(declines)
+    finish(kit, repo, "c1")
+    [hold] = kit.announced.holds
+    [held] = hold.files
+    assert (held.path, held.reasons) == (Path(".claude"), ["protected"])
+    assert not (repo / ".claude").is_symlink()
+    assert (repo / "elsewhere" / "settings.json").is_file()
+
+
+@pytest.mark.parametrize("through", ["into/settings.json", "linked.json"])
+def test_a_shell_write_through_a_link_into_a_protected_directory_is_held_as_the_file_it_reaches(
+    kit: Kit, repo: Path, shell: Shell, through: str
+) -> None:
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "settings.json").write_text("{}\n")
+    (repo / "into").symlink_to(".claude")
+    (repo / "linked.json").symlink_to(".claude/settings.json")
+    shell.commit(repo, "links into a protected directory")
+    start(kit, repo)
+    call(kit, repo, "c1")
+    (repo / through).write_text("{}\n# more\n")
+    finish(kit, repo, "c1")
+    [hold] = kit.announced.holds
+    [held] = hold.files
+    assert (held.path, held.reasons) == (Path(".claude/settings.json"), ["protected"])
+
+
 EXEMPTING_REGEX = (
     "from lup_dev import CodeRules, Exemption, Exemptions, Modules, Project\n"
     "lifted = Exemption(rule='regex', paths=['src/pkg/**'], why='a grammar')\n"

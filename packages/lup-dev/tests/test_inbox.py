@@ -9418,6 +9418,31 @@ def test_a_landing_holds_what_its_own_diff_asks_whatever_the_hooks_heard_and_lan
     assert after == []
 
 
+def test_a_link_at_a_protected_directory_s_name_holds_its_landing_until_approved(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    (landings.feat / ".claude").symlink_to("elsewhere")
+    landings.wrote(landings.feat, "elsewhere/settings.json", "{}\n")
+    old = landings.on_forge("refs/heads/dev")
+    tip = landings.merged()
+    session = lander(landings, "claude")
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, pool):
+        landing, wait = held_landing(machine, clock, delivery, pool)
+        meanwhile = landings.on_forge("refs/heads/dev")
+        place = drawer(machine, clock, session, "feat")
+        answering(machine, clock, session, place, ".claude")
+        answer, error = landing.result(timeout=60)
+    assert not error
+    assert meanwhile == old
+    assert waited_on(wait) == [".claude"]
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+    assert landings.on_forge("refs/heads/dev") == tip
+
+
 def test_a_file_a_landing_asks_about_declined_lands_nothing_and_the_next_landing_holds_it_again(
     landings: Landings,
     machine: Layout,
