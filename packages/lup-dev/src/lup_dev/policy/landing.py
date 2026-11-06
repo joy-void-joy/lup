@@ -1,4 +1,4 @@
-"""Landing a branch: `land`, the tool that merges a branch onto the integration branch, and moves it on the remote once the operator approved what was flagged on what it lands.
+"""Landing a branch: `land`, the tool that merges a branch onto the running branch, and moves it on the remote once the operator approved what was flagged on what it lands.
 
 `docs/judging-writes.md`, *Landing a branch*. A flagged write lands in its
 worktree and holds no one (`lup_dev.policy.flags`); the landing of its branch is
@@ -6,7 +6,8 @@ where it waits for the operator. `git push` runs in the agent's shell, which end
 a command within minutes, so a push can't wait hours for them; a call to one of
 lup's tools can, as `ask` with `wait` does (`docs/inbox.md`, *Holding a call*).
 So `land`, a tool the host service serves each launched session, moves the
-gated branch, `dev` by default:
+running branch, as the declaration approved names it (`approved_branches`), `dev`
+by default, or the gated branch it's told to:
 1. the gated branch's tip on the remote is fetched, writing no ref, so git can
    tell what holds it; then the messages the landing would publish, the merge
    commit's and each commit's beyond what the remote holds, are read for an
@@ -24,7 +25,7 @@ gated branch, `dev` by default:
    check any tip, and the local branch fast-forwarded to it in the room, its
    checkout by `git merge --ff-only`: all of it under the repository's lock
    (`Turns`), so landings merge one at a time, each onto the last. Without a
-   branch, the local integration branch's tip lands as it is;
+   branch, the local running branch's tip lands as it is;
 3. the tip landed must hold the remote's: a landing is a fast-forward;
 4. the gate must have passed on the tip's files, as the room's gate recorded it
    (`lup_dev.gate`, `Passes`): the gate needs the project's environment, which
@@ -41,7 +42,7 @@ gated branch, `dev` by default:
    with the operator's words (`Waits.declined`);
 6. the push goes the remote helper's way (`PushHandler`): held to the launch's
    limits, through `Publishing`, and told to `Remotes.landed`, which
-   asks trust's approval where it moved the integration branch. It names the
+   asks trust's approval where it moved the running branch. It names the
    remote's URL, so the gated branch's remote-tracking ref is moved to what
    landed after it (`tracked`), as `git push <remote>` moves it: the judge
    counts what those refs name as judged;
@@ -53,7 +54,7 @@ gated branch, `dev` by default:
    said how the work felt, is invited to, once, beside their next call
    (`invited`): the landing is where a branch's work ends;
 8. the answer says, for each branch it landed, the `# lup: defer` comments its
-   merge adds and removes against its first parent, and those the integration
+   merge adds and removes against its first parent, and those the running
    branch's own commits add and remove beyond them, where it lands some or no
    branch merged (`Deferrals`): read on the host from each version's parse
    alone, as trust's first reading reads a change (`Parser`), and compared as
@@ -100,9 +101,9 @@ it on the branches landed: the version they last marked reviewed in its writer's
 drawer, a decline marking it so (`lup_dev.policy.reviewed`), or a flagged write
 or a hold at landing an earlier lup made, which they approved, read or
 commented on, whichever came last. Where they saw none, it's the file at the gated branch's tip on the remote,
-which the tip holds, so the integration branch's own changes don't show. One
-they saw before the integration branch changed the file too, merged since,
-shows that change as well.
+which the tip holds, so that branch's own changes don't show. One they saw
+before that branch changed the file too, merged since, shows that change as
+well.
 
 **A worktree is removed in the room,** never on the host: through `podman exec` in
 the launch's container, `git worktree remove` without `--force`, so git itself
@@ -167,6 +168,7 @@ from lup.tools import speaking
 from lup.tools.serving import Answer
 from lup.tools.tool import Accepted, Refused, ToolSpec
 from lup.types import Model, MutableModel
+from lup_dev.approval import approved_branches
 from lup_dev.catalog.paths import PythonPaths
 from lup_dev.codescan.contract import Parser, Source
 from lup_dev.codescan.directives import Directive, Identity, added_deferrals
@@ -236,8 +238,8 @@ class Landing(Model):
         default=None,
         description=(
             "The local branch to land, by its name, as `git branch` lists it: "
-            "merged onto `dev` with a merge commit. Left out, `dev` lands as it "
-            "is, for a change committed on it."
+            "merged onto the running branch with a merge commit. Left out, the "
+            "running branch lands as it is, for a change committed on it."
         ),
     )
     message: str | None = Field(
@@ -252,8 +254,8 @@ class Landing(Model):
         default=None,
         description=(
             "The branch it lands on, on the remote, by its name: one the project's "
-            "declaration gates (`Core.credentials`). Left out, the integration "
-            "branch, `dev`."
+            "declaration gates (`Core.credentials`). Left out, the running branch: "
+            "`dev`, unless the declaration names another (`Versions`)."
         ),
     )
     remote: RemoteName = Field(
@@ -326,9 +328,8 @@ class Lapsed(Model):
 
     who: str
     why: str | None = None
-    """Why it isn't removed: its `HEAD` is a commit the integration branch
-    doesn't hold, which removing it would leave on no branch. None where it's
-    removed."""
+    """Why it isn't removed: its `HEAD` is a commit the branch landed on doesn't
+    hold, which removing it would leave on no branch. None where it's removed."""
 
 
 class Reached(Model):
@@ -552,7 +553,7 @@ def blob(git: Git, commit: str, path: Path) -> bytes | None:
 
 
 def started(saw: Saw | None, git: Git, old: str | None, path: Path) -> bytes | None:
-    """Return the version of the file at `path` its diff starts from: the one the operator last saw, `saw`; else the file at `old`, the integration branch's tip; none where there's neither, or `old` has no file there."""
+    """Return the version of the file at `path` its diff starts from: the one the operator last saw, `saw`; else the file at `old`, the tip of the branch landed on; none where there's neither, or `old` has no file there."""
     if saw is not None:
         return saw.content
     if old is None:
@@ -947,8 +948,6 @@ class Lander(Model, arbitrary_types_allowed=True):
     caller: Caller
     call: str | None = None
     """The runtime's id for the call, which each hold it makes keeps."""
-    integration: str
-    """The integration branch's name: what lands, and where, unless the call says."""
     run: Callable[[Program], Awaitable[Ran]] = executed
     """Runs one program on the host: `podman exec` into the launch's room."""
     turns: Turns
@@ -969,6 +968,11 @@ class Lander(Model, arbitrary_types_allowed=True):
         return Delivery.party(self.launch, self.caller)
 
     @property
+    def running(self) -> str:
+        """Return the branch the declaration approved for the launch's repository runs: what lands, and where, unless the call says."""
+        return approved_branches(self.layout, self.launch.repository).running
+
+    @property
     def baseline(self) -> Baseline:
         """Return what the operator last saw of the repository's files."""
         repository = self.launch.repository
@@ -980,47 +984,49 @@ class Lander(Model, arbitrary_types_allowed=True):
 
     @lup.tool(idempotent=True)
     async def land(self, landing: Landing) -> str:
-        """Land a branch on the integration branch.
+        """Land a branch on the running branch.
 
-        Merges your local `branch` onto `dev` with a merge commit carrying
-        `message`, in your room and apart from every checkout, and puts it on
-        the remote's `dev`, as `git push origin dev` would. Where the merge
-        conflicts, it names the files and changes nothing: merge `dev` into the
-        branch in its worktree, resolve, run the gate there, and call it again.
-        The gate runs on the merge with `--fix`, its fixes amended into the
-        merge commit, unless it passed on those files already, as on a branch
-        that held `dev`; where it fails, it answers with its report and changes
-        nothing. Then `dev`'s checkout is fast-forwarded to the merge, which
-        git refuses rather than touch uncommitted work there. Without a branch,
-        `dev` lands as it is, once the gate passed on its files (`uv run
-        lup-dev check`, with everything committed, records the pass). Each file
-        the landing changes that was flagged on a branch it lands (a new file,
-        a file written whole, a change to the public API) is a hold in the
-        operator's inbox, showing what changed since they last saw it, and
-        this call waits for their answers, which may take hours. Approved, it
-        lands. Where they comment without approving, or decline, it returns
-        their words and lands nothing: answer them, commit, and call it again;
-        what they approved stays approved. Once landed, it lists the
-        `# lup: defer` comments each branch it landed adds and removes against
-        `dev`, each with its file and line, or says there are none, so the work
-        left undone shows as it lands. Each conversation still going that
-        worked on a branch it landed, and hasn't said how the work felt, is
-        invited to, once, beside their next call. Then it cleans up after each
-        branch it landed: deletes its copy on the remote, removes its worktree
-        where it's clean and nobody works in it, and deletes the local branch.
-        A worktree a subagent started in, whose turn ended while their session
-        goes on, it keeps, detached at what landed, so they can be resumed
-        there; a landing after their session ends removes it.
-        A flagged write still waiting that's left nothing to hold, on a branch
-        gone or on a file a branch it landed leaves unchanged, it withdraws
-        from the operator's inbox, saying which.
-        The branches it landed are the one you gave, and each other merged
-        into `dev` whose tip no other branch shares; a branch made from the
-        one you gave, at its tip, is left alone, worktree and all, as is each
-        of several sharing a merged tip, and each one just made from `dev`.
+        The running branch is what the host runs: `dev`, unless the project's
+        declaration names another (`Versions`). Merges your local `branch` onto
+        it with a merge commit carrying `message`, in your room and apart from
+        every checkout, and puts it on the remote's, as `git push origin` would.
+        Where the merge conflicts, it names the files and changes nothing: merge
+        the running branch into the branch in its worktree, resolve, run the
+        gate there, and call it again. The gate runs on the merge with `--fix`,
+        its fixes amended into the merge commit, unless it passed on those files
+        already, as on a branch that held the running branch; where it fails, it
+        answers with its report and changes nothing. Then the running branch's
+        checkout is fast-forwarded to the merge, which git refuses rather than
+        touch uncommitted work there. Without a branch, the running branch lands
+        as it is, once the gate passed on its files (`uv run lup-dev check`,
+        with everything committed, records the pass). Each file the landing
+        changes that was flagged on a branch it lands (a new file, a file
+        written whole, a change to the public API) is a hold in the operator's
+        inbox, showing what changed since they last saw it, and this call waits
+        for their answers, which may take hours. Approved, it lands. Where they
+        comment without approving, or decline, it returns their words and lands
+        nothing: answer them, commit, and call it again; what they approved
+        stays approved. Once landed, it lists the `# lup: defer` comments each
+        branch it landed adds and removes against what it landed on, each with
+        its file and line, or says there are none, so the work left undone shows
+        as it lands. Each conversation still going that worked on a branch it
+        landed, and hasn't said how the work felt, is invited to, once, beside
+        their next call. Then it cleans up after each branch it landed: deletes
+        its copy on the remote, removes its worktree where it's clean and nobody
+        works in it, and deletes the local branch. A worktree a subagent started
+        in, whose turn ended while their session goes on, it keeps, detached at
+        what landed, so they can be resumed there; a landing after their session
+        ends removes it. A flagged write still waiting that's left nothing to
+        hold, on a branch gone or on a file a branch it landed leaves unchanged,
+        it withdraws from the operator's inbox, saying which. The branches it
+        landed are the one you gave, and each other merged into the running
+        branch whose tip no other branch shares; a branch made from the one you
+        gave, at its tip, is left alone, worktree and all, as is each of several
+        sharing a merged tip, and each one just made from the running branch.
         What it leaves, it says, and why. Its last lines say what's still
         running or waiting to land: your session's subagents lup hasn't heard
-        end, and the local branches not on `dev`, with who works in each.
+        end, and the local branches not on the running branch, with who works in
+        each.
         """
         try:
             return await self.landed(landing)
@@ -1029,7 +1035,7 @@ class Lander(Model, arbitrary_types_allowed=True):
 
     def onto(self, landing: Landing) -> str:
         """Return the gated branch `landing` lands on, by its ref's full name, or say it isn't gated."""
-        ref = f"refs/heads/{landing.onto or self.integration}"
+        ref = f"refs/heads/{landing.onto or self.running}"
         if not matching(ref, self.launch.limits.gated):
             message = (
                 f"`{short(ref)}` isn't a branch the project's declaration gates "
@@ -1054,7 +1060,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                 "no merge commit for a `message`: leave it out, or name the branch"
             )
             raise HostError(message)
-        source = landing.branch or self.integration
+        source = landing.branch or self.running
         remote = landing.remote
         git = Git.pinned(self.launch.repository)
         tip = await asyncio.to_thread(git.commit, f"refs/heads/{source}")
@@ -1188,7 +1194,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         return await asyncio.to_thread(self.unpassed, git, landing.tip, landing.branch)
 
     async def merge(self, git: Git, asked: Merge, message: str) -> Made | str:
-        """Merge `asked`'s branch onto the integration branch in the launch's room, with `message`, check the merge as a landing is checked, and fast-forward the local branch to it, one landing at a time; return what lands, or say why nothing does.
+        """Merge `asked`'s branch onto the branch it lands on in the launch's room, with `message`, check the merge as a landing is checked, and fast-forward the local branch to it, one landing at a time; return what lands, or say why nothing does.
 
         The merge goes onto the local branch where it holds the remote's tip,
         else onto the remote's (`base`). A branch already in that history merges
@@ -2055,7 +2061,10 @@ class Lander(Model, arbitrary_types_allowed=True):
         if ran.status != 0:
             said = oneline(ran.said()) or f"it ended with status {ran.status}"
             return Cleaned(left=[f"the worktree {root}: `git switch --detach`: {said}"])
-        self.delivery.left(kept.conversation, detached(short(ref), root, short(onto)))
+        integration = approved_branches(self.layout, self.launch.repository).integration
+        self.delivery.left(
+            kept.conversation, detached(short(ref), root, short(onto), integration)
+        )
         return Cleaned(
             done=[
                 (
@@ -2183,17 +2192,17 @@ class Lander(Model, arbitrary_types_allowed=True):
         }
 
 
-def detached(branch: str, root: Path, onto: str) -> str:
-    """Tell a subagent who may be resumed that `branch` landed on `onto` and its local branch is gone, and that their worktree at `root`, where they started, stays, detached at what landed.
+def detached(branch: str, root: Path, onto: str, integration: str) -> str:
+    """Tell a subagent who may be resumed that `branch` landed on `onto` and its local branch is gone, that their worktree at `root`, where they started, stays, detached at what landed, and that what's next starts from `integration`, where branches start, which `onto` needn't be.
 
-    >>> print(detached("feat", Path("/r/tree/w"), "dev"))
-    lup: `feat` landed on `dev`, and its local branch is gone. Your worktree /r/tree/w stays as it was, its `HEAD` detached at what landed: start what's next there on a branch of its own, from `dev` (`git switch -c <branch> dev`).
+    >>> print(detached("feat", Path("/r/tree/w"), "live", "dev"))
+    lup: `feat` landed on `live`, and its local branch is gone. Your worktree /r/tree/w stays as it was, its `HEAD` detached at what landed: start what's next there on a branch of its own, from `dev` (`git switch -c <branch> dev`).
     """
     return (
         f"lup: `{branch}` landed on `{onto}`, and its local branch is gone. Your "
         f"worktree {root} stays as it was, its `HEAD` detached at what landed: "
-        f"start what's next there on a branch of its own, from `{onto}` "
-        f"(`git switch -c <branch> {onto}`)."
+        f"start what's next there on a branch of its own, from `{integration}` "
+        f"(`git switch -c <branch> {integration}`)."
     )
 
 
@@ -2514,8 +2523,6 @@ class LandingTools(Model, RoomTools, arbitrary_types_allowed=True):
     remotes: Remotes
     layout: Layout
     """lup's state on the host."""
-    integration: str
-    """The integration branch's name."""
     run: Callable[[Program], Awaitable[Ran]] = executed
     """Runs one program on the host: `podman exec` into a launch's room."""
     turns: Turns = Field(default_factory=Turns)
@@ -2556,7 +2563,6 @@ class LandingTools(Model, RoomTools, arbitrary_types_allowed=True):
             launch=launch,
             caller=caller,
             call=call,
-            integration=self.integration,
             run=self.run,
             turns=self.turns,
             parser=self.parser,

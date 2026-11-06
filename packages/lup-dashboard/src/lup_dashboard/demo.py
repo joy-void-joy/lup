@@ -2968,8 +2968,8 @@ def inbox_send(
 CLI_PUSH_BEFORE = '''
 async def proposed_after(launch: Register, refs: list[str]) -> None:
     """Put the approval of the zone at the integration branch's tip in the inbox."""
-    integration = LupDevSettings().lup_integration_branch
-    if f"refs/heads/{integration}" not in refs:
+    running = approved_branches(LAYOUT, launch.repository).running
+    if f"refs/heads/{running}" not in refs:
         return
     root = Git.pinned(launch.repository).main_worktree()
     number = await asyncio.to_thread(machine_trust(root, []).proposed)
@@ -2979,8 +2979,8 @@ async def proposed_after(
     delivery: Delivery, launch: Register, refs: list[str]
 ) -> None:
     """Put the approval of the zone at the integration branch's tip in the inbox, naming the session that pushed."""
-    integration = LupDevSettings().lup_integration_branch
-    if f"refs/heads/{integration}" not in refs:
+    running = approved_branches(LAYOUT, launch.repository).running
+    if f"refs/heads/{running}" not in refs:
         return
     root = Git.pinned(launch.repository).main_worktree()
     pushed_by = delivery.running(launch.launch)

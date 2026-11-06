@@ -337,6 +337,7 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
             marks=ReviewMarks(
                 marks=self.marks, repository=self.repository, module=owner.module.name
             ),
+            branches=self.resolved.branches,
         )
 
     def serving(self, name: str) -> Served | None:
