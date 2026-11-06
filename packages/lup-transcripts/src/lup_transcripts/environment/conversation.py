@@ -4,41 +4,52 @@
 layout answering `Blocks`, the layout of one of `Transcripts`' views:
 - `conversation_blocks`, the drawer: its summary line counting the steps and
   those new to the operator, each exchange before their last words folded under
-  the first line of their words that opened it, what came before their first
-  words under a line of its own, and everything since they last read it open
-  and new, from the drawer's review mark or their own last words, whichever is
-  later (`Read`), but for at most the agent's last 20 words
-  (`EARLIER_KIND.keeps_open`) with what follows them, what came before folded
-  under one line saying how much (`capped`);
+  the first line of their words that opened it, the latest open under its own,
+  what came before their first words under a line of its own, and everything
+  since they last read it open and new, from the drawer's review mark or their
+  own last words, whichever is later (`Read`), but for at most the agent's last
+  20 words (`EARLIER_KIND.keeps_open`) with what follows them, what came before
+  folded under one line saying how much (`capped`);
 - `exchange_blocks`, one earlier exchange's steps, or those its fold of what
   came before the agent's last words holds, or what the operator had read of
   the latest, which the fold reads as it opens (`OfExchange`), itself capped
   the same way, so the drawer's answer stays small however long the
   conversation grows, and each fold opened brings in 20 more of the agent's
   words;
-- `call_blocks`, one call's input and output, which the call's fold reads as
-  it opens (`OfCall`), since each call's whole input and output is read from
-  the record only on asking.
+- `call_blocks`, one call as its fold reads it as it opens (`OfCall`), since a
+  call is read from the record only on asking: what it was given, straight away,
+  each long argument and what it returned folded under a line of its own, each
+  read whole as that opens.
 
-Within an exchange, the operator's words come after `you:`, the agent's as
-Markdown, each call as a line saying what it did (`Called.gist`), a run of calls
-folded under one line saying how many of which, and each item of lup's inbox
-the conversation sent or was sent as a line where it happened, its text folded
-under it (`merged`).
+Within an exchange, the operator's words come after `you:`, each of the agent's
+words as Markdown folded under a line saying how they start, open but for a
+turn's last words, which the review shows as an item and which fold under its
+line; each call as a line saying what it was given (`Called.gist`), a run of
+calls under one line saying how many of which, and each item of lup's inbox the
+conversation sent or was sent as a line where it happened, its text folded under
+it (`merged`). A call whose sending an item is all it did goes under that item's
+line (`turned`). Each such line is one row (`cut`).
 
 Each block's id names what it shows, so it stays from one answer to the next as
 the conversation grows, and a fold's id is never a line's: a fold is
 `exchange 5` (or `exchange before`), `exchange 5 until last 20` for what came
 before the agent's last 20 words in it, `exchange 5 through 40` for what the
-operator had read of it up to step 40, `calls 2`, `call <the call's id>` or
-`item 51`; a line is `step 6` (`step 6.1` on, for the operator's further
-lines), `item 64 line` for an item with no text, `text 51` for an item's text,
-and `input <id>`, `output <id>` (`.1` on) or `unread <id>` in a call's view.
+operator had read of it up to step 40, `said 6` for the agent's words at step 6,
+`calls 2`, `call <the call's id>` or `item 51`; a line is `step 6` (`step 6.1` on, for the
+operator's further lines), `item 64 line` for an item with no text, `text 51` for
+an item's text, and in a call's view, `input <id> <name>` for an argument
+(`.1` on), `output <id>` where it returned nothing or hasn't yet, and `unread <id>`,
+its folds `argument <id> <name>` and `output <id>` read as lines `.1` on. The
+agent's words are a block `step 6` under their fold, so a comment on them stays on
+them whether they're open or folded.
 """
 
 import json
+import textwrap
+from collections import Counter
 from datetime import datetime
 from itertools import accumulate, groupby, pairwise
+from math import ceil
 from typing import TYPE_CHECKING
 
 from pydantic import Field
@@ -59,7 +70,6 @@ from lup.blocks import (
 )
 from lup.types import Model
 from lup_dev.host.records import Called, Entry, Said
-from lup_transcripts.environment.views import folded
 from lup_transcripts.errors import LupTranscriptsError
 
 if TYPE_CHECKING:
@@ -72,7 +82,7 @@ if TYPE_CHECKING:
 
 
 CALL_TONE = Tone(name="call", colour="orange")
-"""A call's line, saying what it did."""
+"""A call's line, saying what it was given."""
 SENT_TONE = Tone(name="sent", like="call")
 """An item the conversation sent: in the orange of the call that made it."""
 RECEIVED_TONE = Tone(name="received", like="operator")
@@ -101,27 +111,31 @@ words in it, under one line saying how much: `zr` opens the latest still
 folded, each one a step further back. A person's layer keeps more or fewer of
 the agent's words open (`keeps_open`; `packages/lup-transcripts/README.md`,
 *The conversation, live*)."""
+ITEMS_KIND = FoldKind(
+    name="items",
+    letter="m",
+    called="messages",
+    one="the message",
+    level=2,
+    colour="cyan",
+)
+"""A message: the agent's words at a step, under a line saying how they start,
+open but for those an item repeats; and an item of lup's inbox the conversation
+sent or was sent, its text under its line."""
 CALLS_KIND = FoldKind(
     name="calls",
     letter="k",
     called="runs of calls",
     one="the run of calls",
-    level=2,
+    level=3,
     colour="purple",
     counts=False,
 )
-"""A run of calls, under one line saying how many of which, set off under it."""
-ITEMS_KIND = FoldKind(
-    name="items",
-    letter="m",
-    called="items' text",
-    one="the item's text",
-    level=3,
-    colour="cyan",
-    counts=False,
-)
-"""An item of lup's inbox the conversation sent or was sent, its text under its
-line."""
+"""A run of calls, under one line saying how many of which, each a row of its own
+set off under it: open, so what the agent did reads without opening anything, and
+one key from being skipped, the run's own or, deepest of those `zm` closes, every
+run of the drawer at once, its messages still open. A person's layer starts every
+run closed (`starts_open`)."""
 CALL_KIND = FoldKind(
     name="call",
     letter="d",
@@ -133,8 +147,22 @@ CALL_KIND = FoldKind(
 )
 """A call's input and output, under its line: opened only by its own keys, since
 each is read from the record as it opens."""
+DETAIL_KIND = FoldKind(
+    name="detail",
+    letter="x",
+    called="calls' outputs and long arguments",
+    one="the output or long argument",
+    level=5,
+    opens="deep",
+    colour="muted",
+    counts=False,
+)
+"""What a call returned, and each argument too long to read at a glance, under a
+line of its own in an opened call: so opening a call shows what it was given, and
+what it returned, however long, is one key further. Opened only by its own keys,
+since each is read from the record as it opens; its line says how much it holds."""
 
-FOLD_KINDS = [EARLIER_KIND, CALLS_KIND, ITEMS_KIND, CALL_KIND]
+FOLD_KINDS = [EARLIER_KIND, ITEMS_KIND, CALLS_KIND, CALL_KIND, DETAIL_KIND]
 """The fold kinds `Transcripts` declares, which its conversation folds under."""
 
 
@@ -160,23 +188,16 @@ class OfExchange(OfAgent):
 
 
 class OfCall(OfAgent):
-    """One call of an agent's conversation, read whole as its fold in the drawer opens."""
+    """One call of an agent's conversation, as its fold in the drawer reads it opening: what it was given; or, as a fold of that opens, what it returned, or one argument, whole."""
 
     id: str = Field(description="The runtime's id for the call.")
-
-
-class Spoken(Model):
-    """Something said at one step: the operator's words, or the agent's."""
-
-    step: int
-    said: Said
-
-
-class Calling(Model):
-    """A tool called at one step."""
-
-    step: int
-    called: Called
+    output: bool | None = Field(
+        default=None, description="Only what it returned, whole."
+    )
+    argument: str | None = Field(
+        default=None,
+        description="Only this argument, whole, by its name; `input` where it was given a text rather than arguments.",
+    )
 
 
 class Inboxed(Model):
@@ -194,9 +215,32 @@ class Inboxed(Model):
     call: str | None = None
     """The call that made it, for one the conversation sent where the record
     keeps the call's id: it goes just after it."""
+    call_sends_it: bool = False
+    """Whether sending it is all that call did: its line stands for the call's,
+    which goes under it (`turned`)."""
+    echoes: bool = False
+    """Whether it repeats the conversation's own words: it stands for the step
+    saying them, where one does (`merged`)."""
     at: datetime
     """When it was told the conversation, or made: where it goes among the steps
     when no call places it."""
+
+
+class Spoken(Model):
+    """Something said at one step: the operator's words, or the agent's."""
+
+    step: int
+    said: Said
+    repeated: Inboxed | None = None
+    """The item repeating the agent's words here, a turn's last words lup made a
+    note of, which the review shows as an item: they fold, under its line."""
+
+
+class Calling(Model):
+    """A tool called at one step."""
+
+    step: int
+    called: Called
 
 
 type Turn = Spoken | Calling | Inboxed
@@ -271,6 +315,17 @@ class Part(Model):
         return "exchange before" if step is None else f"exchange {step}"
 
 
+def cut(line: str, width: int = 100) -> str:
+    """Say `line` in at most `width` characters, at a word where it can, marked where it's cut: 100 keeps a line saying what's folded under it, a call's or a message's, to one row of the review in a window 1280 pixels wide, the overview and the margin beside it (`docs/dashboard.md`, *The page*); what's cut is whole under its fold.
+
+    >>> cut("Found the four kinds of line.", 16)
+    'Found the four…'
+    >>> cut("short", 16)
+    'short'
+    """
+    return textwrap.shorten(line, width, placeholder="…")
+
+
 def kept(text: str) -> list[str]:
     r"""Return the lines `text` is shown in: each without its trailing space, one blank line between paragraphs, none before the first or after the last.
 
@@ -301,40 +356,33 @@ def lined(text: str, indent: str) -> list[str]:
     ]
 
 
-def given(value: JsonValue, indent: str = "", inline: int = 100) -> list[str]:
-    r"""Return what a call was given as the lines it's shown in, set in by `indent`: each argument after its name, a value of several lines, or longer than `inline` as JSON, under it; text as it is.
+def said_as(value: JsonValue, inline: int = 100) -> list[str]:
+    r"""Return a value a call was given as the lines it's shown in: text as it is, any other value as JSON, spread over lines where it's longer than `inline`.
 
-    >>> given({"command": "uv run pytest -q", "limit": 3, "tags": ["a"]})
-    ['command: uv run pytest -q', 'limit: 3', 'tags: ["a"]']
-    >>> given({"question": "Which?\nOr neither?"})
-    ['question:', '  Which?', '  Or neither?']
-    >>> given(None, "  ")
-    ['  null']
+    >>> said_as("uv run pytest -q"), said_as(3), said_as(["a"])
+    (['uv run pytest -q'], ['3'], ['["a"]'])
+    >>> said_as("Which?\nOr neither?")
+    ['Which?', 'Or neither?']
+    >>> said_as({"text": "A model per kind"}, inline=10)
+    ['{', '  "text": "A model per kind"', '}']
+    >>> said_as(None)
+    ['null']
     """
-    inner = f"{indent}  "
+    if isinstance(value, str):
+        return lined(value, "")
+    compact = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    if len(compact) <= inline:
+        return [compact]
+    return lined(json.dumps(value, ensure_ascii=False, indent=2), "")
 
-    def argument(name: str, each: JsonValue) -> list[str]:
-        match each:
-            case str() if "\n" in each:
-                return [f"{indent}{name}:", *lined(each, inner)]
-            case str():
-                return [f"{indent}{name}: {each}"]
-            case _:
-                compact = json.dumps(each, ensure_ascii=False, separators=(",", ":"))
-                if len(compact) <= inline:
-                    return [f"{indent}{name}: {compact}"]
-                spread = json.dumps(each, ensure_ascii=False, indent=2)
-                return [f"{indent}{name}:", *lined(spread, inner)]
 
-    match value:
-        case str():
-            return lined(value, indent)
-        case dict():
-            return [
-                line for name, each in value.items() for line in argument(name, each)
-            ]
-        case _:
-            return lined(json.dumps(value, ensure_ascii=False, indent=2), indent)
+def rows_of(lines: list[str], row: int = 100) -> int:
+    """Return how many rows of `row` characters `lines` take, a long line wrapping.
+
+    >>> rows_of(["a", "", "b" * 250])
+    5
+    """
+    return sum(max(1, ceil(len(line) / row)) for line in lines)
 
 
 def since(start: datetime, until: datetime) -> str:
@@ -366,11 +414,7 @@ def counted(count: int, one: str) -> str:
 
 
 def inboxed(exchanged: Exchanged) -> list[Inboxed]:
-    """Return the items the agent exchanged as their conversation shows them, those they sent first, then those they were sent: each in its line as the core words it (`Exchange.line`), in the tone of its way, sent or received, its text under it with the operator's comment on deciding it after it.
-
-    One repeating the conversation's own words, a turn's last words lup made a
-    note of, is left out: the agent's words show it already.
-    """
+    """Return the items the agent exchanged as their conversation shows them, those they sent first, then those they were sent: each in its line as the core words it (`Exchange.line`), in the tone of its way, sent or received, its text under it with the operator's comment on deciding it after it."""
 
     def text(said: str, comment: str) -> str:
         parts = [said, *([f"your comment: {comment}"] if comment else [])]
@@ -384,22 +428,26 @@ def inboxed(exchanged: Exchanged) -> list[Inboxed]:
             line=[span.model_copy(update={"tone": tone.name}) for span in each.line],
             text=text(each.text, each.comment),
             call=each.item.call if sent else None,
+            call_sends_it=each.call_sends_it,
+            echoes=each.echoes,
             at=each.at,
         )
 
     return [
-        *(shown(each, sent=True) for each in exchanged.sent if not each.echoes),
+        *(shown(each, sent=True) for each in exchanged.sent),
         *(shown(each, sent=False) for each in exchanged.received),
     ]
 
 
 def merged(entries: list[Entry], items: list[Inboxed]) -> list[Turn]:
-    """Return the steps and the items in order: an item the conversation sent just after the call that made it, where the record holds it; any other by when it was told, or made, after the last step at or before then.
+    """Return the steps and the items in order: an item repeating the agent's words at a step on that step, the latest saying them by then; an item the conversation sent just after the call that made it, where the record holds it; any other by when it was told, or made, after the last step at or before then.
 
     A step its record gives no time takes the time of the last before it, and
     one before any time counts as before every item, so in a record with no
     times the items are all at its end. Items between the same two steps go in
-    the order they came, then by number.
+    the order they came, then by number. An item that would repeat words no step
+    says, as a turn's end saying in lup's words that it failed, or one the agent
+    edited since, stands as any other.
     """
 
     def turn(step: int, entry: Entry) -> Spoken | Calling:
@@ -421,14 +469,44 @@ def merged(entries: list[Entry], items: list[Inboxed]) -> list[Turn]:
 
     times = list(accumulate((each.at for each in entries), latest))
 
-    def before(item: Inboxed) -> int:
-        """Return the step `item` goes just after by when it was: the last at or before then, or with no time yet; -1 for before every step."""
+    def by_then(step: int, item: Inboxed) -> bool:
+        time = times[step]
+        return time is None or time <= item.at
+
+    said = {
+        each.step: "\n".join(kept(each.said.text))
+        for each in steps
+        if isinstance(each, Spoken) and each.said.by == "agent"
+    }
+
+    def repeated(item: Inboxed) -> int | None:
+        """Return the step of the agent's words `item` repeats, the latest by when it was made; none where it repeats none."""
+        if not item.echoes:
+            return None
         return max(
             (
                 step
-                for step, time in enumerate(times)
-                if time is None or time <= item.at
+                for step, text in said.items()
+                if text == item.text and by_then(step, item)
             ),
+            default=None,
+        )
+
+    # Of two items saying one step's words, as in a record with no times, the later stands for it, the other alone.
+    repeating = {step: each for each in items if (step := repeated(each)) is not None}
+    standing = {each.number: each for each in repeating.values()}
+    steps = [
+        each.model_copy(update={"repeated": repeating[each.step]})
+        if each.step in repeating and isinstance(each, Spoken)
+        else each
+        for each in steps
+    ]
+    items = [each for each in items if each.number not in standing]
+
+    def before(item: Inboxed) -> int:
+        """Return the step `item` goes just after by when it was: the last at or before then, or with no time yet; -1 for before every step."""
+        return max(
+            (step for step in range(len(times)) if by_then(step, item)),
             default=-1,
         )
 
@@ -489,19 +567,60 @@ def words(spoken: Spoken) -> list[Line]:
 
 
 def called(call: Called) -> str:
-    """Say a call in its line: its tool, and what it did where its record says (`Called.gist`)."""
+    """Say a call in its line: its tool, and what it was given where its record says (`Called.gist`)."""
     return call.tool if call.gist is None else f"{call.tool}: {call.gist}"
 
 
-def turned(turns: list[Turn], of: OfAgent, view: Method, run: int = 3) -> list[Block]:
-    """Lay `turns` out in blocks, in order: the operator's words, the agent's, each call a line saying what it did, each run of `run` calls or more folded under one line saying how many of which, and each item a line with its text folded under it; what each run, call and item folds set off by a bar (`Fold.barred`).
+def starting(text: str, width: int = 100) -> str:
+    r"""Say how `text` starts, as it's written, in a line of at most `width` characters: its first line with words in it, cut where it's longer (`cut`); nothing for no text.
+
+    >>> starting("\n\nFound it.\nHere.")
+    'Found it.'
+    >>> starting("")
+    ''
+    """
+    return cut(next((line for line in kept(text) if line), ""), width)
+
+
+def ran_of(calls: list[Calling], row: int = 100) -> str:
+    """Say a run of calls in its line, of at most `row` characters: how many, then how many of which, most first, so what's cut is what there's least of.
+
+    >>> ran_of([Calling(step=at, called=Called(tool=tool)) for at, tool in enumerate(["Read", "Bash", "Bash"])])
+    '· 3 calls: Bash x2, Read'
+    """
+    tools = Counter(each.called.tool for each in calls).most_common()
+    said = ", ".join(
+        tool if count == 1 else f"{tool} x{count}" for tool, count in tools
+    )
+    return cut(f"· {counted(len(calls), 'call')}: {said}", row)
+
+
+def turned(
+    turns: list[Turn], of: OfAgent, view: Method, run: int = 3, row: int = 100
+) -> list[Block]:
+    """Lay `turns` out in blocks, in order: the operator's words; the agent's, each a fold of their own under a line saying how they start, open but for those an item repeats, which fold under its line; each call a line saying what it was given, each run of `run` calls or more under one line saying how many of which, open; and each item a line with its text folded under it; what each run, call and item folds set off by a bar (`Fold.barred`).
 
     A call whose record gives it an id folds its input and output under its
-    line, read from `view`, one call read whole, as it opens.
+    line, read from `view`, one call read whole, as it opens. A call whose
+    sending an item is all it did goes under that item's line, after its text,
+    the item standing for it, since the call's line would say what its text says.
+    Each line is at most `row` characters (`cut`).
     """
+    sending = {
+        each.call: each.number
+        for each in reversed(turns)
+        if isinstance(each, Inboxed) and each.call is not None and each.call_sends_it
+    }
+    calls = {
+        each.called.id: each
+        for each in turns
+        if isinstance(each, Calling) and each.called.id in sending
+    }
 
     def call(calling: Calling) -> Block:
-        summary = [Span(text=f"· {called(calling.called)}", tone=CALL_TONE.name)]
+        summary = [
+            Span(text=f"· {cut(called(calling.called), row - 2)}", tone=CALL_TONE.name)
+        ]
         ran = calling.called.id
         if ran is None:
             return Line(id=f"step {calling.step}", spans=summary)
@@ -514,17 +633,52 @@ def turned(turns: list[Turn], of: OfAgent, view: Method, run: int = 3) -> list[B
             content=Load.of(view, read),
         )
 
+    def line_of(inboxed: Inboxed, text: str, least: int = 20) -> list[Span]:
+        """Return an item's line, saying how `text` starts after it where the conversation sent it, the words of theirs it stands for, in what the row has left, nothing where that's under `least` characters."""
+        room = row - sum(len(span.text) for span in inboxed.line) - len(" · ")
+        start = starting(text, room) if inboxed.sent and room >= least else ""
+        return [
+            *inboxed.line,
+            *([Span(text=f" · {start}", tone="muted")] if start else []),
+        ]
+
+    def made_by(inboxed: Inboxed) -> list[Block]:
+        """Return the line of the call `inboxed` stands for, where it's the first item that call sent and the call is laid out here."""
+        ran = inboxed.call
+        if ran is None or sending.get(ran) != inboxed.number or ran not in calls:
+            return []
+        return [call(calls[ran])]
+
     def item(inboxed: Inboxed) -> Block:
-        summary = inboxed.line
         number = inboxed.number
-        if not inboxed.text:
+        summary = line_of(inboxed, inboxed.text)
+        text = [Markdown(id=f"text {number}", text=inboxed.text)]
+        content = [*(text if inboxed.text else []), *made_by(inboxed)]
+        if not content:
             return Line(id=f"item {number} line", spans=summary)
         return Fold(
             id=f"item {number}",
             kind=ITEMS_KIND.name,
             summary=summary,
             barred=True,
-            content=[Markdown(id=f"text {number}", text=inboxed.text)],
+            content=content,
+        )
+
+    def message(spoken: Spoken) -> Block:
+        text = "\n".join(kept(spoken.said.text))
+        body = Markdown(id=f"step {spoken.step}", text=text)
+        if not text:
+            return body
+        repeated = spoken.repeated
+        return Fold(
+            id=f"said {spoken.step}",
+            kind=ITEMS_KIND.name,
+            summary=[Span(text=starting(text, row), tone="muted")]
+            if repeated is None
+            else line_of(repeated, text),
+            open=repeated is None,
+            barred=repeated is not None,
+            content=[body],
         )
 
     def one(turn: Turn) -> list[Block]:
@@ -532,37 +686,39 @@ def turned(turns: list[Turn], of: OfAgent, view: Method, run: int = 3) -> list[B
             case Spoken(said=Said(by="operator")):
                 return list(words(turn))
             case Spoken():
-                return [
-                    Markdown(
-                        id=f"step {turn.step}", text="\n".join(kept(turn.said.text))
-                    )
-                ]
+                return [message(turn)]
             case Calling():
                 return [call(turn)]
             case Inboxed():
                 return [item(turn)]
 
     def laid(group: list[Turn]) -> list[Block]:
-        calls = [each for each in group if isinstance(each, Calling)]
-        if len(calls) < run:
+        rows = [each for each in group if isinstance(each, Calling)]
+        if len(rows) < run:
             return [block for each in group for block in one(each)]
-        tools = folded([each.called.tool for each in calls])
         return [
             Fold(
-                id=f"calls {calls[0].step}",
+                id=f"calls {rows[0].step}",
                 kind=CALLS_KIND.name,
-                summary=[Span(text=tools, tone=RUN_TONE.name)],
+                summary=[Span(text=ran_of(rows, row), tone=RUN_TONE.name)],
+                open=True,
                 barred=True,
-                content=[call(each) for each in calls],
+                content=[call(each) for each in rows],
             )
         ]
 
-    runs = groupby(turns, key=lambda each: isinstance(each, Calling))
+    # A call its item stands for is in that item, and no row of a run.
+    shown = [
+        each
+        for each in turns
+        if not (isinstance(each, Calling) and each.called.id in calls)
+    ]
+    runs = groupby(shown, key=lambda each: isinstance(each, Calling))
     return [block for _, group in runs for block in laid(list(group))]
 
 
 def agent_s(turn: Turn) -> bool:
-    """Say whether `turn` is the agent's words, which the cap on what's open counts: never their calls, which fold anyway, nor an item."""
+    """Say whether `turn` is the agent's words, which the cap on what's open counts: never their calls, each a line however many there are, nor an item, but those an item repeats, though they fold, so a conversation of turns' ends alone stays small too."""
     return isinstance(turn, Spoken) and turn.said.by != "operator"
 
 
@@ -663,7 +819,7 @@ def conversation_blocks(
     mark: ReviewMark | None = None,
     reading: Offer | None = None,
 ) -> Blocks:
-    """Lay out an agent's conversation as its drawer shows it: its summary line counting its steps and those new to the operator, each exchange before their last words folded under the first line of their words, what they've read since folded under one line, and everything after it open, but for at most the agent's last words `earlier` keeps open (`capped`).
+    """Lay out an agent's conversation as its drawer shows it: its summary line counting its steps and those new to the operator, each exchange before their last words folded under the first line of their words, the latest open under its own, what they've read since folded under one line, and everything after it open, but for at most the agent's last words `earlier` keeps open (`capped`).
 
     How far they've read is the drawer's review `mark` or their own last
     words, whichever is later (`Read`); where anything came after it, the
@@ -718,7 +874,6 @@ def conversation_blocks(
             content=Load.of(exchange, read),
         )
 
-    opened = [] if latest.opening is None else words(latest.opening)
     shown = capped(
         latest,
         of,
@@ -729,6 +884,25 @@ def conversation_blocks(
         call=call,
         run=run,
     )
+
+    def opening() -> list[Block]:
+        """Return the latest exchange: its fold, open, as the others are folded, or what came before the operator's first words, where they've said none yet; a line alone, nothing under it yet."""
+        if latest.opening is None:
+            return shown
+        first, *further = words(latest.opening)
+        under = [*further, *shown]
+        if not under:
+            return [first]
+        return [
+            Fold(
+                id=latest.key(),
+                kind=earlier.name,
+                summary=first.spans,
+                open=True,
+                content=under,
+            )
+        ]
+
     new = read.new(entries)
     said = [
         f"conversation · {counted(len(entries), 'step')}",
@@ -739,8 +913,7 @@ def conversation_blocks(
         offers=[] if reading is None or not unread else [reading],
         blocks=[
             *(folded_part(part, until) for part, until in pairwise([*before, latest])),
-            *opened,
-            *shown,
+            *opening(),
         ],
     )
 
@@ -806,11 +979,22 @@ def exchange_blocks(
     return Blocks(blocks=[*further, *shown])
 
 
-def call_blocks(of: OfCall, call: Call | None, *, inline: int = 100) -> Blocks:
-    """Lay out one call read whole as its fold in the drawer shows it opened: what it was given after `input:`, each argument after its name, and what it returned after `output:`, or `failed:` where the runtime says it failed, `none yet` while it runs.
+def call_blocks(
+    of: OfCall,
+    call: Call | None,
+    *,
+    view: Method,
+    inline: int = 100,
+    most: int = 10,
+    row: int = 100,
+) -> Blocks:
+    """Lay out one call as its fold shows it opened: what it was given straight away, each argument after its name, on a line, or set in under it where it's several, one taking more than `most` rows of `row` characters folded under a line saying how it starts and how long it is; then what it returned, folded under a line saying how much, or `failed` where the runtime says it failed, `none yet` while it runs.
 
-    A call its record doesn't hold, `call` none, says it wasn't read. A value
-    longer than `inline` as JSON is laid out under its argument's name.
+    What's folded is read from `view`, this view, as it opens, with `of.output`
+    what it returned whole, or with `of.argument` that argument whole, so opening a
+    call reads no more of it than its input, and a command printing this view says
+    which to ask for. A call its record doesn't hold, `call` none, says it wasn't
+    read. A value longer than `inline` as JSON is spread over lines.
     """
     ran = of.id
     if call is None:
@@ -824,24 +1008,78 @@ def call_blocks(of: OfCall, call: Call | None, *, inline: int = 100) -> Blocks:
             ]
         )
 
-    def numbered(part: str, lines: list[str]) -> list[Block]:
+    def numbered(part: str, lines: list[str], indent: str = "") -> list[Block]:
         return [
-            Line.of(f"{part} {ran}.{at}", line)
+            Line.of(f"{part}.{at}", f"{indent}{line}" if line else "")
             for at, line in enumerate(lines, start=1)
         ]
 
-    if call.output is None:
-        returned = [Line.of(f"output {ran}", "output: none yet")]
-    else:
-        said = "failed:" if call.failed else "output:"
-        returned = [
-            Line.of(f"output {ran}", said),
-            *numbered("output", lined(call.output, "  ")),
-        ]
-    return Blocks(
-        blocks=[
-            Line.of(f"input {ran}", "input:"),
-            *numbered("input", given(call.input, "  ", inline)),
-            *returned,
-        ]
-    )
+    if of.output:
+        return Blocks(blocks=numbered(f"output {ran}", lined(call.output or "", "")))
+    if of.argument is not None:
+        match call.input:
+            case dict() as arguments:
+                wanted = arguments.get(of.argument)
+            case _ as given:
+                wanted = given
+        return Blocks(
+            blocks=numbered(f"argument {ran} {of.argument}", said_as(wanted, inline))
+        )
+
+    def folded_under(name: str, value: JsonValue, lines: list[str]) -> Block:
+        """Return `lines`, too long to read at a glance, folded under a line saying how `value`, called `name`, starts, and how long it is."""
+        compact = (
+            None if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+        )
+        start = next((line for line in lines if line.strip()), "")
+        tail = f" · {counted(len(lines), 'line')}"
+        line = cut(f"{name}: {start if compact is None else compact}", row - len(tail))
+        return Fold(
+            id=f"argument {ran} {name}",
+            kind=DETAIL_KIND.name,
+            summary=[Span(text=f"{line}{tail}")],
+            barred=True,
+            content=Load.of(view, of.model_copy(update={"argument": name})),
+        )
+
+    def argument(name: str, value: JsonValue) -> list[Block]:
+        lines = said_as(value, inline)
+        key = f"input {ran} {name}"
+        if rows_of(lines, row) > most:
+            return [folded_under(name, value, lines)]
+        match lines:
+            case [only]:
+                return [Line.of(key, f"{name}: {only}")]
+            case _:
+                return [Line.of(key, f"{name}:"), *numbered(key, lines, "  ")]
+
+    def inputs() -> list[Block]:
+        match call.input:
+            case dict() as arguments:
+                return [
+                    block
+                    for name, value in arguments.items()
+                    for block in argument(name, value)
+                ]
+            case _ as given:
+                lines = said_as(given, inline)
+                if rows_of(lines, row) > most:
+                    return [folded_under("input", given, lines)]
+                return numbered(f"input {ran}", lines)
+
+    def returned() -> Block:
+        if call.output is None:
+            return Line.of(f"output {ran}", "output: none yet")
+        said = "failed" if call.failed else "output"
+        lines = lined(call.output, "")
+        if not lines:
+            return Line.of(f"output {ran}", f"{said}: nothing")
+        return Fold(
+            id=f"output {ran}",
+            kind=DETAIL_KIND.name,
+            summary=[Span(text=f"{said} · {counted(len(lines), 'line')}")],
+            barred=True,
+            content=Load.of(view, of.model_copy(update={"output": True})),
+        )
+
+    return Blocks(blocks=[*inputs(), returned()])

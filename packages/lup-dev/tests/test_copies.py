@@ -187,6 +187,31 @@ def test_the_history_keeps_the_last_of_each_commit_and_passes_over_what_it_cant_
     assert copies.of("none") is None
 
 
+def test_the_history_stays_a_line_a_commit_as_copies_are_flipped_between(
+    copies: Copies,
+) -> None:
+    first = record(copies, "first", 0)
+    second = record(copies, "second", 1)
+    for at in range(3):
+        copies.recorded(first.model_copy(update={"answered": AT + timedelta(days=at)}))
+        copies.recorded(second.model_copy(update={"answered": AT + timedelta(days=at)}))
+    assert len(copies.layout.history.read_text().splitlines()) == 2
+
+
+def test_the_history_keeps_the_last_it_remembers_and_what_it_cant_read(
+    tmp_path: Path,
+) -> None:
+    copies = Copies(layout=JudgeLayout(home=tmp_path / "judges" / "lup"), remembering=3)
+    copies.layout.home.mkdir(parents=True)
+    copies.layout.history.write_text('{"a later lup": "wrote this"}\n')
+    for at, name in enumerate(["one", "two"]):
+        record(copies, name, at)
+    assert '"a later lup"' in copies.layout.history.read_text()
+    record(copies, "three", 2)
+    record(copies, "four", 3)
+    assert [each.name for each in copies.history()] == ["four", "three", "two"]
+
+
 def test_a_field_a_later_lup_added_reads_all_the_same(copies: Copies) -> None:
     kept = record(copies, "one", 0)
     line = kept.model_dump_json()

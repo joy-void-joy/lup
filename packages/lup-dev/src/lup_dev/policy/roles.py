@@ -36,9 +36,36 @@ if TYPE_CHECKING:
     from lup_dev.codescan.contract import FileReport, Finding
 
 
+WILDCARDS = "*?["
+"""What makes a part of a path pattern match more than its own name."""
+
+
 def matches(path: PurePath, patterns: list[str]) -> bool:
     """Say whether `path` matches any of `patterns`, each matched whole."""
     return any(path.full_match(pattern) for pattern in patterns)
+
+
+def guards(pattern: str, path: PurePath) -> bool:
+    """Say whether a change at `path` changes what's read under `pattern`: it's what the pattern matches, or stands where the pattern names a directory.
+
+    git lists no directory as a change, so a change at such a name is a link or a
+    file there: a link repoints whatever the pattern protects, with nothing under
+    it changed. A part with a wildcard names no directory, or `**/pyproject.toml`
+    would guard every path.
+
+    >>> [guards(".github/**", PurePath(p)) for p in [".github", ".github/a", "a/.github"]]
+    [True, True, False]
+    >>> [guards("a/*/conf/x.toml", PurePath(p)) for p in ["a", "a/b", "a/b/conf"]]
+    [True, False, True]
+    >>> guards("**/pyproject.toml", PurePath("anything"))
+    False
+    """
+    named = [
+        directory
+        for directory in PurePath(pattern).parents
+        if directory.name and not any(each in directory.name for each in WILDCARDS)
+    ]
+    return path.full_match(pattern) or any(path.full_match(each) for each in named)
 
 
 class Roles(Model):
@@ -76,28 +103,30 @@ class Roles(Model):
         return "production"
 
     def protecting(self, path: Path) -> str | None:
-        """Return the first protected pattern `path` matches, or none.
+        """Return the first protected pattern guarding `path` (`guards`), or none.
 
         >>> from lup_dev import Project
         >>> roles = Roles(root=Path("/nowhere"), declaration=Declaration.of(Project()))
         >>> roles.protecting(Path("packages/lup/pyproject.toml"))
         '**/pyproject.toml'
+        >>> roles.protecting(Path(".github"))
+        '.github/**'
         """
         protected = self.declaration.paths.protected
-        return next(
-            (pattern for pattern in protected if path.full_match(pattern)), None
-        )
+        return next((pattern for pattern in protected if guards(pattern, path)), None)
 
     def secret(self, path: Path) -> str | None:
-        """Return the first pattern of a file holding secrets that `path` matches, or none.
+        """Return the first pattern of a file holding secrets guarding `path` (`guards`), or none.
 
         >>> from lup_dev import Project
         >>> roles = Roles(root=Path("/nowhere"), declaration=Declaration.of(Project()))
         >>> roles.secret(Path("web/.env.local")), roles.role(Path("web/.env.local"))
         ('**/.env*', 'protected')
+        >>> roles.secret(Path("web/.streamlit"))
+        '**/.streamlit/secrets.toml'
         """
         secret = self.declaration.paths.secret
-        return next((pattern for pattern in secret if path.full_match(pattern)), None)
+        return next((pattern for pattern in secret if guards(pattern, path)), None)
 
     def is_python(self, path: Path) -> bool:
         """Say whether `path` is a Python module, which the rules read."""

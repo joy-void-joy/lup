@@ -115,6 +115,9 @@ class Copies(Model):
     keeping: int = 5
     """How many of the copies that answered are kept, the last run: what each
     costs is in `docs/field-notes.md`, *What a kept copy costs*."""
+    remembering: int = 500
+    """How many commits the history holds a line of, the last changed, each a few
+    KB: an approved commit past these can't be named to be built again."""
 
     @contextmanager
     def installing(self) -> Generator[CopyLayout]:
@@ -167,10 +170,35 @@ class Copies(Model):
         return self.layout.bin.resolve().parent
 
     def recorded(self, kept: Kept) -> None:
-        """Keep how `kept` stands, a line of the repository's history."""
+        """Keep how `kept` stands, a line of the repository's history, in place of what it said of that commit, replaced in one rename.
+
+        Flipping between two copies records each flip, and the sweep reads this
+        every 30 seconds, so it stays a line a commit, the last `remembering`
+        changed. A line that doesn't read stays as it is, a later lup's to read.
+        """
         self.layout.home.mkdir(parents=True, exist_ok=True)
-        with self.layout.history.open("a") as appended:
-            appended.write(f"{kept.model_dump_json()}\n")
+        lines = (
+            self.layout.history.read_text().splitlines()
+            if self.layout.history.is_file()
+            else []
+        )
+
+        def other(line: str) -> bool:
+            read = self.read(line)
+            return read is None or read.commit != kept.commit
+
+        others = [line for line in lines if other(line)]
+        written = [*others, kept.model_dump_json()][-self.remembering :]
+        partial = self.layout.history.with_name(f"{self.layout.history.name}.partial")
+        partial.write_text("".join(f"{line}\n" for line in written))
+        partial.replace(self.layout.history)
+
+    def read(self, line: str) -> Kept | None:
+        """Read one line of the history; none where it doesn't read, as one a later lup wrote otherwise might."""
+        try:
+            return Kept.model_validate_json(line)
+        except ValidationError:
+            return None
 
     def history(self) -> list[Kept]:
         """Return each commit's copy recorded, as its last line says it stands, the last to answer first, those that never have after, a copy gone among them.
@@ -181,15 +209,8 @@ class Copies(Model):
         """
         if not self.layout.history.is_file():
             return []
-
-        def read(line: str) -> Kept | None:
-            try:
-                return Kept.model_validate_json(line)
-            except ValidationError:
-                return None
-
         lines = self.layout.history.read_text().splitlines()
-        records = [each for each in map(read, lines) if each is not None]
+        records = [each for each in map(self.read, lines) if each is not None]
         stands = {each.commit: each for each in records}
 
         def when(each: Kept) -> datetime:

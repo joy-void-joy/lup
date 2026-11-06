@@ -181,6 +181,7 @@ from lup_dev.inbox.store import (
     Reason,
     Remark,
     Review,
+    ReviewedAt,
     Ruling,
     Stop,
     Superseded,
@@ -850,9 +851,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     settling: dict[int, asyncio.Event] = {}
     """By approval's number, in memory: set once the approval is answered, which
     wakes every launch waiting on it."""
-    settle_hold: Callable[[HeldChange, bool, str], None] | None = None
+    settle_hold: Callable[[HeldChange, bool, str], str | None] | None = None
     """Writes the operator's answer to a held change where its hook waits for
-    it, yes or no and their comment; none where this service answers no hold."""
+    it, yes or no and their comment, and returns what to tell the conversation
+    that made it where no call waits to hear it; none where this service answers
+    no hold."""
+    hold_unheard: Callable[[HeldChange], str | None] = lambda _: None
+    """Returns what to tell the conversation that made a held change, answered
+    already, where neither a call nor their inbox told them, noting it told."""
     landing: Callable[[int], str | None] = lambda _: None
     """Says what the landing waiting on the flagged write it's given, by its
     number, lands where, in a few words (`lup_dev.policy.waits`); none where
@@ -2117,6 +2123,23 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         presence.queued = [each.id for each in kept if each.id in presence.queued]
         return [each for each in kept if each.id not in presence.queued]
 
+    async def answers_unheard(self, party: Conversation) -> None:
+        """Tell `party` what the operator answered of their holds that nothing told them (`hold_unheard`), as where the service stopped just after the answer: so a call about to wait for it isn't left waiting."""
+        for item in list(self.inbox.items.values()):
+            if (
+                item.sender == party
+                and isinstance(item.reason, HeldChange)
+                and isinstance(item.state, Decided)
+                and (said := self.hold_unheard(item.reason)) is not None
+            ):
+                await self.hold_told(item, said)
+
+    async def hold_told(self, item: Item, said: str) -> None:
+        """Tell the conversation that made held change `item` its answer, `said`, as the operator's news, no call being there to hear it."""
+        await self.posted(
+            Message(kind="note", text=said), Operator(), item.sender, None
+        )
+
     def arrive(self, party: Conversation) -> None:
         """Wake each call of `party`'s held until something arrives."""
         for each in self.presence(party).held:
@@ -2440,15 +2463,15 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         await self.delivered(reply)
         return reply
 
-    def flag_approved(self, number: int) -> Item:
-        """Approve the flagged write item `number`, as marking it good in its agent's drawer does (`lup_dev.policy.since`), whatever its state but approved already, which it keeps; refused where it isn't a flagged write."""
+    def flag_approved(self, number: int, reviewed: ReviewedAt | None = None) -> Item:
+        """Approve the flagged write item `number`, as marking it good in its agent's drawer does (`lup_dev.policy.since`), at the version `reviewed` there where it says one, whatever its state but approved already, which it keeps; refused where it isn't a flagged write."""
         item = self.inbox.item(number)
         if not isinstance(item.reason, Flagged):
             message = f"{cited(number)} is {what(item)}, not a flagged write"
             raise InboxError(message)
         if isinstance(item.state, Decided) and item.state.approved:
             return item
-        approved = Decided(at=self.clock.now(), approved=True)
+        approved = Decided(at=self.clock.now(), approved=True, reviewed=reviewed)
         self.say(f"{cited(number)}, a flagged write, was approved")
         return self.inbox.kept(item.model_copy(update={"state": approved}))
 
@@ -2675,7 +2698,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
         A comment on an approval a push asked is told to the session that
         pushed (`commented`); a held change's reaches its agent with the hold's
-        answer. A hold at landing has no hook: approved, each flagged write it
+        answer, through their inbox where no call waits to hear it (`hold_told`),
+        as where the service restarted since. A hold at landing has no hook:
+        approved, each flagged write it
         covers is approved with it; and its answer reaches the conversation
         landing, a note where it was declined or commented, so it's told even
         where no call waits on it (`landing_decided`). One answered
@@ -2685,13 +2710,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         item = self.approval(number)
         if not isinstance(item.state, Waiting):
             return item
+        unheard = None
         if isinstance(item.reason, HeldChange) and item.reason.landing is None:
             if self.settle_hold is None:
                 message = (
                     f"{cited(number)} is a held change, which this service can't answer"
                 )
                 raise InboxError(message)
-            self.settle_hold(item.reason, approved, comment)
+            unheard = self.settle_hold(item.reason, approved, comment)
         decided = Decided(at=self.clock.now(), approved=approved, comment=comment)
         answered = self.inbox.kept(item.model_copy(update={"state": decided}))
         self.settle(number)
@@ -2709,6 +2735,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 await self.landing_decided(
                     answered, landing, approved=approved, comment=comment
                 )
+            case HeldChange() if unheard is not None:
+                await self.hold_told(answered, unheard)
             case _:
                 pass
         return answered

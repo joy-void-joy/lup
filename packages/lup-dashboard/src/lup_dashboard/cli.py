@@ -21,7 +21,7 @@ from lup_dashboard.copied import Asking, taken
 from lup_dashboard.demo import Demo
 from lup_dashboard.errors import CopyError
 from lup_dashboard.host import Host, Sockets
-from lup_dashboard.layout import CopyLayout, DashboardLayout, checkout
+from lup_dashboard.layout import DashboardLayout, DemoLayout, checkout
 from lup_dashboard.server import Access, OfCopy, application
 from lup_dev.cli import adapters
 from lup_dev.host.protocol import HostError
@@ -161,12 +161,13 @@ def demo(
 ) -> None:
     """Serve the dashboard over stand-in data on `address` and `port`, until stopped, printing where to open it.
 
-    The real page, every view populated, with no host service or session behind
-    it (`lup_dashboard/demo.py`): for looking at a view while it's built, and
-    trying one before it lands, at a busy day's size (`--size`), with an
-    approval of lup's own code at size (`--approval-lines`) and, with
-    `--hooks`, under a busy day's watch answers. With `--copy`, over a copy of
-    the operator's dashboard state instead (`lup_dashboard/copied.py`).
+    The real page, every view populated, each request answered by the host's own
+    handler over stand-in state, with no host service or session behind it
+    (`lup_dashboard/demo.py`): for looking at a view while it's built, and trying
+    one before it lands, at a busy day's size (`--size`), with an approval of
+    lup's own code at size (`--approval-lines`) and, with `--hooks`, under a busy
+    day's watch answers. With `--copy`, over a copy of the operator's dashboard
+    state instead (`lup_dashboard/copied.py`).
     """
     if copy:
         if size is not None or hooks or approval_lines:
@@ -177,7 +178,12 @@ def demo(
             raise typer.BadParameter(message)
         copied(port, address, timings)
         return
-    host = Demo(hooks=hooks, approval_lines=approval_lines, timings=timings)
+    host = Demo(
+        hooks=hooks,
+        approval_lines=approval_lines,
+        timings=timings,
+        say=lambda line: typer.echo(f"demo: {line}", err=True),
+    )
     if size is not None:
         host.size = size
     served(host, port, address)
@@ -201,7 +207,7 @@ def copied(port: int, address: str, timings: Path | None = None) -> None:
     with tempfile.TemporaryDirectory(prefix="lup-dashboard-copy-") as kept:
         try:
             host = taken(
-                CopyLayout(home=Path(kept)),
+                DemoLayout(home=Path(kept)),
                 Asking(),
                 root,
                 readers,

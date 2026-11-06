@@ -92,8 +92,9 @@ const backInReview = () =>
     dashboard.page.waitForFunction(() => document.querySelector(".keys-palette") === null && document.activeElement?.closest(".review-buffer") != null, undefined, { polling: 20 });
 
 /**
- * Three places, each under a closed fold as the review opens: an item's context, and two conversations in the agents'
- * section. None of what comes to the demo later holds it, unlike the parser's words, which the late question's context does.
+ * Five places, each under a closed fold as the review opens: an item's context, and two conversations in the agents'
+ * section, in each the line of the fold of the agent's words and those words. None of what comes to the demo later holds
+ * it, unlike the parser's words, which the late question's context does.
  */
 const LINE = "Rendering frames 1 to 600.";
 
@@ -109,7 +110,7 @@ describe("searching the review backward with ?, in headless Chromium", () => {
 
     it("asks in a prompt of its own, goes to the match before the cursor opening the folds around it, and n goes on back and N forward", async () => {
         await dashboard.keys.press(["G"]);
-        expect(await found(LINE)).toMatchObject({ before: 3, hidden: [true, true, true] });
+        expect(await found(LINE)).toMatchObject({ before: 5, hidden: [true, true, true, true, true] });
 
         await dashboard.keys.press(["?"]);
         await dashboard.page.waitForSelector(".cm-vim-panel input:focus");
@@ -118,33 +119,37 @@ describe("searching the review backward with ?, in headless Chromium", () => {
         await dashboard.keys.type(LINE.replace(".", "\\."));
         await dashboard.keys.press(["Enter"]);
 
-        await onPlace(LINE, 2);
+        await onPlace(LINE, 4);
         await below(OPENED);
-        expect(await found(LINE)).toMatchObject({ on: 2, hidden: [true, true, false] });
+        expect(await found(LINE)).toMatchObject({ on: 4, hidden: [true, true, true, false, false] });
 
+        // Back onto that conversation's line of those words, then into the other conversation.
         await dashboard.keys.press(["n"]);
-        await onPlace(LINE, 1);
-        expect((await found(LINE)).hidden).toEqual([true, false, false]);
-        await dashboard.keys.press(["N"]);
+        await onPlace(LINE, 3);
+        expect((await found(LINE)).hidden).toEqual([true, true, true, false, false]);
+        await dashboard.keys.press(["n"]);
         await onPlace(LINE, 2);
-        await dashboard.keys.press(["n", "n"], 50);
+        expect((await found(LINE)).hidden).toEqual([true, false, false, false, false]);
+        await dashboard.keys.press(["N"]);
+        await onPlace(LINE, 3);
+        await dashboard.keys.press(["n", "n", "n"], 50);
         await onPlace(LINE, 0);
-        expect((await found(LINE)).hidden).toEqual([false, false, false]);
+        expect((await found(LINE)).hidden).toEqual([false, false, false, false, false]);
         // Back from the first, it goes round to the last, as vim's does.
         await dashboard.keys.press(["n"]);
-        await onPlace(LINE, 2);
+        await onPlace(LINE, 4);
     });
 
     it("leaves / going forward, n going on forward and N back", async () => {
         await dashboard.keys.press(["g", "g"]);
-        expect(await found(LINE)).toMatchObject({ before: 0, hidden: [true, true, true] });
+        expect(await found(LINE)).toMatchObject({ before: 0, hidden: [true, true, true, true, true] });
         await search("/", LINE.replace(".", "\\."));
         await onPlace(LINE, 0);
         await below(OPENED);
-        expect((await found(LINE)).hidden).toEqual([false, true, true]);
+        expect((await found(LINE)).hidden).toEqual([false, true, true, true, true]);
         await dashboard.keys.press(["n"]);
         await onPlace(LINE, 1);
-        expect((await found(LINE)).hidden).toEqual([false, false, true]);
+        expect((await found(LINE)).hidden).toEqual([false, false, false, true, true]);
         await dashboard.keys.press(["N"]);
         await onPlace(LINE, 0);
     });
@@ -154,9 +159,9 @@ describe("searching the review backward with ?, in headless Chromium", () => {
         await dashboard.page.waitForSelector(".cm-vim-panel input:focus");
         await dashboard.keys.type(LINE.replace(".", "\\."));
         await dashboard.keys.press(["Enter"]);
-        await onPlace(LINE, 1);
+        await onPlace(LINE, 3);
         await below(OPENED);
-        expect((await found(LINE)).hidden).toEqual([true, false, true]);
+        expect((await found(LINE)).hidden).toEqual([true, true, true, false, false]);
 
         await dashboard.page.reload();
         await loaded();
@@ -165,7 +170,7 @@ describe("searching the review backward with ?, in headless Chromium", () => {
         await dashboard.keys.type(LINE.replace(".", "\\."));
         await dashboard.keys.press(["Enter"]);
         await onPlace(LINE, 1);
-        expect((await found(LINE)).hidden).toEqual([true, false, true]);
+        expect((await found(LINE)).hidden).toEqual([true, false, false, true, true]);
         await dashboard.keys.press(["g", "g", "2", "n"], 50);
         await onPlace(LINE, 1);
     });

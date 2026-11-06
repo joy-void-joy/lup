@@ -35,6 +35,8 @@ The homes:
   which its worktrees and their rooms share, and which outlast a room's session
   as lup's state there doesn't; and `lup/reports/`, the judge's reports too
   long for a hook, kept whole where every room reads them;
+- inside a checkout's own part of the git directory, `lup/built/`, what the gate's
+  steps that build a file last passed on there (`CheckoutGitLayout`);
 - inside `lup_dev`, the built engine (`Bundle`).
 """
 
@@ -398,6 +400,17 @@ class GitDirectoryLayout(Model):
         return self.common / "lup" / "reports"
 
 
+class CheckoutGitLayout(Model):
+    """What lup keeps in one checkout's own part of the git directory: its alone, among no files git would commit, and gone with it."""
+
+    own: Path
+    """The checkout's git directory, as git names it: a clone's `.git`, or `worktrees/<its name>` in the common one for a worktree `git worktree add` made, of a clone or a bare clone alike."""
+
+    def built(self, step: str) -> Path:
+        """Return where what the gate's step named `step`, which builds a file, last passed on in this checkout is kept (`lup_dev.gate`, `Built`)."""
+        return self.own / "lup" / "built" / f"{step}.json"
+
+
 class PackageLayout(Model):
     """One package of a uv workspace, at its directory: what a copy of it is built from."""
 
@@ -666,7 +679,7 @@ class JudgeLayout(Model):
 
     @property
     def history(self) -> Path:
-        """Each copy built, a JSON line for each time its record changed, the last of a commit's saying how it stands (`Kept`, `lup_dev/copies.py`): it outlives the copy, for one gone to be built again from its commit."""
+        """Each copy built, a JSON line each saying how it stands (`Kept`, `lup_dev/copies.py`): it outlives the copy, for one gone to be built again from its commit."""
         return self.home / "history.jsonl"
 
     @property

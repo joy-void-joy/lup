@@ -531,6 +531,10 @@ class Exchange(Model):
     echoes: bool = False
     """Whether it repeats the conversation's own words, which a view of it shows
     already: a turn's last words, which lup made a note of."""
+    call_sends_it: bool = False
+    """Whether sending it is all the call that made it did, that call's input
+    being its text: one of lup's tools, as `note` or `ask`, rather than a write
+    lup flagged or held."""
 
 
 class Pathed(Model):
@@ -640,6 +644,7 @@ def exchanged(
             at=each.at,
             comment=each.comment,
             echoes=each.echoes,
+            call_sends_it=each.call_sends_it,
         )
 
     lined = lines.lined(party, items, named)

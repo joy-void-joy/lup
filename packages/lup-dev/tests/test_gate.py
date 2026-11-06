@@ -265,51 +265,235 @@ ENGINE = Step(
 )
 
 
-def touch(path: Path, when: int) -> None:
+def written(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("x")
-    os.utime(path, (when, when))
+    path.write_text(text)
 
 
-def check_engine(root: Path) -> tuple[Outcome, Scripted]:
-    processes = Scripted({})
-    [outcome] = gate(root, processes, [ENGINE]).outcomes
-    return outcome, processes
-
-
-def test_a_build_newer_than_its_sources_is_skipped(tmp_path: Path) -> None:
-    touch(tmp_path / "src" / "deep" / "rule.ts", 1_000)
-    touch(tmp_path / "table.ts", 1_000)
-    touch(tmp_path / "bundle" / "engine.js", 2_000)
-    outcome, processes = check_engine(tmp_path)
-    assert outcome.result == "skipped"
-    assert outcome.why == "bundle/engine.js is newer than its sources"
-    assert processes.ran == []
-    assert report(Gated(outcomes=[outcome])).startswith(
-        "skipped  engine (bundle/engine.js is newer than its sources)"
-    )
+def bundled(root: Path) -> None:
+    """Bundle the engine in `root` from its table, as its bundler does alone: byte for byte the same from the same table, and no type-check or test."""
+    written(root / "bundle" / "engine.js", f"from {(root / 'table.ts').read_text()}")
 
 
 class Building(Processes):
-    """Passes every command, `build` writing the engine's bundle as it runs."""
+    """Answers `code` to `build`, bundling the engine as it runs, and passes the rest."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, code: int = 0) -> None:
         self.root = root
+        self.code = code
         self.ran: list[list[str]] = []
 
     @override
     def run(self, command: list[str], cwd: Path) -> Ran:
         self.ran.append(command)
-        if command == ["build"]:
-            touch(self.root / "bundle" / "engine.js", 9_000)
-        return Ran(code=0, output="")
+        if command != ["build"]:
+            return Ran(code=0, output="")
+        bundled(self.root)
+        return Ran(code=self.code, output="")
 
 
-def test_with_fixes_a_stale_build_runs_before_them_and_once(tmp_path: Path) -> None:
-    touch(tmp_path / "table.ts", 1_000)
-    processes = Building(tmp_path)
+def built_engine(repo: Path) -> Check:
+    """The gate over `repo` with the engine's step alone, no pass kept."""
+    return Check(
+        root=repo,
+        processes=Building(repo),
+        tools=Stubbed([]),
+        runner=Plain(),
+        steps=[ENGINE],
+    )
+
+
+def engine_again(repo: Path, processes: Processes | None = None) -> Outcome:
+    """Run the engine's step in `repo`, and say how it went."""
+    processes = processes or Building(repo)
+    [outcome] = gate(repo, processes, [ENGINE]).outcomes
+    return outcome
+
+
+@pytest.fixture
+def passed_engine(repo: Path) -> Path:
+    """`repo` with the engine's table, the engine's step having passed on it."""
+    written(repo / "table.ts", "one")
+    assert engine_again(repo).result == "passed"
+    return repo
+
+
+def test_a_build_by_hand_the_step_never_passed_on_runs_the_step(repo: Path) -> None:
+    written(repo / "table.ts", "one")
+    bundled(repo)
+    processes = Building(repo)
+    assert engine_again(repo, processes).result == "passed"
+    assert processes.ran == [["build"]]
+
+
+def test_a_source_changed_and_built_by_hand_fails_the_gate_where_the_step_fails(
+    passed_engine: Path, clock: FakeClock
+) -> None:
+    written(passed_engine / "table.ts", "a type error its bundler doesn't read")
+    bundled(passed_engine)
+    processes = Building(passed_engine, code=2)
+
+    gated = kept(passed_engine, processes, clock, steps=[ENGINE]).run()
+
+    assert processes.ran == [["build"]]
+    assert failed(gated.outcomes) == ["engine"]
+    assert gated.recorded is None
+    assert Passes.of(passed_engine, clock).found(standing(passed_engine)) is None
+
+
+def test_a_step_that_passed_is_skipped_while_what_it_read_and_left_stand(
+    passed_engine: Path,
+) -> None:
+    processes = Building(passed_engine)
+    outcome = engine_again(passed_engine, processes)
+    assert outcome.result == "skipped"
+    assert (
+        outcome.why == "it passed on these sources, and built bundle/engine.js as it is"
+    )
+    assert processes.ran == []
+    assert report(Gated(outcomes=[outcome])).startswith(
+        "skipped  engine (it passed on these sources, and built bundle/engine.js as "
+        "it is)"
+    )
+
+
+def test_a_build_by_hand_byte_for_byte_what_the_step_left_has_nothing_left_to_check(
+    passed_engine: Path,
+) -> None:
+    (passed_engine / "bundle" / "engine.js").unlink()
+    bundled(passed_engine)
+    assert engine_again(passed_engine).result == "skipped"
+
+
+def test_a_build_by_hand_from_other_sources_runs_the_step_with_its_own_back(
+    passed_engine: Path,
+) -> None:
+    written(passed_engine / "table.ts", "two")
+    bundled(passed_engine)
+    written(passed_engine / "table.ts", "one")
+    processes = Building(passed_engine)
+    assert engine_again(passed_engine, processes).result == "passed"
+    assert processes.ran == [["build"]]
+    assert (passed_engine / "bundle" / "engine.js").read_text() == "from one"
+
+
+def test_no_ages_count_only_what_the_files_hold(passed_engine: Path) -> None:
+    os.utime(passed_engine / "bundle" / "engine.js", (1_000, 1_000))
+    os.utime(passed_engine / "table.ts", (2_000, 2_000))
+    assert engine_again(passed_engine).result == "skipped"
+    written(passed_engine / "table.ts", "two")
+    os.utime(passed_engine / "bundle" / "engine.js", (3_000, 3_000))
+    os.utime(passed_engine / "table.ts", (2_000, 2_000))
+    assert engine_again(passed_engine).result == "passed"
+
+
+def test_a_source_added_runs_the_step(passed_engine: Path) -> None:
+    written(passed_engine / "src" / "deep" / "rule.ts", "new")
+    assert engine_again(passed_engine).result == "passed"
+
+
+def test_a_source_removed_runs_the_step(passed_engine: Path) -> None:
+    (passed_engine / "src" / "pkg" / "core.py").unlink()
+    assert engine_again(passed_engine).result == "passed"
+
+
+def test_the_sources_are_each_file_git_would_commit_their_patterns_match(
+    repo: Path,
+) -> None:
+    written(repo / "table.ts", "one")
+    written(repo / "tablets.ts", "matched by neither")
+    (repo / "src" / "shallow.ts").write_text("untracked")
+    written(repo / "src" / "generated" / "types.ts", "git ignores this")
+    (repo / ".git" / "info" / "exclude").write_text("src/generated/\n")
+    (repo / "src" / "pkg" / "core.py").unlink()
+    assert sorted(built_engine(repo).sources(ENGINE)) == [
+        "src/pkg/__init__.py",
+        "src/shallow.ts",
+        "table.ts",
+    ]
+
+
+def test_a_step_with_no_sources_reads_none_of_the_files(repo: Path) -> None:
+    alone = ENGINE.model_copy(update={"sources": []})
+    assert built_engine(repo).sources(alone) == {}
+
+
+def test_what_a_step_generates_beside_its_sources_leaves_it_to_skip(repo: Path) -> None:
+    (repo / ".git" / "info" / "exclude").write_text("src/generated/\n")
+    written(repo / "table.ts", "one")
+
+    class Generating(Building):
+        @override
+        def run(self, command: list[str], cwd: Path) -> Ran:
+            written(repo / "src" / "generated" / "types.ts", f"run {len(self.ran)}")
+            return super().run(command, cwd)
+
+    processes = Generating(repo)
+    assert engine_again(repo, processes).result == "passed"
+    assert engine_again(repo, processes).result == "skipped"
+
+
+def test_a_source_changed_as_the_step_ran_leaves_it_to_run_again(repo: Path) -> None:
+    written(repo / "table.ts", "one")
+
+    class Editing(Building):
+        @override
+        def run(self, command: list[str], cwd: Path) -> Ran:
+            ran = super().run(command, cwd)
+            written(repo / "table.ts", "edited as it ran")
+            return ran
+
+    assert engine_again(repo, Editing(repo)).result == "passed"
+    assert engine_again(repo).result == "passed"
+    assert engine_again(repo).result == "skipped"
+
+
+def test_a_step_that_failed_on_what_it_read_runs_again(repo: Path) -> None:
+    written(repo / "table.ts", "one")
+    assert engine_again(repo, Building(repo, code=2)).result == "failed"
+    assert engine_again(repo, Building(repo, code=2)).result == "failed"
+
+
+def test_a_step_that_failed_leaves_what_it_passed_on_before(
+    passed_engine: Path,
+) -> None:
+    written(passed_engine / "table.ts", "two")
+    processes = Scripted({"build": Ran(code=2, output="no\n")})
+    assert engine_again(passed_engine, processes).result == "failed"
+    written(passed_engine / "table.ts", "one")
+    assert engine_again(passed_engine).result == "skipped"
+
+
+def test_a_step_that_passed_leaving_no_file_runs_each_time(repo: Path) -> None:
+    written(repo / "table.ts", "one")
+    processes = Scripted({})
+    assert engine_again(repo, processes).result == "passed"
+    assert engine_again(repo, processes).result == "passed"
+
+
+def test_another_command_runs_the_step(passed_engine: Path) -> None:
+    other = ENGINE.model_copy(update={"command": ["build", "--other"]})
+    processes = Building(passed_engine)
+    [outcome] = gate(passed_engine, processes, [other]).outcomes
+    assert outcome.result == "passed"
+    assert processes.ran == [["build", "--other"]]
+
+
+def test_what_a_step_passed_on_is_the_worktree_s_own(
+    passed_engine: Path, linked: Path
+) -> None:
+    written(linked / "table.ts", "one")
+    bundled(linked)
+    processes = Building(linked)
+    assert engine_again(linked, processes).result == "passed"
+    assert processes.ran == [["build"]]
+
+
+def test_with_fixes_a_stale_build_runs_before_them_and_once(repo: Path) -> None:
+    written(repo / "table.ts", "one")
+    processes = Building(repo)
     gated = gate(
-        tmp_path,
+        repo,
         processes,
         [ENGINE, *STEPS],
         fixes=[Step(name="fix", command=["fix"])],
@@ -323,25 +507,31 @@ def test_with_fixes_a_stale_build_runs_before_them_and_once(tmp_path: Path) -> N
     ]
 
 
-def test_without_fixes_a_build_runs_once_in_its_place(tmp_path: Path) -> None:
-    touch(tmp_path / "table.ts", 1_000)
-    processes = Building(tmp_path)
-    gate(tmp_path, processes, [*STEPS[:1], ENGINE])
+def test_with_fixes_a_build_runs_again_where_a_fix_changed_a_source(repo: Path) -> None:
+    written(repo / "table.ts", "one")
+
+    class Fixing(Building):
+        @override
+        def run(self, command: list[str], cwd: Path) -> Ran:
+            if command == ["fix"]:
+                written(repo / "table.ts", "fixed")
+            return super().run(command, cwd)
+
+    processes = Fixing(repo)
+    gate(repo, processes, [ENGINE], fixes=[Step(name="fix", command=["fix"])])
+    assert processes.ran == [["build"], ["fix"], ["build"]]
+
+
+def test_without_fixes_a_build_runs_once_in_its_place(repo: Path) -> None:
+    written(repo / "table.ts", "one")
+    processes = Building(repo)
+    gate(repo, processes, [*STEPS[:1], ENGINE])
     assert processes.ran == [["lint", "--strict"], ["build"]]
 
 
-def test_a_build_older_than_a_source_runs(tmp_path: Path) -> None:
-    touch(tmp_path / "bundle" / "engine.js", 2_000)
-    touch(tmp_path / "src" / "deep" / "rule.ts", 3_000)
-    outcome, processes = check_engine(tmp_path)
-    assert outcome.result == "passed"
-    assert processes.ran == [["build"]]
-
-
-def test_a_missing_build_runs(tmp_path: Path) -> None:
-    touch(tmp_path / "table.ts", 1_000)
-    outcome, _ = check_engine(tmp_path)
-    assert outcome.result == "passed"
+def test_a_missing_build_runs(passed_engine: Path) -> None:
+    (passed_engine / "bundle" / "engine.js").unlink()
+    assert engine_again(passed_engine).result == "passed"
 
 
 # The shell.
@@ -624,15 +814,14 @@ def test_every_worktree_of_a_repository_finds_its_passes(
 
 # A pass found, beside the builds a worktree lacks.
 
-BUILT = [ENGINE.model_copy(update={"sources": ["table.ts"]}), *STEPS]
-"""The engine built from its table alone, then lup's three scripted steps: the
-repository's own `src/` is newer than any bundle `Building` writes."""
+BUILT = [ENGINE, *STEPS]
+"""The engine's step, then lup's three scripted steps."""
 
 
 def ignoring_the_bundle(root: Path) -> None:
     """Give `root` the engine's table, git ignoring the bundle built from it, as lup's repository does."""
     (root / ".gitignore").write_text(".venv/\n.lup/\nbundle/\n")
-    touch(root / "table.ts", 1_000)
+    written(root / "table.ts", "one")
 
 
 def test_a_pass_found_in_a_fresh_worktree_still_builds_what_it_lacks(
@@ -682,7 +871,7 @@ def test_a_build_failing_beside_a_pass_found_fails_the_gate(
 ) -> None:
     ignoring_the_bundle(repo)
     kept(repo, Building(repo), clock, steps=BUILT).run()
-    touch(repo / "table.ts", 20_000)
+    written(repo / "bundle" / "engine.js", "built by hand")
     processes = Scripted({"build": Ran(code=2, output="no bundler\n")})
 
     gated = kept(repo, processes, clock, steps=BUILT).run()
@@ -699,6 +888,119 @@ def test_a_build_failing_beside_a_pass_found_fails_the_gate(
         f"UTC (tree `{gated.found.files.tree}`), so only the builds stale in this "
         "worktree ran. `--again` runs every step."
     )
+
+
+def test_a_pass_found_answers_for_no_build_the_step_never_passed_on(
+    repo: Path, clock: FakeClock
+) -> None:
+    ignoring_the_bundle(repo)
+    bundled(repo)
+    Passes.of(repo, clock).record(standing(repo), [each.name for each in BUILT])
+    processes = Building(repo, code=2)
+
+    gated = kept(repo, processes, clock, steps=BUILT).run()
+
+    assert gated.found is not None
+    assert processes.ran == [["build"]]
+    assert failed(gated.outcomes) == ["engine"]
+
+
+def test_the_record_of_a_build_leaves_the_files_a_pass_is_found_by_alone(
+    repo: Path, shell: Git, clock: FakeClock
+) -> None:
+    ignoring_the_bundle(repo)
+    before = standing(repo), shell.git(repo, "status", "--porcelain")
+
+    gated = kept(repo, Building(repo), clock, steps=BUILT).run()
+
+    assert not gated.moved
+    assert gated.recorded is not None
+    assert (standing(repo), shell.git(repo, "status", "--porcelain")) == before
+
+
+@pytest.fixture(params=["clone", "worktree of a clone", "worktree of a bare clone"])
+def laid_out(request: pytest.FixtureRequest, repo: Path) -> tuple[Path, Path]:
+    """A checkout, however its repository is laid out, and where git keeps its own part of the git directory."""
+    match request.param:
+        case "clone":
+            return repo, repo / ".git"
+        case "worktree of a clone":
+            linked: Path = request.getfixturevalue("linked")
+            return linked, repo / ".git" / "worktrees" / linked.name
+        case _:
+            bare: Path = request.getfixturevalue("bare")
+            return bare / "tree" / "main", bare / "worktrees" / "main"
+
+
+def test_a_build_is_skipped_by_what_it_passed_on_however_the_repository_is_laid_out(
+    laid_out: tuple[Path, Path], shell: Git, clock: FakeClock
+) -> None:
+    root, own = laid_out
+    ignoring_the_bundle(root)
+    before = shell.git(root, "status", "--porcelain")
+
+    first = kept(root, Building(root), clock, steps=BUILT).run()
+
+    assert first.recorded is not None
+    assert (own / "lup" / "built" / "engine.json").is_file()
+    assert shell.git(root, "status", "--porcelain") == before
+    nothing = Building(root)
+    assert kept(root, nothing, clock, steps=BUILT).run().outcomes == []
+    assert nothing.ran == []
+    written(root / "bundle" / "engine.js", "built by hand")
+    by_hand = Building(root)
+    assert kept(root, by_hand, clock, steps=BUILT).run().found == first.recorded
+    assert by_hand.ran == [["build"]]
+
+
+def test_a_worktree_removed_takes_what_its_build_passed_on_with_it(
+    repo: Path, linked: Path, shell: Git, clock: FakeClock
+) -> None:
+    ignoring_the_bundle(linked)
+    kept(linked, Building(linked), clock, steps=BUILT).run()
+    own = repo / ".git" / "worktrees" / linked.name
+    assert (own / "lup" / "built" / "engine.json").is_file()
+
+    shell.git(repo, "worktree", "remove", "--force", str(linked))
+
+    assert not own.exists()
+
+
+def test_again_runs_a_build_that_passed_once(repo: Path, clock: FakeClock) -> None:
+    ignoring_the_bundle(repo)
+    kept(repo, Building(repo), clock, steps=BUILT).run()
+    processes = Building(repo)
+
+    again = kept(repo, processes, clock, steps=BUILT).run(again=True)
+
+    assert processes.ran.count(["build"]) == 1
+    assert ("engine", "passed") in [(each.step, each.result) for each in again.outcomes]
+
+
+def test_again_with_fixes_runs_a_build_that_passed_once(
+    repo: Path, clock: FakeClock
+) -> None:
+    ignoring_the_bundle(repo)
+    kept(repo, Building(repo), clock, steps=BUILT).run()
+    processes = Building(repo)
+    fixes = [Step(name="fix", command=["fix"])]
+
+    kept(repo, processes, clock, steps=BUILT, fixes=fixes).run(again=True)
+
+    assert processes.ran.count(["build"]) == 1
+
+
+def test_again_leaves_a_build_that_fails_to_run_again(
+    repo: Path, clock: FakeClock
+) -> None:
+    ignoring_the_bundle(repo)
+    kept(repo, Building(repo), clock, steps=BUILT).run()
+    kept(repo, Building(repo, code=2), clock, steps=BUILT).run(again=True)
+    processes = Building(repo)
+
+    kept(repo, processes, clock, steps=BUILT).run()
+
+    assert processes.ran[0] == ["build"]
 
 
 def test_a_build_beside_a_pass_found_checks_the_requirements_first(

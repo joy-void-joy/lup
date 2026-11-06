@@ -1,4 +1,4 @@
-"""The demo over a copy of the operator's dashboard state, on a stand-in host: every request the page may send answered by the host's own handler over the copy, with no program run, no socket reached, and nothing written outside the copy's directory, the operator's worktree and the host's state among it."""
+"""The demo over a copy of the operator's dashboard state, on a stand-in host: every request the page may send answered by the host's own handler over the copy, with no program run, no socket reached, and nothing written outside the copy's directory, the operator's worktree and the host's state among it; and the stand-in demo, over the same handlers, held to the same."""
 
 import asyncio
 import json
@@ -8,6 +8,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, override
+from urllib.parse import urlsplit
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,9 +18,11 @@ from lup.blocks import OfAgent
 from lup.programs import ProgramError, run
 from lup.types import Model, MutableModel
 from lup_dashboard.api import Asked, Replied
-from lup_dashboard.copied import Asking, CopyHost, Withholding, asked_kinds, taken
+from lup_dashboard.copied import Asking, Withholding, taken
+from lup_dashboard.demo import Demo
 from lup_dashboard.errors import CopyError
-from lup_dashboard.layout import CopyLayout
+from lup_dashboard.handled import Handled, asked_kinds
+from lup_dashboard.layout import DemoLayout
 from lup_dashboard.server import Access, OfCopy, application
 from lup_dev.adapters.claude import ClaudeRecords, ClaudeTranscripts
 from lup_dev.host.copying import Copy, Copying, RecordOf
@@ -55,6 +58,7 @@ from lup_dev.inbox.protocol import (
     AnswerApproval,
     AnswerCheck,
     AnswerItem,
+    CheckShown,
     Context,
     Conversed,
     Drafted,
@@ -105,6 +109,7 @@ from lup_dev.inbox.store import (
 from lup_dev.inbox.threaded import (
     DeclineThread,
     ListThreads,
+    MovedIntoThread,
     MoveIntoThread,
     ReopenThread,
     SettleThread,
@@ -114,10 +119,16 @@ from lup_dev.inbox.threaded import (
     ThreadStated,
 )
 from lup_dev.layout import Layout
-from lup_dev.policy.since import ReviewSince, ShowSince, ViewedFile
+from lup_dev.policy.since import (
+    ReviewSince,
+    ShowSince,
+    Since,
+    SinceReviewed,
+    ViewedFile,
+)
 from lup_dev.policy.waits import LandingsWaiting, ShowLandings
 from lup_dev.stored import write_model
-from lup_dev.switching import ListCopies, SwitchCopy
+from lup_dev.switching import CopiesListed, CopySwitching, ListCopies, SwitchCopy
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
 from lup_ledger.parties import Conversation, Operator
@@ -179,7 +190,6 @@ WRITING: dict[str, list[int]] = {
         for event in [
             "os.rename",
             "os.link",
-            "os.symlink",
             "shutil.copyfile",
             "shutil.copytree",
             "shutil.move",
@@ -217,8 +227,18 @@ def audited(event: str, arguments: tuple[object, ...]) -> None:
             reached = f"wrote {path}" if written and outside(path, copy) else None
         case "sqlite3.connect":
             [database, *_] = arguments
-            outer = database != ":memory:" and outside(database, copy)
+            uri = str(database).startswith("file:")
+            place = urlsplit(str(database)).path if uri else database
+            outer = database != ":memory:" and outside(place, copy)
             reached = f"opened the database {database}" if outer else None
+        case "os.symlink":
+            # A link's target is read from where the link is.
+            [target, link, *_] = arguments
+            assert isinstance(target, str | bytes | Path)
+            assert isinstance(link, str | bytes | Path)
+            pointed = Path(os.fsdecode(link)).parent / os.fsdecode(target)
+            named = [each for each in [pointed, link] if outside(each, copy)]
+            reached = f"{event}: {named!r}" if named else None
         case _ if event in WRITING:
             paths = [arguments[each] for each in WRITING[event]]
             named = [each for each in paths if outside(each, copy)]
@@ -518,7 +538,7 @@ def checkout(tmp_path: Path) -> Path:
 def test_every_request_the_page_may_send_acts_on_the_copy_alone(tmp_path: Path) -> None:
     host, standing = held_by_host(tmp_path)
     from_host = asking(host)
-    copy = CopyLayout(home=tmp_path / "copy")
+    copy = DemoLayout(home=tmp_path / "copy")
     root = checkout(tmp_path)
     before = files(tmp_path / "host", host.worktree, host.elsewhere, host.home, root)
     sent: list[str] = []
@@ -605,8 +625,10 @@ def test_every_request_the_page_may_send_acts_on_the_copy_alone(tmp_path: Path) 
         talk = Talk(comments=[TalkComment(step=1, text="hm")])
         assert ask(ShowTalk(conversation=MAIN), Talked).talk == Talk()
         assert ask(KeepTalk(conversation=MAIN, talk=talk), Talked).talk == talk
-        assert "moves no host service" in ask(ListCopies(), Refused).error
-        assert "moves no host service" in ask(SwitchCopy(commit="c"), Refused).error
+        assert ask(ListCopies(), CopiesListed).copies == []
+        assert (
+            "no copy of `lup-dev` is kept" in ask(SwitchCopy(commit="c"), Refused).error
+        )
         since = ask(ShowSince(conversation=PARSER), Refused)
         assert since.error == Withholding().why
         marking = ReviewSince(
@@ -717,6 +739,126 @@ def test_every_request_the_page_may_send_acts_on_the_copy_alone(tmp_path: Path) 
     )
 
 
+def test_every_request_the_page_may_send_acts_on_the_stand_in_demo_alone() -> None:
+    demo = Demo(say=lambda _: None)
+    sent: list[str] = []
+    REACH.reached = []
+    REACH.watched = Path(demo.kept.name)
+    try:
+        client = TestClient(
+            application(demo, Access(token=TOKEN, port=8766), None, demo=True),
+            base_url="http://127.0.0.1:8766",
+        )
+
+        def ask[R](request: Asked, reply: type[R]) -> R:
+            sent.append(request.kind)
+            response = client.post(
+                "/api/ask",
+                json=request.model_dump(mode="json"),
+                headers={"Authorization": f"Bearer {TOKEN}"},
+            )
+            assert response.status_code == 200, response.text
+            answered = TypeAdapter[Replied](Replied).validate_python(response.json())
+            assert isinstance(answered, reply), answered
+            return answered
+
+        lup = Path("/home/op/lup.git")
+        session = Conversation(repository=lup, runtime="claude", session="s1")
+        parser = session.model_copy(update={"agent": "a02"})
+        fix_clock = session.model_copy(update={"agent": "a07"})
+        ask(ListLaunches(), Listed)
+        renamed = ask(Rename(launch="a1f0", name="renamed"), Renamed)
+        assert renamed.launch.name == "renamed"
+        holding = SetHolding(launch="a1f0", session="s1", agent="a02", on=True)
+        assert ask(holding, Holding).on
+        ask(ListInbox(), Items)
+        ask(ShowItem(number=51), Shown)
+        ask(ShowFiles(number=54), Files)
+        ask(ShowContext(number=51), Context)
+        ask(ShowConversation(runtime="claude", session="s1"), Conversed)
+        draft = Draft(
+            comments=[Comment(item=55, text="yes, but name it")],
+            letters=[Letter(to=session, text="carry on")],
+            done=[62],
+        )
+        assert ask(KeepDraft(draft=draft), Drafted).draft == draft
+        ask(ShowDraft(), Drafted)
+        ask(ShowOrder(), Ordered)
+        ask(KeepOrder(places=["one"]), Ordered)
+        talk = Talk(comments=[TalkComment(step=1, text="hm")])
+        ask(ShowTalk(conversation=session), Talked)
+        ask(KeepTalk(conversation=session, talk=talk), Talked)
+        ask(ShowLandings(), LandingsWaiting)
+        drawer = ask(ShowSince(conversation=fix_clock), Since)
+        [file] = drawer.places[0].files
+        marking = ReviewSince(
+            conversation=fix_clock,
+            branch="fix-clock",
+            files=[ViewedFile(path=file.path, version=file.version)],
+        )
+        ask(marking, SinceReviewed)
+        moving = MoveMarks(
+            repository=lup,
+            module="core",
+            marks=[Moving(key=marks.seen(parser), up_to="51")],
+        )
+        ask(moving, MarksMoved)
+        viewing = Viewing(
+            repository=lup,
+            module="transcripts",
+            view="conversation",
+            argument=OfAgent(runtime="claude", session="s1", agent="a02").model_dump(
+                mode="json"
+            ),
+        )
+        ask(viewing, Viewed)
+        listed = ask(ListThreads(), ThreadsRead).threads
+        first = listed[0].thread.number
+        ask(ShowThread(number=first, whole=True), ThreadShown)
+        ask(SettleThread(number=first), ThreadStated)
+        ask(ReopenThread(number=first, why="again"), ThreadStated)
+        ask(DeclineThread(number=first, why="no"), ThreadStated)
+        ask(AnswerCheck(number=311), CheckShown)
+        ask(MoveIntoThread(numbers=[57], title="The gate"), MovedIntoThread)
+        rulings = [
+            Ruling(decision=1, verdict="leaning"),
+            Ruling(decision=2, verdict="leaning"),
+        ]
+        ask(AnswerItem(number=51, rulings=rulings), Shown)
+        ask(FinishItem(number=52), Shown)
+        ask(SendItem(launch="a1f0", text="hello", agent="a02"), Shown)
+        assert ask(AnswerApproval(number=54, approved=True), Settled).here
+        reviewed = ask(SendDraft(), Reviewed)
+        measured = Report(
+            page="dashboard",
+            session="a1b2c3",
+            browser=Browser(name="Firefox", version="144", device="desktop"),
+            windows=[
+                Window(
+                    sequence=1,
+                    start=AT,
+                    end=AT,
+                    keys={"typing": Latencies(painted={16: 3})},
+                )
+            ],
+        )
+        assert ask(KeepTimings(report=measured), TimingsKept).windows == 1
+        [_, before, _] = ask(ListCopies(), CopiesListed).copies
+        switching = ask(SwitchCopy(commit=before.commit), CopySwitching)
+    finally:
+        REACH.watched = None
+    assert REACH.reached == []
+    assert sorted(set(sent)) == sorted(asked_kinds())
+    assert [each.number for each in reviewed.approved] == [55]
+    withheld = demo.host.withheld
+    assert withheld.settled == [54]
+    assert withheld.switched == [switching.commit]
+    assert [(each.change.key, each.approved) for each in withheld.holds] == [
+        ("a1b2c3", True)
+    ]
+    assert withheld.notices == []
+
+
 def test_the_watch_on_the_copy_catches_a_program_a_socket_and_a_write_outside_it(
     tmp_path: Path,
 ) -> None:
@@ -746,7 +888,7 @@ def test_a_file_the_checkout_doesnt_read_stops_the_copy_naming_it(
 ) -> None:
     host, _ = held_by_host(tmp_path)
     host.layout.host.record("one").write_text(json.dumps({"launch": "one"}))
-    copy = CopyLayout(home=tmp_path / "copy")
+    copy = DemoLayout(home=tmp_path / "copy")
 
     with pytest.raises(CopyError, match=r"run/host/launches/one\.json, copied from"):
         taken(copy, asking(host), checkout(tmp_path), {})
@@ -759,8 +901,8 @@ def test_a_session_the_operator_ran_on_the_host_is_never_read_into_the_copy(
     operator = host.layout.state / "operator" / "projects" / "-w"
     operator.mkdir(parents=True)
     (operator / "s5.jsonl").write_text(human("mine") + "\n")
-    copy = CopyLayout(home=tmp_path / "copy")
-    copied: CopyHost = taken(
+    copy = DemoLayout(home=tmp_path / "copy")
+    copied: Handled = taken(
         copy, asking(host), checkout(tmp_path), {"claude": ClaudeTranscripts()}
     )
 

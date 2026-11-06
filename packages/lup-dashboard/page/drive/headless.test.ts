@@ -71,6 +71,25 @@ describe("the review's editor, in headless Chromium", () => {
         expect(await review.text()).not.toContain("kept on the host");
     });
 
+    it("closes a run of calls with zc from any of its rows, each a closed fold of its own, as vim's closes what holds a closed fold", async () => {
+        const run = (await review.text()).split("\n").find((line) => /^· \d+ calls: /.test(line));
+        if (run === undefined) {
+            throw new Error("the demo holds no run of calls");
+        }
+        await review.goTo(run);
+        await dashboard.keys.press(["j"]);
+        await review.until("went on to a row of the run", (view) => view.state.doc.lineAt(view.state.selection.main.head).text.startsWith("· "));
+        const row = await review.line();
+        await dashboard.page.waitForFunction((text) => [...document.querySelectorAll(".review-buffer .cm-line")].some((line) => line.textContent?.includes(text)), row);
+
+        await dashboard.keys.press(["z", "c"]);
+        await review.until("went to the run's line", (view, run) => view.state.doc.lineAt(view.state.selection.main.head).text === run, run);
+        await dashboard.page.waitForFunction((text) => ![...document.querySelectorAll(".review-buffer .cm-line")].some((line) => line.textContent?.includes(text)), row);
+
+        await dashboard.keys.press(["z", "a"]);
+        await dashboard.page.waitForFunction((text) => [...document.querySelectorAll(".review-buffer .cm-line")].some((line) => line.textContent?.includes(text)), row);
+    });
+
     it("counts a mark once, though the editor's state holds its decorations twice", async () => {
         const held = await review.evaluate((view) => {
             let count = 0;

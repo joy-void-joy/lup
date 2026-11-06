@@ -103,6 +103,15 @@ class EngineError(LupDevError):
     """The engine's answer doesn't cover what it was asked about."""
 
 
+def by_level(level: Level) -> Level | None:
+    """Return how a path's role's level takes what the role asks: held or flagged, or none where it lets it through (`Levels`).
+
+    >>> by_level("held"), by_level("review")
+    ('held', None)
+    """
+    return level if level in ["held", "flagged"] else None
+
+
 class Change(Model):
     """One file's change, in the three versions the judgement compares."""
 
@@ -162,6 +171,43 @@ class RemovedNote(Model):
     path: Path
     text: str
     """The comment as written, after `# lup:`."""
+
+
+def role_ask(roles: Roles, path: Path, role: Role) -> Ask | None:
+    """Return what a change to `path`, of `role`, asks by its role alone, whatever the change: a protected path and an operator's document by their own names, any other role as `role` where its level holds or flags every write; none where it asks nothing of its own.
+
+    >>> from lup_dev import Project
+    >>> from lup_dev.declaration.resolve import Declaration
+    >>> roles = Roles(root=Path("/nowhere"), declaration=Declaration.of(Project()))
+    >>> role_ask(roles, Path(".gitignore"), "protected").reason
+    '.gitignore is a protected path (**/.gitignore)'
+    >>> role_ask(roles, Path("a.py"), "production") is None
+    True
+    """
+    match role:
+        case "protected":
+            pattern = roles.protecting(path)
+            secret = roles.secret(path)
+            why = f" ({pattern})" if pattern else ", the project's declaration"
+            reason = (
+                f"{path} is a protected path{why}"
+                if pattern is not None or secret is None
+                else f"{path} has the name of a file holding secrets ({secret})"
+            )
+            return Ask(kind="protected", reason=reason)
+        case "operator":
+            return Ask(
+                kind="operator", reason=f"{path} is one of the operator's documents"
+            )
+        case _:
+            way = by_level(roles.declaration.levels.get(role, "review"))
+            if way is None:
+                return None
+            reason = (
+                f"{path} is a {role} path, whose every write the project's "
+                f"`Levels` {'holds' if way == 'held' else 'flags'}"
+            )
+            return Ask(kind="role", reason=reason)
 
 
 class Judgement(Model):
@@ -256,6 +302,78 @@ class Judgement(Model):
                 return sorted(dict.fromkeys(finding.rule for finding in self.findings))
             case "allow":
                 return ["rules-pass" if self.role == "production" else self.role]
+
+
+def by_role(roles: Roles, path: Path) -> Judgement | None:
+    """Return what a change to `path` gets by its role alone, as a write to it is judged (`Judge.one`), or none where that's nothing: what's read from the path and the declaration, needing no version of the file and no reading of the engine's, so a landing works it out from its own diff.
+
+    >>> from lup_dev import Project
+    >>> from lup_dev.declaration.resolve import Declaration
+    >>> roles = Roles(root=Path("/nowhere"), declaration=Declaration.of(Project()))
+    >>> [judged.outcome for judged in [by_role(roles, Path("AGENTS.md"))] if judged]
+    ['ask']
+    >>> by_role(roles, Path("docs/a.md")) is None
+    True
+    """
+    role = roles.role(path)
+    ask = role_ask(roles, path, role)
+    way = by_level(roles.declaration.levels.get(role, "review"))
+    if ask is None or way is None:
+        return None
+    return Judgement(
+        path=path,
+        role=role,
+        outcome="ask" if way == "held" else "allow",
+        asks=[ask] if way == "held" else [],
+        flags=[ask] if way == "flagged" else [],
+    )
+
+
+def added_ignores(
+    path: Path, before: list[Directive], after: list[Directive]
+) -> list[Ask]:
+    """List an ask for each `# lup: ignore` the directives `after` add to those `before`, on its line."""
+    return [
+        Ask(
+            kind="ignore",
+            reason=f"adds `# lup: {added.identity().text}` to {path}",
+            line=added.line,
+        )
+        for added in added_suppressions(before, after)
+    ]
+
+
+def by_directives(
+    roles: Roles, path: Path, before: list[Directive], after: list[Directive]
+) -> Judgement | None:
+    """Return what a change to `path` gets by its role (`by_role`) and the `ignore`s it adds, which the declaration holds or flags whatever the role's level, as a write to it is judged (`Judge.ruled`), from each version's directives alone; none where that's nothing.
+
+    >>> from lup_dev import Project
+    >>> from lup_dev.declaration.resolve import Declaration
+    >>> roles = Roles(root=Path("/nowhere"), declaration=Declaration.of(Project()))
+    >>> by_directives(roles, Path("docs/a.md"), [], []) is None
+    True
+    """
+    judged = by_role(roles, path)
+    declared = roles.declaration
+    ignores = added_ignores(path, before, after) if roles.ruled(path) else []
+    held = [
+        *(judged.asks if judged else []),
+        *(ignores if "ignore" in declared.held else []),
+    ]
+    flagged = [
+        *(judged.flags if judged else []),
+        *(ignores if "ignore" in declared.flagged else []),
+    ]
+    if not held and not flagged:
+        return None
+    return Judgement(
+        path=path,
+        role=roles.role(path),
+        outcome="ask" if held else "allow",
+        asks=held,
+        flags=flagged,
+    )
 
 
 def touched_lines(before: str | None, after: str) -> list[int]:
@@ -489,17 +607,9 @@ class Judge(Model, arbitrary_types_allowed=True):
         ]
         match role:
             case "protected":
-                pattern = self.roles.protecting(change.path)
-                secret = self.roles.secret(change.path)
-                why = f" ({pattern})" if pattern else ", the project's declaration"
-                reason = (
-                    f"{change.path} is a protected path{why}"
-                    if pattern is not None or secret is None
-                    else f"{change.path} has the name of a file holding secrets ({secret})"
-                )
-                ask = Ask(kind="protected", reason=reason)
+                own = self.asked(change, role)
                 if change.after is None or not self.roles.ruled(change.path):
-                    sorted_ = self.sorted([ask], level)
+                    sorted_ = self.sorted(own, level)
                     return Judgement(
                         path=change.path,
                         role=role,
@@ -508,10 +618,9 @@ class Judge(Model, arbitrary_types_allowed=True):
                         flags=sorted_.flagged,
                         removed=removed,
                     )
-                return self.ruled(change, versions, removed, [ask], level)
+                return self.ruled(change, versions, removed, own, level)
             case "operator":
-                reason = f"{change.path} is one of the operator's documents"
-                sorted_ = self.sorted([Ask(kind="operator", reason=reason)], level)
+                sorted_ = self.sorted(self.asked(change, role), level)
                 return Judgement(
                     path=change.path,
                     role=role,
@@ -522,20 +631,15 @@ class Judge(Model, arbitrary_types_allowed=True):
             case "production":
                 if change.after is None:
                     return self.leveled(change, role, level, removed)
-                own = self.asked(change, role, level)
+                own = self.asked(change, role)
                 return self.ruled(change, versions, removed, own, level)
             case _:
                 return self.leveled(change, role, level, [], self.information(versions))
 
-    def asked(self, change: Change, role: Role, level: Level) -> list[Ask]:
-        """Return what a change asks by its path's role alone, where the role has no ask of its own: a `role` ask, where its level holds or flags every write; nothing else."""
-        if level not in ["held", "flagged"]:
-            return []
-        reason = (
-            f"{change.path} is a {role} path, whose every write the project's "
-            f"`Levels` {'holds' if level == 'held' else 'flags'}"
-        )
-        return [Ask(kind="role", reason=reason)]
+    def asked(self, change: Change, role: Role) -> list[Ask]:
+        """Return what a change asks by its path's role alone (`role_ask`)."""
+        ask = role_ask(self.roles, change.path, role)
+        return [] if ask is None else [ask]
 
     def leveled(
         self,
@@ -546,7 +650,7 @@ class Judge(Model, arbitrary_types_allowed=True):
         information: list[Finding] | None = None,
     ) -> Judgement:
         """Judge a change no rule reads by its path's role alone: let through, or, where the role's level holds or flags every write, asking `role`."""
-        sorted_ = self.sorted(self.asked(change, role, level), level)
+        sorted_ = self.sorted(self.asked(change, role), level)
         return Judgement(
             path=change.path,
             role=role,
@@ -630,7 +734,7 @@ class Judge(Model, arbitrary_types_allowed=True):
 
         def taken(ask: Ask) -> Level | None:
             if ask.kind in get_args(RoleAsk.__value__):
-                return level if level in ["held", "flagged"] else None
+                return by_level(level)
             if ask.kind in get_args(DesignAsk.__value__) and level in [
                 "automatic",
                 "hidden",
@@ -781,11 +885,4 @@ class Judge(Model, arbitrary_types_allowed=True):
         if versions.after is None:
             return []
         before = versions.before.directives if versions.before else []
-        return [
-            Ask(
-                kind="ignore",
-                reason=f"adds `# lup: {added.identity().text}` to {path}",
-                line=added.line,
-            )
-            for added in added_suppressions(before, versions.after.directives)
-        ]
+        return added_ignores(path, before, versions.after.directives)

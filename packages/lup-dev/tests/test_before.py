@@ -14,7 +14,7 @@ from lup_dev.policy.checkpoint import (
     SessionStarted,
     Worktree,
 )
-from lup_dev.policy.holds import Holds, Response, answer
+from lup_dev.policy.holds import Hold, Holds, Response, answer
 from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.policy.worktrees import Place, place
 from lup_dev.private.withheld import Held, Withheld, kept
@@ -55,6 +55,45 @@ def test_a_replacement_applies_as_the_tool_does() -> None:
         )
         == "new"
     )
+
+
+def test_a_write_through_a_link_into_a_protected_directory_is_held_as_the_file_it_reaches(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "settings.json").write_text("{}\n")
+    (repo / "into").symlink_to(".claude")
+    shell.commit(repo, "a link into a protected directory")
+    SessionStarted(session="s1", cwd=repo).apply(kit.bench)
+    write = Overwrite(
+        call="w1", tool="Write", path=repo / "into" / "settings.json", text="{}\n#\n"
+    )
+    before(kit.bench, write, "s1", repo)
+    [hold] = kit.announced.holds
+    [held] = hold.files
+    assert (held.path, held.reasons) == (Path(".claude/settings.json"), ["protected"])
+
+
+def test_a_write_to_a_linked_file_into_a_protected_directory_is_held_at_its_call_s_finish(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    """Its path says nothing of where it leads, so it's let through as its own; what it reaches is judged at the checkpoint, as a shell's write is."""
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "settings.json").write_text("{}\n")
+    (repo / "linked.json").symlink_to(".claude/settings.json")
+    shell.commit(repo, "a linked file into a protected directory")
+    SessionStarted(session="s1", cwd=repo).apply(kit.bench)
+    CallStarted(session="s1", cwd=repo, call="w1", tool="Write").apply(kit.bench)
+    write = Overwrite(
+        call="w1", tool="Write", path=repo / "linked.json", text="{}\n#\n"
+    )
+    assert before(kit.bench, write, "s1", repo).outcome == "allow"
+    assert kit.announced.holds == []
+    (repo / "linked.json").write_text(write.text)
+    CallFinished(session="s1", cwd=repo, call="w1", tool="Write").apply(kit.bench)
+    [hold] = kit.announced.holds
+    [held] = hold.files
+    assert (held.path, held.reasons) == (Path(".claude/settings.json"), ["protected"])
 
 
 def test_a_write_to_a_file_linking_out_of_the_worktree_is_let_through_unread(
@@ -495,8 +534,7 @@ def test_a_held_write_holds_its_file_as_a_checkpoints_change_does_while_it_waits
                 reason=(
                     f"lup holds {repo}/src/pkg/core.py for the operator's review "
                     f"(hold {hold.key}), so it isn't written until they answer, "
-                    "which reaches the conversation that made the change at their "
-                    "next call."
+                    "which reaches the conversation that made the change."
                 ),
             ),
         )
@@ -554,6 +592,49 @@ def test_a_held_write_whose_call_died_and_was_declined_never_lands(
     assert (repo / CORE).read_text() == original
     saved = repo / ".lup/saved/1/src/pkg/core.py"
     assert saved.read_text() == original + "\n"
+
+
+def test_a_file_tool_writing_a_file_whose_hold_was_answered_settles_it_rather_than_being_refused(
+    kit: Kit, repo: Path, dying: Dying
+) -> None:
+    """Told the operator's answer, the agent may write the file next, with no checkpoint since."""
+    kit.announced.answering = None
+    SessionStarted(session="s1", cwd=repo).apply(kit.bench)
+    original = (repo / CORE).read_text()
+    dying.at_next_wait(kit.clock)
+    with pytest.raises(dying.died):
+        before(kit.bench, rewrite(repo), "s1", repo)
+    [hold] = kit.announced.holds
+    answer(kit.layout, hold.key, Response(approved=True), [], kit.clock, telling=True)
+    decided = before(kit.bench, rewrite(repo, "w2"), "s1", repo)
+    assert decided.outcome == "allow"
+    assert (repo / CORE).read_text() == original + "\n"
+    store = Worktree.at(repo, kit.layout).store
+    assert store.state().holding == []
+    assert ran(kit, repo, "w2") == ""
+    assert store.content(store.accepted(), CORE) == (original + "\n").encode()
+    assert len(kit.announced.holds) == 1
+
+
+def test_a_held_write_reaches_the_operator_with_its_call_already_waiting_on_it(
+    kit: Kit, repo: Path
+) -> None:
+    """So an answer however quick isn't taken for one no call hears."""
+    kit.announced.answering = Response(approved=True)
+    SessionStarted(session="s1", cwd=repo).apply(kit.bench)
+    waited: list[bool] = []
+    holds = Holds(layout=kit.layout.store(repo))
+    announcing = kit.announced.announced
+
+    def announced(
+        hold: Hold, runtime: str, repository: Path, files: list[ChangedFile]
+    ) -> None:
+        waited.append(holds.waited_on(hold.key))
+        announcing(hold, runtime, repository, files)
+
+    kit.announced.announced = announced
+    assert before(kit.bench, rewrite(repo), "s1", repo).outcome == "allow"
+    assert waited == [True]
 
 
 def test_a_write_landing_under_its_open_hold_is_left_to_the_holds_answer(

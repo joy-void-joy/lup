@@ -55,10 +55,13 @@ describe("settling any thread, in headless Chromium", () => {
     });
 
     it("never settles a thread where something waits on the operator, saying how many", async () => {
-        await review.goTo("━━ @transcript-reader · The transcript reader · lup-impl/parser holds · a question, a check");
-        await offers("␣d not settled while 2 wait on you");
+        // A question, a check, and a question more once it has arrived, whichever the review holds as this goes there.
+        await review.goTo("━━ @transcript-reader · The transcript reader · lup-impl/parser holds · ");
+        await offers("␣d not settled while ");
+        expect((await dashboard.page.locator(".keys").first().innerText()).replace(/\s+/g, " ")).toMatch(/␣d not settled while [23] wait on you/);
         await dashboard.keys.press([" ", "d"]);
-        await said("not settled while 2 wait on you");
+        await said("not settled while ");
+        expect(await dashboard.page.locator(".bar .said").innerText()).toMatch(/not settled while [23] wait on you/);
     });
 
     it("reads a thread's news with Space d, then settles it with Space d again", async () => {

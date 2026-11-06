@@ -97,30 +97,38 @@ describe("moving through the review grouped by thread, line by line, in headless
     });
 
     it("goes ]g and [g to each group in turn across the sections, a closed fold's line standing for the groups under it", async () => {
-        const landings = await review.evaluate((view) => {
-            const doc = view.state.doc;
-            const found: number[] = [];
-            for (let number = 1; number <= doc.lines; number += 1) {
-                const line = doc.line(number);
-                if (line.text.startsWith("━━ ")) {
-                    found.push(doc.lineAt(view.lineBlockAt(line.from).from).number);
+        // Walked again where the review was laid out anew meanwhile, as the demo's arrivals lay it out, moving what's below.
+        for (let tried = 0; tried < 5; tried += 1) {
+            const length = await review.evaluate((view) => view.state.doc.length);
+            const landings = await review.evaluate((view) => {
+                const doc = view.state.doc;
+                const found: number[] = [];
+                for (let number = 1; number <= doc.lines; number += 1) {
+                    const line = doc.line(number);
+                    if (line.text.startsWith("━━ ")) {
+                        found.push(doc.lineAt(view.lineBlockAt(line.from).from).number);
+                    }
                 }
+                return [...new Set(found)];
+            });
+            await to("first");
+            const forward: number[] = [];
+            for (const _ of landings) {
+                await dashboard.keys.press(["]", "g"]);
+                forward.push(await here());
             }
-            return [...new Set(found)];
-        });
-        await to("first");
-        const forward: number[] = [];
-        for (const _ of landings) {
-            await dashboard.keys.press(["]", "g"]);
-            forward.push(await here());
+            const back: number[] = [];
+            for (const _ of landings.slice(1)) {
+                await dashboard.keys.press(["[", "g"]);
+                back.push(await here());
+            }
+            if ((await review.evaluate((view) => view.state.doc.length)) === length) {
+                expect(forward).toEqual(landings);
+                expect(back).toEqual(landings.toReversed().slice(1));
+                return;
+            }
         }
-        expect(forward).toEqual(landings);
-        const back: number[] = [];
-        for (const _ of landings.slice(1)) {
-            await dashboard.keys.press(["[", "g"]);
-            back.push(await here());
-        }
-        expect(back).toEqual(landings.toReversed().slice(1));
+        expect.unreachable("the review was laid out anew at every walk");
     });
 
     it("moves j and k exactly one line shown at a time with every section open, and a thread whole in open, its lines pointing to items above among it", async () => {

@@ -10,8 +10,9 @@
    last build only once this one is whole.
 
 The page is built, never committed: git ignores it, and the package carries it when
-installed from a checkout that built it. The gate runs this step where one of its
-sources is newer than the page (`LupDevelopment`, in `lup_project.py`).
+installed from a checkout that built it. The gate runs this step unless it passed
+on its sources as they stand, leaving the page as it is (`lup_dev.gate`,
+`Check.stale`), so a page built by hand with vite alone never counts as checked.
 """
 
 import json

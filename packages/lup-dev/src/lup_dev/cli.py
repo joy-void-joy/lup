@@ -49,7 +49,7 @@ from lup_dev.clipboard.desktop import Desktop
 from lup_dev.clipboard.protocol import routes as clipboard_routes
 from lup_dev.clock import Clock, SystemClock
 from lup_dev.codescan.conditions import loaded
-from lup_dev.codescan.contract import Checker, Due, Finding, Rule, Source
+from lup_dev.codescan.contract import Checker, Due, Finding, Parser, Rule, Source
 from lup_dev.codescan.directives import (
     Checking,
     Fired,
@@ -60,7 +60,7 @@ from lup_dev.codescan.directives import (
     holding,
     without,
 )
-from lup_dev.codescan.engine import EngineChecker, EngineError
+from lup_dev.codescan.engine import EngineChecker, EngineError, EngineParser
 from lup_dev.codescan.reference import reference
 from lup_dev.codescan.ruff import Ruff
 from lup_dev.commanding import RoomExchanges, RoomMarks
@@ -260,10 +260,16 @@ from lup_dev.migration import HostRuntime, Migrating
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
 from lup_dev.policy.coming import Coming
 from lup_dev.policy.flags import InboxFlagging
-from lup_dev.policy.holds import InboxAnnouncing, Response, answer
+from lup_dev.policy.holds import (
+    InboxAnnouncing,
+    Response,
+    answer,
+    answer_unheard,
+    said_answering,
+)
 from lup_dev.policy.importers import BackgroundSpawner
 from lup_dev.policy.judge import finding
-from lup_dev.policy.landing import LandingTools
+from lup_dev.policy.landing import LandingTools, unapproved_files
 from lup_dev.policy.report import finding_lines
 from lup_dev.policy.since import routes as since_routes
 from lup_dev.policy.tools import JudgeTools, judge_call
@@ -618,6 +624,7 @@ def host_serve(context: typer.Context) -> None:
         settle_hold=lambda change, approved, said: hold_answered(
             layout, change, approved=approved, comment=said
         ),
+        hold_unheard=lambda change: hold_unheard(layout, change),
         queues={
             adapter.runtime.name(): adapter.queues
             for adapter in known.known
@@ -643,11 +650,7 @@ def host_serve(context: typer.Context) -> None:
         running=workers.commands,
         coming=None if rehearsing else coming,
     )
-    remotes = Remotes(
-        say=typer.echo,
-        landed=partial(after_push, delivery, coming),
-        modules=workers,
-    )
+    remotes = host_remotes(delivery, layout, coming, workers, EngineParser())
     waits = Waits(changes=changes)
     delivery.landing = waits.holding
     service = HostService(
@@ -730,6 +733,22 @@ def typed_reading(
 def approval_reading(git: Git, branches: Branches, main: Path) -> Path:
     """Return the worktree a push's approval has its types read in: the checkout of the running branch, whose tip it's about; else of the integration branch, what that branch is made from, as `live` may have none; else `main`, the repository's main worktree."""
     return git.checkout(branches.running) or git.checkout(branches.integration) or main
+
+
+def host_remotes(
+    delivery: Delivery,
+    layout: Layout,
+    coming: Coming,
+    modules: LaunchModules,
+    parser: Parser,
+) -> Remotes:
+    """Return git on the host for each launch's room: each push held to what the operator approved of what it lands (`unapproved_files`), each file read from its parse alone by `parser`, put to `modules`, and told to what follows a push (`after_push`)."""
+    return Remotes(
+        say=typer.echo,
+        landed=partial(after_push, delivery, coming),
+        asking=partial(unapproved_files, delivery, layout, parser=parser),
+        modules=modules,
+    )
 
 
 async def after_push(
@@ -987,18 +1006,27 @@ def heading(item: Item, paths: Sequence[Pathed] = ()) -> str:
 
 def hold_answered(
     layout: Layout, change: HeldChange, *, approved: bool, comment: str
-) -> None:
-    """Write the operator's answer to a held change where its hook waits for it, or a later checkpoint tells it; a hold at landing has no hook, its answer its item's own state."""
+) -> str | None:
+    """Write the operator's answer to a held change where its hook waits for it, and return what to tell the conversation that made it where no call waits to hear it; a hold at landing has no hook, its answer its item's own state."""
     if change.key is None:
-        return
-    answer(
+        return None
+    hold = answer(
         layout,
         change.key,
         Response(approved=approved, comment=comment),
         runtimes(),
         SystemClock(),
         worktree=change.worktree,
+        telling=True,
     )
+    return said_answering(layout, hold) if hold.told else None
+
+
+def hold_unheard(layout: Layout, change: HeldChange) -> str | None:
+    """Return what to tell the conversation that made a held change answered already, where nothing told them (`answer_unheard`); none else, as for a hold at landing."""
+    if change.key is None:
+        return None
+    return answer_unheard(layout, change.worktree, change.key)
 
 
 def shown(item: Item, paths: Sequence[Pathed] = ()) -> str:
@@ -3110,7 +3138,8 @@ def check(
     The steps are the worktree's declaration's, and so is how the project runs
     its tools: lup's rules (`rules check`), ruff, the formatter, pyright, pytest
     and the import contracts by default, with what its modules add, such as lup's
-    own engine, rebuilt when stale. Its modules' requirements are checked first,
+    own engine, rebuilt unless it passed on its sources as they stand. Its modules'
+    requirements are checked first,
     all at once: a required tool missing stops the gate before any step. Each
     step's outcome is reported, then each failure's output in full; the exit code
     is non-zero when any step failed. With `--fix`, ruff's safe fixes and the

@@ -5,9 +5,11 @@ page's editor (opening a comment on a line, quoting a passage, the changes
 between two texts and a cursor moved by them) stays with the page.
 """
 
+import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import BaseModel, JsonValue
@@ -25,7 +27,9 @@ from lup.blocks import (
     OfAgent,
     Offer,
 )
-from lup_dev.host.records import Call, Called, Entry, Said
+from lup_dev.adapters.claude import ClaudeTranscripts
+from lup_dev.adapters.codex import CodexTranscripts
+from lup_dev.host.records import Call, Called, Entry, Reader, Said
 from lup_dev.inbox.marks import ReviewMark
 from lup_dev.inbox.protocol import Exchanged, Pathed, exchanged
 from lup_dev.inbox.store import (
@@ -56,8 +60,10 @@ from lup_transcripts.environment.conversation import (
     call_blocks,
     conversation_blocks,
     exchange_blocks,
-    given,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class Viewing(BaseModel):
@@ -77,7 +83,7 @@ class Viewing(BaseModel):
 
     @lup.view
     async def call(self, viewed: OfCall) -> Blocks:
-        """One call read whole."""
+        """One call, or a part of it, read as its fold opens."""
         del viewed
         return Blocks()
 
@@ -217,37 +223,43 @@ def test_each_exchange_before_the_operator_s_last_words_folds_under_their_words_
     assert view.text() == said(
         "conversation · 8 steps · 2 new",
         "▸ you: Look into reading transcripts.  [exchange step=0]",
-        "you: Build the reader.",
-        "Twenty kinds of line.",
+        "▾ you: Build the reader.",
+        "  ▾ Twenty kinds of line.",
+        "    Twenty kinds of line.",
         "",
-        "Four carry what was said.",
-        "· Grep",
+        "    Four carry what was said.",
+        "  · Grep",
     )
     assert folds(view.blocks) == [
-        ["exchange 0", "earlier", "you: Look into reading transcripts."]
+        ["exchange 0", "earlier", "you: Look into reading transcripts."],
+        ["exchange 5", "earlier", "you: Build the reader."],
+        ["said 6", "items", "Twenty kinds of line."],
     ]
-    earlier = view.blocks[0]
+    earlier, latest = view.blocks
     assert isinstance(earlier, Fold)
     assert not earlier.open
     assert earlier.content == Load.of(
         Viewing.exchange, OfExchange(runtime="claude", session="s1", step=0)
     )
-    # The earlier exchange, read as its fold opens: the agent's words, its run of calls folded.
+    # The latest is the same fold the operator's next words will close, open, its content given.
+    assert isinstance(latest, Fold)
+    assert latest.open
+    # The earlier exchange, read as its fold opens: the agent's words, its run of calls open, each on a row of its own.
     first = exchange(STEPS, 0)
     assert first.summary == []
-    assert (
-        first.text()
-        == "Each session is a JSONL file;\nsubagents get their own.\n▸ · called Bash x2, Read"
-    )
-    assert whole(first) == said(
-        "Each session is a JSONL file;",
-        "subagents get their own.",
-        "▾ · called Bash x2, Read",
+    assert first.text() == said(
+        "▾ Each session is a JSONL file;",
+        "  Each session is a JSONL file;",
+        "  subagents get their own.",
+        "▾ · 3 calls: Bash x2, Read",
         "  · Bash",
         "  · Bash",
         "  · Read",
     )
-    assert folds(first.blocks) == [["calls 2", "calls", "· called Bash x2, Read"]]
+    assert folds(first.blocks) == [
+        ["said 1", "items", "Each session is a JSONL file;"],
+        ["calls 2", "calls", "· 3 calls: Bash x2, Read"],
+    ]
 
 
 def test_each_exchange_but_the_last_folds_what_came_before_their_first_words_under_a_line_of_its_own() -> (
@@ -272,11 +284,13 @@ def test_each_exchange_but_the_last_folds_what_came_before_their_first_words_und
         ],
         ["exchange 2", "earlier", "you: First."],
         ["exchange 4", "earlier", "you: Second."],
+        ["exchange 6", "earlier", "you: Third."],
+        ["said 7", "items", "Three."],
     ]
     # The rest of their words fold with what they opened; the last exchange is open, their words whole.
-    assert exchange(steps, 2).text() == "     Two lines.\nOne."
-    assert exchange(steps, None).text() == "Starting.\n· Bash"
-    assert view.text().endswith("you: Third.\nThree.")
+    assert exchange(steps, 2).text() == "     Two lines.\n▾ One.\n  One."
+    assert exchange(steps, None).text() == "▾ Starting.\n  Starting.\n· Bash"
+    assert view.text().endswith("▾ you: Third.\n  ▾ Three.\n    Three.")
     # Opened under its fold, their further lines stand under the first's words.
     under = Fold(
         id="exchange 2",
@@ -285,10 +299,16 @@ def test_each_exchange_but_the_last_folds_what_came_before_their_first_words_und
         summary=view.blocks[1].summary if isinstance(view.blocks[1], Fold) else [],
         content=exchange(steps, 2).blocks,
     )
-    assert Blocks(blocks=[under]).text() == "▾ you: First.\n       Two lines.\n  One."
-    # Where they never spoke, or spoke first, nothing folds.
-    assert folds(drawer(steps[:2]).blocks) == []
-    assert folds(drawer(steps[2:4]).blocks) == []
+    assert (
+        Blocks(blocks=[under]).text()
+        == "▾ you: First.\n       Two lines.\n  ▾ One.\n    One."
+    )
+    # Where they never spoke, no exchange folds; where they spoke first, theirs is open under its line.
+    assert folds(drawer(steps[:2]).blocks) == [["said 0", "items", "Starting."]]
+    assert folds(drawer(steps[2:4]).blocks) == [
+        ["exchange 0", "earlier", "you: First."],
+        ["said 1", "items", "One."],
+    ]
     assert exchange(steps[2:4], None).blocks == []
 
 
@@ -331,29 +351,29 @@ CALLING: list[Entry] = [
 ]
 
 
-def test_a_call_is_a_line_saying_what_it_did_a_run_of_them_under_one_line_its_input_and_output_read_as_it_opens() -> (
+def test_each_call_is_a_line_of_its_own_saying_what_it_was_given_a_run_of_them_open_under_one_line_its_input_and_output_read_as_it_opens() -> (
     None
 ):
     view = drawer(CALLING)
     assert view.text() == said(
         "conversation · 7 steps · 6 new",
-        "you: Fix it.",
-        "▸ · Bash: Run the tests  [call id=t1]",
-        "Two fail.",
-        "▸ · called Read, Edit x2, Bash",
+        "▾ you: Fix it.",
+        "  ▸ · Bash: Run the tests  [call id=t1]",
+        "  ▾ Two fail.",
+        "    Two fail.",
+        "  ▾ · 4 calls: Edit x2, Read, Bash",
+        "    ▸ · Read: review.ts:480  [call id=t2]",
+        "    ▸ · Edit: review.ts  [call id=t3]",
+        "    ▸ · Edit: review.ts  [call id=t4]",
+        "    · Bash",
     )
-    assert whole(view).endswith(
-        said(
-            "▾ · called Read, Edit x2, Bash",
-            "  ▸ · Read: review.ts:480  [call id=t2]",
-            "  ▸ · Edit: review.ts  [call id=t3]",
-            "  ▸ · Edit: review.ts  [call id=t4]",
-            "  · Bash",
-        )
-    )
-    assert folds(view.blocks) == [
+    # A run's calls are set off under its line, as each call's input and output is under its.
+    run = block(view.blocks, "calls 3")
+    assert isinstance(run, Fold)
+    assert (run.kind, run.open, run.barred) == ("calls", True, True)
+    assert [span.tone for span in run.summary] == ["run"]
+    assert [each for each in folds(view.blocks) if each[1] == "call"] == [
         ["call t1", "call", "· Bash: Run the tests"],
-        ["calls 3", "calls", "· called Read, Edit x2, Bash"],
         ["call t2", "call", "· Read: review.ts:480"],
         ["call t3", "call", "· Edit: review.ts"],
         ["call t4", "call", "· Edit: review.ts"],
@@ -362,21 +382,104 @@ def test_a_call_is_a_line_saying_what_it_did_a_run_of_them_under_one_line_its_in
     call = block(view.blocks, "call t2")
     assert isinstance(call, Fold)
     assert call.barred
+    assert not call.open
     assert call.content == Load(
         view="call",
-        argument={"runtime": "claude", "session": "s1", "agent": None, "id": "t2"},
+        argument={
+            "runtime": "claude",
+            "session": "s1",
+            "agent": None,
+            "id": "t2",
+            "output": None,
+            "argument": None,
+        },
     )
     # A call its record gives no id has nothing to read: a line, named by its step.
     assert block(view.blocks, "step 6") == Line.of("step 6", "· Bash", "call")
     # Its line, in the call's tone, isn't the agent's words.
     assert [span.tone for span in call.summary] == ["call"]
-    # A run's calls are set off under its line, as each call's input and output is under its.
-    run = block(view.blocks, "calls 3")
-    assert isinstance(run, Fold)
-    assert run.barred
 
 
-def test_a_call_s_view_shows_each_argument_after_its_name_what_it_returned_or_that_it_s_still_running() -> (
+def test_a_run_of_calls_keeps_its_id_as_it_grows_and_says_what_there_s_most_of_on_one_row() -> (
+    None
+):
+    start: list[Entry] = [Said(by="operator", text="Go.", at=at(0))]
+    three: list[Entry] = [
+        Called(tool="Read", id=f"r{each}", at=at(1)) for each in range(3)
+    ]
+    grown = drawer([*start, *three, Called(tool="Bash", id="b", at=at(2))])
+    assert folds(drawer([*start, *three]).blocks)[1] == [
+        "calls 1",
+        "calls",
+        "· 3 calls: Read x3",
+    ]
+    assert folds(grown.blocks)[1] == ["calls 1", "calls", "· 4 calls: Read x3, Bash"]
+    # Fewer than three are rows alone.
+    assert [each[1] for each in folds(drawer([*start, *three[:2]]).blocks)] == [
+        "earlier",
+        "call",
+        "call",
+    ]
+    many: list[Entry] = [
+        *start,
+        *(
+            Called(tool=f"mcp__lup__tool_{each}", id=f"t{each}", at=at(1))
+            for each in range(30)
+        ),
+    ]
+    line = folds(drawer(many).blocks)[1][2]
+    assert len(line) <= 100
+    assert line.startswith("· 30 calls: mcp__lup__tool_0, ")
+    assert line.endswith("…")
+
+
+def test_a_call_that_only_sent_an_item_is_no_row_of_a_run_and_doesn_t_break_one_apart_from_its_item() -> (
+    None
+):
+    entries: list[Entry] = [
+        Said(by="operator", text="Go.", at=at(0)),
+        *(Called(tool="Read", id=f"r{each}", at=at(1)) for each in range(3)),
+        Called(tool="mcp__lup__note", id="n", at=at(2)),
+        *(Called(tool="Bash", id=f"b{each}", at=at(3)) for each in range(3)),
+    ]
+    noted = item(50, note("Found it."), 2, call="n")
+    view = drawer(entries, listed((noted, "Found it.")))
+    top = view.blocks[0]
+    assert isinstance(top, Fold)
+    assert isinstance(top.content, list)
+    assert [each.id for each in top.content] == ["calls 1", "item 50", "calls 5"]
+    first = block(view.blocks, "calls 1")
+    assert isinstance(first, Fold)
+    assert isinstance(first.content, list)
+    assert [each.id for each in first.content] == ["call r0", "call r1", "call r2"]
+
+
+def test_a_call_s_line_stays_one_row_whole_under_its_fold() -> None:
+    given = f"Run the {'whole ' * 30}gate"
+    view = drawer(
+        [
+            Said(by="operator", text="Go.", at=at(0)),
+            Called(tool="Bash", gist=given, id="t1", at=at(1)),
+        ]
+    )
+    call = block(view.blocks, "call t1")
+    assert isinstance(call, Fold)
+    line = "".join(span.text for span in call.summary)
+    assert len(line) <= 100
+    assert line.startswith("· Bash: Run the whole")
+    assert line.endswith("…")
+    assert isinstance(call.content, Load)
+
+
+def opened_call(read: Call | None, key: str = "t1", **part: object) -> Blocks:
+    """Return the call's view of `read`, of the part named: as its fold opens with none, or as a fold in it does."""
+    of = OfCall.model_validate(
+        {"runtime": "claude", "session": "s1", "id": key, **part}
+    )
+    return call_blocks(of, read, view=Viewing.call)
+
+
+def test_a_call_opened_shows_what_it_was_given_its_output_folded_read_as_that_opens() -> (
     None
 ):
     read = Call(
@@ -384,36 +487,49 @@ def test_a_call_s_view_shows_each_argument_after_its_name_what_it_returned_or_th
         input={"command": "uv run pytest -q", "description": "Run the tests"},
         output="2 failed\n3 passed\n",
     )
-    shown = call_blocks(OfCall(runtime="claude", session="s1", id="t1"), read)
+    shown = opened_call(read)
     assert shown.text() == said(
-        "input:",
-        "  command: uv run pytest -q",
-        "  description: Run the tests",
-        "output:",
-        "  2 failed",
-        "  3 passed",
+        "command: uv run pytest -q",
+        "description: Run the tests",
+        "▸ output · 2 lines  [call id=t1 output=True]",
     )
     assert ids(shown.blocks) == [
-        "input t1",
-        "input t1.1",
-        "input t1.2",
+        "input t1 command",
+        "input t1 description",
         "output t1",
-        "output t1.1",
-        "output t1.2",
     ]
-    running = Call(id="t2", input={"file_path": "/w/review.ts", "offset": 480})
-    assert call_blocks(
-        OfCall(runtime="claude", session="s1", id="t2"), running
-    ).text() == said(
-        "input:", "  file_path: /w/review.ts", "  offset: 480", "output: none yet"
+    output = block(shown.blocks, "output t1")
+    assert isinstance(output, Fold)
+    assert (output.kind, output.open, output.barred) == ("detail", False, True)
+    assert output.content == Load(
+        view="call",
+        argument={
+            "runtime": "claude",
+            "session": "s1",
+            "agent": None,
+            "id": "t1",
+            "output": True,
+            "argument": None,
+        },
     )
-    unread = call_blocks(OfCall(runtime="claude", session="s1", id="t3"), None)
-    assert unread.blocks == [
+    # Read as it opens: what it returned, whole, on lines of its own.
+    whole_output = opened_call(read, output=True)
+    assert whole_output.text() == said("2 failed", "3 passed")
+    assert ids(whole_output.blocks) == ["output t1.1", "output t1.2"]
+    # Still running, it says so; once it's returned nothing, that; a call the record doesn't hold, that it wasn't read.
+    running = Call(id="t2", input={"file_path": "/w/review.ts", "offset": 480})
+    assert opened_call(running, "t2").text() == said(
+        "file_path: /w/review.ts", "offset: 480", "output: none yet"
+    )
+    assert opened_call(Call(id="t2", input={"a": 1}, output=""), "t2").text() == said(
+        "a: 1", "output: nothing"
+    )
+    assert opened_call(None, "t3").blocks == [
         Line.of("unread t3", "not read: its record doesn't hold the call", "muted")
     ]
 
 
-def test_a_failed_call_says_it_failed_text_given_is_laid_out_as_it_is_a_long_value_under_its_name() -> (
+def test_a_failed_call_says_so_on_its_output_s_line_text_given_is_laid_out_as_it_is() -> (
     None
 ):
     failed = Call(
@@ -422,28 +538,31 @@ def test_a_failed_call_says_it_failed_text_given_is_laid_out_as_it_is_a_long_val
         output="a.py: no such file",
         failed=True,
     )
-    assert call_blocks(
-        OfCall(runtime="claude", session="s1", id="x"), failed
-    ).text() == said(
-        "input:",
-        "  *** Begin Patch",
-        "  *** Update File: a.py",
-        "  *** End Patch",
-        "failed:",
-        "  a.py: no such file",
+    assert opened_call(failed, "x").text() == said(
+        "*** Begin Patch",
+        "*** Update File: a.py",
+        "*** End Patch",
+        "▸ failed · 1 line  [call id=x output=True]",
     )
-    decisions: JsonValue = [
-        {"text": "A model per kind, read by pydantic", "lean": "yes"},
-        {"text": "A dict walked by hand, key by key", "lean": "no"},
-    ]
-    assert given(
-        {
+    assert opened_call(failed, "x", output=True).text() == "a.py: no such file"
+
+
+def test_a_call_s_arguments_are_each_on_a_line_several_lines_set_in_under_its_name_any_value_as_json() -> (
+    None
+):
+    read = Call(
+        id="t1",
+        input={
             "question": "Which?\nOr neither?",
             "limit": 3,
             "tags": ["a"],
-            "decisions": decisions,
-        }
-    ) == [
+            "decisions": [
+                {"text": "A model per kind, read by pydantic", "lean": "yes"},
+                {"text": "A dict walked by hand, key by key", "lean": "no"},
+            ],
+        },
+    )
+    assert opened_call(read).text().splitlines() == [
         "question:",
         "  Which?",
         "  Or neither?",
@@ -460,8 +579,67 @@ def test_a_failed_call_says_it_failed_text_given_is_laid_out_as_it_is_a_long_val
         '      "lean": "no"',
         "    }",
         "  ]",
+        "output: none yet",
     ]
-    assert given(None, "  ") == ["  null"]
+    assert len(ids(opened_call(read).blocks)) == len(set(ids(opened_call(read).blocks)))
+
+
+def test_an_argument_too_long_to_read_at_a_glance_folds_in_its_place_read_whole_as_it_opens() -> (
+    None
+):
+    content = "\n".join(f"line {each}" for each in range(58))
+    prose = "word " * 300
+    decisions: JsonValue = [
+        {"text": f"Choice {each}", "lean": "no"} for each in range(9)
+    ]
+    read = Call(
+        id="t1",
+        input={
+            "file_path": "/w/a.py",
+            "content": content,
+            "prose": prose,
+            "decisions": decisions,
+        },
+    )
+    shown = opened_call(read)
+    assert shown.text().splitlines() == [
+        "file_path: /w/a.py",
+        "▸ content: line 0 · 58 lines  [call id=t1 argument=content]",
+        f"▸ prose: {'word ' * 15}word… · 1 line  [call id=t1 argument=prose]",
+        '▸ decisions: [{"text": "Choice 0", "lean": "no"}, {"text": "Choice 1", "lean": "no"},… · 38 lines  [call id=t1 argument=decisions]',
+        "output: none yet",
+    ]
+    fold = block(shown.blocks, "argument t1 content")
+    assert isinstance(fold, Fold)
+    assert (fold.kind, fold.open, fold.barred) == ("detail", False, True)
+    line = "".join(span.text for span in fold.summary)
+    assert len(line) <= 100
+    # Each read whole as it opens: the text as it is, any other value spread.
+    assert opened_call(read, argument="content").text().splitlines() == [
+        f"line {each}" for each in range(58)
+    ]
+    assert opened_call(read, argument="decisions").text().splitlines()[:3] == [
+        "[",
+        "  {",
+        '    "text": "Choice 0",',
+    ]
+    # An argument it wasn't given reads as nothing there; a text it was given whole folds as `input`.
+    assert opened_call(read, argument="absent").text() == "null"
+    patch = Call(id="t2", input=content, output="ok")
+    assert opened_call(patch, "t2").text().splitlines() == [
+        "▸ input: line 0 · 58 lines  [call id=t2 argument=input]",
+        "▸ output · 1 line  [call id=t2 output=True]",
+    ]
+    assert opened_call(patch, "t2", argument="input").text().splitlines()[0] == "line 0"
+
+
+def test_a_long_output_is_read_only_as_its_fold_opens_the_call_s_fold_holding_its_input() -> (
+    None
+):
+    read = Call(id="t1", input={"a": 1}, output="\n".join(["x"] * 5000))
+    shown = opened_call(read)
+    assert shown.text().splitlines()[-1].startswith("▸ output · 5000 lines")
+    assert len(shown.model_dump_json()) < 2000
 
 
 # The agent's words, which comments are on
@@ -476,6 +654,12 @@ def test_the_agent_s_words_at_each_step_are_one_block_whose_text_a_comment_quote
     assert words == Markdown(
         id="step 1", text="Each session is a JSONL file;\nsubagents get their own."
     )
+    # Their fold holds them, so a comment on them stays on them however it stands.
+    fold = block(first.blocks, "said 1")
+    assert isinstance(fold, Fold)
+    assert (fold.kind, fold.open, fold.barred) == ("items", True, False)
+    assert fold.content == [words]
+    assert [span.tone for span in fold.summary] == ["muted"]
     # A comment's quote counts in that text, as the page's remarks do (`Remark.quote`).
     assert words.text[18:23] == "JSONL"
     latest = block(drawer(STEPS).blocks, "step 6")
@@ -484,21 +668,48 @@ def test_the_agent_s_words_at_each_step_are_one_block_whose_text_a_comment_quote
     )
 
 
+def test_the_agent_s_long_words_say_how_they_start_on_one_row_and_are_whole_under_it() -> (
+    None
+):
+    long = f"{'word ' * 40}end."
+    view = drawer([Said(by="agent", text=f"\n{long}\n\nThe rest.", at=at(0))])
+    fold = block(view.blocks, "said 0")
+    assert isinstance(fold, Fold)
+    line = "".join(span.text for span in fold.summary)
+    assert len(line) <= 100
+    assert line.startswith("word word")
+    assert line.endswith("…")
+    assert fold.content == [Markdown(id="step 0", text=f"{long}\n\nThe rest.")]
+    # Words with nothing in them have nothing to say how they start.
+    assert drawer([Said(by="agent", text=" ", at=at(0))]).blocks == [
+        Markdown(id="step 0", text="")
+    ]
+
+
 # The conversation growing
 
 
 def test_what_arrives_is_added_at_the_end_everything_before_it_as_it_was() -> None:
     before = drawer(STEPS)
     after = drawer([*STEPS, *MORE])
-    # Each block but the last stays as it was; the calls the conversation ended on go on, each a line.
-    assert after.blocks[: len(before.blocks) - 1] == before.blocks[:-1]
-    assert after.text().endswith("· Grep\n· Grep\nFound the four.")
+    # The latest exchange takes in what came, each block before as it was: its calls go on, each a line.
+    assert after.blocks[0] == before.blocks[0]
+    latest, grown = before.blocks[-1], after.blocks[-1]
+    assert isinstance(latest, Fold)
+    assert isinstance(grown, Fold)
+    assert isinstance(latest.content, list)
+    assert isinstance(grown.content, list)
+    assert grown.id == latest.id
+    assert grown.content[: len(latest.content)] == latest.content
+    assert after.text().endswith(
+        "· Grep\n  · Grep\n  ▾ Found the four.\n    Found the four."
+    )
     assert after.summary != before.summary
     # The earlier exchange reads as it did.
     assert exchange([*STEPS, *MORE], 0) == exchange(STEPS, 0)
 
 
-def test_the_last_exchange_folds_once_the_operator_speaks_again_and_a_run_once_it_s_long_enough_each_named_as_before() -> (
+def test_the_last_exchange_folds_once_the_operator_speaks_again_named_as_before() -> (
     None
 ):
     later: list[Entry] = [
@@ -507,16 +718,23 @@ def test_the_last_exchange_folds_once_the_operator_speaks_again_and_a_run_once_i
         *(Called(tool="Read", at=at(14)) for _ in range(3)),
     ]
     view = drawer(later)
-    assert whole(view).endswith(
-        "Found the four.\n▾ · called Read x3\n  · Read\n  · Read\n  · Read"
+    assert view.text().endswith(
+        "▾ Found the four.\n    Found the four.\n"
+        "  ▾ · 3 calls: Read x3\n    · Read\n    · Read\n    · Read"
     )
     spoke = drawer([*later, Said(by="operator", text="Good.", at=at(15))])
     assert folds(spoke.blocks) == [
         ["exchange 0", "earlier", "you: Look into reading transcripts."],
         ["exchange 5", "earlier", "you: Build the reader."],
     ]
-    assert [each[0] for each in folds(exchange(later, 5).blocks)] == ["calls 10"]
+    assert [each[0] for each in folds(exchange(later, 5).blocks)] == [
+        "said 6",
+        "said 9",
+        "calls 10",
+    ]
+    # Their words with nothing under them yet are a line.
     assert spoke.text().endswith("you: Good.")
+    assert isinstance(spoke.blocks[-1], Line)
 
 
 # The items of lup's inbox in a conversation
@@ -607,7 +825,7 @@ def lines(view: Blocks, *marks: str) -> list[str]:
     return [
         each
         for each in (
-            line.removeprefix("▸ ").removeprefix("▾ ")
+            line.strip().removeprefix("▸ ").removeprefix("▾ ")
             for line in whole(view).splitlines()
         )
         if each.startswith(marks)
@@ -620,29 +838,31 @@ def test_each_item_is_a_line_its_text_under_it_one_sent_after_the_call_that_made
     view = drawer(CALLED, EXCHANGED)
     assert whole(view) == said(
         "conversation · 7 steps · 6 new",
-        "you: Look into reading transcripts.",
-        "Each session is a JSONL file.",
-        "▸ · Bash  [call id=b1]",
-        "▸ · mcp__lup__ask  [call id=q1]",
-        "▾ → @51 question to you · answered by @53",
-        "  Which parser?",
-        "  1. A model per kind (lean: yes)",
-        "▸ · Read  [call id=r1]",
-        "▾ ← @53 your answer to @51",
-        "  Asked: Which parser?",
-        "  1. A model per kind (lean: yes): leaning: they go with the lean.",
-        "Reading the second runtime's.",
-        "▾ → @52 note to you · answered by @54",
-        "  I assumed UTF-8.",
-        "▸ · Grep  [call id=g1]",
-        "▾ ← @54 your reply to @52 · not told yet",
-        "  Good.",
+        "▾ you: Look into reading transcripts.",
+        "  ▾ Each session is a JSONL file.",
+        "    Each session is a JSONL file.",
+        "  ▸ · Bash  [call id=b1]",
+        "  ▾ → @51 question to you · answered by @53 · Which parser?",
+        "    Which parser?",
+        "    1. A model per kind (lean: yes)",
+        "    ▸ · mcp__lup__ask  [call id=q1]",
+        "  ▸ · Read  [call id=r1]",
+        "  ▾ ← @53 your answer to @51",
+        "    Asked: Which parser?",
+        "    1. A model per kind (lean: yes): leaning: they go with the lean.",
+        "  ▾ Reading the second runtime's.",
+        "    Reading the second runtime's.",
+        "  ▾ → @52 note to you · answered by @54 · I assumed UTF-8.",
+        "    I assumed UTF-8.",
+        "  ▸ · Grep  [call id=g1]",
+        "  ▾ ← @54 your reply to @52 · not told yet",
+        "    Good.",
     )
     # Each item's text folds under its line, closed, set off by a bar; sent in its tone, received in its own.
-    assert [each for each in folds(view.blocks) if each[1] == "items"] == [
-        ["item 51", "items", "→ @51 question to you · answered by @53"],
+    assert [each for each in folds(view.blocks) if each[0].startswith("item ")] == [
+        ["item 51", "items", "→ @51 question to you · answered by @53 · Which parser?"],
         ["item 53", "items", "← @53 your answer to @51"],
-        ["item 52", "items", "→ @52 note to you · answered by @54"],
+        ["item 52", "items", "→ @52 note to you · answered by @54 · I assumed UTF-8."],
         ["item 54", "items", "← @54 your reply to @52 · not told yet"],
     ]
     answer = block(view.blocks, "item 53")
@@ -658,7 +878,104 @@ def test_each_item_is_a_line_its_text_under_it_one_sent_after_the_call_that_made
     ]
     question = block(view.blocks, "item 51")
     assert isinstance(question, Fold)
-    assert [span.tone for span in question.summary] == ["sent"]
+    assert [span.tone for span in question.summary] == ["sent", "muted"]
+
+
+def test_a_call_that_only_sent_an_item_goes_under_its_line_a_write_flagged_keeps_its_own() -> (
+    None
+):
+    held = item(
+        55,
+        HeldChange(
+            text="Let the change land?",
+            summary="AGENTS.md: the operator's",
+            worktree=Path("/w"),
+            key="k",
+        ),
+        4,
+        call="r1",
+    )
+    view = drawer(
+        CALLED, listed((ASKED, "Which parser?"), (held, "Let the change land?"))
+    )
+    # The `ask` is under its question, whose line stands for it; nothing else says it.
+    assert block(view.blocks, "item 51") == Fold(
+        id="item 51",
+        kind="items",
+        summary=[
+            lup.Span(text="→ @51 question to you · answered by @53", tone="sent"),
+            lup.Span(text=" · Which parser?", tone="muted"),
+        ],
+        barred=True,
+        content=[
+            Markdown(id="text 51", text="Which parser?"),
+            block(view.blocks, "call q1"),
+        ],
+    )
+    # The `Read` that wrote stands apart from the item lup made of it: they say different things.
+    top = block(view.blocks, "exchange 0")
+    assert isinstance(top, Fold)
+    assert isinstance(top.content, list)
+    assert [each.id for each in top.content] == [
+        "said 1",
+        "call b1",
+        "item 51",
+        "call r1",
+        "item 55",
+        "said 5",
+        "call g1",
+    ]
+    assert "· Read" in whole(view)
+    # An item whose call the record doesn't hold, or which has no text, is laid out without it.
+    alone = drawer(STEPS[:2], listed((ASKED, "Which parser?")))
+    assert block(alone.blocks, "item 51") == Fold(
+        id="item 51",
+        kind="items",
+        summary=[
+            lup.Span(text="→ @51 question to you · answered by @53", tone="sent"),
+            lup.Span(text=" · Which parser?", tone="muted"),
+        ],
+        barred=True,
+        content=[Markdown(id="text 51", text="Which parser?")],
+    )
+
+
+def test_a_call_read_apart_from_the_item_it_sent_keeps_its_own_line() -> None:
+    # The mark folds the call, read; the item came after it was moved, new.
+    late = ASKED.model_copy(
+        update={"made": datetime(2026, 10, 18, 10, 3, 30, tzinfo=UTC)}
+    )
+    view = drawer(CALLED, listed((late, "Which parser?")), mark=marked(3, minute=3))
+    assert "item 51" in ids(view.blocks)
+    assert "call q1" not in ids(view.blocks)
+    page = exchange_blocks(
+        OfExchange(runtime="claude", session="s1", step=0, through=3),
+        CALLED,
+        listed((late, "Which parser?")),
+        exchange=Viewing.exchange,
+        call=Viewing.call,
+        mark=marked(3, minute=3),
+    )
+    assert "call q1" in ids(page.blocks)
+    assert "item 51" not in ids(page.blocks)
+
+
+def test_an_item_s_line_says_how_its_text_starts_only_as_far_as_its_row_holds() -> None:
+    long = f"{'word ' * 40}end."
+    noted = item(52, note(long), 7)
+    fold = block(drawer(CALLED, listed((noted, long))).blocks, "item 52")
+    assert isinstance(fold, Fold)
+    line = "".join(span.text for span in fold.summary)
+    assert line.startswith("→ @52 note to you · unread · word word")
+    assert line.endswith("…")
+    assert len(line) <= 100
+    # What they were sent says only what it is: they didn't say it, and its first line is as lup told it.
+    told = item(54, note("Good.", of=52), 9, sender=OPERATOR, recipient=SESSION)
+    fold = block(drawer(CALLED, listed((told, "Good."))).blocks, "item 54")
+    assert isinstance(fold, Fold)
+    assert [span.text for span in fold.summary] == [
+        "← @54 your reply to @52 · not told yet"
+    ]
 
 
 def test_each_item_is_cited_by_at_and_its_number_which_nobody_takes_for_a_github_issue() -> (
@@ -667,25 +984,114 @@ def test_each_item_is_cited_by_at_and_its_number_which_nobody_takes_for_a_github
     assert not re.search(r"#\d", whole(drawer(CALLED, EXCHANGED)))
 
 
-def test_a_turn_s_last_words_lup_made_a_note_are_left_out_being_the_agent_s_words_already_shown() -> (
+TURN_S_END = item(55, note("Reading the second runtime's.", ending=True), 8)
+"""The note lup made of a turn's last words, which `CALLED`'s step 5 says."""
+
+
+def test_a_turn_s_last_words_lup_made_a_note_of_fold_under_its_line_the_review_showing_them_as_an_item() -> (
     None
 ):
-    ended = item(55, note("Reading the second runtime's.", ending=True), 8)
     beside = listed(
         (ASKED, "Which parser?"),
         (NOTED, "I assumed UTF-8."),
         (ANSWERED, "Asked."),
         (REPLIED, "Good."),
-        (ended, "Reading the second runtime's."),
+        (TURN_S_END, "Reading the second runtime's."),
     )
     view = drawer(CALLED, beside)
-    assert [each[0] for each in folds(view.blocks) if each[1] == "items"] == [
-        "item 51",
-        "item 53",
-        "item 52",
-        "item 54",
+    fold = block(view.blocks, "said 5")
+    assert fold == Fold(
+        id="said 5",
+        kind="items",
+        summary=[
+            lup.Span(text="→ @55 turn's end to you · unread", tone="sent"),
+            lup.Span(text=" · Reading the second runtime's.", tone="muted"),
+        ],
+        barred=True,
+        content=[Markdown(id="step 5", text="Reading the second runtime's.")],
+    )
+    # It stands once, where the words were, and no fold of an item says it again.
+    assert "item 55" not in ids(view.blocks)
+    assert whole(view).count("@55") == 1
+    # Its words stay the step's block, which a comment on them is anchored to.
+    assert block(view.blocks, "step 5") == block(drawer(CALLED).blocks, "step 5")
+
+
+def test_a_message_keeps_its_fold_as_a_turn_s_end_arrives_saying_it_closed() -> None:
+    before = block(drawer(CALLED).blocks, "said 5")
+    after = block(
+        drawer(CALLED, listed((TURN_S_END, "Reading the second runtime's."))).blocks,
+        "said 5",
+    )
+    assert isinstance(before, Fold)
+    assert isinstance(after, Fold)
+    assert before.open
+    assert not after.open
+    assert before.content == after.content
+
+
+def test_only_the_words_at_the_step_repeated_fold_the_latest_saying_them_by_then() -> (
+    None
+):
+    entries: list[Entry] = [
+        Said(by="agent", text="Done.", at=at(0)),
+        Said(by="agent", text="Going on.", at=at(1)),
+        Said(by="agent", text="Done.", at=at(2)),
+        Said(by="agent", text="Done.", at=at(9)),
     ]
-    assert "@55" not in whole(view)
+    ended = item(60, note("Done.", ending=True), 3)
+    view = drawer(entries, listed((ended, "Done.")))
+    assert [(each.id, each.open) for each in view.blocks if isinstance(each, Fold)] == [
+        ("said 0", True),
+        ("said 1", True),
+        ("said 2", False),
+        ("said 3", True),
+    ]
+    # Trailing spaces and blank lines aren't the words: the record and the hook may differ in them.
+    spaced: list[Entry] = [
+        Said(by="agent", text="Twenty kinds.\n\n\nFour.  \n", at=at(0))
+    ]
+    last = item(61, note("Twenty kinds.\n\nFour.", ending=True), 1)
+    fold = block(
+        drawer(spaced, listed((last, "Twenty kinds.\n\nFour."))).blocks, "said 0"
+    )
+    assert isinstance(fold, Fold)
+    assert not fold.open
+
+
+def test_a_turn_s_end_saying_what_no_step_says_stands_as_any_item() -> None:
+    # A turn ended on the model's error, which says so in lup's words; or their words edited since.
+    failed = item(62, note("Their turn ended on an error.", ending=True), 8)
+    view = drawer(CALLED, listed((failed, "Their turn ended on an error.")))
+    assert block(view.blocks, "item 62") == Fold(
+        id="item 62",
+        kind="items",
+        summary=[
+            lup.Span(text="→ @62 turn's end to you · unread", tone="sent"),
+            lup.Span(text=" · Their turn ended on an error.", tone="muted"),
+        ],
+        barred=True,
+        content=[Markdown(id="text 62", text="Their turn ended on an error.")],
+    )
+    fold = block(view.blocks, "said 5")
+    assert isinstance(fold, Fold)
+    assert fold.open
+    # One made before the words it says, as a record's clock runs behind, repeats none of them.
+    early = item(63, note("Reading the second runtime's.", ending=True), 1)
+    beside = listed((early, "Reading the second runtime's."))
+    assert "item 63" in ids(drawer(CALLED, beside).blocks)
+    # Two items saying one step's words, in a record with no times: the later stands for it.
+    timeless = [each.model_copy(update={"at": None}) for each in CALLED]
+    again = item(64, note("Reading the second runtime's.", ending=True), 9)
+    both = listed(
+        (early, "Reading the second runtime's."),
+        (again, "Reading the second runtime's."),
+    )
+    shown = drawer(timeless, both)
+    fold = block(shown.blocks, "said 5")
+    assert isinstance(fold, Fold)
+    assert "@64" in fold.summary[0].text
+    assert "item 63" in ids(shown.blocks)
 
 
 def test_the_operator_s_comment_on_deciding_an_item_is_under_its_text() -> None:
@@ -704,11 +1110,11 @@ def test_the_operator_s_comment_on_deciding_an_item_is_under_its_text() -> None:
         drawer(STEPS, listed((held, "Let the change land?\nAGENTS.md: the operator's")))
     )
     assert text[text.index("▾ → @55") :] == said(
-        "▾ → @55 held change to you · declined",
-        "  Let the change land?",
-        "  AGENTS.md: the operator's",
+        "▾ → @55 held change to you · declined · Let the change land?",
+        "    Let the change land?",
+        "    AGENTS.md: the operator's",
         "",
-        "  your comment: Not this file.",
+        "    your comment: Not this file.",
     )
 
 
@@ -735,7 +1141,7 @@ def test_one_passed_on_from_an_ended_subagent_is_in_both_its_session_s_view_and_
         "← @46 your reply to @44, for lup-impl/a04, which had ended"
     ]
     assert lines(subagent, "←", "→") == [
-        "→ @44 note to you · answered by @46",
+        "→ @44 note to you · answered by @46 · No cache.",
         "← @46 your reply to @44 · passed on to lup-impl, this one having ended",
     ]
 
@@ -768,6 +1174,7 @@ def test_a_conversation_an_item_s_line_names_keeps_its_span_referring_to_it_in_t
         ("→ @51 question to ", None),
         ("lup-impl/a04", survey),
         (" · not told yet", None),
+        (" · Which?", None),
     ]
 
 
@@ -785,23 +1192,27 @@ def test_a_step_with_no_time_takes_the_last_before_it_and_in_a_record_with_no_ti
     late = item(61, note("Late."), 6)
     beside = listed((late, "Late."), (early, "Early."))
     assert drawer(untimed, beside).text().splitlines()[1:] == [
-        "you: Go.",
-        "· Bash",
-        "▸ → @60 note to you · unread",
-        "Ran it.",
-        "· Read",
-        "Read it.",
-        "▸ → @61 note to you · unread",
+        "▾ you: Go.",
+        "  · Bash",
+        "  ▸ → @60 note to you · unread · Early.",
+        "  ▾ Ran it.",
+        "    Ran it.",
+        "  · Read",
+        "  ▾ Read it.",
+        "    Read it.",
+        "  ▸ → @61 note to you · unread · Late.",
     ]
     timeless = [each.model_copy(update={"at": None}) for each in untimed]
     assert drawer(timeless, beside).text().splitlines()[1:] == [
-        "you: Go.",
-        "· Bash",
-        "Ran it.",
-        "· Read",
-        "Read it.",
-        "▸ → @60 note to you · unread",
-        "▸ → @61 note to you · unread",
+        "▾ you: Go.",
+        "  · Bash",
+        "  ▾ Ran it.",
+        "    Ran it.",
+        "  · Read",
+        "  ▾ Read it.",
+        "    Read it.",
+        "  ▸ → @60 note to you · unread · Early.",
+        "  ▸ → @61 note to you · unread · Late.",
     ]
 
 
@@ -813,6 +1224,7 @@ def test_an_item_before_the_operator_s_last_words_folds_in_its_exchange_one_befo
     assert [
         each[0] for each in folds(exchange(STEPS, 0, listed((before, "Early."))).blocks)
     ] == [
+        "said 1",
         "calls 2",
         "item 50",
     ]
@@ -831,22 +1243,32 @@ def test_an_item_arriving_is_added_and_its_question_s_line_changes_as_its_answer
     asked = listed((waiting, "Which parser?"))
     answered = listed((ASKED, "Which parser?"), (ANSWERED, "Asked."))
     before, after = drawer(CALLED, asked), drawer(CALLED, answered)
-    assert "▸ → @51 question to you · waiting on you" in before.text()
+    assert "▸ → @51 question to you · waiting on you · Which parser?" in before.text()
     assert whole(after).endswith(
         said(
-            "▾ → @51 question to you · answered by @53",
-            "  Which parser?",
-            "▸ · Read  [call id=r1]",
-            "▾ ← @53 your answer to @51",
-            "  Asked.",
-            "Reading the second runtime's.",
-            "▸ · Grep  [call id=g1]",
+            "▾ → @51 question to you · answered by @53 · Which parser?",
+            "    Which parser?",
+            "    ▸ · mcp__lup__ask  [call id=q1]",
+            "  ▸ · Read  [call id=r1]",
+            "  ▾ ← @53 your answer to @51",
+            "    Asked.",
+            "  ▾ Reading the second runtime's.",
+            "    Reading the second runtime's.",
+            "  ▸ · Grep  [call id=g1]",
         )
     )
+
+    def within(view: Blocks) -> list[Block]:
+        """Return what's in the exchange `view` shows."""
+        [fold] = view.blocks
+        assert isinstance(fold, Fold)
+        assert isinstance(fold.content, list)
+        return fold.content
+
     # Every other block is as it was: the question's own changes, and its answer is added.
-    kept = [each for each in before.blocks if each.id != "item 51"]
+    kept = [each for each in within(before) if each.id != "item 51"]
     assert [
-        each for each in after.blocks if each.id not in {"item 51", "item 53"}
+        each for each in within(after) if each.id not in {"item 51", "item 53"}
     ] == kept
 
 
@@ -863,6 +1285,11 @@ def test_an_item_with_no_text_is_a_line_with_nothing_folded_under_it() -> None:
 
 
 # What stays open: at most the agent's last words, their calls not counted
+
+
+def said_in(blocks: list[Block]) -> list[str]:
+    """Return the agent's words among `blocks`, those inside folds among them, in order."""
+    return [each.text for each in every(blocks) if isinstance(each, Markdown)]
 
 
 def talking(words: int, start: int = 0) -> list[Entry]:
@@ -886,8 +1313,7 @@ def test_at_most_the_agent_s_last_twenty_words_stay_open_what_came_before_under_
 ):
     view = drawer(talking(25))
     # The last 20 of their words, each after their call: the calls don't count.
-    shown = [each for each in view.blocks if isinstance(each, Markdown)]
-    assert [each.text for each in shown] == [f"Word {each}." for each in range(5, 25)]
+    assert said_in(view.blocks) == [f"Word {each}." for each in range(5, 25)]
     first = view.blocks[0]
     assert isinstance(first, Fold)
     assert (first.id, first.kind, first.open) == (
@@ -903,10 +1329,37 @@ def test_at_most_the_agent_s_last_twenty_words_stay_open_what_came_before_under_
     assert view.text().splitlines()[:3] == [
         "conversation · 50 steps · 50 new",
         "▸ 11 earlier steps, 11 new  [exchange until_last=20]",
-        "Word 5.",
+        "▾ Word 5.",
     ]
-    # Twenty or fewer, nothing folds.
-    assert folds(drawer(talking(20)).blocks) == []
+    # Twenty or fewer, nothing folds what came before them.
+    assert not [
+        each for each in folds(drawer(talking(20)).blocks) if each[1] == "earlier"
+    ]
+
+
+def test_a_turn_s_last_words_count_among_those_kept_so_turns_ends_alone_stay_small() -> (
+    None
+):
+    """The cap keeps the drawer's answer small: words that fold are still in it."""
+    entries: list[Entry] = [
+        Said(by="agent", text=f"Word {each}.", at=at(each % 60)) for each in range(25)
+    ]
+    ends = [
+        (
+            item(100 + each, note(f"Word {each}.", ending=True), each % 60),
+            f"Word {each}.",
+        )
+        for each in range(25)
+    ]
+    view = drawer(entries, listed(*ends))
+    first = view.blocks[0]
+    assert isinstance(first, Fold)
+    assert first.id == "exchange before until last 20"
+    assert len(view.blocks) == 21
+    # None of those kept, being repeated, is open.
+    assert not [
+        each for each in view.blocks[1:] if isinstance(each, Fold) and each.open
+    ]
 
 
 def test_the_fold_of_what_came_earlier_reads_twenty_more_of_the_agent_s_words_and_folds_the_rest_the_same_way() -> (
@@ -920,8 +1373,7 @@ def test_the_fold_of_what_came_earlier_reads_twenty_more_of_the_agent_s_words_an
         exchange=Viewing.exchange,
         call=Viewing.call,
     )
-    shown = [each.text for each in page.blocks if isinstance(each, Markdown)]
-    assert shown == [f"Word {each}." for each in range(5, 25)]
+    assert said_in(page.blocks) == [f"Word {each}." for each in range(5, 25)]
     deeper = page.blocks[0]
     assert isinstance(deeper, Fold)
     assert deeper.id == "exchange before until last 40"
@@ -934,10 +1386,8 @@ def test_the_fold_of_what_came_earlier_reads_twenty_more_of_the_agent_s_words_an
         exchange=Viewing.exchange,
         call=Viewing.call,
     )
-    assert [each.text for each in last.blocks if isinstance(each, Markdown)] == [
-        f"Word {each}." for each in range(5)
-    ]
-    assert folds(last.blocks) == []
+    assert said_in(last.blocks) == [f"Word {each}." for each in range(5)]
+    assert not [each for each in folds(last.blocks) if each[1] == "earlier"]
     # Asked for more than the agent said, there's nothing before it.
     assert (
         exchange_blocks(
@@ -980,12 +1430,14 @@ def test_in_an_exchange_the_operator_s_words_open_it_and_the_fold_comes_after_th
     view = drawer(entries, earlier=KEEPING_TWO)
     assert view.text().splitlines() == [
         "conversation · 9 steps · 8 new",
-        "you: Read them all.",
-        "     Every record.",
-        "▸ 5 earlier steps, 5 new  [exchange step=0 until_last=2]",
-        "Word 2.",
-        "· Bash",
-        "Word 3.",
+        "▾ you: Read them all.",
+        "       Every record.",
+        "  ▸ 5 earlier steps, 5 new  [exchange step=0 until_last=2]",
+        "  ▾ Word 2.",
+        "    Word 2.",
+        "  · Bash",
+        "  ▾ Word 3.",
+        "    Word 3.",
     ]
     # An earlier exchange opened is kept the same way, the operator's further lines first.
     spoke = drawer(
@@ -1015,7 +1467,11 @@ def test_items_count_in_the_fold_and_a_person_s_layer_keeps_more_or_everything_o
         "▸ 5 earlier steps, 1 item, 5 new  [exchange until_last=2]"
     )
     everything = EARLIER_KIND.model_copy(update={"keeps_open": None})
-    assert folds(drawer(talking(30), earlier=everything).blocks) == []
+    assert not [
+        each
+        for each in folds(drawer(talking(30), earlier=everything).blocks)
+        if each[1] == "earlier"
+    ]
 
 
 # What the operator has read: the drawer's review mark, and their own words
@@ -1038,7 +1494,7 @@ def test_what_came_before_the_drawer_s_mark_folds_under_one_line_what_came_after
         "conversation · 20 steps · 10 new",
         "▸ 10 earlier steps  [exchange through=9]",
         "· Bash",
-        "Word 5.",
+        "▾ Word 5.",
     ]
     first = view.blocks[0]
     assert isinstance(first, Fold)
@@ -1069,9 +1525,8 @@ def test_the_fold_of_what_was_read_keeps_its_id_as_the_agent_speaks_and_opens_to
         call=Viewing.call,
         mark=marked(9),
     )
-    shown = [each.text for each in page.blocks if isinstance(each, Markdown)]
-    assert shown == [f"Word {each}." for each in range(5)]
-    assert folds(page.blocks) == []
+    assert said_in(page.blocks) == [f"Word {each}." for each in range(5)]
+    assert not [each for each in folds(page.blocks) if each[1] == "earlier"]
 
 
 def test_the_operator_s_words_typed_after_the_mark_count_as_reading_what_came_before() -> (
@@ -1086,20 +1541,23 @@ def test_the_operator_s_words_typed_after_the_mark_count_as_reading_what_came_be
     assert view.text().splitlines() == [
         "conversation · 17 steps · 6 new",
         "▸ earlier · 10 steps, from 20m before your first words  [exchange]",
-        "you: Go on.",
-        "· Bash",
-        "Word 5.",
-        "· Bash",
-        "Word 6.",
-        "· Bash",
-        "Word 7.",
+        "▾ you: Go on.",
+        "  · Bash",
+        "  ▾ Word 5.",
+        "    Word 5.",
+        "  · Bash",
+        "  ▾ Word 6.",
+        "    Word 6.",
+        "  · Bash",
+        "  ▾ Word 7.",
+        "    Word 7.",
     ]
     # A mark after their words is the later.
     later = drawer(entries, mark=marked(13))
     assert later.text().splitlines()[2:5] == [
-        "you: Go on.",
-        "▸ 3 earlier steps  [exchange step=10 through=13]",
-        "Word 6.",
+        "▾ you: Go on.",
+        "  ▸ 3 earlier steps  [exchange step=10 through=13]",
+        "  ▾ Word 6.",
     ]
 
 
@@ -1111,7 +1569,7 @@ def test_a_drawer_long_unread_since_its_mark_keeps_the_cap_its_fold_saying_how_m
     assert view.text().splitlines()[:3] == [
         "conversation · 60 steps · 50 new",
         "▸ 21 earlier steps, 11 new  [exchange until_last=20]",
-        "Word 10.",
+        "▾ Word 10.",
     ]
     assert view.blocks[0].id == "exchange before until last 20"
     # Opened, what was read folds apart from the new it held.
@@ -1126,7 +1584,7 @@ def test_a_drawer_long_unread_since_its_mark_keeps_the_cap_its_fold_saying_how_m
     assert page.text().splitlines()[:3] == [
         "▸ 10 earlier steps  [exchange through=9]",
         "· Bash",
-        "Word 5.",
+        "▾ Word 5.",
     ]
     # An earlier exchange opened is read whole: the mark folds nothing of it.
     spoke = [
@@ -1142,7 +1600,7 @@ def test_a_drawer_long_unread_since_its_mark_keeps_the_cap_its_fold_saying_how_m
         call=Viewing.call,
         mark=marked(2),
     )
-    assert folds(earlier.blocks) == []
+    assert not [each for each in folds(earlier.blocks) if each[1] == "earlier"]
 
 
 def test_an_item_told_after_the_mark_stays_open_one_told_before_folds_with_what_was_read() -> (
@@ -1159,7 +1617,7 @@ def test_an_item_told_after_the_mark_stays_open_one_told_before_folds_with_what_
     assert lines[:3] == [
         "conversation · 12 steps · 6 new",
         "▸ 6 earlier steps, 1 item  [exchange through=5]",
-        "▸ → @51 note to you · unread",
+        "▸ → @51 note to you · unread · Late.",
     ]
 
 
@@ -1174,9 +1632,9 @@ def test_what_was_read_of_items_alone_folds_named_by_the_step_read_and_opens_to_
     beside = listed((told, "On it."))
     view = drawer(entries, beside, mark=marked(0, minute=2))
     assert view.text().splitlines()[1:4] == [
-        "you: Go.",
-        "▸ 1 earlier item  [exchange step=0 through=0]",
-        "Done.",
+        "▾ you: Go.",
+        "  ▸ 1 earlier item  [exchange step=0 through=0]",
+        "  ▾ Done.",
     ]
     page = exchange_blocks(
         OfExchange(runtime="claude", session="s1", step=0, through=0),
@@ -1205,6 +1663,7 @@ def test_every_block_has_an_id_of_its_own_a_fold_s_never_a_line_s() -> None:
         call_blocks(
             OfCall(runtime="claude", session="s1", id="q1"),
             Call(id="q1", input={"a": 1}, output="ok"),
+            view=Viewing.call,
         ),
     ]
     every = [each for view in views for each in ids(view.blocks)]
@@ -1218,10 +1677,11 @@ def test_every_block_has_an_id_of_its_own_a_fold_s_never_a_line_s() -> None:
     line_ids = set(ids(shown)) - fold_ids
     assert fold_ids.isdisjoint(line_ids)
     assert all(
-        each.startswith(("exchange ", "calls ", "call ", "item ")) for each in fold_ids
+        each.startswith(("exchange ", "said ", "calls ", "call ", "item "))
+        for each in fold_ids
     )
     assert not any(
-        each.startswith(("exchange ", "calls ", "call ")) for each in line_ids
+        each.startswith(("exchange ", "said ", "calls ", "call ")) for each in line_ids
     )
 
 
@@ -1241,9 +1701,10 @@ def test_the_fold_kinds_keep_their_letters_and_colours() -> None:
         for each in FOLD_KINDS
     ] == [
         ("earlier", "e", "ok", 1, "back"),
-        ("calls", "k", "purple", 2, "together"),
-        ("items", "m", "cyan", 3, "together"),
+        ("items", "m", "cyan", 2, "together"),
+        ("calls", "k", "purple", 3, "together"),
         ("call", "d", "orange", 4, "deep"),
+        ("detail", "x", "muted", 5, "deep"),
     ]
     assert [(each.name, each.like, each.colour) for each in TONES] == [
         ("call", None, "orange"),
@@ -1251,3 +1712,206 @@ def test_the_fold_kinds_keep_their_letters_and_colours() -> None:
         ("received", "operator", None),
         ("run", "muted", None),
     ]
+
+
+# Both runtimes, from their own records
+
+
+def claude_said(folder: Path) -> Path:
+    """A Claude Code record of a turn: words, a command, a read, an edit and lup's `note`, and its last words."""
+
+    def line(**fields: object) -> str:
+        return json.dumps({"timestamp": "2026-10-18T10:00:00Z", **fields})
+
+    def agent(*blocks: dict[str, object]) -> str:
+        return line(
+            type="assistant", message={"role": "assistant", "content": list(blocks)}
+        )
+
+    def call(id_: str, name: str, **given: object) -> dict[str, object]:
+        return {"type": "tool_use", "id": id_, "name": name, "input": given}
+
+    record = folder / "s1.jsonl"
+    record.write_text(
+        "\n".join(
+            [
+                line(
+                    type="user",
+                    origin={"kind": "human"},
+                    promptSource="typed",
+                    cwd="/w",
+                    message={"role": "user", "content": "Fix it."},
+                ),
+                agent({"type": "text", "text": "On it."}),
+                agent(
+                    call(
+                        "t1",
+                        "Bash",
+                        command="cd /w/tree/dev && uv run pytest -q",
+                        description="Run the tests",
+                    )
+                ),
+                agent(
+                    call("t2", "Read", file_path="/w/page/src/review.ts", offset=480)
+                ),
+                agent(
+                    call(
+                        "t3",
+                        "Edit",
+                        file_path="/w/page/src/review.ts",
+                        old_string="a",
+                        new_string="b\nc",
+                    )
+                ),
+                agent(call("t4", "mcp__lup__note", remark="I assumed UTF-8.")),
+                agent({"type": "text", "text": "Fixed."}),
+            ]
+        )
+        + "\n"
+    )
+    return record
+
+
+def codex_said(folder: Path) -> Path:
+    """A Codex rollout of the same turn: a shell's command, a patch, lup's `note`, and its last words."""
+
+    def rolled(type_: str, payload: dict[str, object]) -> str:
+        return json.dumps(
+            {"timestamp": "2026-10-18T10:00:00Z", "type": type_, "payload": payload}
+        )
+
+    def called(id_: str, name: str, **given: object) -> str:
+        return rolled(
+            "response_item",
+            {
+                "type": "function_call",
+                "name": name,
+                "call_id": id_,
+                "arguments": json.dumps(given),
+            },
+        )
+
+    patch = "*** Begin Patch\n*** Update File: page/src/review.ts\n@@\n-a\n+b\n*** End Patch"
+    rollout = folder / "rollout-2026-10-18T10-00-00-th-1.jsonl"
+    rollout.write_text(
+        "\n".join(
+            [
+                rolled(
+                    "session_meta",
+                    {
+                        "id": "th-1",
+                        "session_id": "th-1",
+                        "cwd": "/w",
+                        "history_mode": "legacy",
+                    },
+                ),
+                rolled(
+                    "event_msg",
+                    {"type": "user_message", "message": "Fix it.", "images": []},
+                ),
+                rolled(
+                    "event_msg",
+                    {
+                        "type": "agent_message",
+                        "message": "On it.",
+                        "phase": "commentary",
+                    },
+                ),
+                called(
+                    "t1",
+                    "exec_command",
+                    cmd="cd /w/tree/dev && uv run pytest -q",
+                    workdir="/w",
+                ),
+                rolled(
+                    "response_item",
+                    {
+                        "type": "custom_tool_call",
+                        "name": "apply_patch",
+                        "call_id": "t2",
+                        "input": patch,
+                    },
+                ),
+                called("t3", "write_stdin", session_id=4, chars="y"),
+                called("t4", "mcp__lup__note", remark="I assumed UTF-8."),
+                rolled(
+                    "event_msg",
+                    {
+                        "type": "agent_message",
+                        "message": "Fixed.",
+                        "phase": "final_answer",
+                    },
+                ),
+            ]
+        )
+        + "\n"
+    )
+    return rollout
+
+
+@pytest.mark.parametrize(
+    ("reader", "record", "run", "calls"),
+    [
+        (
+            ClaudeTranscripts(),
+            claude_said,
+            "  ▾ · 3 calls: Bash, Read, Edit",
+            [
+                "· Bash: Run the tests · uv run pytest -q",
+                "· Read: page/src/review.ts:480",
+                "· Edit: page/src/review.ts -1 +2",
+            ],
+        ),
+        (
+            CodexTranscripts(),
+            codex_said,
+            "  ▾ · 3 calls: exec_command, apply_patch, write_stdin",
+            [
+                "· exec_command: uv run pytest -q",
+                "· apply_patch: page/src/review.ts",
+                "· write_stdin: session_id=4 · chars=y",
+            ],
+        ),
+    ],
+    ids=["claude", "codex"],
+)
+def test_each_runtime_s_record_lays_out_each_call_with_what_it_was_given_its_last_words_folded(
+    tmp_path: Path,
+    reader: Reader,
+    record: Callable[[Path], Path],
+    run: str,
+    calls: list[str],
+) -> None:
+    entries = reader.read(record(tmp_path)).entries
+    sent = item(
+        70,
+        note("I assumed UTF-8."),
+        0,
+        call="t4",
+        made=datetime(2026, 10, 18, 10, 0, tzinfo=UTC),
+    )
+    ended = item(
+        71,
+        note("Fixed.", ending=True),
+        0,
+        made=datetime(2026, 10, 18, 10, 0, 1, tzinfo=UTC),
+    )
+    beside = listed((sent, "I assumed UTF-8."), (ended, "Fixed."))
+    view = drawer(entries, beside)
+    assert [
+        line
+        for line in view.text().splitlines()[1:]
+        if not line.startswith("    ") or line.startswith("    ▸")
+    ] == [
+        "▾ you: Fix it.",
+        "  ▾ On it.",
+        run,
+        *(f"    ▸ {call}  [call id=t{at}]" for at, call in enumerate(calls, start=1)),
+        "  ▸ → @70 note to you · unread · I assumed UTF-8.",
+        "  ▸ → @71 turn's end to you · unread · Fixed.",
+    ]
+    # Each last word, and each `note`, folds: only what no item says stays open.
+    fold = block(view.blocks, "item 70")
+    assert isinstance(fold, Fold)
+    assert "call t4" in ids(fold.content if isinstance(fold.content, list) else [])
+    assert isinstance(block(view.blocks, "step 1"), Markdown)

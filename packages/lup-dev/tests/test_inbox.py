@@ -14,11 +14,12 @@ import os
 import socket
 import sys
 import threading
-from concurrent.futures import ThreadPoolExecutor
+import time
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, override
+from typing import TYPE_CHECKING, Literal, NamedTuple, override
 
 import pytest
 from mcp import Client
@@ -41,23 +42,25 @@ from lup.programs import Ran, run
 from lup.rooms import Podman
 from lup.tools.serving import Answer as ToolAnswer
 from lup.tools.speaking import SPEAKING
-from lup_dev import Modules, Project, cli, commanding
+from lup_dev import Core, Levels, Modules, Paths, Project, cli, commanding
 from lup_dev.adapters.claude import (
     ChannelMessage,
     ClaudeQueues,
     ClaudeRecords,
     ClaudeTranscripts,
 )
+from lup_dev.approval import Approval as StoredApproval
 from lup_dev.codescan.contract import FileReport, Parser, Source
 from lup_dev.codescan.engine import EngineError
 from lup_dev.commanding import RoomMarks
 from lup_dev.conversions import inbox_opened
 from lup_dev.declaration.package_managers.uv import Uv
-from lup_dev.declaration.resolve import resolve
+from lup_dev.declaration.resolve import Declaration, resolve
 from lup_dev.declaration.serving import Operator as OperatorAsker
 from lup_dev.declaration.serving import tools as module_tools
 from lup_dev.gate import Passed, Passes, Processes, Standing
 from lup_dev.gate import Ran as GateRan
+from lup_dev.git import GitError
 from lup_dev.host.client import HostClient, RoomClient, Starter
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard, Posted, Spawned, Spawns
@@ -113,6 +116,7 @@ from lup_dev.inbox.protocol import (
     AnswerApproval,
     AskApproval,
     AskFlag,
+    AskHold,
     Context,
     Conversed,
     Drafted,
@@ -179,6 +183,7 @@ from lup_dev.inbox.store import (
     Reason,
     Remark,
     Review,
+    ReviewedAt,
     Sent,
     Talk,
     TalkComment,
@@ -203,6 +208,7 @@ from lup_dev.inbox.typed import TypeReader
 from lup_dev.launch.room import RoomError
 from lup_dev.layout import GitDirectoryLayout, InboxLayout, Layout
 from lup_dev.merging import Merging, merged
+from lup_dev.policy import landing as landing_module
 from lup_dev.policy import report
 from lup_dev.policy.before import Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import (
@@ -210,6 +216,7 @@ from lup_dev.policy.checkpoint import (
     CallFinished,
     CallStarted,
     ConversationRecord,
+    LastDeclaration,
 )
 from lup_dev.policy.coming import Coming
 from lup_dev.policy.flags import InboxFlagging
@@ -232,16 +239,17 @@ from lup_dev.policy.since import (
     SinceReviewed,
     ViewedFile,
 )
+from lup_dev.policy.store import Held, Store, WorktreeState
 from lup_dev.policy.tools import JudgeTools, stands
 from lup_dev.policy.verdicts import Verdict, VerdictLog
-from lup_dev.policy.waits import LandingsWaiting, ShowLandings, Waits
+from lup_dev.policy.waits import LandingsWaiting, ShowLandings, Wait, Waits
 from lup_dev.policy.worktrees import Holding as Worked
 from lup_dev.policy.worktrees import SessionIndex
 from lup_dev.private.withheld import Withheld
 from lup_dev.private.withheld import kept as listed_at
-from lup_dev.remote.protocol import Remotes, Update
+from lup_dev.remote.protocol import Pushed, PushHandler, Pushing, Remotes, Update
 from lup_dev.settings import LupDevSettings
-from lup_dev.stored import write_model
+from lup_dev.stored import read_model, write_model
 from lup_dev.worker import HostExchanges, HostMarks, RepositoryModules
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
@@ -258,6 +266,7 @@ if TYPE_CHECKING:
     from pydantic import JsonValue
 
     from lup.rooms.engine import Process
+    from lup_dev.declaration.kinds import Role
     from lup_dev.layout import HostLayout
 
 runner = CliRunner()
@@ -5687,8 +5696,9 @@ def judged_in_its_process(
     repo: Path,
     *,
     runtime: str,
+    again: bool = False,
 ) -> Generator[Watched]:
-    """The host service with lup's inbox, serving launch `one` of `runtime` in `repo`, judged by this `lup-dev` in its repository's process; each held change answered in the inbox reaches its hold."""
+    """The host service with lup's inbox, serving launch `one` of `runtime` in `repo`, judged by this `lup-dev` in its repository's process; each held change answered in the inbox reaches its hold. Leaving it stops the service as a restart does; `again` serves the launch from its record, as a service started again does, rather than registering it."""
     workers = Workers(
         layout=machine.host,
         say=said.append,
@@ -5716,7 +5726,8 @@ def judged_in_its_process(
             limits=Limits(actions=[], protected=[]),
             github=None,
         )
-        client(machine.host, clock).register(launch)
+        if not again:
+            client(machine.host, clock).register(launch)
         yield delivery
 
 
@@ -5886,6 +5897,497 @@ def test_a_subagents_held_edit_waits_unlanded_until_the_operator_answers_making_
     assert hold.answer is not None
     assert (hold.answer.approved, hold.answer.comment) == (True, comment)
     assert left == []
+
+
+# A hold outliving the host service: the service stops while the hold's call waits,
+# as it does when it restarts, and is started again; the writer's answer reaches
+# them, whichever conversation they are and whichever comes first, the answer or
+# their next call (#338).
+
+
+class Writer(NamedTuple):
+    """The conversation that made the change, as their runtime's hooks name them."""
+
+    runtime: str
+    hooked: Callable[..., str]
+    """Spells a hook's payload for the runtime."""
+    where: dict[str, str]
+    """What their hooks carry besides the session: a subagent's ids, a turn's."""
+
+
+CLAUDE = Writer("claude", claude, {})
+SUBAGENT = Writer("claude", claude, {"agent_id": "a1", "agent_type": "general-purpose"})
+WRITERS = pytest.mark.parametrize(
+    "writer",
+    [
+        CLAUDE,
+        SUBAGENT,
+        Writer("codex", codex, {"turn_id": "u1"}),
+        Writer("codex", codex, {"turn_id": "u1", "agent_id": "a1"}),
+    ],
+    ids=["claude", "claude-subagent", "codex", "codex-subagent"],
+)
+LONG_WAIT: dict[str, JsonValue] = {"on": ["operator"], "within": "PT5M"}
+"""A `wait_inbox` the operator's news ends; past its time limit, a test moving the clock ends it, so one nothing ended fails rather than hangs."""
+ENDING = 10
+"""How long the operator's news may take to end such a wait before the test fails: under pytest's own timeout."""
+
+
+def shelled(event: str, key: str, repo: Path, writer: Writer, **more: object) -> str:
+    """A hook of `writer`'s shell call `key`, at `event`."""
+    return writer.hooked(
+        event,
+        tool_name="Bash",
+        tool_input={"command": "printf 'More.\\n' >> AGENTS.md"},
+        tool_use_id=key,
+        cwd=str(repo),
+        **writer.where,
+        **more,
+    )
+
+
+def in_its_wait(machine: Layout, repo: Path) -> None:
+    """Return once the one hold is noted and its call waits on it, the process being another: a stop from here on lands while the hold waits."""
+    holds = Holds(layout=machine.store(repo))
+    store = Store(layout=machine.store(repo), worktree=repo)
+    began = time.monotonic()
+    while True:
+        assert time.monotonic() - began < PATIENCE
+        [hold] = holds.all()
+        if holds.waited_on(hold.key) and store.state().holding:
+            return
+        time.sleep(0.01)
+
+
+def held_through_a_stop(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    repo: Path,
+    shell: Shell,
+    writer: Writer,
+) -> Item:
+    """Have `writer` write an operator's document with a shell call, held, and stop the host service while the call waits; return the held change's item, still unanswered."""
+    agents = documented(repo, shell)
+    with (
+        ThreadPoolExecutor(max_workers=1) as pool,
+        judged_in_its_process(
+            machine, clock, notices, said, repo, runtime=writer.runtime
+        ) as delivery,
+    ):
+        hook = machine.host.launch("one").hook
+        send(hook, writer.hooked("SessionStart", source="startup", cwd=str(repo)))
+        send(hook, shelled("PreToolUse", "b1", repo, writer))
+        agents.write_text("# Agents\nMore.\n")
+        finished = pool.submit(
+            send, hook, shelled("PostToolUse", "b1", repo, writer, tool_response="")
+        )
+        item = held_item(delivery, notices)
+        in_its_wait(machine, repo)
+        assert not finished.done()
+    assert finished.result(timeout=PATIENCE) == ""
+    return item
+
+
+def told_beside(*answers: str) -> list[str]:
+    """What each of these hooks' answers told the model, those telling nothing left out."""
+    return [context(each) for each in answers if each]
+
+
+def settled_hold(machine: Layout) -> Hold:
+    """The one hold, once a checkpoint settled it: its files no longer held."""
+    [holds] = [each for each in stores(machine) if each.all()]
+    [hold] = holds.all()
+    assert not hold.waited()
+    return hold
+
+
+@WRITERS
+def test_a_hold_outliving_the_service_answered_before_its_writers_next_call_is_told_once_beside_it(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    repo: Path,
+    shell: Shell,
+    writer: Writer,
+) -> None:
+    item = held_through_a_stop(
+        machine, clock, notices, said, repo=repo, shell=shell, writer=writer
+    )
+    with judged_in_its_process(
+        machine, clock, notices, said, repo, runtime=writer.runtime, again=True
+    ) as delivery:
+        hook = machine.host.launch("one").hook
+        approving(item, "keep it")
+        started = send(hook, shelled("PreToolUse", "b2", repo, writer))
+        finished = send(
+            hook, shelled("PostToolUse", "b2", repo, writer, tool_response="")
+        )
+        send(hook, shelled("PreToolUse", "b3", repo, writer))
+        after = send(hook, shelled("PostToolUse", "b3", repo, writer, tool_response=""))
+        left = delivery.inbox.waiting(Operator())
+    told = told_beside(started, finished)
+    assert sum("which they have since approved: keep it." in each for each in told) == 1
+    assert after == ""
+    assert left == []
+    assert settled_hold(machine).orphaned
+    assert (repo / "AGENTS.md").read_text() == "# Agents\nMore.\n"
+
+
+@WRITERS
+def test_a_hold_outliving_the_service_answered_while_a_call_of_its_writers_runs_is_told_once_beside_it(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    repo: Path,
+    shell: Shell,
+    writer: Writer,
+) -> None:
+    item = held_through_a_stop(
+        machine, clock, notices, said, repo=repo, shell=shell, writer=writer
+    )
+    with judged_in_its_process(
+        machine, clock, notices, said, repo, runtime=writer.runtime, again=True
+    ):
+        hook = machine.host.launch("one").hook
+        started = send(hook, shelled("PreToolUse", "b2", repo, writer))
+        approving(item, "keep it")
+        finished = send(
+            hook, shelled("PostToolUse", "b2", repo, writer, tool_response="")
+        )
+    told = told_beside(started, finished)
+    assert sum("which they have since approved: keep it." in each for each in told) == 1
+    assert settled_hold(machine).orphaned
+
+
+@WRITERS
+def test_a_hold_outliving_the_service_answered_while_its_writer_waits_ends_the_wait_as_the_operators_news(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    repo: Path,
+    shell: Shell,
+    writer: Writer,
+) -> None:
+    item = held_through_a_stop(
+        machine, clock, notices, said, repo=repo, shell=shell, writer=writer
+    )
+    with (
+        ThreadPoolExecutor(max_workers=1) as pool,
+        judged_in_its_process(
+            machine, clock, notices, said, repo, runtime=writer.runtime, again=True
+        ) as delivery,
+    ):
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        starting = writer.hooked(
+            "PreToolUse",
+            tool_name="mcp__lup__wait_inbox",
+            tool_input=LONG_WAIT,
+            tool_use_id="w1",
+            cwd=str(repo),
+            **writer.where,
+        )
+        stamped = json.loads(send(hook, starting))["hookSpecificOutput"]["updatedInput"]
+        waiting = pool.submit(call, mcp, "wait_inbox", stamped)
+        assert delivery.holding.wait(timeout=PATIENCE)
+        approving(item, "keep it")
+        ended = wait([waiting], timeout=ENDING).done
+        clock.sleep(600)
+        returned, failed = waiting.result(timeout=PATIENCE)
+        send(
+            hook,
+            writer.hooked(
+                "PostToolUse",
+                tool_name="mcp__lup__wait_inbox",
+                tool_input=stamped,
+                tool_use_id="w1",
+                tool_response="",
+                cwd=str(repo),
+                **writer.where,
+            ),
+        )
+        send(hook, shelled("PreToolUse", "b2", repo, writer))
+        finished = send(
+            hook, shelled("PostToolUse", "b2", repo, writer, tool_response="")
+        )
+    assert not failed
+    assert "which they have since approved: keep it." in returned
+    assert ended
+    assert finished == ""
+    assert settled_hold(machine).orphaned
+
+
+def test_a_subagents_hold_outliving_the_service_is_told_to_them_not_to_whoever_ends_a_turn_first(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    repo: Path,
+    shell: Shell,
+) -> None:
+    """Their session's own turn's end runs the checkpoint that settles it: what it found is the subagent's to hear."""
+    item = held_through_a_stop(
+        machine, clock, notices, said, repo=repo, shell=shell, writer=SUBAGENT
+    )
+    with judged_in_its_process(
+        machine, clock, notices, said, repo, runtime="claude", again=True
+    ):
+        hook = machine.host.launch("one").hook
+        approving(item, "")
+        ended = send(hook, claude("Stop", cwd=str(repo)))
+        assert settled_hold(machine).orphaned
+        started = send(hook, shelled("PreToolUse", "b2", repo, SUBAGENT))
+        finished = send(
+            hook, shelled("PostToolUse", "b2", repo, SUBAGENT, tool_response="")
+        )
+    assert "approved" not in ended
+    told = told_beside(started, finished)
+    assert sum("which they have since approved." in each for each in told) == 1
+
+
+def test_a_decline_of_a_hold_outliving_the_service_is_told_once_and_puts_the_file_back(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    repo: Path,
+    shell: Shell,
+) -> None:
+    item = held_through_a_stop(
+        machine, clock, notices, said, repo=repo, shell=shell, writer=SUBAGENT
+    )
+    with judged_in_its_process(
+        machine, clock, notices, said, repo, runtime="claude", again=True
+    ):
+        hook = machine.host.launch("one").hook
+        inbox("answer", str(item.number), "--decline", "--comment", "not here")
+        started = send(hook, shelled("PreToolUse", "b2", repo, SUBAGENT))
+        finished = send(
+            hook, shelled("PostToolUse", "b2", repo, SUBAGENT, tool_response="")
+        )
+    told = told_beside(started, finished)
+    assert (
+        sum("which they have since declined: not here." in each for each in told) == 1
+    )
+    assert (repo / "AGENTS.md").read_text() == "# Agents\n"
+    assert settled_hold(machine).orphaned
+
+
+def noted_hold(
+    machine: Layout,
+    clock: FakeClock,
+    repo: Path,
+    *,
+    agent: str | None = None,
+    abandoned: bool = False,
+    commit: str | None = None,
+) -> Hold:
+    """Keep a hold of `agent`'s in `repo`'s store, its files held as a checkpoint notes them, no call waiting on it, and put it in the operator's inbox."""
+    holds = Holds(layout=machine.store(repo))
+    hold = holds.put(
+        Hold(
+            key=holds.unused(),
+            worktree=repo,
+            session="s1",
+            agent=agent,
+            created=clock.now(),
+            files=[
+                HeldFile(
+                    path=Path("AGENTS.md"),
+                    role="operator",
+                    blob="abc",
+                    reasons=["operator"],
+                    asks=["AGENTS.md is one of the operator's documents"],
+                )
+            ],
+            diff="+a line\n",
+            abandoned=abandoned,
+            commit=commit,
+        )
+    )
+    kept = Held(hold=hold.key, path=Path("AGENTS.md"), blob="abc")
+    write_model(holds.layout.state, WorktreeState(holding=[kept]))
+    whole = ChangedFile(path=Path("AGENTS.md"), before=None, after=Text(text="+\n"))
+    InboxAnnouncing(layout=machine.host, clock=clock).announced(
+        hold, "claude", repo / ".git", [whole]
+    )
+    return hold
+
+
+def answering_holds(machine: Layout, delivery: Watched) -> None:
+    """Have `delivery` write each held change's answer to its hold, and say what nothing told, as `lup-dev host`'s does."""
+    delivery.settle_hold = lambda change, approved, comment: cli.hold_answered(
+        machine, change, approved=approved, comment=comment
+    )
+    delivery.hold_unheard = lambda change: cli.hold_unheard(machine, change)
+
+
+GONE = (
+    "lup's host service went away while your call waited for the operator's answer "
+    "to the change to"
+)
+SETTLED = (
+    "The next checkpoint in its worktree keeps it, and you hear more only where the "
+    "file has changed since and it isn't in place."
+)
+
+
+def test_a_held_changes_answer_goes_through_the_inbox_where_no_call_waits_to_hear_it(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], repo: Path
+) -> None:
+    with inboxed(machine, clock, notices, said) as delivery:
+        answering_holds(machine, delivery)
+        launched(machine, clock, repo, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        hold = noted_hold(machine, clock, repo)
+        [item] = delivery.inbox.waiting(Operator())
+        approving(item, "keep it")
+        told = send(hook, bash("b1"))
+        again = send(hook, bash("b2"))
+        left = delivery.inbox.waiting(Operator())
+    assert context(told).endswith(
+        f'from="operator" kind="note">{GONE} {repo}/AGENTS.md, which they have since '
+        f"approved: keep it. {SETTLED}</message>"
+    )
+    assert again == ""
+    assert left == []
+    kept = Holds(layout=machine.store(repo)).get(hold.key)
+    assert kept is not None
+    assert kept.told
+
+
+def test_a_held_changes_answer_a_call_waits_to_hear_goes_to_that_call_alone(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], repo: Path
+) -> None:
+    with inboxed(machine, clock, notices, said) as delivery:
+        answering_holds(machine, delivery)
+        launched(machine, clock, repo, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        hold = noted_hold(machine, clock, repo)
+        [item] = delivery.inbox.waiting(Operator())
+        with Holds(layout=machine.store(repo)).waiting(hold.key):
+            approving(item, "")
+            told = send(hook, bash("b1"))
+    assert told == ""
+
+
+def test_a_held_changes_answer_for_a_subagent_who_ended_goes_to_their_session(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], repo: Path
+) -> None:
+    records = Subagents(repo.parent / "records")
+    with inboxed(machine, clock, notices, said) as delivery:
+        answering_holds(machine, delivery)
+        launched(machine, clock, repo, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, records.spawn("t1", name="parser"))
+        records.recorded("a1", "Explore", "t1", name="parser")
+        send(hook, records.call("a1", "Explore", "c1"))
+        send(hook, records.ended("a1", "Explore", None))
+        send(hook, claude("UserPromptSubmit", prompt="Go on."))
+        noted_hold(machine, clock, repo, agent="a1")
+        [held] = [
+            each
+            for each in delivery.inbox.waiting(Operator())
+            if isinstance(each.reason, HeldChange)
+        ]
+        approving(held, "")
+        told = context(send(hook, bash("b1")))
+    assert f"{GONE} {repo}/AGENTS.md, which they have since approved. {SETTLED}" in told
+    assert "whose conversation had ended" in told
+
+
+def test_a_held_changes_answer_after_its_hold_timed_out_ends_a_wait_as_the_operators_news(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], repo: Path
+) -> None:
+    with (
+        inboxed(machine, clock, notices, said) as delivery,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        answering_holds(machine, delivery)
+        launched(machine, clock, repo, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        noted_hold(machine, clock, repo, abandoned=True)
+        [item] = delivery.inbox.waiting(Operator())
+        waiting = pool.submit(
+            call, machine.host.launch("one").mcp, "wait_inbox", {"on": ["operator"]}
+        )
+        assert delivery.holding.wait(timeout=PATIENCE)
+        approving(item, "")
+        returned, failed = waiting.result(timeout=PATIENCE)
+    assert not failed
+    assert returned.endswith(
+        'from="operator" kind="note">After the hold timed out, the operator approved '
+        f"the change to {repo}/AGENTS.md. Your version was saved when it was put back."
+        "</message>"
+    )
+
+
+def test_a_moves_answer_is_left_to_the_checkpoint_that_tells_it(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], repo: Path
+) -> None:
+    with inboxed(machine, clock, notices, said) as delivery:
+        answering_holds(machine, delivery)
+        launched(machine, clock, repo, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        noted_hold(machine, clock, repo, commit="c0ffee")
+        [item] = delivery.inbox.waiting(Operator())
+        approving(item, "")
+        told = send(hook, bash("b1"))
+    assert told == ""
+
+
+@pytest.mark.parametrize(
+    "writer", [CLAUDE.where, SUBAGENT.where], ids=["main", "subagent"]
+)
+def test_an_answer_nothing_told_ends_the_wait_of_its_writer_once(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    repo: Path,
+    writer: dict[str, str],
+) -> None:
+    """Answered with its call waiting, which stopped with the service before it looked: told as its writer waits for it, whoever they are."""
+    with (
+        inboxed(machine, clock, notices, said) as delivery,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        answering_holds(machine, delivery)
+        launched(machine, clock, repo, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        hold = noted_hold(machine, clock, repo, agent=writer.get("agent_id"))
+        [item] = delivery.inbox.waiting(Operator())
+        with Holds(layout=machine.store(repo)).waiting(hold.key):
+            approving(item, "")
+        starting = lup_call("wait_inbox", {"on": ["operator"]}, "w1", **writer)
+        stamped = json.loads(send(hook, starting))["hookSpecificOutput"]["updatedInput"]
+        returned, failed = pool.submit(call, mcp, "wait_inbox", stamped).result(
+            timeout=PATIENCE
+        )
+        told = send(hook, bash("b1", **writer))
+    assert not failed
+    assert (
+        f"{GONE} {repo}/AGENTS.md, which they have since approved. {SETTLED}"
+        in returned
+    )
+    assert "approved" not in told
 
 
 def test_a_flagged_write_is_an_item_gathering_its_file_a_comment_reaching_its_agent(
@@ -7203,8 +7705,8 @@ def test_judged_says_where_an_open_hold_stands_and_what_waits_with_it(
         "waiting for the operator, its call waiting on their answer",
         (
             "waiting for the operator, no call waiting on it any more: lup's host "
-            "service went away mid-wait, and their answer reaches its session at a "
-            "later call"
+            "service went away mid-wait, and their answer reaches the conversation "
+            "that made it beside a later call or through `wait_inbox`"
         ),
         (
             "waiting for the operator: nobody answered in time, so the change was "
@@ -8529,12 +9031,42 @@ def test_a_landing_waits_on_each_file_flagged_on_what_it_lands_held_in_its_write
         f"@{flags[3]} (`src/pkg/gone.py` on `feat`).\n"
     ) in answer
     assert landings.on_forge("refs/heads/dev") == tip
+    reviewed = Decided(
+        at=clock.now(), approved=True, reviewed=ReviewedAt(version=version)
+    )
     approved = Decided(at=clock.now(), approved=True)
     withdrawn = Withdrawn(
         at=clock.now(), why=f"`feat` landed on `dev` at {tip}, and is gone since"
     )
-    assert states == [approved, approved, Waiting(), withdrawn, approved]
+    assert states == [reviewed, reviewed, Waiting(), withdrawn, approved]
     assert after == []
+
+
+def test_a_landing_waits_on_a_file_flagged_on_what_it_lands_whatever_a_commit_graph_says(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    rooms = '"""Rooms."""\n'
+    landings.wrote(landings.feat, "src/pkg/rooms.py", rooms)
+    old = landings.on_forge("refs/heads/dev")
+    assert old is not None
+    tip = landings.merged()
+    session = lander(landings, "claude")
+    landings.shell.forged_tree(landings.repository, tip, old)
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, pool):
+        landings.flag("src/pkg/rooms.py", rooms, session)
+        landing, wait = held_landing(machine, clock, delivery, pool)
+        meanwhile = landings.on_forge("refs/heads/dev")
+        place = drawer(machine, clock, session, "feat")
+        answering(machine, clock, session, place, "src/pkg/rooms.py")
+        answer, error = landing.result(timeout=60)
+    assert not error
+    assert meanwhile == old
+    assert waited_on(wait) == ["src/pkg/rooms.py"]
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
 
 
 def test_land_withdraws_each_flag_left_nothing_to_hold_on_a_branch_gone_or_a_file_it_leaves_unchanged_and_no_later_landing_holds_on_it(
@@ -8802,6 +9334,820 @@ def test_a_land_sent_again_across_a_restart_waits_again_and_lands_once_its_flag_
     assert f"The operator approved `{path}`" in answer
     assert holds == []
     assert landings.on_forge("refs/heads/dev") == tip
+
+
+WORKFLOW = ".github/workflows/ci.yml"
+"""A protected path, which no hook of these tests hears written."""
+
+
+@contextmanager
+def serving_landings(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> Generator[tuple[Watched, ThreadPoolExecutor]]:
+    """The service with a launch registered and its session started, hearing nothing else of its hooks: its delivery, and a thread to call `land` on while the operator answers."""
+    with (
+        inboxed(
+            machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+        ) as delivery,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        delivery.settle_hold = lambda _change, _approved, _comment: None
+        yield delivery, pool
+
+
+def held_landing(
+    machine: Layout,
+    clock: FakeClock,
+    delivery: Watched,
+    pool: ThreadPoolExecutor,
+    arguments: dict[str, JsonValue] | None = None,
+) -> tuple[Future[tuple[str, bool]], Wait]:
+    """Call `land` in the background, and return once it holds: the call, and what it waits on. Fail, saying what it answered, where it returned instead."""
+    delivery.holding.clear()
+    landing = pool.submit(call, machine.host.launch("one").mcp, "land", arguments or {})
+    while not delivery.holding.wait(timeout=0.01):
+        assert not landing.done(), landing.result()
+    [wait] = client(machine.host, clock).ask(ShowLandings(), LandingsWaiting).waiting
+    return landing, wait
+
+
+def waited_on(wait: Wait) -> list[str]:
+    """Each file `wait` waits on, by its path, sorted."""
+    return sorted(str(each.path) for each in wait.files)
+
+
+def hold_on(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    path: str,
+    content: str,
+) -> int:
+    """Put a hold making `path` hold `content` in the operator's inbox, as the judge does, from the session started: its number."""
+    asking = AskHold(
+        change=HeldChange(
+            text=f"Let the change to {path} land?",
+            summary=f"{path}: {path} is a protected path",
+            worktree=landings.feat,
+        ),
+        sender=lander(landings, "claude"),
+        diff="",
+        files=[ChangedFile.of(Path(path), None, content.encode())],
+    )
+    return client(machine.host, clock).ask(asking, Shown).item.number
+
+
+@pytest.mark.parametrize(
+    ("path", "role", "ask"),
+    [
+        (WORKFLOW, "protected", "protected"),
+        ("web/.env.local", "protected", "protected"),
+        ("AGENTS.md", "operator", "operator"),
+    ],
+)
+def test_a_landing_holds_what_its_own_diff_asks_whatever_the_hooks_heard_and_lands_once_approved(
+    path: str,
+    role: Role,
+    ask: str,
+    landings: Landings,
+    machine: Layout,
+    *,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    content = "a line\n"
+    landings.wrote(landings.feat, path, content)
+    old = landings.on_forge("refs/heads/dev")
+    tip = landings.merged()
+    session = lander(landings, "claude")
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, pool):
+        landing, wait = held_landing(machine, clock, delivery, pool)
+        meanwhile = landings.on_forge("refs/heads/dev")
+        place = drawer(machine, clock, session, "feat")
+        answered = answering(machine, clock, session, place, path)
+        answer, error = landing.result(timeout=60)
+        after = client(machine.host, clock).ask(ShowLandings(), LandingsWaiting).waiting
+    assert not error
+    assert meanwhile == old
+    assert (wait.tip, wait.branches, waited_on(wait)) == (tip, ["feat"], [path])
+    assert wait.files[0].writers == [session]
+    [file] = [each for each in place.files if each.path == Path(path)]
+    assert file.held is not None
+    assert file.file is not None
+    assert (file.file.before, file.file.after) == (None, Text(text=content))
+    assert file.file.reading == Reading(role=role, asks=[Ask(name=ask, taken="held")])
+    assert answered.approved == wait.files[0].flags
+    [notice] = [each for each in notices.raised if "landing" in each]
+    assert notice == (
+        f"lup: `one`'s landing of `feat` on `dev` waits on 1 file\n{path}\n"
+        'Answer each in "since you approved" of `one`.'
+    )
+    assert answer.startswith(
+        f"Landed {tip} on `dev` at `origin`, which was at {old}.\n"
+        f"The operator approved `{path}`.\n"
+    )
+    assert landings.on_forge("refs/heads/dev") == tip
+    assert after == []
+
+
+def test_a_link_at_a_protected_directory_s_name_holds_its_landing_until_approved(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    (landings.feat / ".claude").symlink_to("elsewhere")
+    landings.wrote(landings.feat, "elsewhere/settings.json", "{}\n")
+    old = landings.on_forge("refs/heads/dev")
+    tip = landings.merged()
+    session = lander(landings, "claude")
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, pool):
+        landing, wait = held_landing(machine, clock, delivery, pool)
+        meanwhile = landings.on_forge("refs/heads/dev")
+        place = drawer(machine, clock, session, "feat")
+        answering(machine, clock, session, place, ".claude")
+        answer, error = landing.result(timeout=60)
+    assert not error
+    assert meanwhile == old
+    assert waited_on(wait) == [".claude"]
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+    assert landings.on_forge("refs/heads/dev") == tip
+
+
+def test_a_file_a_landing_asks_about_declined_lands_nothing_and_the_next_landing_holds_it_again(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    landings.wrote(landings.feat, WORKFLOW, "on: push\n")
+    old = landings.on_forge("refs/heads/dev")
+    session = lander(landings, "claude")
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, pool):
+        landing, _ = held_landing(
+            machine,
+            clock,
+            delivery,
+            pool,
+            {"branch": "feat", "message": MESSAGE},
+        )
+        place = drawer(machine, clock, session, "feat")
+        answering(machine, clock, session, place, WORKFLOW, decline=True)
+        declined, error = landing.result(timeout=60)
+        kept = landings.on_forge("refs/heads/dev")
+        tip = landings.shell.git(landings.dev, "rev-parse", "HEAD")
+        landings.passing(tip)
+        again, _ = held_landing(machine, clock, delivery, pool)
+        place = drawer(machine, clock, session, "feat")
+        answering(machine, clock, session, place, WORKFLOW)
+        answer, later = again.result(timeout=60)
+        flags = [
+            item.number
+            for item in delivery.inbox.items.values()
+            if isinstance(item.reason, Flagged)
+        ]
+    assert not error
+    assert not later
+    assert declined.startswith(
+        "Not landed: the operator didn't approve each file it waits on.\n"
+        f"- `{WORKFLOW}`: declined\n"
+    )
+    assert f"`dev` here holds the merge, {tip}" in declined
+    assert kept == old
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+    assert landings.on_forge("refs/heads/dev") == tip
+    assert len(flags) == 1
+
+
+def test_a_file_approved_at_a_landing_that_didn_t_land_isn_t_asked_about_at_the_next(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    documents = "AGENTS.md"
+    landings.wrote(landings.feat, WORKFLOW, "on: push\n")
+    landings.wrote(landings.feat, documents, "Say why.\n")
+    tip = landings.merged()
+    session = lander(landings, "claude")
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, pool):
+        landing, first = held_landing(machine, clock, delivery, pool)
+        place = drawer(machine, clock, session, "feat")
+        answering(machine, clock, session, place, WORKFLOW)
+        answering(machine, clock, session, place, documents, decline=True)
+        refused, _ = landing.result(timeout=60)
+        again, second = held_landing(machine, clock, delivery, pool)
+        place = drawer(machine, clock, session, "feat")
+        answering(machine, clock, session, place, documents)
+        answer, error = again.result(timeout=60)
+    assert not error
+    assert waited_on(first) == [WORKFLOW, documents]
+    assert f"- `{WORKFLOW}`: approved\n" in refused
+    assert f"- `{documents}`: declined\n" in refused
+    assert waited_on(second) == [documents]
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+
+
+def test_a_file_approved_through_a_hold_at_this_content_lands_asking_nothing(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    content = "on: push\n"
+    landings.wrote(landings.feat, WORKFLOW, content)
+    tip = landings.merged()
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, _):
+        hold = hold_on(landings, machine, clock, WORKFLOW, content)
+        inbox("answer", str(hold), "--approve", "--comment", "")
+        answer, error = call(machine.host.launch("one").mcp, "land", {})
+        flags = [
+            item.number
+            for item in delivery.inbox.items.values()
+            if isinstance(item.reason, Flagged)
+        ]
+    assert not error
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+    assert "The operator approved" not in answer
+    assert flags == []
+    assert landings.on_forge("refs/heads/dev") == tip
+
+
+@pytest.mark.parametrize(
+    ("answers", "content"),
+    [
+        (["--approve"], "another version\n"),
+        (["--decline"], "on: push\n"),
+        (["--approve", "--decline"], "on: push\n"),
+    ],
+    ids=["another-version", "declined", "declined-since"],
+)
+def test_a_hold_approving_another_version_or_declined_since_leaves_the_landing_asking(
+    answers: list[str],
+    content: str,
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    *,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    landings.wrote(landings.feat, WORKFLOW, "on: push\n")
+    tip = landings.merged()
+    session = lander(landings, "claude")
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, pool):
+        for each in answers:
+            hold = hold_on(landings, machine, clock, WORKFLOW, content)
+            inbox("answer", str(hold), each, "--comment", "")
+        landing, wait = held_landing(machine, clock, delivery, pool)
+        place = drawer(machine, clock, session, "feat")
+        answering(machine, clock, session, place, WORKFLOW)
+        answer, error = landing.result(timeout=60)
+    assert not error
+    assert waited_on(wait) == [WORKFLOW]
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+
+
+@pytest.mark.parametrize("approving", [True, False], ids=["approved", "declined"])
+def test_a_hold_still_open_on_what_a_landing_lands_holds_it_and_its_answer_answers_the_landing(
+    approving: bool,
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    *,
+    said: list[str],
+) -> None:
+    content = "on: push\n"
+    landings.wrote(landings.feat, WORKFLOW, content)
+    old = landings.on_forge("refs/heads/dev")
+    tip = landings.merged()
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, pool):
+        hold = hold_on(landings, machine, clock, WORKFLOW, content)
+        landing, wait = held_landing(machine, clock, delivery, pool)
+        word = "--approve" if approving else "--decline"
+        inbox(
+            "answer", str(hold), word, "--comment", "Not this." if not approving else ""
+        )
+        answer, error = landing.result(timeout=60)
+    assert not error
+    assert waited_on(wait) == [WORKFLOW]
+    if approving:
+        assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+        assert landings.on_forge("refs/heads/dev") == tip
+    else:
+        assert answer.startswith(
+            "Not landed: the operator didn't approve each file it waits on.\n"
+            f"- `{WORKFLOW}`: declined, saying:\n  Not this.\n"
+        )
+        assert landings.on_forge("refs/heads/dev") == old
+
+
+def test_a_version_the_operator_never_approved_asks_though_a_later_one_was_approved(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    refused, fixed = "on: push\n", "on: pull_request\n"
+    landings.wrote(landings.feat, WORKFLOW, refused)
+    landings.merged()
+    session = lander(landings, "claude")
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, pool):
+        first, _ = held_landing(machine, clock, delivery, pool)
+        place = drawer(machine, clock, session, "feat")
+        answering(machine, clock, session, place, WORKFLOW, decline=True)
+        first.result(timeout=60)
+        landings.wrote(landings.feat, WORKFLOW, fixed)
+        landings.merged()
+        second, _ = held_landing(machine, clock, delivery, pool)
+        place = drawer(machine, clock, session, "feat")
+        answering(machine, clock, session, place, WORKFLOW)
+        landed, _ = second.result(timeout=60)
+        landings.wrote(landings.dev, WORKFLOW, refused)
+        tip = landings.shell.git(landings.dev, "rev-parse", "HEAD")
+        landings.passing(tip)
+        third, wait = held_landing(machine, clock, delivery, pool)
+        place = drawer(machine, clock, session, "dev")
+        answering(machine, clock, session, place, WORKFLOW)
+        answer, error = third.result(timeout=60)
+    assert not error
+    assert landed.startswith("Landed ")
+    assert waited_on(wait) == [WORKFLOW]
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+
+
+IGNORING = '"""Rooms."""\n\nx = 1  # lup: ignore("regex", why="a grammar")\n'
+"""A module of a production path adding an `ignore`, which no hook of these tests hears written."""
+
+
+def test_a_landing_holds_an_ignore_its_own_diff_adds_whatever_the_hooks_heard_and_lands_once_approved(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    path = "src/pkg/rooms.py"
+    landings.wrote(landings.feat, path, IGNORING)
+    old = landings.on_forge("refs/heads/dev")
+    tip = landings.merged()
+    session = lander(landings, "claude")
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, pool):
+        landing, wait = held_landing(machine, clock, delivery, pool)
+        meanwhile = landings.on_forge("refs/heads/dev")
+        place = drawer(machine, clock, session, "feat")
+        answering(machine, clock, session, place, path)
+        answer, error = landing.result(timeout=60)
+    assert not error
+    assert meanwhile == old
+    assert waited_on(wait) == [path]
+    [file] = [each for each in place.files if each.path == Path(path)]
+    assert file.file is not None
+    assert file.file.reading == Reading(
+        role="production", asks=[Ask(name="ignore", taken="held", line=3)]
+    )
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+    assert landings.on_forge("refs/heads/dev") == tip
+
+
+def test_a_landing_with_an_ignore_declined_lands_nothing(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    path = "src/pkg/rooms.py"
+    landings.wrote(landings.feat, path, IGNORING)
+    old = landings.on_forge("refs/heads/dev")
+    landings.merged()
+    session = lander(landings, "claude")
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, pool):
+        landing, _ = held_landing(machine, clock, delivery, pool)
+        place = drawer(machine, clock, session, "feat")
+        answering(machine, clock, session, place, path, decline=True)
+        answer, error = landing.result(timeout=60)
+    assert not error
+    assert "Landed" not in answer
+    assert landings.on_forge("refs/heads/dev") == old
+
+
+def test_an_ignore_approved_at_that_version_isn_t_asked_again_at_its_landing(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    path = "src/pkg/rooms.py"
+    landings.wrote(landings.feat, path, IGNORING)
+    tip = landings.merged()
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ) as delivery:
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        delivery.settle_hold = lambda _change, _approved, _comment: None
+        number = hold_on(landings, machine, clock, path, IGNORING)
+        inbox("answer", str(number), "--approve", "--comment", "")
+        answer, error = call(machine.host.launch("one").mcp, "land", {})
+    assert not error, answer
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+
+
+def test_a_landing_whose_ignores_can_t_be_read_lands_nothing_saying_why(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    old = landings.on_forge("refs/heads/dev")
+    landings.merged()
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=Unreadable()
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer, _ = call(machine.host.launch("one").mcp, "land", {})
+    assert answer.startswith("Not landed:"), answer
+    assert "node: not found" in answer
+    assert landings.on_forge("refs/heads/dev") == old
+
+
+def test_what_a_landing_asks_is_the_approved_declaration_s_never_the_one_it_lands(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    """The branch's own declaration would protect nothing: it isn't run, and it asks as the protected path it is."""
+    approving = Core(paths=Paths().add(protected=["config/**"]))
+    project = Project(modules=Modules.default().edit(approving))
+    declared_branches(machine, landings.repository, Branches())
+    write_model(
+        machine.declaration(landings.repository),
+        LastDeclaration(
+            declaration=Declaration.of(project, Path("lup_project.py")),
+            commit="0" * 40,
+        ),
+    )
+    unprotecting = 'raise SystemExit("a declaration protecting nothing, never run")\n'
+    for path, content in {
+        "lup_project.py": unprotecting,
+        WORKFLOW: "on: push\n",
+        "config/a.toml": "a = 1\n",
+        "notes.md": "Nothing to ask.\n",
+    }.items():
+        landings.wrote(landings.feat, path, content)
+    tip = landings.merged()
+    session = lander(landings, "claude")
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, pool):
+        landing, wait = held_landing(machine, clock, delivery, pool)
+        place = drawer(machine, clock, session, "feat")
+        for path in waited_on(wait):
+            answering(machine, clock, session, place, path)
+        answer, error = landing.result(timeout=60)
+    assert not error
+    assert waited_on(wait) == [WORKFLOW, "config/a.toml", "lup_project.py"]
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+
+
+def test_a_role_the_approved_declaration_doesn_t_hold_asks_nothing_at_its_landing(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    """A level is the judge's reading too: a project reviewing its protected paths has them hold no write, and no landing."""
+    project = Project(
+        modules=Modules.default().edit(Core(levels=Levels(protected="review")))
+    )
+    declared_branches(machine, landings.repository, Branches())
+    write_model(
+        machine.declaration(landings.repository),
+        LastDeclaration(declaration=Declaration.of(project), commit="0" * 40),
+    )
+    landings.wrote(landings.feat, WORKFLOW, "on: push\n")
+    tip = landings.merged()
+    with serving_landings(landings, machine, clock, notices, said):
+        answer, error = call(machine.host.launch("one").mcp, "land", {})
+    assert not error
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+
+
+def test_a_deletion_a_landing_asks_about_is_held_shown_deleted_and_lands_once_approved(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    path, content = ".gitignore", "tmp/\n"
+    landings.wrote(landings.dev, path, content)
+    landings.shell.git(landings.repository, "push", "-q", "origin", "dev")
+    gone = landings.branched("gone")
+    landings.shell.git(gone, "rm", "-q", path)
+    landings.shell.commit(gone, "take it away")
+    tip = landings.merged("gone")
+    session = lander(landings, "claude")
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, pool):
+        landing, wait = held_landing(machine, clock, delivery, pool)
+        place = drawer(machine, clock, session, "gone")
+        answering(machine, clock, session, place, path)
+        answer, error = landing.result(timeout=60)
+    assert not error
+    assert waited_on(wait) == [path]
+    [file] = [each for each in place.files if each.path == Path(path)]
+    assert file.version is None
+    assert file.file is not None
+    assert (file.file.before, file.file.after) == (Text(text=content), None)
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+
+
+def test_a_file_a_landing_asks_about_is_in_the_drawer_of_who_works_on_its_branch(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    tmp_path: Path,
+) -> None:
+    records = Subagents(tmp_path)
+    landings.wrote(landings.feat, WORKFLOW, "on: push\n")
+    tip = landings.merged()
+    worker = lander(landings, "claude").model_copy(update={"agent": "a1"})
+    with (
+        inboxed(
+            machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+        ) as delivery,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        SessionIndex(layout=machine).write(
+            "s1",
+            Worked(
+                repository=landings.repository,
+                worktrees=[landings.dev, landings.feat],
+                started={"": [landings.dev]},
+                apart={"a1": landings.feat},
+            ),
+        )
+        landings.launched("claude")
+        hook = machine.host.launch("one").hook
+        send(hook, started("claude"))
+        send(hook, records.spawn("t1"))
+        records.recorded("a1", "general-purpose", "t1")
+        send(hook, records.call("a1", "general-purpose", "a1-c1"))
+        landing, wait = held_landing(machine, clock, delivery, pool)
+        place = drawer(machine, clock, worker, "feat")
+        answering(machine, clock, worker, place, WORKFLOW)
+        answer, error = landing.result(timeout=60)
+    assert not error
+    assert [each.writers for each in wait.files] == [[worker]]
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+
+
+def test_a_branch_changing_nothing_its_role_asks_about_lands_as_before(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    landings.wrote(landings.feat, "docs/rooms.md", "Rooms.\n")
+    tip = landings.merged()
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, _):
+        answer, error = call(machine.host.launch("one").mcp, "land", {})
+        items = [
+            item.number
+            for item in delivery.inbox.items.values()
+            if isinstance(item.reason, Flagged)
+        ]
+    assert not error
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+    assert "The operator approved" not in answer
+    assert items == []
+    assert not [each for each in notices.raised if "landing" in each]
+    assert landings.on_forge("refs/heads/dev") == tip
+
+
+def checking_pushes(
+    delivery: Delivery, machine: Layout, said: list[str], parser: Parser
+) -> Remotes:
+    """The remotes the host service pushes through, each push held to what the operator approved of what it lands, telling nothing after it."""
+    coming = Coming(delivery=delivery, layout=machine, say=said.append)
+    served = cli.host_remotes(delivery, machine, coming, Predating(), parser)
+    return served.model_copy(
+        update={"say": said.append, "landed": None, "modules": None}
+    )
+
+
+def test_a_push_to_a_gated_branch_is_refused_where_what_it_lands_adds_an_ignore(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    path = "src/pkg/rooms.py"
+    landings.wrote(landings.feat, path, IGNORING)
+    old = landings.on_forge("refs/heads/dev")
+    tip = landings.merged()
+    onto = Pushing(
+        remote="origin", updates=[Update(source=tip, destination="refs/heads/dev")]
+    )
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, _):
+        launch = landings.launched("claude", name="pushing")
+        handler = PushHandler(
+            remotes=checking_pushes(delivery, machine, said, landings.parser)
+        )
+        refused = asyncio.run(handler.answer(onto, launch))
+        hold = hold_on(landings, machine, clock, path, IGNORING)
+        inbox("answer", str(hold), "--approve", "--comment", "")
+        pushed = asyncio.run(handler.answer(onto, launch))
+    assert isinstance(refused, Pushed)
+    [update] = refused.updates
+    assert update.error is not None
+    assert f"`{path}`" in update.error
+    assert "an `ignore` it adds" in update.error
+    assert isinstance(pushed, Pushed)
+    assert [each.error for each in pushed.updates] == [None]
+    assert old != tip
+    assert landings.on_forge("refs/heads/dev") == tip
+
+
+def test_a_push_to_a_gated_branch_is_refused_where_what_it_lands_asks_and_goes_once_approved(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    """A push can't wait for the operator, so it's refused before anything reaches the remote, read as a landing reads its diff, and flags nothing: `land` is the way through."""
+    content = "on: push\n"
+    landings.wrote(landings.feat, WORKFLOW, content)
+    old = landings.on_forge("refs/heads/dev")
+    tip = landings.merged()
+    onto = Pushing(
+        remote="origin", updates=[Update(source=tip, destination="refs/heads/dev")]
+    )
+    beside = Pushing(
+        remote="origin", updates=[Update(source=tip, destination="refs/heads/other")]
+    )
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, _):
+        launch = landings.launched("claude", name="pushing")
+        handler = PushHandler(
+            remotes=checking_pushes(delivery, machine, said, landings.parser)
+        )
+        refused = asyncio.run(handler.answer(onto, launch))
+        kept = landings.on_forge("refs/heads/dev")
+        other = asyncio.run(handler.answer(beside, launch))
+        flags = [
+            item.number
+            for item in delivery.inbox.items.values()
+            if isinstance(item.reason, Flagged)
+        ]
+        hold = hold_on(landings, machine, clock, WORKFLOW, content)
+        inbox("answer", str(hold), "--approve", "--comment", "")
+        pushed = asyncio.run(handler.answer(onto, launch))
+    assert isinstance(refused, Pushed)
+    [update] = refused.updates
+    assert update.error is not None
+    assert f"`{WORKFLOW}`" in update.error
+    assert "`land`" in update.error
+    assert kept == old
+    assert flags == []
+    assert isinstance(other, Pushed)
+    assert [each.error for each in other.updates] == [None]
+    assert isinstance(pushed, Pushed)
+    assert [each.error for each in pushed.updates] == [None]
+    assert landings.on_forge("refs/heads/dev") == tip
+
+
+def test_a_push_to_a_gated_branch_changing_nothing_its_role_asks_about_goes_as_before(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    tip = landings.merged()
+    onto = Pushing(
+        remote="origin", updates=[Update(source=tip, destination="refs/heads/dev")]
+    )
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, _):
+        launch = landings.launched("claude", name="pushing")
+        handler = PushHandler(
+            remotes=checking_pushes(delivery, machine, said, landings.parser)
+        )
+        pushed = asyncio.run(handler.answer(onto, launch))
+    assert isinstance(pushed, Pushed)
+    assert [each.error for each in pushed.updates] == [None]
+    assert landings.on_forge("refs/heads/dev") == tip
+
+
+def test_a_binary_file_a_landing_asks_about_approved_from_the_terminal_passes_its_own_push(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    """Its content isn't kept, so the flag says its version: the push `land` makes reads the same approval the landing waited on."""
+    path, content = "certs/host.p12", b"\x00\x01 a key store"
+    file = landings.feat / path
+    file.parent.mkdir()
+    file.write_bytes(content)
+    landings.shell.commit(landings.feat, "a key store")
+    tip = landings.merged()
+    with (
+        inboxed(
+            machine,
+            clock,
+            notices,
+            said,
+            rooms=landings.room,
+            parser=landings.parser,
+            remotes=lambda delivery: checking_pushes(
+                delivery, machine, said, landings.parser
+            ),
+        ) as delivery,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        landing, wait = held_landing(machine, clock, delivery, pool)
+        [[flag]] = [each.flags for each in wait.files]
+        kept = delivery.inbox.files(flag)
+        inbox("done", str(flag))
+        answer, error = landing.result(timeout=60)
+    assert not error
+    assert [each.after for each in kept] == [Binary(size=len(content))]
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+    assert landings.on_forge("refs/heads/dev") == tip
+
+
+def test_what_a_landing_asks_is_what_the_approval_keeps_of_its_declaration_before_the_judge_s(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    """No judge need have run: and where one did, at another commit, the approval's says."""
+
+    def protecting(pattern: str) -> Declaration:
+        approving = Core(paths=Paths().add(protected=[pattern]))
+        return Declaration.of(Project(modules=Modules.default().edit(approving)))
+
+    declared_branches(machine, landings.repository, Branches())
+    kept = machine.approved(landings.repository)
+    approval = read_model(kept, StoredApproval)
+    assert approval is not None
+    write_model(
+        kept, approval.model_copy(update={"declaration": protecting("approved/**")})
+    )
+    write_model(
+        machine.declaration(landings.repository),
+        LastDeclaration(declaration=protecting("judged/**"), commit="0" * 40),
+    )
+    landings.wrote(landings.feat, "approved/a.toml", "a = 1\n")
+    landings.wrote(landings.feat, "judged/a.toml", "a = 1\n")
+    landings.merged()
+    session = lander(landings, "claude")
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, pool):
+        landing, wait = held_landing(machine, clock, delivery, pool)
+        place = drawer(machine, clock, session, "feat")
+        answering(machine, clock, session, place, "approved/a.toml")
+        answer, error = landing.result(timeout=60)
+    assert not error
+    assert waited_on(wait) == ["approved/a.toml"]
+    assert answer.startswith("Landed ")
 
 
 MESSAGE = "feat(rooms): rooms, `merged` by $(land)\n\nWhat changed, and why.  \n\n\n"
@@ -9585,10 +10931,16 @@ def test_land_of_dev_as_it_is_says_each_merged_branch_s_defer_comments_then_its_
 
 
 class Unreadable(Parser):
-    """The engine's reading of a file's parse, failing as it does on a host with no Node, or no engine built."""
+    """The engine's reading of a file's parse, failing as it does on a host with no Node, or no engine built, once it has answered `answering` requests."""
+
+    def __init__(self, answering: int = 0) -> None:
+        self.answering = answering
 
     @override
     def parsed(self, root: Path, sources: list[Source]) -> list[FileReport]:
+        if self.answering > 0:
+            self.answering -= 1
+            return [FileReport(path=each.path) for each in sources]
         message = "the engine's `parse` failed: node: not found"
         raise EngineError(message)
 
@@ -9602,7 +10954,7 @@ def test_land_where_the_defer_comments_can_t_be_read_says_so_and_lands_all_the_s
 ) -> None:
     landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
     with inboxed(
-        machine, clock, notices, said, rooms=landings.room, parser=Unreadable()
+        machine, clock, notices, said, rooms=landings.room, parser=Unreadable(1)
     ):
         landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
@@ -9615,6 +10967,37 @@ def test_land_where_the_defer_comments_can_t_be_read_says_so_and_lands_all_the_s
         "lup couldn't read the `# lup: defer` comments it lands: the engine's `parse` "
         "failed: node: not found\n"
         "Cleaned up after it:\n"
+    ) in answer
+
+
+def test_land_where_git_can_t_read_the_defer_comments_says_so_having_landed(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """They're read after the push, so a failure there mustn't answer `Not landed`."""
+
+    def unreadable(*_: object) -> None:
+        message = "what the repository's store holds as abc isn't that commit"
+        raise GitError(message)
+
+    monkeypatch.setattr(landing_module, "deferred", unreadable)
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    merge = landings.on_forge("refs/heads/dev")
+    assert f"Landed {merge} on `dev` at `origin`" in answer
+    assert (
+        "lup couldn't read the `# lup: defer` comments it lands: what the "
+        "repository's store holds as abc isn't that commit\n"
     ) in answer
 
 
@@ -9731,7 +11114,8 @@ def test_land_detaches_the_worktree_a_subagent_who_may_be_resumed_started_in_and
     """Resumed, their shell starts where it did, their scratch there as they left it, and they're told why `HEAD` is detached."""
     feat, records = landings.feat, Subagents(tmp_path)
     landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
-    landings.wrote(feat, ".gitignore", "tmp/\n")
+    (landings.repository / "info").mkdir(exist_ok=True)
+    (landings.repository / "info" / "exclude").write_text("tmp/\n")
     tip = landings.shell.git(feat, "rev-parse", "HEAD")
     (feat / "tmp").mkdir()
     (feat / "tmp" / "probe.py").write_text("scratch git ignores")

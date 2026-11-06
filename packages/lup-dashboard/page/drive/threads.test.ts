@@ -4,10 +4,12 @@ import { open, type Dashboard } from "./dashboard.ts";
 import { demo, type Demo } from "./demo.ts";
 import type { Review } from "./review.ts";
 
-/** The demo's first thread waiting on the operator, its header there: the parser subagent's reader, asking a question and a check. */
-const READER = "━━ @transcript-reader · The transcript reader · lup-impl/parser holds · a question, a check ━━";
+/** The demo's first thread waiting on the operator: the parser subagent's reader, asking a question and a check, and a second question once it has arrived. */
+const READER = "━━ @transcript-reader · The transcript reader · lup-impl/parser holds · ";
+/** Its header there. */
+const READER_ASKING = /^━━ @transcript-reader · The transcript reader · lup-impl\/parser holds · (a question|2 questions), a check ━━$/;
 /** The same thread whole, in open. */
-const READER_WHOLE = "━━ @transcript-reader · The transcript reader · lup-impl/parser holds · working · 2 waiting ━━";
+const READER_WHOLE = /^━━ @transcript-reader · The transcript reader · lup-impl\/parser holds · working · [23] waiting ━━$/;
 /** explore-auth's survey, its header in new. */
 const AUTH = "━━ @auth-survey · Where auth is checked · lup-impl/explore-auth holds · 2 new ━━";
 
@@ -56,7 +58,8 @@ const line = () => review.line();
 describe("the review grouped by thread, in headless Chromium", () => {
     it("lays out what waits on the operator and what's new by item, each under its thread's header, and every open thread in open", async () => {
         const lines = (await review.text()).split("\n");
-        expect(lines.slice(0, 3)).toEqual(["waiting on you · 5", READER, lines[2]]);
+        expect(lines[0]).toBe("waiting on you · 5");
+        expect(lines[1]).toMatch(READER_ASKING);
         expect(lines[2]).toMatch(/^── @51 question · lup-impl\/parser · /);
         expect(lines.filter((each) => /^(waiting on you|new|open|to read|settled|agents) · /.test(each)).map((each) => each.split(" · ")[0])).toEqual([
             "waiting on you",
@@ -68,10 +71,11 @@ describe("the review grouped by thread, in headless Chromium", () => {
         ]);
         expect(lines).toContain("◆ to try: Read the voice section of AGENTS.md: each line says what is, and its examples are short.");
         // Open: every thread still open, a line each, folded, saying where it stands and how much waits on the operator or is new.
-        expect(lines).toContain(READER_WHOLE);
+        const whole = lines.findIndex((each) => READER_WHOLE.test(each));
+        expect(whole).toBeGreaterThan(0);
         expect(lines.find((each) => each.startsWith("━━ @reader-names"))).toMatch(/^━━ @reader-names · The reader's names · lup-impl\/parser holds · parked until .+ ━━$/);
         expect(lines).toContain("━━ @clock-ticks · The clock's ticks · lup-impl/fix-clock held it, lup-impl answers · working ━━");
-        expect(await hidesNext(lines.indexOf(READER_WHOLE) + 1)).toBe(true);
+        expect(await hidesNext(whole + 1)).toBe(true);
     });
 
     it("shows in new the latest read before what's new, folded to its header, then each new item", async () => {
@@ -129,7 +133,7 @@ describe("the review grouped by thread, in headless Chromium", () => {
         await review.holds("✓ check @311");
         await review.goTo("━━ @auth-survey · Where auth is checked · lup-impl/explore-auth holds · working");
         await dashboard.keys.press(["z", "o"]);
-        await review.holds("you · @101.1 to lup-impl/explore-auth · open: waits on lup-impl/explore-auth");
+        await review.holds("you · @314.1 to lup-impl/explore-auth · open: waits on lup-impl/explore-auth");
     });
 
     it("goes from an agent's name to their own views among the agents with gd", async () => {

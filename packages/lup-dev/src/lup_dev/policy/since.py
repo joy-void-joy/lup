@@ -78,6 +78,7 @@ from lup_dev.inbox.store import (
     Item,
     Remark,
     Review,
+    ReviewedAt,
     Withdrawn,
 )
 from lup_dev.layout import Layout
@@ -606,7 +607,11 @@ class Reader(Model, arbitrary_types_allowed=True):
         version = " | ".join(each.version for each in read)
         if request.seen == version:
             return Since(version=version, same=True)
-        return Since(version=version, places=[each.place() for each in read])
+        try:
+            return Since(version=version, places=[each.place() for each in read])
+        except GitError as unread:
+            message = f"lup can't read the conversation's branches: {unread}"
+            raise InboxError(message) from unread
 
     def standing(self, party: Conversation, located: Located) -> Standing:
         """Return the place `located` as it stands: its tree, snapshotted where it's a worktree, its tip's where it's a branch alone, none where it's gone; and its version."""
@@ -748,18 +753,18 @@ class Reader(Model, arbitrary_types_allowed=True):
             if not located.gone and standing.get(each.path) != each.version
         ]
         baseline = self.baseline(party)
-        flags = (
+        approving = (
             []
             if request.decline
             else [
-                flag
+                (flag, None if located.gone else ReviewedAt(version=each.version))
                 for each in request.files
                 if each.path not in moved
                 for flag in baseline.flags([branch], each.path)
             ]
         )
-        for flag in flags:
-            self.delivery.flag_approved(flag.number)
+        for flag, reviewed in approving:
+            self.delivery.flag_approved(flag.number, reviewed)
         declined = (
             self.declined(party, branch, [each.path for each in request.files])
             if request.decline
@@ -787,7 +792,7 @@ class Reader(Model, arbitrary_types_allowed=True):
             )
         reviewed = SinceReviewed(
             reviewed=[each.path for each in request.files],
-            approved=[each.number for each in flags],
+            approved=[flag.number for flag, _ in approving],
             declined=declined,
             moved=moved,
         )
@@ -955,7 +960,11 @@ class Standing(Model, arbitrary_types_allowed=True):
         git = Git.pinned(self.party.repository)
         snapshot = self.snapshot()
         tip = self.tip
-        committed = [] if tip is None else changed_files(git, snapshot.base, tip)
+        try:
+            committed = [] if tip is None else changed_files(git, snapshot.base, tip)
+        except GitError as unread:
+            message = f"lup can't read what `{located.branch}` changed: {unread}"
+            raise InboxError(message) from unread
         at_tip = {} if tip is None else blobs(git.tracked(tip))
         standing = snapshot.standing
         uncommitted = [

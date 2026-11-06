@@ -15,11 +15,13 @@ lists, makes, moves, removes, binds or connects to there fails it.
 """
 
 import ast
+import hashlib
 import io
 import os
 import sys
 import time
 import tokenize
+import zlib
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePath, PurePosixPath
@@ -695,11 +697,36 @@ def declared_branches() -> Callable[[Layout, Path, Branches], None]:
 class Shell:
     """git in a test's repositories."""
 
+    def planted(self, objects: Path, name: str, kind: str, content: bytes) -> None:
+        """Keep `content` in the object store at `objects` under the id `name`, which isn't its own, as a room can, a loose object being read before a pack's."""
+        kept = objects / name[:2] / name[2:]
+        kept.parent.mkdir(exist_ok=True)
+        if kept.exists():
+            kept.chmod(0o644)
+        kept.write_bytes(
+            zlib.compress(f"{kind} {len(content)}".encode() + b"\0" + content)
+        )
+
     def git(self, root: Path, *arguments: str) -> str:
         return git(root, *arguments)
 
     def commit(self, root: Path, message: str = "change") -> None:
         commit(root, message)
+
+    def forged_tree(self, repository: Path, commit: str, tree_of: str) -> None:
+        """Rewrite the commit-graph of the bare `repository` so that it names `tree_of`'s tree as `commit`'s, its checksum made again, as a room can under `objects/info/`."""
+        git(repository, "commit-graph", "write", "--reachable")
+        graph = repository / "objects" / "info" / "commit-graph"
+        data = graph.read_bytes()
+        named, forged = (
+            bytes.fromhex(git(repository, "rev-parse", f"{each}^{{tree}}"))
+            for each in [commit, tree_of]
+        )
+        body = data[:-20].replace(named, forged)
+        graph.chmod(0o644)
+        graph.write_bytes(
+            body + hashlib.sha1(body, usedforsecurity=False).digest(),
+        )
 
 
 @pytest.fixture
