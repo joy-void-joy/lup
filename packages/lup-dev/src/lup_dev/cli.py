@@ -109,6 +109,7 @@ from lup_dev.host.dashboard import (
 )
 from lup_dev.host.names import shaped
 from lup_dev.host.protocol import (
+    Branches,
     GitHubRepository,
     HostError,
     Listed,
@@ -701,6 +702,11 @@ def typed_reading(
     return machine_trust(worktree, []).typed(approval.repository, files)
 
 
+def approval_reading(git: Git, branches: Branches, main: Path) -> Path:
+    """Return the worktree a push's approval has its types read in: the checkout of the running branch, whose tip it's about; else of the integration branch, what that branch is made from, as `live` may have none; else `main`, the repository's main worktree."""
+    return git.checkout(branches.running) or git.checkout(branches.integration) or main
+
+
 async def after_push(
     delivery: Delivery, coming: Coming, launch: Register, updates: list[Update]
 ) -> None:
@@ -716,13 +722,18 @@ async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) 
     the event loop. Its repository is the launch's git directory, found
     through git from its main worktree; one holding a `commondir`, which would
     lead git elsewhere, isn't read (`docs/credentials.md`, *Running git on the
-    host*). The approval names the main conversation of the session the launch
+    host*). That main worktree is a bare repository's own directory, where
+    lup's own is laid out so, which holds no project to read types in, so the
+    approval's are read in a checkout (`approval_reading`), while trust's git
+    stays where it is, out of a worktree the room can aim at a `config` of its
+    own. The approval names the main conversation of the session the launch
     runs, as `delivery` last heard it, which the operator's comment on their
     answer is told to: a push comes from the room's git, not from a call, so
     which of the session's conversations pushed isn't known. What fails is said
     in the service's log, and the push stands.
     """
-    running = running_branch(Layout.of(LupDevSettings()), launch.repository)
+    branches = approved_branches(Layout.of(LupDevSettings()), launch.repository)
+    running = branches.running
     if f"refs/heads/{running}" not in refs:
         return
     if (launch.repository / "commondir").exists():
@@ -732,10 +743,12 @@ async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) 
             "lead git to another repository"
         )
         return
-    root = Git.pinned(launch.repository).main_worktree()
+    git = Git.pinned(launch.repository)
+    root = git.main_worktree()
     pushed_by = delivery.running(launch.launch)
     try:
-        number = await asyncio.to_thread(machine_trust(root, []).proposed, pushed_by)
+        trust = machine_trust(root, [], approval_reading(git, branches, root))
+        number = await asyncio.to_thread(trust.proposed, pushed_by)
     except (LupDevError, LupError) as failure:
         typer.echo(
             f"{launch.launch}: the push moved {running}, but its approval "

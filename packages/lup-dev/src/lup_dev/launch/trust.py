@@ -1600,6 +1600,10 @@ class Trust(Model, arbitrary_types_allowed=True):
 
     root: Path
     """The worktree it's run from; the zone is its repository's."""
+    reading: Path | None = None
+    """The worktree an approval it asks has its types read in, where that's not
+    `root` (`proposed`): a bare repository's own directory holds no project, so
+    nothing it imports resolves there."""
     layout: Layout
     asker: Asker
     """The launching terminal, where the operator reads the summary and answers."""
@@ -1914,7 +1918,10 @@ class Trust(Model, arbitrary_types_allowed=True):
 
         Before any approval, by lup's defaults, never the tip's own declaration,
         which importing would run before the operator is asked; the tip's
-        declaration, among `files`, is the protected path it always is.
+        declaration, among `files`, is the protected path it always is. git on
+        the repository is pinned to `repository`, since what reads types here
+        does so in a worktree a room writes, on the host, at a moment its push
+        set off.
         """
         if approval is None:
             layout = CheckoutLayout(root=Path())
@@ -1936,7 +1943,11 @@ class Trust(Model, arbitrary_types_allowed=True):
             worktree = Worktree(
                 root=self.root,
                 repository=repository,
-                store=Store(layout=self.layout.store(self.root), worktree=self.root),
+                store=Store(
+                    layout=self.layout.store(self.root),
+                    worktree=self.root,
+                    common=repository,
+                ),
                 judging=Judging(layout=self.layout),
             )
             declaration = worktree.declaration
@@ -2033,7 +2044,9 @@ class Trust(Model, arbitrary_types_allowed=True):
         acts on the answer (`settle`). `pushed_by` is the main conversation of
         the session who pushed, which the operator's comment on their answer
         is told to; none where no session's is known. An approval waiting about
-        the same zone is joined, as a launch joins it.
+        the same zone is joined, as a launch joins it. Its types are read in
+        `reading`, where it's given: what `root` is, for a push, need hold no
+        project.
         """
         repository = self.repository()
         kept = self.layout.approved(repository)
@@ -2052,7 +2065,7 @@ class Trust(Model, arbitrary_types_allowed=True):
                     typing=change.typing,
                     repository=repository,
                     fingerprint=standing.fingerprint,
-                    worktree=self.root,
+                    worktree=self.reading or self.root,
                     pushed_by=pushed_by,
                     first=change.approved is None,
                 )
@@ -2204,10 +2217,11 @@ class Trust(Model, arbitrary_types_allowed=True):
         return True
 
 
-def machine_trust(root: Path, inside: list[str]) -> Trust:
+def machine_trust(root: Path, inside: list[str], reading: Path | None = None) -> Trust:
     """Return trust on launch for the repository at `root`, with this machine's settings, the terminal, the inbox in the host service, uv, the service's client, and the engine and ruff to judge the zone's change with.
 
-    `inside` names the runtimes whose session this runs inside.
+    `inside` names the runtimes whose session this runs inside, and `reading`
+    the worktree an approval it asks has its types read in (`Trust.reading`).
     """
     settings = LupDevSettings()
     layout = Layout.of(settings)
@@ -2215,6 +2229,7 @@ def machine_trust(root: Path, inside: list[str]) -> Trust:
     host = HostClient(layout=layout.host, clock=clock, starter=Detached())
     return Trust(
         root=root,
+        reading=reading,
         layout=layout,
         asker=Terminal(),
         approvals=InboxApprovals(host=host),
