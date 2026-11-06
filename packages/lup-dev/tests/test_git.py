@@ -210,3 +210,29 @@ def test_a_checkout_that_s_gone_is_no_checkout(bare: Path, shell: Shell) -> None
     shell.git(bare, "worktree", "add", "-q", str(dev), "dev")
     dev.rename(dev.with_name("moved"))
     assert Git.pinned(bare).checkout("dev") is None
+
+
+def test_git_reads_what_a_commit_holds_from_the_commit_whatever_a_commit_graph_says(
+    bare: Path, shell: Shell
+) -> None:
+    root = bare / "tree" / "main"
+    old = committed(root, {"a.py": "1\n"}, shell)
+    tip = committed(root, {"b.py": "2\n"}, shell)
+    shell.forged_tree(bare, tip, old)
+    listed = Git.pinned(bare).text("diff", "--name-only", "--no-renames", old, tip)
+    assert listed == "b.py"
+
+
+def test_git_reads_a_commit_s_parents_from_the_commit_whatever_a_graft_says(
+    bare: Path, shell: Shell
+) -> None:
+    root = bare / "tree" / "main"
+    base = committed(root, {"a.py": "1\n"}, shell)
+    shell.git(root, "switch", "-q", "-c", "side")
+    side = committed(root, {"side.py": "2\n"}, shell)
+    shell.git(root, "switch", "-q", "main")
+    tip = committed(root, {"tip.py": "3\n"}, shell)
+    (bare / "info" / "grafts").write_text(f"{tip} {side}\n")
+    git = Git.pinned(bare)
+    assert git.text("merge-base", tip, side) == base
+    assert git.text("log", "-1", "--format=%P", tip) != side

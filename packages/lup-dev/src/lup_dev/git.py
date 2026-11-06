@@ -8,7 +8,10 @@ effects*). It also ignores replace refs (`--no-replace-objects`): a room writes
 `refs/`, so a `refs/replace/` of its own would hand git another blob for an
 object whose id `git ls-tree` still lists, and an export of the approved commit,
 which trust's fingerprint of those ids calls unchanged, would carry the room's
-content to the host. git's `-z` output is read by splitting it on its NUL separators
+content to the host. It reads each commit's parents and tree from the commit
+alone, rather than `info/grafts` or `objects/info/commit-graph`, which a room
+writes too and git reads first (`ungrafted`, `graphless`). git's `-z` output is
+read by splitting it on its NUL separators
 (`nul_separated`), not through a git library such as dulwich or pygit2, which
 `lup_dev` doesn't depend on.
 
@@ -165,6 +168,20 @@ def everything(path: PurePosixPath) -> bool:
     return True
 
 
+def ungrafted() -> list[str]:
+    """Return the words before git that have it read grafts from an empty file, rather than the `info/grafts` a room writes, which it reads a commit's parents from first.
+
+    >>> ungrafted()
+    ['env', 'GIT_GRAFT_FILE=/dev/null']
+    """
+    return ["env", f"GIT_GRAFT_FILE={os.devnull}"]
+
+
+def graphless() -> list[str]:
+    """Return the options that have git read no commit-graph, which a room writes under `objects/info/` and git reads a commit's parents and tree from first, and leave out the hint it gives wherever a graft file is named."""
+    return ["-c", "core.commitGraph=false", "-c", "advice.graftFileDeprecated=false"]
+
+
 def pinning(common: Path) -> list[str]:
     """Return the words before a program that hold the git it is, or runs, to the repository whose common git directory is `common`.
 
@@ -245,6 +262,7 @@ class Git(Model):
         """Run git with `arguments`; raise `GitError` on an exit status not in `ok`, or where git can't run."""
         safe = [
             "--no-replace-objects",
+            *graphless(),
             "-c",
             "core.fsmonitor=false",
             "-c",
@@ -257,6 +275,7 @@ class Git(Model):
         pinned = [] if self.common is None else pinning(self.common)
         staged = [] if self.index is None else ["env", f"GIT_INDEX_FILE={self.index}"]
         program, *words = [
+            *ungrafted(),
             *pinned,
             *staged,
             "git",

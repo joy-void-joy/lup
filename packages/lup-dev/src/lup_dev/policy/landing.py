@@ -182,7 +182,7 @@ from lup_dev.declaration.project import Project
 from lup_dev.declaration.resolve import Declaration
 from lup_dev.errors import LupDevError
 from lup_dev.gate import Passed, Standing
-from lup_dev.git import LISTED, Git, Tracked, nul_separated
+from lup_dev.git import LISTED, Git, GitError, Tracked, nul_separated
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Conversations
 from lup_dev.host.protocol import HostError, Register
@@ -533,12 +533,8 @@ def landed_branches(
 
 
 def changed_files(git: Git, old: str | None, tip: str) -> list[Path]:
-    """Return the files a landing of `tip` changes, from the repository's root: those differing from `old`'s, or every one of `tip`'s where the remote has no `old`."""
-    if old is None:
-        listed = git.run("ls-tree", "-r", "-z", "--name-only", "--full-tree", tip)
-    else:
-        listed = git.run("diff", "--name-only", "-z", "--no-renames", old, tip)
-    return [Path(each) for each in nul_separated(listed.output)]
+    """Return the files a landing of `tip` changes, from the repository's root, in order: those differing from `old`'s, or every one of `tip`'s where the remote has no `old`. Read from the objects' own bytes (`Git.own_changes`), so only the ids say what it changes; raise `GitError` where one can't be read or isn't what its id says."""
+    return sorted(Path(path) for path in git.own_changes(old, tip))
 
 
 def approved_declaration(layout: Layout, repository: Path) -> Declaration:
@@ -1511,7 +1507,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         raise HostError(message)
 
     async def parents(self, commit: str) -> list[str]:
-        """Return `commit`'s parents, read from the commit alone (`Remotes.git`, `own_parents`), as the room can't have them read otherwise.
+        """Return `commit`'s parents, read from the commit alone (`Remotes.git`), as the room can't have them read otherwise.
 
         Raise `HostError` where git can't read it.
         """
@@ -1522,7 +1518,6 @@ class Lander(Model, arbitrary_types_allowed=True):
             # lup: ignore("fixed-tool-limit", why="one commit's own parents are read, the one line `rev-list` gives for it: no list an agent asked for is cut short")
             "--max-count=1",
             commit,
-            own_parents=True,
         )
         if ran.status != 0:
             message = f"git couldn't read {commit}'s parents: {oneline(ran.said())}"
@@ -1739,7 +1734,7 @@ class Lander(Model, arbitrary_types_allowed=True):
             whole = await asyncio.to_thread(
                 deferred, git, self.parser, root, landing.old, landing.tip
             )
-        except EngineError as unread:
+        except (EngineError, GitError) as unread:
             return [f"lup couldn't read the `# lup: defer` comments it lands: {unread}"]
         own = whole.beyond(list(each.values()))
         gated = f"`{short(landing.onto)}`"

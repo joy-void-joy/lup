@@ -1279,6 +1279,35 @@ def test_a_graft_or_a_commit_graph_the_room_writes_doesnt_land_a_branch(
     assert world.on_forge("refs/heads/feat") == unlanded
 
 
+def plant_parent(world: World, how: str, commit: str, parent: str) -> None:
+    """Have the store say `commit`'s first parent is `parent`, through a graft or a commit-graph, as a room can."""
+    if how == "graft":
+        (world.project / "info" / "grafts").write_text(f"{commit} {parent}\n")
+        return
+    git(world.project, "commit-graph", "write", "--reachable")
+    forged_graph(world.project / "objects" / "info" / "commit-graph", commit, parent)
+
+
+@pytest.mark.parametrize("planted", ["graft", "commit-graph"])
+def test_a_push_sends_only_what_the_commit_names_whatever_a_graft_or_a_commit_graph_says(
+    world: World, clock: FakeClock, planted: str
+) -> None:
+    base = world.commit("base")
+    assert world.room_git("switch", "-q", "-c", "side", base).exit_code == 0
+    side = world.commit("kept to the store")
+    assert world.room_git("switch", "-q", "main").exit_code == 0
+    tip = world.commit("pushed")
+    plant_parent(world, planted, tip, side)
+
+    with world.served(clock):
+        pushed = world.room_git("push", "origin", "main:refs/heads/feat")
+
+    assert pushed.exit_code == 0, stderr(pushed)
+    assert world.on_forge("refs/heads/feat") == tip
+    held = subprocess.run(["git", "cat-file", "-e", side], cwd=world.forge, check=False)
+    assert held.returncode != 0
+
+
 def test_delete_ref_deletes_any_branch_unchecked(
     world: World, clock: FakeClock
 ) -> None:
@@ -1783,6 +1812,22 @@ def test_a_push_carrying_a_value_is_refused_naming_commit_file_and_line(
         each for each in guarded.told if isinstance(each.event, events.Publishing)
     ]
     assert publishing.conversation is None
+
+
+@pytest.mark.parametrize("planted", ["graft", "commit-graph"])
+def test_a_push_carrying_a_value_is_refused_whatever_a_graft_or_a_commit_graph_says_of_its_parents(
+    world: World, clock: FakeClock, guarded: InProcess, planted: str
+) -> None:
+    world.wrote("docs/notes.md", "Notes.\nSee /home/op/notes.\n", "notes")
+    carrying = git(world.worktree, "rev-parse", "HEAD")
+    plant_parent(world, planted, carrying, carrying)
+
+    with world.served(clock, modules=guarded):
+        pushed = world.room_git("push", "origin", "HEAD:refs/heads/feat")
+
+    assert pushed.exit_code != 0
+    assert world.on_forge("refs/heads/feat") is None
+    assert "the operator's home path" in told(pushed)
 
 
 def test_a_value_the_remote_holds_already_isnt_refused_again(

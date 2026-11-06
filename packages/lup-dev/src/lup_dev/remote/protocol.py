@@ -67,7 +67,7 @@ from lup.programs import Ran
 from lup.publishing import Place, Push, Refusal, Updating, told
 from lup.types import Model, MutableModel
 from lup_dev.errors import LupDevError
-from lup_dev.git import pinning, stray
+from lup_dev.git import graphless, pinning, stray, ungrafted
 from lup_dev.host.protocol import Action, HostError, Limits, Register, Reply, Request
 from lup_dev.host.rooms import RoomHandler, RoomRoute
 from lup_dev.host.service import Program, executed
@@ -452,31 +452,21 @@ class Remotes(Model, arbitrary_types_allowed=True):
             return kept
         return [ref.object for ref in await self.listed(launch, remote, push=True)]
 
-    async def git(
-        self, launch: Register, *arguments: str, own_parents: bool = False
-    ) -> Ran:
+    async def git(self, launch: Register, *arguments: str) -> Ran:
         """Run git in `launch`'s repository's own git directory, pinned there (`pinning`), with what it could be led into turned off.
 
-        `own_parents` has git read each commit's parents from the commit alone:
-        a room writes `info/grafts` and `objects/info/commit-graph`, which git
-        reads a commit's parents from first, so either could make any commit
-        another's ancestor (`docs/field-notes.md`, *What git reads a commit's
-        parents from*). Grafts are read from an empty file instead
-        (`GIT_GRAFT_FILE`), and the commit-graph not at all.
+        Each commit's parents are read from the commit alone (`ungrafted`,
+        `graphless`), as `Git.run` reads them for the check of what a push
+        publishes, so a push sends what that check read (`docs/field-notes.md`,
+        *What git reads a commit's parents from*).
         """
-        ungrafted = ["env", f"GIT_GRAFT_FILE={os.devnull}"] if own_parents else []
-        graphless = (
-            ["-c", "core.commitGraph=false", "-c", "advice.graftFileDeprecated=false"]
-            if own_parents
-            else []
-        )
         return await self.run(
             Program(
                 command=[
                     *pinning(launch.repository),
-                    *ungrafted,
+                    *ungrafted(),
                     "git",
-                    *graphless,
+                    *graphless(),
                     "--no-replace-objects",
                     "-c",
                     "gc.auto=0",
@@ -494,14 +484,12 @@ class Remotes(Model, arbitrary_types_allowed=True):
         )
 
     async def descends(self, launch: Register, tip: str, ancestor: str) -> bool:
-        """Whether the commit `ancestor` is in the history of the commit `tip`, each commit's parents read from the commit alone (`git`, `own_parents`).
+        """Whether the commit `ancestor` is in the history of the commit `tip`, each commit's parents read from the commit alone (`git`).
 
         Raise `HostError` where git can't say, one of them missing from the
         store among others.
         """
-        ran = await self.git(
-            launch, "merge-base", "--is-ancestor", ancestor, tip, own_parents=True
-        )
+        ran = await self.git(launch, "merge-base", "--is-ancestor", ancestor, tip)
         match ran.status:
             case 0:
                 return True
