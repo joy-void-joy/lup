@@ -30,6 +30,7 @@ from typing import Literal, get_args
 from lup.types import Model
 from lup_dev.clock import Clock
 from lup_dev.codescan.contract import Finding, Owner
+from lup_dev.confined import Confined
 from lup_dev.layout import GitDirectoryLayout
 from lup_dev.policy.judge import PRIVATE, Ask, RemovedNote
 
@@ -318,16 +319,19 @@ class Reports(Model, arbitrary_types_allowed=True):
         """Keep `report` whole, and return where; forget all but the latest `kept`.
 
         Each is named by the time it was kept, then its digest, so the latest
-        sort last and the same report is kept once.
+        sort last and the same report is kept once. A room writes the git
+        directory, so what it left in the way is replaced, never followed
+        (`Confined`), and only what's in the directory itself is forgotten.
         """
+        common = self.layout.common
         home = self.layout.reports
-        home.mkdir(parents=True, exist_ok=True)
+        confined = Confined(root=common)
         digest = hashlib.blake2b(report.encode(), digest_size=6).hexdigest()
-        path = home / f"{self.clock.now():%Y%m%dT%H%M%S}-{digest}.txt"
-        path.write_text(report)
-        for old in sorted(home.glob("*.txt"))[: -self.kept]:
-            old.unlink(missing_ok=True)
-        return path
+        name = f"{self.clock.now():%Y%m%dT%H%M%S}-{digest}.txt"
+        confined.laid(home.relative_to(common) / name, report.encode())
+        for old in sorted(each.name for each in home.glob("*.txt"))[: -self.kept]:
+            confined.removed(home.relative_to(common) / old)
+        return home / name
 
 
 def fitted(parts: list[Part], fits: int, reports: Reports) -> str:

@@ -183,7 +183,7 @@ from lup_dev.declaration.project import Project
 from lup_dev.declaration.resolve import Declaration
 from lup_dev.errors import LupDevError
 from lup_dev.gate import Passed, Standing
-from lup_dev.git import LISTED, Git, GitError, Tracked, nul_separated
+from lup_dev.git import LISTED, Git, GitError, Tracked, nul_separated, stray
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Conversations
 from lup_dev.host.protocol import HostError, Register
@@ -2764,6 +2764,9 @@ def tracked(git: Git, remote: str, onto: str, tip: str) -> list[str]:
     made where both sides changed a file, the branch merged being gone.
     """
     name = f"{remote}/{short(onto)}"
+    swayed = refs_astray(git)
+    if swayed:
+        return [f"`{name}` here still names what it did: {swayed}."]
     try:
         git.run("update-ref", f"refs/remotes/{name}", tip)
     except LupDevError as failed:
@@ -2771,8 +2774,19 @@ def tracked(git: Git, remote: str, onto: str, tip: str) -> list[str]:
     return []
 
 
+def refs_astray(git: Git) -> str | None:
+    """Say why git mustn't write a ref of the repository: a link under its `refs/`, which it would write through, and a room writes `refs/`; none where there's none (`stray`), or `git` isn't pinned to the repository."""
+    found = [] if git.common is None else stray(git.common / "refs")
+    if not found:
+        return None
+    return f"its refs hold a link, {', '.join(str(each) for each in found)}"
+
+
 def local_deleted(git: Git, ref: str, commit: str) -> Cleaned:
     """Delete the local branch `ref` where it's still at `commit`, the tip it landed at, and say how it went."""
+    swayed = refs_astray(git)
+    if swayed:
+        return Cleaned(left=[f"the local branch `{short(ref)}`: {swayed}"])
     try:
         git.run("update-ref", "-d", ref, commit)
     except LupDevError as kept:
