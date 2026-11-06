@@ -8,7 +8,7 @@ context still empty: a session's own conversation starting anew or cleared
 again after.
 - **Not landed:** each branch with commits on no remote branch, or whose
   worktree holds uncommitted changes, with its worktree, how many commits, and
-  its last. A branch the local integration branch merged but whose landing
+  its last. A branch the local running branch merged but whose landing
   waits is still not landed; the release branch, on its remote, is.
 - **Running beside them:** where more than one other main conversation of the
   repository runs, each by their name, since several sessions may work on one
@@ -18,7 +18,7 @@ again after.
   waits on the operator. Where a root thread nobody holds has the session's
   name, the session takes it as theirs (`Concerns.root`), and is told so
   first: they go on with what an earlier session left.
-- **Landed** on the remote's integration branch since the last main session
+- **Landed** on the remote's running branch, what `land` lands on, since the last main session
   started, its first-parent history, with whether that session still runs or
   when they were last heard, and how their exchange with the operator is read.
 
@@ -32,6 +32,7 @@ lowest of `lup_dev`'s layers, asks it through `Bearings` (`host/service.py`).
 """
 
 import asyncio
+from collections.abc import Callable
 from datetime import datetime
 from itertools import batched
 from pathlib import Path
@@ -67,30 +68,29 @@ class Unlanded(Model):
 
 
 class Landed(Model):
-    """A commit the remote's integration branch took, by its short id and its subject."""
+    """A commit the remote's running branch took, by its short id and its subject."""
 
     commit: str
     subject: str
 
 
 class Repository(Model):
-    """What git says of a repository as a session starts: its branches not landed, and what its integration branch landed since a moment."""
+    """What git says of a repository as a session starts: its branches not landed, and what its running branch landed since a moment."""
 
     unlanded: list[Unlanded]
     landed: list[Landed]
     onto: str
-    """The integration branch they're measured against, as named where it's
-    read: the remote's copy, `origin/dev`, where there's one, else the local
-    branch."""
+    """The running branch they're measured against, as named where it's read: the
+    remote's copy, `origin/dev`, where there's one, else the local branch."""
     unread: str | None = None
     """Why git couldn't be read, which the page says in place of what it would
     have read; none where it was read."""
 
 
 def read_repository(
-    repository: Path, integration: str, remote: str, since: datetime | None
+    repository: Path, running: str, remote: str, since: datetime | None
 ) -> Repository:
-    """Read `repository`'s branches not landed, and what `integration`, `remote`'s copy where there's one, landed from `since` on; nothing landed where `since` is none."""
+    """Read `repository`'s branches not landed, and what `running`, `remote`'s copy where there's one, landed from `since` on; nothing landed where `since` is none."""
     git = Git.pinned(repository)
     branches = git.text("for-each-ref", "--format=%(refname:short)", "refs/heads/")
     checked = {
@@ -123,8 +123,8 @@ def read_repository(
         )
 
     found = [unlanded(branch) for branch in branches.splitlines()]
-    tracked = f"{remote}/{integration}"
-    onto = tracked if git.commit(f"refs/remotes/{tracked}") is not None else integration
+    tracked = f"{remote}/{running}"
+    onto = tracked if git.commit(f"refs/remotes/{tracked}") is not None else running
     landed = (
         []
         if since is None
@@ -162,12 +162,12 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
     """A new main session's bearings, from the inbox `delivery` keeps and the repository's git."""
 
     delivery: Delivery
-    integration: str
-    """The branch work lands on, as lup's settings name it
-    (`LUP_INTEGRATION_BRANCH`)."""
+    running: Callable[[Path], str]
+    """Returns the branch work lands on in the repository at a git directory, as
+    the declaration approved for it names it (`cli.py`, `running_branch`)."""
     remote: str = "origin"
-    """The remote whose copy of the integration branch is what's landed, as
-    `land` lands on it; the local branch where there's none."""
+    """The remote whose copy of the running branch is what's landed, as `land`
+    lands on it; the local branch where there's none."""
 
     @override
     async def told(
@@ -180,14 +180,13 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
         self.delivery.heard_in(starting, launch, None)
         took = self.took(starting)
         since = None if last is None else self.started(last)
+        branch = self.running(launch.repository)
         try:
             found = await asyncio.to_thread(
-                read_repository, launch.repository, self.integration, self.remote, since
+                read_repository, launch.repository, branch, self.remote, since
             )
         except GitError as unread:
-            found = Repository(
-                unlanded=[], landed=[], onto=self.integration, unread=str(unread)
-            )
+            found = Repository(unlanded=[], landed=[], onto=branch, unread=str(unread))
         return self.page(starting, last, found, running, took)
 
     def last(self, starting: Conversation) -> Conversation | None:

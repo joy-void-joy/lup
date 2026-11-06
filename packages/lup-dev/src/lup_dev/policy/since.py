@@ -64,6 +64,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, override
 from pydantic import Field, StringConstraints
 
 from lup.types import Model, MutableModel
+from lup_dev.approval import approved_branches
 from lup_dev.declaration.kinds import Level, Role
 from lup_dev.git import Git, GitError, Tracked
 from lup_dev.host.protocol import Reply, Request
@@ -436,17 +437,17 @@ class Reader(Model, arbitrary_types_allowed=True):
 
     delivery: Delivery
     layout: Layout
-    """lup's state on the host: the judge's session index and stores, and the
-    files marked reviewed."""
-    integration: str
-    """The integration branch's name, where the branch left which is the
-    baseline where the operator saw none of a file (`base`)."""
+    """lup's state on the host: the judge's session index and stores, the files
+    marked reviewed, and the integration branch the declaration approved names,
+    where the branch left which is the baseline where the operator saw none of a
+    file (`base`), rather than what `land` lands on, which holds the branch whole
+    once it's landed there."""
     waits: Waits = Field(default_factory=Waits)
     """The landings waiting on the operator, the service's, which hold each
     file they wait on in its writer's drawer."""
     remote: str = "origin"
-    """The remote whose copy of the integration branch is read, as `land`
-    lands on it; the local branch where there's none."""
+    """The remote whose copy of the integration branch is read; the local branch
+    where there's none."""
     snapshotting: Snapshotting = Field(default_factory=Snapshotting)
     """Held while a worktree is snapshotted: a read at an agent's hook, one as
     its drawer opens and a marking may come at once."""
@@ -532,10 +533,11 @@ class Reader(Model, arbitrary_types_allowed=True):
         message = f"{worktree} is no place the conversation worked"
         raise InboxError(message)
 
-    def old(self, git: Git) -> str | None:
-        """Return the integration branch's tip, the remote's copy where it's there, else the local branch's; none where there's neither."""
-        remote = git.commit(f"refs/remotes/{self.remote}/{self.integration}")
-        return remote or git.commit(f"refs/heads/{self.integration}")
+    def old(self, git: Git, repository: Path) -> str | None:
+        """Return the integration branch of the repository at `repository`'s tip, through `git`: the remote's copy where it's there, else the local branch's; none where there's neither."""
+        integration = approved_branches(self.layout, repository).integration
+        remote = git.commit(f"refs/remotes/{self.remote}/{integration}")
+        return remote or git.commit(f"refs/heads/{integration}")
 
     def base(self, git: Git, old: str | None, tip: str | None) -> str | None:
         """Return where the branch at `tip` left the integration branch at `old`: their merge base, the latest commit both hold, so a file only the integration branch changed since isn't one the branch changed, and one both changed shows the branch's change alone; `old` where there's no `tip`, or the two share no history.
@@ -645,7 +647,7 @@ class Reader(Model, arbitrary_types_allowed=True):
     ) -> Snapshot:
         """Return a place's snapshot as `listed` lists its tree, read through `standing_git`, with where the branch at `tip` left the integration branch, listed too, what the operator saw of `party`'s repository, and the files a landing waits on, each read at its tip."""
         git = Git.pinned(party.repository)
-        base = self.base(git, self.old(git), tip)
+        base = self.base(git, self.old(git, party.repository), tip)
         return Snapshot(
             baseline=self.baseline(party, once=True),
             standing_git=standing_git,
@@ -1008,13 +1010,9 @@ class SinceReviewing(Model, Handler[ReviewSince], arbitrary_types_allowed=True):
         return marking.reviewed
 
 
-def routes(
-    delivery: Delivery, layout: Layout, integration: str, waits: Waits
-) -> list[Route]:
-    """Route the kinds the drawer asks to their handlers, over `delivery`, lup's state at `layout`, the integration branch `integration`, and the landings waiting, `waits`."""
-    reader = Reader(
-        delivery=delivery, layout=layout, integration=integration, waits=waits
-    )
+def routes(delivery: Delivery, layout: Layout, waits: Waits) -> list[Route]:
+    """Route the kinds the drawer asks to their handlers, over `delivery`, lup's state at `layout`, and the landings waiting, `waits`."""
+    reader = Reader(delivery=delivery, layout=layout, waits=waits)
     return [
         Route.reading(SinceShowing(reader=reader)),
         Route.to(SinceReviewing(reader=reader)),

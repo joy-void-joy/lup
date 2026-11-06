@@ -30,6 +30,7 @@ import pytest
 from lup.programs import run
 from lup.types import Model, MutableModel
 from lup_dev import Project, cli, environments
+from lup_dev.approval import Approval, ReleaseTool
 from lup_dev.clock import Clock
 from lup_dev.codescan.contract import (
     Checker,
@@ -57,7 +58,7 @@ from lup_dev.declaration.resolve import Resolved, resolve
 from lup_dev.declaration.serving import Room
 from lup_dev.forge.github import GitHubError
 from lup_dev.host.client import RoomClient
-from lup_dev.host.protocol import HostError, Register
+from lup_dev.host.protocol import Branches, HostError, Register
 from lup_dev.host.records import Call, Reader, Record, Recorded, Records, Transcript
 from lup_dev.host.workers import (
     Called,
@@ -83,6 +84,7 @@ from lup_dev.policy.runtime import Runtime
 from lup_dev.policy.tools import judge_call
 from lup_dev.private.withheld import Facts, Machine
 from lup_dev.settings import LupDevSettings
+from lup_dev.stored import write_model
 from lup_dev.worker import RepositoryModules
 
 if TYPE_CHECKING:
@@ -669,6 +671,27 @@ def commit(root: Path, message: str = "change") -> None:
     git(root, "commit", "-q", "-m", message)
 
 
+@pytest.fixture
+def declared_branches() -> Callable[[Layout, Path, Branches], None]:
+    """Keep an approval for a repository whose declaration named the branches given, as trust keeps one, for a test of what reads them."""
+
+    def keep(layout: Layout, repository: Path, branches: Branches) -> None:
+        tool = ReleaseTool(name="lup-dev", version="0", registry="", pins={})
+        write_model(
+            layout.approved(repository),
+            Approval(
+                commit="0" * 40,
+                fingerprint="",
+                paths=[],
+                tool=tool,
+                time=datetime(2026, 10, 1, tzinfo=UTC),
+                branches=branches,
+            ),
+        )
+
+    return keep
+
+
 class Shell:
     """git in a test's repositories."""
 
@@ -900,7 +923,6 @@ class Kit:
                 clock=self.clock,
                 layout=self.layout,
                 spawner=self.spawner,
-                integration="dev",
                 announcing=self.announced,
                 flagging=self.flags,
                 facts=self.facts,

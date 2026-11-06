@@ -187,3 +187,26 @@ def test_a_partial_clone_is_never_asked_for_what_it_left_out(
     # Asked as git is by default, the clone fetches it from its remote.
     assert shell.git(clone, "cat-file", "-t", first) == "blob"
     assert git.blobs([first]) == [first]
+
+
+def test_a_branch_s_checkout_is_the_worktree_that_has_it_checked_out(
+    bare: Path, shell: Shell
+) -> None:
+    shell.git(bare, "branch", "dev", "main")
+    shell.git(bare, "branch", "live", "main")
+    dev = bare / "tree" / "dev"
+    shell.git(bare, "worktree", "add", "-q", str(dev), "dev")
+    pinned = Git.pinned(bare)
+    assert pinned.checkout("dev") == dev
+    assert pinned.checkout("main") == bare / "tree" / "main"
+    # Nothing has it checked out, as a bare repository's own directory doesn't count.
+    assert pinned.checkout("live") is None
+    assert pinned.checkout("none") is None
+
+
+def test_a_checkout_that_s_gone_is_no_checkout(bare: Path, shell: Shell) -> None:
+    shell.git(bare, "branch", "dev", "main")
+    dev = bare / "tree" / "dev"
+    shell.git(bare, "worktree", "add", "-q", str(dev), "dev")
+    dev.rename(dev.with_name("moved"))
+    assert Git.pinned(bare).checkout("dev") is None

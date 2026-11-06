@@ -45,13 +45,14 @@ from lup_dev import (
     Step,
     TestRoots,
     Uv,
+    Versions,
 )
 from lup_dev.catalog.credentials import CredentialDefaults
 from lup_dev.catalog.paths import CorePaths, PythonPaths
 from lup_dev.catalog.room import PackageAge, SessionDefaults, StandardMachine
 from lup_dev.catalog.rules import DefaultRules
 from lup_dev.declaration.errors import ProjectError
-from lup_dev.declaration.grammar import Drop
+from lup_dev.declaration.grammar import Drop, applied
 from lup_dev.declaration.kinds import Role, lup_actions
 from lup_dev.declaration.load import load
 from lup_dev.declaration.module import Origin
@@ -66,7 +67,7 @@ from lup_dev.declaration.runner import (
     RoomPlaces,
     RunnerError,
 )
-from lup_dev.host.protocol import Action, Limits, actions
+from lup_dev.host.protocol import Action, Branches, Limits, actions
 
 
 def layered(resolved: Resolved, module: str) -> list[Drop]:
@@ -558,6 +559,7 @@ def test_all_is_every_module_lup_ships() -> None:
         "github",
         "transcripts",
         "private",
+        "versions",
     ]
 
 
@@ -1383,6 +1385,63 @@ def test_a_project_gates_its_own_integration_branch_in_its_declaration() -> None
         why="work lands on `main`, and on release branches",
     )
     assert limits(project).gated == ["refs/heads/main", "refs/heads/release/*"]
+
+
+def test_a_project_selecting_nothing_stays_on_dev_for_everything() -> None:
+    resolved = resolve(Project())
+    assert resolved.branches == Branches(integration="dev", running="dev")
+    assert resolved.limits.gated == ["refs/heads/dev"]
+    assert "versions" not in [each.name for each in resolved.modules]
+
+
+def test_versions_selected_with_no_branch_changes_nothing() -> None:
+    resolved = resolve(Project(modules=Modules.default().add(Versions())))
+    assert resolved.branches == Branches(integration="dev", running="dev")
+    assert resolved.limits.gated == ["refs/heads/dev"]
+
+
+def test_versions_names_the_running_branch_and_leaves_the_integration_branch() -> None:
+    resolved = resolve(Project(modules=Modules.default().add(Versions(running="live"))))
+    assert resolved.branches == Branches(integration="dev", running="live")
+    # `land` lands only on a gated branch, so naming it is enough.
+    assert resolved.limits.gated == ["refs/heads/dev", "refs/heads/live"]
+
+
+def test_the_running_branch_defaults_to_the_integration_branch() -> None:
+    resolved = resolve(
+        Project(
+            modules=Modules.default().edit(Core(integration="trunk")).add(Versions())
+        )
+    )
+    assert resolved.branches == Branches(integration="trunk", running="trunk")
+    assert resolved.limits.gated == ["refs/heads/dev", "refs/heads/trunk"]
+
+
+def test_a_project_naming_another_integration_branch_can_stop_gating_dev() -> None:
+    project = Modules.default().edit(
+        Core(
+            integration="trunk",
+            credentials=Credentials(gated=Refs().drop("refs/heads/dev", why="unused")),
+        )
+    )
+    assert limits(project).gated == ["refs/heads/trunk"]
+
+
+def test_a_person_s_layer_on_the_project_can_name_the_running_branch() -> None:
+    below = Project(modules=Modules.default().add(Versions(running="live")))
+    layer = Project(modules=Modules().edit(Versions(running="next")))
+    layered = applied(layer, below, ["modules"])
+    assert resolve(layered).branches == Branches(integration="dev", running="next")
+
+
+@pytest.mark.parametrize(
+    "name", ["", "-x", "--force", "refs/heads/live", "a b", "a~1", "a:b", "a*", "a[b"]
+)
+def test_a_branch_is_named_by_its_short_name(name: str) -> None:
+    with pytest.raises(ValidationError, match="named by its short name"):
+        Versions(running=name)
+    with pytest.raises(ValidationError, match="named by its short name"):
+        Core(integration=name)
 
 
 def allowed(chosen: Actions) -> list[str]:

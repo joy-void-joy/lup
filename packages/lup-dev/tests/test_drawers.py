@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from lup_dev import Core, Levels, Modules, cli
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.resolve import Declaration
+from lup_dev.host.protocol import Branches
 from lup_dev.host.pushes import Pushes
 from lup_dev.inbox.delivery import Delivery, changed_since
 from lup_dev.inbox.notices import Notices
@@ -53,6 +54,8 @@ from lup_ledger.environment.store import Ledger
 from lup_ledger.parties import Conversation, Operator
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from conftest import FakeClock, Shell
 
 
@@ -109,7 +112,6 @@ class Branch:
         return Reader(
             delivery=self.delivery,
             layout=Layout(state=tmp_path / "state", runtime=tmp_path / "run"),
-            integration="dev",
         )
 
     def wrote(self, path: str, content: str, *, committed: bool = True) -> None:
@@ -488,6 +490,26 @@ def test_a_file_is_shown_from_where_the_branch_left_the_integration_branch_so_wh
         before=Text(text=f"a = 2\n{middle}b = 1\n"),
         after=Text(text=f"a = 2\n{middle}b = 2\n"),
     )
+
+
+def test_a_branch_is_shown_from_where_it_left_the_integration_branch_even_once_the_running_one_holds_it(
+    bare: Path,
+    shell: Shell,
+    clock: FakeClock,
+    tmp_path: Path,
+    declared_branches: Callable[[Layout, Path, Branches], None],
+) -> None:
+    delivery = alone(tmp_path, clock)
+    branch = Branch(bare, shell, delivery, clock)
+    reader = branch.reader(tmp_path)
+    declared_branches(reader.layout, bare, Branches(integration="dev", running="live"))
+    branch.wrote("rooms.py", "rooms = 1\n")
+    # `live` holds the branch whole: read against it, nothing would be left to show.
+    shell.git(bare, "branch", "live", "feat")
+
+    [rooms] = only(reader.read(ShowSince(conversation=branch.party))).files
+    assert rooms.file is not None
+    assert (rooms.file.before, rooms.file.after) == (None, Text(text="rooms = 1\n"))
 
 
 def reviewed_at(clock: FakeClock) -> datetime:

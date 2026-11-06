@@ -470,8 +470,10 @@ class Credentials(Layer, extra="forbid"):
     every tag (`lup_dev.catalog.credentials`), unless the project says."""
     gated: Refs = Refs.of(*CredentialDefaults().gated)
     """The refs a push from a room updates only once the gate passed on its
-    commit, as patterns over full ref names: the integration branch, `dev`
-    (`lup_dev.catalog.credentials`), unless the project says."""
+    commit, as patterns over full ref names: lup's integration branch, `dev`
+    (`lup_dev.catalog.credentials`), unless the project says. A branch the project
+    names, `Core.integration` or `Versions.running`, joins them as it's resolved
+    (`gating`, `declaration/resolve.py`), so it's said once."""
 
     def resolve(self, defaults: Credentials) -> Limits:
         """Resolve the actions allowed, the refs protected and the refs gated, `defaults` being the module's own.

@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Literal
 
 from lup.errors import LupError
 from lup.types import Model
+from lup_dev.approval import approved_branches
 from lup_dev.codescan.contract import Due
 from lup_dev.codescan.directives import IssueRef
 from lup_dev.errors import LupDevError
@@ -46,7 +47,7 @@ from lup_dev.forge.github import GitHub, GitHubError
 from lup_dev.git import Git
 from lup_dev.host.protocol import Register
 from lup_dev.inbox.delivery import Delivery
-from lup_dev.layout import GitDirectoryLayout
+from lup_dev.layout import GitDirectoryLayout, Layout
 from lup_dev.stored import read_model
 from lup_ledger.threads import (
     BranchLanded,
@@ -104,8 +105,11 @@ class Coming(Model, arbitrary_types_allowed=True):
     """What the host sees come for the threads parked until it, each where lup already looks; the one place a parked thread is woken from."""
 
     delivery: Delivery
-    integration: str
-    """The integration branch's name, where a branch or a commit lands."""
+    layout: Layout
+    """lup's state on the host, where the declaration approved for each repository
+    names its integration branch (`approved_branches`): what's parked until a
+    branch or a commit lands is parked until it's there, the branch work starts
+    from, so it's the integration branch that wakes it, whatever `land` lands on."""
     say: Callable[[str], None]
     """Where what couldn't be seen is said: the service's log."""
     states: Callable[[Register, IssueRef], Awaitable[Literal["open", "closed"]]] = (
@@ -179,6 +183,7 @@ class Coming(Model, arbitrary_types_allowed=True):
         self, launch: Register, onto: str, branches: list[str]
     ) -> list[Thread]:
         """Wake what `landed` wakes, raising what fails."""
+        integration = approved_branches(self.layout, launch.repository).integration
         woken = (
             self.concerns.due(
                 launch.repository,
@@ -186,7 +191,7 @@ class Coming(Model, arbitrary_types_allowed=True):
                     isinstance(trigger, BranchLanded) and trigger.branch in branches
                 ),
             )
-            if onto == self.integration
+            if onto == integration
             else []
         )
         return [*woken, *await self.closed(launch)]
@@ -197,7 +202,8 @@ class Coming(Model, arbitrary_types_allowed=True):
 
     async def commits(self, launch: Register, updates: list[Update]) -> list[Thread]:
         """Wake what `pushed` wakes, raising what fails but git's word, which is said."""
-        destination = f"refs/heads/{self.integration}"
+        integration = approved_branches(self.layout, launch.repository).integration
+        destination = f"refs/heads/{integration}"
         tip = next(
             (
                 each.source
@@ -221,7 +227,7 @@ class Coming(Model, arbitrary_types_allowed=True):
         except LupDevError as failed:
             self.say(
                 f"{launch.launch}: git couldn't say which commits a parked thread "
-                f"waits on reached `{self.integration}`, so none was woken: {failed}"
+                f"waits on reached `{integration}`, so none was woken: {failed}"
             )
             return []
         return self.concerns.due(

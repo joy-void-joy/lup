@@ -13,9 +13,8 @@ the project's declaration sets (`Register.limits`): a tool's action
 beyond the limits is refused, saying the declaration doesn't allow it and that
 allowing it is the operator's call. What a tool that writes would post is put to
 every module's hooks at `Publishing` first (`ModuleServing.publish`), and
-refused there, it isn't posted. There's no merge tool: work lands on the
-integration branch through git, and what reaches `main` is the operator's to
-merge.
+refused there, it isn't posted. There's no merge tool: work lands through git
+and `land`, and what reaches `main` is the operator's to merge.
 
 Closing an issue posts its comment first, then closes it, so a close that fails
 leaves the comment said rather than an issue closed without its reason; the
@@ -46,7 +45,6 @@ from lup_dev.forge import github as gh
 from lup_dev.forge.github import Closing, GitHubError, Search, terms
 from lup_dev.forge.protocol import IssueState, Stated
 from lup_dev.host.protocol import Action, GitHubRepository, HostError, Register
-from lup_dev.settings import LupDevSettings
 
 if TYPE_CHECKING:
     from lup.github.module import GitHub
@@ -522,7 +520,7 @@ class GitHubServing(ModuleServing):
                 "push it there first (`git push`), then open its pull request"
             )
             raise GitHubError(message)
-        integration = LupDevSettings().lup_integration_branch
+        integration = self.branches.integration
         link = await github.draft(asked.branch, integration, asked.title, asked.body)
         return (
             f"Opened a draft pull request from `{asked.branch}` into "

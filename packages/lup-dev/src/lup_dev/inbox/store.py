@@ -424,7 +424,7 @@ class Approval(Model):
     """The zone's fingerprint: a launch asking about the same zone joins the
     approval waiting for it."""
     pushed_by: Conversation | None = None
-    """The main conversation of the session whose push to the integration branch
+    """The main conversation of the session whose push to the running branch
     asked it, which the operator's comment on their answer is told to; none for
     one a launch asked at its terminal."""
     typing: bool = False
@@ -873,7 +873,7 @@ class Decided(Model):
 
 
 class Superseded(Model):
-    """An approval of a host zone a later approval of the same repository replaced, the integration branch's tip having moved; a hold at landing a later landing's hold on the same file replaced; or lup's word on citations that didn't resolve, its item edited before it was told, its citations read again."""
+    """An approval of a host zone a later approval of the same repository replaced, the running branch's tip having moved; a hold at landing a later landing's hold on the same file replaced; or lup's word on citations that didn't resolve, its item edited before it was told, its citations read again."""
 
     state: Literal["superseded"] = "superseded"
     at: datetime

@@ -16,7 +16,7 @@ from lup_dev.forge.github import GitHubError
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard
 from lup_dev.host.names import Names
-from lup_dev.host.protocol import Limits, Register
+from lup_dev.host.protocol import Branches, Limits, Register
 from lup_dev.host.pushes import Pushes
 from lup_dev.inbox.delivery import Delivery
 from lup_dev.inbox.notices import Notices
@@ -33,6 +33,8 @@ from lup_ledger.parties import Conversation, Lup
 from lup_ledger.threads import Parked, Reopened, Thread
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from conftest import FakeClock
 
     from lup_dev.codescan.directives import IssueRef
@@ -66,9 +68,10 @@ class World:
         self.said: list[str] = []
         self.closed: list[int] = []
         self.asked: list[str] = []
+        self.layout = Layout(state=tmp_path / "state", runtime=tmp_path / "run")
         self.coming = Coming(
             delivery=self.delivery,
-            integration="dev",
+            layout=self.layout,
             say=self.said.append,
             states=self.state,
         )
@@ -213,6 +216,35 @@ def test_a_branch_wakes_only_where_it_lands_on_the_integration_branch(
     assert isinstance(world.status("release"), Parked)
 
 
+def test_a_thread_parked_on_a_branch_wakes_as_it_reaches_the_integration_branch_not_the_running_one(
+    world: World, declared_branches: Callable[[Layout, Path, Branches], None]
+) -> None:
+    declared_branches(
+        world.layout, world.repository, Branches(integration="dev", running="live")
+    )
+    world.parked("release", Parking(branch="build-x"), world.main("s1"))
+
+    on_trial = asyncio.run(world.coming.landed(world.register, "live", ["build-x"]))
+    assert on_trial == []
+    assert isinstance(world.status("release"), Parked)
+
+    accepted = asyncio.run(world.coming.landed(world.register, "dev", ["build-x"]))
+    assert [each.name for each in accepted] == ["release"]
+
+
+def test_a_project_s_own_integration_branch_wakes_what_s_parked_on_it(
+    world: World, declared_branches: Callable[[Layout, Path, Branches], None]
+) -> None:
+    declared_branches(
+        world.layout, world.repository, Branches(integration="trunk", running="trunk")
+    )
+    world.parked("release", Parking(branch="build-x"), world.main("s1"))
+
+    assert asyncio.run(world.coming.landed(world.register, "dev", ["build-x"])) == []
+    landed = asyncio.run(world.coming.landed(world.register, "trunk", ["build-x"]))
+    assert [each.name for each in landed] == ["release"]
+
+
 def test_the_sweep_wakes_a_thread_whose_time_came(
     world: World, clock: FakeClock
 ) -> None:
@@ -340,6 +372,34 @@ def test_a_push_moving_the_integration_branch_wakes_a_thread_parked_until_a_comm
     assert isinstance(world.status("odd"), Parked)
 
 
+def test_a_thread_parked_on_a_commit_wakes_as_it_reaches_the_integration_branch_not_the_running_one(
+    world: World, declared_branches: Callable[[Layout, Path, Branches], None]
+) -> None:
+    root = world.repository.parent
+    for arguments in [
+        ["init", "-q", "-b", "dev"],
+        ["config", "user.email", "test@example.com"],
+        ["config", "user.name", "Test"],
+        ["config", "commit.gpgsign", "false"],
+    ]:
+        run("git", *arguments, cwd=root)
+    (root / "a").write_text("a")
+    run("git", "add", "-A", cwd=root)
+    run("git", "commit", "-q", "-m", "a", cwd=root)
+    commit = run("git", "rev-parse", "HEAD", cwd=root).text().strip()
+    declared_branches(
+        world.layout, world.repository, Branches(integration="dev", running="live")
+    )
+    world.parked("first", Parking(commit=commit), world.main("s1"))
+
+    def pushed(ref: str) -> list[Thread]:
+        update = Update(source=commit, destination=ref)
+        return asyncio.run(world.coming.pushed(world.register, [update]))
+
+    assert pushed("refs/heads/live") == []
+    assert [each.name for each in pushed("refs/heads/dev")] == ["first"]
+
+
 def test_a_commit_is_read_as_a_hash_alone() -> None:
     assert hashed("C6576E49")
     assert not hashed("HEAD")
@@ -416,7 +476,7 @@ def test_each_sweep_beside_the_host_service_wakes_what_came_and_says_a_failure(
     said: list[str] = []
     sweeping = cli.Sweeping.model_construct(coming=world.coming, say=said.append)
     failing = cli.Sweeping.model_construct(
-        coming=Failing(delivery=world.delivery, integration="dev", say=said.append),
+        coming=Failing(delivery=world.delivery, layout=world.layout, say=said.append),
         say=said.append,
     )
 

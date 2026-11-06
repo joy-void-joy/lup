@@ -854,7 +854,7 @@ def test_a_fresh_session_s_bearings_list_the_open_threads_and_the_root_it_took(
     delivery.layout.record("dev").unlink()
     clock.sleep(60)
     later = launched(delivery, "dev", "s2")
-    bearings = RepositoryBearings(delivery=delivery, integration="dev")
+    bearings = RepositoryBearings(delivery=delivery, running=lambda _: "dev")
     took = bearings.took(main("s2"))
 
     page = bearings.page(
