@@ -186,11 +186,19 @@ def application(
         given: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
         origin: Annotated[str | None, Header()] = None,
     ) -> None:
-        """Refuse a call without the dashboard's token, in its cookie or as a bearer, or from a page of another origin."""
+        """Refuse a call without the dashboard's token, in its cookie or as a bearer, or from a page of another origin.
+
+        Either one will do, so a cookie left from an earlier token, as a demo
+        started again on a port leaves, doesn't refuse the token the page was
+        just handed.
+        """
         if origin is not None and origin not in access.origins():
             raise HTTPException(status_code=403, detail=f"not from {origin}")
-        token = held or (None if given is None else given.credentials) or ""
-        if not secrets.compare_digest(token.encode(), access.token.encode()):
+        offered = [held or "", "" if given is None else given.credentials]
+        if not any(
+            secrets.compare_digest(each.encode(), access.token.encode())
+            for each in offered
+        ):
             raise HTTPException(
                 status_code=401, detail="the dashboard's token is needed"
             )
