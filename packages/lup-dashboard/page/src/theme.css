@@ -1772,11 +1772,22 @@ kbd {
     overflow-x: hidden;
 }
 
+/* The list's own cursor's line, only where the keys go; apart from what the second pane's cursor is on, which it keeps in
+   sight, as the overview: what's in view bracketed by a bar, the cursor's entry highlighted, neither a cursor. */
 .list-buffer .cm-activeLine {
-    background: #0d1a26;
+    background: none;
 }
 
 .pane-list:focus-within .list-buffer .cm-activeLine {
+    background: var(--float-bg);
+}
+
+.list-buffer .cm-line.list-in-view {
+    box-shadow: inset 2px 0 0 var(--border);
+    background: #04101a;
+}
+
+.list-buffer .cm-line.list-cursor {
     background: var(--selection);
 }
 
@@ -1809,6 +1820,11 @@ kbd {
 
 .drawn.list-doing {
     color: var(--muted);
+}
+
+.list-asks {
+    color: var(--orange);
+    font-weight: 700;
 }
 
 .mark-pile {

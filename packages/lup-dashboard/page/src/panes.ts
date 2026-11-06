@@ -8,6 +8,8 @@ import type { Span } from "./comments";
 import { doing, type Activity } from "./agents";
 import type { Run } from "./reconcile";
 import type { Merged } from "./looks";
+import { itemStanding } from "./outline";
+import { DRAFTED, GLYPHS } from "./Outline";
 import {
     about,
     checkOwner,
@@ -15,6 +17,8 @@ import {
     grouped,
     nested,
     news,
+    rootThread,
+    taskOwner,
     toAnswer,
     waits,
     whose,
@@ -25,6 +29,7 @@ import {
     type Item,
     type Laid,
     type OwnedCheck,
+    type Seeing,
     type Showing,
     type ThreadRead,
     type Threading,
@@ -93,8 +98,10 @@ export interface Row {
     says: string;
     /** Whether `o` writes to what it opens: a message to an agent, or on a thread. */
     writes: boolean;
-    /** The section it heads, folding what's under it, by what names the fold; none for a row that folds nothing. */
-    folds?: { key: string; closed: boolean; kind: string };
+    /** The item or check it stands for, by number, which going to it lands on. */
+    node?: number;
+    /** The rows nested under it, folding under it, quiet until opened; what names their fold, and whether it starts closed. */
+    under?: { key: string; closed: boolean; kind: string; rows: Row[] };
 }
 
 /** How wide the list writes a row, tallies at its end, in characters. */
@@ -105,7 +112,7 @@ const WAITING = "◆";
 const NEWS = "•";
 const TO_REVIEW = "◇";
 const PILE = "≈";
-const DRAFTED = "»";
+const WRITTEN = "»";
 
 /** Return the stretches of `tally`, each count in its colour; none where nothing's counted. */
 function tallied(tally: Tally): Stretch[] {
@@ -114,7 +121,7 @@ function tallied(tally: Tally): Stretch[] {
         { count: tally.news, glyph: NEWS, look: "mark-news" },
         { count: tally.files, glyph: TO_REVIEW, look: "mark-to-review" },
         { count: tally.pile, glyph: PILE, look: "mark-pile" },
-        { count: tally.written, glyph: DRAFTED, look: "outline-draft" },
+        { count: tally.written, glyph: WRITTEN, look: "outline-draft" },
     ].filter((one) => one.count > 0);
     return each.flatMap((one, at) => [...(at === 0 ? [] : [{ text: " " }]), { text: `${one.glyph}${one.count}`, look: one.look }]);
 }
@@ -160,6 +167,10 @@ export interface ListReading {
     landings?: Shown["landings"];
     /** The checks waiting on the operator, by agent (`checkOwner`), where the list goes by agent. */
     checks?: readonly OwnedCheck[];
+    /** What's new to the operator, which an item's row says. */
+    seeing?: Seeing;
+    /** The rows whose nest is open however little of it waits: what's on screen and where the second pane's cursor has been, by row. */
+    opened?: ReadonlySet<string>;
 }
 
 /** Return the number of a check as the draft marks it answered: ticked, or a comment on it its answer in words. */
@@ -175,6 +186,24 @@ function checksWaiting(key: string, reading: Pick<ListReading, "checks" | "draft
     }).length;
 }
 
+/** Return each thread open that the agent named `key` owns, as a task (`taskOwner`). */
+function tasksOf(key: string, reading: Pick<ListReading, "threads">): ThreadRead[] {
+    return (reading.threads?.read.threads ?? []).filter((each) => {
+        const owner = taskOwner(each);
+        return !closedTask(each) && owner !== null && whose(owner) === key;
+    });
+}
+
+/** Return whether a thread's over, settled or declined. */
+function closedTask(read: ThreadRead): boolean {
+    return read.state === "settled" || read.state === "declined";
+}
+
+/** Return each thread the agent named `key` owns that's done, for the operator to confirm. */
+function confirmingOf(key: string, reading: Pick<ListReading, "threads">): ThreadRead[] {
+    return tasksOf(key, reading).filter((each) => each.state === "done to confirm");
+}
+
 /** Return how the agent `group` is of stands: what of theirs asks the operator, what's news, what's left to review in their "since you approved", and what's drafted to them. */
 function agentTally(group: Grouping, reading: ListReading): Tally {
     const { draft, drawers, looks, remote, called } = reading;
@@ -182,7 +211,7 @@ function agentTally(group: Grouping, reading: ListReading): Tally {
     const parked = draft.parked ?? [];
     const done = draft.done ?? [];
     const open = group.items.filter((each) => !parked.includes(each.number));
-    const asks = open.filter((each) => toAnswer(each, draft)).length + checksWaiting(group.key, reading);
+    const asks = open.filter((each) => toAnswer(each, draft)).length + checksWaiting(group.key, reading) + confirmingOf(group.key, reading).length;
     const newsCount = open.filter((each) => news(each) && waits(each) && !done.includes(each.number)).length;
     const numbers = new Set(group.items.map((each) => each.number));
     const comments = (draft.comments ?? []).filter((each) => numbers.has(each.item) && each.text.trim() !== "").length;
@@ -200,23 +229,37 @@ function agentTally(group: Grouping, reading: ListReading): Tally {
     return { asks, news: newsCount, files, pile: 0, written: comments + letters + remarks };
 }
 
-/** Return the conversation of the agent named `key`, among those the review names; none where it isn't one of them, as lup's approvals. */
-export function conversationNamed(key: string, reading: Pick<ListReading, "agents" | "items" | "checks">): Conversation | undefined {
-    const owners = (reading.checks ?? []).flatMap((each) => {
+/** Return whoever owns a check waiting on the operator, or a task the list shows (`taskShown`). */
+function ownersIn(reading: Pick<ListReading, "checks" | "threads">): Conversation[] {
+    const ofChecks = (reading.checks ?? []).flatMap((each) => {
         const owner = checkOwner(each);
         return owner === null ? [] : [owner];
     });
-    return [...reading.agents, ...owners].find((each) => whose(each) === key) ?? reading.items.flatMap((each) => (each.sender.party === "conversation" && whose(each.sender) === key ? [each.sender] : []))[0];
+    const ofTasks = (reading.threads?.read.threads ?? []).filter(taskShown).flatMap((each) => {
+        const owner = taskOwner(each);
+        return owner === null ? [] : [owner];
+    });
+    return [...ofChecks, ...ofTasks];
+}
+
+/**
+ * Return whether the list shows a thread as a task: one still open, but a session's own root with nothing in it asking,
+ * which is no concern of its own, and would list each session a second time.
+ */
+function taskShown(read: ThreadRead): boolean {
+    return !closedTask(read) && (!rootThread(read) || (read.asks ?? []).length > 0 || (read.new ?? []).length > 0 || read.state === "done to confirm");
+}
+
+/** Return the conversation of the agent named `key`, among those the review names; none where it isn't one of them, as lup's approvals. */
+export function conversationNamed(key: string, reading: Pick<ListReading, "agents" | "items" | "checks" | "threads">): Conversation | undefined {
+    return [...reading.agents, ...ownersIn(reading)].find((each) => whose(each) === key) ?? reading.items.flatMap((each) => (each.sender.party === "conversation" && whose(each.sender) === key ? [each.sender] : []))[0];
 }
 
 /** Return every agent's group the list names, with those of lup's approvals: each with an item, then each of `agents` with none. */
 function groupsOf(reading: ListReading): Grouping[] {
     const groups = grouped([...reading.items], reading.banner);
     const keys = new Set(groups.map((each) => each.key));
-    const owners = (reading.checks ?? []).flatMap((each) => {
-        const owner = checkOwner(each);
-        return owner === null ? [] : [owner];
-    });
+    const owners = ownersIn(reading);
     const empty = [...reading.agents, ...owners].flatMap((conversation): Grouping[] => {
         const key = whose(conversation);
         if (keys.has(key)) {
@@ -229,10 +272,11 @@ function groupsOf(reading: ListReading): Grouping[] {
 }
 
 /** Return the row of the agent `group` is of, set in `depth` deep: how they stand, their name and their tally; under it, what they're doing, drawn, and what they're working on. */
-function agentRow(group: Grouping, depth: number, reading: ListReading): Row {
+function agentRow(group: Grouping, depth: number, reading: ListReading, nesting: boolean = true): Row {
     const conversation = group.conversation;
     const tally = agentTally(group, reading);
     const set = "  ".repeat(depth);
+    const under = nesting ? nestOf(group, depth, tally, reading) : undefined;
     if (conversation === null) {
         return {
             id: `agent ${group.key}`,
@@ -240,6 +284,7 @@ function agentRow(group: Grouping, depth: number, reading: ListReading): Row {
             opens: { kind: "agent", key: group.key },
             says: "lup's approvals",
             writes: false,
+            ...(under === undefined ? {} : { under }),
         };
     }
     const called = reading.called(conversation);
@@ -250,11 +295,11 @@ function agentRow(group: Grouping, depth: number, reading: ListReading): Row {
     const mark = !runs || state === "ended" ? "mark-ended" : state === "calling" ? "mark-calling" : "mark-idle";
     const activity = reading.activities.get(group.key) ?? null;
     const working = currentTask(reading.drawers.get(group.key)?.tasks ?? []);
-    const under = `${set}    `;
+    const setIn = `${set}    `;
     const sub: RowLine | null = runs
         ? {
-              stretches: [{ text: `${under}${working === null ? "" : cutAt(working, COLUMNS)}`, look: "list-sub" }],
-              tick: { after: under.length, said: (now) => `${doing(activity, now)}${working === null ? "" : " · "}`, look: "list-doing" },
+              stretches: [{ text: `${setIn}${working === null ? "" : cutAt(working, COLUMNS)}`, look: "list-sub" }],
+              tick: { after: setIn.length, said: (now) => `${doing(activity, now)}${working === null ? "" : " · "}`, look: "list-doing" },
           }
         : null;
     return {
@@ -263,7 +308,98 @@ function agentRow(group: Grouping, depth: number, reading: ListReading): Row {
         opens: { kind: "agent", key: group.key },
         says: runs ? called : `${called}, ended`,
         writes: true,
+        ...(under === undefined ? {} : { under }),
     };
+}
+
+/**
+ * Return what's nested under the agent `group` is of, `depth` deep: each item of theirs, each check they own, as the
+ * review lays them out, marked as the overview marks them; then each task of theirs, a line each, quiet, but what waits
+ * on the operator there. Folded where nothing of it asks them, until what's on screen comes to it; none where there's
+ * nothing.
+ */
+function nestOf(group: Grouping, depth: number, tally: Tally, reading: ListReading): Row["under"] {
+    const set = "  ".repeat(depth + 1);
+    const items = group.items.map((each) => itemRow(each, group, set, reading));
+    const checks = (reading.checks ?? []).filter((each) => {
+        const owner = checkOwner(each);
+        return owner !== null && whose(owner) === group.key;
+    }).map((each) => checkRow(each, group, set, reading));
+    const tasks = tasksOf(group.key, reading).filter(taskShown);
+    const threads = reading.threads;
+    const rows = [...items, ...checks, ...(threads === null ? [] : threadsNested(tasks, threads.read.threads).map(({ read, depth: within }) => taskRow(read, set, within, threads, reading)))];
+    if (rows.length === 0) {
+        return undefined;
+    }
+    const id = `agent ${group.key}`;
+    return { key: `nest ${id}`, closed: tally.asks === 0 && reading.opened?.has(id) !== true, kind: "section", rows };
+}
+
+/** Return the first words of what an item says, for its row: its own title where it has one; none where it says nothing of its own. */
+function itemWords(item: Item): string {
+    const reason = item.reason;
+    const text = "text" in reason && typeof reason.text === "string" ? reason.text : "";
+    return text.split("\n").find((each) => each.trim() !== "")?.trim() ?? "";
+}
+
+/** Say what kind of item it is, as a word: a message by its own kind, or as a turn's end. */
+function itemKind(item: Item): string {
+    const reason = item.reason;
+    return reason.reason === "message" ? (reason.ending ? "turn ended" : reason.kind) : reason.reason;
+}
+
+/** Return the row of `item`, of the group `group`, set in by `set`: how it stands, as the overview marks it, its number, what it is and how it begins, what's drafted on it at its end. */
+function itemRow(item: Item, group: Grouping, set: string, reading: ListReading): Row {
+    const standing = itemStanding({ item }, reading.draft, reading.seeing ?? { groups: new Map(), commented: new Set() });
+    const mark = standing.marks[0];
+    const glyph = mark === undefined ? " " : (GLYPHS[mark] ?? " ");
+    const drafted = standing.draft.map((each) => DRAFTED[each].glyph).join("");
+    const named = `@${item.number} ${itemKind(item)}`;
+    const left: Stretch[] = [
+        { text: `${set}` },
+        { text: `${glyph} `, look: mark === undefined ? "list-sub" : `mark-${mark}` },
+        { text: named, look: mark === "waiting" ? "list-asks" : "list-sub" },
+        ...(standing.fresh ? [{ text: " new", look: "outline-fresh" }] : []),
+        ...(drafted === "" ? [] : [{ text: ` ${drafted}`, look: "outline-draft" }]),
+        { text: ` ${itemWords(item)}`, look: "list-sub" },
+    ];
+    return { id: `item ${item.number}`, lines: [{ stretches: fitted(left) }], opens: { kind: "agent", key: group.key }, says: named, writes: false, node: item.number };
+}
+
+/** Return the row of a check, under whoever owns it: its number, and what's to try. */
+function checkRow(owned: OwnedCheck, group: Grouping, set: string, reading: ListReading): Row {
+    const number = owned.check.check.number;
+    const answered = checkAnswered(number, reading.draft);
+    const left: Stretch[] = [
+        { text: set },
+        { text: `${answered ? " " : "◆"} `, look: "mark-waiting" },
+        { text: `check @${number}`, look: answered ? "list-sub" : "list-asks" },
+        ...(answered ? [{ text: " ✓", look: "outline-draft" }] : []),
+        { text: ` ${owned.check.check.text.split("\n")[0] ?? ""}`, look: "list-sub" },
+    ];
+    return { id: `check ${number}`, lines: [{ stretches: fitted(left) }], opens: { kind: "agent", key: group.key }, says: `check @${number} in @${owned.thread.thread.name}`, writes: false, node: number };
+}
+
+/** Return `left` cut at the list's width, as a row with no tally. */
+function fitted(left: readonly Stretch[]): Stretch[] {
+    return padded(left, NOTHING);
+}
+
+/**
+ * Return a task's row, set in by `set` and how deep it's nested among its owner's: one line, quiet, but what waits on the
+ * operator there; opened, it reads across agents as a conversation, the thread's own buffer.
+ */
+function taskRow(read: ThreadRead, set: string, depth: number, threads: Threading, reading: ListReading): Row {
+    const state = threadState(read);
+    const tally = threadTally(read, threads, reading.draft);
+    const waiting = tally.asks + tally.files > 0;
+    const left: Stretch[] = [
+        { text: `${set}${"  ".repeat(depth)}` },
+        { text: `@${read.thread.name}`, look: waiting ? "list-name" : "list-sub" },
+        { text: " " },
+        waiting ? state : { text: state.text, look: "list-sub" },
+    ];
+    return { id: `thread ${read.thread.number}`, lines: [{ stretches: padded(left, tally) }], opens: { kind: "thread", number: read.thread.number }, says: `@${read.thread.name}: ${about(read.thread)}`, writes: true };
 }
 
 /** Return the row of what's for the operator, with `tally`, what's there counted across everyone. */
@@ -311,14 +447,31 @@ export function listedByAgent(reading: ListReading): Row[] {
         rows.push(agentRow(group, depth, reading));
     }
     const gone = groups.filter((each) => each.conversation !== null && !reading.running.has(each.key));
-    if (gone.length > 0) {
-        rows.push(heading("heading no agent", "No agent", `${gone.length}`, { kind: "no agent" }, "No agent: what agents who've ended left", added(gone.map(tallyOf))));
+    const threads = reading.threads;
+    // A task nobody's opened or holds, which no one running or ended owns.
+    const unowned = threads === null ? [] : threads.read.threads.filter((each) => taskShown(each) && taskOwner(each) === null);
+    if (gone.length > 0 || unowned.length > 0) {
+        rows.push(heading("heading no agent", "No agent", `${gone.length + unowned.length}`, { kind: "no agent" }, "No agent: what nobody running answers", added(gone.map(tallyOf))));
+        if (threads !== null) {
+            for (const { read, depth } of threadsNested(unowned, threads.read.threads)) {
+                rows.push(taskRow(read, "", depth, threads, reading));
+            }
+        }
         for (const { group, depth } of nested(gone, reading.parents)) {
             rows.push(agentRow(group, depth, reading));
         }
     }
     for (const group of groups.filter((each) => each.conversation === null)) {
         rows.push(agentRow(group, 0, reading));
+    }
+    if (threads !== null) {
+        const done = threads.read.threads.filter(closedTask);
+        if (done.length > 0) {
+            rows.push({
+                ...heading("heading settled", "settled", `${done.length}`),
+                under: { key: "list settled", closed: true, kind: "section", rows: threadsNested(done, threads.read.threads).map(({ read, depth }) => taskRow(read, "", depth, threads, reading)) },
+            });
+        }
     }
     return rows;
 }
@@ -344,7 +497,7 @@ function threadState(read: ThreadRead): { text: string; look: string } {
 /** Return how thread `read` stands: what asks the operator, what's news, the files a landing waits on and the pile; and what's drafted on it. */
 function threadTally(read: ThreadRead, threads: Threading, draft: Draft): Tally {
     const written = (draft.letters ?? []).filter((each) => each.thread === read.thread.number && each.text.trim() !== "").length;
-    return { asks: (read.asks ?? []).length, news: (read.new ?? []).length, files: threads.landing.get(read.thread.number) ?? 0, pile: (read.pile ?? []).length, written };
+    return { asks: (read.asks ?? []).length + (read.state === "done to confirm" ? 1 : 0), news: (read.new ?? []).length, files: threads.landing.get(read.thread.number) ?? 0, pile: (read.pile ?? []).length, written };
 }
 
 /** Return thread `read`'s row, set in `depth` deep: its name, how it stands and its tally; under it, what it's about and who holds it. */
@@ -401,8 +554,10 @@ export function listedByThread(reading: ListReading): Row[] {
     const rows: Row[] = [forYouRow({ ...counted, asks: counted.asks + loose })];
     const runningGroups = groups.filter((each) => each.conversation !== null && reading.running.has(each.key));
     rows.push(heading("heading running", "running", `${runningGroups.length}`));
+    // Whom to talk to, a line each: what's theirs is under the threads here, each a row of its own.
+    const asAgents: ListReading = { ...reading, threads: null };
     for (const { group, depth } of nested(runningGroups, reading.parents)) {
-        rows.push(agentRow(group, depth, reading));
+        rows.push(agentRow(group, depth, asAgents, false));
     }
     const open = reads.filter((each) => !closed(each));
     const nobody = (read: ThreadRead) => (read.answering ?? null) === null && read.state !== "parked";
@@ -419,15 +574,67 @@ export function listedByThread(reading: ListReading): Row[] {
     }
     const done = reads.filter(closed);
     if (done.length > 0) {
-        rows.push({ ...heading("heading settled", "settled", `${done.length}`), folds: { key: "list settled", closed: true, kind: "section" } });
-        for (const { read, depth } of threadsNested(done, reads)) {
-            rows.push(threadRow(read, depth, threads, reading));
-        }
+        rows.push({
+            ...heading("heading settled", "settled", `${done.length}`),
+            under: { key: "list settled", closed: true, kind: "section", rows: threadsNested(done, reads).map(({ read, depth }) => threadRow(read, depth, threads, reading)) },
+        });
     }
     for (const group of groups.filter((each) => each.conversation === null)) {
-        rows.push(agentRow(group, 0, reading));
+        rows.push(agentRow(group, 0, asAgents, false));
     }
     return rows;
+}
+
+/** Return the rows holding the row named `id`, outermost first, and it last; none where it's in none of `rows`. */
+export function pathTo(rows: readonly Row[], id: string): Row[] | null {
+    for (const row of rows) {
+        if (row.id === id) {
+            return [row];
+        }
+        const within = row.under === undefined ? null : pathTo(row.under.rows, id);
+        if (within !== null) {
+            return [row, ...within];
+        }
+    }
+    return null;
+}
+
+/** One part of the buffer on screen a row of the list stands for: the row's id, where it is, and how deep. */
+export interface BufferSpan extends Span {
+    id: string;
+    depth: number;
+}
+
+/**
+ * Return what the rows of the list stand for in the buffer `laid`, `showing`: each group, its agent's row or its
+ * thread's; each item and check, its own; and a thread's own buffer, whole, its thread's row, its items being under their
+ * senders.
+ */
+export function bufferSpans(laid: Laid, showing: Showing): BufferSpan[] {
+    if (showing.kind === "thread") {
+        return [{ id: `thread ${showing.number}`, from: 0, to: laid.text.length, depth: 0 }];
+    }
+    return [
+        ...laid.groups.map((each) => ({
+            id: each.thread === null ? `agent ${each.place.replace(/^(now|later) /, "")}` : `thread ${each.thread.thread.number}`,
+            from: each.banner.from,
+            to: each.end,
+            depth: each.depth,
+        })),
+        ...laid.regions.map((each) => ({ id: `item ${each.item.number}`, from: each.header.from, to: each.end, depth: 100 })),
+        ...laid.checks.map((each) => ({ id: `check ${each.check.check.number}`, from: each.from, to: each.to, depth: 100 })),
+    ];
+}
+
+/** Return the row the second pane's cursor is on: the deepest of `spans` holding `head`, that the list has (`known`). */
+export function spanAt(spans: readonly BufferSpan[], head: number, known: (id: string) => boolean): string | null {
+    let found: BufferSpan | null = null;
+    for (const each of spans) {
+        if (head >= each.from && head <= each.to && known(each.id) && (found === null || each.depth >= found.depth)) {
+            found = each;
+        }
+    }
+    return found?.id ?? null;
 }
 
 /** A row where it's laid out in the list's text. */
@@ -470,14 +677,7 @@ export function listLaid(rows: readonly Row[]): ListLaid {
     const lines: ListLaid["lines"] = [];
     const ticks: ListLaid["ticks"] = [];
     const folds: ListFold[] = [];
-    let folding: { row: Row; summary: Span; opens: NonNullable<Row["folds"]> } | null = null;
-    const endFold = (to: number) => {
-        if (folding !== null && to > folding.summary.to) {
-            folds.push({ key: folding.opens.key, closed: folding.opens.closed, kind: folding.opens.kind, summary: folding.summary, from: folding.summary.to, to });
-        }
-        folding = null;
-    };
-    for (const row of rows) {
+    const write = (row: Row) => {
         const from = text.length;
         for (const line of row.lines) {
             const at = text.length;
@@ -497,19 +697,16 @@ export function listLaid(rows: readonly Row[]): ListLaid {
             }
         }
         const to = text.length - 1;
-        const last = runs.at(-1);
-        if (last !== undefined && last.owner === row.id) {
-            last.to = to;
-        } else {
-            runs.push({ owner: row.id, from, to });
-        }
+        runs.push({ owner: row.id, from, to });
         placed.push({ from, to, row });
-        if (row.folds !== undefined) {
-            endFold(from - 1);
-            folding = { row, summary: { from, to }, opens: row.folds };
+        const under = row.under;
+        if (under !== undefined && under.rows.length > 0) {
+            under.rows.forEach(write);
+            folds.push({ key: under.key, closed: under.closed, kind: under.kind, summary: { from, to }, from: to, to: text.length - 1 });
         }
-    }
-    endFold(text.length - 1);
+    };
+    rows.forEach(write);
+    folds.sort((a, b) => a.from - b.from || b.to - a.to);
     return { text, owners, runs, rows: placed, marks, lines, folds, ticks };
 }
 

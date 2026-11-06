@@ -505,9 +505,7 @@ export function App() {
     const setAside = useMemo(() => (inbox.reply?.kind === "inbox-items" ? inbox.reply.set_aside : []), [inbox.reply]);
 
     const threading = useMemo<Omit<Threading, "banner"> | null>(
-        () => (threadsRead === null || !byThread ? null : { read: threadsRead, shown: conversations.shown, whole: conversations.whole, landing: landingIn }),
-        // `byThread` says it once, as the page loads.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        () => (threadsRead === null ? null : { read: threadsRead, shown: conversations.shown, whole: conversations.whole, landing: landingIn }),
         [threadsRead, conversations, landingIn],
     );
     // The checks the threads shown hold, by number: a comment on one is the operator's answer to it, in their words.
@@ -1278,7 +1276,7 @@ export function App() {
                 )}
                 <span className="spacer" />
                 <span className="count">
-                    {agents.length} {agents.length === 1 ? "agent" : "agents"} · <span className="mark-waiting">◆</span> {waitingOn(byThread ? threadsRead : null, landingIn, waiting, draft.parked ?? []) + checksWaiting.length} waiting on you
+                    {agents.length} {agents.length === 1 ? "agent" : "agents"} · <span className="mark-waiting">◆</span> {waitingOn(byThread ? threadsRead : null, landingIn, waiting, draft.parked ?? []) + checksWaiting.length + (panes === "agents" ? (threadsRead?.threads ?? []).filter((each) => each.state === "done to confirm").length : 0)} waiting on you
                     {toReadCount === 0 ? null : (
                         <>
                             {" · "}

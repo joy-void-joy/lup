@@ -69,8 +69,8 @@ import { DRAFTED, GLYPHS } from "./Outline";
 import { linesOver, stickies, type Sticky } from "./stack";
 import { depths, levelled } from "./folds";
 import { carried, chainAt, findNode, implied, isMarked, marking, marksOn, movedInto, reachOf, reachedIn, type Act, type Destination, type Marked } from "./grammar";
-import { Listing, type ListHandle } from "./Panes";
-import { arrivalIn, bufferKey, conversationNamed, listedByAgent, listedByThread, titled, type PanesBy, type Showing } from "./panes";
+import { Listing, type ListHandle, type Viewed as ListViewed } from "./Panes";
+import { arrivalIn, bufferKey, bufferSpans, conversationNamed, listedByAgent, listedByThread, pathTo, spanAt, titled, type PanesBy, type Showing } from "./panes";
 import { ThreadPalette } from "./Palette";
 import type { DrawerKind, FoldKind, Here } from "./keys";
 import type { Titled } from "./panes";
@@ -948,6 +948,9 @@ export function Review({
     const buffersLeft = useRef(new Map<string, { owner: string; into: number; screen: number | null }>());
     // The buffer being gone to, until it's laid out and read: where it lands, and whether a message is written once it has.
     const goingTo = useRef<{ write: boolean; item: number | null; since: boolean } | null>(null);
+    // What of the buffer on screen the second pane has in view, and under its cursor, by the list's rows; and the rows whose nesting is open for it.
+    const [viewed, setViewed] = useState<ListViewed>({ seen: [], cursor: null });
+    const [nestsOpen, setNestsOpen] = useState<ReadonlySet<string>>(new Set());
     // The buffers `gt` and `gd` crossed from, which Ctrl+O goes back to: vim's own list of jumps knows one text.
     const crossed = useRef<Showing[]>([]);
     const listHandle = useRef<ListHandle | null>(null);
@@ -982,8 +985,10 @@ export function Review({
         !loading.current.read ? 0 : typed.current !== null ? PACED_MOST : Math.min(PACED_MOST, Math.max(PACED_LEAST, 4 * cost.current)),
     );
     // What's new to the operator: grouped by thread, each item that came after where they last read its thread.
+    // In panes by agent, threads are read for what's listed, and laid out only in a thread's own buffer.
+    const byThreadNow = threadsRead !== null && (panes !== "agents" || showing.kind === "thread");
     const seeing = useMemo(() => {
-        if (threadsRead === null) {
+        if (threadsRead === null || !byThreadNow) {
             return seenGiven;
         }
         // What's new in a thread and what asks the operator there, of what came after where they last read it.
@@ -994,9 +999,10 @@ export function Review({
         );
         const calling = threadsRead.read.threads.flatMap((each) => [...(each.new ?? []), ...(each.asks ?? []).map((ask) => ask.node)]);
         return { ...seenGiven, threaded: new Set(calling.filter((each) => later.has(each))) };
-    }, [seenGiven, threadsRead]);
-    // The threads, each banner saying what the core says of it (`threadBanner`).
-    const threads = useMemo<Threading | null>(() => (threadsRead === null ? null : { ...threadsRead, banner: (read, landing, section) => threadBanner(read, landing, called, section) }), [threadsRead, called]);
+    }, [seenGiven, threadsRead, byThreadNow]);
+    // The threads, each banner saying what the core says of it (`threadBanner`): as they're read, and as they're laid out.
+    const threadsAll = useMemo<Threading | null>(() => (threadsRead === null ? null : { ...threadsRead, banner: (read, landing, section) => threadBanner(read, landing, called, section) }), [threadsRead, called]);
+    const threads = byThreadNow ? threadsAll : null;
     // The same object while what it holds is the same, as the rest of what's taken is.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     const arranging = useMemo(() => ({ ...arrangedBy, threads }), [arrangedBy.parents, arrangedBy.looks, arrangedBy.running, arrangedBy.landings, arrangedBy.remote, arrangedBy.checks, threads]);
@@ -1007,6 +1013,8 @@ export function Review({
     const before = useRef<Laid | null>(null);
     const followed = useRef<Followed | null>(null);
     // Laid out with what's typed in a comment, though it isn't given yet, so the text laid out is what the editor holds.
+    // In panes by agent, the threads done for the operator to confirm: each under whoever owns it, as a check is.
+    const confirming = useMemo(() => (panes === "agents" && threadsRead !== null ? threadsRead.read.threads.filter((each) => each.state === "done to confirm") : []), [panes, threadsRead]);
     /** Lay out `drafted`, the buffer `shownNow` of the review, or the review whole. */
     const layOut = (drafted: Draft, shownNow: Showing | null): Laid =>
         laid(
@@ -1035,7 +1043,7 @@ export function Review({
             ordered(places.current, order ?? []),
             drawers,
             called,
-            { ...arranging, previous: panes === null ? before.current : followed.current, showing: shownNow, checks: shownNow === null ? [] : arranging.checks, read: order !== null },
+            { ...arranging, previous: panes === null ? before.current : followed.current, showing: shownNow, threads: shownNow === null && panes === "agents" ? null : arranging.threads, checks: shownNow === null ? [] : arranging.checks, confirming: shownNow === null ? [] : confirming, read: order !== null },
         );
     const layout = useMemo(() => {
         const drafted = typed.current ?? given;
@@ -1598,9 +1606,20 @@ export function Review({
     function sending() {
         if (panes !== null) {
             const drafted = editor.latest.current;
-            implying(implied(layOut(drafted, null), drafted));
+            const wholeNow = layOut(drafted, null);
+            implying(carried(carrying.current, implied(wholeNow, drafted), wholeNow, drafted));
         }
         send();
+    }
+
+    /** Return the thread what's at `at` is in, as a task, going by agent: a line saying one's done, a check's, an item's as the threads read say. */
+    function taskAt(at: number): ThreadRead | null {
+        const reads = threadsAll?.read.threads ?? [];
+        const told = laidOut.confirms.find((each) => at >= each.from && at <= each.to)?.thread;
+        const check = checkAt(laidOut, at)?.thread;
+        const number = regionAt(laidOut, at)?.item.number;
+        const held = (each: ThreadRead) => number !== undefined && ((each.asks ?? []).some((ask) => ask.node === number) || (each.new ?? []).includes(number) || (each.pile ?? []).includes(number));
+        return told ?? reads.find((each) => each.thread.number === check) ?? reads.find(held) ?? null;
     }
 
     /** Say whether the keyboard is in the buffer, what the line of keys says of it: as the review always is, outside panes. */
@@ -1727,6 +1746,25 @@ export function Review({
             }
         }
         if (how !== "stay") {
+            goIn("buffer");
+        }
+    }
+
+    /** Open a row of the list: an item or a check the buffer on screen holds is gone to there, as the overview went; else its buffer shows, on it. */
+    function openRow(next: Showing, how: "in" | "stay" | "write", node: number | null = null) {
+        const there = node === null ? undefined : (laidOut.regions.find((each) => each.item.number === node)?.header.from ?? laidOut.checks.find((each) => each.check.check.number === node)?.from);
+        if (there === undefined || goingTo.current !== null) {
+            openBuffer(next, how, node);
+            return;
+        }
+        jumpTo(there);
+        if (narrow) {
+            setOverview(false);
+        }
+        if (how === "stay") {
+            view.current?.contentDOM.blur();
+            listHandle.current?.focus();
+        } else {
             goIn("buffer");
         }
     }
@@ -2360,7 +2398,7 @@ export function Review({
             const current = view.current;
             const head = editor.head();
             const at = editor.toLaid(head);
-            const read = groupAround(laidOut, at)?.thread ?? null;
+            const read = groupAround(laidOut, at)?.thread ?? (panes === null ? null : taskAt(at));
             if (current === null || read === null) {
                 say("gt: no thread here to go to whole. It goes from an item of waiting on you or new, or its thread's header there, to the whole thread in open: put the cursor on one.");
                 return;
@@ -2452,13 +2490,65 @@ export function Review({
     }, [narrow]);
     // In panes, the list, read from what the review is laid out from: it lays out one buffer of it at a time.
     const listReading = useMemo(
-        () => ({ items, draft, agents, parents: arrangedBy.parents, called, banner: (item: Item) => bannerLine({ item }, false, ""), drawers, looks: arrangedBy.looks, remote: arrangedBy.remote, running: arrangedBy.running, activities, states, threads, landings: arrangedBy.landings, checks: arrangedBy.checks }),
+        () => ({ items, draft, agents, parents: arrangedBy.parents, called, banner: (item: Item) => bannerLine({ item }, false, ""), drawers, looks: arrangedBy.looks, remote: arrangedBy.remote, running: arrangedBy.running, activities, states, threads: threadsAll, landings: arrangedBy.landings, checks: arrangedBy.checks, seeing, opened: nestsOpen }),
         // `bannerLine` says what `banner` does.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-        [items, draft, agents, arrangedBy.parents, called, banner, drawers, arrangedBy.looks, arrangedBy.remote, arrangedBy.running, activities, states, threads, arrangedBy.landings, arrangedBy.checks],
+        [items, draft, agents, arrangedBy.parents, called, banner, drawers, arrangedBy.looks, arrangedBy.remote, arrangedBy.running, activities, states, threadsAll, arrangedBy.landings, arrangedBy.checks, seeing, nestsOpen],
     );
     const listed = useMemo(() => (panes === null ? [] : panes === "agents" ? listedByAgent(listReading) : listedByThread(listReading)), [panes, listReading]);
     const title = panes === null ? null : titled(showing, listReading);
+    // What of the buffer on screen each row stands for, and what of it's in view and under the cursor, kept in sight in the
+    // list as the view moves, as the overview does (`Outline.tsx`), measured in CodeMirror's own measuring.
+    const spans = useMemo(() => (panes === null ? [] : bufferSpans(laidOut, showing)), [panes, laidOut, showing]);
+    const rowsKnown = useRef(new Set<string>());
+    rowsKnown.current = useMemo(() => {
+        const known = new Set<string>();
+        const add = (rows: typeof listed) => {
+            for (const row of rows) {
+                known.add(row.id);
+                add(row.under?.rows ?? []);
+            }
+        };
+        add(listed);
+        return known;
+    }, [listed]);
+    useEffect(() => {
+        if (panes === null) {
+            return undefined;
+        }
+        const measure = () => {
+            follower.view?.requestMeasure({
+                key: "lup-list-follows",
+                read: (read: EditorView): ListViewed => {
+                    const scroller = read.scrollDOM.getBoundingClientRect();
+                    const top = scroller.top - read.documentTop;
+                    const from = read.lineBlockAtHeight(Math.max(top, 0)).from;
+                    const to = read.lineBlockAtHeight(Math.max(top + read.scrollDOM.clientHeight - 1, 0)).to;
+                    const known = rowsKnown.current;
+                    return {
+                        seen: [...new Set(spans.flatMap((each) => (each.depth >= 100 && each.from <= to && each.to >= from && known.has(each.id) ? [each.id] : [])))],
+                        cursor: spanAt(spans, editor.toLaid(read.state.selection.main.head), (id) => known.has(id)),
+                    };
+                },
+                write: (measured: ListViewed) => setViewed((before) => (before.cursor === measured.cursor && before.seen.join("\n") === measured.seen.join("\n") ? before : measured)),
+            });
+        };
+        measure();
+        return follower.listen(measure);
+        // The editor's places are read from what it holds as it's measured, whichever render's editor it is.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [follower, spans, panes]);
+    // The nesting opens as the second pane's cursor comes to what's in it, and stays open while that buffer's on screen.
+    useEffect(() => {
+        if (panes === null) {
+            return;
+        }
+        const holding = (pathTo(listed, viewed.cursor ?? "") ?? []).map((each) => each.id);
+        const here = showing.kind === "agent" ? [`agent ${showing.key}`] : [];
+        setNestsOpen((before) => ([...holding, ...here].every((each) => before.has(each)) ? before : new Set([...before, ...holding, ...here])));
+        // The rows it's in, read as the cursor's row changes.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [viewed.cursor, showing, panes]);
 
     const naming = {
         // A group by its banner's words, the core's and each part's, as its banner says them.
@@ -2569,7 +2659,8 @@ export function Review({
                             <Listing
                                 rows={listed}
                                 showing={showing}
-                                open={openBuffer}
+                                viewed={viewed}
+                                open={openRow}
                                 send={send}
                                 say={say}
                                 escaped={paneModeBegun}

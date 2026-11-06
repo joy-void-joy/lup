@@ -142,6 +142,27 @@ describe("the panes by agent", () => {
         expect(await cursors()).toBe(1);
     });
 
+    it("keeps what the second pane's cursor is on in sight in the list, its nesting open, a highlight and no cursor", async () => {
+        const { page } = dashboard;
+        const highlighted = () => page.evaluate(() => [...document.querySelectorAll(".list-buffer .cm-line.list-cursor")].map((each) => each.textContent ?? ""));
+        await review.goTo("── @52 note");
+        await page.waitForFunction(() => [...document.querySelectorAll(".list-buffer .cm-line.list-cursor")].some((each) => (each.textContent ?? "").includes("@52")), undefined, { polling: 50 });
+        await review.goTo("── @53 problem");
+        await page.waitForFunction(() => [...document.querySelectorAll(".list-buffer .cm-line.list-cursor")].some((each) => (each.textContent ?? "").includes("@53")), undefined, { polling: 50 });
+        expect(await highlighted()).toHaveLength(1);
+        // What's in view is bracketed, beside it; and no cursor's drawn in the list, the keys being here.
+        expect(await page.evaluate(() => document.querySelectorAll(".list-buffer .cm-line.list-in-view").length)).toBeGreaterThan(0);
+        expect(await page.evaluate(() => getComputedStyle(document.querySelector(".list-buffer .cm-vimCursorLayer") as Element).display)).toBe("none");
+        // Going in, the list's cursor lands on that entry.
+        await dashboard.keys.press([" ", "w", "h"]);
+        await page.waitForFunction(() => document.activeElement?.closest(".list-buffer") != null, undefined, { polling: 50 });
+        expect(await page.evaluate(() => document.querySelector(".list-buffer .cm-activeLine")?.textContent ?? "")).toContain("@53");
+        // Enter on an item the buffer on screen holds goes to it there, the buffer as it was.
+        await page.keyboard.press("Enter");
+        await review.until("put the cursor on the item", (view) => view.state.doc.lineAt(view.state.selection.main.head).text.includes("@53 problem"));
+        expect(await review.text()).toContain("@54 approval");
+    });
+
     it("keeps vim's keys in the list, Enter opening a row's buffer and going into it", async () => {
         const { page } = dashboard;
         await listRow(dashboard, "main");
@@ -262,6 +283,20 @@ describe("the panes by agent", () => {
         await page.waitForFunction(() => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("parser") && (each.textContent ?? "").includes("◆2")), undefined, { polling: 50 });
     });
 
+    it("lists tasks under whoever owns them, and reads one across agents from its row", async () => {
+        const { page } = dashboard;
+        await listRow(dashboard, "@transcript-reader");
+        const row = await page.evaluate(() => document.querySelector(".list-buffer .cm-activeLine")?.textContent ?? "");
+        expect(row).toContain("@transcript-reader");
+        await page.keyboard.press("Enter");
+        await review.until("read the thread whole", (view) => !view.state.doc.toString().includes("reading…") && view.state.doc.toString().includes("━━ @transcript-reader"));
+        expect(await page.evaluate(() => document.querySelector(".where-whom")?.textContent ?? "")).toContain("lup-impl/parser");
+        await listRow(dashboard, "what's for you");
+        await page.keyboard.press("Enter");
+        await review.holds("@54 approval");
+        expect(dashboard.thrown).toEqual([]);
+    });
+
     it("sends with Ctrl+Enter from Normal mode, from any buffer, the comment and the message going whole", async () => {
         const { page } = dashboard;
         await listRow(dashboard, "main");
@@ -275,7 +310,8 @@ describe("the panes by agent", () => {
         await listRow(dashboard, "guidance-voice");
         await page.keyboard.press("Enter");
         await review.holds("to guidance-voice");
-        expect(await review.text()).not.toContain(WORDS);
+        // Sent: nothing of it's drafted here any more, though their conversation now holds what they were sent.
+        expect(await review.decorated("remark")).toBe(0);
         expect(dashboard.thrown).toEqual([]);
     });
 });

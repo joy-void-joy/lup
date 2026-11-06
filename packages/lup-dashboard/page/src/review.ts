@@ -490,6 +490,21 @@ export function checkOwner(owned: OwnedCheck): Conversation | null {
     return owned.thread.answering ?? owned.thread.thread.holder ?? (by.party === "conversation" ? by : null);
 }
 
+/**
+ * Return who owns a thread, as a task, where the review goes by agent: whoever answers for it, else whoever holds it
+ * though they've ended, else whoever opened it; none where the operator or lup did and nobody's taken it. What's owned by
+ * no one running sits under `No agent`.
+ */
+export function taskOwner(read: ThreadRead): Conversation | null {
+    const by = read.thread.by;
+    return read.answering ?? read.thread.holder ?? (by.party === "conversation" ? by : null);
+}
+
+/** Whether a thread's a session's own root, which holds whatever its session is given: no concern of its own to list, but where something in it waits. */
+export function rootThread(read: ThreadRead): boolean {
+    return read.thread.parent == null && read.thread.title === ROOT_TITLE;
+}
+
 /** What a comment is followed from as the review is laid out anew (`placed`, `anchors.ts`): where each comment was last seated on its block, and that block's lines then. */
 export type Followed = Pick<Laid, "seated" | "lines">;
 
@@ -539,6 +554,8 @@ export interface Arranging {
     checks?: readonly OwnedCheck[];
     /** Whether what the review is laid out from is all read, so a buffer with nothing in it holds nothing; unsaid, it is. */
     read?: boolean;
+    /** The threads done, for the operator to confirm, each laid out under whoever owns it (`taskOwner`), where the panes go by agent; none else. */
+    confirming?: readonly ThreadRead[];
 }
 
 /**
@@ -674,6 +691,8 @@ export interface Laid {
     pile: PileRun[];
     /** The line in open the roots of sessions that have ended are under, and those roots; none where there's none, or grouped by agent. */
     ended: EndedRun | null;
+    /** Each line saying a thread's done, for the operator to confirm, where the panes go by agent, which `gt` goes from to the thread. */
+    confirms: (Span & { thread: ThreadRead })[];
 }
 
 export const EMPTY: Draft = { comments: [], letters: [], remarks: [], done: [], declined: [], parked: [], marks: [] };
@@ -1619,6 +1638,16 @@ export function laid(
             checkOwners.push(owner);
         }
     }
+    // The threads done for the operator to confirm each group's agent owns, likewise.
+    const confirmsOf = new Map<string, ThreadRead[]>();
+    const confirmLines: (Span & { thread: ThreadRead })[] = [];
+    for (const each of arranging.confirming ?? []) {
+        const owner = taskOwner(each);
+        if (owner !== null) {
+            confirmsOf.set(whose(owner), [...(confirmsOf.get(whose(owner)) ?? []), each]);
+            checkOwners.push(owner);
+        }
+    }
     empty.push(...emptyGroups(checkOwners, [...now, ...empty]));
     if (showing?.kind === "agent") {
         // One agent's own buffer: what's left for later of theirs, then their group, what's live and what's written to
@@ -1641,7 +1670,7 @@ export function laid(
     } else if (showing?.kind === "for you") {
         // What's for the operator: each group with an item, or something it holds waits on them, or written to under its
         // banner; of its drawers, only what waits on them.
-        const holds = (group: Grouping) => group.items.length > 0 || checksOf.has(group.key) || letters.some((each) => each.to != null && whose(each.to) === group.key) || sinceWaits(group) !== null;
+        const holds = (group: Grouping) => group.items.length > 0 || checksOf.has(group.key) || confirmsOf.has(group.key) || letters.some((each) => each.to != null && whose(each.to) === group.key) || sinceWaits(group) !== null;
         const holding = [...now, ...empty].filter(holds);
         for (const { group, depth } of nested(kept(holding, false), arranging.parents ?? null)) {
             layGroup(group, false, depth, "for you");
@@ -1749,6 +1778,7 @@ export function laid(
         pointers,
         pile: pileRuns,
         ended: endedRun,
+        confirms: confirmLines,
     };
 
     /** Lay a line of the buffer's own, no part's but its own: what's said where there's nothing else to read. */
@@ -2537,6 +2567,16 @@ export function laid(
             for (const each of checksOf.get(group.key) ?? []) {
                 layCheck(each.check, each.thread.thread.number, node.children, each.thread.thread.name);
             }
+            // A thread done, for the operator to confirm: settled from its own buffer, which `gt` goes to.
+            for (const each of confirmsOf.get(group.key) ?? []) {
+                const status = each.status ?? null;
+                const toTry = status !== null && status.kind === "ledger:done" ? (status.to_try.split("\n")[0] ?? "") : "";
+                const confirm = `confirm ${each.thread.number}`;
+                const line = w.line(`◆ @${each.thread.name} is done, to confirm: ${toTry} · gt goes there`, confirm);
+                asides.push({ kind: "to-try", ...line });
+                confirmLines.push({ ...line, thread: each });
+                node.children.push(part(confirm, "frame", line.from, line.to));
+            }
         }
         if (shape === "own") {
             const live = declared.filter((each) => each.view === "conversation");
@@ -2552,7 +2592,7 @@ export function laid(
             if (conversation !== null) {
                 layWriting(made, node, id, `to ${name(conversation)}`, talksTo);
             }
-        } else if ((checksOf.get(group.key) ?? []).length > 0 || (group.items.length === 0 && made.drawers.length === 0 && blocks.length > 0)) {
+        } else if ((checksOf.get(group.key) ?? []).length > 0 || confirmsOf.has(group.key) || (group.items.length === 0 && made.drawers.length === 0 && blocks.length > 0)) {
             w.line("", `${id} end`);
         }
     }
