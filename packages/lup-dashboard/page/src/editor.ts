@@ -125,6 +125,16 @@ interface Actions {
     folds: (state?: EditorState) => readonly Folding[];
     undo: (way: "undo" | "redo" | "earlier" | "later") => void;
     send: () => void;
+    /** Esc with nothing left for vim to end, in normal mode with no key of a command held; whether it was taken, none taking it where the view isn't in panes. */
+    escaped: () => boolean;
+    /** Vim's window commands: to the pane on the left (`h`) or the right (`l`), the other (`w`), or the one before (`p`). */
+    window: (how: "h" | "l" | "w" | "p") => void;
+    /** Whether the view has panes to go between: Ctrl+W is the browser's or vim's where it hasn't. */
+    windows: () => boolean;
+    /** Ctrl+O in normal mode, where the view's last jump crossed to another buffer: back to it; whether there was one. */
+    jumpedBack: () => boolean;
+    /** Enter in normal mode, where the view has its own use for it, as the list of the panes opening a row; whether it was taken. */
+    pressedEnter: () => boolean;
     blocks: () => Block[];
     chord: (keys: string) => void;
     say: (text: string) => void;
@@ -140,6 +150,8 @@ interface Keyed {
     visual: boolean;
     /** The passage it tried to change outside every comment, as `v` then `R` would: what such a comment quotes. */
     passage: Span | null;
+    /** Whether Ctrl+W was the last key, whose window command this one says (`mapPaneKeys`). */
+    windowing: boolean;
     /** Whether it's part of vim's change, `c` and a motion, begun in normal mode: a comment it opens is on the passage the motion covers. */
     changing: boolean;
     /** Whether vim is in insert mode, that is, whether a comment is being written. */
@@ -354,6 +366,7 @@ const NONE: Keyed = {
     from: 0,
     visual: false,
     passage: null,
+    windowing: false,
     changing: false,
     inserting: false,
     searching: false,
@@ -518,6 +531,28 @@ export const INDENTING: readonly (readonly [keys: string, as: string])[] = [
 ];
 
 let mapped = false;
+
+/**
+ * Map vim's window commands under Space `w`, where the page lays the review out in panes (`panes.ts`): `h`, `l`, `w` and
+ * `p`. Ctrl+W takes the same keys, read ahead of vim (`keys`), where the browser gives it: a tab keeps it to close
+ * itself, so a tab never sees it. Firefox reserves it always (`key_close`, `reserved="true"`), with no
+ * `navigator.keyboard`; Chromium reserves it in a tab, and gives it to the page in an app window (`--app`, or installed)
+ * or in a fullscreen the page asked for.
+ */
+export function mapPaneKeys(): void {
+    if (paneKeysMapped) {
+        return;
+    }
+    paneKeysMapped = true;
+    mapKeys();
+    for (const how of ["h", "l", "w", "p"] as const) {
+        const named = `lupWindow-${how}`;
+        Vim.defineAction(named, (cm) => boundOf(cm.cm6.state).actions?.window(how));
+        Vim.mapCommand(`<Space>w${how}`, "action", named, {}, { context: "normal" });
+    }
+}
+
+let paneKeysMapped = false;
 
 /** Map the shared keys into vim's keymap, once: user mappings go before its own, and act on the editor the key is pressed in. */
 function mapKeys(): void {
@@ -838,6 +873,36 @@ const keys = Prec.highest(
                     event.preventDefault();
                     return true;
                 }
+            }
+            // Ctrl+W and a window command's key, where the browser lets it through (`mapPaneKeys`): vim's own maps know
+            // no key held with Ctrl leading another.
+            if (bound.actions?.windows() === true && !["Control", "Shift", "Alt", "Meta"].includes(event.key)) {
+                if (keyed.windowing) {
+                    keyed.windowing = false;
+                    if (["h", "l", "w", "p"].includes(event.key)) {
+                        bound.actions.window(event.key as "h" | "l" | "w" | "p");
+                    }
+                    event.preventDefault();
+                    return true;
+                }
+                if (event.key === "w" && event.ctrlKey && !event.altKey && !event.metaKey && event.target === view.contentDOM && idle(cm)) {
+                    keyed.windowing = true;
+                    event.preventDefault();
+                    return true;
+                }
+            }
+            // Esc with nothing left for vim to end: out of the pane, where the view has panes (`Panes.tsx`).
+            if (event.key === "Escape" && !modified && event.target === view.contentDOM && idle(cm) && bound.actions?.escaped() === true) {
+                event.preventDefault();
+                return true;
+            }
+            if (event.key === "o" && event.ctrlKey && !event.altKey && !event.metaKey && event.target === view.contentDOM && idle(cm) && bound.actions?.jumpedBack() === true) {
+                event.preventDefault();
+                return true;
+            }
+            if (event.key === "Enter" && !modified && event.target === view.contentDOM && idle(cm) && bound.actions?.pressedEnter() === true) {
+                event.preventDefault();
+                return true;
             }
             if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
                 if (cm.state.vim.insertMode) {
@@ -1583,8 +1648,14 @@ interface Config<D, C> {
     moved?: (head: number) => void;
     /** Changed each time the draft is replaced from outside, as when it's sent: what was done before can't be undone. */
     epoch: number;
-    /** Whether the editor is shown: shown again, it takes the keyboard. */
+    /** Whether the editor is shown: shown again, it takes the keyboard. Not shown so, as the list of the panes, it waits to be given the keyboard. */
     shownNow: boolean;
+    /** Whether long lines stay one row, cut at the pane's edge, as a list's do; else they wrap, as the review's do. */
+    rows?: boolean;
+    /** Told Esc with nothing left for vim to end: out of the pane, in panes (`Panes.tsx`). None lets vim have it. */
+    escaped?: () => void;
+    /** Told vim's window commands, in panes (`mapPaneKeys`). */
+    window?: (how: "h" | "l" | "w" | "p") => void;
     /** Open the list of every key (`g?`). */
     list: () => void;
     /** Open the panel of what was said, whole (`g<`). */
@@ -1641,6 +1712,10 @@ export interface Own<C> {
     chooseIn?: (position: number) => { from: number; to: number } | undefined;
     /** Do what the verb named `name` does on each of `folds`, a visual selection's, as one mark; none where the view has no verbs. */
     verbOn?: (name: string, folds: readonly Folding[]) => void;
+    /** What Enter does in normal mode where it isn't vim's; none leaves it vim's. */
+    enter?: () => void;
+    /** What Ctrl+O does where the last jump crossed to another buffer, vim's list of jumps being this one's alone: go back, and say so; none, or false, leaves it vim's. */
+    back?: () => boolean;
 }
 
 /** One editor, as a view uses it. */
@@ -1788,7 +1863,7 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                     outOfFolds,
                     foldsTold,
                     offHidden,
-                    EditorView.lineWrapping,
+                    ...(config.rows === true ? [] : [EditorView.lineWrapping]),
                     placeheld(margined),
                     drawing,
                     painting,
@@ -1831,11 +1906,20 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                     keys,
                     typed,
                     ahead,
+                    // What's run from the palette goes to the editor last given the keyboard.
+                    EditorView.domEventHandlers({
+                        focus: (_, focused) => {
+                            fed = focused;
+                            return false;
+                        },
+                    }),
                 ],
             }),
         });
         view.current = created;
-        fed = created;
+        if (config.shownNow) {
+            fed = created;
+        }
         shifting(created);
         getCM(created)?.on("vim-mode-change", (event: { mode: string }) => {
             // Leaving visual mode, as Esc does, ends a fold-wise selection.
@@ -1860,7 +1944,9 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 bound.current.actions?.left();
             }
         });
-        created.focus();
+        if (config.shownNow) {
+            created.focus();
+        }
         return () => {
             created.destroy();
             view.current = null;
@@ -2224,6 +2310,23 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 }
             },
             send: own.send,
+            escaped: () => {
+                if (config.escaped === undefined) {
+                    return false;
+                }
+                config.escaped();
+                return true;
+            },
+            window: (how) => config.window?.(how),
+            windows: () => config.window !== undefined,
+            jumpedBack: () => own.back?.() ?? false,
+            pressedEnter: () => {
+                if (own.enter === undefined) {
+                    return false;
+                }
+                own.enter();
+                return true;
+            },
             paint: (from, to) => {
                 const painted = own.paint?.(toLaid(from), toLaid(to)) ?? [];
                 const changes = changesNow();

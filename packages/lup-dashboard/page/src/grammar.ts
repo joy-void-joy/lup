@@ -797,6 +797,36 @@ export function implied(laidOut: Laid, draft: Draft): Marked[] {
 }
 
 /**
+ * Return `now`, what the operator's comments imply as the review is laid out (`implied`), with each of `before`, what they
+ * implied as it was last laid out, whose comment or thread another buffer has off the screen (`Showing`), so what's sent
+ * doesn't depend on which buffer is on screen as it's sent: a mark on a block not laid out now, its comment still in
+ * the draft and the draft not marking it itself; a thread's mark, the thread not laid out now and anything still drafted
+ * that acts on a thread.
+ */
+export function carried(before: readonly Marked[], now: readonly Marked[], laidOut: Laid, draft: Draft): Marked[] {
+    const named = (mark: Marked) => `${mark.block} ${mark.action}`;
+    const ids = new Set(now.map((each) => each.id));
+    const places = new Set(now.map(named));
+    const said = (each: { text: string }) => each.text.trim() !== "";
+    const acting = (draft.done ?? []).length > 0 || (draft.declined ?? []).length > 0 || (draft.comments ?? []).some(said) || (draft.letters ?? []).some(said);
+    const writtenNow = new Map([...(draft.comments ?? []), ...(draft.letters ?? []), ...(draft.remarks ?? [])].map((each): [string, { text: string }] => [each.id ?? "", each]));
+    return [
+        ...now,
+        ...before.filter((mark) => {
+            if (ids.has(mark.id) || places.has(named(mark))) {
+                return false;
+            }
+            const thread = /^implied read (\d+)$/.exec(mark.id)?.[1];
+            if (thread !== undefined) {
+                return acting && !laidOut.groups.some((each) => each.thread?.thread.number === Number(thread));
+            }
+            const comment = writtenNow.get(mark.id.slice("implied ".length));
+            return findNode(laidOut.nodes, mark.block) === undefined && comment !== undefined && said(comment) && !(draft.marks ?? []).some((each) => each.block === mark.block && each.action === mark.action);
+        }),
+    ];
+}
+
+/**
  * Return each thread the operator acted in, as the draft says, read as far as the review shows it, its review mark moved
  * there as the reply is sent (`readAct`), so only what comes after is new to them, the latest few they read shown before
  * it: an item in it marked done or declined, or commented on, a message written on it, a check in it ticked or answered.
