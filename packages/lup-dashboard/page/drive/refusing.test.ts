@@ -13,6 +13,11 @@ let dashboard: Dashboard;
 beforeAll(async () => {
     served = await demo({ size: 0 });
     dashboard = await open(served.url);
+    // At rest before a draft is kept: the page keeps one of its own as it loads, without the demo's park on an item of
+    // the pile, and on a loaded machine that takes the place of one kept meanwhile.
+    const review = await dashboard.review();
+    await review.holds("── @66 note · lup-impl/explore-auth");
+    await review.settled(1500);
 });
 
 afterEach(() => {
