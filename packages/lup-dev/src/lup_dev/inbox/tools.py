@@ -180,12 +180,15 @@ class Asking(Model):
             "later call."
         ),
     )
+    # lup: defer(issue=363, why="a field that still works and that its description says to leave empty, until it's settled what comes after a check")
     checks: list[str] = Field(
         default=[],
         description=(
-            "What only the operator can try or measure, a line each, with what "
-            "they should see: each waits on them in the thread until they answer "
-            "it with what they saw."
+            "Leave this empty. What you want the operator to try goes in your own "
+            "words in `question`: what you built, what it should do, and why it's "
+            "worth their time, never a list of commands with expected results. A "
+            "line here becomes a row of its own waiting on them until they answer "
+            "it, with nothing tying it to the question it came with."
         ),
     )
     thread: str | None = Field(default=None, description=THREAD)
@@ -298,8 +301,9 @@ class Threading(Model):
     done: str | None = Field(
         default=None,
         description=(
-            "Say it's done, for the operator to confirm: what they try, and what "
-            "they should see."
+            "Say it's done, for the operator to confirm, in your own words: what "
+            "you built, what it should do, and why it's worth their time to try, "
+            "never a list of commands with expected results."
         ),
     )
 
@@ -634,9 +638,12 @@ class Speaker(Model, arbitrary_types_allowed=True):
         at once, and the answer reaches you at a later call, or through
         `wait_inbox`.
 
-        `checks` asks the operator to try or measure what only they can, a
-        line each: each waits on them in the question's thread until they
-        answer it with what they saw, which reaches you then.
+        What you want the operator to try goes in your own words in `question`:
+        what you built, what it should do, and why it's worth their time, never
+        a list of commands with expected results. Leave `checks` empty: a line
+        there becomes a row of its own, waiting on them in the question's thread
+        with nothing tying it to the question, until they answer it with what
+        they saw, which reaches you then.
         """
         question = Question(
             text=asked.question,
