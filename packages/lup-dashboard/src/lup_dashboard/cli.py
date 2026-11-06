@@ -10,6 +10,7 @@ import secrets
 import socket
 import sys
 import tempfile
+from datetime import timedelta
 from ipaddress import IPv6Address, ip_address
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
@@ -145,6 +146,34 @@ def demo(
             )
         ),
     ] = None,
+    arrives: Annotated[
+        float | None,
+        typer.Option(
+            help=(
+                "How many seconds after the page first asks for the inbox a question "
+                "of the parser subagent's arrives: long enough to watch, unless given."
+            )
+        ),
+    ] = None,
+    grows: Annotated[
+        float | None,
+        typer.Option(
+            help=(
+                "How many seconds after the page first asks what the parser "
+                "subagent's branch changed two more writes come to it: long enough "
+                "to watch, unless given."
+            )
+        ),
+    ] = None,
+    types_read: Annotated[
+        float | None,
+        typer.Option(
+            help=(
+                "How many seconds after the page first asks for the approval's files "
+                "their types are read: long enough to watch, unless given."
+            )
+        ),
+    ] = None,
     copy: Annotated[
         bool,
         typer.Option(
@@ -170,10 +199,17 @@ def demo(
     state instead (`lup_dashboard/copied.py`).
     """
     if copy:
-        if size is not None or hooks or approval_lines:
+        if (
+            size is not None
+            or hooks
+            or approval_lines
+            or arrives
+            or grows
+            or types_read
+        ):
             message = (
                 "--copy serves the operator's state as it is: it takes none of "
-                "--size, --hooks or --approval-lines"
+                "--size, --hooks, --approval-lines, --arrives, --grows or --types-read"
             )
             raise typer.BadParameter(message)
         copied(port, address, timings)
@@ -186,6 +222,12 @@ def demo(
     )
     if size is not None:
         host.size = size
+    if arrives is not None:
+        host.arrives = timedelta(seconds=arrives)
+    if grows is not None:
+        host.grows = timedelta(seconds=grows)
+    if types_read is not None:
+        host.types_read = timedelta(seconds=types_read)
     served(host, port, address)
 
 

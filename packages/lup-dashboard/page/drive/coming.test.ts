@@ -1,6 +1,7 @@
 // What comes to the demo as it runs (`docs/dashboard.md`, *The demo*), through the host's own handlers: a question
 // arriving in the thread its asker works in, two writes to a branch, each flagged, and a landing done waiting once the
-// file it waits on is answered. Each waits on what it checks, the demo's stand-in agents taking their seconds.
+// file it waits on is answered. Each waits on what it checks, the demo's stand-in agents taking their seconds: fewer here
+// than the demo's defaults, which leave a person time to watch, and still after the page has come to rest.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { open, type Dashboard } from "./dashboard.ts";
@@ -15,7 +16,7 @@ let dashboard: Dashboard;
 let review: Review;
 
 beforeAll(async () => {
-    served = await demo({ size: 0 });
+    served = await demo({ size: 0, arrives: 3, grows: 4 });
     dashboard = await open(served.url);
     review = await dashboard.review();
     await review.holds("── @66 note · lup-impl/explore-auth");

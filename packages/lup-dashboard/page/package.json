@@ -9,7 +9,7 @@
         "check": "tsc --noEmit",
         "test": "vitest run",
         "build": "vite build",
-        "drive": "tsc -p drive && vitest run --config drive/vitest.config.ts"
+        "drive": "tsc -p drive && flock --verbose --close --timeout 900 /tmp/lup-drive.lock vitest run --config drive/vitest.config.ts"
     },
     "dependencies": {
         "@codemirror/commands": "6.11.1",

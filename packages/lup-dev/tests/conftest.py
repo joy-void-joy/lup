@@ -18,6 +18,7 @@ import ast
 import hashlib
 import io
 import os
+import shutil
 import sys
 import time
 import tokenize
@@ -766,10 +767,10 @@ def offline_uv(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Uv]:
         yield Uv()
 
 
-@pytest.fixture
-def repo(tmp_path: Path) -> Path:
-    """A git repository with a small project, its first commit made."""
-    root = tmp_path / "work"
+@pytest.fixture(scope="session")
+def first_repo(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A git repository with a small project, its first commit made, once a worker: `repo` copies it, which takes a tenth of what its six programs do, and most tests start from one."""
+    root = tmp_path_factory.mktemp("first") / "work"
     (root / "src" / "pkg").mkdir(parents=True)
     (root / "tests").mkdir()
     git(root, "init", "-q", "-b", "main")
@@ -794,6 +795,14 @@ def repo(tmp_path: Path) -> Path:
     (root / "tests" / "test_core.py").write_text("def test_it():\n    assert True\n")
     (root / "README.md").write_text("# Work\n")
     commit(root, "init")
+    return root
+
+
+@pytest.fixture
+def repo(first_repo: Path, tmp_path: Path) -> Path:
+    """A git repository with a small project, its first commit made, the test's own."""
+    root = tmp_path / "work"
+    shutil.copytree(first_repo, root, symlinks=True)
     return root
 
 

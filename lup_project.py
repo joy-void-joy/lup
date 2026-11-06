@@ -50,8 +50,9 @@ class LupDevelopment(Module):
       (`lup_dev/pyright_source.py`). pnpm installs its dependencies, from
       pyright's own lockfile: pnpm 11, the first to read its package age from
       `~/.config/pnpm/config.yaml` and check a frozen lockfile against it.
-    - The dashboard's page is built the same way, after the engine: its types
-      generated from the API's description, type-checked, tested and bundled
+    - The dashboard's page is built the same way, beside the engine, neither
+      reading what the other builds: its types generated from the API's
+      description, type-checked, tested and bundled
       (`packages/lup-dashboard/build.py`), its packages installed by pnpm from
       its own lockfile, and again on the same terms, the host's models the API
       describes among its sources.
@@ -118,6 +119,7 @@ class LupDevelopment(Module):
             name="engine",
             command=["python", "packages/lup-dev/checker/build.py"],
             builds="packages/lup-dev/src/lup_dev/codescan/bundle/engine.js",
+            together=True,
             sources=[
                 "packages/lup-dev/checker/src/**/*",
                 "packages/lup-dev/checker/build.py",
@@ -133,6 +135,7 @@ class LupDevelopment(Module):
             name="dashboard",
             command=["python", "packages/lup-dashboard/build.py"],
             builds="packages/lup-dashboard/src/lup_dashboard/page/index.html",
+            together=True,
             sources=[
                 "packages/lup-dashboard/page/src/**/*",
                 "packages/lup-dashboard/page/index.html",
@@ -162,6 +165,7 @@ class LupDevelopment(Module):
                 "--silent",
                 "drive",
             ],
+            together=True,
         ),
         before="rules",
     )

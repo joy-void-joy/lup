@@ -5,6 +5,7 @@ probe is stubbed."""
 import os
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
@@ -125,6 +126,143 @@ def test_every_step_runs_after_one_fails(tmp_path: Path) -> None:
     assert processes.ran == [["lint", "--strict"], ["types"], ["tests", "-q"]]
     assert [o.result for o in gated.outcomes] == ["failed", "passed", "passed"]
     assert failed(gated.outcomes) == ["lint"]
+
+
+class Together(Processes):
+    """Holds each step named in `meeting` until they've all started, so a run in turn would never get past the first; keeps when each other started and ended."""
+
+    def __init__(self, meeting: list[str]) -> None:
+        self.meeting = meeting
+        self.met = threading.Barrier(len(meeting))
+        self.said: list[str] = []
+        self.keeping = threading.Lock()
+
+    def said_of(self, word: str) -> None:
+        with self.keeping:
+            self.said.append(word)
+
+    @override
+    def run(self, command: list[str], cwd: Path) -> Ran:
+        self.said_of(f"start {command[0]}")
+        if command[0] in self.meeting:
+            # The bound is for a run in turn, which would otherwise wait here for good.
+            self.met.wait(timeout=30)
+        self.said_of(f"end {command[0]}")
+        code = 1 if command[0] == "fails" else 0
+        return Ran(code=code, output=f"{command[0]} said\n")
+
+
+def side_by_side(*names: str) -> list[Step]:
+    """Return a step for each of `names`, each of which may go `together`."""
+    return [Step(name=each, command=[each], together=True) for each in names]
+
+
+def test_steps_side_by_side_that_may_go_together_run_at_once(tmp_path: Path) -> None:
+    gated = gate(tmp_path, Together(["a", "b", "c"]), side_by_side("a", "b", "c"))
+    assert [(o.step, o.result) for o in gated.outcomes] == [
+        ("a", "passed"),
+        ("b", "passed"),
+        ("c", "passed"),
+    ]
+
+
+def test_steps_at_once_are_reported_in_the_declarations_order_each_with_its_own_output(
+    tmp_path: Path,
+) -> None:
+    gated = gate(tmp_path, Together(["fails", "b"]), side_by_side("fails", "b"))
+    assert [(o.step, o.result, o.output) for o in gated.outcomes] == [
+        ("fails", "failed", "fails said\n"),
+        ("b", "passed", "b said\n"),
+    ]
+    assert failed(gated.outcomes) == ["fails"]
+
+
+def test_a_step_that_doesnt_say_it_may_go_together_waits_for_those_before_and_holds_those_after(
+    tmp_path: Path,
+) -> None:
+    processes = Together(["a", "b"])
+    apart = Step(name="apart", command=["apart"])
+    gate(
+        tmp_path,
+        processes,
+        [*side_by_side("a", "b"), apart, *side_by_side("c", "d")],
+    )
+    said = processes.said
+    assert said.index("start apart") > max(said.index("end a"), said.index("end b"))
+    assert said.index("end apart") < min(said.index("start c"), said.index("start d"))
+
+
+def test_steps_that_build_never_run_at_once_with_those_after_them(
+    tmp_path: Path,
+) -> None:
+    processes = Together(["engine", "page"])
+    builds = [
+        Step(
+            name=each,
+            command=[each],
+            together=True,
+            builds=f"built/{each}",
+        )
+        for each in ["engine", "page"]
+    ]
+    gate(tmp_path, processes, [*builds, *side_by_side("tests")])
+    said = processes.said
+    assert said.index("start tests") > max(
+        said.index("end engine"), said.index("end page")
+    )
+
+
+def test_a_gates_steps_go_one_after_another_unless_they_say(tmp_path: Path) -> None:
+    processes = Scripted({})
+    gate(tmp_path, processes)
+    assert processes.ran == [["lint", "--strict"], ["types"], ["tests", "-q"]]
+    assert not Step(name="any", command=["any"]).together
+
+
+def test_what_the_gate_checks_may_go_together_and_what_it_fixes_may_not() -> None:
+    assert all(step.together for step in Gate().steps)
+    assert not any(step.together for step in Fixes().steps)
+
+
+def test_the_report_says_how_long_each_step_it_timed_ran(tmp_path: Path) -> None:
+    class Timed(Processes):
+        @override
+        def run(self, command: list[str], cwd: Path) -> Ran:
+            code = 1 if command[0] == "types" else 0
+            return Ran(code=code, output="", seconds=61.56)
+
+    text = report(gate(tmp_path, Timed()))
+    assert text.splitlines()[:3] == [
+        "passed   lint 61.6 s",
+        "failed   types 61.6 s (exit 1)",
+        "passed   tests 61.6 s",
+    ]
+
+
+def test_the_report_says_how_long_a_run_whose_steps_were_timed_took(
+    tmp_path: Path,
+) -> None:
+    class Timed(Processes):
+        @override
+        def run(self, command: list[str], cwd: Path) -> Ran:
+            return Ran(code=0, output="", seconds=1.0)
+
+    gated = gate(tmp_path, Timed())
+    assert gated.seconds is not None
+    assert report(gated.model_copy(update={"seconds": 145.4})).endswith(
+        "The gate passed in 145 s."
+    )
+    assert report(
+        gate(tmp_path, Scripted({"types": Ran(code=1, output="")})).model_copy(
+            update={"seconds": 145.4}
+        )
+    ).endswith("The gate failed in 145 s: types.")
+
+
+def test_a_command_run_as_a_process_is_timed(tmp_path: Path) -> None:
+    ran = Shell().run([sys.executable, "-c", ""], tmp_path)
+    assert ran.seconds is not None
+    assert ran.seconds >= 0
 
 
 def test_the_report_gives_each_failures_output_in_full(tmp_path: Path) -> None:
@@ -1316,11 +1454,15 @@ def scripted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Scripted:
 def test_lup_dev_check_runs_lups_default_gate_through_uv(scripted: Scripted) -> None:
     result = CliRunner().invoke(cli.app, ["check", "--fix"])
     assert result.exit_code == 0
-    assert scripted.ran == [
-        *(["uv", "run", *step.command] for step in Fixes().steps),
-        *(["uv", "run", *step.command] for step in Gate().steps),
-        ["uv", "run", "lup-dev", "private", "check"],
-    ]
+    fixes = [["uv", "run", *step.command] for step in Fixes().steps]
+    assert scripted.ran[: len(fixes)] == fixes
+    # These go together, so in no order of their own.
+    assert sorted(scripted.ran[len(fixes) :]) == sorted(
+        [
+            *(["uv", "run", *step.command] for step in Gate().steps),
+            ["uv", "run", "lup-dev", "private", "check"],
+        ]
+    )
 
 
 def test_lup_dev_check_runs_the_steps_a_module_of_the_projects_own_adds(
@@ -1329,11 +1471,15 @@ def test_lup_dev_check_runs_the_steps_a_module_of_the_projects_own_adds(
     (tmp_path / "lup_project.py").write_text(BUILDING)
     result = CliRunner().invoke(cli.app, ["check"])
     assert result.exit_code == 0
-    assert scripted.ran == [
-        ["uv", "run", "build", "it"],
-        *(["uv", "run", *step.command] for step in Gate().steps),
-        ["uv", "run", "lup-dev", "private", "check"],
-    ]
+    first, *checks = scripted.ran
+    assert first == ["uv", "run", "build", "it"]
+    # These go together, so in no order of their own.
+    assert sorted(checks) == sorted(
+        [
+            *(["uv", "run", *step.command] for step in Gate().steps),
+            ["uv", "run", "lup-dev", "private", "check"],
+        ]
+    )
 
 
 @pytest.mark.parametrize(("code", "exit_code"), [(0, 0), (1, 1)])

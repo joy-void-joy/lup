@@ -415,6 +415,8 @@ Behind `packages/lup-dashboard/page/drive/vitest.config.ts`'s `maxWorkers` (#162
 - **All at once,** vitest's default of one file per core, the 13 files reached the room's 2,048 (`pids.peak` read 2048): Chromium's renderers crashed ("Target crashed"), `xdotool` couldn't start (`spawn xdotool EAGAIN`), a demo answered 500, and the run took 94 to 159 s, failing 8 or 9 of 50 tests. The session running the gate was cut off once around then; whether by this or by the host service's restart at the same minute isn't known from the room.
 - **Three files at a time** peaked at 722, every test passing, in 29 s.
 - The limit is the room's, shared by every session, subagent and gate in it, so a step that runs browsers in parallel caps itself well under it.
+- **Gates overlapping** reached the limit all the same on 2026-11-06, the 18 files then peaking at about 900 alone: with three gates in the room the `pids.current` read 2,048, and each of two gates' `drive` failed (`spawn xdotool EAGAIN`, Chromium's "browser has been closed", a hook's 60 s running out). With `pnpm run drive` taking a lock in the room's `/tmp` (`flock`), two started at once took 123 s, the second waiting 59.8 s for the first, both passing, with a peak of 1,131.
+- **Six files at a time** took the 18 files from 60 s to 32 s alone, peaking at 1,385, all passing: nearly in proportion, the room having cores to spare. A room under 2,048 has room for it alone with the suite beside it (1,523), and no more.
 
 ## A route just set in Chromium (Chromium 151 headless, Playwright 1.64.1, a 32-core host, measured in a room 2026-11-06)
 
@@ -422,6 +424,28 @@ Behind `Dashboard.route` (`packages/lup-dashboard/page/drive/dashboard.ts`, #365
 - **What's sent straight after can pass it.** A key's `fetch`, pressed as `page.route` returned, went to the server and the route never saw it, in 28 of 3,000 tries with the browser, the demo and vitest on 2 CPUs beside 8 busy loops, and in 1 of 100 on all 32, shared with other sessions' work. A `fetch` asked through `page.evaluate` first, and answered by the route, was never followed by one that passed it: 0 of 3,000 under the same load.
 - **Playwright reports no such request.** With interception on, it holds `Network.requestWillBeSent` until the same request's `Fetch.requestPaused`, which one that passed never gets, so neither `page.on("request")` nor the handler hears of it (`_onRequestWillBeSent`, its `crNetworkManager`).
 - **How it showed:** `rows.test.ts`'s refusal failed in 2 of 75 runs under such load, each at the wait for "Not sent": Ctrl+Enter's keeping of the draft reached the demo, which took it, so the reply was sent for real. Its steps alone, repeated on one draft under that load, did so in 35 of 521 tries, a second DevTools session seeing the browser send it and neither the handler nor `page.on("request")` hearing of it each time; through `Dashboard.route`, in 0 of 1,500.
+
+## What a landing's gate spends (3,662 tests, 18 drive files, a room of 32 cores under 2,048 processes, measured 2026-11-06)
+
+Behind `Step.together` and the drive tests' six files at a time. Each `lup-dev check --at HEAD --fix --again`, as `land` runs it on a merge, in a worktree made for it, timed by what wraps `uv` and `pnpm` on the `PATH` (one that runs them as a child has to hand on signals, or `drive`'s demos outlive their tests and fail them).
+
+| step, seconds | each in turn, one run | at once, the mean of five |
+|---|---:|---:|
+| worktree, environment and start | 3.7 | 3.6 |
+| `engine` and `dashboard` | 14.0 | 7.6, together |
+| `ignores` (`rules fix`), on a cold engine | 24.9 | 25.8 |
+| `drive` | 61.6 | 43.0 |
+| `rules` | 20.8 | 47.3 |
+| `pytest` | 66.9 on 8 workers | 61.5 on 12 |
+| `private` | 2.9 | 3.7 |
+| **the gate, cold** | **197 to 211, 2 runs** | **93 to 106, 5 runs, all passing** |
+
+- **What decides it** is the slowest of what runs at once, `pytest` now, then the fixes' 25 s before it. Each of the rest is under a second.
+- **What wasn't the cost:** the cold environment takes 0.2 s from uv's cache, and the two builds 14 s, so reusing them across checkouts could save little of the gate, and only with what a build is keyed by complete.
+- **`rules`** takes 10 s where its engine is warm and nothing else starts, and about 45 s beside the suite in a worktree just made. Its issues were 15 of its seconds, asked one by one. Why it's slower beside the suite isn't known; it's within `pytest`'s time, so the gate doesn't wait on it.
+- **Two gates at once:** each took 254 to 269 s and failed in `drive` at the limit, a third gate in the room, when each step ran in turn on three files without a lock. Each took 141 s at once with the lock, both passing, the second `drive` waiting its turn, peaking at 1,688.
+- **`pytest`'s time is spread out:** the slowest test takes about 5 s, and 3,614 tests summed 488 s. 96 tests start a real process and took 136 s of it, 20 of them `judged_in_its_process` taking 86 s. About 49,000 programs ran, nearly all git. Putting its temporary files in a tmpfs took 67 s, as on disk, and deferring pydantic's builds took the import from 1.35 s to 1.05 s and the suite nowhere.
+- **`drive`'s setup** took about 3.8 s a file: the demo 1.15 s, Chromium 0.34 s, the review 0.48 s, then `settled` 1.65 s, the largest part, a time-based wait.
 
 ## The room's hook when the host service goes away (socat 1.8.1.3, Linux 7.2.6, measured 2026-10-22)
 

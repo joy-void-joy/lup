@@ -41,6 +41,12 @@ export interface DemoOptions {
      * timings --kept` to read; in the demo's own directory, gone as it stops, unless given.
      */
     timings?: string;
+    /** How many seconds after the page first asks for the inbox the late question arrives: long enough to watch by default. */
+    arrives?: number;
+    /** How many seconds after the page first asks what the parser's branch changed two more writes come to it: long enough to watch by default. */
+    grows?: number;
+    /** How many seconds after the page first asks for the approval's files their types are read: long enough to watch by default. */
+    typesRead?: number;
     /**
      * Open the review as the operator's page does, grouped by agent. Left out, the address asks for it grouped by
      * thread (`?threads`), which most of these tests drive.
@@ -75,6 +81,15 @@ export async function demo(options: DemoOptions = {}): Promise<Demo> {
     }
     if (options.hooks !== undefined) {
         args.push("--hooks", String(options.hooks));
+    }
+    if (options.arrives !== undefined) {
+        args.push("--arrives", String(options.arrives));
+    }
+    if (options.grows !== undefined) {
+        args.push("--grows", String(options.grows));
+    }
+    if (options.typesRead !== undefined) {
+        args.push("--types-read", String(options.typesRead));
     }
     if (options.copy === true) {
         args.push("--copy");

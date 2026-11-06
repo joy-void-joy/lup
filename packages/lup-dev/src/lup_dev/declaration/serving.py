@@ -331,6 +331,15 @@ def tools(owner: type[ModuleServing]) -> list[ToolSpec]:
     ]
 
 
+def tool_names(owner: type[ModuleServing]) -> list[str]:
+    """Return the name of each tool `owner` serves, with no instance and no schema: resolving a declaration checks them each time, and building each schema took a fifth of it."""
+    return [
+        method.taken.name
+        for method in served(owner).values()
+        if method.tooled() is not None
+    ]
+
+
 def requests(owner: type[ModuleServing]) -> dict[str, str]:
     """Return each kind of request `owner` answers, with the name of the method answering it."""
     return {

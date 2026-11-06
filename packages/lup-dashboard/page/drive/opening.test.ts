@@ -14,7 +14,8 @@ let dashboard: Dashboard;
 let review: Review;
 
 beforeAll(async () => {
-    served = await demo({ size: 0 });
+    // Nothing of the demo's own comes while the keys go down, as the test counts the layouts they make.
+    served = await demo({ size: 0, arrives: 3600, grows: 3600, typesRead: 0 });
     dashboard = await open(served.url);
     review = await dashboard.review();
     await review.holds(DEMO_ITEM);
@@ -40,6 +41,8 @@ interface Opening {
  * Note, in the page, how many layouts the editor holds as each key goes down, until a comment opens, and as its line
  * first appears: an empty line more than as the keys began, the cursor on it, in the transaction that puts it there.
  * The count is the editor's own (`ahead`), found among its state's values by its shape, as the page offers no handle.
+ * Begun once the count has rested half a second: a key before, or the host's answer to one, can lay the review out
+ * after these go down, and on a loaded machine one did, a layout more than these made.
  */
 async function noting(): Promise<void> {
     await review.evaluate((view) => {
@@ -51,6 +54,20 @@ async function noting(): Promise<void> {
             }
             throw new Error("the editor's count of layouts (`ahead`, editor.ts) isn't among its state's values");
         };
+        Object.assign(globalThis, { lupDriveLayouts: layouts, lupDriveResting: null });
+    });
+    await review.until("the review's layouts at rest", () => {
+        const seen = globalThis as unknown as { lupDriveLayouts: () => number; lupDriveResting: { count: number; since: number } | null };
+        const count = seen.lupDriveLayouts();
+        const now = performance.now();
+        if (seen.lupDriveResting === null || seen.lupDriveResting.count !== count) {
+            seen.lupDriveResting = { count, since: now };
+            return false;
+        }
+        return now - seen.lupDriveResting.since >= 500;
+    });
+    await review.evaluate((view) => {
+        const layouts = (globalThis as unknown as { lupDriveLayouts: () => number }).lupDriveLayouts;
         const lines = view.state.doc.lines;
         const noted: Opening = { atKey: null, opened: null };
         const down = () => {

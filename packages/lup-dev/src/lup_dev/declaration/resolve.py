@@ -37,6 +37,7 @@ that can't.
 """
 
 from datetime import timedelta
+from functools import cache
 from pathlib import Path
 from typing import Self
 
@@ -85,7 +86,7 @@ from lup_dev.declaration.modules.versions import Versions
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.requirements import Needed
 from lup_dev.declaration.runner import Plain, Prefixed, Runner
-from lup_dev.declaration.serving import ModuleServing, made_with, requests, tools
+from lup_dev.declaration.serving import ModuleServing, made_with, requests, tool_names
 from lup_dev.host.protocol import Bannered, Branches, Drawn, Limits, Looks
 
 
@@ -344,9 +345,9 @@ def served(modules: list[Module]) -> list[Served]:
     distinct(
         "Tools",
         [
-            Owned(module=each.module.name, name=spec.name)
+            Owned(module=each.module.name, name=name)
             for each in found
-            for spec in tools(each.serving)
+            for name in tool_names(each.serving)
         ],
     )
     distinct(
@@ -797,6 +798,12 @@ def resolve(project: Project) -> Resolved:
     )
 
 
+@cache
+def default_tests() -> list[Pytest]:
+    """Return where tests are when a project doesn't say, resolved once: it's asked of every declaration read, as often as a hook comes."""
+    return resolve(Project()).tests
+
+
 class Declaration(Model):
     """A declaration as judging reads it: its file, and plain values resolved from it.
 
@@ -844,7 +851,7 @@ class Declaration(Model):
         True
         """
         resolved = resolve(project)
-        named = resolved.tests != resolve(Project()).tests
+        named = resolved.tests != default_tests()
         return cls(
             source=source,
             paths=resolved.paths,
