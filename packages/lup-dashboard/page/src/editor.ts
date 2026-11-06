@@ -33,8 +33,8 @@
 // (`folds.ts`). A closed fold counts as its summary line: no motion opens it,
 // the cursor passing over it (`outOfFolds`); a search, and a jump to what it
 // hides, as `]n`, opens the folds around where it goes, saying so under the view
-// (`reached`). `?` opens the list of every key, in place of vim's search
-// backward; once a chord is begun, as with Space or `zf`, the view is told what's
+// (`reached`). `g?` opens the list of every key, in place of vim's rot13; once a
+// chord is begun, as with Space or `zf`, the view is told what's
 // pressed, to show what may follow. `"+` and `"*` are the system clipboard, and a
 // yank or a put the clipboard refused is said in the page's top line
 // (`clipboard.ts`). What's written, an agent's text and a comment, is
@@ -100,6 +100,7 @@ interface Actions {
     follow: () => void;
     /** `gt`: go to the thread what the cursor is in is of, whole. */
     thread: () => void;
+    /** `g?`: open the list of every key. */
     list: () => void;
     /** `g<`: open the panel of what was said, whole. */
     whole: () => void;
@@ -584,8 +585,6 @@ function mapKeys(): void {
         Vim.mapCommand(keys, "action", name, {}, { context });
     map("o", "lupCommentLine", "normal");
     map("O", "lupCommentAbove", "normal");
-    // The list of every key, in place of vim's search backward, which `/` then `N` still does.
-    map("?", "lupKeys", "normal");
     map("za", "lupFoldToggle", "normal");
     map("zo", "lupFoldOpen", "normal");
     map("zc", "lupFoldClose", "normal");
@@ -627,12 +626,16 @@ function mapKeys(): void {
     map("gt", "lupThread", "normal");
     // As vim's own `g<` shows the last message whole: what each line of the page says a sentence of.
     map("g<", "lupWhole", "normal");
+    // The list of every key, in place of vim's rot13, which these match ahead of as every mapping here does: in visual
+    // mode too, where the line of keys says it as well and rot13 would rewrite the selection. `?` stays vim's search backward.
+    map("g?", "lupKeys", "normal");
+    map("g?", "lupKeys", "visual");
 }
 
 /** The editor last made, which the palette gives the keys it runs (`feed`). */
 let fed: EditorView | null = null;
 
-/** Give `keys`, as vim's keymap names each key pressed (`<Space>`, `]`), to the editor last made, in normal mode, as if typed; and say whether there was one. */
+/** Give `keys`, as vim's keymap names each key pressed (`<Space>`, `]`), to the editor last made, as if typed, in the mode it's in; and say whether there was one. */
 export function feed(keys: readonly string[]): boolean {
     const cm = fed === null ? null : vimOf(fed);
     if (fed === null || cm === null) {
@@ -925,13 +928,13 @@ const typed = Prec.highest(
     }),
 );
 
-/** The keys that search: vim's `/`, `n`, `N`, `*` and `#`, and `g*` and `g#`; `?` lists the keys instead. */
-const SEARCHES = new Set(["/", "n", "N", "*", "#"]);
+/** The keys that search: vim's `/`, `?`, `n`, `N`, `*` and `#`, and `g*` and `g#`; `g?` lists the keys instead. */
+const SEARCHES = new Set(["/", "?", "n", "N", "*", "#"]);
 
-/** Return whether `key`, pressed outside insert mode, begins or makes a search, rather than finishing another command, as `fn` does. */
+/** Return whether `key`, pressed outside insert mode, begins or makes a search, rather than finishing another command, as `fn` does; a count before it, which vim holds among the keys so far, is still a search, as `2?` and `2n`. */
 function searches(cm: CodeMirrorV, key: string): boolean {
-    const held = cm.state.vim.inputState.keyBuffer;
-    return !cm.state.vim.insertMode && SEARCHES.has(key) && (held.length === 0 || (held.join("") === "g" && (key === "*" || key === "#")));
+    const held = cm.state.vim.inputState.keyBuffer.join("").replace(/^[1-9][0-9]*/, "");
+    return !cm.state.vim.insertMode && SEARCHES.has(key) && (held === "" || (held === "g" && (key === "*" || key === "#")));
 }
 
 /** Marks a view's own replacing of its text, which isn't the operator's edit. */
@@ -1233,8 +1236,8 @@ export function pastFolds(state: EditorState, selection: EditorSelection, was: n
 /**
  * Keep the cursor out of what a closed fold hides, where CodeMirror would open the fold: a plain motion put there, as
  * `w` past a folded file's header, `b` back into one or `G` into a folded drawer, rests past the fold instead
- * (`pastFolds`), so a fold opens by the fold keys, a click, a search or a jump alone. A search, `/`, `n`, `N`, `*` or
- * `#`, opens the folds around its match, said under the view (`reached`); a jump opens what it reaches itself. Not in
+ * (`pastFolds`), so a fold opens by the fold keys, a click, a search or a jump alone. A search, `/`, `?`, `n`, `N`, `*`
+ * or `#`, opens the folds around its match, said under the view (`reached`); a jump opens what it reaches itself. Not in
  * insert mode, where the cursor stays in the comment being written, nor where a view lays its text out, or a click.
  */
 const outOfFolds = EditorState.transactionFilter.of((transaction) => {
@@ -1582,7 +1585,7 @@ interface Config<D, C> {
     epoch: number;
     /** Whether the editor is shown: shown again, it takes the keyboard. */
     shownNow: boolean;
-    /** Open the list of every key (`?`). */
+    /** Open the list of every key (`g?`). */
     list: () => void;
     /** Open the panel of what was said, whole (`g<`). */
     whole: () => void;

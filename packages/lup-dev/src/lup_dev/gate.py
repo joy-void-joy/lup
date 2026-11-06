@@ -40,8 +40,9 @@ stale (`Check.answered`): git ignores what they build, so it isn't part of the
 files a pass is found by, and a worktree just made from a branch that passed has
 none of it. A pass is recorded only where the files after the steps are those the
 steps checked. `--at` runs the gate on a commit, in a worktree made at it and removed
-after (`at_commit`), unless a pass is recorded for its files: lup's remote helper runs it before a push updates the integration
-branch (`lup_dev.remote.helper`). With `--fix` too, what the fixes change is
+after (`at_commit`), unless a pass is recorded for its files: lup's remote helper
+runs it before a push updates a gated branch (`lup_dev.remote.helper`). With `--fix`
+too, what the fixes change is
 committed in place of the commit, with its parents and message (`Amended`):
 `land` runs it so on the merge it makes (`lup_dev.merging`).
 

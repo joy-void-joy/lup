@@ -204,6 +204,17 @@ class Git(Model):
         [main, *_] = self.worktrees()
         return main
 
+    def checkout(self, branch: str) -> Path | None:
+        """Return the worktree that has `branch` checked out, as `git worktree list` gives it; none where none does, or the one that did is gone."""
+        listed = self.run("worktree", "list", "--porcelain", "-z").output
+        found: Path | None = None
+        for field in nul_separated(listed):
+            if field.startswith("worktree "):
+                found = Path(field.removeprefix("worktree "))
+            if field == f"branch refs/heads/{branch}" and found is not None:
+                return found if found.is_dir() else None
+        return None
+
     def branch(self) -> str | None:
         """Return the branch the work tree has checked out, by its short name; none on a detached `HEAD`."""
         found = self.run("symbolic-ref", "--short", "-q", "HEAD", ok=[0, 1])

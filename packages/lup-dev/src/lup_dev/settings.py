@@ -64,15 +64,6 @@ class LupDevSettings(Settings):
     project's rooms' directory where the engine's build fetches a release the
     image doesn't carry (`lup_dev/pyright_source.py`); unset on the host, whose
     build reads its own cache alone."""
-    lup_integration_branch: str = "dev"
-    """`LUP_INTEGRATION_BRANCH`: the branch whose tip holds what the host runs, and the declaration judged by.
-
-    Trust on launch approves the host zone at its tip, and once a commit is
-    approved, every worktree of the repository is judged by the declaration
-    committed there; before any approval, by the declaration at the tip, so a
-    branch's edits to it take effect when they land there. A repository without
-    the branch is judged by the declaration each worktree's `HEAD` commit holds.
-    """
 
     @field_validator("lup_dashboard_addresses", mode="before")
     @classmethod

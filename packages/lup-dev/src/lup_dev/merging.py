@@ -1,4 +1,4 @@
-"""A branch merged onto the integration branch apart from every checkout, and the gate run on the merge: what `land` has a launch's room do.
+"""A branch merged onto the running branch apart from every checkout, and the gate run on the merge: what `land` has a launch's room do.
 
 `docs/judging-writes.md`, *Landing a branch*. `land`, on the host, hands the room
 the two commits and the merge commit's message; `lup-dev merge` runs `merged`
@@ -8,10 +8,10 @@ there, through the project's runner, and prints what came of it as JSON
    --write-tree`): where it conflicts, the answer names the files, and nothing
    is written but objects no ref names;
 2. the merge commit is made with the message as given, cleaned as `git commit`
-   cleans one (`git stripspace`), the integration branch's tip its first parent
+   cleans one (`git stripspace`), the running branch's tip its first parent
    (`git commit-tree`), so the message goes through no shell's quoting;
 3. the gate runs on it, with its fixes (`at_commit`): a branch that held the
-   integration branch's tip merges to its own tree, whose pass the branch
+   running branch's tip merges to its own tree, whose pass the branch
    recorded, so nothing runs; where the fixes change files, they're in a
    commit made in its place, with its parents and message, which is the
    merge that lands.

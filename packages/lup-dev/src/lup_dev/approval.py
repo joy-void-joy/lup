@@ -5,8 +5,10 @@ judge reads the declaration at its commit (`lup_dev.policy`;
 `docs/judging-writes.md`, *The declaration, from the approved commit*), with the
 person's own layer approved beside it, and a launch runs the person's
 profiles approved with it, so what runs on the host is what the operator
-approved. It's here, below both, since the judge can't import the
-launch. Kept per repository in lup's state (`Layout.approved`).
+approved. The branches its declaration names are kept with it, for whatever
+needs them without loading a declaration (`approved_branches`). It's here, below
+both, since the judge can't import the launch. Kept per repository in lup's
+state (`Layout.approved`).
 """
 
 from datetime import datetime
@@ -17,6 +19,7 @@ from pydantic import Field
 
 from lup.types import Model
 from lup_dev.declaration.package_managers.uv import Uv
+from lup_dev.host.protocol import Branches
 from lup_dev.layout import PackageLayout
 from lup_dev.stored import read_model
 
@@ -177,8 +180,20 @@ class Approval(Model):
     """The person's profiles file approved with it, `~/.config/lup/profiles.py`,
     whole, since no repository holds it: a launch runs this copy, never the
     file; none where none was there."""
+    branches: Branches = Branches()
+    """The branches its declaration names, the person's own layer on it, read as
+    the operator approved it (`Trust.answered`), so everything that needs them,
+    trust above all, reads them here and runs no project code to learn them. The
+    defaults in a record from before approvals kept them, which no declaration
+    could have changed."""
 
 
 def approved(layout: Layout, repository: Path) -> Approval | None:
     """Return what the operator approved last for the repository at `repository`; none before the first approval."""
     return read_model(layout.approved(repository), Approval)
+
+
+def approved_branches(layout: Layout, repository: Path) -> Branches:
+    """Return the branches the declaration approved for the repository at `repository` names; `dev` for both before the first approval."""
+    approval = approved(layout, repository)
+    return Branches() if approval is None else approval.branches

@@ -24,8 +24,8 @@ directory, within the limits the project's declaration sets
 - `fetch`: the objects fetched on the host into the repository's own store,
   which the room shares, so git writes the room's refs itself.
 
-Before a push updates a ref the room's configuration gates (`lup.gated`, the
-integration branch), the gate runs on the commit it would name: the command
+Before a push updates a ref the room's configuration gates (`lup.gated`, what
+branches land on), the gate runs on the commit it would name: the command
 `lup.gate` holds (`lup-dev check --at`, through the project's runner), the
 commit's object id after it, which answers at once where the gate passed on that
 commit's files already. It runs in the room, outside the repository git runs the

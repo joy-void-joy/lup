@@ -397,9 +397,10 @@ class Remotes(Model, arbitrary_types_allowed=True):
     """Runs one git command to its end on the service's event loop."""
     landed: Callable[[Register, list[Update]], Awaitable[None]] | None = None
     """Told what a launch's push updated, each ref with the object it names,
-    once it's done and before its room hears: a push moving the integration
-    branch puts the approval of the host zone at its tip in the operator's
-    inbox, and wakes each thread parked until a commit it brings (`cli.py`).
+    once it's done and before its room hears: a push moving the running branch
+    puts the approval of the host zone at its tip in the operator's inbox, and
+    one moving the integration branch wakes each thread parked until a commit
+    it brings (`cli.py`).
     None tells nothing."""
     modules: LaunchModules | None = None
     """Each launch's modules, whose hooks at `Publishing` see what a push would

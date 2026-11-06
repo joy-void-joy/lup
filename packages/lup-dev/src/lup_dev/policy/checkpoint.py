@@ -62,7 +62,7 @@ from lup_dev.declaration.project import Project
 from lup_dev.declaration.resolve import Declaration, resolve
 from lup_dev.errors import LupDevError
 from lup_dev.git import Git
-from lup_dev.host.protocol import Register
+from lup_dev.host.protocol import Branches, Register
 from lup_dev.inbox import ends
 from lup_dev.inbox.store import ChangedFile
 from lup_dev.layout import CheckoutLayout, GitDirectoryLayout, Layout
@@ -132,9 +132,6 @@ class Services(Model, arbitrary_types_allowed=True):
     clock: Clock
     layout: Layout
     spawner: Spawner
-    integration: str
-    """The branch whose tip holds the declaration every worktree is judged by,
-    until the operator approves a commit (`lup_dev.approval`)."""
     announcing: Announcing
     """Where each hold is put before the operator, whose answer comes back to it."""
     facts: Facts
@@ -469,11 +466,8 @@ class Loaded(Model):
 
 
 class Judging(Model):
-    """Where the declaration a worktree is judged by is read from."""
+    """Where the declaration a worktree is judged by is read from: the commit the operator approved, kept in lup's state at `layout`."""
 
-    integration: str
-    """The branch whose tip holds it before the operator approves a commit;
-    without one, the worktree's `HEAD` commit."""
     layout: Layout
 
 
@@ -507,11 +501,11 @@ class Worktree(Model):
         """Open the worktree at `root` of the repository at `repository`, to judge.
 
         It's judged by the declaration at the commit the operator approved, or
-        before any approval at the integration branch's tip, never by its own, so
-        a branch can't change what judges it (#21).
+        before any approval at `dev`'s tip, never by its own, so a branch can't
+        change what judges it (#21).
         """
         store = Store(layout=services.layout.store(root), worktree=root)
-        judging = Judging(integration=services.integration, layout=services.layout)
+        judging = Judging(layout=services.layout)
         return cls(root=root, repository=repository, store=store, judging=judging)
 
     @classmethod
@@ -527,7 +521,7 @@ class Worktree(Model):
         store = Store(
             layout=services.layout.store(root), worktree=root, common=repository
         )
-        judging = Judging(integration=services.integration, layout=services.layout)
+        judging = Judging(layout=services.layout)
         return cls(root=root, repository=repository, store=store, judging=judging)
 
     @cached_property
@@ -537,10 +531,10 @@ class Worktree(Model):
         Read from the commit the operator approved last for the repository
         (`lup_dev.approval`), with the person's own layer approved with it beside
         the declaration, never the worktree's own copy of it, so what runs on the
-        host is what they approved. Before any approval, from the integration
-        branch's tip, with no layer of the person's, or where the
-        repository has no such branch, from the worktree's `HEAD` commit; the
-        defaults before any commit. Each that loads is kept for the repository,
+        host is what they approved. Before any approval, from `dev`'s tip, with
+        no layer of the person's, or where the repository has no such branch,
+        from the worktree's `HEAD` commit; the defaults before any commit. Each
+        that loads is kept for the repository,
         and where one can't load, or the approved commit is gone from the
         repository, the last kept stands in.
         """
@@ -551,7 +545,7 @@ class Worktree(Model):
         commit = (
             approval.commit
             if approval is not None
-            else self.store.tip(judging.integration) or self.store.head()
+            else self.store.tip(Branches().running) or self.store.head()
         )
         if commit is None:
             return Loaded(declaration=Declaration.of(Project()), root=self.root)
@@ -562,7 +556,7 @@ class Worktree(Model):
             if approval is not None and self.store.repository().commit(commit) is None:
                 message = (
                     f"the commit approved last, {commit}, isn't in the repository: "
-                    "approve the integration branch's tip with `lup-dev trust`"
+                    "approve the running branch's tip with `lup-dev trust`"
                 )
                 raise ProjectError(message)
             source = self.exported(judging.layout, commit, local)
@@ -652,8 +646,8 @@ class Worktree(Model):
             "judges with the last of this repository's declarations that loaded, "
             f"from commit {loaded.commit}, until one loads. Tell the operator: if "
             "the declaration uses something the installed judge predates, "
-            "approving `dev`'s with `lup-dev trust` fixes this; otherwise the "
-            "declaration needs fixing."
+            "approving the running branch's tip with `lup-dev trust` fixes this; "
+            "otherwise the declaration needs fixing."
         )
 
     @cached_property

@@ -123,6 +123,7 @@ describe("what the palette runs", () => {
         expect(run("Answering", "␣d")).toEqual(["<Space>", "d"]);
         expect(run("Answering", "^⏎")).toBeNull();
         expect(run("Moving", "]] [[")).toEqual(["]", "]"]);
+        expect(run("Moving", "/ ? n N")).toEqual(["/"]);
         expect(run("Moving", "^d ^u ^f ^b")).toEqual(["<C-d>"]);
         expect(run("Folds", "zR zM")).toEqual(["z", "R"]);
         expect(run("Folds", "zf")).toBeNull();
@@ -130,6 +131,7 @@ describe("what the palette runs", () => {
         expect(run("Folds", "zff")).toEqual(["z", "f", "f"]);
         expect(run("The clipboard", '"+y "*y')).toBeNull();
         expect(run("Writing a comment", "Esc")).toBeNull();
+        expect(run("This palette", "g?")).toBeNull();
     });
 });
 
@@ -149,9 +151,9 @@ describe("the kind of each key, as the page's timings group them", () => {
 
     it("is the part of the table holding the keys whole: a verb, a motion, a fold, the palette", () => {
         expect([kind("␣", "d"), kind("u"), kind("^⏎")]).toEqual(["verb", "verb", "verb"]);
-        expect([kind("]", "]"), kind("^d"), kind("/"), kind("^k")]).toEqual(["motion", "motion", "motion", "motion"]);
+        expect([kind("]", "]"), kind("^d"), kind("/"), kind("?"), kind("^k")]).toEqual(["motion", "motion", "motion", "motion", "motion"]);
         expect([kind("z", "a"), kind("z", "f", "i"), kind("␣", "f"), kind("z", "j")]).toEqual(["fold", "fold", "fold", "fold"]);
-        expect([kind("?"), kind("o"), kind("\\")]).toEqual(["palette", "other", "other"]);
+        expect([kind("g", "?"), kind("o"), kind("\\")]).toEqual(["palette", "other", "other"]);
     });
 
     it("is vim's own motion where the table leaves it to vim, a character after f and t among them", () => {

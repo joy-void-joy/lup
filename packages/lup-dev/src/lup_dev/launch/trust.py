@@ -1,7 +1,7 @@
 """Trust on launch: the code the host runs for a repository, approved before it runs.
 
 `docs/trust.md`. A repository's host zone is what the host runs
-for it, read at the integration branch's tip, so what's approved is what the judge
+for it, read at the running branch's tip, so what's approved is what the judge
 and the host service run, never a branch's own copy (`Zone`), with the person's own
 layer beside it:
 - its declaration, `lup_project.py` or the package `lup_project/`, and every file
@@ -29,6 +29,13 @@ layer beside it:
   next launch. It runs apart from the declaration, importing nothing of the
   commit, and the judge doesn't read it: the repository's roles and rules
   aren't its own.
+
+Which branch that is comes from the declaration already approved, since reading
+the tip's would run the project's code before the operator is asked, and `dev`
+before the first approval: an answer's yes reads the branches the declaration just
+approved names, and keeps them with the approval (`Trust.answered`,
+`Approval.branches`), so a change to them takes effect once it's approved, and its
+diff is in what's approved.
 
 The zone's fingerprint is kept with the commit the operator approved, per
 repository, in lup's state (`Approval`). `trusted`, which a launch calls before
@@ -69,7 +76,7 @@ zone at once wait on one approval. The answer:
 A repository's copy approved but missing from its place, removed or never
 installed there, is installed from the commit approved, asking nothing.
 
-A push from a room that moves the integration branch puts the approval of the
+A push from a room that moves the running branch puts the approval of the
 zone at its tip in the inbox too, asking nothing at any terminal (`proposed`),
 so the operator isn't left to notice that the code the host runs changed. The
 terminal answering it with `lup-dev inbox answer` then acts on a yes as a
@@ -99,13 +106,21 @@ from rich.text import Text
 
 from lup.programs import run
 from lup.types import Model, MutableModel
-from lup_dev.approval import Approval, ReleaseTool, Tool, WorkspaceTool, approved
+from lup_dev.approval import (
+    Approval,
+    ReleaseTool,
+    Tool,
+    WorkspaceTool,
+    approved,
+    approved_branches,
+)
 from lup_dev.clock import Clock, SystemClock
 from lup_dev.codescan import conditions
 from lup_dev.codescan.contract import Checker, Parser
 from lup_dev.codescan.engine import EngineChecker, EngineParser
 from lup_dev.codescan.ruff import Linter, Ruff
 from lup_dev.copies import Copies
+from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.load import (
     Pyproject,
     import_roots,
@@ -120,7 +135,7 @@ from lup_dev.errors import LupDevError
 from lup_dev.gate import invoked
 from lup_dev.git import Git
 from lup_dev.host.client import Detached, HostClient, Outstanding
-from lup_dev.host.protocol import HostError
+from lup_dev.host.protocol import Branches, HostError
 from lup_dev.inbox.protocol import (
     AnswerApproval,
     AskApproval,
@@ -161,7 +176,7 @@ class TrustError(LupDevError):
 
 
 class SupersededError(TrustError):
-    """An approval a later one of the same repository replaced, the integration branch's tip having moved: the later one is asked."""
+    """An approval a later one of the same repository replaced, the running branch's tip having moved: the later one is asked."""
 
 
 class LockSource(Model):
@@ -573,6 +588,40 @@ def reinstalled(approval: Approval, *, again: bool) -> str:
     )
 
 
+class BranchesRead(Model):
+    """The branches a declaration just approved names, and what the approval's answer says of them."""
+
+    branches: Branches
+    said: str | None = None
+    """What changed of them, or why they couldn't be read; none where they stand
+    as they did."""
+
+
+def branches_moved(before: Branches, after: Branches) -> str | None:
+    """Say what changed between `before` and `after`; none where nothing did.
+
+    >>> print(branches_moved(Branches(), Branches(running="live")))
+    The running branch is now `live`: trust reads it, and `land` lands on it.
+    >>> print(branches_moved(Branches(), Branches(integration="trunk", running="trunk")))
+    The integration branch is now `trunk`: branches start from it, and pull requests target it. The running branch is now `trunk`: trust reads it, and `land` lands on it.
+    >>> branches_moved(Branches(), Branches()) is None
+    True
+    """
+    integrating = (
+        f"The integration branch is now `{after.integration}`: branches start from "
+        "it, and pull requests target it."
+    )
+    running = (
+        f"The running branch is now `{after.running}`: trust reads it, and `land` "
+        "lands on it."
+    )
+    said = [
+        *([integrating] if after.integration != before.integration else []),
+        *([running] if after.running != before.running else []),
+    ]
+    return " ".join(said) or None
+
+
 class Unchanged(Model):
     """The tip's host zone is the one approved: nothing was asked."""
 
@@ -605,8 +654,16 @@ class Trusted(Model):
     """Whether the person's own layer is among what changed, where nothing was installed."""
     profiles: bool = False
     """Whether the person's profiles are among what changed, where nothing was installed."""
+    branches: str | None = None
+    """What approving it changed of the branches, or why they couldn't be read
+    (`BranchesRead.said`); none where they stand as they did."""
 
     def report(self) -> str:
+        """Say what was installed, where the host service stands, and what became of the branches."""
+        said = self.installing()
+        return said if self.branches is None else f"{said} {self.branches}"
+
+    def installing(self) -> str:
         """Say what was installed, and where the host service stands."""
         if not self.installed:
             approved = [
@@ -834,7 +891,7 @@ def decision(item: Item) -> bool:
         case Superseded(by=by):
             message = (
                 f"{cited(item.number)} was superseded by {cited(by)}, an approval of "
-                "the host zone at the integration branch's tip."
+                "the host zone at the running branch's tip."
             )
             raise SupersededError(message)
         case _:
@@ -1543,9 +1600,11 @@ class Trust(Model, arbitrary_types_allowed=True):
 
     root: Path
     """The worktree it's run from; the zone is its repository's."""
+    reading: Path | None = None
+    """The worktree an approval it asks has its types read in, where that's not
+    `root` (`proposed`): a bare repository's own directory holds no project, so
+    nothing it imports resolves there."""
     layout: Layout
-    integration: str
-    """The branch whose tip holds the zone; without one, the worktree's `HEAD`."""
     asker: Asker
     """The launching terminal, where the operator reads the summary and answers."""
     approvals: Approvals
@@ -1593,9 +1652,12 @@ class Trust(Model, arbitrary_types_allowed=True):
         )
 
     def zone(self) -> Zone:
-        """Read the host zone at the integration branch's tip, with the person's own layer and their profiles.
+        """Read the host zone at the running branch's tip, as the declaration approved names it, with the person's own layer and their profiles.
 
-        Where the repository has no such branch, at the worktree's `HEAD`. The
+        Where the repository has no such branch, at the integration branch's
+        tip, so naming one before it exists asks about what's accepted rather
+        than whatever a launch's worktree has checked out; without that either,
+        at the worktree's `HEAD`. The
         person's own layer, which git doesn't hold, is read by its content from
         the repository's main worktree (a clone's root, or a bare repository's
         own directory), whichever worktree trust runs from: one layer per
@@ -1607,7 +1669,12 @@ class Trust(Model, arbitrary_types_allowed=True):
         `lup-dev` the host runs.
         """
         git = Git(cwd=self.root)
-        commit = git.commit(f"refs/heads/{self.integration}") or git.commit("HEAD")
+        branches = approved_branches(self.layout, self.repository())
+        commit = (
+            git.commit(f"refs/heads/{branches.running}")
+            or git.commit(f"refs/heads/{branches.integration}")
+            or git.commit("HEAD")
+        )
         if commit is None:
             message = (
                 f"nothing is committed in {self.root}'s repository, so it has no host "
@@ -1851,7 +1918,10 @@ class Trust(Model, arbitrary_types_allowed=True):
 
         Before any approval, by lup's defaults, never the tip's own declaration,
         which importing would run before the operator is asked; the tip's
-        declaration, among `files`, is the protected path it always is.
+        declaration, among `files`, is the protected path it always is. git on
+        the repository is pinned to `repository`, since what reads types here
+        does so in a worktree a room writes, on the host, at a moment its push
+        set off.
         """
         if approval is None:
             layout = CheckoutLayout(root=Path())
@@ -1873,8 +1943,12 @@ class Trust(Model, arbitrary_types_allowed=True):
             worktree = Worktree(
                 root=self.root,
                 repository=repository,
-                store=Store(layout=self.layout.store(self.root), worktree=self.root),
-                judging=Judging(integration=self.integration, layout=self.layout),
+                store=Store(
+                    layout=self.layout.store(self.root),
+                    worktree=self.root,
+                    common=repository,
+                ),
+                judging=Judging(layout=self.layout),
             )
             declaration = worktree.declaration
             named = conditions.declared(worktree.loaded.root, declaration.conditions)
@@ -1965,12 +2039,14 @@ class Trust(Model, arbitrary_types_allowed=True):
     def proposed(self, pushed_by: Conversation | None = None) -> int | None:
         """Put the approval of the tip's host zone in the operator's inbox where it isn't the one approved, asking nothing here, and return its number; none where it's approved.
 
-        What a push that moves the integration branch starts, on the host
+        What a push that moves the running branch starts, on the host
         (`cli.py`): nobody waits on the approval, and the terminal answering it
         acts on the answer (`settle`). `pushed_by` is the main conversation of
         the session who pushed, which the operator's comment on their answer
         is told to; none where no session's is known. An approval waiting about
-        the same zone is joined, as a launch joins it.
+        the same zone is joined, as a launch joins it. Its types are read in
+        `reading`, where it's given: what `root` is, for a push, need hold no
+        project.
         """
         repository = self.repository()
         kept = self.layout.approved(repository)
@@ -1989,7 +2065,7 @@ class Trust(Model, arbitrary_types_allowed=True):
                     typing=change.typing,
                     repository=repository,
                     fingerprint=standing.fingerprint,
-                    worktree=self.root,
+                    worktree=self.reading or self.root,
                     pushed_by=pushed_by,
                     first=change.approved is None,
                 )
@@ -2000,7 +2076,7 @@ class Trust(Model, arbitrary_types_allowed=True):
 
         As a launch waiting on it acts (`answered`), and only once between them.
         Return none where the tip's zone isn't that one any more, the
-        integration branch having moved since it was asked: approving it would
+        running branch having moved since it was asked: approving it would
         approve what the operator didn't read, so `lup-dev trust` asks anew.
         """
         repository = self.repository()
@@ -2019,7 +2095,9 @@ class Trust(Model, arbitrary_types_allowed=True):
         approval is read, and nothing is installed twice. Where only the
         person's own layer or their profiles changed, the copy approved before
         is the commit's already, so the approval is recorded and nothing
-        installed or restarted.
+        installed or restarted. The branches are read here, from what the answer
+        has just approved, and from here alone (`read_branches`), so a decline
+        leaves them as they stand.
         """
         kept = self.layout.approved(repository)
         copy = self.layout.judge(repository)
@@ -2038,6 +2116,7 @@ class Trust(Model, arbitrary_types_allowed=True):
                 raise TrustError(message)
             again = self.reinstall(now, now.commit, copy)
             return Kept(commit=zone.commit, approval=now, again=again)
+        read = self.read_branches(zone, now)
         recorded = Approval(
             commit=zone.commit,
             fingerprint=standing.fingerprint,
@@ -2046,6 +2125,7 @@ class Trust(Model, arbitrary_types_allowed=True):
             time=self.clock.now(),
             local=zone.local,
             profiles=zone.profiles,
+            branches=read.branches,
         )
         if now is not None and now.commit == zone.commit and now.tool == zone.tool:
             # Only the person's own layer or their profiles changed, which the
@@ -2060,12 +2140,38 @@ class Trust(Model, arbitrary_types_allowed=True):
                 installed=False,
                 layer=now.local != zone.local,
                 profiles=now.profiles != zone.profiles,
+                branches=read.said,
             )
         own = zone.tool.lups_own()
         self.installed(zone.tool, zone.commit, copy, users=own)
         restarted = own and self.restart()
         write_model(kept, recorded)
-        return Trusted(approval=recorded, restarted=restarted)
+        return Trusted(approval=recorded, restarted=restarted, branches=read.said)
+
+    def read_branches(self, zone: Zone, now: Approval | None) -> BranchesRead:
+        """Read the branches the declaration at `zone`'s commit names, its person's own layer on it: what the operator has just approved, so it may run.
+
+        Exported from git's objects and imported as a launch imports the
+        declaration approved (`approved_declaration`). Where it doesn't load,
+        they stay what `now` says, as the judge's last declaration that loaded
+        stands in for one that can't, and the answer says so.
+        """
+        before = Branches() if now is None else now.branches
+        try:
+            with tempfile.TemporaryDirectory(prefix="lup-branches-") as scratch:
+                source = Path(scratch)
+                Git(cwd=self.root).export(zone.commit, source, read_by_import)
+                if zone.local is not None:
+                    CheckoutLayout(root=source).local_declaration.write_text(zone.local)
+                after = resolve(load(source).project).branches
+        except ProjectError as failure:
+            said = (
+                f"The branches stay `{before.integration}` to integrate on and "
+                f"`{before.running}` to run, since its declaration doesn't load: "
+                f"{failure}"
+            )
+            return BranchesRead(branches=before, said=said)
+        return BranchesRead(branches=after, said=branches_moved(before, after))
 
     def reinstall(self, approval: Approval, commit: str, copy: JudgeLayout) -> bool:
         """Install the repository's copy approved, from `commit`, where it's missing; say whether it was.
@@ -2080,7 +2186,7 @@ class Trust(Model, arbitrary_types_allowed=True):
                 f"this repository's copy of `{approval.tool.name}`, approved at "
                 f"{commit}, is missing from {copy.home}, and that commit is gone "
                 "from the repository, so there's nothing to install it from: "
-                "approve the integration branch's tip once it changes the host zone"
+                "approve the running branch's tip once it changes the host zone"
             )
             raise TrustError(message)
         self.installed(approval.tool, commit, copy, users=False)
@@ -2111,10 +2217,11 @@ class Trust(Model, arbitrary_types_allowed=True):
         return True
 
 
-def machine_trust(root: Path, inside: list[str]) -> Trust:
+def machine_trust(root: Path, inside: list[str], reading: Path | None = None) -> Trust:
     """Return trust on launch for the repository at `root`, with this machine's settings, the terminal, the inbox in the host service, uv, the service's client, and the engine and ruff to judge the zone's change with.
 
-    `inside` names the runtimes whose session this runs inside.
+    `inside` names the runtimes whose session this runs inside, and `reading`
+    the worktree an approval it asks has its types read in (`Trust.reading`).
     """
     settings = LupDevSettings()
     layout = Layout.of(settings)
@@ -2122,8 +2229,8 @@ def machine_trust(root: Path, inside: list[str]) -> Trust:
     host = HostClient(layout=layout.host, clock=clock, starter=Detached())
     return Trust(
         root=root,
+        reading=reading,
         layout=layout,
-        integration=settings.lup_integration_branch,
         asker=Terminal(),
         approvals=InboxApprovals(host=host),
         toolchain=UvToolchain(),
