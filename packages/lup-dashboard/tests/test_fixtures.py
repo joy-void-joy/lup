@@ -3,18 +3,24 @@
 import asyncio
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import override
 
 from pydantic import JsonValue
 
 from lup.blocks import Block, Blocks, Fold, OfAgent
 from lup.types import Model
-from lup_dashboard.standins import StandInViews
+from lup_dashboard.handled import Modules
+from lup_dashboard.standins import StandInReader, StandInRecords, StoodIn
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.resolve import resolve
 from lup_dev.host.protocol import Looks
-from lup_dev.host.records import Entry, Transcript
+from lup_dev.host.records import Entry, Recorded, Transcript
 from lup_dev.host.workers import Viewing
+from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.marks import MarkStore, StoredMarks
 from lup_dev.inbox.protocol import Exchanged
+from lup_dev.layout import Layout
 
 FIXTURES = Path(__file__).resolve().parents[1] / "page" / "src" / "fixtures"
 
@@ -89,37 +95,60 @@ CONVERSATION = FIXTURES / "conversation.json"
 """An agent's conversation as `Transcripts` answers its views, which the page's review tests lay out as its drawer: the record it's of, and each view's answer."""
 
 
+class NothingExchanged(Exchanges):
+    """No item of the inbox a conversation exchanged: the fixture's record holds none."""
+
+    @override
+    async def exchanged(self, viewed: OfAgent) -> Exchanged:
+        return Exchanged(sent=[], received=[])
+
+
 def transcribed(fixed: Transcribed) -> list[Answered]:
-    """Return each view `fixed` names as `Transcripts` answers it now, over its record, through the repository's process as the demo makes it (`StandInViews`).
+    """Return each view `fixed` names as `Transcripts` answers it now, over its record, through the repository's process as the demo makes it (`lup_dashboard.handled.Modules`).
 
     `uv run python -c "import sys; sys.path.insert(0, 'packages/lup-dashboard/tests');
     import test_fixtures as t; t.CONVERSATION.write_text(t.rewritten())"`
     """
-    views = StandInViews(
-        runtimes=[fixed.of.runtime],
-        exchanged=lambda _: Exchanged(sent=[], received=[]),
-    )
-    views.record(
-        fixed.of,
-        Transcript(
-            runtime=fixed.of.runtime, session=fixed.of.session, entries=fixed.entries
-        ),
-        [],
-    )
 
-    async def answered(each: Answered) -> Answered:
+    async def answered(modules: Modules, each: Answered) -> Answered:
         viewing = Viewing(
             repository=fixed.repository,
             module="transcripts",
             view=each.view,
             argument=each.argument,
         )
-        return each.model_copy(update={"answer": (await views.view(viewing)).blocks})
+        return each.model_copy(update={"answer": (await modules.view(viewing)).blocks})
 
-    async def every() -> list[Answered]:
-        return [await answered(each) for each in fixed.answers]
+    async def every(modules: Modules) -> list[Answered]:
+        return [await answered(modules, each) for each in fixed.answers]
 
-    return asyncio.run(every())
+    with TemporaryDirectory() as kept:
+        layout = Layout(state=Path(kept), data=Path(kept) / "data")
+        records = StandInRecords(
+            runtime=fixed.of.runtime,
+            directory=Path(kept) / "records",
+            stands=lambda runtime, session, _: StoodIn(
+                transcript=Transcript(
+                    runtime=runtime, session=session, entries=fixed.entries
+                )
+            ),
+        )
+        return asyncio.run(
+            every(
+                Modules(
+                    repository=fixed.repository,
+                    resolved=resolve(Project()),
+                    recorded={
+                        fixed.of.runtime: Recorded(
+                            records=records, reader=StandInReader()
+                        )
+                    },
+                    layout=layout,
+                    exchanges=NothingExchanged(),
+                    marks=StoredMarks(store=MarkStore.kept_in(layout)),
+                )
+            )
+        )
 
 
 def rewritten() -> str:

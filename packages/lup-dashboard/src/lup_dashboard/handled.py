@@ -310,6 +310,11 @@ class Handled(MutableModel, Host, arbitrary_types_allowed=True):
     withheld: Withheld
     """What the host would have done beyond the inbox, kept here instead."""
 
+    @property
+    def inbox(self) -> Inbox:
+        """The inbox the handlers answer over."""
+        return self.delivery.inbox
+
     @override
     async def ask(self, request: Asked) -> Replied:
         replied = await self.dispatcher.answered(request.model_dump_json())
