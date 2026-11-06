@@ -6,6 +6,8 @@ same way (`docs/launch.md`, *The user, the process, the network*):
   theirs on the host;
 - `--init`, which reaps exited processes: without it the first lup piled up 4,045
   zombies against its pids limit;
+- `--pids-limit`, well above podman's default, which many gates at once reach
+  (`Podman.pids_limit`);
 - `--cap-drop=all` and `no-new-privileges`, so no capability carries in;
 - the home a directory of the host's the run is given, mounted at the path it
   gives, with `HOME` set to it: keep-id otherwise sets `HOME` to the working
@@ -235,6 +237,12 @@ class Podman(Model, ContainerEngine):
     """Runs containers with rootless podman."""
 
     program: str = "podman"
+    pids_limit: int = 16_384
+    """How many processes and threads a run may hold at once. Every session,
+    worker, gate and demo in a room shares it, and a gate alone peaks at about
+    720, where podman's own default of 2,048 made gates fail with errors that
+    don't name it. It's a limit rather than none, since it's also what stops a
+    fork bomb in a room from taking the host down."""
     execute: Callable[[Process], Ran] = run_process
     """Runs each podman command; a test gives a recording one."""
 
@@ -313,6 +321,7 @@ class Podman(Model, ContainerEngine):
             "--userns=keep-id",
             "--cap-drop=all",
             "--security-opt=no-new-privileges",
+            f"--pids-limit={self.pids_limit}",
             *named,
             *terminal,
             f"--network={network}",
