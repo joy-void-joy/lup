@@ -71,9 +71,9 @@ From then on:
 
 Codex never isolates a subagent, so nothing of this reaches it (`adapters/codex.py`).
 
-**The declaration, from the approved commit.** Every worktree is judged by the declaration at the commit the operator approved last (`docs/trust.md`), never by the worktree's own, so a branch can't change what judges it. Before any approval it's `dev`'s tip; without such a branch, the worktree's `HEAD` commit; before any commit, the defaults. It's exported from git's objects once per commit and imported from there, when a judgement first needs it. The gate reads the worktree's own declaration, to check a branch as it would land, and never takes a stand-in.
+**The declaration, from the approved commit.** Every worktree is judged by the declaration at the commit the operator approved last (`docs/trust.md`), never by the worktree's own, so a branch can't change what judges it. Before any approval it's `dev`'s tip; without such a branch, the worktree's `HEAD` commit; before any commit, the defaults. It's exported from git's objects once per commit, each hashed against its id, and imported from there, when a judgement first needs it. The gate reads the worktree's own declaration, to check a branch as it would land, and never takes a stand-in.
 
-**A declaration that can't load has a stand-in.** Where the commit due can't be imported, by a judge predating one of its fields say, the last declaration that loaded judges, and at a checkpoint the agent is told once, with the error, to pass on; denying every write instead would stop every session, and the defaults would silently drop the project's protections.
+**A declaration that can't load has a stand-in.** Where the commit due can't be imported, by a judge predating one of its fields say, or read, the store holding an object that isn't what its id says, the last declaration that loaded judges, and at a checkpoint the agent is told once, with the error, to pass on; denying every write instead would stop every session, and the defaults would silently drop the project's protections.
 
 ## What the agent is told
 

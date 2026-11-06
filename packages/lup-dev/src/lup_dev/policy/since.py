@@ -607,7 +607,11 @@ class Reader(Model, arbitrary_types_allowed=True):
         version = " | ".join(each.version for each in read)
         if request.seen == version:
             return Since(version=version, same=True)
-        return Since(version=version, places=[each.place() for each in read])
+        try:
+            return Since(version=version, places=[each.place() for each in read])
+        except GitError as unread:
+            message = f"lup can't read the conversation's branches: {unread}"
+            raise InboxError(message) from unread
 
     def standing(self, party: Conversation, located: Located) -> Standing:
         """Return the place `located` as it stands: its tree, snapshotted where it's a worktree, its tip's where it's a branch alone, none where it's gone; and its version."""

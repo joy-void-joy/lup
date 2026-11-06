@@ -27,11 +27,13 @@ through `git archive`, which applies the repository's `.gitattributes`
 (`export-subst` rewrites a file's text, `export-ignore` leaves one out), so its
 copy could differ from the commit the operator was shown.
 
-What a commit changes can be read from its objects' own bytes (`Git.own_changes`),
-each hashed as git hashes one and compared with its id (`Git.verified`), where a
-room writes the store and what's read decides what the operator is asked: the
-ids alone say what a commit holds, as a forge reads them
-(`docs/field-notes.md`, *Host-side git in a repository the room writes*).
+What a commit holds and changes is read from its objects' own bytes (`Git.held`,
+`Git.own_changes`), and each blob wherever it's read (`Git.contents`), each hashed
+as git hashes one and compared with its id (`Git.verified`), since a room writes
+the store and git reads an object by its id without hashing it: what's read
+decides what the operator is asked and what the host runs, and the ids alone say
+what a commit holds, as a forge reads them (`docs/field-notes.md`, *Host-side git
+in a repository the room writes*).
 """
 
 import hashlib
@@ -332,8 +334,25 @@ class Git(Model):
             )
         ]
 
+    def held(self, commit: str) -> list[Tracked]:
+        """List every entry of `commit`'s tree, its directories walked, as `tracked` lists them and in its order, from each object's own bytes (`own_changes`): raise `GitError` where it names no commit, or an object can't be read or isn't what its id says."""
+        found = self.commit(commit)
+        if found is None:
+            message = f"{commit} names no commit"
+            raise GitError(message)
+        entries = [
+            entry
+            for entry in self.own_changes(None, found).values()
+            if entry is not None
+        ]
+        return sorted(entries, key=lambda entry: os.fsencode(entry.path))
+
     def contents(self, objects: list[str]) -> list[bytes]:
-        """Return the content of each of `objects`, in order, read by one `git cat-file`.
+        """Return the content of each blob of `objects`, in order, each hashed against its id (`verified`), read by one `git cat-file`: raise `GitError` where one isn't what its id says, or git can't read it."""
+        return self.verified("blob", objects)
+
+    def stored(self, objects: list[str]) -> list[bytes]:
+        """Return what the store holds under each of `objects`, in order, read by one `git cat-file`, as it stands: only what checks it reads this.
 
         git answers each with its size on a line, the content, then a newline.
         """
@@ -363,7 +382,7 @@ class Git(Model):
 
     def verified(self, kind: ObjectKind, objects: list[str]) -> list[bytes]:
         """Return the content of each of `objects`, each an object of `kind`, in order, each hashed as git hashes one: raise `GitError` where one isn't what its id says, or git can't read it."""
-        contents = self.contents(objects)
+        contents = self.stored(objects)
         unlike = [
             each
             for each, content in zip(objects, contents, strict=True)
@@ -478,7 +497,7 @@ class Git(Model):
         wanted: Callable[[PurePosixPath], bool] = everything,
         batch: int = 512,
     ) -> None:
-        """Write each file of `commit` that `wanted` keeps into `into`, from git's objects.
+        """Write each file of `commit` that `wanted` keeps into `into`, from git's objects, each what its id says (`held`, `contents`), so only the ids a commit names are written.
 
         `batch` files are read from git at a time, so a large commit's content is
         never held whole. A file keeps its executable bit; a link is made as a
@@ -488,7 +507,7 @@ class Git(Model):
         """
         files = [
             each
-            for each in self.tracked(commit)
+            for each in self.held(commit)
             if each.kind == "blob" and wanted(each.path)
         ]
         into.mkdir(parents=True, exist_ok=True)
