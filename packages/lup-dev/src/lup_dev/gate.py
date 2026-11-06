@@ -17,9 +17,10 @@ never type-checked or tested, can't stand in for that pass. Each is read by its
 content, never its age: a file's time can't tell a build a step made after its
 checks from one made by hand, and a source checked out again with the same content
 changes nothing. Reading them takes milliseconds, so a run where they didn't change
-pays nothing for them. The record is the worktree's own, as what's built is, in its
-part of the git directory (`WorktreeGitLayout`), so it's no file a pass is found by
-and goes with the worktree. Trust's build of the copy the operator approves reads
+pays nothing for them. The record is the checkout's own, as what's built is, in its
+part of the git directory, wherever git keeps that (`CheckoutGitLayout`): a clone's
+`.git`, or its place under a clone's or a bare clone's `worktrees/`. So it's no file
+a pass is found by, and goes with the checkout. Trust's build of the copy the operator approves reads
 none of it: it runs each of these steps, every time, in a directory of its own
 (`lup_dev.launch.trust`).
 
@@ -69,7 +70,7 @@ from lup_dev.declaration.resolve import resolve
 from lup_dev.declaration.runner import Runner
 from lup_dev.errors import LupDevError
 from lup_dev.git import Git, GitError, nul_separated
-from lup_dev.layout import GitDirectoryLayout, WorktreeGitLayout
+from lup_dev.layout import CheckoutGitLayout, GitDirectoryLayout
 from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
@@ -372,7 +373,7 @@ class Check(Model, arbitrary_types_allowed=True):
         own = Git(cwd=self.root).text(
             "rev-parse", "--path-format=absolute", "--git-dir"
         )
-        return WorktreeGitLayout(own=Path(own)).built(step.name)
+        return CheckoutGitLayout(own=Path(own)).built(step.name)
 
     def stale(self, step: Step) -> bool:
         """Say whether a step must run: every one that builds no file, and one that does unless it's recorded as passing here on its sources as they stand, leaving its file as it is.

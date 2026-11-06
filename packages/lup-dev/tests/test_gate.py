@@ -918,6 +918,54 @@ def test_the_record_of_a_build_leaves_the_files_a_pass_is_found_by_alone(
     assert (standing(repo), shell.git(repo, "status", "--porcelain")) == before
 
 
+@pytest.fixture(params=["clone", "worktree of a clone", "worktree of a bare clone"])
+def laid_out(request: pytest.FixtureRequest, repo: Path) -> tuple[Path, Path]:
+    """A checkout, however its repository is laid out, and where git keeps its own part of the git directory."""
+    match request.param:
+        case "clone":
+            return repo, repo / ".git"
+        case "worktree of a clone":
+            linked: Path = request.getfixturevalue("linked")
+            return linked, repo / ".git" / "worktrees" / linked.name
+        case _:
+            bare: Path = request.getfixturevalue("bare")
+            return bare / "tree" / "main", bare / "worktrees" / "main"
+
+
+def test_a_build_is_skipped_by_what_it_passed_on_however_the_repository_is_laid_out(
+    laid_out: tuple[Path, Path], shell: Git, clock: FakeClock
+) -> None:
+    root, own = laid_out
+    ignoring_the_bundle(root)
+    before = shell.git(root, "status", "--porcelain")
+
+    first = kept(root, Building(root), clock, steps=BUILT).run()
+
+    assert first.recorded is not None
+    assert (own / "lup" / "built" / "engine.json").is_file()
+    assert shell.git(root, "status", "--porcelain") == before
+    nothing = Building(root)
+    assert kept(root, nothing, clock, steps=BUILT).run().outcomes == []
+    assert nothing.ran == []
+    written(root / "bundle" / "engine.js", "built by hand")
+    by_hand = Building(root)
+    assert kept(root, by_hand, clock, steps=BUILT).run().found == first.recorded
+    assert by_hand.ran == [["build"]]
+
+
+def test_a_worktree_removed_takes_what_its_build_passed_on_with_it(
+    repo: Path, linked: Path, shell: Git, clock: FakeClock
+) -> None:
+    ignoring_the_bundle(linked)
+    kept(linked, Building(linked), clock, steps=BUILT).run()
+    own = repo / ".git" / "worktrees" / linked.name
+    assert (own / "lup" / "built" / "engine.json").is_file()
+
+    shell.git(repo, "worktree", "remove", "--force", str(linked))
+
+    assert not own.exists()
+
+
 def test_again_runs_a_build_that_passed_once(repo: Path, clock: FakeClock) -> None:
     ignoring_the_bundle(repo)
     kept(repo, Building(repo), clock, steps=BUILT).run()
