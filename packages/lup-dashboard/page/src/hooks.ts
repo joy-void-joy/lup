@@ -5,12 +5,15 @@ import { watch, type Asked, type Connection, type Replied, type ReplyOf } from "
 import { SEEN } from "./review";
 import { instanceOf, type Blocks, type Instance } from "./views";
 
-/** The host's reply to `request`, kept up to date while the component is mounted, and where the watch stands. */
-export function useWatched(request: Asked): { reply: Replied | null; connection: Connection } {
+/** The host's reply to `request`, kept up to date while the component is mounted, and where the watch stands; `null` asks nothing. */
+export function useWatched(request: Asked | null): { reply: Replied | null; connection: Connection } {
     const [reply, setReply] = useState<Replied | null>(null);
     const [connection, setConnection] = useState<Connection>("connecting");
     const key = JSON.stringify(request);
-    useEffect(() => watch(JSON.parse(key) as Asked, setReply, setConnection), [key]);
+    useEffect(() => {
+        const asked = JSON.parse(key) as Asked | null;
+        return asked === null ? undefined : watch(asked, setReply, setConnection);
+    }, [key]);
     return { reply, connection };
 }
 

@@ -244,9 +244,12 @@ export function App() {
         useMemo<readonly Wait[]>(() => (landingsWatch.reply?.kind === "policy-landings" ? (landingsWatch.reply.waiting ?? []) : []), [landingsWatch.reply]),
         (list) => JSON.stringify(list),
     );
+    // The review is grouped by agent; `?threads` in the page's address groups it by thread (`docs/dashboard.md`, *The
+    // review*). Without it the host is never asked for threads, and everything below reads none.
+    const byThread = new URLSearchParams(location.search).has("threads");
     // The review's threads, as the host reads them for it (`docs/inbox.md`, *Threads in the review*): the same object
     // while the host says the same of them, which it says again at every hook.
-    const threadsWatch = useWatched({ kind: "inbox-threads" });
+    const threadsWatch = useWatched(byThread ? { kind: "inbox-threads" } : null);
     const threadsRead = useSame(
         useMemo(() => (threadsWatch.reply?.kind === "inbox-threads-read" ? threadsWatch.reply : null), [threadsWatch.reply]),
         (each) => JSON.stringify(each),
@@ -581,7 +584,7 @@ export function App() {
     // What the review is laid out from, all of it read, the threads among it, so it's never laid out by agent first:
     // until then it's laid out empty, and the host told nothing; nor where the host refused one of them, the review
     // showing what it can, by agent where the host reads no threads.
-    const ready = draftRead && kept !== null && inbox.reply !== null && reply !== null && threadsWatch.reply !== null;
+    const ready = draftRead && kept !== null && inbox.reply !== null && reply !== null && (!byThread || threadsWatch.reply !== null);
     const whole = reply?.kind === "listed" && inbox.reply?.kind === "inbox-items" && order.reply?.kind === "inbox-ordered";
     const keepOrder = useCallback((keeping: Keeping) => {
         void ask({ kind: "inbox-keep-order", ...keeping }).then((answer) => {
@@ -1416,7 +1419,7 @@ interface Naming {
  */
 export function waitingOn(read: ThreadsRead | null, landing: ReadonlyMap<number, number>, waiting: readonly Item[]): number {
     if (read === null) {
-        return waiting.length;
+        return waiting.filter((each) => each.rank.name === "waiting on you").length;
     }
     const threads = read.threads.filter((each) => each.section === "waiting on you" || landing.has(each.thread.number));
     const asked = new Set(read.threads.flatMap((each) => (each.asks ?? []).map((ask) => ask.node)));

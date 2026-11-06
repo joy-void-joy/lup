@@ -41,6 +41,11 @@ export interface DemoOptions {
      * timings --kept` to read; in the demo's own directory, gone as it stops, unless given.
      */
     timings?: string;
+    /**
+     * Open the review as the operator's page does, grouped by agent. Left out, the address asks for it grouped by
+     * thread (`?threads`), which most of these tests drive.
+     */
+    byAgent?: boolean;
 }
 
 /** A demo running, until it's closed. */
@@ -78,7 +83,11 @@ export async function demo(options: DemoOptions = {}): Promise<Demo> {
         args.push("--timings", options.timings);
     }
     const served = await start("uv", args, { what: "`lup-dashboard demo`", cwd: ROOT });
-    return { url: new URL(served.first).href, close: served.stop, [Symbol.asyncDispose]: served.stop };
+    const url = new URL(served.first);
+    if (options.byAgent !== true) {
+        url.searchParams.set("threads", "");
+    }
+    return { url: url.href, close: served.stop, [Symbol.asyncDispose]: served.stop };
 }
 
 /** Return the first of the page's sources newer than its build, the build itself where there's none, else null. */
