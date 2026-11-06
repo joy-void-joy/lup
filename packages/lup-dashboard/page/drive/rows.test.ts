@@ -71,25 +71,36 @@ describe("every line of the page on one row, at the demo's width, in headless Ch
     });
 
     it("keeps the line of keys and the line under the review to one row on every section's line, banner and item header", async () => {
-        const heads = await review.evaluate((view) => {
-            const found: number[] = [];
-            for (let number = 1; number <= view.state.doc.lines; number += 1) {
-                const line = view.state.doc.line(number);
-                if (/^(━━ |── @|[a-z ]+ · )/.test(line.text)) {
-                    found.push(line.from);
-                }
-            }
-            return found;
-        });
-        expect(heads.length).toBeGreaterThan(30);
+        // The demo's late question first, however fast this runs: it gives the lines around it, @64's the longest of them,
+        // Space h on the parser, and nothing the demo brings after it makes a line longer.
+        await review.holds("── @61 question · lup-impl/parser");
         const wrong: string[] = [];
-        for (const at of heads) {
-            await review.evaluate((view, anchor) => view.dispatch({ selection: { anchor } }), at);
+        let heads = 0;
+        // Each found as it's gone to, by its place among them: the parser's two writes come later, and move the text.
+        while (
+            await review.evaluate((view, index) => {
+                const found: number[] = [];
+                for (let number = 1; number <= view.state.doc.lines; number += 1) {
+                    const line = view.state.doc.line(number);
+                    if (/^(━━ |── @|[a-z ]+ · )/.test(line.text)) {
+                        found.push(line.from);
+                    }
+                }
+                const anchor = found[index];
+                if (anchor === undefined) {
+                    return false;
+                }
+                view.dispatch({ selection: { anchor } });
+                return true;
+            }, heads)
+        ) {
+            heads += 1;
             await dashboard.page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
             for (const each of await overrun()) {
                 wrong.push(`on ${(await review.line()).slice(0, 60)}: ${each}`);
             }
         }
+        expect(heads).toBeGreaterThan(30);
         expect(wrong).toEqual([]);
     });
 

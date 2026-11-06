@@ -39,7 +39,7 @@
           "chord": null,
           "runs": "send",
           "commented": false,
-          "says": "let their flagged writes land"
+          "says": "let their writes land"
         }
       ],
       "blocks": []
@@ -80,7 +80,7 @@
           "chord": null,
           "runs": "send",
           "commented": false,
-          "says": "hold their flagged writes"
+          "says": "hold their writes"
         }
       ],
       "blocks": []
@@ -356,7 +356,7 @@
           "chord": null,
           "runs": "send",
           "commented": false,
-          "says": "hold their flagged writes"
+          "says": "hold their writes"
         }
       ],
       "blocks": []

@@ -5,7 +5,7 @@ import { chainAt, isMarked, listed, marking, markedPart, seenAct, type Act, type
 import { EMPTY, type Conversation, type Placed } from "./review";
 import type { Offer } from "./views";
 
-const HOLD: Offer = { action: "set-holding", argument: { launch: "l1", session: "s1", agent: null, on: true }, verb: "hold", chord: null, runs: "send", commented: false, says: "hold their flagged writes" };
+const HOLD: Offer = { action: "set-holding", argument: { launch: "l1", session: "s1", agent: null, on: true }, verb: "hold", chord: null, runs: "send", commented: false, says: "hold their writes" };
 
 describe("marking the draft", () => {
     it("puts an item in one list of the draft at most, done, declined or left for later, and takes it out of every one", () => {
@@ -24,7 +24,7 @@ describe("marking the draft", () => {
         ];
         const once = marking(EMPTY, acts, "done");
         expect(once.done).toEqual([51]);
-        expect(once.marks?.map((each) => [each.action, each.verb, each.block, each.says, each.argument])).toEqual([["set-holding", "done", "banner of s1", "hold their flagged writes", HOLD.argument]]);
+        expect(once.marks?.map((each) => [each.action, each.verb, each.block, each.says, each.argument])).toEqual([["set-holding", "done", "banner of s1", "hold their writes", HOLD.argument]]);
         expect(once.marks?.[0]?.id).not.toBe("");
         expect(acts.every((each) => isMarked(once, each, "done"))).toBe(true);
         const twice = marking(once, acts, "done");
