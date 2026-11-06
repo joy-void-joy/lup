@@ -67,6 +67,7 @@ from lup_dev.layout import CopyLayout, HostLayout, JudgeLayout, Layout
 from lup_dev.settings import LupDevSettings
 from lup_dev.snapshots import Restored, Snapshot, Snapshots, written
 from lup_dev.stored import read_model, write_model
+from lup_dev.trial import TrialListed, trial_listed
 from lup_ledger.environment.layout import LedgerLayout
 
 if TYPE_CHECKING:
@@ -827,6 +828,12 @@ def host_copies(layout: Layout) -> Copies | None:
     return Copies(layout=JudgeLayout(home=layout.host_copies.resolve()))
 
 
+def own_repository(copies: Copies) -> Path | None:
+    """Return the repository whose copies `copies` are, lup's own, as what's kept of the copy running says; else of the latest kept; none where none is."""
+    kept = copies.running() or next(iter(copies.history()), None)
+    return None if kept is None else kept.repository
+
+
 def needs_ledger(snapshots: Snapshots, copy: str) -> Snapshot | None:
     """Return the snapshot the copy `copy` would need put back, since it left the ledger at an earlier version of its tables than it stands at; none where it can read it, or left none to say otherwise."""
     left = snapshots.left_by(copy)
@@ -882,6 +889,9 @@ class CopiesListed(Reply):
     tables: int | None = None
     last: LastSwitch | None = None
     """What came of the last switch, for a page that asked for it to say."""
+    trial: TrialListed | None = None
+    """What's on trial, to pick from; none where the repository computes no
+    running branch."""
 
 
 class SwitchCopy(Request, reads=False):
@@ -900,6 +910,15 @@ class CopySwitching(Reply):
     """Where the switch says what came of it, for one that doesn't answer."""
     last: LastSwitch | None = None
     """The switch before this one, for a page waiting to tell them apart."""
+
+
+class TrialSaid(Reply):
+    """What came of what was asked of what's on trial: in words, what's on trial then, and the switch it set going, where it did, which a page waits on."""
+
+    kind: Literal["trial-said"] = "trial-said"
+    said: str = ""
+    listed: TrialListed | None = None
+    switching: CopySwitching | None = None
 
 
 def last_switch(layout: Layout) -> LastSwitch | None:
@@ -933,8 +952,15 @@ def listed_copies(layout: Layout) -> CopiesListed:
             tables=None if left is None else left.written.tables,
         )
 
+    kept = copies.kept()
+    repository = own_repository(copies)
     return CopiesListed(
-        copies=[listed(each) for each in copies.kept()], tables=tables, last=last
+        copies=[listed(each) for each in kept],
+        tables=tables,
+        last=last,
+        trial=None
+        if repository is None
+        else trial_listed(layout, repository, [each.commit for each in kept]),
     )
 
 

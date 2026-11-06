@@ -11,8 +11,10 @@ class Versions(Module):
 
     running: BranchName | None = None
     """The branch the host runs, trust reads and `land` lands on; none for the
-    integration branch (`Core.integration`). It's read from the declaration
-    approved, so a change to it takes effect once approved (`docs/trust.md`,
-    *Which branch*), and it's gated, since `land` lands only on a gated branch
-    (`Credentials.gated`). Naming one neither makes nor computes it: until the
-    repository has that branch, trust reads the integration branch's tip."""
+    integration branch (`Core.integration`). Where it's another, the host computes
+    it, from the integration branch and what's on trial (`docs/trust.md`, *What the
+    host runs while it's on trial*). It's read from the declaration approved, so a
+    change to it takes effect once approved (`docs/trust.md`, *Which branch*), and
+    it's gated (`Credentials.gated`), so `delete-merged` never deletes it. Naming
+    one doesn't make it: until the first landing or pick, trust reads the
+    integration branch's tip."""

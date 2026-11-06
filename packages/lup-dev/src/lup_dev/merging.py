@@ -76,6 +76,32 @@ type Merging = Annotated[Conflicted | Failed | Merged, Field(discriminator="kind
 """What came of a merge `land` asked of the room."""
 
 
+def gated_commit(
+    root: Path,
+    commit: str,
+    *,
+    processes: Processes,
+    passes: Passes,
+    runner: Runner,
+    say: Callable[[str], None],
+    stop: Callable[[Path], None],
+) -> Merging:
+    """Run the gate on `commit`, as the worktree at `root` reads it, without its fixes: what `land` has the room do for what the host computed, which has to stay exactly that, a fix being lost at its next recompute (`lup_dev.trial`).
+
+    `processes`, `passes`, `runner`, `say` and `stop` are the gate's (`at_commit`).
+    """
+    match at_commit(root, commit, processes, passes, runner, say=say, stop=stop):
+        case Passed():
+            return Merged(commit=commit, ran=False)
+        case Ran(code=0):
+            return Merged(commit=commit, ran=True)
+        case Ran(output=output):
+            return Failed(commit=commit, report=output)
+        case Amended(commit=amended):
+            message = f"the gate amended {commit} into {amended}, asked for no fixes"
+            raise MergeError(message)
+
+
 def merged(
     root: Path,
     base: str,
