@@ -1,6 +1,7 @@
 // The review in panes (`docs/dashboard.md`, *The review*): each buffer a subset of the one layout, what's written kept
 // and followed as another is on screen, and the list by agent and by thread.
 import "./fixtures/looks";
+import { hosted } from "./fixtures/kinds";
 import { describe, expect, it } from "vitest";
 
 import { carried, implied, type Marked } from "./grammar";
@@ -23,7 +24,7 @@ const WORKER = from("s1", "a1");
 const GONE = from("s2");
 
 function item(number: number, sender: Conversation, reason: Item["reason"], rank: Item["rank"] = NEWS): Item {
-    return { number, reason, sender, recipient: { party: "operator" }, replies: [], citations: [], edits: [], quiet: false, made: AT, state: { state: "waiting" }, rank };
+    return hosted({ number, reason, sender, recipient: { party: "operator" }, replies: [], citations: [], edits: [], quiet: false, made: AT, state: { state: "waiting" }, rank });
 }
 
 function note(number: number, sender: Conversation, text: string): Item {
