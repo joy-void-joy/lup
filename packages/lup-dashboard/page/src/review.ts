@@ -467,8 +467,8 @@ export interface Group {
 }
 
 /**
- * What the second pane shows, one buffer at a time, where the page lays the review out in panes (`?panes=`,
- * `panes.ts`): what's for the operator, across everyone; one agent's own buffer, by `whose` they are, their items and
+ * What the second pane shows, one buffer at a time, where the page lays the review out in panes, as it opens
+ * (`panes.ts`): what's for the operator, across everyone; one agent's own buffer, by `whose` they are, their items and
  * their conversation, live, what the operator writes at its end reaching them; every agent no longer running; or one
  * thread's conversation, whole. Each is a subset of the review's tree, laid out by the one layout.
  */

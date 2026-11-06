@@ -73,12 +73,12 @@ function reading(draft: Draft = EMPTY): ListReading {
 }
 
 describe("the page's address", () => {
-    it("asks for panes by agent or by thread, and for nothing else", () => {
+    it("opens in panes by agent, by thread where it asks, and as one buffer where it asks that", () => {
+        expect(panesAsked("")).toBe("agents");
         expect(panesAsked("?panes=agents")).toBe("agents");
         expect(panesAsked("?panes=threads")).toBe("threads");
+        expect(panesAsked("?panes=off")).toBeNull();
         expect(panesAsked("?threads")).toBeNull();
-        expect(panesAsked("?panes=forum")).toBeNull();
-        expect(panesAsked("")).toBeNull();
     });
 });
 
@@ -263,6 +263,13 @@ describe("the list by agent", () => {
 
     it("lists what's for the operator, who's running, a subagent under their parent, then No agent", () => {
         expect(rows().map((each) => each.id)).toEqual(["for you", "heading running", `agent ${whoseOf(LEAD)}`, `agent ${whoseOf(WORKER)}`, "party no agent", `agent ${whoseOf(GONE)}`]);
+    });
+
+    it("counts what's only to read as `toRead` does, falling as it's seen", () => {
+        const seen = { groups: new Map([[whoseOf(LEAD), 70]]), commented: new Set<number>() };
+        const lines = listLaid(listedByAgent({ ...reading(), seeing: seen })).text.split("\n");
+        expect(lines.find((each) => each.includes("s1") && !each.includes("a1"))).not.toContain("•");
+        expect(lines[0]).toContain("•1");
     });
 
     it("says how much of each waits on the operator, and what's for them across everyone", () => {
@@ -502,6 +509,10 @@ describe("the list by thread", () => {
         const lead = rows.find((each) => each.id === `agent ${whoseOf(LEAD)}`);
         expect(lead?.under?.rows.map((each) => each.id)).toEqual(["item 70", "thread 310", "thread 311"]);
         expect(lead?.under?.rows.find((each) => each.id === "thread 311")?.lines).toHaveLength(1);
+        // What's new is said on the item's row, read by being seen there, never on the task's, whose mark doesn't move so.
+        const newsy = { ...quiet, new: [70] } as ThreadRead;
+        const withNews = listLaid(listedByAgent({ ...reading(), threads: { ...threads, read: { ...threads.read, threads: [newsy] } } }));
+        expect(withNews.text.split("\n").find((each) => each.includes("@quiet"))).not.toContain("•");
         const laidOut = listLaid(rows);
         expect(laidOut.text.split("\n").find((each) => each.includes("@owned"))).toContain("◆1");
         expect(laidOut.text.split("\n").find((each) => each.includes("@quiet"))).not.toContain("◆");

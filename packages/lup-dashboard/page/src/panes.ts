@@ -1,9 +1,9 @@
-// The review in two panes, where the page's address asks for it (`?panes=agents`, `?panes=threads`), to compare with
-// the review as one buffer (#363): on the left, a list, itself a buffer with vim's keys; on the right, one buffer at a
-// time (`Showing`), a subset of the review's tree that the one layout lays out (`laid`, `review.ts`). This is the list,
-// by agent or by thread, read from what the review is laid out from, each row saying what it opens, how it stands and
-// how much of it waits on the operator; its text, whose each line is, and what's drawn on it. And how the list's rows
-// and a buffer say whom the operator's words reach. Pure: `Panes.tsx` draws it.
+// The review in two panes, as the page opens (`docs/dashboard.md`, *The panes*): on the left, a list, itself a buffer with
+// vim's keys; on the right, one buffer at a time (`Showing`), a subset of the review's tree that the one layout lays out
+// (`laid`, `review.ts`). This is the list, by agent, or by thread where the address asks (`?panes=threads`), read from what
+// the review is laid out from, each row saying what it opens, how it stands and how much of it waits on the operator; its
+// text, whose each line is, and what's drawn on it. And how the list's rows and a buffer say whom the operator's words
+// reach. Pure: `Panes.tsx` draws it.
 import type { Folding, Span } from "./comments";
 import { doing, type Activity } from "./agents";
 import type { Run } from "./reconcile";
@@ -16,12 +16,12 @@ import {
     cutAt,
     grouped,
     nested,
-    news,
     PARTIES,
     rootThread,
     taskOwner,
     toAnswer,
-    waits,
+    toRead,
+    UNSEEN,
     whose,
     type Conversation,
     type Draft,
@@ -45,10 +45,18 @@ export type { Showing };
 /** What the list goes by. */
 export type PanesBy = "agents" | "threads";
 
-/** Return what the page's address asks the panes to go by; none lays the review out as one buffer. */
+/**
+ * Return what the panes go by, as the page's address asks: by agent, as the page opens; by thread where it says
+ * `?panes=threads`; none, the review as one buffer beside the overview, where it says `?panes=off`, or `?threads`, that buffer
+ * grouped by thread.
+ */
 export function panesAsked(search: string): PanesBy | null {
-    const asked = new URLSearchParams(search).get("panes");
-    return asked === "agents" || asked === "threads" ? asked : null;
+    const address = new URLSearchParams(search);
+    const asked = address.get("panes");
+    if (asked === "threads") {
+        return asked;
+    }
+    return asked === "off" || (asked === null && address.has("threads")) ? null : "agents";
 }
 
 /** Return what names a buffer among the others, which the cursor is kept by while another is on screen, and its row in the list. */
@@ -215,10 +223,9 @@ function agentTally(group: Grouping, reading: ListReading): Tally {
     const { draft, drawers, looks, remote, called } = reading;
     const conversation = group.conversation;
     const parked = draft.parked ?? [];
-    const done = draft.done ?? [];
     const open = group.items.filter((each) => !parked.includes(each.number));
     const asks = open.filter((each) => toAnswer(each, draft)).length + checksWaiting(group.key, reading) + confirmingOf(group.key, reading).length;
-    const newsCount = open.filter((each) => news(each) && waits(each) && !done.includes(each.number)).length;
+    const newsCount = open.filter((each) => toRead(each, draft, reading.seeing ?? UNSEEN)).length;
     const numbers = new Set(group.items.map((each) => each.number));
     const comments = (draft.comments ?? []).filter((each) => numbers.has(each.item) && each.text.trim() !== "").length;
     const letters = conversation === null ? 0 : (draft.letters ?? []).filter((each) => each.to != null && whose(each.to) === group.key && each.text.trim() !== "").length;
@@ -351,7 +358,7 @@ function itemKind(item: Item): string {
 
 /** Return the row of `item`, of the group `group`, set in by `set`: how it stands, as the overview marks it, its number, what it is and how it begins, what's drafted on it at its end. */
 function itemRow(item: Item, group: Grouping, set: string, reading: ListReading): Row {
-    const standing = itemStanding({ item }, reading.draft, reading.seeing ?? { groups: new Map(), commented: new Set() });
+    const standing = itemStanding({ item }, reading.draft, reading.seeing ?? UNSEEN);
     const mark = standing.marks[0];
     const glyph = mark === undefined ? " " : (GLYPHS[mark] ?? " ");
     const drafted = standing.draft.map((each) => DRAFTED[each].glyph).join("");
@@ -390,7 +397,9 @@ function taskRow(read: ThreadRead, set: string, depth: number, threads: Threadin
         { text: " " },
         waiting ? state : { text: state.text, look: "list-sub" },
     ];
-    return { id: `thread ${read.thread.number}`, lines: [{ stretches: padded(left, tally) }], opens: { kind: "thread", number: read.thread.number }, says: `@${read.thread.name}: ${about(read.thread)}`, writes: true };
+    // What asks them alone: what's new is on the item's row under who sent it, read by being seen there, as a thread's mark isn't.
+    const quiet = { ...tally, news: 0, pile: 0 };
+    return { id: `thread ${read.thread.number}`, lines: [{ stretches: padded(left, quiet) }], opens: { kind: "thread", number: read.thread.number }, says: `@${read.thread.name}: ${about(read.thread)}`, writes: true };
 }
 
 /** Return the row of what's for the operator, with `tally`, what's there counted across everyone. */

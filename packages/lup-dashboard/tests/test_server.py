@@ -1183,7 +1183,9 @@ def test_the_copies_go_through_the_api_too(page: Path) -> None:
     assert response.json()["kind"] == "copies-listed"
 
 
-def test_a_demo_given_a_token_file_keeps_its_token_across_a_restart(tmp_path: Path) -> None:
+def test_a_demo_given_a_token_file_keeps_its_token_across_a_restart(
+    tmp_path: Path,
+) -> None:
     kept = tmp_path / "token"
     first = kept_token(kept)
     assert kept.stat().st_mode & 0o777 == 0o600

@@ -1,7 +1,8 @@
-// The review in two panes (`?panes=agents`, `?panes=threads`, `page/src/panes.ts`): the three levels of the keys, moving
-// between the panes, a comment written in one buffer and still anchored as another comes and goes, search within the
-// buffer on screen, and what Ctrl+Enter sends from any of them.
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+// The review in two panes, as the page opens, and by thread where its address asks (`page/src/panes.ts`): the three levels
+// of the keys, moving between the panes, a comment written in one buffer and still anchored as another comes and goes,
+// search within the buffer on screen, what Ctrl+Enter sends from any of them, and what's read by being on screen.
+import type { Request } from "playwright";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { open, type Dashboard } from "./dashboard.ts";
 import { demo, type Demo } from "./demo.ts";
@@ -48,7 +49,7 @@ describe("the panes by agent", () => {
     let review: Review;
 
     beforeAll(async () => {
-        served = await demo({ size: 0, panes: "agents" });
+        served = await demo({ size: 0, panes: "opened" });
         dashboard = await open(served.url);
         review = await dashboard.review();
         await review.holds(THEIR_ITEM);
@@ -273,15 +274,16 @@ describe("the panes by agent", () => {
         expect(line).toContain(" in @transcript-reader:");
         const number = /check @(\d+)/.exec(line)?.[1] ?? "";
         // Counted with what waits on the operator, as the list says.
-        const row = (await listText(dashboard)).find((each) => each.includes("parser")) ?? "";
-        expect(row).toContain("◆2");
+        // Beside what asks them in the items, the question the demo brings ten seconds in among them.
+        const rowSays = (mark: string) => page.waitForFunction((wanted) => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("parser") && (each.textContent ?? "").includes(wanted)), mark, { polling: 50 });
+        await rowSays("◆3");
         await review.goTo(`check @${number}`);
         await dashboard.keys.press([" ", "d"]);
         await page.waitForFunction(() => (document.querySelector(".status")?.textContent ?? "").includes("No reply drafted") === false, undefined, { polling: 50 });
-        await page.waitForFunction(() => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("parser") && (each.textContent ?? "").includes("◆1")), undefined, { polling: 50 });
+        await rowSays("◆2");
         // Undone: nothing of it is sent by what follows.
         await page.keyboard.press("u");
-        await page.waitForFunction(() => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("parser") && (each.textContent ?? "").includes("◆2")), undefined, { polling: 50 });
+        await rowSays("◆3");
     });
 
     it("lists tasks under whoever owns them, and reads one across agents from its row", async () => {
@@ -317,12 +319,87 @@ describe("the panes by agent", () => {
     });
 });
 
+describe("what's read by being on screen, in panes", () => {
+    let served: Demo;
+    let dashboard: Dashboard;
+    let review: Review;
+    let told: Record<string, unknown>[] = [];
+
+    beforeEach(async () => {
+        told = [];
+        served = await demo({ size: 0, panes: "opened" });
+        dashboard = await open(served.url, { clock: true });
+        dashboard.page.on("request", (request: Request) => {
+            if (request.method() === "POST" && request.url().endsWith("/api/ask")) {
+                const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>;
+                if (body.kind === "review-mark") {
+                    told.push(body);
+                }
+            }
+        });
+        review = await dashboard.review();
+        await review.holds(THEIR_ITEM);
+        await review.settled(1500);
+    });
+
+    afterEach(async () => {
+        expect(dashboard.thrown).toEqual([]);
+        await dashboard.close();
+        await served.close();
+    });
+
+    const moved = () => told.flatMap((each) => each.marks as { key: Record<string, unknown>; up_to: string; seen: boolean }[]);
+    const passes = (ms: number) => dashboard.page.clock.runFor(ms);
+    const row = (text: string) => dashboard.page.evaluate((wanted) => [...document.querySelectorAll(".list-buffer .cm-line")].find((each) => (each.textContent ?? "").includes(wanted))?.textContent ?? "", text);
+
+    it("moves their agent's mark as what's been seen scrolls off, the list's count falling", async () => {
+        await review.goTo("── @56 turn ended");
+        await dashboard.keys.press(["z", "z"]);
+        await review.settled(300);
+        await passes(10_000);
+        await review.settled(300);
+        const was = await row("guidance-voice");
+        expect(was).toContain("•");
+        await dashboard.keys.press(["G"]);
+        await review.settled(300);
+        await passes(4000);
+        await review.settled(300);
+        const [mark] = moved().filter((each) => each.up_to === "56");
+        expect(mark?.seen).toBe(true);
+        // Their agent's, never a thread's, though the list reads threads.
+        expect(mark?.key.node).toBeUndefined();
+        expect(mark?.key.session).toEqual(expect.any(String));
+        await review.until("let go of its word that it's new", (view) => !/── @56 turn ended[^\n]* new /.test(view.state.doc.toString()));
+        expect(await row("@56 turn ended")).not.toContain(" new ");
+    });
+
+    it("moves it as another buffer takes the screen, what was seen there leaving with it", async () => {
+        await review.goTo("── @56 turn ended");
+        await dashboard.keys.press(["z", "z"]);
+        await review.settled(300);
+        await passes(10_000);
+        await review.settled(300);
+        expect(moved().filter((each) => each.up_to === "56")).toEqual([]);
+        await listRow(dashboard, "main");
+        await dashboard.page.keyboard.press("Enter");
+        await review.until("left what's for the operator", (view) => !view.state.doc.toString().includes("── @45 note"));
+        await review.settled(300);
+        const [mark] = moved().filter((each) => each.up_to === "56");
+        expect(mark?.seen).toBe(true);
+    });
+
+    it("reads nothing of a page nobody has touched, in panes as without them", async () => {
+        await passes(10_000);
+        expect(told).toEqual([]);
+    });
+});
+
 describe("the panes on a phone", () => {
     let served: Demo;
     let dashboard: Dashboard;
 
     beforeAll(async () => {
-        served = await demo({ size: 0, panes: "agents" });
+        served = await demo({ size: 0, panes: "opened" });
         dashboard = await open(served.url, { viewport: { width: 400, height: 800 } });
         const review = await dashboard.review();
         await review.settled();

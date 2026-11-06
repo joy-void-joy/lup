@@ -254,9 +254,9 @@ export function App() {
         useMemo<readonly Wait[]>(() => (landingsWatch.reply?.kind === "policy-landings" ? (landingsWatch.reply.waiting ?? []) : []), [landingsWatch.reply]),
         (list) => JSON.stringify(list),
     );
-    // The review is grouped by agent; `?threads` in the page's address groups it by thread (`docs/dashboard.md`, *The
-    // review*). Without it the host is never asked for threads, and everything below reads none.
-    // Where the address asks for panes (`?panes=agents`, `?panes=threads`, `panes.ts`), to compare with this, those go by one or the other.
+    // As one buffer the review is grouped by agent; `?threads` in the page's address groups it by thread (`docs/dashboard.md`,
+    // *The review*): there, and with `?panes=off`, the host is asked for threads where it's by thread alone.
+    // The panes, by agent as the page opens, by thread where the address asks (`panes.ts`); as one buffer where it asks that.
     const panes = panesAsked(location.search);
     const byThread = panes === null ? new URLSearchParams(location.search).has("threads") : panes === "threads";
     // Whether the keys of the page do nothing but move between panes (`Pane mode`).
@@ -495,7 +495,7 @@ export function App() {
         [inbox.reply],
     );
     // What's only to read, which the top bar counts apart from what asks the operator.
-    const toReadCount = countToRead(waiting, draft, seeing, threadsRead?.threads ?? null);
+    const toReadCount = countToRead(waiting, draft, seeing, byThread ? (threadsRead?.threads ?? null) : null);
 
     // What the draft marks or comments on that's past waiting, answered or replaced since it was written: laid out with
     // what's drafted on it, which stays in view, saying so, until it's sent.

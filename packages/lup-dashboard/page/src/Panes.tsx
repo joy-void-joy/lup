@@ -1,7 +1,7 @@
 // The list of the panes (`panes.ts`): a buffer with vim's keys, its own CodeMirror, made as the review's is
 // (`useEditor`), read-only since nothing here is what the operator wrote. Each row kept by its id through what changes,
 // so the cursor stays on it as agents come and go, a fold named by its key; Enter opens the row's buffer in the second
-// pane and goes into it, a click opens it, `o` opens it writing to whom it reaches (`docs/dashboard.md`, *The review*).
+// pane and goes into it, a click opens it, `o` opens it writing to whom it reaches (`docs/dashboard.md`, *The panes*).
 import { RangeSet, StateEffect, type Range } from "@codemirror/state";
 import { Decoration, EditorView, highlightActiveLine } from "@codemirror/view";
 import { useEffect, useMemo, useRef, type RefObject } from "react";

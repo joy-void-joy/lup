@@ -1152,8 +1152,9 @@ export function Review({
     const over = useRef<(position: number) => number>(() => 0);
     over.current = (position) => linesOver(roots, editor.toLaid(position), narrow) * (view.current?.defaultLineHeight ?? 18);
     // What's read by being on screen, and for how long it has been (`useSeeing.ts`).
-    const sights = useMemo(() => sightsOf(laidOut, seeing, draft, arrangedBy.remote, threadsRead?.read.threads ?? null), [laidOut, seeing, draft, arrangedBy.remote, threadsRead]);
-    useSeeing({
+    // By agent in panes, what's new is by its agent's mark, whatever threads are read for the list; but in a thread's own buffer.
+    const sights = useMemo(() => sightsOf(laidOut, seeing, draft, arrangedBy.remote, byThreadNow && threadsRead !== null ? threadsRead.read.threads : null), [laidOut, seeing, draft, arrangedBy.remote, threadsRead, byThreadNow]);
+    const onScreenNow = useSeeing({
         following: follower,
         sights,
         over: (position) => over.current(position),
@@ -1729,6 +1730,8 @@ export function Review({
             return;
         }
         if (current !== null) {
+            // What's been seen here leaves the screen with it, read as a scroll off it is.
+            onScreenNow.left();
             const state = current.state;
             const at = state.selection.main.head;
             const run = state.field(owning).find((each) => at >= each.from && at <= each.to);
@@ -2502,10 +2505,10 @@ export function Review({
     }, [narrow]);
     // In panes, the list, read from what the review is laid out from: it lays out one buffer of it at a time.
     const listReading = useMemo(
-        () => ({ items, draft, agents, parents: arrangedBy.parents, called, banner: (item: Item) => bannerLine({ item }, false, ""), drawers, looks: arrangedBy.looks, remote: arrangedBy.remote, running: arrangedBy.running, activities, states, threads: threadsAll, landings: arrangedBy.landings, checks: arrangedBy.checks, seeing, opened: nestsOpen }),
+        () => ({ items, draft, agents, parents: arrangedBy.parents, called, banner: (item: Item) => bannerLine({ item }, false, ""), drawers, looks: arrangedBy.looks, remote: arrangedBy.remote, running: arrangedBy.running, activities, states, threads: threadsAll, landings: arrangedBy.landings, checks: arrangedBy.checks, seeing: panes === "agents" ? seenGiven : seeing, opened: nestsOpen }),
         // `bannerLine` says what `banner` does.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-        [items, draft, agents, arrangedBy.parents, called, banner, drawers, arrangedBy.looks, arrangedBy.remote, arrangedBy.running, activities, states, threadsAll, arrangedBy.landings, arrangedBy.checks, seeing, nestsOpen],
+        [items, draft, agents, arrangedBy.parents, called, banner, drawers, arrangedBy.looks, arrangedBy.remote, arrangedBy.running, activities, states, threadsAll, arrangedBy.landings, arrangedBy.checks, seeing, seenGiven, nestsOpen],
     );
     const listed = useMemo(() => (panes === null ? [] : panes === "agents" ? listedByAgent(listReading) : listedByThread(listReading)), [panes, listReading]);
     const title = panes === null ? null : titled(showing, listReading);

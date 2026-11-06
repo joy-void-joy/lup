@@ -242,7 +242,9 @@ def demo(
     served(host, port, address, token_file=token_file)
 
 
-def copied(port: int, address: str, timings: Path | None = None, token_file: Path | None = None) -> None:
+def copied(
+    port: int, address: str, timings: Path | None = None, token_file: Path | None = None
+) -> None:
     """Serve the dashboard over a copy of the operator's dashboard state, taken into a directory of its own removed as it stops, until stopped; what the page measures of itself kept in `timings`, where it's given.
 
     The checkout it runs in answers its repository's views by its own
@@ -270,7 +272,9 @@ def copied(port: int, address: str, timings: Path | None = None, token_file: Pat
         except (CopyError, HostError) as failed:
             typer.echo(f"lup-dashboard: the copy can't be served: {failed}", err=True)
             raise typer.Exit(1) from failed
-        served(host, port, address, OfCopy(defaults=host.views.by_defaults()), token_file)
+        served(
+            host, port, address, OfCopy(defaults=host.views.by_defaults()), token_file
+        )
 
 
 def kept_token(path: Path | None) -> str:
