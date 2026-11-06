@@ -21,7 +21,6 @@ import {
     type Draft,
     type Drawers,
     type Grouping,
-    type Head,
     type Item,
     type Laid,
     type Showing,
@@ -147,7 +146,8 @@ export interface ListReading {
     agents: readonly Conversation[];
     parents: ReadonlyMap<string, string>;
     called: (party: Conversation) => string;
-    banner: (head: Head) => string;
+    /** The words naming the group of what `item` is of, by which the review tells lup's approvals of one repository's from another's (`grouped`). */
+    banner: (item: Item) => string;
     drawers: Drawers;
     looks: Merged;
     remote: Remote;
@@ -183,9 +183,14 @@ function agentTally(group: Grouping, reading: ListReading): Tally {
     return { asks, news: newsCount, files, pile: 0, written: comments + letters + remarks };
 }
 
+/** Return the conversation of the agent named `key`, among those the review names; none where it isn't one of them, as lup's approvals. */
+export function conversationNamed(key: string, reading: Pick<ListReading, "agents" | "items">): Conversation | undefined {
+    return reading.agents.find((each) => whose(each) === key) ?? reading.items.flatMap((each) => (each.sender.party === "conversation" && whose(each.sender) === key ? [each.sender] : []))[0];
+}
+
 /** Return every agent's group the list names, with those of lup's approvals: each with an item, then each of `agents` with none. */
 function groupsOf(reading: ListReading): Grouping[] {
-    const groups = grouped([...reading.items], (item) => reading.banner({ item }));
+    const groups = grouped([...reading.items], reading.banner);
     const keys = new Set(groups.map((each) => each.key));
     const empty = reading.agents.flatMap((conversation): Grouping[] => {
         const key = whose(conversation);
@@ -491,7 +496,7 @@ export interface Titled {
 }
 
 /** Return what the buffer `showing` says of itself over its pane. */
-export function titled(showing: Showing, reading: Pick<ListReading, "agents" | "called" | "running" | "threads" | "items" | "banner">): Titled {
+export function titled(showing: Showing, reading: Pick<ListReading, "agents" | "called" | "running" | "threads" | "items">): Titled {
     switch (showing.kind) {
         case "for you":
             return { name: "what's for you", whom: "a comment reaches who sent the item" };
@@ -506,7 +511,7 @@ export function titled(showing: Showing, reading: Pick<ListReading, "agents" | "
             return { name: `@${read.thread.name}`, whom: answering === null ? "nobody answers for it: what you write stays on it" : `your words reach ${reading.called(answering)}` };
         }
         case "agent": {
-            const conversation = reading.agents.find((each) => whose(each) === showing.key) ?? reading.items.flatMap((each) => (each.sender.party === "conversation" && whose(each.sender) === showing.key ? [each.sender] : []))[0];
+            const conversation = conversationNamed(showing.key, reading);
             if (conversation === undefined) {
                 return { name: "lup's approvals", whom: "a comment reaches the session whose push asked it" };
             }

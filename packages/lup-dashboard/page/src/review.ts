@@ -2465,7 +2465,7 @@ export function laid(
             }
         };
         // An agent's "since you approved" laid out at the end of the thread they work in isn't laid out again here.
-        const declared = data === undefined ? [] : looks.drawers(repository).filter((each) => !(each.view === "since" && sinceLaid.has(group.key)));
+        const declared = data === undefined && shape !== "own" ? [] : looks.drawers(repository).filter((each) => !(each.view === "since" && sinceLaid.has(group.key)));
         // Under the banner, before the items, each drawer; in what's for the operator, only what waits on them; in the
         // agent's own buffer, all but their conversation, which comes after the items, live, what's written to them under it.
         layDrawers(shape === "for you" ? declared.filter((each) => each.view === "since" && sinceWaits(group) !== null) : shape === "own" ? declared.filter((each) => each.view !== "conversation") : declared, `${id} drawers`, false);

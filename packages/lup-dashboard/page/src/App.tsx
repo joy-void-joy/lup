@@ -141,7 +141,12 @@ export function App() {
     // What the operator's comments imply, a comment counting as a review, as the review last laid it out: shown and
     // sent with the draft's own marks.
     const [implied, setImplied] = useState<readonly Marked[]>([]);
-    const implying = useCallback((marks: Marked[]) => setImplied((before) => (JSON.stringify(before) === JSON.stringify(marks) ? before : marks)), []);
+    // As they stand now, for a send the review asks in the same moment it says them (`Review.tsx`, in panes).
+    const impliedNow = useRef<readonly Marked[]>([]);
+    const implying = useCallback((marks: readonly Marked[]) => {
+        impliedNow.current = marks;
+        setImplied((before) => (JSON.stringify(before) === JSON.stringify(marks) ? before : marks));
+    }, []);
     // Whether the draft has been asked for, answered or not: with the inbox, the conversations running and the order,
     // what the review is laid out from, none of which it's laid out without, lest it tell the host its groups are gone.
     const [draftRead, setDraftRead] = useState(false);
@@ -223,7 +228,7 @@ export function App() {
         adopt(made);
         return made;
     }, [declared]);
-    const parts = useMemo(() => reviewKeys(looks.kinds, looks.verbs), [looks]);
+    const parts = useMemo(() => reviewKeys(looks.kinds, looks.verbs, panesAsked(location.search) !== null), [looks]);
     // A fold kind of another repository's taking a letter one already took is refused it, and said.
     useEffect(() => {
         if (looks.refused.length > 0) {
@@ -1080,7 +1085,7 @@ export function App() {
         }
         typed.current = null;
         pending.current = null;
-        const whole = pruned(implied.length === 0 ? drafted : { ...drafted, marks: [...(drafted.marks ?? []), ...implied] });
+        const whole = pruned(impliedNow.current.length === 0 ? drafted : { ...drafted, marks: [...(drafted.marks ?? []), ...impliedNow.current] });
         // A comment on a check is the operator's answer to it, which the page sends apart: the inbox knows no item by its
         // number.
         const onChecks = (whole.comments ?? []).filter((each) => checks.has(each.item));
@@ -1241,8 +1246,8 @@ export function App() {
                         </>
                     )}
                 </span>
-                <button type="button" className="overview-button" onClick={() => setOverview(!overview)} title="the overview of every agent and item">
-                    Overview <kbd>{"\\"}</kbd>
+                <button type="button" className="overview-button" onClick={() => setOverview(!overview)} title={panes === null ? "the overview of every agent and item" : "the list"}>
+                    {panes === null ? "Overview" : "List"} <kbd>{"\\"}</kbd>
                 </button>
                 <button type="button" onClick={() => setPalette(true)}>
                     Go to <kbd>Ctrl</kbd> <kbd>K</kbd>

@@ -1,0 +1,324 @@
+// The review in panes (`docs/dashboard.md`, *The review*): each buffer a subset of the one layout, what's written kept
+// and followed as another is on screen, and the list by agent and by thread.
+import "./fixtures/looks";
+import { describe, expect, it } from "vitest";
+
+import { carried, implied, type Marked } from "./grammar";
+import { adopted } from "./looks";
+import { arrivalIn, bufferKey, listLaid, listedByAgent, listedByThread, panesAsked, rowAt, titled, type ListReading } from "./panes";
+import { EMPTY, aboutAt, followedFrom, groupAt, laid, opened, whose as whoseOf, type Around, type Conversation, type Draft, type Item, type Laid, type Showing, type ThreadRead, type ThreadShown, type Threading } from "./review";
+import { partyNamed, threadBanner } from "./Review";
+
+const AT = "2026-10-30T12:00:00Z";
+const WAITING: Item["rank"] = { name: "waiting on you", order: 0, notifies: true };
+const NEWS: Item["rank"] = { name: "news", order: 1, notifies: false };
+const REPOSITORY = "/r/lup.git";
+
+function from(session: string, agent: string | null = null): Conversation {
+    return { party: "conversation", repository: REPOSITORY, runtime: "claude", session, agent };
+}
+
+const LEAD = from("s1");
+const WORKER = from("s1", "a1");
+const GONE = from("s2");
+
+function item(number: number, sender: Conversation, reason: Item["reason"], rank: Item["rank"] = NEWS): Item {
+    return { number, reason, sender, recipient: { party: "operator" }, replies: [], citations: [], edits: [], quiet: false, made: AT, state: { state: "waiting" }, rank };
+}
+
+function note(number: number, sender: Conversation, text: string): Item {
+    return item(number, sender, { reason: "message", passages: [], answers: [], ending: false, kind: "note", text, to: null });
+}
+
+const QUESTION = item(51, WORKER, { reason: "question", text: "Which parser?", decisions: [{ text: "pydantic", lean: "yes" }] } as unknown as Item["reason"], WAITING);
+const LEADS = note(70, LEAD, "Built.");
+const LEFT = note(80, GONE, "What the one who ended left.");
+const ITEMS = [QUESTION, LEADS, LEFT];
+
+const NOTHING: Around = { contexts: new Map(), files: new Map(), answers: [], commented: [] };
+const called = (party: Conversation) => (party.agent === null || party.agent === undefined ? party.session : `${party.session}/${party.agent}`);
+const header = (shown: Item) => `── @${shown.number} ──`;
+const banner = (head: { item: Item } | { conversation: Conversation }) => `━━ ${"item" in head ? (head.item.sender.party === "conversation" ? called(head.item.sender) : "lup") : called(head.conversation)} ━━`;
+
+/** The conversations running, by what the layout names them by. */
+function running(...conversations: Conversation[]): ReadonlyMap<string, { launch: string; holding: boolean }> {
+    return new Map(conversations.map((each) => [whoseOf(each), { launch: "l", holding: false }]));
+}
+
+function buffer(showing: Showing | null, draft: Draft = EMPTY, previous: Laid | null = null, items: Item[] = ITEMS): Laid {
+    return laid(items, [LEAD, WORKER], banner, header, draft, NOTHING, [], new Map(), called, { showing, previous, running: running(LEAD, WORKER), looks: adopted() });
+}
+
+function reading(draft: Draft = EMPTY): ListReading {
+    return {
+        items: ITEMS,
+        draft,
+        agents: [LEAD, WORKER],
+        parents: new Map([[whoseOf(WORKER), whoseOf(LEAD)]]),
+        called,
+        banner: (shown) => banner({ item: shown }),
+        drawers: new Map(),
+        looks: adopted(),
+        remote: new Map(),
+        running: running(LEAD, WORKER),
+        activities: new Map(),
+        states: new Map([
+            [whoseOf(LEAD), "calling"],
+            [whoseOf(WORKER), "idle"],
+        ]),
+        threads: null,
+    };
+}
+
+describe("the page's address", () => {
+    it("asks for panes by agent or by thread, and for nothing else", () => {
+        expect(panesAsked("?panes=agents")).toBe("agents");
+        expect(panesAsked("?panes=threads")).toBe("threads");
+        expect(panesAsked("?threads")).toBeNull();
+        expect(panesAsked("?panes=forum")).toBeNull();
+        expect(panesAsked("")).toBeNull();
+    });
+});
+
+describe("one buffer at a time", () => {
+    it("lays out an agent's own buffer: theirs alone, nobody nested under them, what's written to them last", () => {
+        const out = buffer({ kind: "agent", key: whoseOf(LEAD) });
+        expect(out.groups.map((each) => called(each.conversation as Conversation))).toEqual(["s1"]);
+        expect(out.regions.map((each) => each.item.number)).toEqual([70]);
+        const lines = out.text.trimEnd().split("\n");
+        expect(lines.at(-1)).toBe("── to s1 ──");
+    });
+
+    it("lays out what's for the operator: each group with an item, none with only a banner", () => {
+        const out = buffer({ kind: "for you" });
+        expect(out.regions.map((each) => each.item.number).toSorted()).toEqual([51, 70, 80]);
+        const quiet = laid([LEFT], [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called, { showing: { kind: "for you" }, running: running(LEAD), looks: adopted() });
+        expect(quiet.groups.map((each) => called(each.conversation as Conversation))).toEqual(["s2"]);
+    });
+
+    it("lays out what nobody running answers under No agent", () => {
+        const out = buffer({ kind: "no agent" });
+        expect(out.regions.map((each) => each.item.number)).toEqual([80]);
+    });
+
+    it("lays out nothing but the review whole, without a buffer", () => {
+        const whole = buffer(null);
+        expect(whole.groups).toHaveLength(3);
+        expect(whole.text.split("\n").filter((each) => each.startsWith("── to "))).toEqual([]);
+    });
+
+    it("writes to an agent from their buffer's last line, under it, and goes back there", () => {
+        const out = buffer({ kind: "agent", key: whoseOf(LEAD) });
+        const writing = out.groups[0]?.writing;
+        expect(writing).toBeDefined();
+        const letter = opened(out, writing?.from ?? 0);
+        expect(letter).toEqual({ id: "", to: LEAD, text: "" });
+        const draft: Draft = { ...EMPTY, letters: [{ id: "m1", to: LEAD, text: "Go on." }] };
+        const written = buffer({ kind: "agent", key: whoseOf(LEAD) }, draft);
+        expect(written.text.trimEnd().split("\n").slice(-2)).toEqual(["── to s1 ──", "Go on."]);
+        const block = written.groups[0]?.blocks[0];
+        expect(block).toBeDefined();
+        expect(groupAt(written, block?.from ?? 0)?.conversation).toEqual(LEAD);
+        expect(aboutAt(written, { id: "m1", to: LEAD, text: "Go on." }, block ?? { comment: "", from: 0, to: 0 })).toBe(written.groups[0]?.writing?.from);
+    });
+
+    it("leaves what's written on what's off the screen in the draft, as it was", () => {
+        const draft: Draft = { ...EMPTY, comments: [{ id: "c1", item: 51, quote: null, text: "Pydantic." }] };
+        const off = buffer({ kind: "agent", key: whoseOf(LEAD) }, draft);
+        expect(off.text).not.toContain("Pydantic.");
+        expect(off.written).toEqual(draft.comments);
+        expect(off.converted).toBeNull();
+        const on = buffer({ kind: "agent", key: whoseOf(WORKER) }, draft);
+        expect(on.text).toContain("Pydantic.");
+    });
+
+    it("follows a comment from where it was seated while another buffer was on screen", () => {
+        const text = ["One.", "Two.", "Three."].join("\n");
+        const long = note(90, LEAD, text);
+        const quote = { text: "Two.", block: `inbox message {"number":90} `, version: "", line: 1, lines: ["Two."], start: 0, end: 4 };
+        const first = buffer({ kind: "agent", key: whoseOf(LEAD) }, EMPTY, null, [long]);
+        const block = [...first.lines.keys()].find((each) => each.includes("90")) ?? "";
+        const draft: Draft = { ...EMPTY, comments: [{ id: "c1", item: 90, quote: { ...quote, block, version: first.lines.get(block)?.version ?? "" }, text: "On two." }] };
+        const seated = buffer({ kind: "agent", key: whoseOf(LEAD) }, draft, null, [long]);
+        const away = buffer({ kind: "agent", key: whoseOf(WORKER) }, draft, seated, [long]);
+        // Laid out on another buffer, it isn't seated there, and what's followed still knows where it was.
+        expect(away.seated.has("c1")).toBe(false);
+        const followed = followedFrom(followedFrom(null, seated), away);
+        expect(followed.seated.get("c1")?.first).toBe(1);
+        expect(followed.lines.has(block)).toBe(true);
+    });
+
+    it("never lets a block not laid out say where a comment was", () => {
+        const was = { seated: new Map([["c1", { block: "b", version: "v1", first: 3, last: 3, outdated: false }]]), lines: new Map([["b", { version: "v1", lines: ["a", "b", "c", "d"] }]]) } as unknown as Parameters<typeof followedFrom>[0];
+        const now = { seated: new Map([["c1", { block: "b", version: "", first: 0, last: 0, outdated: true }]]), lines: new Map() } as unknown as Laid;
+        expect(followedFrom(was, now).seated.get("c1")?.first).toBe(3);
+    });
+
+    it("lands a buffer first opened on what's to answer, else on its last line", () => {
+        const asking = buffer({ kind: "agent", key: whoseOf(WORKER) });
+        expect(arrivalIn(asking, EMPTY)).toBe(asking.regions[0]?.header.from);
+        const told = buffer({ kind: "agent", key: whoseOf(LEAD) });
+        expect(arrivalIn(told, EMPTY)).toBe(told.groups[0]?.writing?.from);
+    });
+
+    it("names each buffer apart, which the cursor's kept by", () => {
+        const keys = [{ kind: "for you" }, { kind: "no agent" }, { kind: "agent", key: "a" }, { kind: "agent", key: "b" }, { kind: "thread", number: 1 }, { kind: "thread", number: 2 }] as Showing[];
+        expect(new Set(keys.map(bufferKey)).size).toBe(keys.length);
+    });
+});
+
+describe("what a comment implies, as another buffer is on screen", () => {
+    const mark = (id: string, block: string): Marked => ({ id, action: "policy-review-since", argument: {}, verb: "done", says: "mark it reviewed", block, version: null });
+
+    it("keeps a mark whose block is off the screen while its comment's in the draft", () => {
+        const out = buffer({ kind: "agent", key: whoseOf(LEAD) });
+        const draft: Draft = { ...EMPTY, remarks: [{ id: "r1", to: LEAD, quote: { text: "x", block: "off", version: "v", line: 0, lines: ["x"], start: 0, end: 1 }, text: "On x." }] };
+        const off = mark("implied r1", "off");
+        expect(carried([off], [], out, draft)).toEqual([off]);
+        // Its comment gone, or emptied, the mark goes with it.
+        expect(carried([off], [], out, EMPTY)).toEqual([]);
+        // The draft marking it itself takes it over.
+        expect(carried([off], [], out, { ...draft, marks: [off] })).toEqual([]);
+    });
+
+    it("lets a block on the screen say for itself", () => {
+        const out = buffer({ kind: "agent", key: whoseOf(LEAD) });
+        const onIt = mark("implied r1", out.nodes[0]?.id ?? "");
+        const draft: Draft = { ...EMPTY, remarks: [{ id: "r1", to: LEAD, quote: { text: "x", block: "off", version: "v", line: 0, lines: ["x"], start: 0, end: 1 }, text: "On x." }] };
+        expect(carried([onIt], implied(out, draft), out, draft).filter((each) => each.id === "implied r1")).toEqual([]);
+    });
+});
+
+describe("the list by agent", () => {
+    const rows = () => listedByAgent(reading());
+
+    it("lists what's for the operator, who's running, a subagent under their parent, then No agent", () => {
+        expect(rows().map((each) => each.id)).toEqual(["for you", "heading running", `agent ${whoseOf(LEAD)}`, `agent ${whoseOf(WORKER)}`, "heading no agent", `agent ${whoseOf(GONE)}`]);
+    });
+
+    it("says how much of each waits on the operator, and what's for them across everyone", () => {
+        const laidOut = listLaid(rows());
+        const lines = laidOut.text.split("\n");
+        expect(lines[0]).toContain("what's for you");
+        expect(lines[0]).toContain("◆1");
+        expect(lines[0]).toContain("•2");
+        const worker = lines.find((each) => each.includes("a1"));
+        expect(worker).toContain("◆1");
+        expect(worker).not.toContain("•");
+    });
+
+    it("counts what's drafted to an agent or on their items", () => {
+        const draft: Draft = { ...EMPTY, comments: [{ id: "c1", item: 51, quote: null, text: "Pydantic." }], letters: [{ id: "m1", to: WORKER, text: "Go on." }] };
+        const laidOut = listLaid(listedByAgent(reading(draft)));
+        expect(laidOut.text.split("\n").find((each) => each.includes("a1"))).toContain("»2");
+    });
+
+    it("opens each row's buffer, and says which rows are written to", () => {
+        const laidOut = listLaid(rows());
+        const row = rowAt(laidOut, laidOut.text.indexOf("s1"));
+        expect(row?.opens).toEqual({ kind: "agent", key: whoseOf(LEAD) });
+        expect(row?.writes).toBe(true);
+        expect(rowAt(laidOut, 0)?.opens).toEqual({ kind: "for you" });
+        expect(rowAt(laidOut, 0)?.writes).toBe(false);
+        expect(rowAt(laidOut, laidOut.text.indexOf("running"))?.opens).toBeNull();
+    });
+
+    it("keeps each line a row's, and marks each stretch where it is", () => {
+        const laidOut = listLaid(rows());
+        expect(laidOut.owners).toHaveLength(laidOut.text.trimEnd().split("\n").length);
+        for (const each of laidOut.marks) {
+            expect(laidOut.text.slice(each.from, each.to)).not.toContain("\n");
+        }
+    });
+});
+
+describe("the list by thread", () => {
+    function thread(number: number, name: string, read: Partial<ThreadRead>): ThreadRead {
+        return {
+            thread: { kind: "ledger:thread", number, name, title: `The ${name}`, repository: REPOSITORY, by: LEAD, at: AT, parent: null, holder: WORKER },
+            state: "working",
+            section: "every thread",
+            since: AT,
+            asks: [],
+            new: [],
+            pile: [],
+            unanswered: [],
+            members: 0,
+            earlier: 0,
+            answering: WORKER,
+            ...read,
+        } as ThreadRead;
+    }
+    const READER = thread(302, "reader", { state: "waiting on the operator", section: "waiting on you", asks: [{ node: 51, what: "a question", came: AT }] as ThreadRead["asks"] });
+    const CHILD = (() => {
+        const made = thread(303, "child", { new: [70] });
+        return { ...made, thread: { ...made.thread, parent: 302 } } as ThreadRead;
+    })();
+    const NOBODY = thread(304, "nobody", { answering: null } as Partial<ThreadRead>);
+    const DONE = thread(305, "done", { state: "settled" });
+    const SHOWN: ThreadShown = { kind: "inbox-thread-shown", read: READER, entries: [{ spot: { node: 51 }, came: AT, member: true }], left: 0, items: [QUESTION], checks: [], references: [], under: [], on: [], paths: [] } as unknown as ThreadShown;
+    const threads: Threading = {
+        read: { kind: "inbox-threads-read", threads: [READER, CHILD, NOBODY, DONE], paths: [], working: [] },
+        shown: new Map([[302, SHOWN]]),
+        whole: new Map([[302, SHOWN]]),
+        landing: new Map(),
+        banner: (read, landing, section) => threadBanner(read, landing, called, section),
+    };
+    const byThread = (): ListReading => ({ ...reading(), threads });
+
+    it("lists what's for the operator, who's running, each thread open under its parent, No agent, and what's settled folded", () => {
+        const rows = listedByThread(byThread());
+        expect(rows.map((each) => each.id)).toEqual([
+            "for you",
+            "heading running",
+            `agent ${whoseOf(LEAD)}`,
+            `agent ${whoseOf(WORKER)}`,
+            "heading threads",
+            "thread 302",
+            "thread 303",
+            "heading no agent",
+            "thread 304",
+            "heading settled",
+            "thread 305",
+        ]);
+        const laidOut = listLaid(rows);
+        expect(laidOut.folds).toHaveLength(1);
+        expect(laidOut.text.slice(laidOut.folds[0]?.from, laidOut.folds[0]?.to)).toContain("@done");
+        expect(laidOut.text.split("\n").find((each) => each.includes("@reader"))).toContain("◆1");
+    });
+
+    it("lays out one thread's own buffer: open, whoever answers named on its last line", () => {
+        const out = laid(ITEMS, [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called, { threads, showing: { kind: "thread", number: 302 }, looks: adopted() });
+        expect(out.sections).toEqual([]);
+        expect(out.groups.map((each) => each.thread?.thread.number)).toEqual([302]);
+        expect(out.groups[0]?.fold?.closed).toBe(false);
+        expect(out.text.trimEnd().split("\n").at(-1)).toBe("── to s1/a1 on @reader ──");
+    });
+
+    it("lays out what's for the operator without the front or what's settled", () => {
+        const out = laid(ITEMS, [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called, { threads, showing: { kind: "for you" }, looks: adopted() });
+        expect(out.sections.map((each) => each.name)).toEqual(["waiting on you", "new", "to read"]);
+    });
+
+    it("says whom the words reach from a thread's buffer, and where nobody answers for it", () => {
+        const named = (number: number) => titled({ kind: "thread", number }, byThread());
+        expect(named(302)).toEqual({ name: "@reader", whom: "your words reach s1/a1" });
+        expect(named(304).whom).toContain("nobody answers");
+    });
+});
+
+describe("whom a buffer's words reach", () => {
+    it("says so of an agent running, one who's ended, what's for the operator and lup's approvals", () => {
+        const read = reading();
+        expect(titled({ kind: "agent", key: whoseOf(LEAD) }, read)).toEqual({ name: "s1", whom: "your words reach s1" });
+        expect(titled({ kind: "agent", key: whoseOf(GONE) }, read).whom).toContain("has ended");
+        expect(titled({ kind: "for you" }, read).name).toBe("what's for you");
+        expect(titled({ kind: "agent", key: "lup ━━ lup ━━" }, read).name).toBe("lup's approvals");
+    });
+
+    it("follows the name under the cursor to that party, the longest there first", () => {
+        const text = "── to s1/a1 ──\n";
+        expect(partyNamed(text, text.indexOf("s1/a1") + 1, [LEAD, WORKER], called)).toEqual(WORKER);
+        expect(partyNamed(text, 0, [LEAD, WORKER], called)).toBeUndefined();
+    });
+});

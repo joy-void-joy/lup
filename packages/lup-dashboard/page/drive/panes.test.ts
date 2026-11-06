@@ -38,7 +38,7 @@ async function listRow(dashboard: Dashboard, text: string): Promise<void> {
     await page.keyboard.press("g");
     await page.keyboard.press("g");
     await page.keyboard.press("/");
-    await page.keyboard.type(text);
+    await page.keyboard.type(text.replaceAll("/", "\\/"));
     await page.keyboard.press("Enter");
 }
 
@@ -173,6 +173,41 @@ describe("the panes by agent", () => {
         expect(lines[at + 1]).toBe("A message to them");
     });
 
+    it("opens what nobody running answers, an ended agent's own buffer and lup's approvals, each from its row", async () => {
+        const { page } = dashboard;
+        await listRow(dashboard, "No agent");
+        await page.keyboard.press("Enter");
+        await review.until("showed what's left by who's ended", (view) => view.state.doc.toString().includes("fix-clock"));
+        expect(await review.text()).not.toContain("@54 approval");
+        await listRow(dashboard, "lup-impl/fix-clock");
+        await page.keyboard.press("Enter");
+        await review.holds("to lup-impl/fix-clock");
+        expect(await review.text()).toContain("since you approved");
+        await listRow(dashboard, "lup's approvals");
+        await page.keyboard.press("Enter");
+        await review.holds("@54 approval");
+        expect((await review.text()).split("\n").filter((each) => each.startsWith("━━"))).toHaveLength(1);
+    });
+
+    it("goes into the list with gO, hides it with \\ and shows it again, and to an agent's buffer with gd on their name", async () => {
+        const { page } = dashboard;
+        await listRow(dashboard, "what's for you");
+        await page.keyboard.press("Enter");
+        await review.holds("@56 turn ended");
+        await page.keyboard.press("g");
+        await page.keyboard.press("O");
+        await page.waitForFunction(() => document.activeElement?.closest(".list-buffer") != null, undefined, { polling: 50 });
+        await page.keyboard.press("\\");
+        await page.waitForFunction(() => document.querySelector(".pane-list") === null, undefined, { polling: 50 });
+        expect(await review.mode()).toBe("normal");
+        await page.keyboard.press("\\");
+        await page.waitForFunction(() => document.querySelector(".list-buffer .cm-line") !== null, undefined, { polling: 50 });
+        await review.goTo("guidance-voice · @56, its answer");
+        await page.keyboard.press("g");
+        await page.keyboard.press("d");
+        await review.holds("to guidance-voice");
+    });
+
     it("sends with Ctrl+Enter from Normal mode, from any buffer, the comment and the message going whole", async () => {
         const { page } = dashboard;
         await listRow(dashboard, "main");
@@ -187,6 +222,44 @@ describe("the panes by agent", () => {
         await page.keyboard.press("Enter");
         await review.holds("to guidance-voice");
         expect(await review.text()).not.toContain(WORDS);
+        expect(dashboard.thrown).toEqual([]);
+    });
+});
+
+describe("the panes on a phone", () => {
+    let served: Demo;
+    let dashboard: Dashboard;
+
+    beforeAll(async () => {
+        served = await demo({ size: 0, panes: "agents" });
+        dashboard = await open(served.url, { viewport: { width: 400, height: 800 } });
+        const review = await dashboard.review();
+        await review.settled();
+    });
+
+    afterAll(async () => {
+        await dashboard?.close();
+        await served?.close();
+    });
+
+    const shown = (which: string) => dashboard.page.waitForFunction((pane) => {
+        const box = document.querySelector(pane)?.getBoundingClientRect();
+        return box !== undefined && box.width > 0;
+    }, which, { polling: 50 });
+    const hidden = (which: string) => dashboard.page.waitForFunction((pane) => {
+        const box = document.querySelector(pane)?.getBoundingClientRect();
+        return box === undefined || box.width === 0;
+    }, which, { polling: 50 });
+
+    it("gets one pane at a time, the list first, the bar's button going back to it", async () => {
+        const { page } = dashboard;
+        await shown(".pane-list");
+        await hidden(".pane-buffer");
+        await page.click(".list-buffer .cm-line:first-child");
+        await shown(".pane-buffer");
+        await hidden(".pane-list");
+        await page.click(".overview-button");
+        await shown(".pane-list");
         expect(dashboard.thrown).toEqual([]);
     });
 });

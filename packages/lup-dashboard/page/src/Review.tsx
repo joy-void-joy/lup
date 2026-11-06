@@ -70,7 +70,7 @@ import { linesOver, stickies, type Sticky } from "./stack";
 import { depths, levelled } from "./folds";
 import { carried, chainAt, findNode, implied, isMarked, marking, marksOn, movedInto, reachOf, reachedIn, type Act, type Destination, type Marked } from "./grammar";
 import { Listing, type ListHandle } from "./Panes";
-import { arrivalIn, bufferKey, listedByAgent, listedByThread, titled, type PanesBy, type Showing } from "./panes";
+import { arrivalIn, bufferKey, conversationNamed, listedByAgent, listedByThread, titled, type PanesBy, type Showing } from "./panes";
 import { ThreadPalette } from "./Palette";
 import type { DrawerKind, FoldKind, Here } from "./keys";
 import type { Titled } from "./panes";
@@ -88,6 +88,7 @@ import {
     citationsOf,
     following,
     followedFrom,
+    ownerOf,
     arrival,
     blockAt,
     blocksOf,
@@ -215,7 +216,7 @@ interface Props {
     /** How far the operator has seen each group, and what they commented on in a reply sent: what an item is new by. */
     seeing: Seeing;
     /** Told the marks the operator's comments imply, a comment counting as a review (`implied`), as the review is laid out. */
-    implying: (marks: Marked[]) => void;
+    implying: (marks: readonly Marked[]) => void;
     /** What each conversation running is doing, by `whose` they are, drawn on their banner as the time passes (`ticking.ts`). */
     activities: ReadonlyMap<string, Activity | null>;
     /** Each conversation's parent, by `whose` each is: what nests a subagent's group under their parent's. */
@@ -931,13 +932,16 @@ export function Review({
     // In panes, the one buffer on screen, and where the keyboard is: in a pane, or, in Pane mode, nowhere, a pane selected.
     const [showing, setShowing] = useState<Showing>({ kind: "for you" });
     const [paneMode, setPaneMode] = useState(false);
-    const [pane, setPane] = useState<"list" | "buffer">("buffer");
+    const [paneSelected, setPane] = useState<"list" | "buffer">("buffer");
+    const narrow = useNarrow();
+    // A phone gets one pane at a time, as the bar's button says, or opening a row.
+    const pane = narrow ? (overview ? "list" : "buffer") : paneSelected;
     const paneNow = useRef({ mode: paneMode, pane });
     paneNow.current = { mode: paneMode, pane };
     // Where the cursor was in each buffer left, by what names the buffer (`bufferKey`), by the part it was in: as vim's buffers keep theirs.
     const buffersLeft = useRef(new Map<string, { owner: string; into: number; screen: number | null }>());
     // The buffer being gone to, until it's laid out and read: where it lands, and whether a message is written once it has.
-    const goingTo = useRef<{ write: boolean; item: number | null } | null>(null);
+    const goingTo = useRef<{ write: boolean; item: number | null; since: boolean } | null>(null);
     const listHandle = useRef<ListHandle | null>(null);
     const root = useRef<HTMLDivElement>(null);
     // Where the cursor is, and whether a comment is being written: what the header says.
@@ -952,7 +956,6 @@ export function Review({
     // them out, none until it has, when what it doesn't lay out of the host's order is gone.
     const places = useRef<string[]>([]);
     const toldOrder = useRef<string[] | null>(null);
-    const narrow = useNarrow();
     // What the host answers, as the review lays it out: once the review has been read as the page loads, taken no more
     // often than four times what laying the review out last cost, a quarter of a second at least and two at most, so
     // the hooks of agents at work, each answering the agent's record, its views and the listing again, lay it out at
@@ -989,18 +992,19 @@ export function Review({
     // The same object while what it holds is the same, as the rest of what's taken is.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     const arranging = useMemo(() => ({ ...arrangedBy, threads }), [arrangedBy.parents, arrangedBy.looks, arrangedBy.running, arrangedBy.landings, arrangedBy.remote, threads]);
+    /** The words a group's banner says: `banner`'s, its parts' after them, and whether it's what's left for later. */
+    const bannerLine = (head: Head, later: boolean, parts: string) => `━━ ${banner(head)}${parts === "" ? "" : ` · ${parts}`}${later ? " · later" : ""} ━━`;
     // The review as it was last laid out into the editor, which each comment is followed from (`Arranging.previous`):
     // in panes, as each comment's block was last laid out, whichever buffer that was in.
     const before = useRef<Laid | null>(null);
     const followed = useRef<Followed | null>(null);
     // Laid out with what's typed in a comment, though it isn't given yet, so the text laid out is what the editor holds.
-    const layout = useMemo(() => {
-        const drafted = typed.current ?? given;
-        const began = performance.now();
-        const laidOut = laid(
+    /** Lay out `drafted`, the buffer `shownNow` of the review, or the review whole. */
+    const layOut = (drafted: Draft, shownNow: Showing | null): Laid =>
+        laid(
             items,
             agents,
-            (head, later, parts) => `━━ ${banner(head)}${parts === "" ? "" : ` · ${parts}`}${later ? " · later" : ""} ━━`,
+            bannerLine,
             // What the item's kind says of it, then what the core says of how it stands.
             (item, later, said) => {
                 // Grouped by thread, an item says whose it is, as a conversation's line does: several agents write in one.
@@ -1023,8 +1027,12 @@ export function Review({
             ordered(places.current, order ?? []),
             drawers,
             called,
-            { ...arranging, previous: panes === null ? before.current : followed.current, showing: panes === null ? null : showing },
+            { ...arranging, previous: panes === null ? before.current : followed.current, showing: shownNow },
         );
+    const layout = useMemo(() => {
+        const drafted = typed.current ?? given;
+        const began = performance.now();
+        const laidOut = layOut(drafted, panes === null ? null : showing);
         return { drafted, laidOut, cost: performance.now() - began };
         // `typed` is read as the review is laid out, whatever else lays it out: what's typed alone doesn't.
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1409,7 +1417,11 @@ export function Review({
         if (going !== null) {
             const readYet = showing.kind !== "thread" || (laidOut.groups.length > 0 && laidOut.groups[0]?.fold?.unread !== true);
             const run = leftThere === undefined ? undefined : laidOut.runs.find((each) => each.owner === leftThere.owner);
-            const asked = going.item === null ? undefined : (laidOut.regions.find((each) => each.item.number === going.item)?.header.from ?? laidOut.checks.find((each) => each.check.check.number === going.item)?.from);
+            const asked = going.since
+                ? laidOut.drawers.find((each) => each.kind === "since")?.header.from
+                : going.item === null
+                  ? undefined
+                  : (laidOut.regions.find((each) => each.item.number === going.item)?.header.from ?? laidOut.checks.find((each) => each.check.check.number === going.item)?.from);
             const to = asked ?? (run !== undefined && leftThere !== undefined ? Math.min(run.from + leftThere.into, run.to) : arrivalIn(laidOut, draft));
             const at = asked === undefined ? uncovered(laidFor.folds.filter((each) => isFolded(current.state, each)), to) : to;
             current.dispatch({ selection: { anchor: at }, annotations: rebuilt.of(true), effects: asked === undefined ? [] : reaching(current.state, at) });
@@ -1567,6 +1579,19 @@ export function Review({
     // Where `gt` goes once the thread it went to is read whole: the thread, and the item or check it went from.
     const pendingThread = useRef<{ thread: number; node: number | null; from: number } | null>(null);
 
+    /**
+     * Send the reply. In panes, what the comments imply, a comment counting as a review, is read first from the review
+     * laid out whole, as it is without panes, so what's sent is the same whichever buffer is on screen, whichever were
+     * opened since the page loaded.
+     */
+    function sending() {
+        if (panes !== null) {
+            const drafted = editor.latest.current;
+            implying(implied(layOut(drafted, null), drafted));
+        }
+        send();
+    }
+
     /** Say whether the keyboard is in the buffer, what the line of keys says of it: as the review always is, outside panes. */
     function inBuffer(): boolean {
         return panes === null || (!paneNow.current.mode && paneNow.current.pane === "buffer");
@@ -1644,8 +1669,11 @@ export function Review({
     }, [paneMode, pane]);
 
     /** Show the buffer `next` in the second pane, and go into it (`in`), stay where the keyboard is (`stay`), or go into it writing to whoever it reaches (`write`); on the item `item` where given. */
-    function openBuffer(next: Showing, how: "in" | "stay" | "write", item: number | null = null) {
+    function openBuffer(next: Showing, how: "in" | "stay" | "write", item: number | null = null, sinceDrawer: boolean = false) {
         const current = view.current;
+        if (narrow) {
+            setOverview(false);
+        }
         if (bufferKey(next) === bufferKey(showing)) {
             if (how === "write") {
                 goIn("buffer");
@@ -1661,10 +1689,19 @@ export function Review({
             const run = state.field(owning).find((each) => at >= each.from && at <= each.to);
             buffersLeft.current.set(bufferKey(showing), { owner: run?.owner ?? "", into: at - (run?.from ?? 0), screen: screenOffset(current, at) });
         }
-        goingTo.current = { write: how === "write", item };
+        goingTo.current = { write: how === "write", item, since: sinceDrawer };
         setShowing(next);
         if (next.kind === "thread") {
             openThread(next.number, true);
+        }
+        // An agent no longer running, whose record and branches the page reads only as they're opened.
+        const agent = next.kind === "agent" ? conversationNamed(next.key, listReading) : undefined;
+        if (agent !== undefined && !arrangedBy.running.has(whose(agent))) {
+            told(agent, "since");
+            const of = { runtime: agent.runtime, session: agent.session, agent: agent.agent ?? null };
+            for (const drawn of arrangedBy.looks.drawers(agent.repository)) {
+                load({ repository: agent.repository, module: drawn.module, view: drawn.view, argument: of });
+            }
         }
         if (how !== "stay") {
             goIn("buffer");
@@ -2256,8 +2293,15 @@ export function Review({
                     : (laidOut.regions.find((each) => each.item.number === pointer.node)?.header.from ?? laidOut.checks.find((each) => each.check.check.number === pointer.node)?.from);
             const placed = home?.banner.from ?? pointed;
             const target = current === null ? undefined : placed !== undefined ? editor.fromLaid(placed) : (following(citationsOf(laidOut), head) ?? namedDrawer(laidOut, head));
-            // In panes, an agent's name goes to their own buffer.
+            // In panes, a banner naming another agent's drawer, to it in their own buffer; an agent's name, to their own buffer.
             if (panes !== null && target === undefined) {
+                const naming = (groupAt(laidOut, at)?.parts ?? []).flatMap((part) => (part.answer?.blocks.summary ?? []).flatMap((span) => (span.conversation == null ? [] : [span.conversation])))[0];
+                if (naming !== undefined) {
+                    const conversation = { party: "conversation" as const, repository: groupAt(laidOut, at)?.conversation?.repository ?? "", ...naming, agent: naming.agent ?? null };
+                    kept.current.set(foldKey({ of: ownerOf({ drawer: "since", conversation }), kind: "since", name: "" }), false);
+                    openBuffer({ kind: "agent", key: whose(conversation) }, "in", null, true);
+                    return;
+                }
                 const named = partyNamed(laidOut.text, at, [...agents, ...items.flatMap((each) => (each.sender.party === "conversation" ? [each.sender] : []))], called);
                 if (named !== undefined) {
                     openBuffer({ kind: "agent", key: whose(named) }, "in");
@@ -2321,7 +2365,7 @@ export function Review({
                 recordJump(current, head, to);
             }
         },
-        send,
+        send: sending,
         paint: (from, to) => painted(laidOut, from, to, freshOf),
         level: (position, opening, all, closed) => levelled(scopeFolds(position), closed, opening, all),
         // `zO` and `zC` within the item or the drawer the cursor is in; on a banner, its group's.
@@ -2349,18 +2393,34 @@ export function Review({
     // What the overview reads beside the review as it's laid out.
     const reading = useMemo(() => ({ draft, seeing, states, called }), [draft, seeing, states, called]);
     const focusing = useCallback((focus: (() => void) | null) => setOutlineFocus(focus), []);
-    // In panes, `gO` goes into the list, which `\` hides or shows.
+    // In panes, `gO` goes into the list, which `\` hides or shows, the keyboard going to the buffer as it's hidden.
     useEffect(() => {
         if (panes !== null) {
             setOutlineFocus(() => {
                 setOverview(true);
                 goIn("list");
             });
+            setOutlineToggle(() => {
+                if (overview && pane === "list") {
+                    goIn("buffer");
+                }
+                setOverview(!overview);
+            });
         }
     });
+    // A phone gets one pane at a time, the list first.
+    useEffect(() => {
+        if (panes !== null && narrow) {
+            setOverview(true);
+        }
+        // As the screen goes narrow.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [narrow]);
     // In panes, the list, read from what the review is laid out from: it lays out one buffer of it at a time.
     const listReading = useMemo(
-        () => ({ items, draft, agents, parents: arrangedBy.parents, called, banner, drawers, looks: arrangedBy.looks, remote: arrangedBy.remote, running: arrangedBy.running, activities, states, threads, landings: arrangedBy.landings }),
+        () => ({ items, draft, agents, parents: arrangedBy.parents, called, banner: (item: Item) => bannerLine({ item }, false, ""), drawers, looks: arrangedBy.looks, remote: arrangedBy.remote, running: arrangedBy.running, activities, states, threads, landings: arrangedBy.landings }),
+        // `bannerLine` says what `banner` does.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
         [items, draft, agents, arrangedBy.parents, called, banner, drawers, arrangedBy.looks, arrangedBy.remote, arrangedBy.running, activities, states, threads, arrangedBy.landings],
     );
     const listed = useMemo(() => (panes === null ? [] : panes === "agents" ? listedByAgent(listReading) : listedByThread(listReading)), [panes, listReading]);
@@ -2457,7 +2517,7 @@ export function Review({
         return (
             <>
                 <div className={`panes${narrow ? " is-narrow" : ""}`} data-mode={paneMode ? "pane" : "normal"} ref={root} tabIndex={-1} onKeyDown={panePressed}>
-                    {overview ? (
+                    {overview || narrow ? (
                         <section
                             className={`pane pane-list${pane === "list" ? " is-selected" : ""}`}
                             onFocusCapture={() => {

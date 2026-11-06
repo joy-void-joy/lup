@@ -114,9 +114,9 @@ export async function review(page: Page, thrown: readonly Error[] = []): Promise
             }
             await holds(text);
             await evaluate((view) => view.focus());
-            // Whatever was begun ends first; in normal mode with nothing begun there's nothing to end, and in panes Esc
-            // would leave the pane.
-            if ((await page.evaluate(mode)) !== "normal") {
+            // Whatever was begun ends first; but in panes, Esc in normal mode leaves the pane.
+            const paned = await page.evaluate(() => document.querySelector(".panes") !== null);
+            if (!paned || (await page.evaluate(mode)) !== "normal") {
                 await page.keyboard.press("Escape");
             }
             await page.keyboard.press("/");

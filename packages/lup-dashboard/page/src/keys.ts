@@ -144,11 +144,28 @@ const VERBS: Readonly<Record<string, string>> = {
  * drawer's after `]` and `[`. A kind with no letter, another kind having taken it, is reached by the generic keys
  * alone. And the verbs known now (`verbs`), each Space and its key, in the order declared, the core's first.
  */
-export function reviewKeys(kinds: readonly Kind[], verbs: readonly Verb[] = []): Part[] {
+/** The keys of the panes, where the page lays the review out in them (`panes.ts`). */
+const PANES: Part = {
+    title: "The panes",
+    keys: [
+        { keys: "Esc", does: "in insert mode, to normal mode; in normal mode with nothing begun, to Pane mode, where no key acts on anything but moving between the panes", short: "out, a level" },
+        { keys: "h l", does: "in Pane mode, select the list or the buffer", short: "select a pane" },
+        { keys: "i ⏎", does: "in Pane mode, go into the pane selected, in normal mode", short: "go into a pane" },
+        { keys: "⏎", does: "in the list, show the row's buffer in the second pane and go into it; a click shows it and stays", short: "open a row" },
+        { keys: "o", does: "in the list, go into the row's buffer writing to whom it reaches; at a buffer's last line, write to them", short: "write to them" },
+        { keys: "gt", does: "from an item or a thread's header, to the thread's own buffer, on that item", short: "to its thread" },
+        { keys: "gd", does: "on an agent's name, to their own buffer", short: "to their buffer" },
+        { keys: "gO", does: "into the list", short: "the list" },
+        { keys: "\\", does: "hide the list or show it again", short: "hide the list" },
+    ],
+};
+
+export function reviewKeys(kinds: readonly Kind[], verbs: readonly Verb[] = [], panes: boolean = false): Part[] {
     const lettered = kinds.flatMap((each) => (each.letter === null ? [] : [{ ...each, letter: each.letter }]));
     const drawers = lettered.filter((each) => each.drawer);
     return [
     ...WRITING,
+    ...(panes ? [PANES] : []),
     {
         title: "Answering",
         keys: [

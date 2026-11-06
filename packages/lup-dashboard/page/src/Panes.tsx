@@ -170,7 +170,7 @@ export function Listing({ rows, showing, open, send, say, escaped, placed, list,
         },
         send,
         enter: () => openAt.current(editor.head(), "in"),
-        verb: (name) => say(`␣ and a key marks what's in the second pane: Enter goes into this row's buffer. (${name})`),
+        verb: () => say("␣ and a key marks what's in the second pane: Enter goes into this row's buffer."),
     });
     return <div className="buffer list-buffer" ref={editor.parent} />;
 }
