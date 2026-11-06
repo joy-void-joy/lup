@@ -127,6 +127,9 @@ def snapshot(source: LedgerLayout, target: LedgerLayout) -> bool:
     try:
         writing = sqlite3.connect(target.database)
         try:
+            # What syncs it is the disk's next flush: a copy needn't outlast a
+            # power cut the moment it's taken, and a switch waits on this.
+            writing.execute("PRAGMA synchronous = OFF")
             reading.backup(writing)
         finally:
             writing.close()

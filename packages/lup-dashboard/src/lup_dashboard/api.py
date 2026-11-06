@@ -69,6 +69,7 @@ from lup_dev.inbox.threaded import (
 )
 from lup_dev.policy.since import ReviewSince, ShowSince, Since, SinceReviewed
 from lup_dev.policy.waits import LandingsWaiting, ShowLandings
+from lup_dev.switching import CopiesListed, CopySwitching, ListCopies, SwitchCopy
 
 type Asked = Annotated[
     ListLaunches
@@ -102,7 +103,9 @@ type Asked = Annotated[
     | MoveIntoThread
     | AnswerCheck
     | Viewing
-    | KeepTimings,
+    | KeepTimings
+    | ListCopies
+    | SwitchCopy,
     Field(discriminator="kind"),
 ]
 """A request the page may send: the launches served and their conversations,
@@ -119,8 +122,9 @@ the threads as the review reads them and one's conversation, a thread
 settled, declined or reopened, frictions and how it felt moved into one from
 the pile to read, a check answered, a module's view, which the
 page draws from its blocks (`docs/host.md`, *The views the dashboard shows*),
-and what the page measured of itself in the operator's browser, which the host
-keeps (`docs/host.md`, *A page's timings*)."""
+what the page measured of itself in the operator's browser, which the host
+keeps (`docs/host.md`, *A page's timings*), and the copies of `lup-dev` kept, the
+host service moved to one (`docs/trust.md`, *The way back*)."""
 
 type Replied = Annotated[
     Listed
@@ -147,6 +151,8 @@ type Replied = Annotated[
     | CheckShown
     | Viewed
     | TimingsKept
+    | CopiesListed
+    | CopySwitching
     | Refused,
     Field(discriminator="kind"),
 ]

@@ -8,6 +8,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, override
+from urllib.parse import urlsplit
 
 import pytest
 from fastapi.testclient import TestClient
@@ -127,6 +128,7 @@ from lup_dev.policy.since import (
 )
 from lup_dev.policy.waits import LandingsWaiting, ShowLandings
 from lup_dev.stored import write_model
+from lup_dev.switching import CopiesListed, CopySwitching, ListCopies, SwitchCopy
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
 from lup_ledger.parties import Conversation, Operator
@@ -188,7 +190,6 @@ WRITING: dict[str, list[int]] = {
         for event in [
             "os.rename",
             "os.link",
-            "os.symlink",
             "shutil.copyfile",
             "shutil.copytree",
             "shutil.move",
@@ -226,8 +227,18 @@ def audited(event: str, arguments: tuple[object, ...]) -> None:
             reached = f"wrote {path}" if written and outside(path, copy) else None
         case "sqlite3.connect":
             [database, *_] = arguments
-            outer = database != ":memory:" and outside(database, copy)
+            uri = str(database).startswith("file:")
+            place = urlsplit(str(database)).path if uri else database
+            outer = database != ":memory:" and outside(place, copy)
             reached = f"opened the database {database}" if outer else None
+        case "os.symlink":
+            # A link's target is read from where the link is.
+            [target, link, *_] = arguments
+            assert isinstance(target, str | bytes | Path)
+            assert isinstance(link, str | bytes | Path)
+            pointed = Path(os.fsdecode(link)).parent / os.fsdecode(target)
+            named = [each for each in [pointed, link] if outside(each, copy)]
+            reached = f"{event}: {named!r}" if named else None
         case _ if event in WRITING:
             paths = [arguments[each] for each in WRITING[event]]
             named = [each for each in paths if outside(each, copy)]
@@ -614,6 +625,10 @@ def test_every_request_the_page_may_send_acts_on_the_copy_alone(tmp_path: Path) 
         talk = Talk(comments=[TalkComment(step=1, text="hm")])
         assert ask(ShowTalk(conversation=MAIN), Talked).talk == Talk()
         assert ask(KeepTalk(conversation=MAIN, talk=talk), Talked).talk == talk
+        assert ask(ListCopies(), CopiesListed).copies == []
+        assert (
+            "no copy of `lup-dev` is kept" in ask(SwitchCopy(commit="c"), Refused).error
+        )
         since = ask(ShowSince(conversation=PARSER), Refused)
         assert since.error == Withholding().why
         marking = ReviewSince(
@@ -828,6 +843,8 @@ def test_every_request_the_page_may_send_acts_on_the_stand_in_demo_alone() -> No
             ],
         )
         assert ask(KeepTimings(report=measured), TimingsKept).windows == 1
+        [_, before, _] = ask(ListCopies(), CopiesListed).copies
+        switching = ask(SwitchCopy(commit=before.commit), CopySwitching)
     finally:
         REACH.watched = None
     assert REACH.reached == []
@@ -835,6 +852,7 @@ def test_every_request_the_page_may_send_acts_on_the_stand_in_demo_alone() -> No
     assert [each.number for each in reviewed.approved] == [55]
     withheld = demo.host.withheld
     assert withheld.settled == [54]
+    assert withheld.switched == [switching.commit]
     assert [(each.change.key, each.approved) for each in withheld.holds] == [
         ("a1b2c3", True)
     ]

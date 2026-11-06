@@ -306,10 +306,31 @@ async def started(program: str | Path, *arguments: str) -> Running:
     )
 
 
+class Apart(Model, arbitrary_types_allowed=True):
+    """A program started in a session of its own, for a caller that watches it."""
+
+    process: subprocess.Popen[bytes]
+
+    def ended(self) -> bool:
+        """Say whether it has ended."""
+        return self.process.poll() is not None
+
+    def end(self, patience: timedelta) -> None:
+        """End it, asked first, then made to past `patience`; nothing where it has ended."""
+        if self.ended():
+            return
+        self.process.terminate()
+        try:
+            self.process.wait(patience.total_seconds())
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+
 def detached(
     program: str | Path, *arguments: str, log: Path, cwd: Path | None = None
-) -> None:
-    """Start `program` in a session of its own, which outlives its caller, appending what it prints to `log`.
+) -> Apart:
+    """Start `program` in a session of its own, which outlives its caller, appending what it prints to `log`; return it, for a caller that watches it to end or see end.
 
     Raise `ProgramMissingError` where it can't be started.
     """
@@ -317,7 +338,7 @@ def detached(
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("ab") as appended:
         try:
-            subprocess.Popen(
+            process = subprocess.Popen(
                 command,
                 cwd=cwd,
                 stdin=subprocess.DEVNULL,
@@ -328,3 +349,4 @@ def detached(
         except OSError as missing:
             message = f"`{program}` can't be started: {missing}"
             raise ProgramMissingError(message) from missing
+    return Apart(process=process)

@@ -49,6 +49,11 @@ class LupDevSettings(Settings):
     refused, since it would offer the dashboard on every network the machine
     joins, a café's among them, with the token as its only wall.
     """
+    lup_host_rehearsing: bool = False
+    """`LUP_HOST_REHEARSING`: the service runs on a state of its own, to see that a
+    copy answers before it's switched to (`lup_dev/switching.py`), so nothing it
+    does reaches past that state: no desktop notice, no thread woken, no type
+    reading of an approval waiting in the ledger it copied."""
     lup_engine_idle: timedelta = timedelta(minutes=15)
     """`LUP_ENGINE_IDLE`: how long a worktree's engine waits unasked before it stops.
 

@@ -48,8 +48,9 @@ class CredentialDefaults(Model):
     gated: list[str] = ["refs/heads/dev"]
     """Refs a push from a room updates only once the gate passed on the commit it
     would put there, as patterns over full ref names: lup's integration branch,
-    `dev`, so it never takes a commit the gate fails on. A project whose
-    integration branch is another names that one. The gate runs in the room,
+    `dev`, so it never takes a commit the gate fails on. A branch a project
+    names, integration or running, is gated as it resolves (`gating`,
+    `declaration/resolve.py`). The gate runs in the room,
     before the host is asked: it steers, and guards nothing
     (`docs/credentials.md`, *git through a remote helper*). A branch whose
     commits are all in a gated one on the remote has landed, so `delete-merged`

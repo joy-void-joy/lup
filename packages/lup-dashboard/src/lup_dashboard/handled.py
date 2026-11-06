@@ -16,6 +16,9 @@ handlers as one that refuses, or keeps what it would do in the state:
   `SendDraft`): the host installs the copy approved and restarts on it, in a
   process of its own (`Host.settle`, `lup-dev inbox answer --approve`). Here
   nothing is installed or run: the number is kept (`Withheld.settled`);
+- the host service moved to a copy kept (`SwitchCopy`): the host runs `lup-dev
+  restore`, in a process of its own, which stops it. Here nothing runs or stops:
+  the state's own link is moved and what came of it kept (`withheld_switch`);
 - a held change answered, the same ways: the host writes the answer into the
   store of the hold's worktree, runs git in that worktree and logs the verdict,
   for the hook waiting on it to put the files back or keep them
@@ -88,9 +91,11 @@ from lup_dev.inbox.protocol import Exchanged, ItemsListing, ListItems
 from lup_dev.inbox.protocol import routes as inbox_routes
 from lup_dev.inbox.store import HeldChange
 from lup_dev.inbox.threaded import routes as threaded_routes
-from lup_dev.layout import Layout
+from lup_dev.layout import CopyLayout, Layout
 from lup_dev.policy.waits import Waits
 from lup_dev.policy.waits import routes as waits_routes
+from lup_dev.stored import write_model
+from lup_dev.switching import CopiesAnswering, CopySwitch, LastSwitch, host_copies
 from lup_dev.worker import RepositoryModules
 from lup_ledger.parties import Conversation
 
@@ -172,6 +177,8 @@ class Withheld(MutableModel, Notices):
     holds: list[HoldAnswered] = []
     settled: list[int] = []
     """Each approval approved, by its number, whose copy the host would install."""
+    switched: list[str] = []
+    """Each commit asked for, whose copy the host would move to."""
 
     @override
     async def notify(self, summary: str, body: str) -> None:
@@ -274,6 +281,32 @@ class Views(MutableModel, RepositoryAsking, arbitrary_types_allowed=True):
     @override
     def looks(self) -> dict[Path, Looks]:
         return {each: self.modules(each).resolved.looks for each in self.repositories}
+
+
+def withheld_switch(
+    lup: Layout, withheld: Withheld, clock: Clock
+) -> Callable[[CopyLayout, str], None]:
+    """Return what stands in for starting `lup-dev restore`, for a demo's copies alone (`CopySwitch.start`): the link in `lup` names the commit's, as a switch that answered leaves it, what came of it said where a page waiting on it reads that, and no program runs."""
+
+    def switched(copy: CopyLayout, commit: str) -> None:
+        del copy
+        withheld.switched = [*withheld.switched, commit]
+        copies = host_copies(lup)
+        kept = None if copies is None else copies.of(commit)
+        if copies is None or kept is None:
+            return
+        at = clock.now()
+        copies.switch(copies.place(kept))
+        copies.recorded(kept.model_copy(update={"answered": at}))
+        said = (
+            f"The demo's copy of {commit} is the one running, and nothing else moved."
+        )
+        write_model(
+            lup.host.switched,
+            LastSwitch(commit=commit, at=at, said=said, answered=True),
+        )
+
+    return switched
 
 
 def asked_kinds() -> list[str]:
@@ -417,6 +450,10 @@ def handled(
         *threaded_routes(delivery),
         *waits_routes(waits),
         *timings_routes(TimingsStore(home=timings or lup.host.timings), clock),
+        Route.to(CopiesAnswering(layout=lup)),
+        Route.to(
+            CopySwitch(layout=lup, start=withheld_switch(lup, withheld, clock)),
+        ),
         *beyond,
         Route.reading(module_views, watch=module_views.watched),
     ]

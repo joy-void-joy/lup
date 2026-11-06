@@ -31,6 +31,7 @@ from lup_dev.policy.since import (
     ViewedFile,
 )
 from lup_dev.policy.waits import LandingsWaiting, ShowLandings
+from lup_dev.switching import CopiesListed, CopySwitching, ListCopies, SwitchCopy
 from lup_ledger.parties import Conversation
 
 LUP = Path("/home/op/lup.git")
@@ -285,3 +286,41 @@ def test_a_hook_call_changes_what_a_worker_does_and_comes_again() -> None:
 
     assert demo.hooked == 1
     assert first.talkers["a1f0"] != second.talkers["a1f0"]
+
+
+def test_the_demo_keeps_copies_and_switches_between_them_moving_nothing_else() -> None:
+    demo = Demo(clock=Fixed())
+    listed = asyncio.run(demo.ask(ListCopies()))
+    assert isinstance(listed, CopiesListed)
+    [running, before, never] = listed.copies
+    assert running.running
+    assert not before.running
+    assert never.answered is None
+    assert listed.last is None
+    switching = asyncio.run(demo.ask(SwitchCopy(commit=before.commit)))
+    assert isinstance(switching, CopySwitching)
+    assert switching.commit == before.commit
+    after = asyncio.run(demo.ask(ListCopies()))
+    assert isinstance(after, CopiesListed)
+    assert {each.commit: each.running for each in after.copies} == {
+        running.commit: False,
+        before.commit: True,
+        never.commit: False,
+    }
+    assert after.last is not None
+    assert after.last.answered
+    assert demo.host.withheld.switched == [before.commit]
+
+
+def test_the_demo_refuses_a_switch_as_the_host_does() -> None:
+    demo = Demo(clock=Fixed())
+    listed = asyncio.run(demo.ask(ListCopies()))
+    assert isinstance(listed, CopiesListed)
+    running = next(each for each in listed.copies if each.running)
+    already = asyncio.run(demo.ask(SwitchCopy(commit=running.commit)))
+    assert isinstance(already, Refused)
+    assert "already" in already.error
+    unknown = asyncio.run(demo.ask(SwitchCopy(commit="none")))
+    assert isinstance(unknown, Refused)
+    assert "no copy kept" in unknown.error
+    assert demo.host.withheld.switched == []
