@@ -1,3 +1,4 @@
+import { hosted } from "./fixtures/kinds";
 import { LOOKS, STANDING } from "./fixtures/looks";
 import { adopt, merged, type Looks } from "./looks";
 import { ANSWERED, DRAWER_ONLY } from "./fixtures/conversation";
@@ -109,7 +110,7 @@ function from(session: string, agent: string | null = null): Conversation {
     return { party: "conversation", repository: "/r/.git", runtime: "claude", session, agent };
 }
 
-const QUESTION: Item = {
+const QUESTION: Item = hosted({
     number: 51,
     reason: {
         reason: "question",
@@ -128,9 +129,9 @@ const QUESTION: Item = {
     made: AT,
     state: { state: "waiting" },
     rank: WAITING,
-};
+});
 
-const NOTE: Item = {
+const NOTE: Item = hosted({
     number: 52,
     reason: { reason: "message", passages: [], answers: [], ending: false, kind: "note", text: "I assumed UTF-8." },
     sender: from("s2"),
@@ -142,9 +143,12 @@ const NOTE: Item = {
     made: AT,
     state: { state: "waiting" },
     rank: WAITING,
-};
+});
 
-const APPROVAL: Item = {
+/** A problem an agent sent, ranked as `NOTE` is: what asks the operator of a message. */
+const PROBLEM: Item = hosted({ ...NOTE, reason: { ...NOTE.reason, kind: "problem" } as Item["reason"] });
+
+const APPROVAL: Item = hosted({
     number: 54,
     reason: {
         reason: "approval",
@@ -164,9 +168,9 @@ const APPROVAL: Item = {
     made: AT,
     state: { state: "waiting" },
     rank: WAITING,
-};
+});
 
-const FLAGGED: Item = {
+const FLAGGED: Item = hosted({
     number: 70,
     reason: {
         reason: "flagged",
@@ -185,7 +189,7 @@ const FLAGGED: Item = {
     made: AT,
     state: { state: "waiting" },
     rank: { name: "flag", order: 2, notifies: false },
-};
+});
 
 const CONTEXT: Context = {
     kind: "inbox-context",
@@ -264,8 +268,8 @@ describe("laid", () => {
     });
 
     it("lays groups and items in the order they arrived: each group where its first item came, each item at the end of its group", () => {
-        const later: Item = { ...QUESTION, number: 53, reason: { ...NOTE.reason } };
-        const fourth: Item = { ...NOTE, number: 54 };
+        const later: Item = hosted({ ...QUESTION, number: 53, reason: { ...NOTE.reason } });
+        const fourth: Item = hosted({ ...NOTE, number: 54 });
         const out = laid([fourth, QUESTION, NOTE, later], [], banner, header, EMPTY, NOTHING);
         expect(heads(out)).toEqual(["━━ s1 ━━", "── #51 ──", "── #53 ──", "━━ s2 ━━", "── #52 ──", "── #54 ──"]);
         // Given in any order, and however new, the first item's number places the group.
@@ -274,20 +278,20 @@ describe("laid", () => {
     });
 
     it("lays news where it came, before what's to answer where it came first: its rank orders nothing", () => {
-        const friction: Item = {
+        const friction: Item = hosted({
             ...NOTE,
             number: 50,
             reason: { reason: "friction", text: "`ls` failed", title: "" },
             sender: from("s1", "a1"),
             rank: NEWS,
-        };
-        const ended: Item = {
+        });
+        const ended: Item = hosted({
             ...NOTE,
             number: 61,
             reason: { reason: "message", passages: [], answers: [], ending: true, kind: "note", text: "Done." },
             sender: from("s3"),
             rank: NEWS,
-        };
+        });
         const out = laid([friction, QUESTION, NOTE, ended], [], banner, header, EMPTY, NOTHING);
         expect(heads(out)).toEqual(["━━ s1 ━━", "── #50 ──", "── #51 ──", "━━ s2 ━━", "── #52 ──", "━━ s3 ━━", "── #61 ──"]);
         expect(news(friction)).toBe(true);
@@ -296,20 +300,20 @@ describe("laid", () => {
     });
 
     it("lays a flag where it came too, before news and what's to answer where it came first", () => {
-        const flagged = (number: number, sender: Conversation): Item => ({ ...FLAGGED, number, sender });
-        const ended: Item = {
+        const flagged = (number: number, sender: Conversation): Item => hosted({ ...FLAGGED, number, sender });
+        const ended: Item = hosted({
             ...NOTE,
             number: 61,
             reason: { reason: "message", passages: [], answers: [], ending: true, kind: "note", text: "Done." },
             sender: from("s3"),
             rank: NEWS,
-        };
-        const went: Item = {
+        });
+        const went: Item = hosted({
             ...NOTE,
             number: 62,
             reason: { reason: "how it felt", text: "Good." },
             rank: NEWS,
-        };
+        });
         const out = laid([flagged(50, from("s2")), flagged(71, from("s4")), went, NOTE, ended], [], banner, header, EMPTY, NOTHING);
         expect(heads(out)).toEqual([
             "━━ s2 ━━",
@@ -328,8 +332,8 @@ describe("laid", () => {
         const first = laid([QUESTION, NOTE], [], banner, header, EMPTY, NOTHING);
         expect(heads(first)).toEqual(["━━ s1 ━━", "── #51 ──", "━━ s2 ━━", "── #52 ──"]);
         // A later item for s1, to answer, goes at the end of s1's group; one for a new agent, after every group.
-        const later: Item = { ...QUESTION, number: 53 };
-        const ninth: Item = { ...NOTE, number: 54, sender: from("s9") };
+        const later: Item = hosted({ ...QUESTION, number: 53 });
+        const ninth: Item = hosted({ ...NOTE, number: 54, sender: from("s9") });
         const more = laid([later, ninth, QUESTION, NOTE], [], banner, header, EMPTY, NOTHING);
         expect(heads(more)).toEqual(["━━ s1 ━━", "── #51 ──", "── #53 ──", "━━ s2 ━━", "── #52 ──", "━━ s9 ━━", "── #54 ──"]);
         // The note's rank changed, and the question marked read: the same places.
@@ -352,12 +356,12 @@ describe("laid", () => {
     });
 
     it("walks to what's to answer with ]a and [a, in the order it came, passing over news, flags and what's settled", () => {
-        const friction: Item = { ...NOTE, number: 60, reason: { reason: "friction", text: "`ls` failed", title: "" }, sender: from("s1", "a1"), rank: NEWS };
-        const out = laid([QUESTION, NOTE, friction, FLAGGED, APPROVAL], [], banner, header, EMPTY, NOTHING);
+        const friction: Item = hosted({ ...NOTE, number: 60, reason: { reason: "friction", text: "`ls` failed", title: "" }, sender: from("s1", "a1"), rank: NEWS });
+        const out = laid([QUESTION, PROBLEM, friction, FLAGGED, APPROVAL], [], banner, header, EMPTY, NOTHING);
         expect(heads(out)).toEqual(["━━ s1 ━━", "── #51 ──", "── #60 ──", "━━ s2 ━━", "── #52 ──", "── #70 ──", "━━ lup ━━", "── #54 ──"]);
         const at = (text: string) => out.text.indexOf(text);
         const number = (region: ReturnType<typeof answerAfter>) => region?.item.number;
-        expect([toAnswer(QUESTION, EMPTY), toAnswer(NOTE, EMPTY), toAnswer(friction, EMPTY), toAnswer(FLAGGED, EMPTY), toAnswer(APPROVAL, EMPTY)]).toEqual([
+        expect([toAnswer(QUESTION, EMPTY), toAnswer(PROBLEM, EMPTY), toAnswer(friction, EMPTY), toAnswer(FLAGGED, EMPTY), toAnswer(APPROVAL, EMPTY)]).toEqual([
             true,
             true,
             false,
@@ -388,8 +392,8 @@ describe("laid", () => {
     });
 
     it("counts what's to answer and what's new for the header over the review, those settled in the draft left out", () => {
-        const friction: Item = { ...NOTE, number: 60, reason: { reason: "friction", text: "`ls` failed", title: "" }, rank: NEWS };
-        const items = [QUESTION, NOTE, friction, FLAGGED];
+        const friction: Item = hosted({ ...NOTE, number: 60, reason: { reason: "friction", text: "`ls` failed", title: "" }, rank: NEWS });
+        const items = [QUESTION, PROBLEM, friction, FLAGGED];
         // Each group seen up to an item, as the operator marked it with Space d on its banner.
         const seen = (upTo: number): Seeing => ({ groups: new Map([[whose(from("s1", "a1")), upTo], [whose(from("s2")), upTo]]), commented: new Set() });
         expect(tallied(items, EMPTY, UNSEEN)).toBe("2 to answer · 4 new");
@@ -401,17 +405,17 @@ describe("laid", () => {
     });
 
     it("shows a friction, how it felt and a stop as written", () => {
-        const friction: Item = {
+        const friction: Item = hosted({
             ...NOTE,
             number: 62,
             reason: { reason: "friction", text: "`uv run lup-dev check` printed: engine stale\nI was running the gate.", title: "" },
-        };
-        const went: Item = {
+        });
+        const went: Item = hosted({
             ...NOTE,
             number: 63,
             reason: { reason: "how it felt", text: "The brief was clear, and it felt good." },
-        };
-        const stopped: Item = { ...NOTE, number: 65, reason: { reason: "stop", why: "Nothing more is worth doing." } };
+        });
+        const stopped: Item = hosted({ ...NOTE, number: 65, reason: { reason: "stop", why: "Nothing more is worth doing." } });
         expect(body(friction)).toBe("`uv run lup-dev check` printed: engine stale\nI was running the gate.");
         expect(body(went)).toBe("The brief was clear, and it felt good.");
         expect(body(stopped)).toBe("Nothing more is worth doing.");
@@ -725,7 +729,7 @@ function clock(count: number, changed: boolean, head: string[] = []): string {
 }
 
 describe("typed folds", () => {
-    const HELD: Item = {
+    const HELD: Item = hosted({
         number: 56,
         reason: { reason: "held", text: "Let it land?", summary: "", worktree: "/w", key: "k" },
         sender: from("s1"),
@@ -737,7 +741,7 @@ describe("typed folds", () => {
         made: AT,
         state: { state: "waiting" },
         rank: WAITING,
-    };
+    });
     const AUTOMATIC: ChangedFile = {
         path: "t.py",
         before: { kind: "text", text: "a\nb\n" },
@@ -888,7 +892,7 @@ describe("what a change shows open, as it's laid out", () => {
             findings: [],
         },
     };
-    const HELD: Item = {
+    const HELD: Item = hosted({
         number: 57,
         reason: { reason: "held", text: "Let it land?", summary: "", worktree: "/w", key: "k" },
         sender: from("s1"),
@@ -900,7 +904,7 @@ describe("what a change shows open, as it's laid out", () => {
         made: AT,
         state: { state: "waiting" },
         rank: WAITING,
-    };
+    });
     /** The runs of lines folded under `item`, changing `signed`, as it's laid out, and whether its change on line 10 is among what they hide. */
     const folded = (item: Item) => {
         const around: Around = { contexts: new Map(), files: new Map([[item.number, { shown: [signed] }]]), answers: [], commented: [] };
@@ -938,7 +942,7 @@ describe("what a change shows open, as it's laid out", () => {
     });
 
     it("folds each file of a first approval whole under its header, which says so, and counts them so in the item's", () => {
-        const first: Item = { ...APPROVAL, reason: { ...APPROVAL.reason, first: true } as Item["reason"] };
+        const first: Item = hosted({ ...APPROVAL, reason: { ...APPROVAL.reason, first: true } as Item["reason"] });
         expect(Object.values(whole(first, FILES))).toEqual([true, true, true, true]);
         const around: Around = { contexts: new Map(), files: new Map([[54, { shown: [read("a.py", "production")] }]]), answers: [], commented: [] };
         const out = laid([first], [], banner, header, EMPTY, around);
@@ -947,7 +951,7 @@ describe("what a change shows open, as it's laid out", () => {
 });
 
 describe("comments on a changed file's lines", () => {
-    const HELD: Item = {
+    const HELD: Item = hosted({
         number: 55,
         reason: { reason: "held", text: "Let the change to 2 files land?", summary: "a.py: asks", worktree: "/w", key: "k" },
         sender: from("s1"),
@@ -959,7 +963,7 @@ describe("comments on a changed file's lines", () => {
         made: AT,
         state: { state: "waiting" },
         rank: WAITING,
-    };
+    });
     const CREATED: ChangedFile = { path: "b.md", before: null, after: { kind: "text", text: "# B\n\nNew.\n" } };
     const around: Around = { contexts: new Map(), files: new Map([[55, { shown: [CHANGED, CREATED] }]]), answers: [], commented: [] };
     const out = laid([HELD], [], banner, header, EMPTY, around);
@@ -1088,8 +1092,8 @@ describe("every agent's group, and the messages under its banner", () => {
         expect(heads(first)).toEqual(["━━ s1 ━━", "━━ s2 ━━", "━━ s3 ━━"]);
         const places = first.groups.map((each) => each.place);
         // s2's note answered, its agent running, and a newer item for s1: they keep their places, and s4's comes after.
-        const newer: Item = { ...QUESTION, number: 60, made: "2026-10-17T13:00:00Z" };
-        const fourth: Item = { ...NOTE, number: 61, sender: S4 };
+        const newer: Item = hosted({ ...QUESTION, number: 60, made: "2026-10-17T13:00:00Z" });
+        const fourth: Item = hosted({ ...NOTE, number: 61, sender: S4 });
         const next = laid([QUESTION, newer, fourth], [S1, S3, from("s2")], banner, header, EMPTY, NOTHING, places);
         expect(heads(next)).toEqual(["━━ s1 ━━", "━━ s2 ━━", "━━ s3 ━━", "━━ s4 ━━"]);
         // Laid out anew from the items alone, as on reload: s4's where its first item came, the empty ones after.
@@ -1100,7 +1104,7 @@ describe("every agent's group, and the messages under its banner", () => {
             "━━ s2 ━━",
         ]);
         // A group's first item answered: it keeps its place this sitting, though anew it would come after.
-        const third: Item = { ...QUESTION, number: 53 };
+        const third: Item = hosted({ ...QUESTION, number: 53 });
         expect(heads(laid([third, NOTE], [S1], banner, header, EMPTY, NOTHING, places))).toEqual(["━━ s1 ━━", "━━ s2 ━━"]);
         expect(heads(laid([third, NOTE], [S1], banner, header, EMPTY, NOTHING))).toEqual(["━━ s2 ━━", "━━ s1 ━━"]);
         // What's left for later has places of its own.
@@ -1117,8 +1121,8 @@ describe("every agent's group, and the messages under its banner", () => {
         expect(toKeep(placesOf(first), [], [])).toEqual({ places: placesOf(first), gone: [] });
         const kept = placesOf(first);
         // s2's note answered, its agent running, and an item for s4: s4's place told, after the others.
-        const newer: Item = { ...QUESTION, number: 60, made: "2026-10-17T13:00:00Z" };
-        const fourth: Item = { ...NOTE, number: 61, sender: S4 };
+        const newer: Item = hosted({ ...QUESTION, number: 60, made: "2026-10-17T13:00:00Z" });
+        const fourth: Item = hosted({ ...NOTE, number: 61, sender: S4 });
         const now = [QUESTION, newer, fourth];
         const running = [S1, S3, from("s2")];
         const next = laid(now, running, banner, header, EMPTY, NOTHING, ordered(placesOf(first), kept));
@@ -1171,7 +1175,7 @@ describe("every agent's group, and the messages under its banner", () => {
 
 describe("replies kept from before", () => {
     /** The operator's review that answered the note: a comment on its passage, and the agent's reply to it, kept on the review after its one part. */
-    const REVIEW: Item = {
+    const REVIEW: Item = hosted({
         number: 60,
         reason: {
             reason: "review",
@@ -1189,9 +1193,9 @@ describe("replies kept from before", () => {
         made: AT,
         state: { state: "told", at: AT, how: "call" },
         rank: WAITING,
-    };
+    });
     /** The operator's answer to the question: a ruling on each decision, and a comment on the whole, the second ruling replied to. */
-    const ANSWER: Item = {
+    const ANSWER: Item = hosted({
         number: 61,
         reason: {
             reason: "answer",
@@ -1211,7 +1215,7 @@ describe("replies kept from before", () => {
         made: AT,
         state: { state: "told", at: AT, how: "call" },
         rank: WAITING,
-    };
+    });
     const around: Around = { contexts: new Map(), files: new Map(), answers: [REVIEW, ANSWER], commented: [] };
 
     it("reads them from the operator's items answering the item: each comment by its part's id, and the replies to them", () => {
@@ -1251,7 +1255,7 @@ describe("replies kept from before", () => {
 describe("an answer in a turn's last words", () => {
     const SESSION = from("s2");
     /** The operator's review the turn's end answers: a comment on the session's note, one on another agent's, and a message to the session. */
-    const REVIEW: Item = {
+    const REVIEW: Item = hosted({
         number: 70,
         reason: {
             reason: "review",
@@ -1272,9 +1276,9 @@ describe("an answer in a turn's last words", () => {
         made: AT,
         state: { state: "told", at: AT, how: "call" },
         rank: WAITING,
-    };
-    const OTHERS: Item = { ...NOTE, number: 90, sender: from("s9") };
-    const END: Item = {
+    });
+    const OTHERS: Item = hosted({ ...NOTE, number: 90, sender: from("s9") });
+    const END: Item = hosted({
         ...NOTE,
         number: 72,
         reason: {
@@ -1300,7 +1304,7 @@ describe("an answer in a turn's last words", () => {
             { said: "@70[nothing]", start: 51, end: 63, item: 70, part: null, words: "nothing", found: null, candidates: [] },
         ],
         edits: [{ at: "2026-10-17T12:05:00Z", before: "Every one.\nSplitting it @70[nothing] next." }],
-    };
+    });
     const around: Around = { contexts: new Map(), files: new Map(), answers: [REVIEW], commented: [NOTE, OTHERS] };
 
     it("lays the operator's words it answers above it, its own after the agent's name, each passage it cites folded under its line", () => {
@@ -1351,7 +1355,7 @@ describe("an answer in a turn's last words", () => {
     });
 
     it("numbers the operator's words as the host does, after replies kept from before, and shows an agent the parts that were their own", () => {
-        const kept: Item = { ...REVIEW, replies: [{ number: 3, to: { item: 70, part: 1 }, text: "Old.", at: AT }] };
+        const kept: Item = hosted({ ...REVIEW, replies: [{ number: 3, to: { item: 70, part: 1 }, text: "Old.", at: AT }] });
         expect(spokenOf(REVIEW).map((each) => [each.id.part, each.text])).toEqual([
             [1, "Every one? Even a stray byte?"],
             [2, "Not yours."],
@@ -1369,7 +1373,7 @@ describe("an answer in a turn's last words", () => {
     });
 
     it("says a comment outdated where an edit changed the passage it quotes", () => {
-        const edited: Item = { ...NOTE, reason: { ...NOTE.reason, text: "I assumed ASCII." } as Item["reason"], edits: [{ at: AT, before: "I assumed UTF-8." }] };
+        const edited: Item = hosted({ ...NOTE, reason: { ...NOTE.reason, text: "I assumed ASCII." } as Item["reason"], edits: [{ at: AT, before: "I assumed UTF-8." }] });
         expect([outdated(NOTE, { text: "UTF-8", start: 10, end: 15 }), outdated(edited, { text: "UTF-8", start: 10, end: 15 }), outdated(edited, { text: "I assumed", start: 0, end: 9 })]).toEqual([
             false,
             true,
@@ -1409,14 +1413,14 @@ describe("waited and fresh", () => {
     });
 
     it("reads how far the operator has seen from the inbox's listing: each group's mark, and the items a review sent commented on", () => {
-        const review: Item = {
+        const review: Item = hosted({
             ...NOTE,
             number: 80,
             sender: { party: "operator" },
             recipient: from("s2"),
             reason: { reason: "review", comments: [{ item: 52, text: "Why?", quote: null }], message: "", rulings: [] } as unknown as Item["reason"],
-        };
-        const seeing = seeingOf({ kind: "inbox-items", items: [NOTE], seen: [{ conversation: from("s1", "a1"), item: 51, at: "2026-10-17T12:00:00Z" }], answers: [review], commented: [], paths: [], landings: {} });
+        });
+        const seeing = seeingOf({ kind: "inbox-items", past: [], set_aside: [], items: [NOTE], seen: [{ conversation: from("s1", "a1"), item: 51, at: "2026-10-17T12:00:00Z" }], answers: [review], commented: [], paths: [], landings: {} });
         expect(seeing.groups.get(whose(from("s1", "a1")))).toBe(51);
         expect([...seeing.commented]).toEqual([52]);
         expect(seeingOf(null)).toBe(UNSEEN);

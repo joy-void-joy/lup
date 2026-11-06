@@ -880,30 +880,6 @@ export function news(item: Item): boolean {
     return item.rank.name === "news";
 }
 
-/**
- * Whether the operator's reply answers an item, as the host has it (`unanswerable`, `inbox/delivery.py`): an approval
- * or a held change, whoever asked it; a message, a friction, how it felt, a stop, a question or a flagged write a
- * conversation sent. Not the operator's own words, a review, an answer or a message of theirs, as a thread's
- * conversation shows them, nor a subagent's end, nor lup's word on citations: none is marked done, declined or left for
- * later, nor ever to answer, and a comment on one goes on its thread.
- */
-export function answerable(item: Item): boolean {
-    switch (item.reason.reason) {
-        case "approval":
-        case "held":
-            return true;
-        case "message":
-        case "friction":
-        case "how it felt":
-        case "stop":
-        case "question":
-        case "flagged":
-            return item.sender.party === "conversation";
-        default:
-            return false;
-    }
-}
-
 /** Whether an item is a write that landed flagged, which the review shows in its agent's "since you approved" drawer rather than as an item (`docs/dashboard.md`, *The review*). */
 export function flag(item: Item): boolean {
     return item.rank.name === "flag";
@@ -1762,7 +1738,7 @@ export function laid(
         // What asks the operator in no thread, as lup's own approvals.
         const asked = new Set(reads.flatMap((each) => (each.asks ?? []).map((ask) => ask.node)));
         const loose = grouped(
-            items.filter((each) => each.rank.name === "waiting on you" && !asked.has(each.number) && !parked.includes(each.number)),
+            items.filter((each) => each.asks && !asked.has(each.number) && !parked.includes(each.number)),
             (item) => banner({ item }, false, ""),
         );
         layThreadSection("waiting on you", `${blocked.length + confirming.length + loose.length}`, () => {
@@ -3024,14 +3000,13 @@ export function stepped(stops: number[], line: number, forward: boolean): number
 }
 
 /**
- * Whether an item is to answer rather than to read: ranked as waiting on the operator (`Item.rank`, which the host
- * gives), a question, a held change, an approval or a hold at landing, still waiting where it stands, and neither marked
- * read nor left for later in `draft`, which settles it until the reply is sent; never the operator's own words, which
- * a reply doesn't answer (`answerable`), though the host ranks a review of theirs as waiting.
+ * Whether an item is to answer rather than to read: one the host says needs the operator as it stands (`Item.asks`), a
+ * question, a held change, an approval or a hold at landing, and neither marked read nor left for later in `draft`, which
+ * settles it until the reply is sent.
  */
 export function toAnswer(item: Item, draft: Draft): boolean {
     const settled = [...(draft.done ?? []), ...(draft.declined ?? []), ...(draft.parked ?? [])];
-    return item.rank.name === "waiting on you" && waits(item) && answerable(item) && !settled.includes(item.number);
+    return item.asks && !settled.includes(item.number);
 }
 
 /** Whether an item still waits where it stands, as each the inbox lists does: grouped by thread, a thread's conversation shows those answered, done or decided too. */
@@ -3042,17 +3017,18 @@ export function waits(item: Item): boolean {
 /**
  * Return the classes of an item's header line: new to the operator, news; struck through where the draft marks it done,
  * declined or left for later, which the next Ctrl+Enter does; and muted where it no longer waits, answered, read or
- * decided, a thread's history, never struck through as the draft's own marks are.
+ * decided, a thread's history, never struck through, as a mark on it does nothing.
  */
 export function headerClasses(item: Item, draft: Draft, seeing: Seeing): string {
     const number = item.number;
+    const open = waits(item);
     return [
         "review-header",
         fresh(item, seeing) ? "is-new" : "",
         news(item) ? "is-news" : "",
-        (draft.done ?? []).includes(number) ? "is-done" : waits(item) ? "" : "is-past",
-        (draft.declined ?? []).includes(number) ? "is-declined" : "",
-        (draft.parked ?? []).includes(number) ? "is-parked" : "",
+        !open ? "is-past" : (draft.done ?? []).includes(number) ? "is-done" : "",
+        open && (draft.declined ?? []).includes(number) ? "is-declined" : "",
+        open && (draft.parked ?? []).includes(number) ? "is-parked" : "",
     ].join(" ");
 }
 
@@ -3087,7 +3063,7 @@ export function tallied(items: Item[], draft: Draft, seeing: Seeing): string {
         return "";
     }
     const settled = [...(draft.done ?? []), ...(draft.declined ?? []), ...(draft.parked ?? [])];
-    const open = items.filter((each) => !settled.includes(each.number));
+    const open = items.filter((each) => waits(each) && !settled.includes(each.number));
     const answering = open.filter((each) => toAnswer(each, draft)).length;
     const arrived = open.filter((each) => fresh(each, seeing)).length;
     return [`${answering} to answer`, ...(arrived === 0 ? [] : [`${arrived} new`])].join(" · ");

@@ -230,7 +230,7 @@ def application(
         match request, replied:
             case (
                 AnswerApproval(number=number, approved=True),
-                Settled(item=Item(reason=Approval())),
+                Settled(item=Item(reason=Approval()), here=True),
             ):
                 await host.settle(number)
             case SendDraft(), Reviewed(approved=approved):

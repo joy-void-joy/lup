@@ -933,8 +933,8 @@ export function Review({
             (item, later, said) => {
                 // Grouped by thread, an item says whose it is, as a conversation's line does: several agents write in one.
                 const whose = threads !== null && item.sender.party === "conversation" ? [called(item.sender)] : [];
-                // Grouped by thread, one no longer waiting says where it stands: answered, done, decided.
-                const stands = threads !== null && !waits(item) ? [item.state.state] : [];
+                // One no longer waiting says where it stands: answered, done, decided, superseded.
+                const stands = !waits(item) ? [item.state.state] : [];
                 const told = [
                     `${cited(item.number)} ${said}`,
                     ...whose,
@@ -1637,7 +1637,8 @@ export function Review({
             return opened(laidOut, at) === undefined ? null : { says: "remark on the line", on: null };
         }
         const region = regionAt(laidOut, at);
-        return region === undefined ? null : { says: "comment on it", on: region.named };
+        const offer = region?.item.offers.find((each) => each.verb === "comment");
+        return region === undefined || offer === undefined ? null : { says: offer.says, on: region.named };
     }
 
     /** Open each fold over `target`, as a jump to it does, so the line it's on is in view, saying so under the review. */
@@ -2151,7 +2152,7 @@ export function Review({
         const answers = here.reached.filter((each) => looks.verbs.some((verb) => `␣${verb.key}` === each.keys && (verb.name === "done" || verb.name === "decline")));
         const said = answers.map((each) => `${each.keys} ${each.says}${each.on === null ? "" : ` ${each.on}`}`);
         const region = sticky.kind === "item" ? regionAt(laidOut, sticky.header.from) : undefined;
-        const asks = region?.item.reason.reason === "question" ? ["a comment answers it"] : [];
+        const asks = region?.item.asks === true && region.item.reason.reason === "question" ? ["a comment answers it"] : [];
         return said.length === 0 && asks.length === 0 ? null : [...asks, ...said].join(" · ");
     };
     return (

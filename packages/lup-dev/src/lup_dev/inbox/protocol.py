@@ -380,6 +380,17 @@ class Items(Reply):
     """By each flagged write listed that a landing waits on, what that landing
     lands where (`Delivery.landing`): what `lup-dev inbox` says on the flags'
     line."""
+    past: list[Item] = []
+    """The items the operator's draft marks or comments on that a reply answers
+    but that are past waiting on them, as they stand, oldest first: answered,
+    decided or replaced since it was written, none of them in `items`, which the
+    review lays out for what's drafted on them to stay visible until it's
+    sent. The operator's alone, never a room's."""
+    set_aside: list[Unanswerable] = []
+    """What sending the draft as it stands would do with each part on an item a
+    reply doesn't answer, or that's past waiting on the operator, as the send
+    says it (`Delivery.answerable`), so the line under the review says it before
+    it's sent. The operator's alone, never a room's."""
 
 
 class Readout(Reply):
@@ -450,10 +461,11 @@ class Reviewed(Reply):
     """The messages it took off the list marked read with nothing to add, by
     number, which tells their senders nothing."""
     approved: list[Item] = []
-    """The approvals and held changes it approved: an approval of a host zone
-    among them is acted on as the operator's terminal acts on it."""
+    """The approvals and held changes it approved, each answered by this send:
+    an approval of a host zone among them is acted on as the operator's terminal
+    acts on it."""
     declined: list[Item] = []
-    """The approvals and held changes it declined."""
+    """The approvals and held changes it declined, each answered by this send."""
     noted: list[Item] = []
     """The notes it left with each session whose push asked an approval the
     operator commented on, which stays unanswered."""
@@ -462,8 +474,9 @@ class Reviewed(Reply):
     comments stay drafted."""
     unanswerable: list[Unanswerable] = []
     """What it did with each part on an item a reply doesn't answer, the
-    operator's own words among them, rather than refuse the reply whole: each
-    mark dropped, each comment written on the item's thread or kept drafted,
+    operator's own words among them, or one past waiting on them, answered,
+    decided or replaced since, rather than refuse the reply whole or say it did
+    it: each mark dropped, each comment written to who it reaches or kept drafted,
     and why."""
 
 
@@ -759,7 +772,31 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: ListInbox) -> Reply:
-        return self.listed(self.waiting(request))
+        return self.drafted(self.listed(self.waiting(request)))
+
+    def drafted(self, listed: Items) -> Items:
+        """Return `listed` with what the operator's draft holds on what doesn't wait on them, as the review lays it out and the line under it says it: never asked by a room, since it reads their draft."""
+        delivery = self.delivery
+        draft = delivery.inbox.draft()
+        roster = delivery.roster()
+        found = delivery.inbox.items
+        marked = [
+            *draft.done,
+            *draft.declined,
+            *(each.item for each in draft.comments if each.text.strip()),
+        ]
+        past = [
+            found[each]
+            for each in sorted(dict.fromkeys(marked))
+            if each in found and not found[each].waits and found[each].answers
+        ]
+        return listed.model_copy(
+            update={
+                "past": past,
+                "set_aside": delivery.answerable(draft, roster).unanswerable,
+                "paths": [*listed.paths, *pathed(roster, past)],
+            }
+        )
 
     @override
     async def scoped(self, request: ListInbox, repository: Path) -> Reply:

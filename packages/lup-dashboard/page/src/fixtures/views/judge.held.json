@@ -95,32 +95,7 @@
       ],
       "waiting": false,
       "count": 0,
-      "offers": [
-        {
-          "action": "inbox-answer-approval",
-          "argument": {
-            "number": 55,
-            "approved": true
-          },
-          "verb": "done",
-          "chord": null,
-          "runs": "send",
-          "commented": true,
-          "says": "approve"
-        },
-        {
-          "action": "inbox-answer-approval",
-          "argument": {
-            "number": 55,
-            "approved": false
-          },
-          "verb": "decline",
-          "chord": null,
-          "runs": "send",
-          "commented": false,
-          "says": "decline"
-        }
-      ],
+      "offers": [],
       "blocks": [
         {
           "block": "markdown",
@@ -235,32 +210,7 @@
       ],
       "waiting": false,
       "count": 0,
-      "offers": [
-        {
-          "action": "inbox-answer-approval",
-          "argument": {
-            "number": 56,
-            "approved": true
-          },
-          "verb": "done",
-          "chord": null,
-          "runs": "send",
-          "commented": true,
-          "says": "approve"
-        },
-        {
-          "action": "inbox-answer-approval",
-          "argument": {
-            "number": 56,
-            "approved": false
-          },
-          "verb": "decline",
-          "chord": null,
-          "runs": "send",
-          "commented": false,
-          "says": "decline"
-        }
-      ],
+      "offers": [],
       "blocks": [
         {
           "block": "markdown",

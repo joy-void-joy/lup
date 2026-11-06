@@ -1,9 +1,9 @@
 // The review's verbs as one grammar (#247; `docs/dashboard.md`, *The keys*): Space and a verb's key acts on the
 // innermost thing it applies to, from the cursor outward, through the tree the review is laid out as (`Laid.nodes`):
-// a block offering the verb, as a file of "since you approved" offers done; a drawer, as a whole; an item, its kind's
-// view saying what done and decline mean for it, the core marking any item done otherwise; and an agent's group, its
-// banner's parts saying what hold means, done reaching the agent's own items and drawers. What a verb reaches is said
-// before it's pressed, on the line of keys, in the palette and the stack, from the same walk (`reachOf`).
+// a block offering the verb, as a file of "since you approved" offers done; a drawer, as a whole; an item, the host
+// saying what it offers (`Item.offers`), each answer of its kind while it waits on the operator; and an agent's group,
+// its banner's parts saying what hold means, done reaching the agent's own items and drawers. What a verb reaches is
+// said before it's pressed, on the line of keys, in the palette and the stack, from the same walk (`reachOf`).
 //
 // Only the view changes at once. Everything that reaches an agent or the host is a mark in the draft (`marking`):
 // an item done, declined or left for later, the inbox's own; anything else a block offers, recorded as the offer
@@ -13,7 +13,7 @@ import { newId } from "./anchors";
 import { partSaid, type ReplyPart } from "./brief";
 import type { components } from "./generated/api";
 import { cited } from "./comments";
-import { EMPTY, answerable, isLetter, news, toAnswer, waits, writtenId, type Conversation, type Draft, type Group, type Item, type Laid, type Piled, type PileRun, type Placed, type Region, type ThreadRead } from "./review";
+import { EMPTY, isLetter, news, toAnswer, waits, writtenId, type Conversation, type Draft, type Group, type Item, type Laid, type Piled, type PileRun, type Placed, type Region, type ThreadRead } from "./review";
 import type { Block as ViewBlock, Offer } from "./views";
 
 export type Verb = components["schemas"]["Verb"];
@@ -107,6 +107,9 @@ export function seenAct(conversation: Conversation, block: string, upTo: number)
 /** The core's verbs, by name, which apply to anything (`lup.SHELL_VERBS`). */
 export const CORE = { done: "done", decline: "decline", send: "send", comment: "comment" } as const;
 
+/** Done, as a verb the walk asks for by name: what marks news read. */
+const DONE_VERB = { name: CORE.done, key: "d", called: "done" } satisfies Verb;
+
 /**
  * Why nothing takes a verb where nothing at the cursor or around it offers it, in a few words: the core's say what they
  * apply to; any other verb is its module's.
@@ -184,16 +187,26 @@ function answering(offers: readonly Offer[] | undefined, verb: Verb): Offer[] {
     return (offers ?? []).filter((each) => each.verb === verb.name);
 }
 
+/** The actions of what an item offers (`lup_dev.inbox.store`): an answer marked in one of the draft's lists, and a comment on it whole, which the editor opens. */
+const ITEM_MARKED = "inbox-mark";
+const ITEM_COMMENTED = "inbox-comment";
+
 /**
  * Return what an offer does as an act, marked on `block` at `version`, or run at once on `conversation`: an item's
- * answer, the inbox's own until item kinds' answers are their modules' actions, as the item marked done or declined.
+ * answer, the inbox's own until item kinds' answers are their modules' actions, as the item marked in one of the draft's
+ * lists; a comment on an item whole.
  */
 function actOf(offer: Offer, block: string, version: string | null, conversation: Conversation | null): Act {
-    if (offer.action === "inbox-answer-approval") {
-        const argument = offer.argument as { number: number; approved: boolean };
-        return { kind: "item", number: argument.number, list: argument.approved ? "done" : "declined" };
+    switch (offer.action) {
+        case ITEM_MARKED: {
+            const argument = offer.argument as { number: number; list: Listed };
+            return { kind: "item", number: argument.number, list: argument.list };
+        }
+        case ITEM_COMMENTED:
+            return { kind: "comment" };
+        default:
+            return offer.runs === "once" ? { kind: "once", offer, conversation } : { kind: "mark", offer, block, version };
     }
-    return offer.runs === "once" ? { kind: "once", offer, conversation } : { kind: "mark", offer, block, version };
 }
 
 /** Return the blocks within `node`, whatever it holds, that offer `verb`, each the outermost that does: what a verb on the whole of it reaches. */
@@ -241,8 +254,9 @@ function actsOf(blocks: readonly Placed[], verb: Verb, conversation: Conversatio
  * - **A block** offering it: the file under the cursor in "since you approved" marked reviewed.
  * - **A fold or a drawer** offering it, as a whole: every block within it offering it, each the outermost, so each
  *   shows its mark; or its own offer where none within does.
- * - **An item:** what its kind's view offers, as approving or declining an approval; else the core's, done marking it
- *   read, send leaving it for later, comment opening a comment on it whole.
+ * - **An item:** what the host offers on it (`Item.offers`): each answer of its kind while it waits on the operator, as
+ *   approving or declining an approval, done marking a note read, send leaving it for later; and a comment on it whole.
+ *   One a later item replaced says so (`Item.spent`); any other past waiting goes on outward.
  * - **An agent's group,** on its banner or anywhere in it nothing nearer takes the verb: what its banner's parts offer,
  *   as hold; done marking it seen and reaching its own news and drawers, its subagents' left as they are, and an item
  *   asking something, which marking done would answer, left too; comment a message to it.
@@ -387,8 +401,13 @@ function pileReach(laidOut: Laid, node: Placed, verb: Verb): Reach | null {
     const on = entry !== undefined ? `${entry.item.reason.reason === "friction" ? "friction" : "how it felt"} ${cited(entry.item.number)}` : `@${(run as PileRun).thread.thread.name}'s pile`;
     const them = entries.length === 1 ? "it" : `its ${entries.length}`;
     switch (verb.name) {
-        case CORE.done:
-            return { on, node, says: `mark ${them} read`, acts: entries.map((each) => ({ kind: "item", number: each.item.number, list: "done" })) };
+        case CORE.done: {
+            const acts = entries.flatMap((each) => {
+                const offer = answering(each.item.offers, verb)[0];
+                return offer === undefined ? [] : [actOf(offer, node.id, null, null)];
+            });
+            return acts.length === 0 ? null : { on, node, says: `mark ${them} read`, acts };
+        }
         case CORE.send:
             return {
                 on,
@@ -402,31 +421,19 @@ function pileReach(laidOut: Laid, node: Placed, verb: Verb): Reach | null {
 }
 
 /**
- * Return where `verb` lands on `region`'s item, laid out at `node`: what its kind's view offers, else the core's done,
- * send and comment; none where neither takes it. On what a reply doesn't answer (`answerable`), as the operator's own
- * words in a thread's conversation, the core's comment alone, which goes on its thread: done and send go on outward, to
- * the thread or the agent's group it's in, as on its banner.
+ * Return where `verb` lands on `region`'s item, laid out at `node`: what the host offers on it, each answer of its kind
+ * while it waits on the operator and a comment on it whole (`Item.offers`); on one a later item replaced, the host's
+ * words on why not, doing nothing (`Item.spent`). None for anything else, the verb going on outward, to the thread or
+ * the agent's group it's in, as on its banner.
  */
 function itemReach(region: Region, node: Placed, verb: Verb): Reach | null {
     const on = region.named;
-    const number = region.item.number;
-    const offered = answering(region.body.answer?.blocks.offers, verb)[0];
+    const offered = answering(region.item.offers, verb)[0];
     if (offered !== undefined) {
         return { on, node, says: offered.says, acts: [actOf(offered, region.body.id, null, null)] };
     }
-    if (!answerable(region.item) && verb.name !== CORE.comment) {
-        return null;
-    }
-    switch (verb.name) {
-        case CORE.done:
-            return { on, node, says: "mark it read", acts: [{ kind: "item", number, list: "done" }] };
-        case CORE.send:
-            return { on, node, says: "leave it for later", acts: [{ kind: "item", number, list: "parked" }] };
-        case CORE.comment:
-            return { on, node, says: "comment on it", acts: [{ kind: "comment" }] };
-        default:
-            return null;
-    }
+    const spent = region.item.spent.find((each) => each.verb === verb.name);
+    return spent === undefined ? null : { on, node, says: spent.says, acts: [] };
 }
 
 /**
@@ -460,7 +467,7 @@ function groupReach(laidOut: Laid, node: Placed, group: Group, verb: Verb, namin
                 const reached = news(region.item) ? itemReach(region, child, verb) : null;
                 return reached === null || reached.on === null ? [] : reached.acts;
             });
-            const left = leaving(regions.filter(({ region }) => !news(region.item) && waits(region.item) && answerable(region.item)).map(({ region }) => region.item.number));
+            const left = leaving(regions.filter(({ region }) => region.item.asks).map(({ region }) => region.item.number));
             // Each drawer's blocks offering done, as the files of "since you approved"; else what the drawer offers as a
             // whole, as a conversation marked read.
             const drawers = group.drawers.flatMap((drawer) => {
@@ -841,7 +848,7 @@ export function threadsRead(laidOut: Laid, draft: Draft): Marked[] {
             .filter((each) => headers.some((header) => threadAt(each.header.from) === header))
             .map((each) => each.item)
             .toSorted((a, b) => a.number - b.number);
-        const unread = shown.findIndex((each) => news(each) && answerable(each) && each.state.state === "waiting" && !items.has(each.number));
+        const unread = shown.findIndex((each) => news(each) && answering(each.offers, DONE_VERB).length > 0 && !items.has(each.number));
         const upTo = (unread < 0 ? shown : shown.slice(0, unread)).at(-1);
         const markedAlready = (draft.marks ?? []).some((each) => each.action === "review-mark" && headers.some((header) => each.block === `group ${header.place}`));
         if (node === undefined || upTo === undefined || markedAlready) {
