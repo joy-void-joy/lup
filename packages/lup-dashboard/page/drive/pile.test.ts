@@ -40,6 +40,9 @@ const going = (text: string) =>
 /** Return once what the page said last says `text`. */
 const said = (text: string) => dashboard.page.waitForFunction((text) => document.querySelector(".said")?.textContent?.includes(text) === true, text);
 
+/** Return once the line of keys says `text`. */
+const keysSay = (text: string) => dashboard.page.waitForFunction((text) => document.querySelector(".keys")?.textContent?.includes(text) === true, text);
+
 /** What the line of keys says, the cursor where it is. */
 const keys = async () => (await dashboard.page.locator(".keys").first().innerText()).replace(/\s+/g, " ");
 
@@ -74,7 +77,7 @@ describe("the pile to read, in headless Chromium", () => {
         await review.goTo(PILE);
         await dashboard.keys.press([" ", "f", "r"]);
         await review.inMode("visual");
-        expect(await keys()).toContain("frictions and how it felt: 8 selected");
+        await keysSay("frictions and how it felt: 8 selected");
         await dashboard.keys.press(["s"]);
         await dashboard.page.waitForSelector(".palette input");
         await dashboard.keys.type("The gate's silent rebuild");
@@ -93,5 +96,26 @@ describe("the pile to read, in headless Chromium", () => {
         await review.holds("to read · 0 frictions, 0 how it felt");
         await review.holds(GATE);
         await review.holds("── @57 friction · moved to @the-gate-s-silent-rebuild · lup-impl/parser · done");
+    });
+});
+
+describe("a fold-wise selection as the review is laid out anew, in headless Chromium", () => {
+    it("is kept, its head under its section's closed fold, and acts as it did", async () => {
+        // A stand-in hook every half second, each laying the review out anew, as what arrives does on the host.
+        await using served = await demo({ size: 6, hooks: 120 });
+        await using dashboard = await open(served.url);
+        const review = await dashboard.review();
+        await review.holds(PILE);
+        await review.settled(1500);
+        await review.goTo(PILE);
+        await dashboard.keys.press([" ", "f", "r"]);
+        await review.inMode("visual");
+        const before = await review.text();
+        await review.until("was laid out anew", (view, was) => view.state.doc.toString() !== was, before);
+        await dashboard.page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+        expect(await review.mode()).toBe("visual");
+        await dashboard.keys.press(["s"]);
+        await dashboard.page.waitForSelector(".palette input");
+        expect(dashboard.thrown).toEqual([]);
     });
 });
