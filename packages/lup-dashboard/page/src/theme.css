@@ -1734,7 +1734,7 @@ kbd {
 }
 
 .pane-list {
-    flex: 0 0 48ch;
+    flex: 0 0 50ch;
     max-width: 45%;
     border-right: 1px solid var(--border);
 }

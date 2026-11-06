@@ -297,7 +297,8 @@ describe("the list by thread", () => {
 
     it("lays out what's for the operator without the front or what's settled", () => {
         const out = laid(ITEMS, [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called, { threads, showing: { kind: "for you" }, looks: adopted() });
-        expect(out.sections.map((each) => each.name)).toEqual(["waiting on you", "new", "to read"]);
+        // Nothing to read here: no section says so.
+        expect(out.sections.map((each) => each.name)).toEqual(["waiting on you", "new"]);
     });
 
     it("says whom the words reach from a thread's buffer, and where nobody answers for it", () => {

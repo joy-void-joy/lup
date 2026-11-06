@@ -1856,7 +1856,7 @@ export function laid(
             for (const each of fresh) {
                 layFresh(each);
             }
-        });
+        }, fresh.length === 0);
         // The front: every thread still open, a line each, nested as threads nest, folded, its whole conversation read as
         // it opens; the roots of sessions that have ended after the others, under a line of their own, `ended`, which
         // Space d settles together, a thread under one staying with the others.
@@ -1882,7 +1882,7 @@ export function laid(
             for (const run of runs) {
                 layPile(run.read, run.entries);
             }
-        });
+        }, runs.length === 0);
         const declined = done.filter((each) => each.state === "declined").length;
         layThreadSection("settled", `${done.length - declined} settled · ${declined} declined`, () => {
             for (const { read, depth } of nestedThreads(done)) {
@@ -1971,9 +1971,9 @@ export function laid(
             return (under.get(null) ?? []).flatMap((each) => walk(each, 0));
         }
 
-        /** Lay a section's line, saying what it holds, then what `lay` lays in it; in what's for the operator, only those holding what's for them. */
-        function layThreadSection(name: SectionName, holds: string, lay: () => void): void {
-            if (showing?.kind === "for you" && name !== "waiting on you" && name !== "new" && name !== "to read") {
+        /** Lay a section's line, saying what it holds, then what `lay` lays in it; in what's for the operator, only those holding what's for them, and none `empty`. */
+        function layThreadSection(name: SectionName, holds: string, lay: () => void, empty: boolean = false): void {
+            if (showing?.kind === "for you" && ((name !== "waiting on you" && name !== "new" && name !== "to read") || empty)) {
                 return;
             }
             const id = `section ${name}`;
