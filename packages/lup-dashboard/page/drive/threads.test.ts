@@ -11,7 +11,7 @@ const READER_ASKING = /^━━ @transcript-reader · The transcript reader · lu
 /** The same thread whole, in open. */
 const READER_WHOLE = /^━━ @transcript-reader · The transcript reader · lup-impl\/parser holds · working · [23] waiting ━━$/;
 /** explore-auth's survey, its header in new. */
-const AUTH = "━━ @auth-survey · Where auth is checked · lup-impl/explore-auth holds · 2 new ━━";
+const AUTH = "━━ @auth-survey · Where auth is checked · lup-impl/explore-auth holds · 1 new ━━";
 
 let served: Demo;
 let dashboard: Dashboard;
@@ -81,7 +81,8 @@ describe("the review grouped by thread, in headless Chromium", () => {
     it("shows in new the latest read before what's new, folded to its header, then each new item", async () => {
         const lines = (await review.text()).split("\n");
         const at = lines.indexOf(AUTH);
-        expect(lines[at + 1]).toMatch(/^── @64 note to lup-impl\/explore-auth · lup-impl · /);
+        // A message between agents is never new: its copy, done, is what came before, folded to its header.
+        expect(lines[at + 1]).toMatch(/^── @64 note to lup-impl\/explore-auth · lup-impl · done · /);
         expect(await hidesNext(at + 2)).toBe(true);
         expect(lines.slice(at).find((each) => each.startsWith("── @65"))).toMatch(/^── @65 note to lup-impl · lup-impl\/explore-auth · new · /);
     });

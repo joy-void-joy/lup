@@ -84,8 +84,9 @@ conversation that spawned them, or to one of their own subagents) is an item
 for its recipient, told as the operator's are: at their next call, their turn's
 end, by `wait_inbox`, or waking their idle session where they're a main
 conversation.
-The operator reads a copy, news whatever its kind (`Message.to`), from its
-sender, which a review's comment answers as any message's.
+The operator's copy (`Message.to`), from its sender, is done as it's made
+(`copied`): it holds the message's place in a thread, and asks nothing of them,
+who read it in both agents' drawers, so it's no item of their review.
 
 **A subagent's end, and what they say of their work,** reach the conversation
 that spawned them (`Whereabouts.parent`): which subagent ended and how, with
@@ -2243,6 +2244,29 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         runtime with no way waits for their next hook. An idle session starts a
         turn with it; one the service took for idle, unknown since the service
         started again or since the operator interrupted them, takes it at their
+    async def copied(
+        self,
+        message: Message,
+        to: Conversation,
+        sender: Conversation,
+        worktree: Path | None,
+        *,
+        call: str | None = None,
+        thread: Thread | None = None,
+    ) -> Item:
+        """Make the operator's copy of `message`, from `sender` to `to`, in `thread`, else where `sender` works, done as it's made: what lands in a thread is what's sent the operator, so it's what holds the message there, and it asks nothing of them, who read the message in both agents' drawers."""
+        copy = await self.posted(
+            message.model_copy(update={"to": to}),
+            sender,
+            Operator(),
+            worktree,
+            call=call,
+            thread=thread,
+        )
+        return self.inbox.kept(
+            copy.model_copy(update={"state": Done(at=self.clock.now())})
+        )
+
         next boundary, as measured on the runtime that has a way
         (`docs/field-notes.md`, *Waking a session*, *Channels*).
         """
