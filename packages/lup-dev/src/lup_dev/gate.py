@@ -9,12 +9,23 @@ every one even after one fails, so one run shows everything wrong. Each step's
 command is the tool alone, run through the project's runner (`uv run …` by
 default), or as written for a step that says it isn't run in the environment.
 
-A step that builds a file runs only when that file is missing or older than its
-sources: the engine's bundle is rebuilt when its table or source changed, since
-tests asking a stale engine fail for reasons the change didn't cause. The report
-gives each step's outcome, then each failure's output in full, then which steps
-failed; the command exits non-zero when any did, so the gate's verdict is its exit
-code rather than something read off its output. With `--fix`, ruff's safe fixes
+A step that builds a file is skipped only where it already passed on what it reads,
+its sources as they stand and its file as it left it (`Built`, `Check.stale`): the
+engine's bundle is rebuilt when its table or source changed, since tests asking a
+stale engine fail for reasons the change didn't cause, and a page built by hand,
+never type-checked or tested, can't stand in for that pass. Each is read by its
+content, never its age: a file's time can't tell a build a step made after its
+checks from one made by hand, and a source checked out again with the same content
+changes nothing. Reading them takes milliseconds, so a run where they didn't change
+pays nothing for them. The record is the worktree's own, as what's built is, in its
+part of the git directory (`WorktreeGitLayout`), so it's no file a pass is found by
+and goes with the worktree. Trust's build of the copy the operator approves reads
+none of it: it runs each of these steps, every time, in a directory of its own
+(`lup_dev.launch.trust`).
+
+The report gives each step's outcome, then each failure's output in full, then which
+steps failed; the command exits non-zero when any did, so the gate's verdict is its
+exit code rather than something read off its output. With `--fix`, ruff's safe fixes
 and the formatter rewrite the worktree first (`Fixes`); without, it only checks.
 
 A pass is recorded by the files it passed on (`Standing`, `Passes`): the tree git
@@ -22,13 +33,13 @@ would commit the worktree's files as, tracked and untracked but not ignored, wit
 the person's own layer of the declaration beside them where the worktree has one,
 in the repository's own git directory. A later run on the same files finds it and
 runs nothing, so the gate run again on unchanged files costs nothing, and neither
-does a push of them (`--again` runs it anyway); nothing but the steps that build a
-file, which still run where it's stale (`Check.answered`): git ignores what they
-build, so it isn't part of the files a pass is found by, and a worktree just made
-from a branch that passed has none of it. A pass is recorded only where the files
-after the steps are those the steps checked. `--at` runs the gate on a commit, in
-a worktree made at it and removed after (`at_commit`), unless a pass is recorded
-for its files: lup's remote helper runs it before a push updates the integration
+does a push of them (`--again` runs every step anyway, those that build a file
+among them); nothing but the steps that build a file, which still run where it's
+stale (`Check.answered`): git ignores what they build, so it isn't part of the
+files a pass is found by, and a worktree just made from a branch that passed has
+none of it. A pass is recorded only where the files after the steps are those the
+steps checked. `--at` runs the gate on a commit, in a worktree made at it and removed
+after (`at_commit`), unless a pass is recorded for its files: lup's remote helper runs it before a push updates the integration
 branch (`lup_dev.remote.helper`). With `--fix` too, what the fixes change is
 committed in place of the commit, with its parents and message (`Amended`):
 `land` runs it so on the merge it makes (`lup_dev.merging`).
@@ -57,8 +68,8 @@ from lup_dev.declaration.requirements import Checked, Needed, Tools, check
 from lup_dev.declaration.resolve import resolve
 from lup_dev.declaration.runner import Runner
 from lup_dev.errors import LupDevError
-from lup_dev.git import Git, GitError
-from lup_dev.layout import GitDirectoryLayout
+from lup_dev.git import Git, GitError, nul_separated
+from lup_dev.layout import GitDirectoryLayout, WorktreeGitLayout
 from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
@@ -140,12 +151,17 @@ class Standing(Model):
         return self.tree if self.layer is None else f"{self.tree}-{self.layer}"
 
 
+def digest(file: Path) -> str:
+    """Return the digest of the content of `file`."""
+    return hashlib.sha256(file.read_bytes()).hexdigest()
+
+
 def layer(root: Path) -> str | None:
     """Return the digest of the person's own layer of the declaration for the worktree at `root` (`person_layer`), or none where there's none."""
     local = person_layer(root)
     if not local.is_file():
         return None
-    return hashlib.sha256(local.read_bytes()).hexdigest()
+    return digest(local)
 
 
 def standing(root: Path) -> Standing:
@@ -224,6 +240,17 @@ class Passes(Model, arbitrary_types_allowed=True):
         passed = Passed(files=files, at=self.clock.now(), steps=steps)
         write_model(self.directory / f"{files.name}.json", passed)
         return passed
+
+
+class Built(Model):
+    """What a step that builds a file last passed on in a worktree: what it ran, what it read, and what it left."""
+
+    command: list[str]
+    """What it ran, as declared: another command wouldn't have checked the same."""
+    sources: dict[str, str]
+    """The digest of each of its sources, by its path from the root (`Check.sources`)."""
+    built: str
+    """The digest of the file it built, which a build by hand replaces."""
 
 
 class Outcome(Model):
@@ -314,18 +341,53 @@ class Check(Model, arbitrary_types_allowed=True):
             passes=passes,
         )
 
+    def sources(self, step: Step) -> dict[str, str]:
+        """Return the digest of each of `step`'s sources as they stand, by its path from the root.
+
+        A source is a file git would commit, as those a pass is found by are
+        (`standing`): what git ignores among its patterns is what a build makes
+        beside them, such as the page's types generated from the API's
+        description, and isn't what the build was given. A tracked file gone from
+        the worktree is left out, so its going counts as a change.
+        """
+        if not step.sources:
+            return {}
+        listed = Git(cwd=self.root).run(
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+            "--",
+            *(f":(glob){pattern}" for pattern in step.sources),
+        )
+        return {
+            path: digest(self.root / path)
+            for path in nul_separated(listed.output)
+            if (self.root / path).is_file()
+        }
+
+    def record_of(self, step: Step) -> Path:
+        """Return where what `step` last passed on in this worktree is kept."""
+        own = Git(cwd=self.root).text(
+            "rev-parse", "--path-format=absolute", "--git-dir"
+        )
+        return WorktreeGitLayout(own=Path(own)).built(step.name)
+
     def stale(self, step: Step) -> bool:
-        """Say whether a step that builds a file must run: it is missing or older."""
+        """Say whether a step must run: every one that builds no file, and one that does unless it's recorded as passing here on its sources as they stand, leaving its file as it is.
+
+        A build by hand leaves a file the step didn't, or sources it never
+        passed on, so it runs the step, whatever their ages. One byte for byte
+        what the step left, from sources it passed on, has nothing left to check.
+        """
         if step.builds is None:
             return True
         built = self.root / step.builds
         if not built.is_file():
             return True
-        made = built.stat().st_mtime
-        return any(
-            source.is_file() and source.stat().st_mtime > made
-            for pattern in step.sources
-            for source in self.root.glob(pattern)
+        return read_model(self.record_of(step), Built) != Built(
+            command=step.command, sources=self.sources(step), built=digest(built)
         )
 
     def building(self) -> list[Step]:
@@ -335,13 +397,33 @@ class Check(Model, arbitrary_types_allowed=True):
         ]
 
     def one(self, step: Step) -> Outcome:
-        """Run one step, or skip it where what it builds is up to date."""
+        """Run one step, or skip it where it builds a file and has passed on what it reads here (`stale`)."""
         if not self.stale(step):
-            why = f"{step.builds} is newer than its sources"
+            why = f"it passed on these sources, and built {step.builds} as it is"
             return Outcome(step=step.name, result="skipped", why=why)
+        given = self.sources(step)
         ran = self.processes.run(invoked(step, self.runner), self.root)
+        if ran.code == 0:
+            self.record(step, given)
         result = "passed" if ran.code == 0 else "failed"
         return Outcome(step=step.name, result=result, code=ran.code, output=ran.output)
+
+    def record(self, step: Step, given: dict[str, str]) -> None:
+        """Record what `step`, given the sources `given`, passed on, unless it left no file or they changed as it ran: as a pass, it counts only for what it checked."""
+        if step.builds is None:
+            return
+        built = self.root / step.builds
+        if built.is_file() and self.sources(step) == given:
+            write_model(
+                self.record_of(step),
+                Built(command=step.command, sources=given, built=digest(built)),
+            )
+
+    def forget(self) -> None:
+        """Forget what each step that builds a file passed on here, so it runs once more."""
+        for step in self.steps:
+            if step.builds is not None:
+                self.record_of(step).unlink(missing_ok=True)
 
     def run(self, *, again: bool = False) -> Gated:
         """Check every requirement at once, then run the fixes and every step, in order.
@@ -357,9 +439,12 @@ class Check(Model, arbitrary_types_allowed=True):
         it's stale (`answered`); the fixes don't, since on files the gate passed
         they change nothing. A run that passes is recorded for the files its
         steps checked, those after the fixes, where they're the same after the
-        steps.
+        steps. `again` runs the steps that build a file too, once each: nothing
+        else makes one run on sources it passed on.
         """
         passes = self.passes
+        if again:
+            self.forget()
         if passes is not None and not again:
             found = passes.found(standing(self.root))
             if found is not None:
