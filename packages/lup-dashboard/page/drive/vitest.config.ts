@@ -13,12 +13,11 @@ export default defineConfig({
         include: ["*.test.ts"],
         testTimeout: 60_000,
         hookTimeout: 60_000,
-        // Three files at a time: each runs a demo and a Chromium, about 230 processes and threads, and a room's pids
-        // limit is shared by every session and gate in it (`Podman.pids_limit`). All at once, one per core, 13 files
-        // reached podman's default of 2,048: Chromium crashed, `xdotool` couldn't start, the demo answered 500. Three
-        // peaked at 722 and ran in 29 s, faster than all at once (`docs/field-notes.md`, *The drive tests in a room*).
-        // Gates' runs at once take the room's cores as well as its processes, so `pnpm run drive` takes the room's lock
-        // first (`package.json`), and waits its turn.
-        maxWorkers: 3,
+        // Six files at a time: each runs a demo and a Chromium, about 230 processes and threads, so this peaks near 1,400
+        // of a room's limit (`Podman.pids_limit`), which every session and gate in it shares, and takes the 18 files from
+        // 60 s on three to 32 s. All at once, one per core, the first 13 files reached podman's default of 2,048 and
+        // crashed (`docs/field-notes.md`, *The drive tests in a room*). Gates' runs at once share the room's cores too,
+        // so `pnpm run drive` takes the room's lock first (`package.json`), and waits its turn.
+        maxWorkers: 6,
     },
 });

@@ -416,6 +416,7 @@ Behind `packages/lup-dashboard/page/drive/vitest.config.ts`'s `maxWorkers` (#162
 - **Three files at a time** peaked at 722, every test passing, in 29 s.
 - The limit is the room's, shared by every session, subagent and gate in it, so a step that runs browsers in parallel caps itself well under it.
 - **Gates overlapping** reached the limit all the same on 2026-11-06, the 18 files then peaking at about 900 alone: with three gates in the room the `pids.current` read 2,048, and each of two gates' `drive` failed (`spawn xdotool EAGAIN`, Chromium's "browser has been closed", a hook's 60 s running out). With `pnpm run drive` taking a lock in the room's `/tmp` (`flock`), two started at once took 123 s, the second waiting 59.8 s for the first, both passing, with a peak of 1,131.
+- **Six files at a time** took the 18 files from 60 s to 32 s alone, peaking at 1,385, all passing: nearly in proportion, the room having cores to spare. A room under 2,048 has room for it alone with the suite beside it (1,523), and no more.
 
 ## A route just set in Chromium (Chromium 151 headless, Playwright 1.64.1, a 32-core host, measured in a room 2026-11-06)
 
