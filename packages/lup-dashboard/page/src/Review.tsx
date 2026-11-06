@@ -70,7 +70,7 @@ import { linesOver, stickies, type Sticky } from "./stack";
 import { depths, levelled } from "./folds";
 import { carried, chainAt, findNode, implied, isMarked, marking, marksOn, movedInto, reachOf, reachedIn, type Act, type Destination, type Marked } from "./grammar";
 import { Listing, type ListHandle, type Viewed as ListViewed } from "./Panes";
-import { arrivalIn, bufferKey, bufferSpans, conversationNamed, listedByAgent, listedByThread, pathTo, spanAt, titled, type PanesBy, type Showing } from "./panes";
+import { arrivalIn, bufferKey, bufferSpans, conversationNamed, listedByAgent, listedByThread, marginFolds, pathTo, spanAt, titled, type PanesBy, type Showing } from "./panes";
 import { ThreadPalette } from "./Palette";
 import type { DrawerKind, FoldKind, Here } from "./keys";
 import type { Titled } from "./panes";
@@ -252,6 +252,8 @@ interface Props {
     paning?: (yes: boolean) => void;
     /** The checks waiting on the operator, each laid out under whoever owns it, where the panes go by agent. */
     checks?: readonly OwnedCheck[];
+    /** What a buffer says while what it's laid out from isn't read, in panes: as a token refused can't be, and it isn't being. */
+    unreadSaid?: string;
 }
 
 /** Return the classes a line under an item or in a drawer is drawn with: what it shows, and whether it's set in under a summary or a file's header, as a file's reviewed line isn't. */
@@ -934,6 +936,7 @@ export function Review({
     panes = null,
     paning,
     checks: checksGiven = NO_CHECKS,
+    unreadSaid = "Reading what's there…",
 }: Props) {
     // In panes, the one buffer on screen, and where the keyboard is: in a pane, or, in Pane mode, nowhere, a pane selected.
     const [showing, setShowing] = useState<Showing>({ kind: "for you" });
@@ -1043,7 +1046,7 @@ export function Review({
             ordered(places.current, order ?? []),
             drawers,
             called,
-            { ...arranging, previous: panes === null ? before.current : followed.current, showing: shownNow, threads: shownNow === null && panes === "agents" ? null : arranging.threads, checks: shownNow === null ? [] : arranging.checks, confirming: shownNow === null ? [] : confirming, read: order !== null },
+            { ...arranging, previous: panes === null ? before.current : followed.current, showing: shownNow, threads: shownNow === null && panes === "agents" ? null : arranging.threads, checks: shownNow === null ? [] : arranging.checks, confirming: shownNow === null ? [] : confirming, read: order !== null, unread: unreadSaid },
         );
     const layout = useMemo(() => {
         const drafted = typed.current ?? given;
@@ -1736,18 +1739,25 @@ export function Review({
         if (next.kind === "thread") {
             openThread(next.number, true);
         }
-        // An agent no longer running, whose record and branches the page reads only as they're opened.
+        // An agent no longer running, whose record and branches the page reads only as they're opened: theirs, or each
+        // a party holds.
         const agent = next.kind === "agent" ? conversationNamed(next.key, listReading) : undefined;
-        if (agent !== undefined && !arrangedBy.running.has(whose(agent))) {
-            told(agent, "since");
-            const of = { runtime: agent.runtime, session: agent.session, agent: agent.agent ?? null };
-            for (const drawn of arrangedBy.looks.drawers(agent.repository)) {
-                load({ repository: agent.repository, module: drawn.module, view: drawn.view, argument: of });
+        const held = next.kind === "party" ? laidOutGroups(next) : agent === undefined ? [] : [agent];
+        for (const each of held.filter((one) => !arrangedBy.running.has(whose(one)))) {
+            told(each, "since");
+            const of = { runtime: each.runtime, session: each.session, agent: each.agent ?? null };
+            for (const drawn of arrangedBy.looks.drawers(each.repository)) {
+                load({ repository: each.repository, module: drawn.module, view: drawn.view, argument: of });
             }
         }
         if (how !== "stay") {
             goIn("buffer");
         }
+    }
+
+    /** Return the agents of the groups a party's buffer lays out. */
+    function laidOutGroups(party: Showing): Conversation[] {
+        return layOut(editor.latest.current, party).groups.flatMap((each) => (each.conversation === null ? [] : [each.conversation]));
     }
 
     /** Open a row of the list: an item or a check the buffer on screen holds is gone to there, as the overview went; else its buffer shows, on it. */
@@ -2184,8 +2194,9 @@ export function Review({
     // Where the text is now, what's typed in a comment ahead of the layout (`Editor.toLaid`): the margin is drawn line
     // for line with the text as it stands, and says what the layout does.
     structured.current = {
+        // In panes, what the list and each banner say already, leaving the margin to what folds within them.
         get folds() {
-            return editor.folds();
+            return panes === null ? editor.folds() : marginFolds(editor.folds());
         },
         label: (fold) => (fold.kind !== undefined && fold.scope === true ? labelOf(fold.kind, editor.toLaid(fold.summary.from)) : null),
         jump: (at) => jumpTo(editor.toLaid(at)),
@@ -2197,8 +2208,9 @@ export function Review({
         },
     };
     useEffect(() => {
-        view.current?.dispatch({ effects: gutters.reconfigure(structureMargin(() => structured.current, !narrow)) });
-    }, [view, gutters, narrow]);
+        // In panes, no labels: the list and the header over the buffer say each, and the buffer takes the width.
+        view.current?.dispatch({ effects: gutters.reconfigure(structureMargin(() => structured.current, !narrow && panes === null)) });
+    }, [view, gutters, narrow, panes]);
 
     editor.bind({
         whole: (position) => {
@@ -2611,9 +2623,12 @@ export function Review({
     };
     // Each pinned header's fold, its letter in its column and its label, as the margin has them.
     const pinnedFolds = useMemo(() => {
-        const kinded = laidFor.folds.filter((each) => each.kind !== undefined && each.scope === true);
-        const deep = depths(laidFor.folds.filter((each) => each.kind !== undefined));
+        const inMargin = panes === null ? laidFor.folds : marginFolds(laidFor.folds);
+        const kinded = inMargin.filter((each) => each.kind !== undefined && each.scope === true);
+        const deep = depths(inMargin.filter((each) => each.kind !== undefined));
         return new Map(kinded.map((each) => [each.summary.from, { fold: each, depth: deep.get(each) ?? 0 }]));
+        // `panes` says it once, as the page loads.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [laidFor.folds]);
     const markOf = (sticky: Sticky): StackMark | null => {
         const found = pinnedFolds.get(sticky.header.from);
@@ -2622,7 +2637,7 @@ export function Review({
             return null;
         }
         const letter = kindOf(kind)?.letter ?? "";
-        return { kind, letter, depth: found.depth, label: narrow ? null : labelOf(kind, sticky.header.from) };
+        return { kind, letter, depth: found.depth, label: narrow || panes !== null ? null : labelOf(kind, sticky.header.from) };
     };
     // What settles what a pinned header heads, so the operator knows what would validate the file they're in.
     const hintOf = (sticky: Sticky): string | null => {

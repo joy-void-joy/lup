@@ -94,7 +94,7 @@ const SAID = {
     connecting: "connecting",
     live: "live",
     retrying: "out of reach, trying again",
-    refused: "this page's token is refused: open the dashboard again from `lup-dev dashboard`",
+    refused: "this page's token is refused: open it again from `lup-dev dashboard`, or a demo's latest address",
 };
 
 /** What the review is laid out from before it's all read: no item, and no conversation running. */
@@ -1329,6 +1329,7 @@ export function App() {
                         panes={panes}
                         checks={ready ? checksWaiting : NO_CHECKS}
                         paning={setPaneMode}
+                        unreadSaid={connection === "refused" ? `${SAID.refused}.` : "Reading what's there…"}
                         looks={looks}
                         running={runningNow}
                         landings={landings}

@@ -4,10 +4,10 @@ import "./fixtures/looks";
 import { hosted } from "./fixtures/kinds";
 import { describe, expect, it } from "vitest";
 
-import { carried, implied, type Marked } from "./grammar";
+import { carried, implied, reachOf, type Marked, type Verb } from "./grammar";
 import { adopted } from "./looks";
 import { arrivalIn, bufferKey, bufferSpans, listLaid, listedByAgent, listedByThread, panesAsked, pathTo, rowAt, spanAt, titled, type ListReading } from "./panes";
-import { EMPTY, NO_AGENT, PARTIES, ROOT_TITLE, aboutAt, checkOwner, followedFrom, groupAt, laid, opened, whose as whoseOf, type Around, type Conversation, type Draft, type Item, type Laid, type OwnedCheck, type Party, type Showing, type ThreadRead, type ThreadShown, type Threading } from "./review";
+import { EMPTY, NO_AGENT, PARTIES, ROOT_TITLE, aboutAt, checkOwner, followedFrom, groupAt, laid, opened, whose as whoseOf, type Around, type Conversation, type Draft, type Drawers, type Item, type Laid, type OwnedCheck, type Party, type Showing, type ThreadRead, type ThreadShown, type Threading } from "./review";
 import { partyNamed, threadBanner } from "./Review";
 
 const AT = "2026-10-30T12:00:00Z";
@@ -36,6 +36,7 @@ const LEADS = note(70, LEAD, "Built.");
 const LEFT = note(80, GONE, "What the one who ended left.");
 const ITEMS = [QUESTION, LEADS, LEFT];
 
+const DONE_VERB = { name: "done", key: "d", called: "done" } as Verb;
 const NOTHING: Around = { contexts: new Map(), files: new Map(), answers: [], commented: [] };
 const called = (party: Conversation) => (party.agent === null || party.agent === undefined ? party.session : `${party.session}/${party.agent}`);
 const header = (shown: Item) => `── @${shown.number} ──`;
@@ -121,6 +122,20 @@ describe("one buffer at a time", () => {
     it("says something of a buffer whose agent's gone from what's read", () => {
         const out = buffer({ kind: "agent", key: "nobody" });
         expect(out.text.trimEnd()).toBe("Nothing here now: the list beside this says what there is.");
+    });
+
+    it("shows each agent's drawers in what's for the operator, whether or not they have items", () => {
+        const drawers = new Map([
+            [whoseOf(LEAD), { tasks: [{ id: "1", subject: "Build it", status: "in_progress" }], usage: null, since: null }],
+            [whoseOf(WORKER), { tasks: [{ id: "1", subject: "Read it", status: "in_progress" }], usage: null, since: null }],
+        ]) as unknown as Drawers;
+        const out = laid([QUESTION], [LEAD, WORKER], banner, header, EMPTY, NOTHING, [], drawers, called, { showing: { kind: "for you" }, running: running(LEAD, WORKER), looks: adopted() });
+        expect(out.drawers.map((each) => [called(each.conversation), each.kind])).toEqual([
+            ["s1/a1", "tasks"],
+            ["s1", "tasks"],
+        ]);
+        // Folded: a line each.
+        expect(out.drawers.every((each) => each.folds.some((fold) => fold.kind === each.kind && fold.closed))).toBe(true);
     });
 
     it("lays out what nobody running answers under No agent", () => {
@@ -366,6 +381,8 @@ describe("the checks, going by agent", () => {
         const list = listLaid(listedByAgent({ ...reading(), checks: [CHECK] }));
         expect(list.text.split("\n")[0]).toContain("◆2");
         expect(list.text.split("\n").find((each) => each.includes("s2"))).toContain("◆1");
+        // No row of its own: it's its task's, which counts it.
+        expect(list.text).not.toContain("check @311");
     });
 
     it("gives its owner a group where they have none, and a row under No agent", () => {
@@ -384,7 +401,29 @@ describe("the checks, going by agent", () => {
 
     it("is what a buffer lands on first, whichever comes first of what asks", () => {
         const out = checked({ kind: "agent", key: whoseOf(LEAD) }, [{ ...CHECK, thread: heldByLead }]);
-        expect(arrivalIn(out, EMPTY)).toBe(out.checks[0]?.from);
+        // An item to answer first; else their last line, the checks right over it, what's live right over those.
+        expect(arrivalIn(out, EMPTY)).toBe(out.groups[0]?.writing?.from);
+        const lines = out.text.trimEnd().split("\n");
+        expect(lines.at(-2)).toContain("check @311");
+        const asked = checked({ kind: "agent", key: whoseOf(WORKER) });
+        expect(arrivalIn(asked, EMPTY)).toBe(asked.regions[0]?.header.from);
+    });
+
+    it("makes several of a thread's one row saying how many, folded, opening to the list, a verb on it reaching each", () => {
+        const second: OwnedCheck = { ...CHECK, check: { ...CHECK.check, check: { ...CHECK.check.check, number: 312, text: "Search a short one." } } as OwnedCheck["check"] };
+        const out = checked({ kind: "agent", key: whoseOf(LEAD) }, [
+            { ...CHECK, thread: heldByLead },
+            { ...second, thread: heldByLead },
+        ]);
+        expect(out.text).toContain("◆ 2 checks in @reader");
+        const fold = out.outer.find((each) => each.of === "checks 302");
+        expect(fold?.closed).toBe(true);
+        expect(out.text.slice(fold?.from, fold?.to)).toContain("check @311: Search a long record.");
+        expect(out.text.slice(fold?.from, fold?.to)).toContain("check @312: Search a short one.");
+        expect(out.checks).toHaveLength(2);
+        const reach = reachOf(out, fold?.summary.from ?? 0, DONE_VERB, { called });
+        expect(reach.on).toContain("2 checks");
+        expect(reach.on === null ? [] : reach.acts).toHaveLength(2);
     });
 
     it("leaves the review without panes unaware of it", () => {

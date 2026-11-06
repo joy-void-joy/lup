@@ -8,7 +8,7 @@ import { demo, type Demo } from "./demo.ts";
 import type { Review } from "./review.ts";
 
 /** The item the demo's guidance-voice session sent, whose group they're first in. */
-const THEIR_ITEM = "@45 note";
+const THEIR_ITEM = "── @45 note";
 
 /** Words the demo holds nowhere: what's written in these tests. */
 const WORDS = "Keep this anchored across buffers";
@@ -170,7 +170,7 @@ describe("the panes by agent", () => {
         expect(row).toContain("main");
         await page.keyboard.press("Enter");
         await review.holds("to main");
-        await review.until("left what's for the operator", (view) => !view.state.doc.toString().includes("@45 note"));
+        await review.until("left what's for the operator", (view) => !view.state.doc.toString().includes("── @45 note"));
         expect(await inList(dashboard)).toBe(false);
         const text = await review.text();
         // Their own: their item and their conversation, nobody else's.
@@ -194,6 +194,7 @@ describe("the panes by agent", () => {
         await listRow(dashboard, "what's for you");
         await page.keyboard.press("Enter");
         await review.holds(THEIR_ITEM);
+        await review.goTo("── @52 note");
         await review.goTo("so a search never fails on one");
         await review.comment();
         await page.keyboard.type(WORDS);
@@ -201,7 +202,7 @@ describe("the panes by agent", () => {
         await review.inMode("normal");
         await listRow(dashboard, "main");
         await page.keyboard.press("Enter");
-        await review.until("left what's for the operator", (view) => !view.state.doc.toString().includes("@45 note"));
+        await review.until("left what's for the operator", (view) => !view.state.doc.toString().includes("── @45 note"));
         expect(await review.text()).not.toContain(WORDS);
         await listRow(dashboard, "guidance-voice");
         await page.keyboard.press("Enter");

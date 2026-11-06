@@ -187,6 +187,17 @@ def demo(
             ),
         ),
     ] = False,
+    token_file: Annotated[
+        Path | None,
+        typer.Option(
+            help=(
+                "Keep the demo's token in this file, read back as it starts again, so "
+                "its address stays the same and a page left open carries on across a "
+                "restart, reconnecting, rather than being refused. A fresh token at "
+                "each start, unless given."
+            )
+        ),
+    ] = None,
 ) -> None:
     """Serve the dashboard over stand-in data on `address` and `port`, until stopped, printing where to open it.
 
@@ -212,7 +223,7 @@ def demo(
                 "--size, --hooks, --approval-lines, --arrives, --grows or --types-read"
             )
             raise typer.BadParameter(message)
-        copied(port, address, timings)
+        copied(port, address, timings, token_file)
         return
     host = Demo(
         hooks=hooks,
@@ -228,10 +239,10 @@ def demo(
         host.grows = timedelta(seconds=grows)
     if types_read is not None:
         host.types_read = timedelta(seconds=types_read)
-    served(host, port, address)
+    served(host, port, address, token_file=token_file)
 
 
-def copied(port: int, address: str, timings: Path | None = None) -> None:
+def copied(port: int, address: str, timings: Path | None = None, token_file: Path | None = None) -> None:
     """Serve the dashboard over a copy of the operator's dashboard state, taken into a directory of its own removed as it stops, until stopped; what the page measures of itself kept in `timings`, where it's given.
 
     The checkout it runs in answers its repository's views by its own
@@ -259,12 +270,33 @@ def copied(port: int, address: str, timings: Path | None = None) -> None:
         except (CopyError, HostError) as failed:
             typer.echo(f"lup-dashboard: the copy can't be served: {failed}", err=True)
             raise typer.Exit(1) from failed
-        served(host, port, address, OfCopy(defaults=host.views.by_defaults()))
+        served(host, port, address, OfCopy(defaults=host.views.by_defaults()), token_file)
 
 
-def served(host: Host, port: int, address: str, copied: OfCopy | None = None) -> None:
-    """Serve the demo over `host` on `address` and `port`, until stopped, printing where to open it, its token in the fragment."""
+def kept_token(path: Path | None) -> str:
+    """Return the demo's token: the one kept in `path`, or a fresh one, kept there where it's given, only its owner reading it.
+
+    >>> len(kept_token(None)) > 16
+    True
+    """
+    if path is not None and path.exists():
+        return path.read_text().strip()
     token = secrets.token_urlsafe(16)
+    if path is not None:
+        path.touch(mode=0o600)
+        path.write_text(token)
+    return token
+
+
+def served(
+    host: Host,
+    port: int,
+    address: str,
+    copied: OfCopy | None = None,
+    token_file: Path | None = None,
+) -> None:
+    """Serve the demo over `host` on `address` and `port`, until stopped, printing where to open it, its token in the fragment."""
+    token = kept_token(token_file)
     listening = socket.create_server((address, port))
     bound = listening.getsockname()[1]
     app = application(

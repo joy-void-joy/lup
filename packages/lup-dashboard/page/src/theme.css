@@ -1718,7 +1718,10 @@ kbd {
     outline: none;
 }
 
+/* The margin in panes: letters and bars, no labels, what the list and the header over the buffer say, and fewer columns,
+   the deepest sharing the last, so the buffer has the width. */
 .panes {
+    --columns: 4;
     position: relative;
     display: flex;
     flex: 1;

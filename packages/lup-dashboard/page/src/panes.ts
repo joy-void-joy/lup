@@ -4,7 +4,7 @@
 // by agent or by thread, read from what the review is laid out from, each row saying what it opens, how it stands and
 // how much of it waits on the operator; its text, whose each line is, and what's drawn on it. And how the list's rows
 // and a buffer say whom the operator's words reach. Pure: `Panes.tsx` draws it.
-import type { Span } from "./comments";
+import type { Folding, Span } from "./comments";
 import { doing, type Activity } from "./agents";
 import type { Run } from "./reconcile";
 import type { Merged } from "./looks";
@@ -319,21 +319,16 @@ function agentRow(group: Grouping, depth: number, reading: ListReading, nesting:
 }
 
 /**
- * Return what's nested under the agent `group` is of, `depth` deep: each item of theirs, each check they own, as the
- * review lays them out, marked as the overview marks them; then each task of theirs, a line each, quiet, but what waits
- * on the operator there. Folded where nothing of it asks them, until what's on screen comes to it; none where there's
- * nothing.
+ * Return what's nested under the agent `group` is of, `depth` deep: each item of theirs, as the review lays it out, marked
+ * as the overview marks it; then each task of theirs, a line each, quiet, but what waits on the operator there, its checks
+ * among it. Folded where nothing of it asks them, until what's on screen comes to it; none where there's nothing.
  */
 function nestOf(group: Grouping, depth: number, tally: Tally, reading: ListReading): Row["under"] {
     const set = "  ".repeat(depth + 1);
     const items = group.items.map((each) => itemRow(each, group, set, reading));
-    const checks = (reading.checks ?? []).filter((each) => {
-        const owner = checkOwner(each);
-        return owner !== null && whose(owner) === group.key;
-    }).map((each) => checkRow(each, group, set, reading));
     const tasks = tasksOf(group.key, reading).filter(taskShown);
     const threads = reading.threads;
-    const rows = [...items, ...checks, ...(threads === null ? [] : threadsNested(tasks, threads.read.threads).map(({ read, depth: within }) => taskRow(read, set, within, threads, reading)))];
+    const rows = [...items, ...(threads === null ? [] : threadsNested(tasks, threads.read.threads).map(({ read, depth: within }) => taskRow(read, set, within, threads, reading)))];
     if (rows.length === 0) {
         return undefined;
     }
@@ -370,20 +365,6 @@ function itemRow(item: Item, group: Grouping, set: string, reading: ListReading)
         { text: ` ${itemWords(item)}`, look: "list-sub" },
     ];
     return { id: `item ${item.number}`, lines: [{ stretches: fitted(left) }], opens: { kind: "agent", key: group.key }, says: named, writes: false, node: item.number };
-}
-
-/** Return the row of a check, under whoever owns it: its number, and what's to try. */
-function checkRow(owned: OwnedCheck, group: Grouping, set: string, reading: ListReading): Row {
-    const number = owned.check.check.number;
-    const answered = checkAnswered(number, reading.draft);
-    const left: Stretch[] = [
-        { text: set },
-        { text: `${answered ? " " : "◆"} `, look: "mark-waiting" },
-        { text: `check @${number}`, look: answered ? "list-sub" : "list-asks" },
-        ...(answered ? [{ text: " ✓", look: "outline-draft" }] : []),
-        { text: ` ${owned.check.check.text.split("\n")[0] ?? ""}`, look: "list-sub" },
-    ];
-    return { id: `check ${number}`, lines: [{ stretches: fitted(left) }], opens: { kind: "agent", key: group.key }, says: `check @${number} in @${owned.thread.thread.name}`, writes: false, node: number };
 }
 
 /** Return `left` cut at the list's width, as a row with no tally. */
@@ -517,7 +498,9 @@ function threadState(read: ThreadRead): { text: string; look: string } {
 /** Return how thread `read` stands: what asks the operator, what's news, the files a landing waits on and the pile; and what's drafted on it. */
 function threadTally(read: ThreadRead, threads: Threading, draft: Draft): Tally {
     const written = (draft.letters ?? []).filter((each) => each.thread === read.thread.number && each.text.trim() !== "").length;
-    return { asks: (read.asks ?? []).length + (read.state === "done to confirm" ? 1 : 0), news: (read.new ?? []).length, files: threads.landing.get(read.thread.number) ?? 0, pile: (read.pile ?? []).length, written };
+    const settled = new Set([...(draft.done ?? []), ...(draft.declined ?? []), ...(draft.parked ?? [])]);
+    const asking = (read.asks ?? []).filter((each) => !settled.has(each.node) && !checkAnswered(each.node, draft));
+    return { asks: asking.length + (read.state === "done to confirm" ? 1 : 0), news: (read.new ?? []).length, files: threads.landing.get(read.thread.number) ?? 0, pile: (read.pile ?? []).length, written };
 }
 
 /** Return thread `read`'s row, set in `depth` deep: its name, how it stands and its tally; under it, what it's about and who holds it. */
@@ -645,7 +628,8 @@ export function bufferSpans(laid: Laid, showing: Showing): BufferSpan[] {
             depth: each.depth,
         })),
         ...laid.regions.map((each) => ({ id: `item ${each.item.number}`, from: each.header.from, to: each.end, depth: 100 })),
-        ...laid.checks.map((each) => ({ id: `check ${each.check.check.number}`, from: each.from, to: each.to, depth: 100 })),
+        // A check is its task's: they're one row in the list.
+        ...laid.checks.map((each) => ({ id: `thread ${each.thread}`, from: each.from, to: each.to, depth: 100 })),
     ];
 }
 
@@ -773,16 +757,28 @@ export function titled(showing: Showing, reading: Pick<ListReading, "agents" | "
 }
 
 /**
- * Return where the cursor goes as a buffer is first opened: on what's first to answer there; else on the line what's
- * written to them is written under, at its end, the latest of what's live just above it; else on its first item.
+ * Return where the cursor goes as a buffer is first opened: on the first item to answer there; else on the line what's
+ * written to them is written under, at its end, the latest of what's live and any checks of theirs just above it; else
+ * on what's first there.
  */
 export function arrivalIn(laid: Laid, draft: Draft): number {
     const asking = laid.regions.find((each) => toAnswer(each.item, draft))?.header.from;
-    const checking = laid.checks.find((each) => (each.check.answer ?? null) === null && !checkAnswered(each.check.check.number, draft))?.from;
-    const first = Math.min(asking ?? Infinity, checking ?? Infinity);
-    if (first !== Infinity) {
-        return first;
+    const writing = laid.groups.find((each) => each.writing !== undefined)?.writing?.from;
+    return asking ?? writing ?? laid.checks[0]?.from ?? laid.regions[0]?.header.from ?? 0;
+}
+
+/** The folds' kinds the margin leaves out in panes, what the list and each banner say already. */
+const NOT_IN_MARGIN = new Set(["group", "section"]);
+
+const marginKept = new WeakMap<readonly Folding[], readonly Folding[]>();
+
+/** Return of `folds` those the margin shows in panes, the same list while they're the same, which the margin reads each by. */
+export function marginFolds<F extends Folding>(folds: readonly F[]): readonly F[] {
+    const kept = marginKept.get(folds);
+    if (kept !== undefined) {
+        return kept as readonly F[];
     }
-    const writing = laid.groups.find((each) => each.writing !== undefined)?.writing;
-    return writing?.from ?? laid.regions[0]?.header.from ?? 0;
+    const made = folds.filter((each) => !NOT_IN_MARGIN.has(each.kind ?? ""));
+    marginKept.set(folds, made);
+    return made;
 }
