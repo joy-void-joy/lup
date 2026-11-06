@@ -19,6 +19,7 @@ from pydantic import Field
 
 from lup.types import Model
 from lup_dev.declaration.package_managers.uv import Uv
+from lup_dev.declaration.resolve import Declaration
 from lup_dev.host.protocol import Branches
 from lup_dev.layout import PackageLayout
 from lup_dev.stored import read_model
@@ -186,6 +187,12 @@ class Approval(Model):
     trust above all, reads them here and runs no project code to learn them. The
     defaults in a record from before approvals kept them, which no declaration
     could have changed."""
+    declaration: Declaration | None = None
+    """Its declaration as judging reads it, the person's own layer on it, read
+    as the operator approved it (`Trust.answered`), as plain values: a landing
+    reads each file's role here, runs no project code to learn it, and needs no
+    judge to have run (`approved_roles`, `lup_dev.policy.landing`). None
+    where it couldn't be read, and in a record from before approvals kept it."""
 
 
 def approved(layout: Layout, repository: Path) -> Approval | None:

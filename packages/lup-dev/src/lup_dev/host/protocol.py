@@ -166,9 +166,11 @@ class Limits(Model):
     gated: list[str] = []
     """Patterns over full ref names: the refs a push from the room updates only
     once the gate passed on its commit, which the room's git helper runs first
-    (`remote/helper.py`), the host checking nothing of it. Branches land there:
-    `delete-merged` deletes a branch whose commits are all in a gated one on
-    the remote, and never a gated one (`remote/protocol.py`)."""
+    (`remote/helper.py`), the host checking nothing of that; and only where what
+    it lands asks the operator nothing they haven't approved, which the host
+    reads from its diff (`Remotes.asking`, `remote/protocol.py`). Branches land
+    there: `delete-merged` deletes a branch whose commits are all in a gated one
+    on the remote, and never a gated one."""
 
     def refusal(self, action: Action) -> str | None:
         """Say why the host doesn't do `action` for the launch, where these limits leave it out; none where they allow it.

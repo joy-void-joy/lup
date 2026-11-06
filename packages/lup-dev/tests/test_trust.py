@@ -2722,6 +2722,21 @@ def test_an_approval_keeps_the_branches_its_declaration_names_and_trust_then_rea
     assert trusting(lup, kit, unasked()).check().zone.commit == live
 
 
+def test_an_approval_keeps_what_its_declaration_protects_and_one_that_doesn_t_load_keeps_the_last(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    """A landing reads each file's role from here, so nothing of the project's runs to learn it."""
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    assert first.approval.declaration is not None
+    assert "**/uv.lock" in first.approval.declaration.paths.protected
+    assert first.approval.declaration.source == Path("lup_project.py")
+    changed(lup, {"lup_project.py": 'raise ValueError("it does not load")\n'}, shell)
+    second = trusting(lup, kit, yes()).ensure()
+    assert isinstance(second, Trusted)
+    assert second.approval.declaration == first.approval.declaration
+
+
 def test_a_project_not_selecting_versions_reads_dev_and_says_nothing_of_branches(
     lup: Path, kit: Kit, shell: Shell
 ) -> None:

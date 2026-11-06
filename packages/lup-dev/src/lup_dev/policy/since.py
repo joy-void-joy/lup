@@ -78,6 +78,7 @@ from lup_dev.inbox.store import (
     Item,
     Remark,
     Review,
+    ReviewedAt,
     Withdrawn,
 )
 from lup_dev.layout import Layout
@@ -748,18 +749,18 @@ class Reader(Model, arbitrary_types_allowed=True):
             if not located.gone and standing.get(each.path) != each.version
         ]
         baseline = self.baseline(party)
-        flags = (
+        approving = (
             []
             if request.decline
             else [
-                flag
+                (flag, None if located.gone else ReviewedAt(version=each.version))
                 for each in request.files
                 if each.path not in moved
                 for flag in baseline.flags([branch], each.path)
             ]
         )
-        for flag in flags:
-            self.delivery.flag_approved(flag.number)
+        for flag, reviewed in approving:
+            self.delivery.flag_approved(flag.number, reviewed)
         declined = (
             self.declined(party, branch, [each.path for each in request.files])
             if request.decline
@@ -787,7 +788,7 @@ class Reader(Model, arbitrary_types_allowed=True):
             )
         reviewed = SinceReviewed(
             reviewed=[each.path for each in request.files],
-            approved=[each.number for each in flags],
+            approved=[flag.number for flag, _ in approving],
             declined=declined,
             moved=moved,
         )

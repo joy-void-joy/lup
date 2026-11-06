@@ -27,8 +27,9 @@ from lup import events
 from lup.rooms.container import Mask, Mount
 from lup.types import Model
 from lup_dev import Project
-from lup_dev.declaration.resolve import resolve
+from lup_dev.declaration.resolve import Declaration, resolve
 from lup_dev.errors import LupDevError
+from lup_dev.git import Git, GitError
 from lup_dev.host.client import HostClient, RoomClient, Starter, asked
 from lup_dev.host.courier import Courier, Heard, Telling
 from lup_dev.host.protocol import (
@@ -44,6 +45,8 @@ from lup_dev.host.service import Answerer, HostService, Program, executed
 from lup_dev.host.workers import LaunchJudge
 from lup_dev.launch.room import RoomError, RoomGit, programs, refreshed, room_git
 from lup_dev.layout import HostLayout, LaunchLayout, LaunchSockets, Layout, RoomPaths
+from lup_dev.policy.landing import asked_files
+from lup_dev.policy.roles import Roles
 from lup_dev.private import serving as private_serving
 from lup_dev.private.withheld import Facts, Held, Machine, Withheld, kept
 from lup_dev.remote.config import Gating, room_config
@@ -54,6 +57,7 @@ from lup_dev.remote.protocol import (
     Lease,
     Listing,
     Pushed,
+    PushHandler,
     Pushing,
     Ref,
     Remotes,
@@ -247,9 +251,15 @@ class World:
         limits: Limits = DEFAULT,
         modules: LaunchModules | None = None,
         run: Callable[[Program], Awaitable[Ended]] = executed,
+        asking: Callable[[Register, str | None, str], Awaitable[list[Path]]]
+        | None = None,
     ) -> Generator[None]:
         remotes = Remotes(
-            say=self.said.append, landed=self.landing, modules=modules, run=run
+            say=self.said.append,
+            landed=self.landing,
+            modules=modules,
+            run=run,
+            asking=asking,
         )
         service = HostService(
             layout=self.layout,
@@ -826,6 +836,171 @@ def test_a_protected_pattern_is_git_s_glob_its_star_spanning_slashes(
     assert why("refs/heads/release/2/hotfix") is not None
     assert why("refs/heads/releases") is None
     assert why("refs/heads/Release/2") is None
+
+
+# What a push to a gated ref lands
+
+
+class Asking:
+    """What says which files of a push to a gated ref are unapproved, as told; each asking recorded by the ref's tip on the remote and the commit pushed."""
+
+    def __init__(
+        self, paths: list[Path] | None = None, failing: str | None = None
+    ) -> None:
+        self.paths = paths or []
+        self.failing = failing
+        self.asked: list[tuple[str | None, str]] = []
+
+    async def __call__(self, launch: Register, old: str | None, tip: str) -> list[Path]:
+        assert launch.launch == "one"
+        self.asked.append((old, tip))
+        if self.failing is not None:
+            raise GitError(self.failing)
+        return self.paths
+
+
+def test_a_push_of_what_the_operator_hasn_t_approved_is_refused_before_it_reaches_the_remote(
+    world: World, clock: FakeClock
+) -> None:
+    """Through the room's own `git push`: its helper, the socket and the host, which alone can refuse it."""
+    tip = world.commit("first")
+    asking = Asking(paths=[Path(".github/workflows/ci.yml")])
+
+    with world.served(clock, MERGING, asking=asking):
+        pushed = world.room_git("push", "origin", "HEAD:refs/heads/dev")
+
+    assert pushed.exit_code != 0
+    assert world.on_forge("refs/heads/dev") is None
+    assert world.landed == []
+    assert asking.asked == [(None, tip)]
+    assert "`.github/workflows/ci.yml`" in stderr(pushed)
+    assert "`land`" in stderr(pushed)
+    assert any("refused a push to `refs/heads/dev`" in each for each in world.said)
+
+
+def test_a_push_to_a_gated_ref_is_read_against_its_tip_on_the_remote_and_goes_where_nothing_is_unapproved(
+    world: World, clock: FakeClock
+) -> None:
+    old = world.commit("first")
+    git(world.project, "push", "-q", str(world.forge), f"{old}:refs/heads/dev")
+    tip = world.commit("second")
+    asking = Asking()
+
+    with world.served(clock, MERGING, asking=asking):
+        pushed = world.room_git("push", "origin", "HEAD:refs/heads/dev")
+
+    assert pushed.exit_code == 0, stderr(pushed)
+    assert world.on_forge("refs/heads/dev") == tip
+    assert asking.asked == [(old, tip)]
+
+
+def test_what_a_gated_push_lands_isn_t_asked_of_any_other_ref_or_a_deletion(
+    world: World, clock: FakeClock
+) -> None:
+    tip = world.commit("first")
+    git(world.project, "push", "-q", str(world.forge), f"{tip}:refs/heads/feat")
+    git(world.project, "push", "-q", str(world.forge), f"{tip}:refs/heads/dev")
+    asking = Asking(paths=[Path("AGENTS.md")])
+
+    with world.served(clock, MERGING, asking=asking):
+        other = world.room_git("push", "origin", "HEAD:refs/heads/other")
+        gone = world.room_git("push", "origin", ":refs/heads/feat")
+
+    assert other.exit_code == 0, stderr(other)
+    assert gone.exit_code == 0, stderr(gone)
+    assert world.on_forge("refs/heads/other") == tip
+    assert world.on_forge("refs/heads/feat") is None
+    assert asking.asked == []
+
+
+def test_a_gated_push_whose_diff_can_t_be_read_isn_t_pushed(
+    world: World, clock: FakeClock
+) -> None:
+    world.commit("first")
+    asking = Asking(failing="git couldn't read it")
+
+    with world.served(clock, MERGING, asking=asking):
+        pushed = world.room_git("push", "origin", "HEAD:refs/heads/dev")
+
+    assert pushed.exit_code != 0
+    assert world.on_forge("refs/heads/dev") is None
+    assert "git couldn't read it" in stderr(pushed)
+
+
+def test_an_atomic_push_with_a_gated_update_unapproved_pushes_none(
+    world: World, clock: FakeClock
+) -> None:
+    world.commit("first")
+    asking = Asking(paths=[Path("AGENTS.md")])
+
+    with world.served(clock, MERGING, asking=asking):
+        pushed = world.room_git(
+            "push", "--atomic", "origin", "HEAD:refs/heads/dev", "HEAD:refs/heads/other"
+        )
+
+    assert pushed.exit_code != 0
+    assert world.on_forge("refs/heads/dev") is None
+    assert world.on_forge("refs/heads/other") is None
+
+
+def test_a_gated_push_the_limits_refuse_asks_nothing_of_what_it_lands(
+    world: World, clock: FakeClock
+) -> None:
+    world.commit("first")
+    asking = Asking()
+    forbidding = MERGING.model_copy(update={"protected": ["refs/heads/dev"]})
+
+    with world.served(clock, forbidding, asking=asking):
+        pushed = world.room_git("push", "origin", "HEAD:refs/heads/dev")
+
+    assert pushed.exit_code != 0
+    assert asking.asked == []
+
+
+def read_from_the_diff(launch: Register, old: str | None, tip: str) -> list[Path]:
+    """What a landing reads of its own diff, by lup's default roles: each file it asks about."""
+    roles = Roles(root=Path("/nowhere"), declaration=Declaration.of(Project()))
+    git_read = Git.pinned(launch.repository)
+    return [each.path for each in asked_files(git_read, roles, old, tip)]
+
+
+def test_the_commit_a_room_s_push_names_is_read_from_the_store_it_shares_before_the_update_goes(
+    world: World, clock: FakeClock
+) -> None:
+    """Its objects are in the store as its git asks the host: the push is refused on the file itself, nothing having reached the remote."""
+    world.wrote(".github/workflows/ci.yml", "on: push\n", "a workflow")
+
+    async def asking(launch: Register, old: str | None, tip: str) -> list[Path]:
+        return read_from_the_diff(launch, old, tip)
+
+    with world.served(clock, MERGING, asking=asking):
+        pushed = world.room_git("push", "origin", "HEAD:refs/heads/dev")
+
+    assert pushed.exit_code != 0
+    assert "`.github/workflows/ci.yml`" in stderr(pushed)
+    assert world.on_forge("refs/heads/dev") is None
+
+
+def test_a_commit_git_can_t_read_named_to_the_socket_isn_t_pushed(world: World) -> None:
+    """A room can speak to the socket without its git: what it names is read, and what can't be read doesn't land."""
+    launch = world.registered(MERGING)
+
+    async def asking(launch: Register, old: str | None, tip: str) -> list[Path]:
+        return read_from_the_diff(launch, old, tip)
+
+    handler = PushHandler(remotes=Remotes(say=world.said.append, asking=asking))
+    unread = Pushing(
+        remote="origin",
+        updates=[Update(source="1" * 40, destination="refs/heads/dev")],
+    )
+    pushed = asyncio.run(handler.answer(unread, launch))
+    assert isinstance(pushed, Pushed)
+    [update] = pushed.updates
+    assert update.error is not None
+    assert update.error.startswith(
+        "lup couldn't read what this puts on `refs/heads/dev`, so it isn't pushed: "
+    )
+    assert world.on_forge("refs/heads/dev") is None
 
 
 # Deleting a branch that has landed

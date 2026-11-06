@@ -31,7 +31,11 @@ by default, or the gated branch it's told to:
    (`lup_dev.gate`, `Passes`): the gate needs the project's environment, which
    the host doesn't run, so `land` reads the pass and never runs the gate. The
    room writes the passes, so this steers and guards nothing;
-5. each file the landing changes that's flagged on a branch it lands, and not
+5. the landing reads what it asks from its own diff, by each file's role and
+   the declaration approved, as the judge reads a write (`Lander.asks`,
+   `asked_files`), so what it holds doesn't depend on the hooks: each such file
+   the operator hasn't approved at that version is flagged there and then;
+6. each file the landing changes that's flagged on a branch it lands, and not
    approved, holds it: the landing waits on each, every flag on it (`Wait`,
    `lup_dev.policy.waits`), raising one desktop notice for them all, and each
    is held at landing in its writer's "since you approved" drawer, shown from
@@ -40,20 +44,20 @@ by default, or the gated branch it's told to:
    Marked reviewed, each flag on it is approved; declined, or commented on
    without being marked reviewed, nothing is pushed, and the call answers
    with the operator's words (`Waits.declined`);
-6. the push goes the remote helper's way (`PushHandler`): held to the launch's
+7. the push goes the remote helper's way (`PushHandler`): held to the launch's
    limits, through `Publishing`, and told to `Remotes.landed`, which
    asks trust's approval where it moved the running branch. It names the
    remote's URL, so the gated branch's remote-tracking ref is moved to what
    landed after it (`tracked`), as `git push <remote>` moves it: the judge
    counts what those refs name as judged;
-7. each thread parked until a branch it landed on the integration branch, or
+8. each thread parked until a branch it landed on the integration branch, or
    until an issue that closed, is woken (`lup_dev.policy.coming`), its holder
-   told; a commit it lands wakes one at its push (step 6), as every push the
+   told; a commit it lands wakes one at its push (step 7), as every push the
    host makes does;
    each conversation still going that worked on a branch it landed, and hasn't
    said how the work felt, is invited to, once, beside their next call
    (`invited`): the landing is where a branch's work ends;
-8. the answer says, for each branch it landed, the `# lup: defer` comments its
+9. the answer says, for each branch it landed, the `# lup: defer` comments its
    merge adds and removes against its first parent, and those the running
    branch's own commits add and remove beyond them, where it lands some or no
    branch merged (`Deferrals`): read on the host from each version's parse
@@ -61,19 +65,19 @@ by default, or the gated branch it's told to:
    the judge compares a file's directives (`missing`). It's information: work
    knowingly left undone shows as it lands, and a reading that fails is said
    and refuses nothing;
-9. each branch it landed is cleaned up after: its copy on the remote deleted,
+10. each branch it landed is cleaned up after: its copy on the remote deleted,
    as `delete-merged` deletes one (`Remotes.merged`); its worktree removed where
    it's clean and nobody works in it, or detached where a subagent who may be
    resumed started there; then the local branch deleted. A worktree kept so is
    removed by the first landing after its subagent's launch ends (`lapsed`);
-10. each flagged write still waiting that's left nothing to hold is withdrawn
+11. each flagged write still waiting that's left nothing to hold is withdrawn
     from the operator's inbox (`Lander.withdrawn`): one on a branch gone, the
     cleanup's or any deleted earlier, landed or not; and one on a branch whose
     flags hold the landing, on a file it leaves unchanged, where the file
     stands as the flag keeps it, landed before. It's left unread, so it's no
     version they saw (`Withdrawn`). One on a branch still there whose file
     stands otherwise may be a write not committed yet, and waits;
-11. the answer ends on what's still running or waiting to land (`going`): the
+12. the answer ends on what's still running or waiting to land (`going`): the
     subagents of the session landing whom lup hasn't heard end, and the local
     branches not on what landed, each with who works in it.
 
@@ -168,11 +172,14 @@ from lup.tools import speaking
 from lup.tools.serving import Answer
 from lup.tools.tool import Accepted, Refused, ToolSpec
 from lup.types import Model, MutableModel
+from lup_dev.approval import approved as approved_last
 from lup_dev.approval import approved_branches
 from lup_dev.catalog.paths import PythonPaths
 from lup_dev.codescan.contract import Parser, Source
 from lup_dev.codescan.directives import Directive, Identity, added_deferrals
 from lup_dev.codescan.engine import EngineError, EngineParser
+from lup_dev.declaration.project import Project
+from lup_dev.declaration.resolve import Declaration
 from lup_dev.errors import LupDevError
 from lup_dev.gate import Passed, Standing
 from lup_dev.git import LISTED, Git, Tracked, nul_separated
@@ -203,9 +210,12 @@ from lup_dev.inbox.store import (
 )
 from lup_dev.layout import CheckoutLayout, GitDirectoryLayout, HostLayout, Layout
 from lup_dev.merging import Conflicted, Failed, Merged, Merging
+from lup_dev.policy.checkpoint import LastDeclaration
 from lup_dev.policy.coming import Coming
+from lup_dev.policy.holds import unified
+from lup_dev.policy.judge import Judgement, by_role
 from lup_dev.policy.reviewed import Mark, Reviews
-from lup_dev.policy.roles import matches
+from lup_dev.policy.roles import Roles, matches
 from lup_dev.policy.waits import Awaited, Wait, Waits
 from lup_dev.policy.worktrees import SessionIndex
 from lup_dev.private.found import in_prose
@@ -531,6 +541,99 @@ def changed_files(git: Git, old: str | None, tip: str) -> list[Path]:
     return [Path(each) for each in nul_separated(listed.output)]
 
 
+def approved_declaration(layout: Layout, repository: Path) -> Declaration:
+    """Return the declaration the operator approved last for the repository at `repository`: as the approval keeps it; in a record from before approvals kept it, the last the judge loaded, which it reads from the commit approved; else lup's defaults, with the declaration's own file protected.
+
+    Never the tip's, which a landing would then be judged by, so a branch could
+    leave its own files unprotected; and nothing of the project's runs to read
+    it.
+    """
+    approval = approved_last(layout, repository)
+    if approval is not None and approval.declaration is not None:
+        return approval.declaration
+    try:
+        last = (
+            None
+            if approval is None
+            else read_model(layout.declaration(repository), LastDeclaration)
+        )
+    except OSError, ValidationError:
+        last = None
+    if last is not None:
+        return last.declaration
+    return Declaration.of(Project(), CheckoutLayout(root=Path()).declaration)
+
+
+def approved_roles(layout: Layout, repository: Path) -> Roles:
+    """Return the role of each path of the repository at `repository`, by the declaration approved (`approved_declaration`).
+
+    Rooted in lup's state, which no room writes: a protected path and an
+    operator's document are told by their path alone, and what reads a project's
+    files to place any other role reads none of a worktree's on the host.
+    """
+    return Roles(
+        root=layout.repository(repository),
+        declaration=approved_declaration(layout, repository),
+    )
+
+
+class Asks(Model):
+    """What a landing's own diff asks that the operator hasn't approved: each file, by its path, and the holds still open on each, whose answer answers it too."""
+
+    paths: list[Path] = []
+    holds: dict[Path, list[int]] = {}
+
+
+class Brought(Model):
+    """Where a file a landing's own diff asks about is put before the operator: the branch that brought it, where that's checked out, who works there, and the file as the gated branch's tip on the remote holds it."""
+
+    branch: str
+    root: Path | None
+    writer: Conversation
+    before: bytes | None
+
+
+class AskedFile(Model):
+    """A file a landing's own diff asks the operator about by its role, as a write to it would, whatever its hooks heard: what it changes it to, and what it gets."""
+
+    path: Path
+    """From the repository's root."""
+    version: str | None
+    """git's id for it at the landing's tip; none where the landing deletes it."""
+    content: bytes | None
+    """Its content there; none where it isn't a file's, or the landing deletes it."""
+    judgement: Judgement
+
+
+def asked_files(git: Git, roles: Roles, old: str | None, tip: str) -> list[AskedFile]:
+    """Return each file the landing of `tip` changes against `old` that its role asks about (`by_role`): the same reading the judge makes of a write to it, of the diff alone, so no hook need have heard it. Read from the objects' own bytes (`Git.own_changes`), each what its id says, so only the ids say what it lands; raise `GitError` where one can't be read or isn't."""
+    changed = {Path(path): entry for path, entry in git.own_changes(old, tip).items()}
+    judged = {
+        path: judgement
+        for path in changed
+        if (judgement := by_role(roles, path)) is not None
+    }
+    held = list(
+        dict.fromkeys(
+            entry.object
+            for path in judged
+            if (entry := changed[path]) is not None and entry.kind == "blob"
+        )
+    )
+    contents = dict(zip(held, git.verified("blob", held), strict=True))
+
+    def asked(path: Path, judgement: Judgement) -> AskedFile:
+        entry = changed[path]
+        return AskedFile(
+            path=path,
+            version=None if entry is None else entry.object,
+            content=None if entry is None else contents.get(entry.object),
+            judgement=judgement,
+        )
+
+    return [asked(path, judgement) for path, judgement in judged.items()]
+
+
 def blob(git: Git, commit: str, path: Path) -> bytes | None:
     """Return the file at `path` in `commit`, or none where `commit` has no file there."""
     listed = git.run(
@@ -792,17 +895,24 @@ def settled_at(item: Item) -> datetime | None:
             return None
 
 
-def outcome(awaited: Awaited, approving: Callable[[int], bool]) -> Outcome:
-    """Say how the operator answered `awaited`, a file a landing waited on, each of its flags approved where `approving` says.
+def outcome(awaited: Awaited, decided: Callable[[int], Decided | None]) -> Outcome:
+    """Say how the operator answered `awaited`, a file a landing waited on: `decided` says how they answered each of its flags and of the holds open on it, none where they haven't. A hold's answer answers it; else each flag must be approved, and one with none has nothing approved.
 
     >>> from lup_dev.policy.waits import Declined
     >>> done = Awaited(path=Path("a.py"), flags=[3], writers=[])
-    >>> outcome(done, lambda _: True).said
+    >>> yes = Decided(at=datetime(2026, 1, 1), approved=True)
+    >>> outcome(done, lambda _: yes).said
     'approved'
+    >>> outcome(done.model_copy(update={"flags": []}), lambda _: yes).said
+    'still waiting for the operator'
     >>> said = Declined(at=datetime(2026, 1, 1), words="Not yet.")
-    >>> no = outcome(done.model_copy(update={"declined": said}), lambda _: False)
+    >>> no = outcome(done.model_copy(update={"declined": said}), lambda _: None)
     >>> (no.approved, no.said, no.words)
     (False, 'declined', 'Not yet.')
+    >>> held = done.model_copy(update={"flags": [3], "holds": [4]})
+    >>> answers = {4: Decided(at=datetime(2026, 1, 1), approved=False, comment="No.")}
+    >>> (outcome(held, answers.get).said, outcome(held, answers.get).words)
+    ('declined', 'No.')
     """
     if awaited.declined is not None:
         return Outcome(
@@ -811,7 +921,17 @@ def outcome(awaited: Awaited, approving: Callable[[int], bool]) -> Outcome:
             said="declined",
             words=awaited.declined.words,
         )
-    if all(approving(each) for each in awaited.flags):
+    holds = [found for each in awaited.holds if (found := decided(each)) is not None]
+    refused = next((each for each in holds if not each.approved), None)
+    if refused is not None:
+        return Outcome(
+            path=awaited.path,
+            approved=False,
+            said="declined",
+            words=refused.comment,
+        )
+    flags = [decided(each) for each in awaited.flags]
+    if holds or (flags and all(each and each.approved for each in flags)):
         return Outcome(path=awaited.path, approved=True, said="approved")
     return Outcome(
         path=awaited.path, approved=False, said="still waiting for the operator"
@@ -825,6 +945,19 @@ def flagged_on(path: Path, landed: list[str], item: Item) -> bool:
             return flagged == path and branch in landed
         case HeldChange(landing=AtLanding() as held):
             return held.path == path and any(each in landed for each in held.branches)
+        case _:
+            return False
+
+
+def on_file(path: Path, item: Item) -> bool:
+    """Say whether `item` is a flagged write or a hold of the file at `path`, on any branch: a hold's summary has a line for each file it holds."""
+    match item.reason:
+        case Flagged(path=flagged):
+            return flagged == path
+        case HeldChange(landing=AtLanding() as held):
+            return held.path == path
+        case HeldChange(summary=summary):
+            return any(line.startswith(f"{path}: ") for line in summary.splitlines())
         case _:
             return False
 
@@ -875,6 +1008,59 @@ class Baseline(Model, arbitrary_types_allowed=True):
             and not approved(item)
             and not isinstance(item.state, Withdrawn)
         ]
+
+    def at_version(self, item: Item, file: AskedFile) -> bool:
+        """Say whether `item`, of the file `file` is of, is of it at `file`'s version: by the version they marked approving it, else the one it says it asks about, else the file kept beside it. A version kept not as text tells nothing, so it's none."""
+        if isinstance(item.state, Decided) and item.state.reviewed is not None:
+            return item.state.reviewed.version == file.version
+        if isinstance(item.reason, Flagged) and item.reason.version is not None:
+            return item.reason.version == file.version
+        try:
+            files = self.inbox.files(item.number)
+        except InboxError:
+            return False
+        kept = next((each for each in files if each.path == file.path), None)
+        if kept is None:
+            return False
+        match kept.after:
+            case None:
+                return file.version is None
+            case Text(text=written):
+                return written.encode() == file.content
+            case _:
+                return False
+
+    def approves(self, file: AskedFile) -> bool:
+        """Say whether the operator approved `file` at its version, as an inbox item on the host keeps it: through a hold, or a flagged write an earlier landing or the judge made, wherever it was. Their latest answer at that version says, so one they declined since asks again."""
+        decided = [
+            state
+            for item in reversed(self.about)
+            if isinstance(state := item.state, Decided)
+            and on_file(file.path, item)
+            and self.at_version(item, file)
+        ]
+        latest = max(decided, key=lambda each: each.at, default=None)
+        return latest is not None and latest.approved
+
+    def open_holds(self, file: AskedFile) -> list[int]:
+        """Return the holds still open on `file` at its version, whose answer answers it too."""
+        return [
+            item.number
+            for item in self.about
+            if isinstance(item.reason, HeldChange)
+            and isinstance(item.state, Waiting)
+            and on_file(file.path, item)
+            and self.at_version(item, file)
+        ]
+
+    def flagged_at(self, file: AskedFile, branches: list[str]) -> bool:
+        """Say whether a flagged write waiting on `branches` is of `file` at its version, so a landing asked again makes no other."""
+        waiting = [
+            found
+            for flag in self.flags(branches, file.path)
+            if (found := self.inbox.items.get(flag.number)) is not None
+        ]
+        return any(self.at_version(item, file) for item in waiting)
 
     def seen(self, path: Path, landed: list[str]) -> Item | None:
         """Return the latest item of the file at `path` on the branches `landed` that the operator saw: a flagged write or a hold at landing they approved, read or commented on, the last they settled; none where they saw none."""
@@ -1105,7 +1291,19 @@ class Lander(Model, arbitrary_types_allowed=True):
         given = {f"refs/heads/{source}": tip, f"refs/heads/{named}": lands}
         branches = await asyncio.to_thread(landed_branches, git, lands, old, given)
         changed = await asyncio.to_thread(changed_files, git, old, lands)
-        holds = self.holds(onto, lands, old, branches.holding, changed=changed)
+        asks = await self.asks(
+            git,
+            Merge(onto=onto, remote=remote, old=old, branch=named, tip=lands),
+            branches.holding,
+        )
+        holds = self.holds(
+            onto,
+            lands,
+            old,
+            [*branches.holding, onto],
+            changed=[*changed, *asks.paths],
+            opened=asks.holds,
+        )
         waited = await self.waited(holds)
         if not all(each.approved for each in waited.outcomes):
             return unapproved(waited, made.moved)
@@ -1606,6 +1804,119 @@ class Lander(Model, arbitrary_types_allowed=True):
             "`land` again."
         )
 
+    async def asks(self, git: Git, landing: Merge, branches: list[str]) -> Asks:
+        """Work out what `landing` asks from its own diff, by each file's role and the declaration approved (`asked_files`), and put each file the operator hasn't approved at that version before them: a flagged write on the branch that brought it, which the landing then waits on as on any (`holds`). So what it holds doesn't depend on the hooks.
+
+        One flagged at that version already, a landing sent again say, or the
+        judge's, needs no other. What can't be read raises, and nothing lands.
+        """
+        roles = await asyncio.to_thread(
+            approved_roles, self.layout, self.launch.repository
+        )
+        files = await asyncio.to_thread(
+            asked_files, git, roles, landing.old, landing.tip
+        )
+        baseline = self.baseline
+        names = [short(each) for each in [*branches, landing.onto]]
+
+        def unanswered() -> list[AskedFile]:
+            return [each for each in files if not baseline.approves(each)]
+
+        def flagging(asked: list[AskedFile]) -> list[AskedFile]:
+            return [each for each in asked if not baseline.flagged_at(each, names)]
+
+        asked = await asyncio.to_thread(unanswered)
+        for file in await asyncio.to_thread(flagging, asked):
+            await self.flagged(git, landing, file, names)
+
+        def opened() -> Asks:
+            return Asks(
+                paths=[each.path for each in asked],
+                holds={
+                    each.path: holds
+                    for each in asked
+                    if (holds := baseline.open_holds(each))
+                },
+            )
+
+        return await asyncio.to_thread(opened)
+
+    async def flagged(
+        self, git: Git, landing: Merge, file: AskedFile, names: list[str]
+    ) -> None:
+        """Put `file`, which `landing`'s own diff asks about, before the operator as a flagged write, holding no one: on whichever of `names`, the branches whose flags hold the landing, brought it, from who works there (`writer`), so it's in the drawer they already review (`lup_dev.policy.since`)."""
+        path = file.path
+
+        def placed() -> Brought:
+            branch = self.brought_by(git, file, names, short(landing.onto))
+            ref = f"refs/heads/{branch}"
+            root = next(
+                (each.root for each in worktrees(git) if each.branch == ref), None
+            )
+            return Brought(
+                branch=branch,
+                root=root,
+                writer=self.writer(root),
+                before=None if landing.old is None else blob(git, landing.old, path),
+            )
+
+        brought = await asyncio.to_thread(placed)
+        branch, before = brought.branch, brought.before
+        judgement = file.judgement
+        summary = "\n".join(each.reason for each in [*judgement.asks, *judgement.flags])
+        await self.delivery.flagged(
+            Flagged(
+                text=(
+                    f"{path} is in what `{branch}` lands, and its role asks the "
+                    f"operator about it. It holds at landing: `{branch}` lands once "
+                    "they approve it."
+                ),
+                summary=summary,
+                worktree=brought.root or self.launch.worktree,
+                path=path,
+                branch=branch,
+                version=file.version,
+            ),
+            brought.writer,
+            unified(path, text(before), text(file.content)),
+            ChangedFile.of(path, before, file.content, judgement.reading()),
+            call=self.call,
+        )
+
+    def brought_by(self, git: Git, file: AskedFile, names: list[str], onto: str) -> str:
+        """Return the branch of `names` that brought `file`: the first but those gated whose tip holds it as the landing does; `onto`, the gated branch landed on, where none does, a commit of its own having brought it."""
+        for name in names:
+            ref = f"refs/heads/{name}"
+            if matching(ref, self.launch.limits.gated):
+                continue
+            tip = git.commit(ref)
+            if tip is not None and blob(git, tip, file.path) == file.content:
+                return name
+        return onto
+
+    def writer(self, root: Path | None) -> Conversation:
+        """Return whose "since you approved" shows a file the hooks may never have heard written: who works in the worktree at `root`, as the judge's session index has it (`Holding.works`), or whose session started there, of a launch still served, the latest heard; the conversation landing where they're one of them, where nobody is, or where it's checked out nowhere, since their call waits on it."""
+        if root is None:
+            return self.party
+        index = SessionIndex(layout=self.layout)
+        live = self.served()
+
+        def works(place: Whereabouts) -> bool:
+            party = place.conversation
+            if party.repository != self.launch.repository or place.launch not in live:
+                return False
+            held = index.read(party.session)
+            kept = [] if held is None else held.works(party.agent or "")
+            started = [place.worktree] if party.agent is None else []
+            return root in [*kept, *started]
+
+        working = [
+            place for place in self.delivery.inbox.whereabouts.values() if works(place)
+        ]
+        if self.party in [each.conversation for each in working] or not working:
+            return self.party
+        return max(working, key=lambda each: each.since).conversation
+
     def holds(
         self,
         onto: str,
@@ -1614,8 +1925,9 @@ class Lander(Model, arbitrary_types_allowed=True):
         branches: list[str],
         *,
         changed: list[Path],
+        opened: dict[Path, list[int]],
     ) -> Wait | None:
-        """Return the landing's wait on each file it changes, `changed`, that's flagged on one of `branches`, those it lands or may have merged (`Branches.holding`), and not approved, every such flag on it; none where none is."""
+        """Return the landing's wait on each file it changes, `changed`, that's flagged on one of `branches`, those it lands or may have merged (`Branches.holding`) and the gated branch, and not approved, every such flag on it, with the holds still open on it (`opened`); none where none is."""
         names = [short(ref) for ref in branches]
         flags = [
             each for each in self.baseline.flags(names) if each.flagged.path in changed
@@ -1632,6 +1944,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                 writers=list(
                     dict.fromkeys(each.writer for each in on if each.writer is not None)
                 ),
+                holds=opened.get(path, []),
             )
 
         return Wait(
@@ -1741,16 +2054,18 @@ class Lander(Model, arbitrary_types_allowed=True):
             return Waited(told="", outcomes=[])
         inbox = self.delivery.inbox
 
-        def approving(number: int) -> bool:
+        def decided(number: int) -> Decided | None:
             found = inbox.items.get(number)
-            return found is not None and approved(found)
+            if found is None or not isinstance(found.state, Decided):
+                return None
+            return found.state
 
         def standing() -> Wait:
             return self.waits.waits.get(wait.key, wait)
 
         def answered() -> bool:
             return all(
-                outcome(each, approving).said != "still waiting for the operator"
+                outcome(each, decided).said != "still waiting for the operator"
                 for each in standing().files
             )
 
@@ -1760,7 +2075,7 @@ class Lander(Model, arbitrary_types_allowed=True):
             told = await self.delivery.held(
                 self.party, answered, on=[], home=self.launch.home
             )
-            outcomes = [outcome(each, approving) for each in standing().files]
+            outcomes = [outcome(each, decided) for each in standing().files]
         finally:
             self.waits.ended(wait.key)
         return Waited(told=told, outcomes=outcomes)
@@ -2514,6 +2829,25 @@ def left_alone(source: str, branches: Branches) -> list[str]:
             else []
         ),
     ]
+
+
+async def unapproved_files(
+    delivery: Delivery, layout: Layout, launch: Register, old: str | None, tip: str
+) -> list[Path]:
+    """Return each file putting `tip` on a gated branch at `old` on the remote changes that its role asks about, the operator not having approved it at that version: the reading a landing holds on (`Lander.asks`), for a push, which can't hold (`Remotes.asking`). Raise what git raises, read through `launch`'s repository pinned."""
+    repository = launch.repository
+    baseline = Baseline(
+        inbox=delivery.inbox,
+        repository=repository,
+        reviews=Reviews.of(layout, delivery.inbox.marks, repository),
+    )
+
+    def read() -> list[Path]:
+        git = Git.pinned(repository)
+        files = asked_files(git, approved_roles(layout, repository), old, tip)
+        return [each.path for each in files if not baseline.approves(each)]
+
+    return await asyncio.to_thread(read)
 
 
 class LandingTools(Model, RoomTools, arbitrary_types_allowed=True):

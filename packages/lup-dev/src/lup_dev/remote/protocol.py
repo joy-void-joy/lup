@@ -21,6 +21,11 @@
   where the branch's tip on the remote is in the history of a gated branch's
   tip there, both fetched into the store, and is pushed with a lease on the tip
   checked (`Remotes.merged`);
+- an update putting commits on a gated ref (`Limits.gated`) is refused where what
+  it lands asks the operator about a file they haven't approved at that version,
+  read from its own diff against that ref's tip on the remote (`Remotes.asking`):
+  a push can't wait for them, so the refusal names `land`, which can, and whose
+  own push passes here once they've answered. What can't be read isn't pushed;
 - what each update would publish is put to the launch's modules' hooks at
   `Publishing` before git runs (`lup.publishing`), with what the
   remote holds already: the listing git asked for before the push
@@ -53,6 +58,7 @@ import asyncio
 import os
 from collections.abc import Awaitable, Callable
 from fnmatch import fnmatchcase
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, override
 
 from pydantic import AfterValidator
@@ -60,6 +66,7 @@ from pydantic import AfterValidator
 from lup.programs import Ran
 from lup.publishing import Place, Push, Refusal, Updating, told
 from lup.types import Model, MutableModel
+from lup_dev.errors import LupDevError
 from lup_dev.git import pinning, stray
 from lup_dev.host.protocol import Action, HostError, Limits, Register, Reply, Request
 from lup_dev.host.rooms import RoomHandler, RoomRoute
@@ -402,6 +409,8 @@ class Remotes(Model, arbitrary_types_allowed=True):
     one moving the integration branch wakes each thread parked until a commit
     it brings (`cli.py`).
     None tells nothing."""
+    asking: Callable[[Register, str | None, str], Awaitable[list[Path]]] | None = None
+    """What says which files of a push to a gated ref its role asks the operator about, unapproved at that version, given the ref's tip on the remote, none where it isn't there, and the commit pushed (`unapproved_files`, `lup_dev.policy.landing`): any it names refuses the update, since a push can't wait for them. None asks nothing, for a service serving no landings."""
     modules: LaunchModules | None = None
     """Each launch's modules, whose hooks at `Publishing` see what a push would
     publish before git runs; none asks nothing, for a service serving no
@@ -707,13 +716,23 @@ class PushHandler(Model, RoomHandler[Pushing]):
             )
         )
         unmerged = {**limited, **merging.refused}
-        within = [each for each in request.updates if each.destination not in unmerged]
+        unapproved = (
+            {}
+            if unmerged and request.atomic
+            else await self.unapproved(
+                request,
+                launch,
+                [each for each in request.updates if each.destination not in unmerged],
+            )
+        )
+        stopped = {**unmerged, **unapproved}
+        within = [each for each in request.updates if each.destination not in stopped]
         barred = (
             Barred()
-            if unmerged and request.atomic
+            if stopped and request.atomic
             else await self.barred(request, launch, within)
         )
-        refused = {**unmerged, **barred.refused}
+        refused = {**stopped, **barred.refused}
         for destination, reason in refused.items():
             self.remotes.say(
                 f"{launch.launch}: refused a push to `{destination}` on "
@@ -793,6 +812,64 @@ class PushHandler(Model, RoomHandler[Pushing]):
                 if isinstance(lease, Lease)
             },
         )
+
+    async def unapproved(
+        self, request: Pushing, launch: Register, allowed: list[Update]
+    ) -> dict[str, str]:
+        """Say why each of `allowed` putting commits on a gated ref isn't pushed: what it lands asks the operator about a file they haven't approved at that version (`Remotes.asking`), by its destination.
+
+        The ref's tip is read from the remote, fetched into the store and named
+        with the commit by their ids, never by anything the room writes; a store
+        reading from elsewhere, or a commit git can't read, refuses it: what
+        can't be read doesn't land. A push can't wait hours for the operator, so
+        it's refused, naming `land`, which can.
+        """
+        asking = self.remotes.asking
+        gated = [
+            each
+            for each in allowed
+            if each.source is not None
+            and matching(each.destination, launch.limits.gated)
+        ]
+        if asking is None or not gated:
+            return {}
+
+        async def why(update: Update, tip: str) -> str | None:
+            named = update.destination
+            try:
+                await self.remotes.contained(launch)
+                refs = await self.remotes.listed(launch, request.remote, push=True)
+                old = next((ref.object for ref in refs if ref.name == named), None)
+                wanted = [] if old is None else [Wanted(object=old, name=named)]
+                if wanted and await self.remotes.fetched(
+                    launch, request.remote, wanted, push=True
+                ):
+                    return f"`{named}` moved on `{request.remote}` while lup read it: push again"
+                paths = await asking(launch, old, tip)
+            except LupDevError as failed:
+                return (
+                    f"lup couldn't read what this puts on `{named}`, so it isn't "
+                    f"pushed: {oneline(str(failed))}"
+                )
+            if not paths:
+                return None
+            files = oneline(", ".join(f"`{each}`" for each in paths))
+            return (
+                f"this puts on `{named}` what the operator hasn't approved, by each "
+                f"file's role: {files}. `land` holds for their answer, as a push "
+                "can't: land it with lup's tool"
+            )
+
+        reasons = {
+            each.destination: await why(each, each.source)
+            for each in gated
+            if each.source is not None
+        }
+        return {
+            destination: reason
+            for destination, reason in reasons.items()
+            if reason is not None
+        }
 
     async def barred(
         self, request: Pushing, launch: Register, allowed: list[Update]
