@@ -139,7 +139,7 @@ from lup_dev.inbox.delivery import (
     standing,
 )
 from lup_dev.inbox.marks import routes as marks_routes
-from lup_dev.inbox.notices import NotifySend
+from lup_dev.inbox.notices import NotifySend, Unsaid
 from lup_dev.inbox.protocol import (
     AnswerApproval,
     AnswerCheck,
@@ -575,6 +575,10 @@ def host_serve(context: typer.Context) -> None:
     and ends each launch whose launcher and container are both gone
     (`Sweeping`). `lup-dev host stop` or Ctrl-C stops it; the launches it serves
     stay recorded, and the next service serves them.
+
+    Tried on a state of its own (`LupDevSettings.lup_host_rehearsing`), it raises
+    no notice, wakes no thread parked in the ledger it copied, and reads no
+    approval's types, so nothing it does reaches past that state.
     """
     if context.invoked_subcommand is not None:
         return
@@ -582,6 +586,7 @@ def host_serve(context: typer.Context) -> None:
     couriers = Couriers(adapters=known)
     wakers = Wakers(adapters=known)
     settings = LupDevSettings()
+    rehearsing = settings.lup_host_rehearsing
     layout = Layout.of(settings)
     changes = Changes()
     pushes = Pushes()
@@ -591,7 +596,7 @@ def host_serve(context: typer.Context) -> None:
         waker=wakers,
         pushes=pushes,
         layout=layout.host,
-        notices=NotifySend(),
+        notices=Unsaid() if rehearsing else NotifySend(),
         clock=SystemClock(),
         say=typer.echo,
         settle_hold=lambda change, approved, said: hold_answered(
@@ -620,7 +625,7 @@ def host_serve(context: typer.Context) -> None:
         podman=podman,
         say=typer.echo,
         running=workers.commands,
-        coming=coming,
+        coming=None if rehearsing else coming,
     )
     remotes = Remotes(
         say=typer.echo,
@@ -671,7 +676,11 @@ def host_serve(context: typer.Context) -> None:
         changes=changes,
         waker=wakers,
         pushes=pushes,
-        companions=[types, sweeping, *([] if dashboard is None else [dashboard])],
+        companions=[
+            *([] if rehearsing else [types]),
+            sweeping,
+            *([] if dashboard is None else [dashboard]),
+        ],
     )
     asyncio.run(service.serve())
 

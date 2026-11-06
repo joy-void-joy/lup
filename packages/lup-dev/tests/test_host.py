@@ -2194,6 +2194,31 @@ def shown(dashboard: DashboardProcess | None) -> Route:
     return Route.to(Showing(dashboard=dashboard, missing="no dashboard here"))
 
 
+def test_one_who_asks_for_the_dashboard_as_it_starts_waits_for_that_one(
+    tmp_path: Path,
+) -> None:
+    dashboard, record = stand_in(tmp_path)
+
+    async def both() -> list[DashboardShown]:
+        asked = await asyncio.gather(dashboard.start(), dashboard.start())
+        await dashboard.end()
+        return list(asked)
+
+    first, second = asyncio.run(both())
+    assert first == second
+    started = [
+        each for each in record.read_text().splitlines() if each.startswith("started")
+    ]
+    assert len(started) == 1
+
+
+def test_the_service_keeps_its_process_id_beside_its_lock(
+    layout: HostLayout, said: list[str]
+) -> None:
+    with served(service(layout, Judge(), said)):
+        assert layout.pid.read_text() == str(os.getpid())
+
+
 def test_the_dashboard_starts_with_the_service_its_token_kept_and_ends_with_it(
     layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
 ) -> None:

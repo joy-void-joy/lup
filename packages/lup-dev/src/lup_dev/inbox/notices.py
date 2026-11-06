@@ -29,6 +29,14 @@ class Notices(ABC):
         """Tell the operator `summary`, with `body` beneath it."""
 
 
+class Unsaid(Notices, Model):
+    """Tells nobody: for a service tried on a state of its own (`lup_dev/switching.py`), whose items aren't the operator's."""
+
+    @override
+    async def notify(self, summary: str, body: str) -> None:
+        pass
+
+
 class NotifySend(Notices, Model):
     """The desktop's notices, raised through `notify-send` where it's installed."""
 
