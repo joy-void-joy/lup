@@ -21,7 +21,7 @@ from lup_dashboard.copied import Asking, taken
 from lup_dashboard.demo import Demo
 from lup_dashboard.errors import CopyError
 from lup_dashboard.host import Host, Sockets
-from lup_dashboard.layout import CopyLayout, DashboardLayout, checkout
+from lup_dashboard.layout import DashboardLayout, DemoLayout, checkout
 from lup_dashboard.server import Access, OfCopy, application
 from lup_dev.cli import adapters
 from lup_dev.host.protocol import HostError
@@ -201,7 +201,7 @@ def copied(port: int, address: str, timings: Path | None = None) -> None:
     with tempfile.TemporaryDirectory(prefix="lup-dashboard-copy-") as kept:
         try:
             host = taken(
-                CopyLayout(home=Path(kept)),
+                DemoLayout(home=Path(kept)),
                 Asking(),
                 root,
                 readers,

@@ -17,9 +17,10 @@ from lup.blocks import OfAgent
 from lup.programs import ProgramError, run
 from lup.types import Model, MutableModel
 from lup_dashboard.api import Asked, Replied
-from lup_dashboard.copied import Asking, CopyHost, Withholding, asked_kinds, taken
+from lup_dashboard.copied import Asking, Withholding, taken
 from lup_dashboard.errors import CopyError
-from lup_dashboard.layout import CopyLayout
+from lup_dashboard.handled import Handled, asked_kinds
+from lup_dashboard.layout import DemoLayout
 from lup_dashboard.server import Access, OfCopy, application
 from lup_dev.adapters.claude import ClaudeRecords, ClaudeTranscripts
 from lup_dev.host.copying import Copy, Copying, RecordOf
@@ -517,7 +518,7 @@ def checkout(tmp_path: Path) -> Path:
 def test_every_request_the_page_may_send_acts_on_the_copy_alone(tmp_path: Path) -> None:
     host, standing = held_by_host(tmp_path)
     from_host = asking(host)
-    copy = CopyLayout(home=tmp_path / "copy")
+    copy = DemoLayout(home=tmp_path / "copy")
     root = checkout(tmp_path)
     before = files(tmp_path / "host", host.worktree, host.elsewhere, host.home, root)
     sent: list[str] = []
@@ -743,7 +744,7 @@ def test_a_file_the_checkout_doesnt_read_stops_the_copy_naming_it(
 ) -> None:
     host, _ = held_by_host(tmp_path)
     host.layout.host.record("one").write_text(json.dumps({"launch": "one"}))
-    copy = CopyLayout(home=tmp_path / "copy")
+    copy = DemoLayout(home=tmp_path / "copy")
 
     with pytest.raises(CopyError, match=r"run/host/launches/one\.json, copied from"):
         taken(copy, asking(host), checkout(tmp_path), {})
@@ -756,8 +757,8 @@ def test_a_session_the_operator_ran_on_the_host_is_never_read_into_the_copy(
     operator = host.layout.state / "operator" / "projects" / "-w"
     operator.mkdir(parents=True)
     (operator / "s5.jsonl").write_text(human("mine") + "\n")
-    copy = CopyLayout(home=tmp_path / "copy")
-    copied: CopyHost = taken(
+    copy = DemoLayout(home=tmp_path / "copy")
+    copied: Handled = taken(
         copy, asking(host), checkout(tmp_path), {"claude": ClaudeTranscripts()}
     )
 
