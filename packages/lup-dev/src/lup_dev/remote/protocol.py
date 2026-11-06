@@ -594,7 +594,7 @@ class Remotes(Model, arbitrary_types_allowed=True):
     def computed(self, launch: Register) -> str | None:
         """Return the full name of the branch the host computes for `launch`'s repository; none where it computes none (`trying`)."""
         branches = None if self.trying is None else self.trying(launch)
-        return None if branches is None else f"refs/heads/{branches.running}"
+        return None if branches is None else branches.running_ref
 
     async def url(self, launch: Register, remote: str, *, push: bool) -> str:
         """Return the URL of the remote named `remote` in `launch`'s repository, as git reads it there for a push or a fetch.
@@ -922,7 +922,7 @@ class PushHandler(Model, RoomHandler[Pushing]):
             self.own
             or trying is None
             or hosted is None
-            or destination != f"refs/heads/{trying.integration}"
+            or destination != trying.integration_ref
         ):
             return []
         return await hosted(launch, old, tip)

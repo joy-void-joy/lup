@@ -38,6 +38,7 @@ from lup_dev.stored import read_model, write_model
 from lup_ledger.parties import Conversation
 
 if TYPE_CHECKING:
+    from lup_dev.host.protocol import Branches
     from lup_dev.layout import Layout
 
 
@@ -132,9 +133,7 @@ class Trials(Model):
 def computed_ref(layout: Layout, repository: Path) -> str | None:
     """Return the full name of the branch lup computes for the repository at `repository`, as the declaration approved names it: the running branch where it isn't the integration branch; none where they're one."""
     branches = approved_branches(layout, repository)
-    if branches.running == branches.integration:
-        return None
-    return f"refs/heads/{branches.running}"
+    return None if branches.running == branches.integration else branches.running_ref
 
 
 def running_tip(layout: Layout, repository: Path) -> str | None:
@@ -340,13 +339,14 @@ def moved_on(
     return stands.model_copy(update={"versions": versions[-keeping:]})
 
 
-def move_ref(git: Git, running: str, commit: str) -> str | None:
-    """Move the local branch `running` to `commit`, for whoever reads it there; say why it didn't, or none where it did.
+def move_ref(git: Git, branches: Branches, commit: str) -> str | None:
+    """Move the local running branch of `branches` to `commit`, for whoever reads it there; say why it didn't, or none where it did.
 
     Left where a worktree has it checked out, whose files it would leave behind,
     and where a link under `refs/` would have git write elsewhere (`refs_astray`).
     What reads what runs reads the record, so neither changes that.
     """
+    running = branches.running
     swayed = refs_astray(git)
     if swayed:
         return f"`{running}` here still names what it did: {swayed}"
@@ -354,7 +354,7 @@ def move_ref(git: Git, running: str, commit: str) -> str | None:
         return (
             f"`{running}` here still names what it did: a worktree has it checked out"
         )
-    git.run("update-ref", f"refs/heads/{running}", commit)
+    git.run("update-ref", branches.running_ref, commit)
     return None
 
 

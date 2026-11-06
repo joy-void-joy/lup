@@ -536,9 +536,9 @@ class Reader(Model, arbitrary_types_allowed=True):
 
     def old(self, git: Git, repository: Path) -> str | None:
         """Return the integration branch of the repository at `repository`'s tip, through `git`: the remote's copy where it's there, else the local branch's; none where there's neither."""
-        integration = approved_branches(self.layout, repository).integration
-        remote = git.commit(f"refs/remotes/{self.remote}/{integration}")
-        return remote or git.commit(f"refs/heads/{integration}")
+        branches = approved_branches(self.layout, repository)
+        remote = git.commit(f"refs/remotes/{self.remote}/{branches.integration}")
+        return remote or git.commit(branches.integration_ref)
 
     def base(self, git: Git, old: str | None, tip: str | None) -> str | None:
         """Return where the branch at `tip` left the integration branch at `old`: their merge base, the latest commit both hold, so a file only the integration branch changed since isn't one the branch changed, and one both changed shows the branch's change alone; `old` where there's no `tip`, or the two share no history.

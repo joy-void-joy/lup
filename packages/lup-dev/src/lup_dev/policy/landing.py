@@ -1691,7 +1691,7 @@ class Lander(Model, arbitrary_types_allowed=True):
             raise HostError(message)
         require("push", self.launch)
         refs = await self.remotes.listed(self.launch, remote, push=True)
-        dev_ref = f"refs/heads/{branches.integration}"
+        dev_ref = branches.integration_ref
         dev = next((ref.object for ref in refs if ref.name == dev_ref), None)
         if dev is None:
             message = f"`{remote}` has no `{branches.integration}` to compute from"
@@ -1745,7 +1745,7 @@ class Lander(Model, arbitrary_types_allowed=True):
             gated_on = await self.gated_in_room(git, name, found.commit, branches)
         if gated_on is not None:
             return gated_on
-        onto = f"refs/heads/{branches.running}"
+        onto = branches.running_ref
         asked = Merge(onto=onto, remote=remote, old=dev, branch=name, tip=found.commit)
         holding = [f"refs/heads/{name}"]
         changed = await asyncio.to_thread(changed_files, git, dev, found.commit)
@@ -1896,7 +1896,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         """Compute `live` as it stands by now with `on` on trial, the operator having answered what it held on, gate that where it isn't what passed (`found`), keep it, and push it: what came of it, or why nothing landed. What the record said is put back where the push fails."""
         repository = self.launch.repository
         refs = await self.remotes.listed(self.launch, remote, push=True)
-        dev_ref = f"refs/heads/{branches.integration}"
+        dev_ref = branches.integration_ref
         dev = next((ref.object for ref in refs if ref.name == dev_ref), None)
         if dev is None:
             message = f"`{remote}` has no `{branches.integration}` to compute from"
@@ -1924,7 +1924,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                 return refused
         commit = now.commit or now.trial.live or dev
         stands = moved_on(now.trial, commit, dev, now.plan, at)
-        onto = f"refs/heads/{branches.running}"
+        onto = branches.running_ref
         updates = [
             *([Update(source=commit, destination=onto)] if now.commit else []),
             *(
@@ -1952,7 +1952,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                 f"Not landed: {failed[0].error}. What the operator approved stays "
                 f"approved.{refusals}"
             )
-        unmoved = await asyncio.to_thread(move_ref, git, branches.running, commit)
+        unmoved = await asyncio.to_thread(move_ref, git, branches, commit)
         untracked = await asyncio.to_thread(tracked, git, remote, onto, commit)
         await asyncio.to_thread(self.pinned_copies, stands)
         return Joining(

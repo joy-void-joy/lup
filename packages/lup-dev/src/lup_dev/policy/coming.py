@@ -202,8 +202,8 @@ class Coming(Model, arbitrary_types_allowed=True):
 
     async def commits(self, launch: Register, updates: list[Update]) -> list[Thread]:
         """Wake what `pushed` wakes, raising what fails but git's word, which is said."""
-        integration = approved_branches(self.layout, launch.repository).integration
-        destination = f"refs/heads/{integration}"
+        branches = approved_branches(self.layout, launch.repository)
+        destination = branches.integration_ref
         tip = next(
             (
                 each.source
@@ -227,7 +227,7 @@ class Coming(Model, arbitrary_types_allowed=True):
         except LupDevError as failed:
             self.say(
                 f"{launch.launch}: git couldn't say which commits a parked thread "
-                f"waits on reached `{integration}`, so none was woken: {failed}"
+                f"waits on reached `{branches.integration}`, so none was woken: {failed}"
             )
             return []
         return self.concerns.due(
