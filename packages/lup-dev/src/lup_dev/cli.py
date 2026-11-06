@@ -66,7 +66,7 @@ from lup_dev.codescan.ruff import Ruff
 from lup_dev.commanding import RoomExchanges, RoomMarks
 from lup_dev.confined import Confined
 from lup_dev.conversions import inbox_opened
-from lup_dev.copies import removable
+from lup_dev.copies import Kept, removable
 from lup_dev.declaration.load import declared_profiles, load, person_layer
 from lup_dev.declaration.profiles import chosen
 from lup_dev.declaration.project import Project
@@ -280,10 +280,17 @@ from lup_dev.private.withheld import Facts, HostFacts, Withheld, kept
 from lup_dev.remote.config import Gating
 from lup_dev.remote.protocol import Remotes, Update
 from lup_dev.remote.protocol import routes as remote_routes
+from lup_dev.restoring import RestoreError, Restoring
 from lup_dev.settings import LupDevSettings, TerminalVariables
 from lup_dev.staging import Changed, Lines, StagingError
 from lup_dev.stored import read_model, write_model
 from lup_dev.switching import (
+    LastSwitch,
+    Programs,
+    Serving,
+    Switch,
+    Switched,
+    Switching,
     host_starter,
 )
 from lup_dev.worker import RepositoryModules, worked
@@ -3296,6 +3303,89 @@ def trust() -> None:
     kept = trust.kept_first()
     if kept is not None:
         typer.echo(kept)
+
+
+@app.command("restore")
+def restore(
+    commit: Annotated[
+        str | None,
+        typer.Argument(
+            help="The commit of the copy to go back to, or its start; left out, the copies are listed and nothing changes."
+        ),
+    ] = None,
+    *,
+    ledger: Annotated[
+        bool,
+        typer.Option(
+            help="Put the ledger back as that copy left it too, losing what happened since, which it says and asks about first."
+        ),
+    ] = False,
+) -> None:
+    """Go back to a copy of `lup-dev` kept, or list them, with or without a host service or a dashboard.
+
+    The last resort, in your own terminal. Your `lup-dev` hands this command to
+    the copy that answered before the one running, so it works whatever is wrong
+    with that one. It stops the host service if one runs, snapshots the ledger,
+    moves the host service, the judge and your `lup-dev` to the copy, with what
+    was approved with it, starts the service, and checks that it and the
+    dashboard answer, putting back what it moved where they don't. A later launch
+    asks about the running branch's tip again.
+
+    A commit you approved whose copy is gone is built again from the commit. The
+    ledger is left as it is unless you ask, or the copy can't read it as it stands.
+    """
+    inside = [runtime.name() for runtime in runtimes() if runtime.inside()]
+    if inside:
+        message = (
+            f"this runs inside a {inside[0]} session, and which `lup-dev` runs is "
+            "the operator's: run it in your own terminal"
+        )
+        raise RestoreError(message)
+    layout = Layout.of(LupDevSettings())
+    clock = SystemClock()
+    host = HostClient(
+        layout=layout.host,
+        clock=clock,
+        starter=host_starter(layout),
+        timeout=timedelta(seconds=10),
+    )
+
+    def built_again(kept: Kept, then: Callable[[Kept], Switch]) -> Switch:
+        root = Git.pinned(kept.repository).main_worktree()
+        trust = machine_trust(root, [])
+        with trust.built(kept.approval, layout.judge(kept.repository)) as built:
+            return then(built)
+
+    restoring = Restoring(
+        layout=layout,
+        host=host,
+        switcher=Switching(
+            layout=layout,
+            host=host,
+            answers=Serving(clock=clock),
+            processes=Programs(),
+            clock=clock,
+        ),
+        confirm=typer.confirm,
+        built_again=built_again,
+        say=typer.echo,
+    )
+    if commit is None:
+        typer.echo(restoring.listing())
+        return
+    try:
+        switch = restoring.restored(commit, ledger=ledger)
+    except (RestoreError, HostError) as refused:
+        write_model(
+            layout.host.switched,
+            LastSwitch(
+                commit=commit, at=clock.now(), said=str(refused), answered=False
+            ),
+        )
+        raise
+    typer.echo(switch.report())
+    if not isinstance(switch, Switched):
+        raise typer.Exit(1)
 
 
 @app.command("verdicts")
