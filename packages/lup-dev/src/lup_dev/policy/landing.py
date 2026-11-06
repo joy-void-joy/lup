@@ -2831,6 +2831,25 @@ def left_alone(source: str, branches: Branches) -> list[str]:
     ]
 
 
+async def unapproved_files(
+    delivery: Delivery, layout: Layout, launch: Register, old: str | None, tip: str
+) -> list[Path]:
+    """Return each file putting `tip` on a gated branch at `old` on the remote changes that its role asks about, the operator not having approved it at that version: the reading a landing holds on (`Lander.asks`), for a push, which can't hold (`Remotes.asking`). Raise what git raises, read through `launch`'s repository pinned."""
+    repository = launch.repository
+    baseline = Baseline(
+        inbox=delivery.inbox,
+        repository=repository,
+        reviews=Reviews.of(layout, delivery.inbox.marks, repository),
+    )
+
+    def read() -> list[Path]:
+        git = Git.pinned(repository)
+        files = asked_files(git, approved_roles(layout, repository), old, tip)
+        return [each.path for each in files if not baseline.approves(each)]
+
+    return await asyncio.to_thread(read)
+
+
 class LandingTools(Model, RoomTools, arbitrary_types_allowed=True):
     """`land`, as the host service serves it to each launched session, beside the inbox's and the judge's tools."""
 

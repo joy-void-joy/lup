@@ -269,7 +269,7 @@ from lup_dev.policy.holds import (
 )
 from lup_dev.policy.importers import BackgroundSpawner
 from lup_dev.policy.judge import finding
-from lup_dev.policy.landing import LandingTools
+from lup_dev.policy.landing import LandingTools, unapproved_files
 from lup_dev.policy.report import finding_lines
 from lup_dev.policy.since import routes as since_routes
 from lup_dev.policy.tools import JudgeTools, judge_call
@@ -629,11 +629,7 @@ def host_serve(context: typer.Context) -> None:
         running=workers.commands,
         coming=coming,
     )
-    remotes = Remotes(
-        say=typer.echo,
-        landed=partial(after_push, delivery, coming),
-        modules=workers,
-    )
+    remotes = host_remotes(delivery, layout, coming, workers)
     waits = Waits(changes=changes)
     delivery.landing = waits.holding
     service = HostService(
@@ -712,6 +708,18 @@ def typed_reading(
 def approval_reading(git: Git, branches: Branches, main: Path) -> Path:
     """Return the worktree a push's approval has its types read in: the checkout of the running branch, whose tip it's about; else of the integration branch, what that branch is made from, as `live` may have none; else `main`, the repository's main worktree."""
     return git.checkout(branches.running) or git.checkout(branches.integration) or main
+
+
+def host_remotes(
+    delivery: Delivery, layout: Layout, coming: Coming, modules: LaunchModules
+) -> Remotes:
+    """Return git on the host for each launch's room: each push held to what the operator approved of what it lands (`unapproved_files`), put to `modules`, and told to what follows a push (`after_push`)."""
+    return Remotes(
+        say=typer.echo,
+        landed=partial(after_push, delivery, coming),
+        asking=partial(unapproved_files, delivery, layout),
+        modules=modules,
+    )
 
 
 async def after_push(

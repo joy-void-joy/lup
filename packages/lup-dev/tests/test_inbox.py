@@ -245,7 +245,7 @@ from lup_dev.policy.worktrees import Holding as Worked
 from lup_dev.policy.worktrees import SessionIndex
 from lup_dev.private.withheld import Withheld
 from lup_dev.private.withheld import kept as listed_at
-from lup_dev.remote.protocol import Remotes, Update
+from lup_dev.remote.protocol import Pushed, PushHandler, Pushing, Remotes, Update
 from lup_dev.settings import LupDevSettings
 from lup_dev.stored import read_model, write_model
 from lup_dev.worker import HostExchanges, HostMarks, RepositoryModules
@@ -9786,6 +9786,121 @@ def test_a_branch_changing_nothing_its_role_asks_about_lands_as_before(
     assert "The operator approved" not in answer
     assert items == []
     assert not [each for each in notices.raised if "landing" in each]
+    assert landings.on_forge("refs/heads/dev") == tip
+
+
+def checking_pushes(delivery: Delivery, machine: Layout, said: list[str]) -> Remotes:
+    """The remotes the host service pushes through, each push held to what the operator approved of what it lands, telling nothing after it."""
+    coming = Coming(delivery=delivery, layout=machine, say=said.append)
+    served = cli.host_remotes(delivery, machine, coming, Predating())
+    return served.model_copy(
+        update={"say": said.append, "landed": None, "modules": None}
+    )
+
+
+def test_a_push_to_a_gated_branch_is_refused_where_what_it_lands_asks_and_goes_once_approved(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    """A push can't wait for the operator, so it's refused before anything reaches the remote, read as a landing reads its diff, and flags nothing: `land` is the way through."""
+    content = "on: push\n"
+    landings.wrote(landings.feat, WORKFLOW, content)
+    old = landings.on_forge("refs/heads/dev")
+    tip = landings.merged()
+    onto = Pushing(
+        remote="origin", updates=[Update(source=tip, destination="refs/heads/dev")]
+    )
+    beside = Pushing(
+        remote="origin", updates=[Update(source=tip, destination="refs/heads/other")]
+    )
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, _):
+        launch = landings.launched("claude", name="pushing")
+        handler = PushHandler(remotes=checking_pushes(delivery, machine, said))
+        refused = asyncio.run(handler.answer(onto, launch))
+        kept = landings.on_forge("refs/heads/dev")
+        other = asyncio.run(handler.answer(beside, launch))
+        flags = [
+            item.number
+            for item in delivery.inbox.items.values()
+            if isinstance(item.reason, Flagged)
+        ]
+        hold = hold_on(landings, machine, clock, WORKFLOW, content)
+        inbox("answer", str(hold), "--approve", "--comment", "")
+        pushed = asyncio.run(handler.answer(onto, launch))
+    assert isinstance(refused, Pushed)
+    [update] = refused.updates
+    assert update.error is not None
+    assert f"`{WORKFLOW}`" in update.error
+    assert "`land`" in update.error
+    assert kept == old
+    assert flags == []
+    assert isinstance(other, Pushed)
+    assert [each.error for each in other.updates] == [None]
+    assert isinstance(pushed, Pushed)
+    assert [each.error for each in pushed.updates] == [None]
+    assert landings.on_forge("refs/heads/dev") == tip
+
+
+def test_a_push_to_a_gated_branch_changing_nothing_its_role_asks_about_goes_as_before(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    tip = landings.merged()
+    onto = Pushing(
+        remote="origin", updates=[Update(source=tip, destination="refs/heads/dev")]
+    )
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, _):
+        launch = landings.launched("claude", name="pushing")
+        handler = PushHandler(remotes=checking_pushes(delivery, machine, said))
+        pushed = asyncio.run(handler.answer(onto, launch))
+    assert isinstance(pushed, Pushed)
+    assert [each.error for each in pushed.updates] == [None]
+    assert landings.on_forge("refs/heads/dev") == tip
+
+
+def test_a_binary_file_a_landing_asks_about_approved_from_the_terminal_passes_its_own_push(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    """Its content isn't kept, so the flag says its version: the push `land` makes reads the same approval the landing waited on."""
+    path, content = "certs/host.p12", b"\x00\x01 a key store"
+    file = landings.feat / path
+    file.parent.mkdir()
+    file.write_bytes(content)
+    landings.shell.commit(landings.feat, "a key store")
+    tip = landings.merged()
+    with (
+        inboxed(
+            machine,
+            clock,
+            notices,
+            said,
+            rooms=landings.room,
+            parser=landings.parser,
+            remotes=lambda delivery: checking_pushes(delivery, machine, said),
+        ) as delivery,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        landing, wait = held_landing(machine, clock, delivery, pool)
+        [[flag]] = [each.flags for each in wait.files]
+        kept = delivery.inbox.files(flag)
+        inbox("done", str(flag))
+        answer, error = landing.result(timeout=60)
+    assert not error
+    assert [each.after for each in kept] == [Binary(size=len(content))]
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
     assert landings.on_forge("refs/heads/dev") == tip
 
 
