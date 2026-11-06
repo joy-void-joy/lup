@@ -14,11 +14,12 @@ import os
 import socket
 import sys
 import threading
-from concurrent.futures import ThreadPoolExecutor
+import time
+from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, override
+from typing import TYPE_CHECKING, Literal, NamedTuple, override
 
 import pytest
 from mcp import Client
@@ -232,6 +233,7 @@ from lup_dev.policy.since import (
     SinceReviewed,
     ViewedFile,
 )
+from lup_dev.policy.store import Held, Store, WorktreeState
 from lup_dev.policy.tools import JudgeTools, stands
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.policy.waits import LandingsWaiting, ShowLandings, Waits
@@ -5677,8 +5679,9 @@ def judged_in_its_process(
     repo: Path,
     *,
     runtime: str,
+    again: bool = False,
 ) -> Generator[Watched]:
-    """The host service with lup's inbox, serving launch `one` of `runtime` in `repo`, judged by this `lup-dev` in its repository's process; each held change answered in the inbox reaches its hold."""
+    """The host service with lup's inbox, serving launch `one` of `runtime` in `repo`, judged by this `lup-dev` in its repository's process; each held change answered in the inbox reaches its hold. Leaving it stops the service as a restart does; `again` serves the launch from its record, as a service started again does, rather than registering it."""
     workers = Workers(
         layout=machine.host,
         say=said.append,
@@ -5706,7 +5709,8 @@ def judged_in_its_process(
             limits=Limits(actions=[], protected=[]),
             github=None,
         )
-        client(machine.host, clock).register(launch)
+        if not again:
+            client(machine.host, clock).register(launch)
         yield delivery
 
 
@@ -5876,6 +5880,497 @@ def test_a_subagents_held_edit_waits_unlanded_until_the_operator_answers_making_
     assert hold.answer is not None
     assert (hold.answer.approved, hold.answer.comment) == (True, comment)
     assert left == []
+
+
+# A hold outliving the host service: the service stops while the hold's call waits,
+# as it does when it restarts, and is started again; the writer's answer reaches
+# them, whichever conversation they are and whichever comes first, the answer or
+# their next call (#338).
+
+
+class Writer(NamedTuple):
+    """The conversation that made the change, as their runtime's hooks name them."""
+
+    runtime: str
+    hooked: Callable[..., str]
+    """Spells a hook's payload for the runtime."""
+    where: dict[str, str]
+    """What their hooks carry besides the session: a subagent's ids, a turn's."""
+
+
+CLAUDE = Writer("claude", claude, {})
+SUBAGENT = Writer("claude", claude, {"agent_id": "a1", "agent_type": "general-purpose"})
+WRITERS = pytest.mark.parametrize(
+    "writer",
+    [
+        CLAUDE,
+        SUBAGENT,
+        Writer("codex", codex, {"turn_id": "u1"}),
+        Writer("codex", codex, {"turn_id": "u1", "agent_id": "a1"}),
+    ],
+    ids=["claude", "claude-subagent", "codex", "codex-subagent"],
+)
+LONG_WAIT: dict[str, JsonValue] = {"on": ["operator"], "within": "PT5M"}
+"""A `wait_inbox` the operator's news ends; past its time limit, a test moving the clock ends it, so one nothing ended fails rather than hangs."""
+ENDING = 10
+"""How long the operator's news may take to end such a wait before the test fails: under pytest's own timeout."""
+
+
+def shelled(event: str, key: str, repo: Path, writer: Writer, **more: object) -> str:
+    """A hook of `writer`'s shell call `key`, at `event`."""
+    return writer.hooked(
+        event,
+        tool_name="Bash",
+        tool_input={"command": "printf 'More.\\n' >> AGENTS.md"},
+        tool_use_id=key,
+        cwd=str(repo),
+        **writer.where,
+        **more,
+    )
+
+
+def in_its_wait(machine: Layout, repo: Path) -> None:
+    """Return once the one hold is noted and its call waits on it, the process being another: a stop from here on lands while the hold waits."""
+    holds = Holds(layout=machine.store(repo))
+    store = Store(layout=machine.store(repo), worktree=repo)
+    began = time.monotonic()
+    while True:
+        assert time.monotonic() - began < PATIENCE
+        [hold] = holds.all()
+        if holds.waited_on(hold.key) and store.state().holding:
+            return
+        time.sleep(0.01)
+
+
+def held_through_a_stop(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    repo: Path,
+    shell: Shell,
+    writer: Writer,
+) -> Item:
+    """Have `writer` write an operator's document with a shell call, held, and stop the host service while the call waits; return the held change's item, still unanswered."""
+    agents = documented(repo, shell)
+    with (
+        ThreadPoolExecutor(max_workers=1) as pool,
+        judged_in_its_process(
+            machine, clock, notices, said, repo, runtime=writer.runtime
+        ) as delivery,
+    ):
+        hook = machine.host.launch("one").hook
+        send(hook, writer.hooked("SessionStart", source="startup", cwd=str(repo)))
+        send(hook, shelled("PreToolUse", "b1", repo, writer))
+        agents.write_text("# Agents\nMore.\n")
+        finished = pool.submit(
+            send, hook, shelled("PostToolUse", "b1", repo, writer, tool_response="")
+        )
+        item = held_item(delivery, notices)
+        in_its_wait(machine, repo)
+        assert not finished.done()
+    assert finished.result(timeout=PATIENCE) == ""
+    return item
+
+
+def told_beside(*answers: str) -> list[str]:
+    """What each of these hooks' answers told the model, those telling nothing left out."""
+    return [context(each) for each in answers if each]
+
+
+def settled_hold(machine: Layout) -> Hold:
+    """The one hold, once a checkpoint settled it: its files no longer held."""
+    [holds] = [each for each in stores(machine) if each.all()]
+    [hold] = holds.all()
+    assert not hold.waited()
+    return hold
+
+
+@WRITERS
+def test_a_hold_outliving_the_service_answered_before_its_writers_next_call_is_told_once_beside_it(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    repo: Path,
+    shell: Shell,
+    writer: Writer,
+) -> None:
+    item = held_through_a_stop(
+        machine, clock, notices, said, repo=repo, shell=shell, writer=writer
+    )
+    with judged_in_its_process(
+        machine, clock, notices, said, repo, runtime=writer.runtime, again=True
+    ) as delivery:
+        hook = machine.host.launch("one").hook
+        approving(item, "keep it")
+        started = send(hook, shelled("PreToolUse", "b2", repo, writer))
+        finished = send(
+            hook, shelled("PostToolUse", "b2", repo, writer, tool_response="")
+        )
+        send(hook, shelled("PreToolUse", "b3", repo, writer))
+        after = send(hook, shelled("PostToolUse", "b3", repo, writer, tool_response=""))
+        left = delivery.inbox.waiting(Operator())
+    told = told_beside(started, finished)
+    assert sum("which they have since approved: keep it." in each for each in told) == 1
+    assert after == ""
+    assert left == []
+    assert settled_hold(machine).orphaned
+    assert (repo / "AGENTS.md").read_text() == "# Agents\nMore.\n"
+
+
+@WRITERS
+def test_a_hold_outliving_the_service_answered_while_a_call_of_its_writers_runs_is_told_once_beside_it(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    repo: Path,
+    shell: Shell,
+    writer: Writer,
+) -> None:
+    item = held_through_a_stop(
+        machine, clock, notices, said, repo=repo, shell=shell, writer=writer
+    )
+    with judged_in_its_process(
+        machine, clock, notices, said, repo, runtime=writer.runtime, again=True
+    ):
+        hook = machine.host.launch("one").hook
+        started = send(hook, shelled("PreToolUse", "b2", repo, writer))
+        approving(item, "keep it")
+        finished = send(
+            hook, shelled("PostToolUse", "b2", repo, writer, tool_response="")
+        )
+    told = told_beside(started, finished)
+    assert sum("which they have since approved: keep it." in each for each in told) == 1
+    assert settled_hold(machine).orphaned
+
+
+@WRITERS
+def test_a_hold_outliving_the_service_answered_while_its_writer_waits_ends_the_wait_as_the_operators_news(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    repo: Path,
+    shell: Shell,
+    writer: Writer,
+) -> None:
+    item = held_through_a_stop(
+        machine, clock, notices, said, repo=repo, shell=shell, writer=writer
+    )
+    with (
+        ThreadPoolExecutor(max_workers=1) as pool,
+        judged_in_its_process(
+            machine, clock, notices, said, repo, runtime=writer.runtime, again=True
+        ) as delivery,
+    ):
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        starting = writer.hooked(
+            "PreToolUse",
+            tool_name="mcp__lup__wait_inbox",
+            tool_input=LONG_WAIT,
+            tool_use_id="w1",
+            cwd=str(repo),
+            **writer.where,
+        )
+        stamped = json.loads(send(hook, starting))["hookSpecificOutput"]["updatedInput"]
+        waiting = pool.submit(call, mcp, "wait_inbox", stamped)
+        assert delivery.holding.wait(timeout=PATIENCE)
+        approving(item, "keep it")
+        ended = wait([waiting], timeout=ENDING).done
+        clock.sleep(600)
+        returned, failed = waiting.result(timeout=PATIENCE)
+        send(
+            hook,
+            writer.hooked(
+                "PostToolUse",
+                tool_name="mcp__lup__wait_inbox",
+                tool_input=stamped,
+                tool_use_id="w1",
+                tool_response="",
+                cwd=str(repo),
+                **writer.where,
+            ),
+        )
+        send(hook, shelled("PreToolUse", "b2", repo, writer))
+        finished = send(
+            hook, shelled("PostToolUse", "b2", repo, writer, tool_response="")
+        )
+    assert not failed
+    assert "which they have since approved: keep it." in returned
+    assert ended
+    assert finished == ""
+    assert settled_hold(machine).orphaned
+
+
+def test_a_subagents_hold_outliving_the_service_is_told_to_them_not_to_whoever_ends_a_turn_first(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    repo: Path,
+    shell: Shell,
+) -> None:
+    """Their session's own turn's end runs the checkpoint that settles it: what it found is the subagent's to hear."""
+    item = held_through_a_stop(
+        machine, clock, notices, said, repo=repo, shell=shell, writer=SUBAGENT
+    )
+    with judged_in_its_process(
+        machine, clock, notices, said, repo, runtime="claude", again=True
+    ):
+        hook = machine.host.launch("one").hook
+        approving(item, "")
+        ended = send(hook, claude("Stop", cwd=str(repo)))
+        assert settled_hold(machine).orphaned
+        started = send(hook, shelled("PreToolUse", "b2", repo, SUBAGENT))
+        finished = send(
+            hook, shelled("PostToolUse", "b2", repo, SUBAGENT, tool_response="")
+        )
+    assert "approved" not in ended
+    told = told_beside(started, finished)
+    assert sum("which they have since approved." in each for each in told) == 1
+
+
+def test_a_decline_of_a_hold_outliving_the_service_is_told_once_and_puts_the_file_back(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    repo: Path,
+    shell: Shell,
+) -> None:
+    item = held_through_a_stop(
+        machine, clock, notices, said, repo=repo, shell=shell, writer=SUBAGENT
+    )
+    with judged_in_its_process(
+        machine, clock, notices, said, repo, runtime="claude", again=True
+    ):
+        hook = machine.host.launch("one").hook
+        inbox("answer", str(item.number), "--decline", "--comment", "not here")
+        started = send(hook, shelled("PreToolUse", "b2", repo, SUBAGENT))
+        finished = send(
+            hook, shelled("PostToolUse", "b2", repo, SUBAGENT, tool_response="")
+        )
+    told = told_beside(started, finished)
+    assert (
+        sum("which they have since declined: not here." in each for each in told) == 1
+    )
+    assert (repo / "AGENTS.md").read_text() == "# Agents\n"
+    assert settled_hold(machine).orphaned
+
+
+def noted_hold(
+    machine: Layout,
+    clock: FakeClock,
+    repo: Path,
+    *,
+    agent: str | None = None,
+    abandoned: bool = False,
+    commit: str | None = None,
+) -> Hold:
+    """Keep a hold of `agent`'s in `repo`'s store, its files held as a checkpoint notes them, no call waiting on it, and put it in the operator's inbox."""
+    holds = Holds(layout=machine.store(repo))
+    hold = holds.put(
+        Hold(
+            key=holds.unused(),
+            worktree=repo,
+            session="s1",
+            agent=agent,
+            created=clock.now(),
+            files=[
+                HeldFile(
+                    path=Path("AGENTS.md"),
+                    role="operator",
+                    blob="abc",
+                    reasons=["operator"],
+                    asks=["AGENTS.md is one of the operator's documents"],
+                )
+            ],
+            diff="+a line\n",
+            abandoned=abandoned,
+            commit=commit,
+        )
+    )
+    kept = Held(hold=hold.key, path=Path("AGENTS.md"), blob="abc")
+    write_model(holds.layout.state, WorktreeState(holding=[kept]))
+    whole = ChangedFile(path=Path("AGENTS.md"), before=None, after=Text(text="+\n"))
+    InboxAnnouncing(layout=machine.host, clock=clock).announced(
+        hold, "claude", repo / ".git", [whole]
+    )
+    return hold
+
+
+def answering_holds(machine: Layout, delivery: Watched) -> None:
+    """Have `delivery` write each held change's answer to its hold, and say what nothing told, as `lup-dev host`'s does."""
+    delivery.settle_hold = lambda change, approved, comment: cli.hold_answered(
+        machine, change, approved=approved, comment=comment
+    )
+    delivery.hold_unheard = lambda change: cli.hold_unheard(machine, change)
+
+
+GONE = (
+    "lup's host service went away while your call waited for the operator's answer "
+    "to the change to"
+)
+SETTLED = (
+    "The next checkpoint in its worktree keeps it, and you hear more only where the "
+    "file has changed since and it isn't in place."
+)
+
+
+def test_a_held_changes_answer_goes_through_the_inbox_where_no_call_waits_to_hear_it(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], repo: Path
+) -> None:
+    with inboxed(machine, clock, notices, said) as delivery:
+        answering_holds(machine, delivery)
+        launched(machine, clock, repo, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        hold = noted_hold(machine, clock, repo)
+        [item] = delivery.inbox.waiting(Operator())
+        approving(item, "keep it")
+        told = send(hook, bash("b1"))
+        again = send(hook, bash("b2"))
+        left = delivery.inbox.waiting(Operator())
+    assert context(told).endswith(
+        f'from="operator" kind="note">{GONE} {repo}/AGENTS.md, which they have since '
+        f"approved: keep it. {SETTLED}</message>"
+    )
+    assert again == ""
+    assert left == []
+    kept = Holds(layout=machine.store(repo)).get(hold.key)
+    assert kept is not None
+    assert kept.told
+
+
+def test_a_held_changes_answer_a_call_waits_to_hear_goes_to_that_call_alone(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], repo: Path
+) -> None:
+    with inboxed(machine, clock, notices, said) as delivery:
+        answering_holds(machine, delivery)
+        launched(machine, clock, repo, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        hold = noted_hold(machine, clock, repo)
+        [item] = delivery.inbox.waiting(Operator())
+        with Holds(layout=machine.store(repo)).waiting(hold.key):
+            approving(item, "")
+            told = send(hook, bash("b1"))
+    assert told == ""
+
+
+def test_a_held_changes_answer_for_a_subagent_who_ended_goes_to_their_session(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], repo: Path
+) -> None:
+    records = Subagents(repo.parent / "records")
+    with inboxed(machine, clock, notices, said) as delivery:
+        answering_holds(machine, delivery)
+        launched(machine, clock, repo, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, records.spawn("t1", name="parser"))
+        records.recorded("a1", "Explore", "t1", name="parser")
+        send(hook, records.call("a1", "Explore", "c1"))
+        send(hook, records.ended("a1", "Explore", None))
+        send(hook, claude("UserPromptSubmit", prompt="Go on."))
+        noted_hold(machine, clock, repo, agent="a1")
+        [held] = [
+            each
+            for each in delivery.inbox.waiting(Operator())
+            if isinstance(each.reason, HeldChange)
+        ]
+        approving(held, "")
+        told = context(send(hook, bash("b1")))
+    assert f"{GONE} {repo}/AGENTS.md, which they have since approved. {SETTLED}" in told
+    assert "whose conversation had ended" in told
+
+
+def test_a_held_changes_answer_after_its_hold_timed_out_ends_a_wait_as_the_operators_news(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], repo: Path
+) -> None:
+    with (
+        inboxed(machine, clock, notices, said) as delivery,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        answering_holds(machine, delivery)
+        launched(machine, clock, repo, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        noted_hold(machine, clock, repo, abandoned=True)
+        [item] = delivery.inbox.waiting(Operator())
+        waiting = pool.submit(
+            call, machine.host.launch("one").mcp, "wait_inbox", {"on": ["operator"]}
+        )
+        assert delivery.holding.wait(timeout=PATIENCE)
+        approving(item, "")
+        returned, failed = waiting.result(timeout=PATIENCE)
+    assert not failed
+    assert returned.endswith(
+        'from="operator" kind="note">After the hold timed out, the operator approved '
+        f"the change to {repo}/AGENTS.md. Your version was saved when it was put back."
+        "</message>"
+    )
+
+
+def test_a_moves_answer_is_left_to_the_checkpoint_that_tells_it(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], repo: Path
+) -> None:
+    with inboxed(machine, clock, notices, said) as delivery:
+        answering_holds(machine, delivery)
+        launched(machine, clock, repo, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        noted_hold(machine, clock, repo, commit="c0ffee")
+        [item] = delivery.inbox.waiting(Operator())
+        approving(item, "")
+        told = send(hook, bash("b1"))
+    assert told == ""
+
+
+@pytest.mark.parametrize(
+    "writer", [CLAUDE.where, SUBAGENT.where], ids=["main", "subagent"]
+)
+def test_an_answer_nothing_told_ends_the_wait_of_its_writer_once(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    repo: Path,
+    writer: dict[str, str],
+) -> None:
+    """Answered with its call waiting, which stopped with the service before it looked: told as its writer waits for it, whoever they are."""
+    with (
+        inboxed(machine, clock, notices, said) as delivery,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        answering_holds(machine, delivery)
+        launched(machine, clock, repo, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        hold = noted_hold(machine, clock, repo, agent=writer.get("agent_id"))
+        [item] = delivery.inbox.waiting(Operator())
+        with Holds(layout=machine.store(repo)).waiting(hold.key):
+            approving(item, "")
+        starting = lup_call("wait_inbox", {"on": ["operator"]}, "w1", **writer)
+        stamped = json.loads(send(hook, starting))["hookSpecificOutput"]["updatedInput"]
+        returned, failed = pool.submit(call, mcp, "wait_inbox", stamped).result(
+            timeout=PATIENCE
+        )
+        told = send(hook, bash("b1", **writer))
+    assert not failed
+    assert (
+        f"{GONE} {repo}/AGENTS.md, which they have since approved. {SETTLED}"
+        in returned
+    )
+    assert "approved" not in told
 
 
 def test_a_flagged_write_is_an_item_gathering_its_file_a_comment_reaching_its_agent(
@@ -7193,8 +7688,8 @@ def test_judged_says_where_an_open_hold_stands_and_what_waits_with_it(
         "waiting for the operator, its call waiting on their answer",
         (
             "waiting for the operator, no call waiting on it any more: lup's host "
-            "service went away mid-wait, and their answer reaches its session at a "
-            "later call"
+            "service went away mid-wait, and their answer reaches the conversation "
+            "that made it beside a later call or through `wait_inbox`"
         ),
         (
             "waiting for the operator: nobody answered in time, so the change was "

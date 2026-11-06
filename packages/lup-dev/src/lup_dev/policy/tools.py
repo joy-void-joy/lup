@@ -376,8 +376,8 @@ def stands(hold: Hold, *, waited: bool) -> str:
         return "waiting for the operator, its call waiting on their answer"
     return (
         "waiting for the operator, no call waiting on it any more: lup's host "
-        "service went away mid-wait, and their answer reaches its session at a "
-        "later call"
+        "service went away mid-wait, and their answer reaches the conversation that "
+        "made it beside a later call or through `wait_inbox`"
     )
 
 

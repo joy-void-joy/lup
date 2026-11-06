@@ -46,6 +46,7 @@ from lup_dev.policy.checkpoint import (
     Worktree,
     decoded,
     holding,
+    settle_orphans,
     unflag,
     verdict,
 )
@@ -224,11 +225,14 @@ def before(
             "write isn't judged."
         )
         return Decision(outcome="allow", told=unread)
+    services = bench.services
+    if here.worktree is not None:
+        holder = Worktree.of(here.worktree, held.repository, services)
+        settle_orphans(bench, holder, session, agent or "", here.path)
     current = standing.text(here.path)
     after = proposal.content(current)
     if after is None:
         return Decision(outcome="allow")
-    services = bench.services
     if here.worktree is None:
         written = here.repository / here.path
         reason = (
@@ -344,12 +348,12 @@ def kept(path: Path, hold: str) -> str:
     """Say why a write to `path` is refused while hold `hold` waits on it: the file is nobody's until the operator answers.
 
     >>> kept(Path("/work/AGENTS.md"), "a1b2c3")
-    "lup holds /work/AGENTS.md for the operator's review (hold a1b2c3), so it isn't written until they answer, which reaches the conversation that made the change at their next call."
+    "lup holds /work/AGENTS.md for the operator's review (hold a1b2c3), so it isn't written until they answer, which reaches the conversation that made the change."
     """
     return (
         f"lup holds {path} for the operator's review (hold {hold}), so it isn't "
         "written until they answer, which reaches the conversation that made the "
-        "change at their next call."
+        "change."
     )
 
 
@@ -426,10 +430,10 @@ def held_write(
         after.encode(),
         held.reading,
     )
-    services.announcing.announced(
-        hold, bench.runtime.name(), worktree.repository, [whole]
-    )
     with holds.waiting(key):
+        services.announcing.announced(
+            hold, bench.runtime.name(), worktree.repository, [whole]
+        )
         answer = holds.wait(key, services.clock, ended=bench.interrupted)
         interrupted = answer is None and bench.interrupted()
         conversations = ConversationRecord(layout=services.layout, session=session)

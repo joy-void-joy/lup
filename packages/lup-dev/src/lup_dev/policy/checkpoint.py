@@ -73,6 +73,8 @@ from lup_dev.policy.holds import (
     Hold,
     Holds,
     answered,
+    late_answer,
+    named,
     outcome,
 )
 from lup_dev.policy.importers import Conversation, Found, ImportersPass, Spawner
@@ -1137,12 +1139,18 @@ class Decided(Model):
 
 
 def act(
-    bench: Bench, worktree: Worktree, snapshot: Snapshot, decided: Decided
+    bench: Bench,
+    worktree: Worktree,
+    snapshot: Snapshot,
+    decided: Decided,
+    claim: Callable[[str], None],
 ) -> Acted:
     """Hold what waits, put before the operator, and accept the rest; hold the lock.
 
     A held file keeps its accepted content in the store, or `HEAD`'s where a
-    move changed it, since the move is accepted, until the operator answers.
+    move changed it, since the move is accepted, until the operator answers. The
+    call claims the hold first (`Holds.claiming`), so an answer however quick
+    finds it waiting.
     """
     store = worktree.store
     root = worktree.root
@@ -1188,6 +1196,7 @@ def act(
         else None
     )
     if hold is not None:
+        claim(hold.key)
         bench.services.announcing.announced(
             hold,
             bench.runtime.name(),
@@ -1332,12 +1341,26 @@ def checkpoint(
     waited on then, settled, and the checkpoint runs again for what the
     operator approved.
     """
+    with worktree.holds().claiming() as claim:
+        return checkpointed(bench, worktree, key, agent, call=call, claim=claim)
+
+
+def checkpointed(
+    bench: Bench,
+    worktree: Worktree,
+    key: str,
+    agent: str,
+    *,
+    call: str | None,
+    claim: Callable[[str], None],
+) -> Checked:
+    """Run a checkpoint (`checkpoint`), claiming with `claim` the hold it makes, whose lock it holds from before it reaches the operator until it's settled."""
     services = bench.services
     store = worktree.store
     root = worktree.root
     with worktree.lock():
         session = worktree.session(key, bench.runtime)
-        reviewed = orphans(bench, worktree)
+        orphans(bench, worktree, session)
         taken = store.snapshot()
         accepted = store.accepted()
         head = store.head()
@@ -1367,7 +1390,7 @@ def checkpoint(
             head=head,
             start=store.started(key) if changed else None,
             elsewhere=Elsewhere(store=store, commits=[*state.tips, *others, *remote]),
-            judged={**{each.path: each for each in session.judged}, **reviewed},
+            judged={each.path: each for each in session.judged},
             move=moving(worktree, heads, head) if changed else None,
         )
         plans = [snapshot.plan(path) for path in changed]
@@ -1415,7 +1438,7 @@ def checkpoint(
         decided = Decided(
             fates=fated, plans=plans, verdicts=logged, hold=hold, agent=agent, call=call
         )
-        acted = act(bench, worktree, snapshot, decided)
+        acted = act(bench, worktree, snapshot, decided, claim)
         worktree.verdicts(services.layout).append(logged)
         commits = brought(bench, worktree, snapshot, plans)
         if root not in heads.worktrees or heads.worktrees[root] != head:
@@ -1431,6 +1454,7 @@ def checkpoint(
             agent,
             acted,
             quiet=conversations.quieted,
+            working=conversations.working,
             told=told,
             moved=commits.landed,
             wrote=wrote,
@@ -1572,6 +1596,7 @@ def remember(
     acted: Acted,
     *,
     quiet: Callable[[str], Quiet],
+    working: list[str],
     told: Checked,
     moved: list[Judgement],
     wrote: dict[Path, list[str]],
@@ -1584,7 +1609,9 @@ def remember(
     for the others whose calls finished since the last one: the checkpoint sees
     files, not who wrote them. Each is told only the findings they weren't
     told yet (`Session.news`), and none of a kind their quiet holds (`quiet`, by
-    conversation): those they aren't told, they don't learn. Each file landed is
+    conversation): those they aren't told, they don't learn. A late answer is the
+    conversation's that made the change, of the subagents at work (`working`,
+    `late_answers`). Each file landed is
     touched by the conversations `wrote` names for it. `told` is what a move of
     `HEAD` brought, which is no session's, and `moved` the files it brought,
     judged: their type errors are the files changed's, which a quiet may hold.
@@ -1607,8 +1634,9 @@ def remember(
 
     said = Checked(
         removed=noted(root, [note for j in landed for note in j.removed]),
-        notices=late_answers(worktree, session),
     ).then(told)
+    late = late_answers(worktree, session, agent, working)
+    answers = Checked.together([mail.checked for mail in late if mail.agent == agent])
 
     def report(conversation: str) -> Checked:
         held = quiet(conversation)
@@ -1644,8 +1672,11 @@ def remember(
         ).then(said)
 
     others = [other for other in session.participants if other != agent]
-    checked = report(agent)
-    mailed = [Mail(agent=other, checked=report(other)) for other in others]
+    checked = answers.then(report(agent))
+    mailed = [
+        *(Mail(agent=other, checked=report(other)) for other in others),
+        *(mail for mail in late if mail.agent != agent),
+    ]
     session.touched = kept_by(session.touched, {j.path: wrote[j.path] for j in landed})
     session.removed = {
         **session.removed,
@@ -1660,71 +1691,64 @@ def remember(
 
 PUT_BACK = "It was put back, or never landed, and your version saved."
 """Said of a declined change whose hold no call waited on."""
+REDO = "the file having changed since: make the change again if it's still wanted."
+"""Said of an approved change whose hold no call waited on that isn't in place."""
 
 
-def late_answers(worktree: Worktree, session: Session) -> list[str]:
-    """Tell the answers given to holds no agent waited on; hold the lock.
+def late_answers(
+    worktree: Worktree, session: Session, agent: str, working: list[str]
+) -> list[Mail]:
+    """Take the answers given to holds no agent waited on, of the session they're for; hold the lock. Return what's to tell of each, as mail for the conversation it's for: the one that made the change, or `agent`, whose checkpoint this is, where that was a subagent not in `working`, for whom mail would wait unread.
 
     For a hold whose wait ran out or whose call was interrupted, an approval
     covers the paths for the rest of the session, so the saved version can go
     back into place; so it does for one whose call's process ended, settled at
     a checkpoint (`orphans`), told with whether the change is in place. For a
-    move's, the session that found the move hears the answer, and a decline
-    changes no file.
+    move's, the session's own conversation hears the answer, and a decline
+    changes no file. An answer told through the inbox as it was given
+    (`Hold.told`) isn't said again: all that's left is a change it said would
+    be kept that isn't in place.
     """
     holds = worktree.holds()
 
+    def in_place(held: HeldFile) -> bool:
+        there = worktree.root / held.path
+        if not held.blob:
+            return not there.is_file()
+        return there.is_file() and there.read_bytes() == worktree.store.object(
+            held.blob
+        )
+
     def told(hold: Hold) -> str:
         holds.mark(hold.key, delivered=True)
-        paths = [held.path for held in hold.files]
-        answer = hold.answer
-        approved = answer is not None and answer.approved
-        verb = "approved" if approved else "declined"
-        comment = (
-            f": {answer.comment}." if answer is not None and answer.comment else "."
-        )
-        named = ", ".join(str(worktree.root / path) for path in paths)
-        if hold.commit is not None:
-            kept = (
-                ""
-                if approved
-                else " Nothing was changed: revert it only at the operator's word."
-            )
-            return (
-                f"The operator {verb} what commit {hold.commit} brought to {named}"
-                f"{comment}{kept}"
-            )
-        if approved:
+        approved = hold.answer is not None and hold.answer.approved
+        if approved and hold.commit is None:
+            paths = [held.path for held in hold.files]
             session.approved = list(dict.fromkeys([*session.approved, *paths]))
-        if hold.orphaned:
-            return (
-                "lup's host service went away while your call waited for the "
-                f"operator's answer to the change to {named}, which they have since "
-                f"{verb}{comment} {placed(hold) if approved else PUT_BACK}"
-            )
-        after = (
-            "your call was interrupted" if hold.interrupted else "the hold timed out"
+        placed = not (approved and hold.orphaned) or all(
+            in_place(held) for held in hold.files
         )
-        return (
-            f"After {after}, the operator {verb} the change to {named}"
-            f"{comment} Your version was saved when it was put back."
-        )
-
-    def placed(hold: Hold) -> str:
-        on_disk = all(
-            (worktree.root / held.path).is_file()
-            and (worktree.root / held.path).read_bytes()
-            == worktree.store.object(held.blob)
-            for held in hold.files
-        )
-        if on_disk:
-            return "It's in place."
-        return (
-            "It isn't in place, the file having changed since: make the change "
-            "again if it's still wanted."
+        if hold.told:
+            if placed:
+                return ""
+            return f"The change to {named(hold)} the operator approved isn't in place, {REDO}"
+        if not approved:
+            return late_answer(hold, PUT_BACK)
+        return late_answer(
+            hold, "It's in place." if placed else f"It isn't in place, {REDO}"
         )
 
-    return [told(hold) for hold in holds.late() if hold.session == session.key]
+    def writer(hold: Hold) -> str:
+        wrote = hold.agent or ""
+        return wrote if not wrote or wrote in working else agent
+
+    taken = [hold for hold in holds.late() if hold.session == session.key]
+    said = [(writer(hold), told(hold)) for hold in taken]
+    return [
+        Mail(agent=each, checked=Checked(notices=[words]))
+        for each, words in said
+        if words
+    ]
 
 
 def settle(
@@ -1737,7 +1761,7 @@ def settle(
     with the agent's version saved. A call its runtime ended while it waited
     (`Bench.interrupted`) gives up as on no answer, its conversation told at
     their next call, since nothing hears this one's answer. The call holds its
-    lock while it waits (`Holds.waiting`); a hold settled meanwhile with no
+    lock while it waits (`Holds.claiming`); a hold settled meanwhile with no
     call waiting on it (`orphans`) is a later checkpoint's to tell.
     """
     services = bench.services
@@ -1746,59 +1770,77 @@ def settle(
     holds = worktree.holds()
     paths = [held.path for held in hold.files]
     log = worktree.verdicts(services.layout)
-    with holds.waiting(hold.key):
-        answer = holds.wait(hold.key, services.clock, ended=bench.interrupted)
-        interrupted = answer is None and bench.interrupted()
-        with worktree.lock():
-            state = store.state()
-            if all(each.hold != hold.key for each in state.holding):
-                return Checked()
-            state.holding = [each for each in state.holding if each.hold != hold.key]
-            if answer is None or not answer.approved:
-                accepted = store.accepted() or ""
-                number = state.saved + 1
-                refused = [
-                    Refused(
-                        path=root / held.path,
-                        saved=store.save(
-                            number, held.path, store.object(held.blob) or b""
-                        ),
-                        new=store.content(accepted, held.path) is None,
-                        declined=None if answer is None else answer.comment,
-                        unanswered=answer is None and not interrupted,
-                        interrupted=interrupted,
-                    )
-                    for held in hold.files
-                ]
-                store.restore(accepted, paths)
-                state.saved = number
-                store.remember(state)
-                if answer is None:
-                    holds.mark(hold.key, abandoned=True, interrupted=interrupted)
-                if interrupted:
-                    session = worktree.session(key, bench.runtime)
-                    told = Mail(agent=agent, checked=Checked(refused=refused))
-                    session.mail = [*session.mail, told]
-                    worktree.keep(session)
-                log.append(answered(hold, outcome(holds, hold.key, answer)))
-                return Checked(refused=refused)
-            session = worktree.session(key, bench.runtime)
-            session.judged = [
-                *session.judged,
-                *(
-                    Judged(path=held.path, blob=held.blob, agent=agent)
-                    for held in hold.files
-                ),
+    answer = holds.wait(hold.key, services.clock, ended=bench.interrupted)
+    interrupted = answer is None and bench.interrupted()
+    with worktree.lock():
+        state = store.state()
+        if all(each.hold != hold.key for each in state.holding):
+            return Checked()
+        state.holding = [each for each in state.holding if each.hold != hold.key]
+        if answer is None or not answer.approved:
+            accepted = store.accepted() or ""
+            number = state.saved + 1
+            refused = [
+                Refused(
+                    path=root / held.path,
+                    saved=store.save(number, held.path, store.object(held.blob) or b""),
+                    new=store.content(accepted, held.path) is None,
+                    declined=None if answer is None else answer.comment,
+                    unanswered=answer is None and not interrupted,
+                    interrupted=interrupted,
+                )
+                for held in hold.files
             ]
-            session.approved = list(dict.fromkeys([*session.approved, *paths]))
+            store.restore(accepted, paths)
+            state.saved = number
             store.remember(state)
-            worktree.keep(session)
+            if answer is None:
+                holds.mark(hold.key, abandoned=True, interrupted=interrupted)
+            if interrupted:
+                session = worktree.session(key, bench.runtime)
+                told = Mail(agent=agent, checked=Checked(refused=refused))
+                session.mail = [*session.mail, told]
+                worktree.keep(session)
+            log.append(answered(hold, outcome(holds, hold.key, answer)))
+            return Checked(refused=refused)
+        session = worktree.session(key, bench.runtime)
+        session.judged = [
+            *session.judged,
+            *(
+                Judged(path=held.path, blob=held.blob, agent=agent)
+                for held in hold.files
+            ),
+        ]
+        session.approved = list(dict.fromkeys([*session.approved, *paths]))
+        store.remember(state)
+        worktree.keep(session)
     log.append(answered(hold, "approved"))
     told = approval([root / path for path in paths], answer.comment)
     return Checked(notices=[told]).then(checkpoint(bench, worktree, key, agent))
 
 
-def orphans(bench: Bench, worktree: Worktree) -> dict[Path, Judged]:
+def settle_orphans(
+    bench: Bench, worktree: Worktree, key: str, agent: str, path: Path
+) -> None:
+    """Settle what the operator answered of the holds no call waits on any more, where conversation `agent` of session `key` is about to write the held file at `path` with a file tool.
+
+    Otherwise a hold they've answered refuses the write until a checkpoint comes.
+    What they approved is accepted at the next, and what's left to tell waits for
+    it as mail.
+    """
+    if all(each.path != path for each in worktree.store.state().holding):
+        return
+    record = ConversationRecord(layout=bench.services.layout, session=key)
+    with record.lock():
+        working = record.read().working
+    with worktree.lock():
+        session = worktree.session(key, bench.runtime)
+        orphans(bench, worktree, session)
+        session.mail = [*session.mail, *late_answers(worktree, session, agent, working)]
+        worktree.keep(session)
+
+
+def orphans(bench: Bench, worktree: Worktree, session: Session) -> None:
     """Settle each open hold no call waits on any more, as its call would have; hold the lock.
 
     A call's wait ends with its process, the host service's or the launch's,
@@ -1806,11 +1848,13 @@ def orphans(bench: Bench, worktree: Worktree) -> dict[Path, Judged]:
     finds it. Once the operator answers, an approval keeps the change as
     reviewed: a file tool's write, which never landed, is made where the file
     is still as it was accepted, and the content approved that's on disk is
-    returned by path, for the checkpoint to accept unjudged; a decline puts the
+    kept in `session`, the record of whoever found it, before the file stops
+    being held, for their checkpoint to accept unjudged; a decline puts the
     file back as it was accepted, a file tool's write that landed anyway among
     it, and saves the agent's version. Unanswered past its patience, it's put
     back and saved as a call's would be, and stays open. Each is logged, and
-    told to its session at that session's next checkpoint (`late_answers`).
+    what's left to tell of it is told at its session's next checkpoint
+    (`late_answers`).
     """
     store = worktree.store
     holds = worktree.holds()
@@ -1828,16 +1872,15 @@ def orphans(bench: Bench, worktree: Worktree) -> dict[Path, Judged]:
     found = [due(key) for key in dict.fromkeys(each.hold for each in state.holding)]
     settled = [hold for hold in found if hold is not None]
     if not settled:
-        return {}
+        return
     keys = [hold.key for hold in settled]
     state.holding = [each for each in state.holding if each.hold not in keys]
-    reviewed = {
-        each.path: each
-        for hold in settled
-        for each in orphaned(bench, worktree, state, hold)
-    }
+    session.judged = [
+        *session.judged,
+        *(each for hold in settled for each in orphaned(bench, worktree, state, hold)),
+    ]
+    worktree.keep(session)
     store.remember(state)
-    return reviewed
 
 
 def orphaned(
