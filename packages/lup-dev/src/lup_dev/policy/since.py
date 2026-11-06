@@ -960,7 +960,11 @@ class Standing(Model, arbitrary_types_allowed=True):
         git = Git.pinned(self.party.repository)
         snapshot = self.snapshot()
         tip = self.tip
-        committed = [] if tip is None else changed_files(git, snapshot.base, tip)
+        try:
+            committed = [] if tip is None else changed_files(git, snapshot.base, tip)
+        except GitError as unread:
+            message = f"lup can't read what `{located.branch}` changed: {unread}"
+            raise InboxError(message) from unread
         at_tip = {} if tip is None else blobs(git.tracked(tip))
         standing = snapshot.standing
         uncommitted = [

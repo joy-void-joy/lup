@@ -1,6 +1,5 @@
 """What a landing reads of its own diff: each file's role, by the objects' own bytes."""
 
-import hashlib
 import subprocess
 import zlib
 from pathlib import Path
@@ -11,7 +10,7 @@ import pytest
 from lup_dev import Project
 from lup_dev.declaration.resolve import Declaration
 from lup_dev.git import Git, GitError
-from lup_dev.policy.landing import asked_files
+from lup_dev.policy.landing import asked_files, changed_files
 from lup_dev.policy.roles import Roles
 
 if TYPE_CHECKING:
@@ -165,17 +164,52 @@ def test_what_a_commit_holds_is_read_from_the_commit_whatever_a_commit_graph_say
     root = bare / "tree" / "main"
     old = committed(root, shell, {"a.py": "1\n"})
     tip = committed(root, shell, {"AGENTS.md": "after\n"})
-    shell.git(root, "commit-graph", "write", "--reachable")
-    graph = bare / "objects" / "info" / "commit-graph"
-    data = bytearray(graph.read_bytes())
-    tree = {
-        each: bytes.fromhex(shell.git(root, "rev-parse", f"{each}^{{tree}}"))
-        for each in [old, tip]
-    }
-    at = bytes(data).index(tree[tip])
-    data[at : at + len(tree[tip])] = tree[old]
-    data[-20:] = hashlib.sha1(bytes(data[:-20]), usedforsecurity=False).digest()
-    graph.chmod(0o644)
-    graph.write_bytes(bytes(data))
+    shell.forged_tree(bare, tip, old)
     found = asked_files(Git.pinned(bare), ROLES, old, tip)
     assert [str(each.path) for each in found] == ["AGENTS.md"]
+
+
+def test_a_landing_s_changed_files_are_read_from_the_commits_whatever_a_commit_graph_says(
+    bare: Path, shell: Shell
+) -> None:
+    root = bare / "tree" / "main"
+    old = committed(root, shell, {"a.py": "1\n"})
+    tip = committed(root, shell, {"src/b.py": "2\n", "a.py": "3\n"})
+    shell.forged_tree(bare, tip, old)
+    assert changed_files(Git.pinned(bare), old, tip) == [
+        Path("a.py"),
+        Path("src/b.py"),
+    ]
+    whole = changed_files(Git.pinned(bare), None, tip)
+    assert [Path("a.py"), Path("src/b.py")] == [
+        each for each in whole if each in [Path("a.py"), Path("src/b.py")]
+    ]
+
+
+@pytest.mark.parametrize("kind", ["commit", "tree"])
+def test_a_landing_s_changed_files_aren_t_read_past_an_object_that_isn_t_what_its_id_says(
+    kind: str, bare: Path, shell: Shell
+) -> None:
+    root = bare / "tree" / "main"
+    old = committed(root, shell, {"a.py": "1\n"})
+    tip = committed(root, shell, {"a.py": "2\n"})
+    if kind == "commit":
+        content = subprocess.run(
+            ["git", "cat-file", "commit", tip],
+            cwd=root,
+            capture_output=True,
+            check=True,
+        ).stdout
+        old_tree = shell.git(root, "rev-parse", f"{old}^{{tree}}").encode()
+        new_tree = shell.git(root, "rev-parse", f"{tip}^{{tree}}").encode()
+        planted(bare, tip, "commit", content.replace(new_tree, old_tree))
+    else:
+        content = subprocess.run(
+            ["git", "cat-file", "tree", f"{old}^{{tree}}"],
+            cwd=root,
+            capture_output=True,
+            check=True,
+        ).stdout
+        planted(bare, shell.git(root, "rev-parse", f"{tip}^{{tree}}"), "tree", content)
+    with pytest.raises(GitError, match="isn't that"):
+        changed_files(Git.pinned(bare), old, tip)

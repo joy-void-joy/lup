@@ -1,6 +1,7 @@
 """The drawers under an agent's banner: what their branch changed since the operator last saw it, read as the worktree stands, its files marked reviewed; and a remark on their code telling which quoted lines changed since."""
 
 import asyncio
+import zlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, override
@@ -8,6 +9,7 @@ from typing import TYPE_CHECKING, override
 import pytest
 from pydantic import ValidationError
 
+from lup.programs import run
 from lup_dev import Core, Levels, Modules, cli
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.resolve import Declaration
@@ -529,6 +531,49 @@ def test_a_branch_is_shown_from_where_it_left_the_integration_branch_even_once_t
     [rooms] = only(reader.read(ShowSince(conversation=branch.party))).files
     assert rooms.file is not None
     assert (rooms.file.before, rooms.file.after) == (None, Text(text="rooms = 1\n"))
+
+
+def test_a_file_committed_on_a_branch_is_shown_whatever_a_commit_graph_or_a_graft_says(
+    bare: Path, shell: Shell, clock: FakeClock, tmp_path: Path
+) -> None:
+    delivery = alone(tmp_path, clock)
+    branch = Branch(bare, shell, delivery, clock)
+    reader = branch.reader(tmp_path)
+    branch.wrote("rooms.py", "rooms = 1\n")
+    (branch.dev / "landed.py").write_text("landed = True\n")
+    shell.commit(branch.dev, "landed")
+    dev = shell.git(branch.dev, "rev-parse", "HEAD")
+    tip = shell.git(branch.feat, "rev-parse", "HEAD")
+    start = shell.git(branch.feat, "rev-parse", "HEAD~1")
+
+    def shown() -> list[Path]:
+        since = reader.read(ShowSince(conversation=branch.party))
+        return [each.path for each in only(since).files]
+
+    assert shown() == [Path("rooms.py")]
+    shell.forged_tree(bare, tip, start)
+    assert shown() == [Path("rooms.py")]
+    (bare / "objects" / "info" / "commit-graph").unlink()
+    (bare / "info" / "grafts").write_text(f"{dev} {tip}\n")
+    assert shown() == [Path("rooms.py")]
+
+
+def test_a_branch_holding_an_object_that_isn_t_what_its_id_says_is_refused_rather_than_shown_as_changing_nothing(
+    bare: Path, shell: Shell, clock: FakeClock, tmp_path: Path
+) -> None:
+    delivery = alone(tmp_path, clock)
+    branch = Branch(bare, shell, delivery, clock)
+    reader = branch.reader(tmp_path)
+    start = shell.git(branch.feat, "rev-parse", "HEAD")
+    branch.wrote("rooms.py", "rooms = 1\n")
+    tip = shell.git(branch.feat, "rev-parse", "HEAD")
+    tree = shell.git(branch.feat, "rev-parse", f"{tip}^{{tree}}")
+    kept = bare / "objects" / tree[:2] / tree[2:]
+    was = run("git", "cat-file", "tree", f"{start}^{{tree}}", cwd=branch.feat).output
+    kept.chmod(0o644)
+    kept.write_bytes(zlib.compress(b"tree %d\0" % len(was) + was))
+    with pytest.raises(InboxError, match=f"{tree} isn't that tree"):
+        reader.read(ShowSince(conversation=branch.party))
 
 
 def reviewed_at(clock: FakeClock) -> datetime:

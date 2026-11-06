@@ -533,12 +533,8 @@ def landed_branches(
 
 
 def changed_files(git: Git, old: str | None, tip: str) -> list[Path]:
-    """Return the files a landing of `tip` changes, from the repository's root: those differing from `old`'s, or every one of `tip`'s where the remote has no `old`."""
-    if old is None:
-        listed = git.run("ls-tree", "-r", "-z", "--name-only", "--full-tree", tip)
-    else:
-        listed = git.run("diff", "--name-only", "-z", "--no-renames", old, tip)
-    return [Path(each) for each in nul_separated(listed.output)]
+    """Return the files a landing of `tip` changes, from the repository's root, in order: those differing from `old`'s, or every one of `tip`'s where the remote has no `old`. Read from the objects' own bytes (`Git.own_changes`), so only the ids say what it changes; raise `GitError` where one can't be read or isn't what its id says."""
+    return sorted(Path(path) for path in git.own_changes(old, tip))
 
 
 def approved_declaration(layout: Layout, repository: Path) -> Declaration:
@@ -1511,7 +1507,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         raise HostError(message)
 
     async def parents(self, commit: str) -> list[str]:
-        """Return `commit`'s parents, read from the commit alone (`Remotes.git`, `own_parents`), as the room can't have them read otherwise.
+        """Return `commit`'s parents, read from the commit alone (`Remotes.git`), as the room can't have them read otherwise.
 
         Raise `HostError` where git can't read it.
         """
@@ -1522,7 +1518,6 @@ class Lander(Model, arbitrary_types_allowed=True):
             # lup: ignore("fixed-tool-limit", why="one commit's own parents are read, the one line `rev-list` gives for it: no list an agent asked for is cut short")
             "--max-count=1",
             commit,
-            own_parents=True,
         )
         if ran.status != 0:
             message = f"git couldn't read {commit}'s parents: {oneline(ran.said())}"

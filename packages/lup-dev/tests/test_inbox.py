@@ -60,6 +60,7 @@ from lup_dev.declaration.serving import Operator as OperatorAsker
 from lup_dev.declaration.serving import tools as module_tools
 from lup_dev.gate import Passed, Passes, Processes, Standing
 from lup_dev.gate import Ran as GateRan
+from lup_dev.git import GitError
 from lup_dev.host.client import HostClient, RoomClient, Starter
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard, Posted, Spawned, Spawns
@@ -207,6 +208,7 @@ from lup_dev.inbox.typed import TypeReader
 from lup_dev.launch.room import RoomError
 from lup_dev.layout import GitDirectoryLayout, InboxLayout, Layout
 from lup_dev.merging import Merging, merged
+from lup_dev.policy import landing as landing_module
 from lup_dev.policy import report
 from lup_dev.policy.before import Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import (
@@ -9030,6 +9032,33 @@ def test_a_landing_waits_on_each_file_flagged_on_what_it_lands_held_in_its_write
     assert after == []
 
 
+def test_a_landing_waits_on_a_file_flagged_on_what_it_lands_whatever_a_commit_graph_says(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    rooms = '"""Rooms."""\n'
+    landings.wrote(landings.feat, "src/pkg/rooms.py", rooms)
+    old = landings.on_forge("refs/heads/dev")
+    assert old is not None
+    tip = landings.merged()
+    session = lander(landings, "claude")
+    landings.shell.forged_tree(landings.repository, tip, old)
+    with serving_landings(landings, machine, clock, notices, said) as (delivery, pool):
+        landings.flag("src/pkg/rooms.py", rooms, session)
+        landing, wait = held_landing(machine, clock, delivery, pool)
+        meanwhile = landings.on_forge("refs/heads/dev")
+        place = drawer(machine, clock, session, "feat")
+        answering(machine, clock, session, place, "src/pkg/rooms.py")
+        answer, error = landing.result(timeout=60)
+    assert not error
+    assert meanwhile == old
+    assert waited_on(wait) == ["src/pkg/rooms.py"]
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+
+
 def test_land_withdraws_each_flag_left_nothing_to_hold_on_a_branch_gone_or_a_file_it_leaves_unchanged_and_no_later_landing_holds_on_it(
     landings: Landings,
     machine: Layout,
@@ -10780,6 +10809,37 @@ def test_land_where_the_defer_comments_can_t_be_read_says_so_and_lands_all_the_s
         "lup couldn't read the `# lup: defer` comments it lands: the engine's `parse` "
         "failed: node: not found\n"
         "Cleaned up after it:\n"
+    ) in answer
+
+
+def test_land_where_git_can_t_read_the_defer_comments_says_so_having_landed(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """They're read after the push, so a failure there mustn't answer `Not landed`."""
+
+    def unreadable(*_: object) -> None:
+        message = "what the repository's store holds as abc isn't that commit"
+        raise GitError(message)
+
+    monkeypatch.setattr(landing_module, "deferred", unreadable)
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    with inboxed(
+        machine, clock, notices, said, rooms=landings.room, parser=landings.parser
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    merge = landings.on_forge("refs/heads/dev")
+    assert f"Landed {merge} on `dev` at `origin`" in answer
+    assert (
+        "lup couldn't read the `# lup: defer` comments it lands: what the "
+        "repository's store holds as abc isn't that commit\n"
     ) in answer
 
 

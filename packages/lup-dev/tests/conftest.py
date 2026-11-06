@@ -15,6 +15,7 @@ lists, makes, moves, removes, binds or connects to there fails it.
 """
 
 import ast
+import hashlib
 import io
 import os
 import sys
@@ -711,6 +712,21 @@ class Shell:
 
     def commit(self, root: Path, message: str = "change") -> None:
         commit(root, message)
+
+    def forged_tree(self, repository: Path, commit: str, tree_of: str) -> None:
+        """Rewrite the commit-graph of the bare `repository` so that it names `tree_of`'s tree as `commit`'s, its checksum made again, as a room can under `objects/info/`."""
+        git(repository, "commit-graph", "write", "--reachable")
+        graph = repository / "objects" / "info" / "commit-graph"
+        data = graph.read_bytes()
+        named, forged = (
+            bytes.fromhex(git(repository, "rev-parse", f"{each}^{{tree}}"))
+            for each in [commit, tree_of]
+        )
+        body = data[:-20].replace(named, forged)
+        graph.chmod(0o644)
+        graph.write_bytes(
+            body + hashlib.sha1(body, usedforsecurity=False).digest(),
+        )
 
 
 @pytest.fixture
