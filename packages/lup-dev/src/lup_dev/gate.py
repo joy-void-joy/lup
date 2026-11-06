@@ -5,9 +5,12 @@
 any step: a required tool missing stops the gate, naming every one missing, the
 module needing it and how to install it, and an optional one missing is said once,
 its feature off. Then it runs the declaration's steps from the root, in order, and
-every one even after one fails, so one run shows everything wrong. Each step's
-command is the tool alone, run through the project's runner (`uv run …` by
-default), or as written for a step that says it isn't run in the environment.
+every one even after one fails, so one run shows everything wrong; those side by
+side that say they may go `together` run at once (`Check.each`), their outcomes
+reported in the declaration's order (`docs/field-notes.md`, *What a landing's gate
+spends*). Each step's command is the tool alone, run through the project's runner
+(`uv run …` by default), or as written for a step that says it isn't run in the
+environment.
 
 A step that builds a file is skipped only where it already passed on what it reads,
 its sources as they stand and its file as it left it (`Built`, `Check.stale`): the
@@ -56,7 +59,9 @@ import shutil
 import tempfile
 import time
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from itertools import groupby
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, override
 
@@ -445,8 +450,31 @@ class Check(Model, arbitrary_types_allowed=True):
             if step.builds is not None:
                 self.record_of(step).unlink(missing_ok=True)
 
+    def each(self, steps: list[Step]) -> list[Outcome]:
+        """Run `steps`, every one whatever the others give, in their order, and return their outcomes in that order.
+
+        Those side by side that may go `together` run at once. A step that builds
+        a file never runs at once with one that doesn't, whatever it says, since
+        those after it may read what it builds: the page's tests read the page.
+        """
+
+        def batch(step: Step) -> Literal["in turn", "building", "checking"]:
+            if not step.together:
+                return "in turn"
+            return "checking" if step.builds is None else "building"
+
+        outcomes: list[Outcome] = []
+        for kind, side_by_side in groupby(steps, key=batch):
+            batched = list(side_by_side)
+            if kind == "in turn":
+                outcomes += [self.one(step) for step in batched]
+                continue
+            with ThreadPoolExecutor(max_workers=len(batched)) as pool:
+                outcomes += pool.map(self.one, batched)
+        return outcomes
+
     def run(self, *, again: bool = False) -> Gated:
-        """Check every requirement at once, then run the fixes and every step, in order.
+        """Check every requirement at once, then run the fixes and every step, in order, those that may go `together` at once (`each`).
 
         Raise `RequirementError` naming every required one missing, before
         anything runs. Every step runs whatever the ones before gave. With
@@ -471,10 +499,10 @@ class Check(Model, arbitrary_types_allowed=True):
             if found is not None:
                 return self.answered(found)
         report = check(self.requirements, self.tools).require()
-        built = [self.one(step) for step in self.building()] if self.fixes else []
-        fixed = [self.one(step) for step in self.fixes]
+        built = self.each(self.building()) if self.fixes else []
+        fixed = self.each(self.fixes)
         checked = None if passes is None else standing(self.root)
-        outcomes = [self.one(step) for step in self.steps]
+        outcomes = self.each(self.steps)
         every = [*built, *fixed, *outcomes]
         timed = any(outcome.seconds is not None for outcome in every)
         gated = Gated(
@@ -503,8 +531,7 @@ class Check(Model, arbitrary_types_allowed=True):
         if not building:
             return Gated(outcomes=[], found=found)
         required = check(self.requirements, self.tools).require()
-        outcomes = [self.one(step) for step in building]
-        return Gated(off=required.off, outcomes=outcomes, found=found)
+        return Gated(off=required.off, outcomes=self.each(building), found=found)
 
 
 def failed(outcomes: list[Outcome]) -> list[str]:

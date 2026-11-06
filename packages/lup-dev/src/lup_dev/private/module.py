@@ -90,7 +90,9 @@ class Private(Module):
     serving: Serving = Serving.of(PrivateServing)
     """At `Publishing`, refusing a push or a post that carries a value; and the
     gate's step in a room, which never sees the list, answered on the host."""
-    gate: Gate = Gate.of(Step(name="private", command=["lup-dev", "private", "check"]))
+    gate: Gate = Gate.of(
+        Step(name="private", command=["lup-dev", "private", "check"], together=True)
+    )
     """`private`: every file, and `HEAD`'s commits the remotes lack, read for a
     value, failing on one."""
     guidance: Guidance = Guidance.of(
