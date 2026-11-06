@@ -209,17 +209,19 @@ kbd {
     margin: 0;
 }
 
-/* The palette. */
+/* The palette: over the page, in place of its own, since cmdk's dialog puts the overlay and the palette side by side
+   at the page's end, where the overlay can't place it and it would sit below everything. */
 .palette-overlay {
     position: fixed;
     inset: 0;
     background: rgb(0 0 0 / 0.6);
-    display: flex;
-    justify-content: center;
-    padding-top: 12vh;
 }
 
 .palette {
+    position: fixed;
+    top: 12vh;
+    left: 50%;
+    transform: translateX(-50%);
     width: min(80ch, 92vw);
     background: var(--bg);
     border: 1px solid var(--border);
