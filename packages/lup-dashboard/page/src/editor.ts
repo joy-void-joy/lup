@@ -931,10 +931,10 @@ const typed = Prec.highest(
 /** The keys that search: vim's `/`, `?`, `n`, `N`, `*` and `#`, and `g*` and `g#`; `g?` lists the keys instead. */
 const SEARCHES = new Set(["/", "?", "n", "N", "*", "#"]);
 
-/** Return whether `key`, pressed outside insert mode, begins or makes a search, rather than finishing another command, as `fn` does. */
+/** Return whether `key`, pressed outside insert mode, begins or makes a search, rather than finishing another command, as `fn` does; a count before it, which vim holds among the keys so far, is still a search, as `2?` and `2n`. */
 function searches(cm: CodeMirrorV, key: string): boolean {
-    const held = cm.state.vim.inputState.keyBuffer;
-    return !cm.state.vim.insertMode && SEARCHES.has(key) && (held.length === 0 || (held.join("") === "g" && (key === "*" || key === "#")));
+    const held = cm.state.vim.inputState.keyBuffer.join("").replace(/^[1-9][0-9]*/, "");
+    return !cm.state.vim.insertMode && SEARCHES.has(key) && (held === "" || (held === "g" && (key === "*" || key === "#")));
 }
 
 /** Marks a view's own replacing of its text, which isn't the operator's edit. */

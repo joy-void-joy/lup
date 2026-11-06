@@ -149,6 +149,27 @@ describe("searching the review backward with ?, in headless Chromium", () => {
         await onPlace(LINE, 0);
     });
 
+    it("opens the folds around the match a count reaches, for ?, / and n alike", async () => {
+        await dashboard.keys.press(["G", "2", "?"], 50);
+        await dashboard.page.waitForSelector(".cm-vim-panel input:focus");
+        await dashboard.keys.type(LINE.replace(".", "\\."));
+        await dashboard.keys.press(["Enter"]);
+        await onPlace(LINE, 1);
+        await below(OPENED);
+        expect((await found(LINE)).hidden).toEqual([true, false, true]);
+
+        await dashboard.page.reload();
+        await loaded();
+        await dashboard.keys.press(["g", "g", "2", "/"], 50);
+        await dashboard.page.waitForSelector(".cm-vim-panel input:focus");
+        await dashboard.keys.type(LINE.replace(".", "\\."));
+        await dashboard.keys.press(["Enter"]);
+        await onPlace(LINE, 1);
+        expect((await found(LINE)).hidden).toEqual([true, false, true]);
+        await dashboard.keys.press(["g", "g", "2", "n"], 50);
+        await onPlace(LINE, 1);
+    });
+
     it("stays where it was as Esc leaves the prompt, the keyboard back in the review", async () => {
         const before = await review.evaluate((view) => view.state.selection.main.head);
         await dashboard.keys.press(["?"]);
