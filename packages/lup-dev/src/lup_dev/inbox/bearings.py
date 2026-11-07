@@ -15,9 +15,8 @@ again after.
   repository at once, and one's open threads aren't abandoned.
 - **Open threads:** each thread of the repository not settled or declined,
   under the one it's under, with who holds it, where it stands and what in it
-  waits on the operator. Where a root thread nobody holds has the session's
-  name, the session takes it as theirs (`Concerns.root`), and is told so
-  first: they go on with what an earlier session left.
+  waits on the operator: what's there to take, none of it theirs by being told,
+  whatever they're called.
 - **Landed** on the remote's running branch, what `land` lands on, since the last main session
   started, its first-parent history, with whether that session still runs or
   when they were last heard, and how their exchange with the operator is read.
@@ -178,7 +177,6 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
         )
         last = self.last(starting)
         self.delivery.heard_in(starting, launch, None)
-        took = self.took(starting)
         since = None if last is None else self.started(last)
         branch = self.running(launch.repository)
         try:
@@ -187,7 +185,7 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
             )
         except GitError as unread:
             found = Repository(unlanded=[], landed=[], onto=branch, unread=str(unread))
-        return self.page(starting, last, found, running, took)
+        return self.page(starting, last, found, running)
 
     def last(self, starting: Conversation) -> Conversation | None:
         """Return the main conversation of `starting`'s repository lup heard start last before them; none where it heard none."""
@@ -201,19 +199,6 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
         latest = max(mains, key=lambda place: place.since, default=None)
         return None if latest is None else latest.conversation
 
-    def took(self, starting: Conversation) -> Thread | None:
-        """Make the root thread nobody holds that has `starting`'s name theirs, and return it; none where there's none."""
-        concerns = self.delivery.concerns()
-        name = concerns.roster.own(starting)
-        found = (
-            None
-            if name is None
-            else concerns.takeable(starting.repository, name, starting)
-        )
-        if found is None or found.holder == starting:
-            return None
-        return concerns.took(starting, found)
-
     def started(self, conversation: Conversation) -> datetime:
         """Return when lup first heard `conversation` in the launch they were last heard in."""
         return self.delivery.inbox.whereabouts[conversation.key()].since
@@ -224,9 +209,8 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
         last: Conversation | None,
         found: Repository,
         running: list[Running],
-        took: Thread | None = None,
     ) -> str:
-        """Say the bearings: what's not landed, the main sessions running beside the one starting where more than one does, the open threads, the root they `took` first where they took one, and what landed since `last` started."""
+        """Say the bearings: what's not landed, the main sessions running beside the one starting where more than one does, the open threads, and what landed since `last` started."""
         items = self.delivery.inbox.about(starting.repository)
         reader = Reader(
             delivery=self.delivery,
@@ -247,7 +231,7 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
             ],
             self.unlanded(found),
             self.beside(beside, reader) if len(beside) > 1 else [],
-            self.threads(starting, reader, took),
+            self.threads(starting, reader),
             # lup: defer(issue=262, why="the last handoff's note is told here, after what landed, once `handoff` writes one: it waits for spawn (#117)")
             self.landed(found, last, beside, reader, items),
         ]
@@ -306,10 +290,8 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
             ),
         ]
 
-    def threads(
-        self, starting: Conversation, reader: Reader, took: Thread | None
-    ) -> list[str]:
-        """Say the repository's open threads, each under the one it's under: who holds it, where it stands, and what waits on the operator; first the root `starting` took, where they took one."""
+    def threads(self, starting: Conversation, reader: Reader) -> list[str]:
+        """Say the repository's open threads, each under the one it's under: who holds it, where it stands, and what waits on the operator."""
         concerns = self.delivery.concerns()
         threads = concerns.threads.of(starting.repository)
         standings = {each.number: concerns.standing(each) for each in threads}
@@ -337,28 +319,7 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
         tops = [each for each in open_threads if each.parent not in numbers]
         if not tops:
             return []
-
-        def below(thread: Thread) -> list[Thread]:
-            under = [each for each in open_threads if each.parent == thread.number]
-            return [found for each in under for found in [each, *below(each)]]
-
-        under = [] if took is None else below(took)
-        inherited = [] if took is None else [took, *under]
-        waiting = sum(len(standings[each.number].waiting) for each in inherited)
-        counts = [
-            *([f"{many(len(under), 'open thread')} under it"] if under else []),
-            *([f"{many(waiting, 'thing')} waiting on the operator"] if waiting else []),
-        ]
-        taken = (
-            []
-            if took is None
-            else [
-                f"You took over the root @{took.name}, which nobody held"
-                + (f": {', '.join(counts)}." if counts else ".")
-            ]
-        )
         return [
-            *taken,
             (
                 "Open threads of this repository (`inbox` with `thread` reads one "
                 "whole; the `thread` tool with `hold` takes one):"

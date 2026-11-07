@@ -95,6 +95,7 @@ from lup_ledger.threads import (
     Status,
     Thread,
     stood,
+    without_roots,
 )
 
 if TYPE_CHECKING:
@@ -148,7 +149,7 @@ class Ledgered(Model):
         """Read every thread off the ledger `concerns` holds, each kind's records in one read."""
         ledger = concerns.inbox.ledger
         with ledger.together():
-            threads = ledger.every(Thread)
+            threads = without_roots(ledger.every(Thread))
             ins = ledger.drawn_of(In)
             moved = ledger.drawn_of(Moved)
             statuses = [
@@ -161,7 +162,12 @@ class Ledgered(Model):
             refers = ledger.drawn_of(Refers)
         current = {each.source: each for each in ins}
         parts = {(each.source, each.part): each for each in moved}
-        went = {each.source: each.target for each in moved if each.part is None}
+        numbers = {each.number: each for each in threads}
+        went = {
+            each.source: each.target
+            for each in moved
+            if each.part is None and each.target in numbers
+        }
         joined = sorted(
             [
                 *(
@@ -184,7 +190,7 @@ class Ledgered(Model):
             key=lambda each: each[1].came,
         )
         return cls(
-            threads={each.number: each for each in threads},
+            threads=numbers,
             members={
                 number: [member for target, member in joined if target == number]
                 for number in dict.fromkeys(target for target, _ in joined)
@@ -282,6 +288,14 @@ class ThreadRead(Model):
     answering: Conversation | None = None
     """Who answers for it: its holder where they go on, else the holder of the
     nearest thread above that does; none where nobody does."""
+    left_by: Conversation | None = None
+    """Who left it, where nobody running answers for it, which a list says of it:
+    its holder, who's ended, else the agent who opened it; none where someone
+    answers for it, or the operator opened it and nobody took it."""
+    bare: bool = False
+    """Whether it's nothing to list: nobody running answers for it or works in it,
+    nothing's in it, nothing was said of where it stands, as parking it, and the
+    same of each thread under it."""
 
 
 class ThreadEntry(Model):
@@ -412,7 +426,7 @@ class ReopenThread(Request, reads=False):
 
 
 class MoveIntoThread(Request, reads=False):
-    """Move frictions and how it felt into a thread, as the operator does from the pile to read: one they name by `thread`, or one opened titled `title` under the root above where the first landed; each marked read, staying in the thread it landed in, and whoever answers for the thread told each whole (`Concerns.gathered`)."""
+    """Move frictions and how it felt into a thread, as the operator does from the pile to read: one they name by `thread`, or one opened titled `title` under the top of where the first landed, where it landed in one; each marked read, staying in the thread it landed in, and whoever answers for the thread told each whole (`Concerns.gathered`)."""
 
     kind: Literal["inbox-move-into-thread"] = "inbox-move-into-thread"
     numbers: list[int] = Field(min_length=1)
@@ -501,18 +515,11 @@ class Concerned(Model, arbitrary_types_allowed=True):
         ]
 
     def working(self) -> list[Working]:
-        """Return where each conversation going on works, from their whereabouts alone, so reading makes no root: the thread they joined, hold or were handed, else their session's root."""
-        places = self.concerns.inbox.whereabouts
-
-        def root(conversation: Conversation) -> int | None:
-            main = places.get(conversation.main().key())
-            return None if main is None else main.root
-
+        """Return where each conversation going on works, from their whereabouts alone: the thread they joined, hold, were handed or started on, where it's one."""
         found = [
-            Working(conversation=place.conversation, thread=number)
-            for place in places.values()
-            if self.concerns.live(place.conversation)
-            and (number := place.thread or root(place.conversation)) is not None
+            Working(conversation=place.conversation, thread=place.thread)
+            for place in self.concerns.inbox.whereabouts.values()
+            if self.concerns.live(place.conversation) and place.thread is not None
         ]
         return sorted(found, key=lambda each: each.conversation.key())
 
@@ -538,7 +545,7 @@ class Readings(Model, arbitrary_types_allowed=True):
         named = [
             each
             for read in threads
-            for each in [read.thread.holder, read.answering]
+            for each in [read.thread.holder, read.answering, read.left_by]
             if each is not None
         ]
         working = [
@@ -622,7 +629,9 @@ class Readings(Model, arbitrary_types_allowed=True):
         )
         return ThreadRead(
             thread=thread,
-            state=stood(status, waiting=bool(asking)),
+            state=stood(
+                status, waiting=bool(asking), running=beside.answering is not None
+            ),
             status=status,
             section=placing.section,
             since=placing.since,
@@ -634,6 +643,33 @@ class Readings(Model, arbitrary_types_allowed=True):
             earlier=read_to.members,
             mark=mark,
             answering=beside.answering,
+            left_by=self.left_by(thread, beside.answering),
+            bare=self.bare(number),
+        )
+
+    @staticmethod
+    def left_by(thread: Thread, answering: Conversation | None) -> Conversation | None:
+        """Return who left `thread`, where nobody running is `answering` for it: its holder, else the agent who opened it; none else."""
+        if answering is not None:
+            return None
+        return thread.holder or (
+            thread.by if isinstance(thread.by, Conversation) else None
+        )
+
+    def bare(self, number: int) -> bool:
+        """Say whether thread `number` is nothing to list (`ThreadRead.bare`)."""
+        ledgered = self.ledgered
+        thread = ledgered.threads[number]
+        return (
+            not ledgered.members.get(number)
+            and number not in ledgered.statuses
+            and not any(each.thread == number for each in self.working)
+            and self.source.concerns.answering(thread) is None
+            and all(
+                self.bare(each.number)
+                for each in ledgered.threads.values()
+                if each.parent == number
+            )
         )
 
     def read_to(

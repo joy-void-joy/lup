@@ -69,7 +69,6 @@ from lup_dev.host.service import Route, Served
 from lup_dev.host.watch import Changes, Touched
 from lup_dev.inbox import marks
 from lup_dev.inbox.citations import resolved
-from lup_dev.inbox.concerns import ROOT
 from lup_dev.inbox.marks import CORE, ReviewMark
 from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.protocol import Files, ListInbox, ShowFiles
@@ -226,7 +225,7 @@ class Cast(Model):
     """The runtime's id for the subagent that spawned them; none where their session's own conversation did."""
     activity: Activity
     works: str | None = None
-    """For a session's own conversation, their root thread; for a subagent, the thread they joined or hold; none for one who works in their session's root."""
+    """The thread they joined or hold; none for one who works in none."""
     ended: datetime | None = None
 
     def id(self) -> str:
@@ -700,7 +699,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 launch=LUP_IMPL,
                 session="s1",
                 activity=calling,
-                works="lup-impl",
+                works="the-build",
             ),
             Cast(
                 launch=LUP_IMPL,
@@ -758,7 +757,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 launch="b2e1",
                 session="s2",
                 activity=Activity(state="idle", since=self.ago(12)),
-                works="guidance-voice",
+                works="the-voice",
             ),
             Cast(
                 launch="c3d2",
@@ -766,7 +765,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 activity=Activity(
                     state="calling", since=self.ago(2), tool="exec_command"
                 ),
-                works="main",
+                works="render-pass",
             ),
             Cast(
                 launch="c3d2",
@@ -782,7 +781,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 launch="e5f4",
                 session="s4",
                 activity=Activity(state="ended", since=self.ago(190)),
-                works="docs-pass",
+                works="docs-sweep",
                 ended=self.ago(190),
             ),
         ]
@@ -815,14 +814,13 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 if each.parent is None
                 else main.model_copy(update={"agent": each.parent}),
                 name=each.own,
-                thread=None if each.agent is None else thread,
-                root=thread if each.agent is None else None,
+                thread=thread,
             )
 
         return [heard(each) for each in self.cast()]
 
     def served(self, lup: Layout) -> list[Served]:
-        """Return each launch as the host serves it, its record and each session's name written where the host keeps them, which say whose conversations still hold what they hold, and how they're called."""
+        """Return each launch as the host serves it, its record and each session's name written where the host keeps them, the ended docs session's among them, which say whose conversations still hold what they hold, and how they're called."""
         cast = self.cast()
         names = Names(path=lup.host.names)
 
@@ -855,6 +853,11 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 servers=[],
             )
 
+        ended = self.ended_launch()
+        for each in cast:
+            if each.launch == ended.launch and each.agent is None:
+                # A session's name outlives their launch, as the host keeps it.
+                names.keep(each.session, ended.name or ended.launch)
         return [of(each) for each in self.launches()]
 
     def branches(self) -> list[Route]:
@@ -897,7 +900,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         )
 
     def stand_in_threads(self) -> Threaded:
-        """Return the demo's threads, over its items (`every`): each session's root, held by them; the lup-impl session's work under theirs, the parser's reader with its question, a check and the parser's exchange with their subagent, explore-auth's survey new with its exchange with the session, the clock's ticks whose landing waits on a file, the legacy reader's cache settled, the reader's names parked; the voice session's root done, to confirm, with a part of the operator's words moved under it; zoetrope's render, its problem asking; the docs pass, the root of a session that has ended, its last note read, which its end settles not; and each worker's module, of a busy day."""
+        """Return the demo's threads, over its items (`every`): what each session holds; the lup-impl session's build, with their subagents' work under it, the parser's reader with its question, a check and the parser's exchange with their subagent, explore-auth's survey new with its exchange with the session, the clock's ticks whose landing waits on a file, whose holder ended, so the build's holder answers, the legacy reader's cache settled, the reader's names parked; the voice session's voice done, to confirm, with a part of the operator's words moved under it; zoetrope's render, its problem asking; the docs sweep, held by a session that has ended, its last note read, which its end settles not, so it's in `No agent`; and each worker's module, of a busy day."""
         first, second = self.runtimes
         lup = Path("/home/op/lup.git")
         zoetrope = Path("/home/op/zoetrope.git")
@@ -911,18 +914,18 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         main = Conversation(repository=zoetrope, runtime=second, session="s3")
         items = {each.number: each for each in self.every()}
         (
-            lup_root,
+            build,
             reader,
             auth,
             ticks,
             cache,
             names,
-            voice_root,
+            voiced,
             branch,
-            zoetrope_root,
+            rendered,
             past,
             reached,
-            docs_root,
+            swept,
         ) = range(self.first_thread, self.first_thread + 12)
         workers_from = self.first_thread + 12
 
@@ -968,7 +971,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     f"module-{n}",
                     f"Worker {n}'s module",
                     holder=self.worker(n),
-                    parent=lup_root,
+                    parent=build,
                     minutes=420,
                 ),
                 members=[
@@ -982,7 +985,13 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         ]
         stood = [
             StandInThread(
-                thread=thread(lup_root, "lup-impl", ROOT, holder=session, minutes=480),
+                thread=thread(
+                    build,
+                    "the-build",
+                    "Building lup's transcript reader",
+                    holder=session,
+                    minutes=480,
+                ),
                 members=[came(60), came(55), came(62)],
             ),
             StandInThread(
@@ -991,7 +1000,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     "transcript-reader",
                     "The transcript reader",
                     holder=parser,
-                    parent=lup_root,
+                    parent=build,
                     minutes=40,
                 ),
                 members=[
@@ -1010,7 +1019,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     "auth-survey",
                     "Where auth is checked",
                     holder=explorer,
-                    parent=lup_root,
+                    parent=build,
                     minutes=8,
                 ),
                 members=[came(64), came(65), came(66)],
@@ -1021,7 +1030,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     "clock-ticks",
                     "The clock's ticks",
                     holder=clock,
-                    parent=lup_root,
+                    parent=build,
                     minutes=35,
                 ),
                 members=[came(68), came(69)],
@@ -1032,7 +1041,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     "legacy-cache",
                     "The legacy reader's cache",
                     holder=survey,
-                    parent=lup_root,
+                    parent=build,
                     minutes=20,
                 ),
                 members=[came(44)],
@@ -1049,7 +1058,11 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             ),
             StandInThread(
                 thread=thread(
-                    voice_root, "guidance-voice", ROOT, holder=voice, minutes=30
+                    voiced,
+                    "the-voice",
+                    "The guidance's voice",
+                    holder=voice,
+                    minutes=30,
                 ),
                 members=[came(52), came(45), came(56), came(58)],
             ),
@@ -1059,25 +1072,31 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     "voice-branch",
                     "Put the voice on its branch",
                     holder=voice,
-                    parent=voice_root,
+                    parent=voiced,
                     minutes=7,
                 ),
                 members=[Joined(node=50, part=3, came=self.ago(7))],
             ),
             StandInThread(
                 thread=thread(
-                    zoetrope_root,
-                    "main",
-                    ROOT,
+                    rendered,
+                    "render-pass",
+                    "Zoetrope's render",
                     holder=main,
                     minutes=90,
                     repository=zoetrope,
                 ),
                 members=[came(53)],
             ),
-            StandInThread(thread=thread(past, "dev", ROOT, holder=None, minutes=2880)),
             StandInThread(
-                thread=thread(docs_root, "docs-pass", ROOT, holder=docs, minutes=240),
+                thread=thread(
+                    past, "old-notes", "Notes from before", holder=None, minutes=2880
+                )
+            ),
+            StandInThread(
+                thread=thread(
+                    swept, "docs-sweep", "The docs sweep", holder=docs, minutes=240
+                ),
                 members=[came(43)],
             ),
             *workers,
@@ -1096,7 +1115,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     why="named once the reader lands",
                 ),
                 ThreadDone(
-                    target=voice_root,
+                    target=voiced,
                     repository=lup,
                     by=voice,
                     at=self.ago(1.3),
