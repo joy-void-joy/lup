@@ -327,9 +327,16 @@ def moved_on(
     keeping: int = 50,
     fingerprint: str | None = None,
 ) -> Trial:
-    """Return `trial` with `live` at `commit`, what `plan_` holds and what keeps each other out, keeping the last `keeping` of the versions still pinned, and this one, whose host zone has `fingerprint`, where it was read."""
+    """Return `trial` with `live` at `commit`, what `plan_` holds and what keeps each other out, keeping the last `keeping` of the versions still pinned, and this one, whose host zone has `fingerprint`, where it was read: `live` staying at a commit it holds, nothing's read of it, and what was stays."""
+    known = next(
+        (each.fingerprint for each in trial.versions if each.commit == commit), None
+    )
     version = Version(
-        commit=commit, dev=dev, tips=plan_.tips, at=at, fingerprint=fingerprint
+        commit=commit,
+        dev=dev,
+        tips=plan_.tips,
+        at=at,
+        fingerprint=fingerprint or known,
     )
     branches = [
         each.model_copy(update={"conflict": plan_.conflicts.get(each.branch, "")})

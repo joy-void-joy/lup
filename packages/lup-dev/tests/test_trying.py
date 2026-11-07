@@ -522,13 +522,36 @@ def test_a_version_is_listed_with_the_copy_that_runs_it_and_what_runs(
     ]
 
 
-def test_a_pick_records_the_zone_of_what_it_runs(world: World, machine: Layout) -> None:
+def test_following_dev_with_nothing_moved_keeps_the_zone_as_an_accept_does_twice(
+    world: World, machine: Layout
+) -> None:
     a = world.branched("a", {"a.txt": "a\n"})
     world.on_trial(("a", a))
-    world.picked("a")
-    latest = world.record().latest
-    assert latest is not None
-    assert latest.fingerprint is not None
+    trying = world.trying
+    asyncio.run(trying.picked(world.repository, ["a"]))
+    before = world.record().latest
+    assert before is not None
+    assert before.fingerprint is not None
+    # An accept follows `dev` as its push does, then as it's answered: the second finds
+    # nothing to do, and reads no zone.
+    asyncio.run(trying.moved_dev(world.repository))
+    asyncio.run(trying.moved_dev(world.repository))
+    after = world.record().latest
+    assert after is not None
+    assert (after.commit, after.fingerprint) == (before.commit, before.fingerprint)
+
+
+def test_moved_on_for_a_commit_it_holds_keeps_what_was_read_of_it() -> None:
+    at = datetime(2026, 11, 7, tzinfo=UTC)
+    trial = Trial(
+        live="c",
+        dev="d",
+        versions=[Version(commit="c", dev="d", at=at, fingerprint="zone")],
+    )
+    again = moved_on(trial, "c", "d", Plan(tips={}, tree="t"), at)
+    assert again.versions[-1].fingerprint == "zone"
+    told = moved_on(trial, "c", "d", Plan(tips={}, tree="t"), at, fingerprint="other")
+    assert told.versions[-1].fingerprint == "other"
 
 
 class Lists(RepositoryAsking):
