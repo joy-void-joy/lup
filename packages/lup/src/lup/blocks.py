@@ -888,12 +888,10 @@ SHELL_FOLDS = [
     ),
 ]
 """The fold kinds of the shell, which every repository's looks carry and no
-module's letter may take: a section of the review whole under its line,
-*waiting on you*, *new*, *to read*, *every thread* and *agents*; a group whole
-under its banner, a thread's or an agent's; what of a thread came before
-where the operator last read it, read from the host as it opens; a friction or
-how it felt in the pile to read, its text under its title, which Space `f` and
-its letter select to mark read or move into a thread together; an item
+module's letter may take: what's nested under a row of the dashboard's list; a
+group whole under its banner, a thread's or an agent's; what of a thread came
+before where the operator last read it, which no buffer lays out; several
+checks of a thread under the row counting them; an item
 whole under its header, and an item's context, the core's; a file, a body and
 a run of unchanged lines, which `Diff` and `Code` fold under. `Core` declares
 them (`Core.folds`), so a person's layer changes how each starts and whether

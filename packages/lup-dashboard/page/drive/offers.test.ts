@@ -1,11 +1,12 @@
 // What each item offers is the host's (`docs/dashboard.md`, *Answering is marking*): each answer of its kind while it
 // waits on the operator, and a comment on it whatever it stands at, on the page as the host's table says it, whichever
-// layout shows it; what the draft holds on one that's past waiting, the line under the review says before it's sent.
+// buffer shows it; what the draft holds on one that's past waiting, the line under the review says before it's sent.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { open, type Dashboard } from "./dashboard.ts";
 import { demo, type Demo } from "./demo.ts";
 import type { Review } from "./review.ts";
+import { DEMO_ITEM } from "./typing.ts";
 
 /** Return once the line of keys says `text`, the cursor where it is. */
 const offers = (dashboard: Dashboard, text: string) =>
@@ -32,13 +33,13 @@ const asked = (dashboard: Dashboard, request: unknown) =>
         }
     }, request);
 
-describe("what's offered, grouped by agent, in headless Chromium", () => {
+describe("what's offered, in headless Chromium", () => {
     let served: Demo;
     let dashboard: Dashboard;
     let review: Review;
 
     beforeAll(async () => {
-        served = await demo({ size: 0, byAgent: true });
+        served = await demo({ size: 0 });
         dashboard = await open(served.url);
         review = await dashboard.review();
         await review.holds("── @54 approval");
@@ -64,6 +65,10 @@ describe("what's offered, grouped by agent, in headless Chromium", () => {
         await offers(dashboard, "␣d mark it read");
         await offers(dashboard, "␣s leave it for later");
         expect(await dashboard.page.locator(".keys").first().innerText()).not.toContain("␣x decline");
+        // How it felt, as a friction, is news as a note is.
+        await review.goTo("── @58 how it felt");
+        await offers(dashboard, "␣d mark it read");
+        await offers(dashboard, "␣s leave it for later");
     });
 
     it("counts an approval left for later as waiting no more", async () => {
@@ -106,7 +111,7 @@ describe("what's offered, grouped by agent, in headless Chromium", () => {
     });
 });
 
-describe("what's offered, grouped by thread, in headless Chromium", () => {
+describe("what's offered in a thread's own buffer, in headless Chromium", () => {
     let served: Demo;
     let dashboard: Dashboard;
     let review: Review;
@@ -115,7 +120,7 @@ describe("what's offered, grouped by thread, in headless Chromium", () => {
         served = await demo({ size: 0 });
         dashboard = await open(served.url);
         review = await dashboard.review();
-        await review.holds("── @66 note · lup-impl/explore-auth");
+        await review.holds(DEMO_ITEM);
         await review.settled(1500);
     });
 
@@ -129,9 +134,8 @@ describe("what's offered, grouped by thread, in headless Chromium", () => {
     });
 
     it("offers only a comment on what's past waiting, Space d going on to the thread it's in", async () => {
-        // Read as its thread opens, in the thread's history.
-        await review.goTo("━━ @transcript-reader · The transcript reader · lup-impl/parser holds · working");
-        await dashboard.keys.press(["z", "a"]);
+        // Read as its buffer opens, in the thread's history.
+        await dashboard.openRow("@transcript-reader");
         await review.holds("── @47 note");
         await review.goTo("── @47 note");
         await offers(dashboard, "comment on it");

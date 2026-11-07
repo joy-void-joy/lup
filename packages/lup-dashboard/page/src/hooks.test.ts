@@ -16,4 +16,12 @@ describe("what the host answers, taken no more often than every so often", () =>
         expect(taken("d", 1250)).toEqual(["d", null]);
         expect(taken("d", 1260)).toEqual(["d", null]);
     });
+
+    it("takes nothing as time alone passes, in a render nothing it depends on asked for, its timer due at once", () => {
+        const kept: Paced<string> = { shown: "a", at: 1000 };
+        expect(paced(kept, "b", 1100, 250, false)).toEqual({ paced: kept, due: 150 });
+        expect(paced(kept, "b", 2000, 250, false)).toEqual({ paced: kept, due: 0 });
+        expect(paced(kept, "a", 2000, 250, false)).toEqual({ paced: kept, due: null });
+        expect(paced(kept, "b", 2000, 250).paced).toEqual({ shown: "b", at: 2000 });
+    });
 });

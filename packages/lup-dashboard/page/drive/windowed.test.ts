@@ -14,6 +14,8 @@ beforeAll(async () => {
     served = await demo({ size: 0 });
     dashboard = await open(served.url, { windowed: US_INTERNATIONAL });
     review = await dashboard.review();
+    await review.holds(DEMO_ITEM);
+    await review.settled();
 });
 
 afterEach(() => {

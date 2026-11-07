@@ -1,10 +1,8 @@
 // The review: everything waiting for the operator laid out as one text to read
-// and move through, grouped by thread, in sections, each thread's conversation
-// from where the operator last read it, each agent's own views in a group of
-// theirs among the agents (`layThreaded`); or, where the host reads no threads,
-// in groups, one per agent, every agent running having one, empty or not;
-// their comments in it, each under the line it's on, and their messages to
-// each agent under the agent's banner, or on a thread under its banner. A tree (`laid`, `Laid.nodes`): the
+// and move through, in groups, one per agent, every agent running having one,
+// empty or not; or one thread's conversation whole, in its own buffer
+// (`layThread`); their comments in it, each under the line it's on, and their
+// messages to each agent under the agent's banner, or on a thread at its end. A tree (`laid`, `Laid.nodes`): the
 // core lays out the frame, the groups in the order they arrived, never sorted
 // again, each banner, each item's header and what's around its body (the
 // operator's words an answer answers, its edits, its citations' passages, the
@@ -117,34 +115,17 @@ export type ThreadEntry = components["schemas"]["ThreadEntry"];
 export type CheckRead = components["schemas"]["CheckRead"];
 
 /**
- * A section of the review grouped by thread, in its order: what asks the operator, what came that they haven't read,
- * the front, every other thread still open, the pile to read, what's settled or declined, and each agent with their
- * own views.
- */
-export type SectionName = "waiting on you" | "new" | "open" | "to read" | "settled" | "agents";
-
-/** The sections, in the review's order, and whether each starts folded: the front, open, is there to look at. */
-export const SECTIONS: readonly { name: SectionName; folded: boolean }[] = [
-    { name: "waiting on you", folded: false },
-    { name: "new", folded: false },
-    { name: "open", folded: false },
-    { name: "to read", folded: true },
-    { name: "settled", folded: true },
-    { name: "agents", folded: true },
-];
-
-/**
  * The review's threads, as the host reads them (`docs/inbox.md`, *Threads in the review*), and what of each the page has
- * read: each thread, its section and what asks; each one's conversation from where the operator last read it, for those
- * shown; each read whole, for those whose earlier part was opened; how many files a landing waits on in each, read from
- * the landings waiting by the thread their lander works in; and the banner's words for each.
+ * read: each thread and what asks; each one's conversation from where the operator last read it, for those with a check;
+ * each read whole, for those whose own buffer was opened; how many files a landing waits on in each, read from the
+ * landings waiting by the thread their lander works in; and the banner's words for each.
  */
 export interface Threading {
     read: ThreadsRead;
     shown: ReadonlyMap<number, ThreadShown>;
     whole: ReadonlyMap<number, ThreadShown>;
     landing: ReadonlyMap<number, number>;
-    banner: (read: ThreadRead, landing: number, section: SectionName) => string;
+    banner: (read: ThreadRead, landing: number) => string;
 }
 
 /** What every root thread is titled, the host's (`lup_dev.inbox.concerns.ROOT`): what it holds is whatever its session is given. */
@@ -155,48 +136,14 @@ export function about(thread: ThreadRead["thread"]): string {
     return thread.parent == null && thread.title === ROOT_TITLE ? "the session's own" : thread.title;
 }
 
-/**
- * Whether thread `read` is the root of a session that has ended: a root nobody answers for, its holder gone on no
- * longer, or none holding it. A session's end never settles it: it's the operator's, under the line `ended` in open.
- */
-export function endedRoot(read: ThreadRead): boolean {
-    return read.thread.parent == null && read.thread.title === ROOT_TITLE && (read.answering ?? null) === null;
-}
-
-/** The line in open the roots of sessions that have ended are listed under, after every other thread, and those roots. */
-export interface EndedRun extends Span {
-    header: Span;
-    threads: ThreadRead[];
-}
-
-/**
- * One friction or how it felt in the pile to read, where it's laid out: its line, what it is, its number, who sent it
- * and its title, its text folded under it; the item, and the thread it landed in.
- */
-export interface Piled extends Span {
-    item: Item;
-    thread: ThreadRead;
-    header: Span;
-}
-
-/** One thread's run in the pile to read: its line naming the thread, and its frictions and how it felt under it, in the order they came. */
-export interface PileRun extends Span {
-    thread: ThreadRead;
-    header: Span;
-    entries: Piled[];
-}
-
-/** Whether an item is the pile's to read: a friction or how it felt. */
-export function piled(item: Item): boolean {
+/** Whether an item is a friction or how it felt. */
+function piled(item: Item): boolean {
     return item.reason.reason === "friction" || item.reason.reason === "how it felt";
 }
 
-/** The longest a title made of an item's text is, in characters: its text whole is under it. */
-const TITLE_MOST = 80;
-
 /**
- * The longest a thread's title is where a line of the review says it, its banner and its line in the pile, in
- * characters: a banner is one row, its title whole in the overview's (`outline.ts`) and the thread palette's.
+ * The longest a thread's title is where a line of the review says it, its banner, in characters: a banner is one row,
+ * its title whole in the list's line of keys.
  */
 export const ABOUT_MOST = 60;
 
@@ -209,50 +156,10 @@ export function cutAt(text: string, most: number): string {
     return `${text.slice(0, cut > 0 ? cut : most - 1).trimEnd()}…`;
 }
 
-/**
- * Say an item of the pile by its title: a friction's own, else its text's first sentence, cut at a word to
- * `TITLE_MOST` characters at most, as how it felt has none, and a friction may leave it out.
- */
-export function pileTitle(item: Item): string {
-    const reason = item.reason;
-    const title = reason.reason === "friction" ? reason.title.trim() : "";
-    if (title !== "") {
-        return title;
-    }
-    const text = "text" in reason && typeof reason.text === "string" ? reason.text : "";
-    const line = text.split("\n").find((each) => each.trim() !== "")?.trim() ?? "";
-    const sentence = /^(.+?[.!?])(\s|$)/.exec(line)?.[1] ?? line;
-    return cutAt(sentence, TITLE_MOST);
-}
-
-/** One section of the review where it's laid out: its line, saying what it holds, and its fold whole under it. */
-export interface Section {
-    name: SectionName;
-    header: Span;
-    fold: Fold | null;
-}
-
 /** A check in a thread, where it's laid out: from its first line to its last, the comments under it among them. */
 export interface CheckLine extends Span {
     check: CheckRead;
     thread: number;
-}
-
-/**
- * An item of a thread's conversation laid out whole above, in waiting on you or new, where its thread in open shows it:
- * a line saying so, which `gd` follows to it, so no item shows twice and a comment on it belongs to one place.
- */
-export interface Pointer extends Span {
-    node: number;
-    thread: number;
-    section: SectionName;
-}
-
-/** A fold read from the host as it opens, by its key (`foldKey`): a thread's conversation, from where it was read or whole. */
-export interface Loading {
-    key: string;
-    number: number;
-    whole: boolean;
 }
 
 /** What the operator writes in the review, as its editor holds it: a comment on an item, a message to an agent, or a remark in one of their drawers. */
@@ -509,14 +416,14 @@ export const NO_AGENT: Party = {
 /** The parties the list lists and a buffer may show, in order; the operator's would go here. */
 export const PARTIES: readonly Party[] = [NO_AGENT];
 
-/** A check that waits on the operator, in the thread it's in: laid out by agent, under whoever owns that thread (`checkOwner`), where the review goes by agent and threads aren't what it's laid out by. */
+/** A check that waits on the operator, in the thread it's in: laid out under whoever owns that thread (`checkOwner`). */
 export interface OwnedCheck {
     check: CheckRead;
     thread: ThreadRead;
 }
 
 /**
- * Return who a check answers to, where the review goes by agent: whoever holds its thread (`taskOwner`), or the one who
+ * Return who a check answers to: whoever holds its thread (`taskOwner`), or the one who
  * asked it where nobody ever did. So it sits under them, or, where they've ended, under `No agent`, one owner for
  * everything.
  */
@@ -526,7 +433,7 @@ export function checkOwner(owned: OwnedCheck): Conversation | null {
 }
 
 /**
- * Return who owns a thread, as a task, where the review goes by agent: whoever holds it, running or not, so a task whose
+ * Return who owns a thread, as a task: whoever holds it, running or not, so a task whose
  * holder ended without finishing it sits under them, under `No agent`, though someone answers for it; else whoever answers
  * for it; else whoever opened it; none where the operator or lup did and nobody's taken it.
  */
@@ -581,17 +488,17 @@ export interface Arranging {
     remote?: Remote;
     /** The review as the page last laid it out, which each comment is followed from, through its block's change since (`placed`, `anchors.ts`); none as it's first laid out. */
     previous?: Followed | null;
-    /** The review's threads, which it's grouped by where given (`layThreaded`); none groups it by agent. */
+    /** The review's threads, which a thread's own buffer lays out one of (`layThread`). */
     threads?: Threading | null;
     /** The one buffer to lay out of the review, where it's laid out in panes; none lays it out whole. */
     showing?: Showing | null;
-    /** The checks waiting on the operator, each laid out under whoever owns it (`checkOwner`), where the panes go by agent; none else. */
+    /** The checks waiting on the operator, each laid out under whoever owns it (`checkOwner`), in panes; none else. */
     checks?: readonly OwnedCheck[];
     /** Whether what the review is laid out from is all read, so a buffer with nothing in it holds nothing; unsaid, it is. */
     read?: boolean;
     /** What a buffer with nothing in it says until it's read. */
     unread?: string;
-    /** The threads done, for the operator to confirm, each laid out under whoever owns it (`taskOwner`), where the panes go by agent; none else. */
+    /** The threads done, for the operator to confirm, each laid out under whoever owns it (`taskOwner`), in panes; none else. */
     confirming?: readonly ThreadRead[];
     /** The parties a buffer may show; unsaid, those declared here (`PARTIES`). */
     parties?: readonly Party[];
@@ -679,7 +586,7 @@ export interface ReviewedLine extends Span {
  */
 export interface Placed extends Span {
     id: string;
-    kind: "section" | "group" | "banner" | "item" | "header" | "frame" | "view" | "block" | "written" | "pile" | "ended";
+    kind: "group" | "banner" | "item" | "header" | "frame" | "view" | "block" | "written";
     header: Span;
     children: Placed[];
     view?: Mounted;
@@ -714,23 +621,13 @@ export interface Laid {
     converted: Written[] | null;
     /** Each span drawn beside the text rather than written in it, where it goes (`isDrawn`). */
     drawn: Drawn[];
-    /** Each section, grouped by thread; none grouped by agent. */
-    sections: Section[];
-    /** The folds of no scope: each section's whole, and what of a thread came before where the operator read it. */
+    /** The folds of no scope: each row of several checks'. */
     outer: Fold[];
     /** The lines of a thread that are no item's nor drawer's: the operator's words moved in or on what isn't laid out, a check, what's to try. */
     asides: Aside[];
     /** Each check laid out, in the text's order. */
     checks: CheckLine[];
-    /** Each fold read from the host as it opens. */
-    loading: Loading[];
-    /** Each line in a thread's conversation in open or settled standing for an item laid out above, in the text's order. */
-    pointers: Pointer[];
-    /** The pile to read, each thread's run of it, in the text's order; none grouped by agent. */
-    pile: PileRun[];
-    /** The line in open the roots of sessions that have ended are under, and those roots; none where there's none, or grouped by agent. */
-    ended: EndedRun | null;
-    /** Each line saying a thread's done, for the operator to confirm, where the panes go by agent, which `gt` goes from to the thread. */
+    /** Each line saying a thread's done, for the operator to confirm, which `gt` goes from to the thread. */
     confirms: (Span & { thread: ThreadRead })[];
 }
 
@@ -981,7 +878,7 @@ function filedIn(blocks: readonly ViewBlock[]): Filed[] {
 }
 
 /**
- * How an agent's group is laid out: whole, as the review grouped by agent lays it, each drawer under its banner, then
+ * How an agent's group is laid out: whole, each drawer under its banner, then
  * its items, what's written to them under the banner; `gone`, the same of an agent no longer running, whose drawers are
  * read only as their buffer's opened; or as their `own` buffer, their conversation live after their items, what's
  * written to them after it.
@@ -1032,29 +929,16 @@ function placeOf(key: string, later: boolean): string {
     return `${later ? "later" : "now"} ${key}`;
 }
 
-/** Return what names thread `number`'s group's place in open or settled across layouts, as the host keeps the order (`placeOf`). */
+/** Return what names thread `number`'s group's place across layouts (`placeOf`). */
 export function threadPlace(number: number): string {
     return placeOf(`thread:${number}`, false);
 }
 
-/** Where a thread's header is laid out: over what asks in waiting on you, over what's new, or whole in open or settled. */
-export type Placing = "waiting" | "new" | "open" | "settled";
-
-/** Return what names thread `number`'s header's place in `section` across layouts: each section keeps its own order, a thread's place in open its `threadPlace`. */
-export function placeIn(section: Placing, number: number): string {
-    return section === "open" || section === "settled" ? threadPlace(number) : placeOf(`${section} thread:${number}`, false);
-}
-
 /**
- * How many of what came before what's new show before it in new, the latest, each folded to its header: a little the
- * operator may have seen, as context (`ShowThread.seen`, which the page asks with it).
+ * How many of what came before what's new the host marks, the latest, each folded to its header in a thread's conversation:
+ * a little the operator may have seen, as context (`ShowThread.seen`, which the page asks with it).
  */
 export const SEEN = 3;
-
-/** Return whether `item`, where there is one, is a flagged write, which the review shows in its writer's drawer, never as an item. */
-function flagged(item: Item | undefined): boolean {
-    return item !== undefined && flag(item);
-}
 
 /** Return what names an entry of a thread's conversation among the others: its node, and its part where it's one. */
 function spotKey(spot: { node: number; part?: number | null }): string {
@@ -1131,7 +1015,7 @@ export function waited(made: string, now: Date): string {
 export interface Seeing {
     groups: ReadonlyMap<string, number>;
     commented: ReadonlySet<number>;
-    /** Grouped by thread, the items new to the operator: each that came after where they last read its thread. */
+    /** In a thread's own buffer, the items new to the operator: each that came after where they last read the thread. */
     threaded?: ReadonlySet<number>;
 }
 
@@ -1150,7 +1034,7 @@ export function seeingOf(items: components["schemas"]["Items"] | null): Seeing {
     return { groups, commented };
 }
 
-/** Say whether an item is new to the operator: they haven't seen its group since it came, nor commented on it in a reply they sent; grouped by thread, it came after where they last read its thread. */
+/** Say whether an item is new to the operator: they haven't seen its group since it came, nor commented on it in a reply they sent; in a thread's own buffer, it came after where they last read the thread. */
 export function fresh(item: Item, seeing: Seeing): boolean {
     if (seeing.commented.has(item.number)) {
         return false;
@@ -1172,22 +1056,9 @@ export function toRead(item: Item, draft: Draft, seeing: Seeing): boolean {
     return !item.asks && news(item) && waits(item) && !settled.includes(item.number) && fresh(item, seeing);
 }
 
-/**
- * Return how many items are only to read, what the top bar and the header over the review say apart from what asks the
- * operator: of `items`, as `toRead` says; grouped by thread, what the host says is new in each of `threads` and on its pile
- * to read, those the draft marks left out.
- */
-export function countToRead(items: readonly Item[], draft: Draft, seeing: Seeing, threads: readonly ThreadRead[] | null): number {
-    if (threads === null) {
-        return items.filter((each) => toRead(each, draft, seeing)).length;
-    }
-    const settled = new Set([...(draft.done ?? []), ...(draft.declined ?? []), ...(draft.parked ?? [])]);
-    return new Set(threads.flatMap((each) => [...(each.new ?? []), ...(each.pile ?? [])]).filter((number) => !settled.has(number))).size;
-}
-
-/** Say how many of a thing there are: `1 step`, `5 steps`. */
-function counted(count: number, one: string): string {
-    return `${count} ${one}${count === 1 ? "" : "s"}`;
+/** Return how many of `items` are only to read, what the top bar and the header over the review say apart from what asks the operator (`toRead`). */
+export function countToRead(items: readonly Item[], draft: Draft, seeing: Seeing): number {
+    return items.filter((each) => toRead(each, draft, seeing)).length;
 }
 
 /**
@@ -1641,28 +1512,12 @@ export function laid(
     const regions: Region[] = [];
     const laidDrawers: Drawer[] = [];
     const nodes: Placed[] = [];
-    const sections: Section[] = [];
     const outer: Fold[] = [];
     const asides: Aside[] = [];
     const checkLines: CheckLine[] = [];
-    const loading: Loading[] = [];
-    const pointers: Pointer[] = [];
-    // Each item and check laid out whole above, in waiting on you or new, by its number, and where: in its thread's
-    // conversation in open, each is a pointer to it there.
-    const shownAbove = new Map<number, SectionName>();
-    // Each thread whose messages written on it are laid out, under the first of its headers.
-    const lettered = new Set<number>();
-    const pileRuns: PileRun[] = [];
-    // The line in open the ended sessions' roots are under, where there are some; and the lines a group's fold never
-    // reaches past, beside each section's, as that line, which no thread's fold holds.
-    let endedRun = null as EndedRun | null;
+    // The lines a group's fold never reaches past; and the groups whose conversation isn't read yet.
     const breaks: number[] = [];
-    // The groups whose fold starts closed, as each thread's of the front and of what's settled does, and those whose
-    // conversation isn't read yet.
-    const closedGroups = new Set<string>();
     const unreadGroups = new Set<string>();
-    // Each agent whose "since you approved" is laid out at the end of the thread they work in, by `whose` they are.
-    const sinceLaid = new Set<string>();
     const threading = arranging.threads ?? null;
     const showing = arranging.showing ?? null;
     // Whether what the review is laid out from is read yet: until then, a buffer's empty for that alone.
@@ -1704,11 +1559,11 @@ export function laid(
         for (const { group, depth } of nested(kept([...now, ...empty].filter(inIt), false), arranging.parents ?? null)) {
             layGroup(group, false, depth, "gone");
         }
-    } else if (threading !== null) {
-        layThreaded(threading);
+    } else if (showing?.kind === "thread" && threading !== null) {
+        layThread(threading, showing.number);
     } else if (showing?.kind === "for you") {
         // What's for the operator: each group with an item, or something it holds waits on them, or written to under its
-        // banner; each with its drawers, as the review by agent has them, a line each until opened.
+        // banner; each with its drawers, a line each until opened.
         const holds = (group: Grouping) => group.items.length > 0 || checksOf.has(group.key) || confirmsOf.has(group.key) || letters.some((each) => each.to != null && whose(each.to) === group.key) || sinceWaits(group) !== null;
         const holding = [...now, ...empty].filter(holds);
         for (const { group, depth } of nested(kept(holding, false), arranging.parents ?? null)) {
@@ -1742,16 +1597,15 @@ export function laid(
         layNote(readYet ? "Nothing here now: the list beside this says what there is." : (arranging.unread ?? "Reading what's there…"), "nothing here");
     }
     // Each group folds whole under its banner, up to the next as deep or shallower, a subagent's inside their parent's,
-    // a thread's under its parent's in its section, and never past its section's end.
+    // and never past a line of the buffer's own that it holds none of.
     {
         groups.forEach((group, at) => {
             const next = groups.findIndex((each, after) => after > at && each.depth <= group.depth);
-            const section = Math.min(sections.find((each) => each.header.from > group.banner.from)?.header.from ?? w.at, breaks.find((each) => each > group.banner.from) ?? w.at);
-            const end = Math.min(next < 0 ? w.at : (groups[next]?.banner.from ?? w.at), section) - 1;
+            const end = Math.min(next < 0 ? w.at : (groups[next]?.banner.from ?? w.at), breaks.find((each) => each > group.banner.from) ?? w.at) - 1;
             const id = `group ${group.place}`;
             if (end > group.banner.to) {
                 const label = w.lineFrom(group.banner.from);
-                group.fold = { of: id, kind: "group", name: "", label, closed: closedGroups.has(id), summary: group.banner, from: group.banner.to, to: end, scope: true, ...(unreadGroups.has(id) ? { unread: true } : {}) };
+                group.fold = { of: id, kind: "group", name: "", label, closed: false, summary: group.banner, from: group.banner.to, to: end, scope: true, ...(unreadGroups.has(id) ? { unread: true } : {}) };
             }
             group.end = Math.max(end, group.banner.to);
             const node = nodes.find((each) => each.id === id);
@@ -1760,31 +1614,6 @@ export function laid(
             }
         });
     }
-    // The line of ended sessions' roots holds them, to the last one's end.
-    if (endedRun !== null) {
-        const run = endedRun;
-        const last = groups.filter((each) => each.thread !== null && run.threads.includes(each.thread) && each.banner.from > run.header.from).at(-1);
-        run.to = Math.max(run.header.to, last?.end ?? run.header.to);
-        const node = nodes.find((each) => each.id === "ended");
-        if (node !== undefined) {
-            node.to = run.to;
-        }
-    }
-    // Each section folds whole under its line, up to the next.
-    sections.forEach((section, at) => {
-        const end = (sections[at + 1]?.header.from ?? w.at) - 1;
-        const id = `section ${section.name}`;
-        if (end > section.header.to) {
-            // In what's for the operator, its banners are there to be seen: it never looks empty while anyone's at work.
-            const folded = (SECTIONS.find((each) => each.name === section.name)?.folded ?? false) && !(showing?.kind === "for you" && section.name === "agents");
-            section.fold = { of: id, kind: "section", name: "", label: w.lineFrom(section.header.from), closed: folded, summary: section.header, from: section.header.to, to: end, scope: true };
-            outer.push(section.fold);
-        }
-        const node = nodes.find((each) => each.id === id);
-        if (node !== undefined) {
-            node.to = Math.max(end, section.header.to);
-        }
-    });
     // Each fold starts as its kind says where it says (`Kind.startsOpen`, a person's layer's), else as its view laid it
     // out; one a mark folded stays folded.
     for (const fold of [...regions, ...laidDrawers].flatMap((each) => each.folds).concat(groups.flatMap((each) => (each.fold === null ? [] : [each.fold])), outer)) {
@@ -1809,14 +1638,9 @@ export function laid(
         written: asLaid,
         converted,
         drawn: drawnAt,
-        sections,
         outer: outer.sort((a, b) => a.from - b.from || b.to - a.to),
         asides,
         checks: checkLines,
-        loading,
-        pointers,
-        pile: pileRuns,
-        ended: endedRun,
         confirms: confirmLines,
     };
 
@@ -1828,13 +1652,13 @@ export function laid(
         return line;
     }
 
-    /** Return `section` with each group laid out before in its place, any other after them, in its own order. */
-    function kept(section: Grouping[], isParked: boolean): Grouping[] {
+    /** Return `groups` with each laid out before in its place, any other after them, in its own order. */
+    function kept(groups: Grouping[], isParked: boolean): Grouping[] {
         const rank = (group: Grouping) => {
             const at = places.indexOf(placeOf(group.key, isParked));
             return at < 0 ? places.length : at;
         };
-        return [...section].sort((a, b) => rank(a) - rank(b));
+        return [...groups].sort((a, b) => rank(a) - rank(b));
     }
 
     /** Return a part of the review laid out from `from` to `to`, its first line its header. */
@@ -1904,389 +1728,87 @@ export function laid(
         return quoting(last.block, lines, ofLine.at(first)?.line ?? 0, last.line, start, end, quote.text);
     }
 
-    /** Return `list` with each laid out before in its place (`places`), the rest after them in their order. */
-    function keptBy<T>(list: readonly T[], place: (each: T) => string): T[] {
-        const rank = (each: T) => {
-            const at = places.indexOf(place(each));
-            return at < 0 ? places.length : at;
-        };
-        return [...list].sort((a, b) => rank(a) - rank(b));
-    }
-
     /**
-     * Lay the review out by thread (`docs/dashboard.md`, *The review*), each section under its line, in its order:
-     * waiting on you and new by item, each under a header naming its thread, what asks the operator in each, those blocked
-     * on them first, then those done for them to confirm, then what asks them in no thread, as lup's own approvals, by
-     * whom it's from; and what's new in each, the latest few read before it as context; each header in the order it came
-     * into its section, never sorted again, its place kept (`places`, `placeIn`), so nothing moves but the items; open,
-     * every thread still open, always, a line each, nested under its parent among them, folded, its whole conversation
-     * read as it opens, each item laid out above a line pointing to it there; to read, the pile; settled, each thread
-     * settled or declined, nested so, folded, read so; and agents, each agent's group as it was, their banner and their
-     * own views, folded.
+     * Lay thread `number`'s own buffer (`Showing`), as the host reads it (`docs/inbox.md`, *Threads in the review*): its
+     * banner, saying what the core says of it (`Threading.banner`); what it's parked until; its whole conversation, read
+     * from the host as the buffer's opened, a line saying so until it is, each entry in the order it came; the "since you
+     * approved" of each agent working in it; and last the line what's written on it goes under.
      */
-    function layThreaded(threading: Threading): void {
-        const reads = threading.read.threads;
-        const landed = (read: ThreadRead) => threading.landing.get(read.thread.number) ?? 0;
-        // What the host reads as every thread is the front, each open, or what's settled or declined.
-        const sectionOf = (read: ThreadRead): SectionName =>
-            landed(read) > 0 ? "waiting on you" : read.section !== "every thread" ? read.section : read.state === "settled" || read.state === "declined" ? "settled" : "open";
-        // Where each conversation works, by the thread: whose "since you approved" is laid out at its group's end; and
-        // each writer of a file a landing waits on, where they work nowhere now, as an ended subagent, at the end of the
-        // thread their lander works in, where what the landing waits on is asked.
-        const homes = new Map<number, Conversation[]>();
-        const working = new Map((threading.read.working ?? []).map((each) => [whose(each.conversation), each.thread]));
-        for (const each of threading.read.working ?? []) {
-            homes.set(each.thread, [...(homes.get(each.thread) ?? []), each.conversation]);
-        }
-        for (const wait of arranging.landings ?? []) {
-            const thread = working.get(whose(wait.lander));
-            for (const writer of (wait.files ?? []).flatMap((file) => file.writers ?? [])) {
-                if (thread !== undefined && !working.has(whose(writer))) {
-                    working.set(whose(writer), thread);
-                    homes.set(thread, [...(homes.get(thread) ?? []), writer]);
-                }
-            }
-        }
-        const since = (read: ThreadRead) => new Date(read.since).getTime();
-        const inOrder = (list: ThreadRead[], section: Placing) => keptBy(list.toSorted((a, b) => since(a) - since(b)), (each) => placeIn(section, each.thread.number));
-        const closed = (read: ThreadRead) => read.state === "settled" || read.state === "declined";
-        // Waiting on you: each thread something in asks the operator, a landing waits on files there, or it's done for
-        // them to confirm, those blocked on them first; new: each with something they haven't read that asks nothing.
-        const asking = reads.filter((each) => (each.asks ?? []).length > 0 || landed(each) > 0 || each.state === "done to confirm");
-        const blocked = inOrder(asking.filter((each) => (each.asks ?? []).length > 0 || landed(each) > 0), "waiting");
-        const confirming = inOrder(asking.filter((each) => !blocked.includes(each)), "waiting");
-        const fresh = inOrder(reads.filter((each) => (each.new ?? []).length > 0), "new");
-        // Open: every thread neither settled nor declined, always; settled: the rest.
-        const front = reads.filter((each) => !closed(each));
-        const done = reads.filter(closed);
-        // What asks the operator in no thread, as lup's own approvals.
-        const asked = new Set(reads.flatMap((each) => (each.asks ?? []).map((ask) => ask.node)));
-        const loose = grouped(
-            items.filter((each) => each.asks && !asked.has(each.number) && !parked.includes(each.number)),
-            (item) => banner({ item }, false, ""),
-        );
-        // One thread's own buffer: its whole conversation, open, and no section.
-        if (showing?.kind === "thread") {
-            const own = reads.find((each) => each.thread.number === showing.number);
-            if (own !== undefined) {
-                layWhole(own, 0, closed(own) ? "settled" : "open");
-            }
+    function layThread(threading: Threading, number: number): void {
+        const read = threading.read.threads.find((each) => each.thread.number === number);
+        if (read === undefined) {
             return;
         }
-        layThreadSection("waiting on you", `${blocked.length + confirming.length + loose.length}`, () => {
-            for (const each of [...blocked, ...confirming]) {
-                layAsking(each);
-            }
-            for (const group of kept(loose, false)) {
-                layGroup(group, false, 0);
-            }
-        });
-        layThreadSection("new", `${fresh.length}`, () => {
-            for (const each of fresh) {
-                layFresh(each);
-            }
-        }, fresh.length === 0);
-        // The front: every thread still open, a line each, nested as threads nest, folded, its whole conversation read as
-        // it opens; the roots of sessions that have ended after the others, under a line of their own, `ended`, which
-        // Space d settles together, a thread under one staying with the others.
-        const ended = front.filter(endedRoot);
-        layThreadSection("open", `${front.length}`, () => {
-            for (const { read, depth } of nestedThreads(front.filter((each) => !endedRoot(each)))) {
-                layWhole(read, depth, "open");
-            }
-            if (ended.length > 0) {
-                layEnded(ended.toSorted((a, b) => a.thread.number - b.thread.number));
-            }
-        });
-        // The pile to read: each thread's frictions and how it felt not yet read, under a line naming the thread, the
-        // threads in the order their first came, each keeping its place as more come.
-        const waitingNow = new Map(items.map((each) => [each.number, each]));
-        const runs = reads
-            .map((read) => ({ read, entries: (read.pile ?? []).flatMap((number) => waitingNow.get(number) ?? []) }))
-            .filter((each) => each.entries.length > 0)
-            .toSorted((a, b) => (a.entries[0]?.number ?? 0) - (b.entries[0]?.number ?? 0));
-        const pile = runs.flatMap((each) => each.entries);
-        const frictions = pile.filter((each) => each.reason.reason === "friction").length;
-        layThreadSection("to read", [`${frictions} ${frictions === 1 ? "friction" : "frictions"}`, `${pile.length - frictions} how it felt`].join(", "), () => {
-            for (const run of runs) {
-                layPile(run.read, run.entries);
-            }
-        }, runs.length === 0);
-        const declined = done.filter((each) => each.state === "declined").length;
-        layThreadSection("settled", `${done.length - declined} settled · ${declined} declined`, () => {
-            for (const { read, depth } of nestedThreads(done)) {
-                layWhole(read, depth, "settled");
-            }
-        });
-        // Each agent's group, their banner and their own views, as an agent's group was: those running, those holding
-        // what waits on the operator, and each a message is written to under their banner.
-        const agentGroups = emptyGroups(
-            [...agents, ...letters.flatMap((each) => (each.to != null && each.thread == null ? [each.to] : [])), ...remarks.map(holderOf)],
-            [],
-        );
-        layThreadSection("agents", `${agentGroups.length}`, () => {
-            for (const { group, depth } of nested(kept(agentGroups, false), arranging.parents ?? null)) {
-                layGroup(group, false, depth);
-            }
-        }, agentGroups.length === 0);
-
-        /**
-         * Lay thread `read`'s run of the pile to read: a line naming it, then each of `entries`, a friction or how it
-         * felt, on a line saying what it is, its number, who sent it and its title, its text under it, set in, folded
-         * (`pile`, `r`).
-         */
-        function layPile(read: ThreadRead, entries: readonly Item[]): void {
-            const number = read.thread.number;
-            const id = `pile thread:${number}`;
-            const frictionsHere = entries.filter((each) => each.reason.reason === "friction").length;
-            const counts = [
-                ...(frictionsHere === 0 ? [] : [counted(frictionsHere, "friction")]),
-                ...(entries.length === frictionsHere ? [] : [`${entries.length - frictionsHere} how it felt`]),
-            ].join(", ");
-            const header = w.line(`@${read.thread.name} · ${cutAt(about(read.thread), ABOUT_MOST)} · ${counts}`, id);
-            asides.push({ kind: "pile-thread", ...header });
-            const node = part(id, "pile", header.from, header.to);
-            nodes.push(node);
-            const run: PileRun = { thread: read, header, entries: [], from: header.from, to: header.to };
-            for (const item of entries) {
-                const of = `pile ${item.number}`;
-                const what = item.reason.reason === "friction" ? "friction" : "how it felt";
-                const who = item.sender.party === "conversation" ? name(item.sender) : "you";
-                const line = w.line(`${what} ${cited(item.number)} · ${who} · ${pileTitle(item)}`, of);
-                asides.push({ kind: "pile", ...line });
-                const text = "text" in item.reason && typeof item.reason.text === "string" ? item.reason.text : "";
-                for (const each of text.trimEnd().split("\n")) {
-                    asides.push({ kind: "pile-text", ...w.line(`${SET_IN}${each}`, of) });
-                }
-                const end = w.at - 1;
-                if (end > line.to) {
-                    outer.push({ of, kind: "pile", name: "", label: w.lineFrom(line.from), closed: true, summary: line, from: line.to, to: end });
-                }
-                node.children.push(part(of, "pile", line.from, end));
-                run.entries.push({ item, thread: read, header: line, from: line.from, to: end });
-            }
-            node.to = w.at - 1;
-            run.to = node.to;
-            pileRuns.push(run);
+        const place = threadPlace(number);
+        const id = `group ${place}`;
+        const opening = w.line(threading.banner(read, threading.landing.get(number) ?? 0), `${id} banner`);
+        const made: Group = {
+            conversation: read.answering ?? null,
+            parts: [],
+            head: { thread: read },
+            later: false,
+            place,
+            banner: opening,
+            blocks: [],
+            drawers: [],
+            depth: 0,
+            fold: null,
+            thread: read,
+            end: opening.to,
+        };
+        groups.push(made);
+        const node = part(id, "group", opening.from, opening.to);
+        nodes.push(node);
+        node.children.push(part(`${id} banner`, "banner", opening.from, opening.to));
+        const status = read.status ?? null;
+        if (status !== null && status.kind === "ledger:parked" && (status.why ?? "") !== "") {
+            const parkedLine = w.line(`parked: ${status.why ?? ""}`, `${id} parked`);
+            asides.push({ kind: "summary", ...parkedLine });
+            node.children.push(part(`${id} parked`, "frame", parkedLine.from, parkedLine.to));
         }
-
-        /** Lay the line the roots of sessions that have ended are under, in open, then each of them, `roots`, a line each, folded. */
-        function layEnded(roots: readonly ThreadRead[]): void {
-            const header = w.line(`ended · ${roots.length}`, "ended");
-            asides.push({ kind: "ended", ...header });
-            breaks.push(header.from);
-            nodes.push(part("ended", "ended", header.from, header.to));
-            endedRun = { header, threads: [...roots], from: header.from, to: header.to };
-            for (const read of roots) {
-                layWhole(read, 0, "open");
-            }
-        }
-
-        /** Return `threads`, each under its parent among them, in the order each was opened, with how deep it's set in. */
-        function nestedThreads(threads: readonly ThreadRead[]): { read: ThreadRead; depth: number }[] {
-            const numbers = new Set(threads.map((each) => each.thread.number));
-            const under = new Map<number | null, ThreadRead[]>();
-            for (const each of threads.toSorted((a, b) => a.thread.number - b.thread.number)) {
-                let parent = each.thread.parent ?? null;
-                while (parent !== null && !numbers.has(parent)) {
-                    parent = reads.find((one) => one.thread.number === parent)?.thread.parent ?? null;
-                }
-                under.set(parent, [...(under.get(parent) ?? []), each]);
-            }
-            const walk = (read: ThreadRead, depth: number): { read: ThreadRead; depth: number }[] => [
-                { read, depth },
-                ...(under.get(read.thread.number) ?? []).flatMap((child) => walk(child, depth + 1)),
-            ];
-            return (under.get(null) ?? []).flatMap((each) => walk(each, 0));
-        }
-
-        /** Lay a section's line, saying what it holds, then what `lay` lays in it; in what's for the operator, only those holding what's for them, and none `empty`. */
-        function layThreadSection(name: SectionName, holds: string, lay: () => void, empty: boolean = false): void {
-            if (showing?.kind === "for you" && ((name !== "waiting on you" && name !== "new" && name !== "to read" && name !== "agents") || empty)) {
-                return;
-            }
-            const id = `section ${name}`;
-            const header = w.line(`${name} · ${holds}`, id);
-            sections.push({ name, header, fold: null });
-            nodes.push(part(id, "section", header.from, header.to));
-            lay();
-        }
-
-        /**
-         * Lay thread `read`'s header in `section`, a group of its own folding what's under it, `depth` deep among the
-         * section's: its banner, saying what the section says of it (`Threading.banner`), and, under the first of its
-         * headers, the operator's messages written on it; folded where `folded` says. Return it, its part of the tree.
-         */
-        function layHeader(read: ThreadRead, section: Placing, depth: number, folded: boolean): { made: Group; node: Placed; id: string } {
-            const number = read.thread.number;
-            const place = placeIn(section, number);
-            const id = `group ${place}`;
-            const named: SectionName = section === "waiting" ? "waiting on you" : section;
-            const opening = w.line(threading.banner(read, landed(read), named), `${id} banner`);
-            const blocks: Block[] = [];
-            const writtenParts: Placed[] = [];
-            if (!lettered.has(number)) {
-                lettered.add(number);
-                for (const letter of letters) {
-                    if (letter.thread === number) {
-                        writeWritten(letter, blocks, writtenParts);
-                    }
-                }
-            }
-            const made: Group = {
-                conversation: read.answering ?? null,
-                parts: [],
-                head: { thread: read },
-                later: false,
-                place,
-                banner: opening,
-                blocks,
-                drawers: [],
-                depth,
-                fold: null,
-                thread: read,
-                end: opening.to,
-            };
-            groups.push(made);
-            const node = part(id, "group", opening.from, opening.to);
-            nodes.push(node);
-            node.children.push(part(`${id} banner`, "banner", opening.from, opening.to), ...writtenParts);
-            if (folded) {
-                closedGroups.add(id);
-            }
-            return { made, node, id };
-        }
-
-        /**
-         * Lay what of thread `read` asks the operator under its header in waiting on you: what's to try where it's done,
-         * a landing waiting on files there with the "since you approved" holding them, then each item and check asking
-         * them, whole, in the order it came; a line saying it's being read until the host answers.
-         */
-        function layAsking(read: ThreadRead): void {
-            const number = read.thread.number;
-            const { made, node, id } = layHeader(read, "waiting", 0, false);
-            const status = read.status ?? null;
-            const toldFrom = w.at;
-            if (status !== null && status.kind === "ledger:done") {
-                const [first = "", ...rest] = status.to_try.split("\n");
-                asides.push({ kind: "to-try", ...w.line(`◇ to try: ${first}`, `${id} to try`) });
-                for (const line of rest) {
-                    asides.push({ kind: "to-try", ...w.line(`${SET_IN}${line}`, `${id} to try`) });
-                }
-            }
-            const files = landed(read);
-            if (files > 0) {
-                asides.push({ kind: "to-try", ...w.line(`◆ landing waits on ${counted(files, "file")}: in "since you approved" below`, `${id} landing`) });
-            }
-            if (w.at > toldFrom) {
-                node.children.push(part(`${id} status`, "frame", toldFrom, w.at - 1));
-            }
-            // The code asked about where it's asked: each since you approved a landing there waits on.
-            if (files > 0) {
-                laySince(read, made, node, id);
-            }
-            const shownNow = threading.shown.get(number) ?? null;
-            if (shownNow === null) {
-                reading(id, node);
-                return;
-            }
-            const asks = new Set((read.asks ?? []).map((each) => each.node));
-            layEntries(
-                shownNow.entries.filter((each) => each.member && each.spot.part == null && asks.has(each.spot.node)),
-                shownNow,
-                number,
-                node.children,
-                "waiting on you",
-            );
-        }
-
-        /**
-         * Lay what of thread `read` is new to the operator under its header in new: the latest few they read before it,
-         * as context, each folded to its header (`ThreadEntry.seen`), or, in a thread they never read, the few before its
-         * first news; their own words since; then each item new to them, in the order it came.
-         */
-        function layFresh(read: ThreadRead): void {
-            const number = read.thread.number;
-            const { node, id } = layHeader(read, "new", 0, false);
-            const shownNow = threading.shown.get(number) ?? null;
-            if (shownNow === null) {
-                reading(id, node);
-                return;
-            }
-            const fresh = new Set(read.new ?? []);
-            const isNew = (each: ThreadEntry) => each.member && each.spot.part == null && fresh.has(each.spot.node);
-            const known = new Map(shownNow.items.map((each) => [each.number, each]));
-            // A thread never read has no context the host marks: the few before its first news, but what's shown above.
-            const first = shownNow.entries.findIndex(isNew);
-            const before =
-                read.mark != null || first < 0
-                    ? []
-                    : shownNow.entries
-                          .slice(0, first)
-                          .filter((each) => each.member && each.spot.part == null && !shownAbove.has(each.spot.node) && !flagged(known.get(each.spot.node)))
-                          .slice(-SEEN);
-            const context = new Set(before.map((each) => spotKey(each.spot)));
-            const entries = shownNow.entries
-                .filter((each) => each.seen === true || context.has(spotKey(each.spot)) || isNew(each) || (!each.member && each.earlier !== true))
-                .map((each) => (context.has(spotKey(each.spot)) ? { ...each, seen: true } : each));
-            layEntries(entries, shownNow, number, node.children, "new");
-        }
-
-        /**
-         * Lay thread `read` in `section`, open or settled, a line folding its whole conversation, read from the host as
-         * it opens, `depth` deep among the threads there: what it's parked until, then each entry in the order it came,
-         * an item laid out whole above a pointer to it there; and, at its end, the "since you approved" of each agent
-         * working in it not laid out yet.
-         */
-        function layWhole(read: ThreadRead, depth: number, section: "open" | "settled"): void {
-            const number = read.thread.number;
-            const own = showing?.kind === "thread";
-            if (own) {
-                // In its own buffer, what's written on it goes under what's live, at the end.
-                lettered.add(number);
-            }
-            const { made, node, id } = layHeader(read, section, depth, !own);
-            const status = read.status ?? null;
-            if (status !== null && status.kind === "ledger:parked" && (status.why ?? "") !== "") {
-                const parkedLine = w.line(`parked: ${status.why ?? ""}`, `${id} parked`);
-                asides.push({ kind: "summary", ...parkedLine });
-                node.children.push(part(`${id} parked`, "frame", parkedLine.from, parkedLine.to));
-            }
-            const whole = threading.whole.get(number) ?? null;
-            if (whole === null) {
-                reading(id, node);
-                unreadGroups.add(id);
-                loading.push({ key: foldKey({ of: id, kind: "group", name: "" }), number, whole: true });
-            } else {
-                layEntries(whole.entries, whole, number, node.children, section);
-            }
-            laySince(read, made, node, id);
-            if (own) {
-                const answering = read.answering ?? null;
-                layWriting(made, node, id, answering === null ? `nobody answers for @${read.thread.name}: what you write stays on it` : `to ${name(answering)} on @${read.thread.name}`, (each) => each.thread === number);
-            }
-        }
-
-        /** Lay a line saying the thread whose group is `id`, at `node`, is being read from the host. */
-        function reading(id: string, node: Placed): void {
+        const whole = threading.whole.get(number) ?? null;
+        if (whole === null) {
             const line = w.line("reading…", `${id} reading`);
             asides.push({ kind: "summary", ...line });
             node.children.push(part(`${id} reading`, "frame", line.from, line.to));
+            unreadGroups.add(id);
+        } else {
+            layEntries(whole.entries, whole, number, node.children);
         }
+        laySince();
+        const answering = read.answering ?? null;
+        layWriting(made, node, id, answering === null ? `nobody answers for @${read.thread.name}: what you write stays on it` : `to ${name(answering)} on @${read.thread.name}`, (each) => each.thread === number);
 
-        /** Lay at the end of `made`, thread `read`'s group laid out at `node`, the "since you approved" of each agent working in it, each laid out once in the review. */
-        function laySince(read: ThreadRead, made: Group, node: Placed, id: string): void {
-            for (const conversation of homes.get(read.thread.number) ?? []) {
+        /**
+         * Lay the "since you approved" of each agent working in the thread, as the host says where each works; and of each
+         * writer of a file a landing waits on, where they work nowhere now, as an ended subagent, at the end of the thread
+         * their lander works in.
+         */
+        function laySince(): void {
+            const homes = new Map<number, Conversation[]>();
+            const working = new Map((threading.read.working ?? []).map((each) => [whose(each.conversation), each.thread]));
+            for (const each of threading.read.working ?? []) {
+                homes.set(each.thread, [...(homes.get(each.thread) ?? []), each.conversation]);
+            }
+            for (const wait of arranging.landings ?? []) {
+                const thread = working.get(whose(wait.lander));
+                for (const writer of (wait.files ?? []).flatMap((file) => file.writers ?? [])) {
+                    if (thread !== undefined && !working.has(whose(writer))) {
+                        working.set(whose(writer), thread);
+                        homes.set(thread, [...(homes.get(thread) ?? []), writer]);
+                    }
+                }
+            }
+            for (const conversation of homes.get(number) ?? []) {
                 const key = whose(conversation);
                 const drawn = looks.drawers(conversation.repository).find((each) => each.view === "since");
-                if (sinceLaid.has(key) || !drawers.has(key) || drawn === undefined) {
+                if (!drawers.has(key) || drawn === undefined) {
                     continue;
                 }
                 const of = { runtime: conversation.runtime, session: conversation.session, agent: conversation.agent ?? null };
                 const view = mount(conversation.repository, drawn.module, drawn.view, of, shown, remote);
                 const drawer = layDrawer(drawn.view, conversation, view, name(conversation));
                 if (drawer !== null) {
-                    sinceLaid.add(key);
                     made.drawers.push(drawer);
                     laidDrawers.push(drawer);
                     node.children.push(drawer.node);
@@ -2299,13 +1821,6 @@ export function laid(
         }
     }
 
-    /** Return what `item` is, in a few words, as its kind's view names it in its header: `question`, `note to lup-impl`. */
-    function namedOf(item: Item): string {
-        const kind = kindView(item);
-        const repository = item.sender.party === "conversation" ? item.sender.repository : item.reason.reason === "approval" ? item.reason.repository : "";
-        return namedBy(mount(repository, kind.module, kind.view, { number: item.number }, shown, remote).answer?.blocks.summary ?? []);
-    }
-
     /**
      * Lay `entries` of thread `number`'s conversation, `from` what the host answered of it, into `within`, each reply
      * under what it answers: an item as its region, the operator's words on it inside it after its own, a message between
@@ -2313,11 +1828,11 @@ export function laid(
      * Space `d`, answered in words with a comment under it; a part of the operator's words moved in, or their words on
      * what isn't laid out here, each after who wrote it, saying where it's open.
      */
-    function layEntries(entries: readonly ThreadEntry[], from: ThreadShown, number: number, within: Placed[], section: SectionName): void {
+    function layEntries(entries: readonly ThreadEntry[], from: ThreadShown, number: number, within: Placed[]): void {
         const known = new Map(from.items.map((each) => [each.number, each]));
         const threadNamed = (thread: number) => threading?.read.threads.find((each) => each.thread.number === thread)?.thread.name ?? `${thread}`;
-        // Where an item of the pile is beside its kind: moved here from where it landed, moved from here, or to read in
-        // the pile, where it's read rather than in its thread's conversation.
+        // Where a friction or how it felt is beside its kind: moved here from where it landed, moved from here, or still
+        // on the host's pile.
         const noted = (entry: ThreadEntry, item: Item): string | undefined => {
             if (entry.moved === true) {
                 return "moved here";
@@ -2346,30 +1861,12 @@ export function laid(
             if (entry.member && item !== undefined && flag(item)) {
                 return;
             }
-            // An item or a check laid out whole above, in waiting on you or new: a line pointing to it there, its words
-            // with it there; what answers it after it, as before.
-            const there = entry.member && entry.spot.part == null ? shownAbove.get(entry.spot.node) : undefined;
-            if (there !== undefined && (item !== undefined || checks.has(entry.spot.node))) {
-                const what = item === undefined ? "check" : namedOf(item);
-                const id = `group ${placeIn(section === "settled" ? "settled" : "open", number)} points ${entry.spot.node}`;
-                const line = w.line(`↑ ${cited(entry.spot.node)} ${what} · in ${there} · gd goes there`, id);
-                asides.push({ kind: "pointer", ...line });
-                pointers.push({ from: line.from, to: line.to, node: entry.spot.node, thread: number, section: there });
-                within.push(part(id, "frame", line.from, line.to));
-                for (const child of below.filter((each) => each.member)) {
-                    walk(child, true);
-                }
-                return;
-            }
             if (entry.member && item !== undefined) {
-                if (section === "waiting on you" || section === "new") {
-                    shownAbove.set(item.number, section);
-                }
                 const words = below.filter((each) => !each.member);
                 // A message between agents folds to its header, as does what no longer waits on the operator: answered,
                 // marked done, decided, which is the thread's history.
                 // And what's shown as context before what's new, read already (`ThreadEntry.seen`).
-                // An item of the pile folds too: it's read in the pile, or where it was moved.
+                // A friction or how it felt folds too.
                 const between = item.reason.reason === "message" && item.reason.to != null && item.sender.party === "conversation";
                 const note = noted(entry, item);
                 within.push(
@@ -2392,9 +1889,6 @@ export function laid(
             }
             const check = entry.spot.part == null ? checks.get(entry.spot.node) : undefined;
             if (check !== undefined) {
-                if (section === "waiting on you" || section === "new") {
-                    shownAbove.set(check.check.number, section);
-                }
                 layCheck(check, number, within);
             } else if (entry.said != null) {
                 layWords(entry, number, from, within);
@@ -2621,8 +2115,7 @@ export function laid(
                 lastDrawer.end = w.line("", owner).from;
             }
         };
-        // An agent's "since you approved" laid out at the end of the thread they work in isn't laid out again here.
-        const declared = data === undefined && shape === "whole" ? [] : looks.drawers(repository).filter((each) => !(each.view === "since" && sinceLaid.has(group.key)));
+        const declared = data === undefined && shape === "whole" ? [] : looks.drawers(repository);
         // Under the banner, before the items, each drawer; in the agent's own buffer, all but their conversation, which
         // comes after the items, live, what asks the operator and what's written to them under it.
         // What's live in their own buffer: the plain conversation where their repository's looks have one (`messages`), the
@@ -3371,7 +2864,7 @@ export function toAnswer(item: Item, draft: Draft): boolean {
     return item.asks && !settled.includes(item.number);
 }
 
-/** Whether an item still waits where it stands, as each the inbox lists does: grouped by thread, a thread's conversation shows those answered, done or decided too. */
+/** Whether an item still waits where it stands, as each the inbox lists does: a thread's conversation shows those answered, done or decided too. */
 export function waits(item: Item): boolean {
     return item.state.state === "waiting";
 }
@@ -3425,7 +2918,7 @@ export function tallied(items: Item[], draft: Draft, seeing: Seeing): string {
         return "";
     }
     const answering = items.filter((each) => waits(each) && toAnswer(each, draft)).length;
-    const reading = countToRead(items, draft, seeing, null);
+    const reading = countToRead(items, draft, seeing);
     return [`${answering} to answer`, ...(reading === 0 ? [] : [`${reading} to read`])].join(" · ");
 }
 
@@ -3468,12 +2961,12 @@ export function drawerAt(laidOut: Laid, position: number): Drawer | undefined {
     return scope !== undefined && isDrawer(scope) ? scope : undefined;
 }
 
-/** Return the group `position` is on: on its banner, the messages under it, or the blank line after them, a thread's own lines among them; none on an item or a drawer, nor on a section's line. */
+/** Return the group `position` is on: on its banner, the messages under it, or the blank line after them, a thread's own lines among them; none on an item or a drawer. */
 export function groupAt(laidOut: Laid, position: number): Group | undefined {
     return scopeAt(laidOut, position) === undefined ? groupAround(laidOut, position) : undefined;
 }
 
-/** Return the group `position` is in, on its banner, its items or its drawers; none on a section's line. */
+/** Return the group `position` is in, on its banner, its items or its drawers; none on a line of the buffer's own. */
 export function groupAround(laidOut: Laid, position: number): Group | undefined {
     return laidOut.groups.findLast((each) => each.banner.from <= position && position <= each.end);
 }
@@ -3481,11 +2974,6 @@ export function groupAround(laidOut: Laid, position: number): Group | undefined 
 /** Return the check `position` is on, its lines or the comments drafted on it; none elsewhere. */
 export function checkAt(laidOut: Laid, position: number): CheckLine | undefined {
     return laidOut.checks.find((each) => position >= each.from && position <= each.to);
-}
-
-/** Return the section `position` is in; none grouped by agent. */
-export function sectionAt(laidOut: Laid, position: number): Section | undefined {
-    return lastFrom(laidOut.sections, (each) => each.header.from, position);
 }
 
 /** One part of what the header over the review says: whom what's being written goes to, the group, or a fold the cursor is in, by its kind. */
@@ -3518,8 +3006,7 @@ export function recipient(item: Item): Conversation | null {
 export function heading(laidOut: Laid, head: number, writing: boolean, wrote: Written[], naming: Naming): Where[] {
     const group = groupAround(laidOut, head);
     if (group === undefined) {
-        const section = sectionAt(laidOut, head);
-        return section === undefined ? [] : [{ kind: "section", text: section.name }];
+        return [];
     }
     const block = writing ? blockAt(laidOut, head) : undefined;
     const being = block === undefined ? undefined : wrote.find((each) => writtenId(each) === block.comment);
