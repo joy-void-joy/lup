@@ -1348,6 +1348,12 @@ class Marked(Model):
     version: str | None = None
     """The version of what it marked, where the block says one: a file's, as
     git names its content."""
+    runs: Literal["send", "once", "last"] | None = None
+    """When it runs, as the block offered it (`Offer.runs`); none as the reply is
+    sent."""
+    draws: str | None = None
+    """What its block's line reads while it's marked, as the block offered it
+    (`Offer.draws`); none draws it as its verb's."""
 
 
 class Draft(Model):

@@ -410,7 +410,9 @@ class ActionDoor(Model):
     mark of a send; or a list of it, every mark of the method's in one send given
     at once, so that, say, two boxes ticked are one pick rather than two. It
     answers what a tool does, words or a model, or nothing where what it changed
-    shows in the views it touches, and raises `ActionRefusedError` to refuse.
+    shows in the views it touches, and raises `ActionRefusedError` to refuse. It
+    answers soon: the reply being sent waits on it, so what takes minutes runs apart,
+    what it comes to shown in its views.
     """
 
     verb: str
@@ -419,9 +421,10 @@ class ActionDoor(Model):
     said: str
     """What it does, as the line of keys and the stack say it after its key:
     `merge it onto dev`. A block offering it may say it closer to what it's on."""
-    runs: Literal["send", "once"] = "send"
+    runs: Literal["send", "once", "last"] = "send"
     """When it runs: as the reply is sent, recorded in the draft until Ctrl+Enter;
-    or at once, as a key changing only what a view shows (`Offer.runs`)."""
+    at once, as a key changing only what a view shows; or, where it may move the
+    host, last of a send, and one a send at most (`Offer.runs`)."""
     commented: bool = False
     """Whether a comment written on a block offering it implies it (`Offer.commented`)."""
 
@@ -793,7 +796,7 @@ def action(
     *,
     verb: str,
     says: str,
-    runs: Literal["send", "once"] = "send",
+    runs: Literal["send", "once", "last"] = "send",
     commented: bool = False,
 ) -> ActionDoor:
     """Return the door of an action, to put on a method: Space and `verb`'s key runs it on what a block of a view offers it (`Offer.of`), and its command does; `says` is what the line of keys and the stack say it does.
@@ -802,8 +805,10 @@ def action(
     one send at once; its docstring is its command's help. It answers words, a
     model, or nothing where what it changed shows in the views it touches, and
     raises `ActionRefusedError` to refuse, saying why, which the page says under the
-    review, the mark kept drafted. `runs` says when: as the reply is sent, or at
-    once. `commented` that a comment written on a block offering it implies it.
+    review, the mark kept drafted. `runs` says when: as the reply is sent, at once,
+    or, where it may move the host, `last`, after every other mark of a send and one
+    a send at most. `commented` that a comment written on a block offering it
+    implies it.
     """
     return ActionDoor(verb=verb, said=says, runs=runs, commented=commented)
 

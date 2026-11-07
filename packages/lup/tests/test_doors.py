@@ -308,7 +308,7 @@ class Acts(Model):
         """Merge it."""
         return f"merged {picked.branch}"
 
-    @lup.action(verb="run", says="run them", runs="once", commented=True)
+    @lup.action(verb="run", says="run them", runs="last", commented=True)
     async def run(self, picked: list[Picked]) -> Replied:
         """Run them together."""
         return Replied(weather=" ".join(each.branch for each in picked))
@@ -339,16 +339,19 @@ def test_a_method_read_through_an_instance_is_called_as_any_action() -> None:
 
 def test_an_offer_takes_a_keys_meaning_from_its_action() -> None:
     offer = Offer.of(Acts.run, Picked(branch="a"))
-    assert (offer.verb, offer.says, offer.runs, offer.commented) == (
+    assert (offer.verb, offer.says, offer.runs, offer.commented, offer.draws) == (
         "run",
         "run them",
-        "once",
+        "last",
         True,
+        None,
     )
     assert offer.action == "module-act"
     assert offer.argument == {"action": "run", "argument": {"branch": "a"}}
     closer = Offer.of(Acts.merge, Picked(branch="a"), says="merge it: no session runs")
     assert closer.says == "merge it: no session runs"
+    other_key = Offer.of(Acts.run, Picked(branch="a"), verb="decline", draws="[ ]")
+    assert (other_key.verb, other_key.draws) == ("decline", "[ ]")
 
 
 def test_an_offer_refuses_what_isnt_an_action_or_what_it_doesnt_take() -> None:

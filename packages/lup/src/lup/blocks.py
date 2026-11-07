@@ -114,11 +114,13 @@ class Offer(Model):
     chord: str | None = None
     """Its own keys, as vim's keymap writes them, where it answers no verb: a
     module's view key, changing only what its view shows."""
-    runs: Literal["send", "once"] = "send"
+    runs: Literal["send", "once", "last"] = "send"
     """When it runs: as the reply is sent, recorded in the draft until
     Ctrl+Enter, refused where what it's on changed since it was shown; or at
     once, as a key changing only the view does, and as each of the page's own
-    views' does until each moves to its module (#247)."""
+    views' does until each moves to its module (#247); or, where it may move the
+    host, which stops what's answering it, as the reply is sent, after every other
+    mark of it, and one a send at most, a second kept drafted, said."""
     commented: bool = False
     """Whether a comment written on its block implies it, as one on a held
     change approves it with the comment, and one on a file of "since you
@@ -126,12 +128,22 @@ class Offer(Model):
     says: str
     """What it does, as the line of keys and the stack say it after its key:
     `approve`, `mark it reviewed`."""
+    draws: str | None = None
+    """What the first characters of its block's line read while it's marked, in
+    place of what they read, which is then all its mark looks like: a box ticked
+    (`[x]`) rather than a line struck through. None draws the mark as its verb's."""
 
     @classmethod
     def of(
-        cls, action: Method, argument: BaseModel, *, says: str | None = None
+        cls,
+        action: Method,
+        argument: BaseModel,
+        *,
+        verb: str | None = None,
+        says: str | None = None,
+        draws: str | None = None,
     ) -> Offer:
-        """Return the offer of `action`, an action read through its class, given `argument`: what its key means is the action's own, its verb and when it runs, and what the block offering it says is only that it's offered there, and, in `says`, what it does closer to what it's on than the action's own words.
+        """Return the offer of `action`, an action read through its class, given `argument`: what its key means is the action's own, its verb and when it runs, and what the block offering it says is only that it's offered there, and what's closer to what it's on than the action's own: where one action answers two keys, as yes and no on a box, every mark of a send coming to it together, which verb this is (`verb`); what it does (`says`); and what its line reads marked (`draws`).
 
         Raise `BlockError` where `action` isn't an action, or doesn't take `argument`'s type.
         """
@@ -151,10 +163,11 @@ class Offer(Model):
                 "action": action.taken.name,
                 "argument": argument.model_dump(mode="json", by_alias=True),
             },
-            verb=door.verb,
+            verb=door.verb if verb is None else verb,
             runs=door.runs,
             commented=door.commented,
             says=door.said if says is None else says,
+            draws=draws,
         )
 
     def of_module(self, repository: Path, module: str) -> Offer:
@@ -776,6 +789,29 @@ class Blocks(Model):
                 ]
             )
         )
+
+    def verbs(self) -> list[str]:
+        """Return each verb the view's offers answer, once each, in the order first named.
+
+        >>> offer = Offer(action="a", verb="done", says="do it")
+        >>> Blocks(blocks=[Fold(id="1", kind="k", summary=[],
+        ...     content=[Line(id="2", offers=[offer])])]).verbs()
+        ['done']
+        """
+
+        def named(block: Block) -> list[str | None]:
+            inside = block.content if isinstance(block, Fold) else []
+            nested = [] if isinstance(inside, Load) else inside
+            return [
+                *(each.verb for each in block.offers),
+                *(verb for each in nested for verb in named(each)),
+            ]
+
+        said = [
+            *(each.verb for each in self.offers),
+            *(verb for block in self.blocks for verb in named(block)),
+        ]
+        return list(dict.fromkeys(each for each in said if each is not None))
 
     def of_module(self, repository: Path, module: str) -> Blocks:
         """Return the view with each offer of an action naming whose it is (`Offer.of_module`), as its answer leaves the repository's process.
