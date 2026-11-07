@@ -3,6 +3,7 @@
 import json
 import socketserver
 import threading
+import webbrowser
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Self
@@ -19,7 +20,7 @@ from lup_dev.declaration.modules.code_rules import lup_default
 from lup_dev.declaration.runner import Plain, Prefixed
 from lup_dev.forge.protocol import IssueState, Stated
 from lup_dev.host.client import RoomClient
-from lup_dev.host.dashboard import DashboardShown, ShowDashboard
+from lup_dev.host.dashboard import DashboardShown, ShowDashboard, plain_page
 from lup_dev.host.protocol import HostError, Refused, Reply, Request
 from lup_dev.host.timings import (
     Browser,
@@ -719,6 +720,20 @@ def test_dashboard_says_how_to_get_the_qr_code_without_qrencode_and_draws_none_f
         LOCALHOST
     ]
     assert dashboard_command(monkeypatch, tmp_path, alone) == [LOCALHOST]
+
+
+def test_dashboard_copies_opens_the_plain_page_with_no_pasting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr(webbrowser, "open", opened.append)
+    shown = DashboardShown(address=LOCALHOST)
+    monkeypatch.setattr(cli, "answering", showing(shown))
+    result = runner.invoke(cli.app, ["dashboard", "--copies"])
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines()[0] == plain_page(LOCALHOST)
+    assert opened == [plain_page(LOCALHOST)]
+    assert plain_page(LOCALHOST).endswith("/copies#token=t")
 
 
 def test_dashboard_refuses_an_address_the_dashboard_doesnt_listen_on(

@@ -108,8 +108,19 @@ from lup_dev.host.dashboard import (
     DashboardShown,
     ShowDashboard,
     Showing,
+    plain_page,
 )
 from lup_dev.host.names import shaped
+from lup_dev.host.on_trial import (
+    AcceptBranch,
+    BranchListed,
+    DropBranch,
+    LastSwitch,
+    ListTrial,
+    PickBranches,
+    TrialListed,
+    TrialSaid,
+)
 from lup_dev.host.protocol import (
     Branches,
     GitHubRepository,
@@ -130,7 +141,7 @@ from lup_dev.host.timings import (
     TimingsStore,
 )
 from lup_dev.host.timings import routes as timings_routes
-from lup_dev.host.views import ModuleViews
+from lup_dev.host.views import ModuleActions, ModuleViews
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import JudgeHook, WorkerJudge, Workers, WorkersAsking
 from lup_dev.inbox.bearings import RepositoryBearings
@@ -271,7 +282,13 @@ from lup_dev.policy.holds import (
 )
 from lup_dev.policy.importers import BackgroundSpawner
 from lup_dev.policy.judge import finding
-from lup_dev.policy.landing import LandingTools, Turns, hosted_files, unapproved_files
+from lup_dev.policy.landing import (
+    LandingTools,
+    RoomAccepting,
+    Turns,
+    hosted_files,
+    unapproved_files,
+)
 from lup_dev.policy.report import finding_lines
 from lup_dev.policy.since import routes as since_routes
 from lup_dev.policy.tools import JudgeTools, judge_call
@@ -295,27 +312,19 @@ from lup_dev.stored import read_model, write_model
 from lup_dev.switching import (
     CopiesAnswering,
     CopySwitch,
-    LastSwitch,
     Programs,
     Serving,
     Switch,
     Switched,
     Switching,
-    TrialSaid,
     host_starter,
     restore_detached,
 )
-from lup_dev.trial import (
-    AcceptBranch,
-    BranchListed,
-    DropBranch,
-    ListTrial,
-    PickBranches,
-    TrialListed,
-)
 from lup_dev.trial import named as in_sentence
 from lup_dev.trying import (
+    OwnViewsSaid,
     TrialAccepting,
+    TrialChanging,
     TrialDropping,
     TrialListing,
     TrialPicking,
@@ -598,7 +607,7 @@ def control_routes(
     trying: Trying | None = None,
     landing: LandingTools | None = None,
 ) -> list[Route]:
-    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; the dashboard's, `dashboard`'s address; the drawer's, what a branch changed since the operator approved it, read from lup's state at `layout`, each file a landing waits on in `waits` held there; the landings waiting; the review marks, as `delivery`'s inbox holds them; the review's threads; what a page measured of itself, kept in lup's state; a module's view the dashboard shows, through `views`, watched at its own triggers, where it's given; and what's on trial, moved through `trying` and accepted through `landing`, where they're given."""
+    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; the dashboard's, `dashboard`'s address; the drawer's, what a branch changed since the operator approved it, read from lup's state at `layout`, each file a landing waits on in `waits` held there; the landings waiting; the review marks, as `delivery`'s inbox holds them; the review's threads; what a page measured of itself, kept in lup's state; a module's view the dashboard shows, through `views`, watched at its own triggers, and its actions, where it's given; and what's on trial, moved through `trying` and accepted through `landing`, where they're given."""
     return [
         *inbox_routes(delivery, recorded),
         Route.to(dashboard_shown(dashboard)),
@@ -607,7 +616,14 @@ def control_routes(
         *marks_routes(delivery.inbox.marks, delivery.clock, delivery.inbox.changes),
         *threaded_routes(delivery),
         *timings_routes(TimingsStore(home=layout.host.timings), delivery.clock),
-        *([] if views is None else [Route.reading(views, watch=views.watched)]),
+        *(
+            []
+            if views is None
+            else [
+                Route.reading(views, watch=views.watched),
+                Route.to(ModuleActions(asking=views.asking, changes=views.changes)),
+            ]
+        ),
         Route.to(CopiesAnswering(layout=layout)),
         Route.to(CopySwitch(layout=layout, start=restore_detached(layout))),
         *([] if trying is None else trial_routes(trying, delivery, landing)),
@@ -621,11 +637,20 @@ def trial_routes(
     return [
         Route.to(TrialListing(trying=trying)),
         Route.to(TrialPicking(trying=trying)),
+        Route.to(TrialChanging(trying=trying)),
         Route.to(TrialDropping(trying=trying, delivery=delivery)),
         *(
             []
             if landing is None
-            else [Route.to(TrialAccepting(trying=trying, tools=landing))]
+            else [
+                Route.to(
+                    TrialAccepting(
+                        trying=trying,
+                        tools=RoomAccepting(tools=landing),
+                        changes=delivery.inbox.changes,
+                    )
+                )
+            ]
         ),
     ]
 
@@ -758,7 +783,16 @@ def host_serve(context: typer.Context) -> None:
         waker=wakers,
         pushes=pushes,
         companions=[
-            *([] if rehearsing else [types]),
+            *(
+                []
+                if rehearsing
+                else [
+                    types,
+                    OwnViewsSaid(
+                        layout=layout, asking=asking, changes=changes, say=typer.echo
+                    ),
+                ]
+            ),
             sweeping,
             *([] if dashboard is None else [dashboard]),
         ],
@@ -1320,6 +1354,16 @@ def dashboard_open(
             )
         ),
     ] = None,
+    copies: Annotated[
+        bool,
+        typer.Option(
+            "--copies",
+            help=(
+                "Open the plain page, what runs and the copies kept, with nothing of "
+                "the review's: for when the review itself is broken."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Open the dashboard: every agent, what each is doing, and your inbox, in one page.
 
@@ -1329,22 +1373,24 @@ def dashboard_open(
     dashboard listens on an address of this machine's beyond localhost, as its
     WireGuard one (`LUP_DASHBOARD_ADDRESSES`), it prints that address instead,
     drawn as a QR code for your phone to scan where `qrencode` is installed:
-    the page, opened once, keeps the token as its cookie. `timings` says how
-    long its keys took to reach the screen in the browsers you used it in.
+    the page, opened once, keeps the token as its cookie. `--copies` opens the
+    plain page there instead, which works where the review doesn't. `timings` says
+    how long its keys took to reach the screen in the browsers you used it in.
     """
     if context.invoked_subcommand is not None:
         return
     shown = answering("the dashboard").ask(ShowDashboard(), DashboardShown)
     chosen = shown.chosen(address)
-    typer.echo(chosen)
+    where = plain_page if copies else str
+    typer.echo(where(chosen))
     if chosen != shown.address:
         typer.echo(
-            qr_code(chosen)
+            qr_code(where(chosen))
             or f"To scan it as a QR code, install `{QRENCODE.named()}`: "
             f"{QRENCODE.install}, then run this again."
         )
     if opened:
-        webbrowser.open(shown.address)
+        webbrowser.open(where(shown.address))
 
 
 @dashboard.command("timings")
@@ -3800,7 +3846,13 @@ def module_ran(words: list[str]) -> None:
     if not commanding.approved(Path(sys.argv[0]), command):
         commanding.handed_over(words, command, repository)
     modules = RepositoryModules.loaded(repository, services(), recorded())
-    commanding.run(words, modules.resolved.served, modules.made, Operator)
+
+    def inside() -> str | None:
+        return next((each.name() for each in runtimes() if each.inside()), None)
+
+    commanding.run(
+        words, modules.resolved.served, modules.made, Operator, inside=inside
+    )
 
 
 def module_commands_said() -> str:

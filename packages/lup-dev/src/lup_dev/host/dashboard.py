@@ -23,7 +23,7 @@ import shlex
 from ipaddress import IPv6Address
 from pathlib import Path
 from typing import Literal, override
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import Field
 
@@ -48,6 +48,15 @@ class ShowDashboard(Request, reads=False):
     """Return the dashboard's addresses, its token in each fragment, starting it where it isn't running."""
 
     kind: Literal["dashboard"] = "dashboard"
+
+
+def plain_page(address: str) -> str:
+    """Return where the plain page is, at the dashboard's `address`: the same, the token in its fragment, with `/copies` before its `#`.
+
+    >>> plain_page("http://127.0.0.1:8766/#token=t")
+    'http://127.0.0.1:8766/copies#token=t'
+    """
+    return urlunsplit(urlsplit(address)._replace(path="/copies"))
 
 
 class DashboardShown(Reply):

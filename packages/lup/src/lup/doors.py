@@ -1,4 +1,4 @@
-"""The doors a module's method is reached through, each a decorator in `lup`'s namespace: `lup.tool`, `lup.request`, `lup.on`, `lup.view` and `lup.command`.
+"""The doors a module's method is reached through, each a decorator in `lup`'s namespace: `lup.tool`, `lup.request`, `lup.on`, `lup.view`, `lup.action` and `lup.command`.
 
 A door exists only where the contract differs: who calls a method, what it
 takes, what it returns. Each is a decorator, typed with its contract, so pyright
@@ -18,6 +18,11 @@ holds the method behind it to what the door takes and returns:
   viewed and returns `Blocks` (`lup.blocks`). Placed in a drawer under an
   agent, it takes the agent it's of (`OfAgent`); with no place, a fold reads
   it as it opens (`Load`), or its command prints it (`ViewDoor`).
+- `@lup.action(verb="done", says="…")`: the operator's key runs it, on what a
+  block of a view offers it (`Offer.of`), and its command does. It takes the
+  model the block gives it, or, as `list[Model]`, every mark of one send at once.
+  It answers words, a model or nothing, and raises `ActionRefusedError` to refuse
+  (`ActionDoor`).
 - `@lup.command`: whoever runs the command line calls it, under its module's
   command. The fields of the model it takes are its arguments and options; it
   returns the text it prints (`CommandDoor`).
@@ -49,7 +54,7 @@ from annotationlib import type_repr
 from collections.abc import Awaitable, Callable
 from functools import partial
 from types import GenericAlias, UnionType
-from typing import Concatenate, Self, get_args, overload
+from typing import Concatenate, Literal, Self, get_args, get_origin, overload
 
 from pydantic import BaseModel
 
@@ -80,6 +85,10 @@ def spelled(annotation: Annotation) -> str:
 
 class DoorError(LupError):
     """A function can't be reached through a door: it takes or returns other than the door's contract says, or two doors of different audiences are put on it."""
+
+
+class ActionRefusedError(LupError):
+    """An action won't do what it was asked: its message says why, which the page says under the review, the mark kept drafted."""
 
 
 class Taken(Model, arbitrary_types_allowed=True):
@@ -150,6 +159,15 @@ class Taken(Model, arbitrary_types_allowed=True):
     def answers_model(self) -> bool:
         """Say whether it returns a pydantic model."""
         return isinstance(self.returned, type) and issubclass(self.returned, BaseModel)
+
+    def gathers(self) -> bool:
+        """Say whether it takes a list of its model, every mark of one send at once, as an action may."""
+        return get_origin(self.model.annotation) is list
+
+    def one(self) -> type[BaseModel]:
+        """Return the model it takes, or, where it takes a list of it, that model."""
+        annotation = self.model.annotation
+        return get_args(annotation)[0] if self.gathers() else annotation
 
     def admits(self, event: type[Event]) -> bool:
         """Say whether its model's type admits `event`: the event's class, or one it derives from, alone or in a union."""
@@ -325,9 +343,10 @@ class ViewDoor(Model):
     """
 
     place: Drawer | Banner | None = None
-    """Where the dashboard shows it, under each agent: in a drawer, or as a part
-    of its banner; none for a view a fold reads as it opens (`Load`), or only
-    its command prints."""
+    """Where the dashboard shows it: under each agent, in a drawer or as a part of
+    its banner; under its repository, a drawer that's a row of the review's list
+    opening it as a buffer of its own; none for a view a fold reads as it opens
+    (`Load`), or only its command prints."""
     watch: Watch = Watch()
     """When a view the page shows is answered again."""
 
@@ -336,7 +355,7 @@ class ViewDoor(Model):
         return "a view"
 
     def checked(self, taken: Taken) -> None:
-        """Raise `DoorError` where `taken` isn't a view's: a method of a class, taking one model, what's viewed, an agent's (`OfAgent`) where it's placed under one, returning `Blocks`, and described by a docstring, its command's help."""
+        """Raise `DoorError` where `taken` isn't a view's: a method of a class, taking one model, what's viewed, an agent's (`OfAgent`) where it's placed under one and needing no value where it's placed under its repository, returning `Blocks`, and described by a docstring, its command's help."""
         if not taken.method:
             message = f"the view `{taken.name}` is a method of a class of a module's"
             raise DoorError(message)
@@ -347,10 +366,19 @@ class ViewDoor(Model):
                 f"{spelled(model)}: a view takes one pydantic model, what's viewed"
             )
             raise DoorError(message)
-        if self.place is not None and not issubclass(model, OfAgent):
+        under = None if self.place is None else self.place.under
+        if under == "agent" and not issubclass(model, OfAgent):
             message = (
                 f"the view `{taken.name}` is placed under an agent, so it takes "
                 f"the agent it's of, an `OfAgent`, not `{model.__name__}`"
+            )
+            raise DoorError(message)
+        if under == "repository" and any(
+            field.is_required() for field in model.model_fields.values()
+        ):
+            message = (
+                f"the view `{taken.name}` is placed under its repository, so the "
+                f"page asks it with nothing, and `{model.__name__}` needs a value"
             )
             raise DoorError(message)
         returned = taken.returned
@@ -369,6 +397,77 @@ class ViewDoor(Model):
     def __call__[S, I: BaseModel, **P](
         self, method: Callable[Concatenate[S, I, P], Awaitable[Blocks]], /
     ) -> Served[S, Concatenate[I, P], Awaitable[Blocks]]:
+        """Return `method` served through this door."""
+        return Served(method, [self], first(method, self))
+
+
+class ActionDoor(Model):
+    """An action's door: the operator's key runs the method, on what a block of a view offers it (`Offer.of`), and so does its command.
+
+    `@lup.action(verb="done", says="…")` is this door, put on the method it
+    decorates: what a key means is said once, here, and a block only says it's
+    offered there. It takes the model the block gives it, called once for each
+    mark of a send; or a list of it, every mark of the method's in one send given
+    at once, so that, say, two boxes ticked are one pick rather than two. It
+    answers what a tool does, words or a model, or nothing where what it changed
+    shows in the views it touches, and raises `ActionRefusedError` to refuse. It
+    answers soon: the reply being sent waits on it, so what takes minutes runs apart,
+    what it comes to shown in its views.
+    """
+
+    verb: str
+    """The verb whose key reaches it, by its name (`Verb`): the core's, or one a
+    module declares."""
+    said: str
+    """What it does, as the line of keys and the stack say it after its key:
+    `merge it onto dev`. A block offering it may say it closer to what it's on."""
+    runs: Literal["send", "once", "last"] = "send"
+    """When it runs: as the reply is sent, recorded in the draft until Ctrl+Enter;
+    at once, as a key changing only what a view shows; or, where it may move the
+    host, last of a send, and one a send at most (`Offer.runs`)."""
+    commented: bool = False
+    """Whether a comment written on a block offering it implies it (`Offer.commented`)."""
+
+    def says(self) -> str:
+        """Say the door, as an error names it."""
+        return "an action"
+
+    def checked(self, taken: Taken) -> None:
+        """Raise `DoorError` where `taken` isn't an action's: a method of a class, taking one model or a list of it, returning words, a model or nothing, and described by a docstring, its command's help."""
+        if not taken.method:
+            message = f"the action `{taken.name}` is a method of a class of a module's"
+            raise DoorError(message)
+        if not is_model(taken.one()):
+            message = (
+                f"the action `{taken.name}` takes `{taken.model.name}` typed "
+                f"{spelled(taken.model.annotation)}: an action takes one pydantic "
+                "model, what a block gives it, or a list of it, every mark of a send"
+            )
+            raise DoorError(message)
+        if not (
+            taken.returned is None or taken.returned is str or taken.answers_model()
+        ):
+            message = (
+                f"the action `{taken.name}` returns {spelled(taken.returned)}: an "
+                "action returns a pydantic model, `str` for an answer in words, or "
+                "nothing"
+            )
+            raise DoorError(message)
+        if taken.description is None:
+            message = (
+                f"the action `{taken.name}` needs a docstring: it's its command's help"
+            )
+            raise DoorError(message)
+
+    @overload
+    def __call__[S, I: BaseModel, O: BaseModel | str | None, **P](
+        self, method: Callable[Concatenate[S, I, P], Awaitable[O]], /
+    ) -> Served[S, Concatenate[I, P], Awaitable[O]]: ...
+    @overload
+    def __call__[S, I: BaseModel, O: BaseModel | str | None, **P](
+        self, method: Callable[Concatenate[S, list[I], P], Awaitable[O]], /
+    ) -> Served[S, Concatenate[list[I], P], Awaitable[O]]: ...
+    def __call__(self, method: Callable[..., Awaitable[Answer]], /) -> Method:
         """Return `method` served through this door."""
         return Served(method, [self], first(method, self))
 
@@ -412,7 +511,7 @@ class CommandDoor(Model):
         return Served(method, [self], first(method, self))
 
 
-type Door = ToolDoor | RequestDoor | OnDoor | ViewDoor | CommandDoor
+type Door = ToolDoor | RequestDoor | OnDoor | ViewDoor | ActionDoor | CommandDoor
 """A door a method is reached through."""
 
 
@@ -490,6 +589,10 @@ class Method(property):
         """Return its view's door; none where it isn't a view."""
         return next((each for each in self.doors if isinstance(each, ViewDoor)), None)
 
+    def acting(self) -> ActionDoor | None:
+        """Return its action's door; none where it isn't an action."""
+        return next((each for each in self.doors if isinstance(each, ActionDoor)), None)
+
     def commanded(self) -> bool:
         """Say whether it's a command."""
         return any(isinstance(each, CommandDoor) for each in self.doors)
@@ -508,7 +611,10 @@ class Method(property):
         )
 
     async def called(
-        self, instance: BaseModel, value: BaseModel, asker: BaseModel | None
+        self,
+        instance: BaseModel,
+        value: BaseModel | list[BaseModel],
+        asker: BaseModel | None,
     ) -> Answer:
         """Run the method of `instance` on `value`, handing it `asker` where it takes who asks it.
 
@@ -684,6 +790,27 @@ def view(
     """
     door = ViewDoor(place=place, watch=watch or Watch())
     return door if method is None else door(method)
+
+
+def action(
+    *,
+    verb: str,
+    says: str,
+    runs: Literal["send", "once", "last"] = "send",
+    commented: bool = False,
+) -> ActionDoor:
+    """Return the door of an action, to put on a method: Space and `verb`'s key runs it on what a block of a view offers it (`Offer.of`), and its command does; `says` is what the line of keys and the stack say it does.
+
+    It takes the model the block gives it, or, as `list[Model]`, every mark of
+    one send at once; its docstring is its command's help. It answers words, a
+    model, or nothing where what it changed shows in the views it touches, and
+    raises `ActionRefusedError` to refuse, saying why, which the page says under the
+    review, the mark kept drafted. `runs` says when: as the reply is sent, at once,
+    or, where it may move the host, `last`, after every other mark of a send and one
+    a send at most. `commented` that a comment written on a block offering it
+    implies it.
+    """
+    return ActionDoor(verb=verb, said=says, runs=runs, commented=commented)
 
 
 def command[S, I: BaseModel, **P](

@@ -1,4 +1,4 @@
-"""A module's commands on the command line, `lup-dev <module> <command> …`: each `@lup.command` method and each view, built with typer from its method and run in the terminal's own process.
+"""A module's commands on the command line, `lup-dev <module> <command> …`: each `@lup.command` method, each view and each action, built with typer from its method and run in the terminal's own process.
 
 `docs/declaration.md`, *Commands*. Typer prints help and errors to its
 process's standard output, with no stream of a command's own, so a module's
@@ -13,7 +13,7 @@ process, which serves every session at once:
 Each command is built from its method's model (`signature`): a field with no
 default an argument, one with a default an option named for its alias, else
 its name, its description the help; the method's docstring the command's. A
-view's command prints its text form (`Blocks.text`).
+view's command prints its text form (`Blocks.text`), an action's what it answers.
 """
 
 import asyncio
@@ -25,11 +25,13 @@ from types import UnionType
 from typing import TYPE_CHECKING, NoReturn, TypeAliasType, get_args, override
 
 import typer
+from pydantic import BaseModel
 
 from lup.blocks import Blocks, OfAgent
 from lup.doors import Method, served
+from lup.tools.tool import answered
 from lup.types import Model
-from lup_dev.declaration.serving import Asker, ModuleServing, ask
+from lup_dev.declaration.serving import Asker, ModuleServing, Operator, ask, named
 from lup_dev.errors import LupDevError
 from lup_dev.host.client import RoomClient
 from lup_dev.inbox.exchanges import Exchanges
@@ -40,7 +42,6 @@ from lup_ledger.parties import Conversation as Party
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from pydantic import BaseModel
     from pydantic.fields import FieldInfo
 
     from lup_dev.declaration.resolve import Served
@@ -94,26 +95,49 @@ def signature(model: type[BaseModel]) -> inspect.Signature:
     )
 
 
+def nowhere() -> str | None:
+    """Say no session's running here: what a command line outside any is told."""
+    return None
+
+
 def command(
     method: Method,
     owner: Served,
-    made: Callable[[Served], ModuleServing],
+    made: Callable[[Served, Asker], ModuleServing],
     asker: Callable[[], Asker],
+    inside: Callable[[], str | None] = nowhere,
 ) -> Callable[..., None]:
-    """Return `method`, of `owner`'s class, as a typer command run by whoever `asker` says: the values parsed into its model, the method run on it, and the text it returns printed, a view's text form for a view.
+    """Return `method`, of `owner`'s class, as a typer command run by whoever `asker` says: the values parsed into its model, the method run on it, and the text it returns printed, a view's text form for a view. One that's the operator's alone is refused inside an agent's session, which `inside` names, whoever it runs as.
 
     Who runs it, and whether they may (`ask`), is found as it runs, so `--help`
     asks nothing and lists what they can't run.
     """
-    model = method.taken.model.annotation
+    model = method.taken.one()
 
     # lup: ignore("bare-object", why="typer hands each value its parameter parsed, of the type its field gives, which the model validates at once")
     def run(**values: object) -> None:
         by = asker()
-        ask(owner.serving, method.taken.name, by)
+        name = method.taken.name
+        ask(owner.serving, name, by)
+        session = inside()
+        if session is not None and named(owner.serving, name, method) == [Operator]:
+            message = (
+                f"this runs inside a {session} session, and `{name}` is the "
+                "operator's: run it in your own terminal"
+            )
+            raise CommandError(message)
         asked = model.model_validate(values, by_name=True)
-        answer = asyncio.run(method.called(made(owner), asked, by))
-        text = answer.text() if isinstance(answer, Blocks) else str(answer)
+        given = [asked] if method.taken.gathers() else asked
+        answer = asyncio.run(method.called(made(owner, by), given, by))
+        match answer:
+            case None:
+                return
+            case Blocks():
+                text = answer.text()
+            case BaseModel() | str():
+                text = answered(answer)
+            case _:
+                text = str(answer)
         typer.echo(text, nl=not text.endswith("\n"))
 
     vars(run)["__signature__"] = signature(model)
@@ -123,10 +147,11 @@ def command(
 def commands(
     module: str,
     owners: list[Served],
-    made: Callable[[Served], ModuleServing],
+    made: Callable[[Served, Asker], ModuleServing],
     asker: Callable[[], Asker],
+    inside: Callable[[], str | None] = nowhere,
 ) -> typer.Typer:
-    """Return the commands of the module named `module`: each `@lup.command` method of its classes, and each view, under its method's name.
+    """Return the commands of the module named `module`: each `@lup.command` method of its classes, each view and each action, under its method's name.
 
     Raise `CommandError` where no class of the repository's is the module's.
     """
@@ -143,9 +168,13 @@ def commands(
     )
     for owner in its:
         for name, method in served(owner.serving).items():
-            if method.commanded() or method.viewing() is not None:
+            if (
+                method.commanded()
+                or method.viewing() is not None
+                or method.acting() is not None
+            ):
                 app.command(name, help=method.taken.description)(
-                    command(method, owner, made, asker)
+                    command(method, owner, made, asker, inside)
                 )
     return app
 
@@ -153,12 +182,14 @@ def commands(
 def run(
     words: list[str],
     owners: list[Served],
-    made: Callable[[Served], ModuleServing],
+    made: Callable[[Served, Asker], ModuleServing],
     asker: Callable[[], Asker],
+    *,
+    inside: Callable[[], str | None] = nowhere,
 ) -> None:
     """Run the module command `words` names, its module's name first, as whoever `asker` says once it runs: typer parses the rest, and prints."""
     module, *rest = words
-    app = commands(module, owners, made, asker)
+    app = commands(module, owners, made, asker, inside)
     app(args=rest, prog_name=f"lup-dev {module}")
 
 

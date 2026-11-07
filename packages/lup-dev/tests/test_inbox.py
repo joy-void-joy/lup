@@ -65,6 +65,7 @@ from lup_dev.host.client import HostClient, RoomClient, Starter
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard, Posted, Spawned, Spawns
 from lup_dev.host.names import Names, container_name
+from lup_dev.host.on_trial import AcceptBranch, DropBranch, TrialSaid
 from lup_dev.host.protocol import (
     Branches,
     Holding,
@@ -252,8 +253,7 @@ from lup_dev.private.withheld import kept as listed_at
 from lup_dev.remote.protocol import Pushed, PushHandler, Pushing, Remotes, Update
 from lup_dev.settings import LupDevSettings
 from lup_dev.stored import read_model, write_model
-from lup_dev.switching import TrialSaid
-from lup_dev.trial import AcceptBranch, DropBranch, OnTrial, Trial, Trials
+from lup_dev.trial import OnTrial, Trial, Trials
 from lup_dev.trying import Trying
 from lup_dev.worker import HostExchanges, HostMarks, RepositoryModules
 from lup_ledger.environment.layout import LedgerLayout

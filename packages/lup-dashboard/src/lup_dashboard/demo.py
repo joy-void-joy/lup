@@ -4,7 +4,8 @@
 in a room screenshots it headless) and for the operator to try one before it
 lands. Its state is seeded as the host keeps its own, in a directory of its own:
 the items, threads, checks, review marks and draft on a ledger of its own, each
-conversation's whereabouts, the launches and their names, the landing waiting.
+conversation's whereabouts, the launches and their names, the landing waiting, what's
+on trial.
 Each request the page sends is answered by the host's own handler of its kind
 (`lup_dashboard/handled.py`), so what the host refuses is refused here, and the
 drive tests run over the host's rules rather than a stand-in's.
@@ -12,7 +13,8 @@ drive tests run over the host's rules rather than a stand-in's.
 What stands in is what's beyond the host's handlers: each conversation's record
 (`lup_dashboard/standins.py`); what an agent's branches changed since the
 operator saw them, which the host reads with git in worktrees no demo has
-(`since`, `reviewed`); the agents themselves, whose hooks and calls are a few
+(`since`, `reviewed`); the merges what's on trial is computed with
+(`lup_dashboard/trialed.py`); the agents themselves, whose hooks and calls are a few
 timers set going as the page first asks (`asking`): a question that arrives,
 an approval's types read, two writes to a branch.
 """
@@ -34,7 +36,8 @@ from lup_dashboard.handled import Handled, handled
 from lup_dashboard.host import Host
 from lup_dashboard.layout import DemoLayout
 from lup_dashboard.standins import StandInReader, StandInRecords, StoodIn
-from lup_dev import Project
+from lup_dashboard.trialed import Conflict, Trees, TrialStandIn
+from lup_dev import Modules, Project, Versions
 from lup_dev.approval import Approval as ApprovedZone
 from lup_dev.approval import WorkspaceTool
 from lup_dev.clock import Clock, SystemClock
@@ -46,6 +49,7 @@ from lup_dev.host.courier import Conversations
 from lup_dev.host.names import Names
 from lup_dev.host.protocol import (
     Activity,
+    Branches,
     Limits,
     ListLaunches,
     Refused,
@@ -118,6 +122,7 @@ from lup_dev.policy.since import (
 )
 from lup_dev.policy.waits import Awaited, Declined, Wait
 from lup_dev.stored import write_model
+from lup_dev.trial import OnTrial, Trial, Trials, Version
 from lup_ledger.parties import Conversation, Lup, Operator
 from lup_ledger.threads import (
     Check,
@@ -292,6 +297,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     """Where what the page measured of itself is kept, laid out as the host keeps
     it (`HostLayout.timings`), for `lup-dev dashboard timings --kept` to read;
     none keeps it in the demo's own directory, gone as the demo stops."""
+    merge_takes: timedelta = timedelta(seconds=4)
+    """How long a merge's gate stands in as taking, so a session can watch its line say so."""
     first_thread: int = 301
     """The number of the demo's first thread (`stand_in_threads`), the rest and
     their check numbered after it: past the demo's own items, as the ledger
@@ -337,6 +344,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         inbox = Inbox.kept_in(lup, changes)
         self.seeded(inbox)
         self.copies_kept(lup)
+        self.trial_seeded(lup)
         defaults = resolve(Project())
         made = handled(
             lup,
@@ -354,7 +362,9 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 for runtime in self.runtimes
             },
             own=self.lup_session().repository,
-            declared=defaults,
+            declared=resolve(
+                Project(modules=Modules.default().add(Versions(running="live")))
+            ),
             defaults=defaults,
             served=self.served(lup),
             beyond=self.branches(),
@@ -362,6 +372,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             clock=self.clock,
             say=self.say,
             timings=self.timings,
+            trial=self.on_trial(),
         )
         made.waits.began(self.landing())
         return made
@@ -388,6 +399,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                         name="lup-dev", package=Path("packages/lup-dev"), members=[]
                     ),
                     time=now - timedelta(hours=at + 1),
+                    branches=Branches(running="live"),
                 ),
                 subject=subject,
                 answered=now - timedelta(hours=at + 1) if at != 2 else None,
@@ -401,6 +413,124 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         copies.switch(copies.place(kept[0]))
         copies.back(copies.place(kept[1]))
         linked(lup.host_copies, copies.layout.home)
+        write_model(lup.approved(repository), kept[0].approval)
+
+    def on_trial(self) -> TrialStandIn:
+        """Return what stands in for git behind what's on trial (`trial_seeded`): a rival that conflicts with one of what's running, and the zone of each set that's run, by what each of the copies kept holds."""
+        trees = Trees(
+            conflicts=[
+                Conflict(
+                    one="clearer-marks",
+                    other="rival-marks",
+                    file=Path("packages/lup-dashboard/page/src/panes.ts"),
+                )
+            ]
+        )
+        return TrialStandIn(
+            trees=trees,
+            zones={
+                trees.tree(
+                    ON_DEV, ["clearer-marks", "steady-list"]
+                ): "the zone at 0c0ffee",
+                trees.tree(ON_DEV, ["steady-list"]): "the zone at 1c0ffee",
+                trees.tree(ON_DEV, []): "the zone at 2c0ffee",
+            },
+            propose=self.proposed,
+            takes=self.merge_takes,
+            failing={
+                "rival-marks": (
+                    "Not landed: the gate failed on the merge of `rival-marks` onto "
+                    "`dev`, and nothing has changed.\nFAILED tests/test_panes.py::"
+                    "test_each_mark_says_what_it_counts\n1 failed, 3808 passed"
+                )
+            },
+        )
+
+    def proposed(self, repository: Path) -> int | None:
+        """Say the number of the approval a set never run asks: the demo's own, while it waits, as a demo files none, and builds nothing on its yes."""
+        del repository
+        waiting = self.host.inbox.waiting(Operator())
+        found = next(
+            (each for each in waiting if isinstance(each.reason, Approval)), None
+        )
+        return None if found is None else found.number
+
+    def trial_seeded(self, lup: Layout) -> None:
+        """Keep what's on trial in the demo's state, as the host keeps it: two branches running, landed by the lup-impl session and their parser subagent; a rival that conflicts with one of them; one the operator took out, which no copy holds, landed by the fix-clock subagent, who has ended; and the versions the copies kept hold."""
+        repository = self.lup_session().repository
+        session = self.lup_session()
+        parser = session.model_copy(update={"agent": "a02"})
+        ended = session.model_copy(update={"agent": FIX_CLOCK})
+        branches = [
+            OnTrial(
+                branch=branch,
+                tip=f"{branch}-tip",
+                subject=subject,
+                message=f"Merge {branch}: {subject}",
+                landed=self.clock.now() - timedelta(hours=hours),
+                out=out,
+                conflict=conflict,
+                party=party,
+            )
+            for branch, subject, hours, out, conflict, party in [
+                (
+                    "steady-list",
+                    "each agent keeps their place in the list",
+                    5,
+                    False,
+                    "",
+                    parser,
+                ),
+                (
+                    "clearer-marks",
+                    "the list's marks say what each count is",
+                    4,
+                    False,
+                    "",
+                    session,
+                ),
+                (
+                    "rival-marks",
+                    "the list's marks by colour alone",
+                    3,
+                    False,
+                    "it conflicts with `clearer-marks`, in `packages/lup-dashboard/page/src/panes.ts`",
+                    parser,
+                ),
+                (
+                    "quiet-banner",
+                    "a banner saying less while nothing waits",
+                    2,
+                    True,
+                    "",
+                    ended,
+                ),
+            ]
+        ]
+        now = self.clock.now()
+        versions = [
+            Version(
+                commit=f"{at}c0ffee",
+                dev=ON_DEV,
+                tips=tips,
+                at=now - timedelta(hours=at + 1),
+                fingerprint=f"the zone at {at}c0ffee",
+            )
+            for at, tips in [
+                (2, {}),
+                (1, {"steady-list": "steady-list-tip"}),
+                (
+                    0,
+                    {
+                        "clearer-marks": "clearer-marks-tip",
+                        "steady-list": "steady-list-tip",
+                    },
+                ),
+            ]
+        ]
+        Trials.of(lup, repository).write(
+            Trial(live="0c0ffee", dev=ON_DEV, branches=branches, versions=versions)
+        )
 
     def seeded(self, inbox: Inbox) -> None:
         """Keep the demo's state in `inbox`, as the host keeps its own: each item (`every`), with the files of each that changes any; each conversation's whereabouts (`cast`); each thread, its check, what's in each and its status (`stand_in_threads`); how far the operator has read and seen each, as of 3 minutes before the demo began, so what came since is new."""
@@ -3210,6 +3340,8 @@ See [the field notes](docs/field-notes.md) and `records.py`.
 
 LUP_IMPL = "a1f0"
 """The launch of the lup-impl session, by its id: the demo's busiest."""
+ON_DEV = "d38dbd2c0ffee5a7f6b1a9e0c4d2f7e8a1b3c5d7"
+"""The commit of `dev` the demo's versions are on."""
 FIX_CLOCK = "a07"
 """The ended fix-clock subagent of the lup-impl session, by their runtime's id:
 their branch's landing waits on the operator, its clock module held in their

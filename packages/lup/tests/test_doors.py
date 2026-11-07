@@ -8,7 +8,9 @@ import pytest
 from pydantic import BaseModel
 
 import lup
+from lup.blocks import BlockError, Blocks, Drawer, Offer
 from lup.doors import (
+    ActionDoor,
     DoorError,
     Method,
     Observing,
@@ -24,6 +26,7 @@ from lup.doors import (
 from lup.events import Launched, Publishing, Stopped, TurnEnded
 from lup.publishing import Place, Refusal
 from lup.tools.tool import Accepted
+from lup.types import Model
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
@@ -285,3 +288,122 @@ def test_a_view_takes_what_its_viewed_and_answers_blocks() -> None:
         opened(shown, ViewDoor(place=lup.Banner()))
     with pytest.raises(DoorError, match="needs a docstring"):
         opened(bare, ViewDoor())
+
+
+class Picked(Model):
+    """A box a block offers to tick."""
+
+    branch: str
+
+
+class Other(Model):
+    """What no action here takes."""
+
+
+class Acts(Model):
+    """A class with an action of each shape."""
+
+    @lup.action(verb="done", says="merge it")
+    async def merge(self, picked: Picked) -> str:
+        """Merge it."""
+        return f"merged {picked.branch}"
+
+    @lup.action(verb="run", says="run them", runs="last", commented=True)
+    async def run(self, picked: list[Picked]) -> Replied:
+        """Run them together."""
+        return Replied(weather=" ".join(each.branch for each in picked))
+
+    @lup.action(verb="decline", says="drop it")
+    async def drop(self, picked: Picked) -> None:
+        """Drop it, changing what its view shows."""
+        del picked
+
+
+def test_an_action_says_what_its_key_means_read_through_its_class() -> None:
+    methods = served(Acts)
+    assert methods["merge"].acting() == ActionDoor(verb="done", said="merge it")
+    assert methods["run"].taken.gathers()
+    assert not methods["merge"].taken.gathers()
+    assert methods["run"].taken.one() is Picked
+    assert methods["drop"].taken.one() is Picked
+    assert isinstance(Acts.merge, Method)
+
+
+def test_a_method_read_through_an_instance_is_called_as_any_action() -> None:
+    acts = Acts()
+    assert asyncio.run(acts.merge(Picked(branch="a"))) == "merged a"
+    together = asyncio.run(acts.run([Picked(branch="a"), Picked(branch="b")]))
+    assert together == Replied(weather="a b")
+    assert asyncio.run(acts.drop(Picked(branch="a"))) is None
+
+
+def test_an_offer_takes_a_keys_meaning_from_its_action() -> None:
+    offer = Offer.of(Acts.run, Picked(branch="a"))
+    assert (offer.verb, offer.says, offer.runs, offer.commented, offer.draws) == (
+        "run",
+        "run them",
+        "last",
+        True,
+        None,
+    )
+    assert offer.action == "module-act"
+    assert offer.argument == {"action": "run", "argument": {"branch": "a"}}
+    closer = Offer.of(Acts.merge, Picked(branch="a"), says="merge it: no session runs")
+    assert closer.says == "merge it: no session runs"
+    other_key = Offer.of(Acts.run, Picked(branch="a"), verb="decline", draws="[ ]")
+    assert (other_key.verb, other_key.draws) == ("decline", "[ ]")
+
+
+def test_an_offer_refuses_what_isnt_an_action_or_what_it_doesnt_take() -> None:
+    with pytest.raises(BlockError, match="`forecast`, which isn't an action"):
+        Offer.of(Serving.forecast, Asked(city="Oslo"))
+    with pytest.raises(BlockError, match="`merge` with a `Other`"):
+        Offer.of(Acts.merge, Other())
+
+
+def test_an_action_answers_a_model_words_or_nothing_and_needs_a_docstring() -> None:
+    door = ActionDoor(verb="done", said="do")
+
+    async def refusing(self: Serving, picked: Picked) -> list[Refusal]:
+        """Answer what a hook does."""
+        del picked
+        return []
+
+    async def bare(self: Serving, picked: Picked) -> None:
+        del picked
+
+    async def words(self: Serving, picked: list[str]) -> None:
+        """Take words."""
+        del picked
+
+    async def alone(picked: Picked) -> None:
+        """Stand alone."""
+        del picked
+
+    with pytest.raises(DoorError, match="returns `list"):
+        opened(refusing, door)
+    with pytest.raises(DoorError, match="needs a docstring"):
+        opened(bare, door)
+    with pytest.raises(DoorError, match="one pydantic model"):
+        opened(words, door)
+    with pytest.raises(DoorError, match="a method of a class"):
+        opened(alone, door)
+
+
+def test_a_view_placed_under_its_repository_needs_no_value_from_the_page() -> None:
+    async def needing(self: Serving, picked: Picked) -> Blocks:
+        """Need a value."""
+        del picked
+        return Blocks()
+
+    async def nothing(self: Serving, viewed: Other) -> Blocks:
+        """Need none."""
+        del viewed
+        return Blocks()
+
+    placed = ViewDoor(
+        place=Drawer(under="repository", letter="q", called="q", colour="cyan")
+    )
+    with pytest.raises(DoorError, match="the page asks it with nothing"):
+        opened(needing, placed)
+    assert opened(nothing, placed).viewing() == placed

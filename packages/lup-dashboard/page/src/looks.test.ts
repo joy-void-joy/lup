@@ -38,6 +38,17 @@ describe("the looks, merged across repositories", () => {
         expect(looks.drawers("/r/new.git").map((each) => each.view)).toEqual(["tasks", "since", "messages", "conversation"]);
     });
 
+    it("keeps a view placed under its repository out of each agent's drawers, a row of the list", () => {
+        const place = { under: "repository" as const, letter: "V", called: "what runs", colour: "cyan" as const };
+        const placing: Looks = { ...STANDING, drawers: [...(STANDING.drawers ?? []), { module: "versions", view: "what_runs", place }] };
+        const looks = merged({ "/r/lup.git": placing, "/r/zoetrope.git": STANDING }, STANDING);
+        expect(looks.drawers("/r/lup.git").map((each) => each.view)).toEqual(["tasks", "since", "messages", "conversation"]);
+        expect(looks.rows.map((each) => [each.repository, each.drawn.view])).toEqual([["/r/lup.git", "what_runs"]]);
+        // Its fold kind is known, as any drawer's, for its buffer's line.
+        expect(looks.kinds.find((each) => each.name === "what_runs")).toMatchObject({ letter: "V", drawer: true });
+        expect(merged({}, STANDING).rows).toEqual([]);
+    });
+
     it("draws each kind in its colour and each tone in its look, through the tone it takes it from", () => {
         const css = styled(merged({}, STANDING));
         expect(css).toContain("--fold-since: var(--warn);");

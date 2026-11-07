@@ -13,12 +13,13 @@ from lup_dev import cli
 from lup_dev.approval import Approval, WorkspaceTool
 from lup_dev.copies import Copies, Kept
 from lup_dev.host.client import Detached, HostClient
+from lup_dev.host.on_trial import LastSwitch
 from lup_dev.host.protocol import HostError, Listed, ListLaunches, Reply, Request
 from lup_dev.layout import Layout
 from lup_dev.restoring import RestoreError, Restoring
 from lup_dev.snapshots import Snapshot, Snapshots
 from lup_dev.stored import write_model
-from lup_dev.switching import LastSwitch, Switch, Switched, Switcher
+from lup_dev.switching import Switch, Switched, Switcher
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
 

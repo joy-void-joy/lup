@@ -47,12 +47,14 @@ export interface Merged {
     verbs: Verb[];
     /** The drawers under the banner of an agent of `repository`, by its git directory, in the order they're laid out. */
     drawers: (repository: string) => Drawn[];
+    /** Each view a repository's modules place under the repository rather than an agent, with that repository: a row of the list, opening it as a buffer of its own. */
+    rows: readonly { repository: string; drawn: Drawn }[];
     /** The parts of the banner of an agent of `repository`, in the order they're said. */
     banners: (repository: string) => Bannered[];
     refused: string[];
 }
 
-export const UNLOOKED: Merged = { kinds: [], tones: [], verbs: [], drawers: () => [], banners: () => [], refused: [] };
+export const UNLOOKED: Merged = { kinds: [], tones: [], verbs: [], drawers: () => [], rows: [], banners: () => [], refused: [] };
 
 /**
  * The verbs declared that nothing acts on yet, by name: pause, the runtime adapters', whose host side is designed beside
@@ -156,7 +158,8 @@ export function merged(looks: Readonly<Record<string, Looks>>, standing: Looks):
         kinds: [...kinds.values()].sort((a, b) => a.level - b.level),
         tones: [...tones.values()],
         verbs: [...verbs.values()],
-        drawers: (repository) => own(repository).drawers ?? [],
+        drawers: (repository) => (own(repository).drawers ?? []).filter((each) => each.place.under !== "repository"),
+        rows: Object.entries(looks).flatMap(([repository, each]) => (each.drawers ?? []).filter((one) => one.place.under === "repository").map((drawn) => ({ repository, drawn }))),
         banners: (repository) => own(repository).banners ?? [],
         refused,
     };

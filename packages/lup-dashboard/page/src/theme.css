@@ -434,6 +434,13 @@ kbd {
     text-decoration-color: var(--err);
 }
 
+/* What a mark draws in place of its line's first characters, as a box ticked. */
+.mark-drawn {
+    color: var(--warn);
+    font-weight: 700;
+    white-space: pre;
+}
+
 .buffer .cm-line.is-marked[data-mark]::after {
     content: "  ⏎ " attr(data-mark);
     color: var(--warn);

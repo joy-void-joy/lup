@@ -13,6 +13,7 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from lup.types import Model
+from lup_dev.host.on_trial import CopySwitching, PickBranches, SwitchCopy, TrialSaid
 from lup_dev.host.protocol import (
     Holding,
     Listed,
@@ -23,7 +24,7 @@ from lup_dev.host.protocol import (
     SetHolding,
 )
 from lup_dev.host.timings import KeepTimings, TimingsKept
-from lup_dev.host.workers import Viewed, Viewing
+from lup_dev.host.workers import Acted, Acting, Viewed, Viewing
 from lup_dev.inbox.marks import MarksMoved, MoveMarks
 from lup_dev.inbox.protocol import (
     AnswerApproval,
@@ -69,14 +70,7 @@ from lup_dev.inbox.threaded import (
 )
 from lup_dev.policy.since import ReviewSince, ShowSince, Since, SinceReviewed
 from lup_dev.policy.waits import LandingsWaiting, ShowLandings
-from lup_dev.switching import (
-    CopiesListed,
-    CopySwitching,
-    ListCopies,
-    SwitchCopy,
-    TrialSaid,
-)
-from lup_dev.trial import PickBranches
+from lup_dev.switching import CopiesListed, ListCopies
 
 type Asked = Annotated[
     ListLaunches
@@ -110,6 +104,7 @@ type Asked = Annotated[
     | MoveIntoThread
     | AnswerCheck
     | Viewing
+    | Acting
     | KeepTimings
     | ListCopies
     | SwitchCopy
@@ -130,6 +125,7 @@ the threads as the review reads them and one's conversation, a thread
 settled, declined or reopened, frictions and how it felt moved into one from
 the pile to read, a check answered, a module's view, which the
 page draws from its blocks (`docs/host.md`, *The views the dashboard shows*),
+one of a module's actions run,
 what the page measured of itself in the operator's browser, which the host
 keeps (`docs/host.md`, *A page's timings*), and the copies of `lup-dev` kept, the
 host service moved to one (`docs/trust.md`, *The way back*)."""
@@ -158,6 +154,7 @@ type Replied = Annotated[
     | MovedIntoThread
     | CheckShown
     | Viewed
+    | Acted
     | TimingsKept
     | CopiesListed
     | CopySwitching

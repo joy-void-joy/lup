@@ -44,8 +44,14 @@ from lup.types import Model
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
+    from pathlib import Path
 
     from lup.doors import Method
+
+ACT = "module-act"
+"""The request an action of a module's is run by, which an offer of one names as
+its action (`Offer.of`) and the page sends as the reply is sent: the host puts it
+to the repository's process (`lup_dev.host.workers.Acting`)."""
 
 type Colour = Literal[
     "fg", "muted", "link", "ok", "err", "warn", "info", "purple", "cyan", "orange"
@@ -92,13 +98,15 @@ class Offer(Model):
     """
 
     action: str
-    """The action, by its name: the method's of the module whose view the block
-    is in; for a view the page lays out itself until its module serves it, the
-    request the page sends (`policy-review-since`); for an item's answer, until
-    those are their modules' actions, what the page marks in the draft
-    (`lup_dev.inbox.store.Item.offers`)."""
+    """What the page sends for it, by its kind: `module-act` for one of its
+    module's actions (`of`), `review-mark` for a review mark's, or, for a view the
+    page lays out itself until its module serves it, the request it sends
+    (`policy-review-since`); for an item's answer, until those are their modules'
+    actions, what the page marks in the draft (`lup_dev.inbox.store.Item.offers`)."""
     argument: dict[str, JsonValue] = {}
-    """What the action is given, as JSON."""
+    """What the action is given, as JSON: for one of its module's actions, which
+    action and what it takes, with the module and its repository as its view's
+    answer leaves the repository's process (`Blocks.of_module`)."""
     verb: str | None = None
     """The verb it answers, by its name (`Verb`): the core's `done`, `decline`,
     `send` or `comment`, which apply to anything, or one a module declares, as
@@ -106,11 +114,13 @@ class Offer(Model):
     chord: str | None = None
     """Its own keys, as vim's keymap writes them, where it answers no verb: a
     module's view key, changing only what its view shows."""
-    runs: Literal["send", "once"] = "send"
+    runs: Literal["send", "once", "last"] = "send"
     """When it runs: as the reply is sent, recorded in the draft until
     Ctrl+Enter, refused where what it's on changed since it was shown; or at
     once, as a key changing only the view does, and as each of the page's own
-    views' does until each moves to its module (#247)."""
+    views' does until each moves to its module (#247); or, where it may move the
+    host, which stops what's answering it, as the reply is sent, after every other
+    mark of it, and one a send at most, a second kept drafted, said."""
     commented: bool = False
     """Whether a comment written on its block implies it, as one on a held
     change approves it with the comment, and one on a file of "since you
@@ -118,6 +128,69 @@ class Offer(Model):
     says: str
     """What it does, as the line of keys and the stack say it after its key:
     `approve`, `mark it reviewed`."""
+    draws: str | None = None
+    """What the first characters of its block's line read while it's marked, in
+    place of what they read, which is then all its mark looks like: a box ticked
+    (`[x]`) rather than a line struck through. None draws the mark as its verb's."""
+
+    @classmethod
+    def of(
+        cls,
+        action: Method,
+        argument: BaseModel,
+        *,
+        verb: str | None = None,
+        says: str | None = None,
+        draws: str | None = None,
+    ) -> Offer:
+        """Return the offer of `action`, an action read through its class, given `argument`: what its key means is the action's own, its verb and when it runs, and what the block offering it says is only that it's offered there, and what's closer to what it's on than the action's own: where one action answers two keys, as yes and no on a box, every mark of a send coming to it together, which verb this is (`verb`); what it does (`says`); and what its line reads marked (`draws`).
+
+        Raise `BlockError` where `action` isn't an action, or doesn't take `argument`'s type.
+        """
+        door = action.acting()
+        if door is None:
+            message = f"a block offers `{action.taken.name}`, which isn't an action"
+            raise BlockError(message)
+        if not isinstance(argument, action.taken.one()):
+            message = (
+                f"a block offers `{action.taken.name}` with a "
+                f"`{type(argument).__name__}`, which it doesn't take"
+            )
+            raise BlockError(message)
+        return cls(
+            action=ACT,
+            argument={
+                "action": action.taken.name,
+                "argument": argument.model_dump(mode="json", by_alias=True),
+            },
+            verb=door.verb if verb is None else verb,
+            runs=door.runs,
+            commented=door.commented,
+            says=door.said if says is None else says,
+            draws=draws,
+        )
+
+    def of_module(self, repository: Path, module: str) -> Offer:
+        """Return this offer naming whose action it is, where it's one of a module's (`of`): a block doesn't know, and the page sends what the offer says.
+
+        >>> offer = Offer(action=ACT, argument={"action": "pick"}, verb="done", says="pick it")
+        >>> from pathlib import Path
+        >>> offer.of_module(Path("/r.git"), "versions").argument["module"]
+        'versions'
+        >>> Offer(action="review-mark", verb="done", says="read").of_module(Path("/r.git"), "m").argument
+        {}
+        """
+        if self.action != ACT:
+            return self
+        return self.model_copy(
+            update={
+                "argument": {
+                    **self.argument,
+                    "repository": str(repository),
+                    "module": module,
+                }
+            }
+        )
 
     @model_validator(mode="after")
     def reached(self) -> Self:
@@ -217,6 +290,10 @@ class Line(Model):
     """What it offers the operator to do with what it shows, each answering a
     verb's key or a chord of its own (`Offer`)."""
     spans: list[Span] = []
+    by: OfAgent | None = None
+    """Who a comment on it goes to, as `Markdown.by` says of who wrote one: a line
+    takes a comment only where it says, since most say what the review already
+    holds elsewhere, and whom it would reach isn't theirs to guess."""
 
     @classmethod
     def of(cls, key: str, text: str, tone: str = "plain") -> Line:
@@ -713,6 +790,69 @@ class Blocks(Model):
             )
         )
 
+    def verbs(self) -> list[str]:
+        """Return each verb the view's offers answer, once each, in the order first named.
+
+        >>> offer = Offer(action="a", verb="done", says="do it")
+        >>> Blocks(blocks=[Fold(id="1", kind="k", summary=[],
+        ...     content=[Line(id="2", offers=[offer])])]).verbs()
+        ['done']
+        """
+
+        def named(block: Block) -> list[str | None]:
+            inside = block.content if isinstance(block, Fold) else []
+            nested = [] if isinstance(inside, Load) else inside
+            return [
+                *(each.verb for each in block.offers),
+                *(verb for each in nested for verb in named(each)),
+            ]
+
+        said = [
+            *(each.verb for each in self.offers),
+            *(verb for block in self.blocks for verb in named(block)),
+        ]
+        return list(dict.fromkeys(each for each in said if each is not None))
+
+    def of_module(self, repository: Path, module: str) -> Blocks:
+        """Return the view with each offer of an action naming whose it is (`Offer.of_module`), as its answer leaves the repository's process.
+
+        >>> from pathlib import Path
+        >>> offer = Offer(action=ACT, argument={"action": "pick"}, verb="done", says="pick it")
+        >>> inner = Line(id="2", offers=[offer])
+        >>> view = Blocks(blocks=[Fold(id="1", kind="k", summary=[], content=[inner])])
+        >>> view.of_module(Path("/r.git"), "m").blocks[0].content[0].offers[0].argument["module"]
+        'm'
+        """
+
+        def told(offers: list[Offer]) -> list[Offer]:
+            return [each.of_module(repository, module) for each in offers]
+
+        def within(block: Block) -> Block:
+            content = (
+                [within(each) for each in block.content]
+                if isinstance(block, Fold) and isinstance(block.content, list)
+                else None
+            )
+            return block.model_copy(
+                update={
+                    "offers": told(block.offers),
+                    **({} if content is None else {"content": content}),
+                }
+            )
+
+        sights = self.sights
+        return self.model_copy(
+            update={
+                "blocks": [within(each) for each in self.blocks],
+                "offers": told(self.offers),
+                "sights": None
+                if sights is None
+                else sights.model_copy(
+                    update={"offer": sights.offer.of_module(repository, module)}
+                ),
+            }
+        )
+
 
 class FoldKind(Model):
     """One kind of fold a module declares, as the page's fold keys know it: the letter naming it, what its folds are called, the level the keys open and close it at, how it opens, and its colour."""
@@ -899,9 +1039,10 @@ them (`Core.folds`), so a person's layer changes how each starts and whether
 
 
 class Drawer(Model):
-    """Where a view is placed: a drawer under each agent's banner, its line in the banner's group saying what it holds."""
+    """Where a view is placed: a drawer under each agent's banner, its line in the banner's group saying what it holds; or, under its repository, a row of the review's list opening it as a buffer of its own, what it answers saying that row's words and its marks."""
 
-    under: Literal["agent"] = "agent"
+    # lup: defer(issue=312, why="a row of the list a module places stands in until it's a node of #372's tree of concerns and piles, as a party or a pile a module holds")
+    under: Literal["agent", "repository"] = "agent"
     letter: str
     """Its fold kind's letter, which opens and closes it."""
     called: str

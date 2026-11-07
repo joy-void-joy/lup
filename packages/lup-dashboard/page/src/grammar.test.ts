@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { hosted, KINDS, type Said } from "./fixtures/kinds";
 import "./fixtures/looks";
-import { chainAt, isMarked, listed, marking, markedPart, reachOf, seenAct, type Act, type Marked, type Verb } from "./grammar";
+import { actionsToRun, chainAt, isMarked, listed, marking, markedPart, reachOf, seenAct, type Act, type Marked, type Verb } from "./grammar";
 import { EMPTY, laid, type Around, type Conversation, type Item, type Placed } from "./review";
 import type { Offer } from "./views";
 
@@ -188,5 +188,42 @@ describe("what the host offers on an item", () => {
         expect(acts("decline")).toEqual([{ kind: "item", number: 7, list: "declined" }]);
         expect(acts("send")).toEqual([{ kind: "item", number: 7, list: "parked" }]);
         expect(acts("comment")).toEqual([{ kind: "comment" }]);
+    });
+});
+
+
+describe("the order a send asks a module's actions in", () => {
+    const mark = (id: string, action: string, runs: "last" | null = null, module: string = "versions"): Marked => ({
+        id,
+        action: "module-act",
+        argument: { repository: "/r.git", module, action, argument: { id } },
+        verb: "done",
+        says: id,
+        block: id,
+        version: null,
+        ...(runs === null ? {} : { runs }),
+    });
+
+    it("asks what may move the host last, whatever order the keys came in", () => {
+        const { run } = actionsToRun([mark("run", "run_again", "last"), mark("merge", "merge")]);
+        expect(run.map((each) => each.marks.map((one) => one.id))).toEqual([["merge"], ["run"]]);
+        expect(run.map((each) => each.last)).toEqual([false, true]);
+    });
+
+    it("asks one that may move the host a send, the rest held back", () => {
+        const { run, held } = actionsToRun([mark("pick", "pick", "last"), mark("run", "run_again", "last")]);
+        expect(run.map((each) => each.marks.map((one) => one.id))).toEqual([["pick"]]);
+        expect(held.map((each) => each.id)).toEqual(["run"]);
+    });
+
+    it("gathers every mark of an action into one asking, ticks of one box after another among them", () => {
+        const { run, held } = actionsToRun([mark("a", "pick", "last"), mark("merge", "merge"), mark("b", "pick", "last")]);
+        expect(run.map((each) => each.marks.map((one) => one.id))).toEqual([["merge"], ["a", "b"]]);
+        expect(held).toEqual([]);
+    });
+
+    it("leaves out what's no module's action", () => {
+        const other: Marked = { ...mark("x", "x"), action: "review-mark" };
+        expect(actionsToRun([other]).run).toEqual([]);
     });
 });
