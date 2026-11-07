@@ -268,12 +268,18 @@ class OperatorHost(ABC):
         """
 
 
-class NoOperatorHost(OperatorHost):
-    """What a module's command in a room has of the host: nothing the operator asks, since a room isn't them."""
+class NoOperatorHost(Model, OperatorHost):
+    """What's there of the host for a method anyone but the operator asks: nothing, however it's reached, so an agent's call or a room's request never becomes theirs."""
+
+    asker: str = "this"
+    """Who asks, as the refusal names them."""
 
     @override
     async def asked[R: Reply](self, request: Request, reply: type[R]) -> R:
-        message = f"`{request.kind}` is the operator's, and a room can't ask it"
+        message = (
+            f"`{request.kind}` is the operator's, and it's {self.asker} asking: "
+            "`self.host` is there for the operator's views and actions alone"
+        )
         raise HostError(message)
 
 
@@ -318,8 +324,9 @@ class ModuleServing(Model, arbitrary_types_allowed=True):
     repository: Path = Path()
     """The repository's git directory."""
     host: OperatorHost = NoOperatorHost()
-    """The host service, as the operator asks it, for a method only they ask:
-    their view or their action. In a room, nothing."""
+    """The host service, as the operator asks it: for a method the operator is
+    asking, its view or its action, and for no one else, whatever a door lets them
+    do, so anyone else's asking raises (`NoOperatorHost`)."""
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: object) -> None:

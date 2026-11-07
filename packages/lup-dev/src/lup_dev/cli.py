@@ -3830,7 +3830,13 @@ def module_ran(words: list[str]) -> None:
     if not commanding.approved(Path(sys.argv[0]), command):
         commanding.handed_over(words, command, repository)
     modules = RepositoryModules.loaded(repository, services(), recorded())
-    commanding.run(words, modules.resolved.served, modules.made, Operator)
+
+    def inside() -> str | None:
+        return next((each.name() for each in runtimes() if each.inside()), None)
+
+    commanding.run(
+        words, modules.resolved.served, modules.made, Operator, inside=inside
+    )
 
 
 def module_commands_said() -> str:
