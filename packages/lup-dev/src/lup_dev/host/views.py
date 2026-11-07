@@ -34,7 +34,7 @@ from lup.types import Model
 from lup_dev.clock import Clock, SystemClock
 from lup_dev.host.protocol import HostError, Reply
 from lup_dev.host.service import Handler, Reading
-from lup_dev.host.watch import ActionRun, Changes, Remarked, Touched
+from lup_dev.host.watch import ActionRun, Changes, Remarked, Touched, TrialMoved
 from lup_dev.host.workers import (
     Acted,
     Acting,
@@ -120,10 +120,10 @@ class ModuleViews(Model, Reading[Viewing], arbitrary_types_allowed=True):
                 await self.triggered(request, reply.watch, seen)
 
     async def triggered(self, request: Viewing, watch: Watching, seen: int) -> None:
-        """Wait for the first of a view's triggers since the count `seen`: a change touching the agent it's of, at one of the events it names or by an item; a review mark it read moving; an action of its module's run; or `longest` gone by."""
+        """Wait for the first of a view's triggers since the count `seen`: a change touching the agent it's of, at one of the events it names or by an item; a review mark it read moving; an action of its module's run; a merge of its repository finishing apart; or `longest` gone by."""
         repository = request.repository
         of = watch.of
-        touched: list[Touched | Remarked | ActionRun] = (
+        touched: list[Touched | Remarked | ActionRun | TrialMoved] = (
             []
             if of is None
             else [
@@ -141,6 +141,7 @@ class ModuleViews(Model, Reading[Viewing], arbitrary_types_allowed=True):
             *touched,
             *watch.marks,
             ActionRun(repository=repository, module=request.module),
+            TrialMoved(repository=repository),
         ]
         waits: list[asyncio.Task[int | None]] = [
             asyncio.ensure_future(self.changes.touching(wanted, seen))

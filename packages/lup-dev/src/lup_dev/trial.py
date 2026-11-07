@@ -22,6 +22,7 @@ What's kept per version (`Version`) is how a copy built for one stays kept
 (`pins`, `Copies.pin`), and how `live`'s history reads as a list of them.
 """
 
+from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -114,6 +115,18 @@ class Trial(Model):
         """Return each branch in `live`, with the commit of it there."""
         latest = self.latest
         return {} if latest is None else latest.tips
+
+
+class AcceptingTools(ABC):
+    """What accepting a branch needs beyond what's on trial: a session's room, for its gate and its worktree's removal."""
+
+    @abstractmethod
+    def ready(self, repository: Path, on: OnTrial) -> None:
+        """Raise `HostError` where accepting `on` can't start: no session of the repository runs."""
+
+    @abstractmethod
+    async def accepted(self, repository: Path, on: OnTrial) -> str:
+        """Merge `on` onto the integration branch, at the tip it landed with, cleaning up after it, and say what came of it, which needn't be that it landed: a failed gate is said, not raised. Raise `HostError` where it can't be tried."""
 
 
 class Trials(Model):

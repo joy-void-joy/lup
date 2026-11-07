@@ -33,6 +33,10 @@ class BranchListed(Model):
     party: Conversation | None = None
     """Who landed it, as the inbox knows them: whom the operator's words on it
     reach, or wait for."""
+    merging: bool = False
+    """It's being merged onto the integration branch, or waits its turn to be."""
+    merge_said: str = ""
+    """What the last try at merging it said, where it didn't land; empty else."""
 
 
 class LastSwitch(Model):
@@ -78,7 +82,11 @@ class TrialListed(Model):
     """The commit approved, whose copy the host runs: another than `live` where
     `live` holds what the host runs the same, or waits on the operator's yes."""
     last: LastSwitch | None = None
-    """What came of the last switch, which a page says where it fell back."""
+    """What came of the last switch, which a page says where it fell back: lup's
+    own repository's alone, whose copy it moved."""
+    merged: list[str] = []
+    """What the last few merges that landed said, the latest last, since the branch
+    each was of isn't on trial to say it."""
 
 
 class ListTrial(Request, reads=False):
@@ -97,6 +105,25 @@ class PickBranches(Request, reads=False):
     branches: list[str]
     repository: Path | None = None
     """The repository's git directory; none for lup's own."""
+    seen: dict[str, str] = {}
+    """The tip each was seen at, by its name: refused where it has landed again
+    since, whoever asks saying they looked at it (`ChangeBranches.seen`)."""
+    dev: str | None = None
+    """The commit of the integration branch seen, refused where it has moved since;
+    none asks nothing of it."""
+
+
+class ChangeBranches(Request, reads=False):
+    """Put these branches in what runs and leave those out, each other as it stands: the operator's alone, what one box says, where a pick says the whole set. Applied on the host under the repository's turn, so what's seen and what's changed are one."""
+
+    kind: Literal["trial-change"] = "trial-change"
+    taking: list[str] = []
+    leaving: list[str] = []
+    seen: dict[str, str] = {}
+    """The tip each was seen at, by its name: refused where it has landed again
+    since."""
+    repository: Path | None = None
+    """The repository's git directory; none for lup's own."""
 
 
 class AcceptBranch(Request, reads=False):
@@ -106,6 +133,12 @@ class AcceptBranch(Request, reads=False):
     branch: str
     repository: Path | None = None
     """The repository's git directory; none for lup's own."""
+    tip: str | None = None
+    """The tip it was seen at, refused where it has landed again since; none asks
+    nothing of it."""
+    apart: bool = False
+    """Answer at once and merge it apart, its gate taking minutes, what it comes to
+    said where what's on trial is listed (`BranchListed.merging`, `.merge_said`)."""
 
 
 class DropBranch(Request, reads=False):

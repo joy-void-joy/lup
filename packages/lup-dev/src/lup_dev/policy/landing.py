@@ -259,6 +259,7 @@ from lup_dev.remote.protocol import (
 )
 from lup_dev.stored import read_model
 from lup_dev.trial import (
+    AcceptingTools,
     OnTrial,
     Plan,
     Trial,
@@ -3575,3 +3576,19 @@ class LandingTools(Model, RoomTools, arbitrary_types_allowed=True):
                 return Answer(text=answer)
             case Refused(rejection=rejection):
                 return Answer(text=f"Refused: {rejection.reason}", error=True)
+
+
+class RoomAccepting(Model, AcceptingTools):
+    """Accepts a branch through `land`'s own machinery, in a session's room."""
+
+    tools: LandingTools
+
+    @override
+    def ready(self, repository: Path, on: OnTrial) -> None:
+        served = served_launches(self.tools.layout.host, repository)
+        if not served or on.caller is None:
+            raise HostError(no_room(on.branch))
+
+    @override
+    async def accepted(self, repository: Path, on: OnTrial) -> str:
+        return await self.tools.accepted(repository, on)

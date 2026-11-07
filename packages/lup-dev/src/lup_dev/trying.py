@@ -5,6 +5,11 @@ landing (`Lander.on_trial`), in a room; the rest of what moves `live` comes from
 room, so it's here, in the host service: the operator asks through their terminal
 or the plain page, on the control socket, which no room reaches.
 
+Accepting a branch runs the gate on its merge, in a room, which takes minutes: asked
+apart (`AcceptBranch.apart`), as the review asks, it's answered at once, merges one at
+a time, and what it comes to is said where what's on trial is listed, while anything
+moving the host waits, since a restart would stop the gate (`Merges`).
+
 A new `live` commit is what any of these comes to. It's computed from the record, in
 a store apart (`lup_dev.trial`, `lup_dev.composing`), and what happens next depends on
 what it runs, by the fingerprint of its host zone, which says what the operator
@@ -25,9 +30,12 @@ Each is held to one at a time in a repository, with a landing's merge (`Turns`).
 """
 
 import asyncio
+import traceback
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, override
+
+from pydantic import Field
 
 from lup.types import Model, MutableModel
 from lup_dev.approval import approved, approved_branches
@@ -38,6 +46,7 @@ from lup_dev.errors import LupDevError
 from lup_dev.git import Git
 from lup_dev.host.on_trial import (
     AcceptBranch,
+    ChangeBranches,
     CopySwitching,
     DropBranch,
     ListTrial,
@@ -47,15 +56,16 @@ from lup_dev.host.on_trial import (
 )
 from lup_dev.host.protocol import Branches, HostError, Reply
 from lup_dev.host.service import Companion, Handler
-from lup_dev.host.watch import Changes
+from lup_dev.host.watch import Changes, TrialMoved
 from lup_dev.host.workers import Listing, RepositoryAsking
 from lup_dev.inbox.delivery import Delivery
 from lup_dev.inbox.store import cited
 from lup_dev.layout import CopyLayout, Layout
-from lup_dev.policy.landing import LandingTools, Turns
+from lup_dev.policy.landing import Turns
 from lup_dev.snapshots import Snapshots
 from lup_dev.switching import host_copies, last_switch, needs_ledger, own_repository
 from lup_dev.trial import (
+    AcceptingTools,
     OnTrial,
     Origin,
     Plan,
@@ -76,6 +86,43 @@ from lup_ledger.environment.layout import LedgerLayout
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
+
+
+class RepositoryMerges(MutableModel, arbitrary_types_allowed=True):
+    """One repository's merges under way, and what the last ones said, in the service's memory: a merge's gate outlasts the request, and the page that asked for it."""
+
+    turn: asyncio.Lock = Field(default_factory=asyncio.Lock)
+    """Held while one merges: each reads the integration branch's tip as it starts, so
+    two together would have the second refused as it moved."""
+    underway: list[str] = []
+    """Each merging or waiting its turn, by its branch's name."""
+    failed: dict[str, str] = {}
+    """What the last try at each said, where it didn't land, by its branch's name."""
+    landed: list[str] = []
+    """What the last few that landed said, the latest last."""
+    remembering: int = 3
+    """How many of them it keeps: each is what its branch's own line would have
+    said, and the review's own says it's gone."""
+    tasks: list[asyncio.Task[None]] = []
+    """What's running apart, kept so it isn't collected as it runs."""
+
+    def ended(self, branch: str, said: str, *, landed: bool) -> None:
+        """Say `branch` is done merging, what came of it `said`."""
+        self.underway = [each for each in self.underway if each != branch]
+        others = {name: each for name, each in self.failed.items() if name != branch}
+        self.failed = others if landed else {**others, branch: said}
+        if landed:
+            self.landed = [*self.landed, said][-self.remembering :]
+
+
+class Merges(MutableModel, arbitrary_types_allowed=True):
+    """Each repository's merges under way, by its git directory."""
+
+    repositories: dict[Path, RepositoryMerges] = {}
+
+    def of(self, repository: Path) -> RepositoryMerges:
+        """Return the merges of the repository at `repository`."""
+        return self.repositories.setdefault(repository, RepositoryMerges())
 
 
 class Computed(Model):
@@ -105,6 +152,18 @@ class Trying(Model, arbitrary_types_allowed=True):
     start: Callable[[CopyLayout, str], None]
     """Starts the copy's `lup-dev restore`, in a session of its own, given where
     it's installed and the commit: it stops this service."""
+    merges: Merges = Field(default_factory=Merges)
+    """Each repository's merges under way, and what the last ones said."""
+
+    def refuse_merging(self, repository: Path) -> None:
+        """Raise `HostError` where a branch of `repository` is merging: moving the host would stop its gate."""
+        underway = self.merges.of(repository).underway
+        if underway:
+            message = (
+                f"{named(underway)} is merging, whose gate runs in a session's room, "
+                "and moving the host now would stop it: ask this again once it's done"
+            )
+            raise HostError(message)
 
     def repository(self, asked: Path | None) -> Path:
         """Return the repository asked for, or lup's own, which the service runs from: raise `HostError` where it's not known, or computes no running branch."""
@@ -250,13 +309,42 @@ class Trying(Model, arbitrary_types_allowed=True):
             )
         ]
 
-    async def picked(self, asked: Path | None, names: list[str]) -> TrialSaid:
-        """Run `dev` plus exactly `names`, as the operator asked: at once where it's what's approved, or a copy of it is kept; else asking their yes. Refused where a name isn't on trial or they conflict, or its copy needs the ledger restored, nothing having moved."""
+    async def picked(
+        self,
+        asked: Path | None,
+        names: list[str],
+        *,
+        seen: dict[str, str] | None = None,
+        dev: str | None = None,
+    ) -> TrialSaid:
+        """Run `dev` plus exactly `names`, as the operator asked: at once where it's what's approved, or a copy of it is kept; else asking their yes. Refused where a name isn't on trial or they conflict, or its copy needs the ledger restored, or, what they saw of it being `seen` and `dev`, where that moved since, or a merge is under way, nothing having moved."""
         repository = self.repository(asked)
         async with self.turns.of(repository):
-            return await asyncio.to_thread(self.picking, repository, names)
+            self.refuse_merging(repository)
+            return await asyncio.to_thread(
+                self.picking, repository, names, seen or {}, dev
+            )
 
-    def picking(self, repository: Path, names: list[str]) -> TrialSaid:
+    def refuse_unseen(self, trial: Trial, seen: dict[str, str]) -> None:
+        """Raise `HostError` where a branch of `seen` has landed again since it was seen at the tip it says."""
+        moved = [
+            name
+            for name, tip in seen.items()
+            if (on := trial.on(name)) is not None and on.tip != tip
+        ]
+        if moved:
+            message = (
+                f"{named(moved)} landed again since you marked it: look at it again"
+            )
+            raise HostError(message)
+
+    def picking(
+        self,
+        repository: Path,
+        names: list[str],
+        seen: dict[str, str],
+        seen_dev: str | None,
+    ) -> TrialSaid:
         """Do what `picked` says, off the event loop."""
         branches = approved_branches(self.layout, repository)
         trial = Trials.of(self.layout, repository).read()
@@ -264,9 +352,15 @@ class Trying(Model, arbitrary_types_allowed=True):
         if unknown:
             message = f"{named(unknown)} isn't on trial: `lup-dev live` lists what is"
             raise HostError(message)
+        self.refuse_unseen(trial, seen)
         git = Git.pinned(repository)
         remote = next((each.remote for each in trial.branches), "origin")
         dev = self.dev_tip(git, branches, trial, remote)
+        if seen_dev is not None and dev != seen_dev:
+            message = (
+                f"`{branches.integration}` moved since you marked it: look at it again"
+            )
+            raise HostError(message)
         self.refuse_conflict(git, trial, names, dev, branches)
         chosen = trial.model_copy(
             update={
@@ -278,6 +372,65 @@ class Trying(Model, arbitrary_types_allowed=True):
         )
         found = self.computed(git, chosen, branches, dev)
         return self.running(repository, git, found, remote)
+
+    async def changed(
+        self,
+        asked: Path | None,
+        taking: list[str],
+        leaving: list[str],
+        seen: dict[str, str],
+    ) -> TrialSaid:
+        """Put `taking` in what runs and leave `leaving` out, each other branch as it stands, one kept out by a conflict still coming back where it merges; run that as `picked` does. Refused, nothing having moved, where they conflict, where one moved since it was `seen`, or a merge is under way; a branch off trial since is said, there being nothing left to do with it."""
+        repository = self.repository(asked)
+        async with self.turns.of(repository):
+            self.refuse_merging(repository)
+            return await asyncio.to_thread(
+                self.changing, repository, taking, leaving, seen
+            )
+
+    def changing(
+        self,
+        repository: Path,
+        taking: list[str],
+        leaving: list[str],
+        seen: dict[str, str],
+    ) -> TrialSaid:
+        """Do what `changed` says, off the event loop, under the repository's turn: what's in what runs is read here, so a branch landing meanwhile joins it rather than being left out unseen."""
+        branches = approved_branches(self.layout, repository)
+        trial = Trials.of(self.layout, repository).read()
+        self.refuse_unseen(trial, seen)
+        gone = [
+            f"`{each}` isn't on trial any more."
+            for each in dict.fromkeys([*taking, *leaving])
+            if trial.on(each) is None
+        ]
+        taken = [each for each in taking if trial.on(each) is not None]
+        left = [each for each in leaving if trial.on(each) is not None]
+        if not taken and not left:
+            return self.said(repository, gone)
+        git = Git.pinned(repository)
+        remote = next((each.remote for each in trial.branches), "origin")
+        dev = self.dev_tip(git, branches, trial, remote)
+        wanted = [each for each in trial.tips if each not in left]
+        self.refuse_conflict(
+            git, trial, list(dict.fromkeys([*wanted, *taken])), dev, branches
+        )
+        chosen = trial.model_copy(
+            update={
+                "branches": [
+                    each.model_copy(
+                        update={
+                            "out": each.branch in left
+                            or (each.out and each.branch not in taken)
+                        }
+                    )
+                    for each in trial.branches
+                ]
+            }
+        )
+        found = self.computed(git, chosen, branches, dev)
+        reply = self.running(repository, git, found, remote)
+        return reply.model_copy(update={"said": "\n".join([*gone, reply.said])})
 
     def refuse_conflict(
         self, git: Git, trial: Trial, names: list[str], dev: str, branches: Branches
@@ -375,6 +528,7 @@ class Trying(Model, arbitrary_types_allowed=True):
         """Take `branch` off trial, its branch and its worktree left, leaving what the operator said on it for who landed it, told at their next call whenever that is; where it was in `live`, what runs moves as a pick does."""
         repository = self.repository(asked)
         async with self.turns.of(repository):
+            self.refuse_merging(repository)
             trial = await asyncio.to_thread(Trials.of(self.layout, repository).read)
             on = trial.on(branch)
             if on is None:
@@ -415,12 +569,29 @@ class Trying(Model, arbitrary_types_allowed=True):
         return TrialSaid(said="\n".join(lines), listed=self.listed(repository))
 
     def listed(self, repository: Path) -> TrialListed | None:
-        """Return what's on trial in `repository`, as a page lists it."""
+        """Return what's on trial in `repository`, as a page lists it, with what's merging apart, and what came of the last switch where it's lup's own, whose copy that moved."""
         kept = Copies(layout=self.layout.judge(repository)).kept()
         listed = trial_listed(self.layout, repository, kept)
         if listed is None:
             return None
-        return listed.model_copy(update={"last": last_switch(self.layout)})
+        merges = self.merges.of(repository)
+        copies = host_copies(self.layout)
+        own = None if copies is None else own_repository(copies)
+        return listed.model_copy(
+            update={
+                "last": last_switch(self.layout) if own == repository else None,
+                "merged": merges.landed,
+                "branches": [
+                    each.model_copy(
+                        update={
+                            "merging": each.branch in merges.underway,
+                            "merge_said": merges.failed.get(each.branch, ""),
+                        }
+                    )
+                    for each in listed.branches
+                ],
+            }
+        )
 
 
 class OwnViewsSaid(MutableModel, Companion, arbitrary_types_allowed=True):
@@ -482,7 +653,28 @@ class TrialPicking(Model, Handler[PickBranches]):
 
     @override
     async def answer(self, request: PickBranches) -> Reply:
-        return await self.trying.picked(request.repository, request.branches)
+        return await self.trying.picked(
+            request.repository,
+            request.branches,
+            seen=request.seen,
+            dev=request.dev,
+        )
+
+
+class TrialChanging(Model, Handler[ChangeBranches]):
+    """Answers `ChangeBranches`: those branches in what runs, or out, each other as it stands."""
+
+    trying: Trying
+
+    @override
+    def request(self) -> type[ChangeBranches]:
+        return ChangeBranches
+
+    @override
+    async def answer(self, request: ChangeBranches) -> Reply:
+        return await self.trying.changed(
+            request.repository, request.taking, request.leaving, request.seen
+        )
 
 
 class TrialDropping(Model, Handler[DropBranch]):
@@ -502,11 +694,13 @@ class TrialDropping(Model, Handler[DropBranch]):
         )
 
 
-class TrialAccepting(Model, Handler[AcceptBranch]):
-    """Answers `AcceptBranch`: the branch merged onto `dev`, in a room, and cleaned up after, as a landing is, then `live` computed on what that leaves."""
+class TrialAccepting(Model, Handler[AcceptBranch], arbitrary_types_allowed=True):
+    """Answers `AcceptBranch`: the branch merged onto `dev`, in a room, and cleaned up after, as a landing is, then `live` computed on what that leaves; one at a time in a repository, and, asked apart, with its answer at once and what it comes to listed."""
 
     trying: Trying
-    tools: LandingTools
+    tools: AcceptingTools
+    changes: Changes | None = None
+    """Told a merge that ran apart finished, so what's shown says what came of it."""
 
     @override
     def request(self) -> type[AcceptBranch]:
@@ -520,6 +714,52 @@ class TrialAccepting(Model, Handler[AcceptBranch]):
         if on is None:
             message = f"`{request.branch}` isn't on trial: `lup-dev live` lists what is"
             raise HostError(message)
-        landed = await self.tools.accepted(repository, on)
-        moved = await self.trying.moved_dev(repository, on.remote)
-        return await asyncio.to_thread(self.trying.said, repository, [landed, *moved])
+        if request.tip is not None:
+            self.trying.refuse_unseen(trial, {on.branch: request.tip})
+        merges = self.trying.merges.of(repository)
+        if on.branch in merges.underway:
+            message = f"`{on.branch}` is merging already"
+            raise HostError(message)
+        self.tools.ready(repository, on)
+        merges.underway = [*merges.underway, on.branch]
+        if request.apart:
+            task = asyncio.create_task(self.apart(repository, on))
+            merges.tasks = [*(each for each in merges.tasks if not each.done()), task]
+            said = [f"`{on.branch}` is merging: what it comes to shows on its line."]
+            return await asyncio.to_thread(self.trying.said, repository, said)
+        try:
+            words = await self.merged(repository, on)
+        except LupDevError as refused:
+            merges.ended(on.branch, str(refused), landed=False)
+            raise
+        merges.ended(on.branch, "\n".join(words), landed=self.gone(repository, on))
+        return await asyncio.to_thread(self.trying.said, repository, words)
+
+    def gone(self, repository: Path, on: OnTrial) -> bool:
+        """Say whether `on` is off trial, which is what its having landed comes to: a merge says what stopped it in words, as the gate failing."""
+        return Trials.of(self.trying.layout, repository).read().on(on.branch) is None
+
+    async def merged(self, repository: Path, on: OnTrial) -> list[str]:
+        """Merge `on` at its turn, saying what came of it, a line each. It's refused where it landed again while it waited, and there's nothing to do where it's gone from trial."""
+        async with self.trying.merges.of(repository).turn:
+            trial = Trials.of(self.trying.layout, repository).read()
+            if trial.on(on.branch) is None:
+                return [f"`{on.branch}` isn't on trial any more."]
+            self.trying.refuse_unseen(trial, {on.branch: on.tip})
+            landed = await self.tools.accepted(repository, on)
+            moved = await self.trying.moved_dev(repository, on.remote)
+            return [landed, *moved]
+
+    async def apart(self, repository: Path, on: OnTrial) -> None:
+        """Merge `on` with nobody waiting on the answer, keeping what it comes to for whatever lists what's on trial, and telling whoever watches."""
+        try:
+            said = "\n".join(await self.merged(repository, on))
+        except LupDevError as refused:
+            said = str(refused)
+        except Exception as failed:
+            self.trying.say(traceback.format_exc())
+            said = f"it failed, as the host service's log says: {failed}"
+        merges = self.trying.merges.of(repository)
+        merges.ended(on.branch, said, landed=self.gone(repository, on))
+        if self.changes is not None:
+            self.changes.changed([TrialMoved(repository=repository)])

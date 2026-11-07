@@ -39,7 +39,7 @@ from lup_dev.host.protocol import (
 )
 from lup_dev.host.service import Answerer, HostService, Route
 from lup_dev.host.views import ModuleActions, ModuleViews
-from lup_dev.host.watch import ActionRun, Changes, Remarked, Touched
+from lup_dev.host.watch import ActionRun, Changes, Remarked, Touched, TrialMoved
 from lup_dev.host.workers import (
     Acted,
     Acting,
@@ -679,6 +679,28 @@ def test_an_action_runs_in_its_repository_s_process_asking_the_host_back_on_its_
 
 def acting() -> Acting:
     return Acting(repository=REPOSITORY, module="shown", action="wave", arguments=[{}])
+
+
+def test_a_watched_view_is_answered_again_as_a_merge_of_its_repository_finishes_apart(
+    clock: FakeClock,
+) -> None:
+    asked = Asked(Watching())
+    changes = Changes()
+
+    async def exercised() -> list[str]:
+        watched = views(asked, changes, [], clock).watched(viewing())
+        seen = [texts(await anext(watched))]
+        coming = asyncio.ensure_future(anext(watched))
+        asked.text = "merged"
+        changes.changed([TrialMoved(repository=Path("/other/.git"))])
+        await settled()
+        assert not coming.done()
+        changes.changed([TrialMoved(repository=REPOSITORY)])
+        seen.append(texts(await asyncio.wait_for(coming, PATIENCE)))
+        await watched.aclose()
+        return seen
+
+    assert asyncio.run(exercised()) == ["zero", "merged"]
 
 
 def test_a_watched_view_is_answered_again_as_an_action_of_its_module_runs(

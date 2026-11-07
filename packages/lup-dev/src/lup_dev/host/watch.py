@@ -14,7 +14,8 @@ touches alone (`host/views.py`), since each answer asks its repository's
 process, where answering every watch at every change anywhere would ask it at
 each hook of every agent. A review mark moved says which it is (`Remarked`), so
 a view that read it is answered again (`lup_dev.inbox.marks`), and an action run
-says whose it is (`ActionRun`), so each of its module's views shown is too.
+says whose it is (`ActionRun`), so each of its module's views shown is too, as a
+merge finishing apart says which repository's (`TrialMoved`).
 """
 
 import asyncio
@@ -60,6 +61,13 @@ class ActionRun(Model):
     module: str
 
 
+class TrialMoved(Model):
+    """What's on trial in a repository moved with no request of the operator's answering: a merge that ran apart finished, which each of the repository's views shown may say."""
+
+    repository: Path
+    """The repository's git directory."""
+
+
 class Changes(MutableModel, arbitrary_types_allowed=True):
     """How many times what the service holds may have changed, which conversations each change touched, and a wait for the next.
 
@@ -69,12 +77,14 @@ class Changes(MutableModel, arbitrary_types_allowed=True):
     count: int = 0
     next: asyncio.Event = Field(default_factory=asyncio.Event)
     """Set at the next change, and replaced by a fresh one."""
-    touches: dict[Touched | Remarked | ActionRun, int] = {}
+    touches: dict[Touched | Remarked | ActionRun | TrialMoved, int] = {}
     """The count at the last change touching each conversation so, a conversation
     and how, moving each review mark, or running an action of each module: one
     each, however many times it's touched."""
 
-    def changed(self, touched: Iterable[Touched | Remarked | ActionRun] = ()) -> None:
+    def changed(
+        self, touched: Iterable[Touched | Remarked | ActionRun | TrialMoved] = ()
+    ) -> None:
         """Say that what the service holds may have changed, touching `touched`, waking each wait."""
         self.count += 1
         self.touches = {**self.touches, **dict.fromkeys(touched, self.count)}
@@ -89,7 +99,7 @@ class Changes(MutableModel, arbitrary_types_allowed=True):
         return self.count
 
     async def touching(
-        self, wanted: list[Touched | Remarked | ActionRun], seen: int
+        self, wanted: list[Touched | Remarked | ActionRun | TrialMoved], seen: int
     ) -> int:
         """Wait until a change after the count `seen` touched one of `wanted`, and return the count then; none wanted waits for ever."""
         while all(self.touches.get(each, 0) <= seen for each in wanted):

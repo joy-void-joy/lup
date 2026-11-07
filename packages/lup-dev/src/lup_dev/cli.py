@@ -282,7 +282,13 @@ from lup_dev.policy.holds import (
 )
 from lup_dev.policy.importers import BackgroundSpawner
 from lup_dev.policy.judge import finding
-from lup_dev.policy.landing import LandingTools, Turns, hosted_files, unapproved_files
+from lup_dev.policy.landing import (
+    LandingTools,
+    RoomAccepting,
+    Turns,
+    hosted_files,
+    unapproved_files,
+)
 from lup_dev.policy.report import finding_lines
 from lup_dev.policy.since import routes as since_routes
 from lup_dev.policy.tools import JudgeTools, judge_call
@@ -318,6 +324,7 @@ from lup_dev.trial import named as in_sentence
 from lup_dev.trying import (
     OwnViewsSaid,
     TrialAccepting,
+    TrialChanging,
     TrialDropping,
     TrialListing,
     TrialPicking,
@@ -630,11 +637,20 @@ def trial_routes(
     return [
         Route.to(TrialListing(trying=trying)),
         Route.to(TrialPicking(trying=trying)),
+        Route.to(TrialChanging(trying=trying)),
         Route.to(TrialDropping(trying=trying, delivery=delivery)),
         *(
             []
             if landing is None
-            else [Route.to(TrialAccepting(trying=trying, tools=landing))]
+            else [
+                Route.to(
+                    TrialAccepting(
+                        trying=trying,
+                        tools=RoomAccepting(tools=landing),
+                        changes=delivery.inbox.changes,
+                    )
+                )
+            ]
         ),
     ]
 
