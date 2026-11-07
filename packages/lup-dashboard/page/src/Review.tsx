@@ -1274,8 +1274,14 @@ export function Review({
             return;
         }
         looked.current.set(lookedAt(was.of, was.path), standing);
-        // Drawn once the cursor's move is done, which this is told of while CodeMirror is still telling it.
-        queueMicrotask(() => editor.draw(decorations(laidOut, withImplied, seeing, reachesOf, ends)));
+        // Drawn once the cursor's move is done, which this is told of while CodeMirror is still telling it; never over text
+        // this layout isn't in yet, where a key comes between its render and its effect, which draws it anyway: placed in
+        // another text, one past the editor's end would throw as the next change is mapped, and the page with it.
+        queueMicrotask(() => {
+            if (before.current === laidOut) {
+                editor.draw(decorations(laidOut, withImplied, seeing, reachesOf, ends));
+            }
+        });
     }
     // Which comments each fold held as the review was last laid out, by its key: one that comes to hold another opens.
     const held = useRef(new Map<string, Set<string>>());
