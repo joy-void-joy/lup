@@ -94,8 +94,7 @@ if (token) {
     return document(
         "lup: the copies kept",
         '<h1>The copies kept</h1><p id="said">Open this with the dashboard\'s token: '
-        "the address <code>lup-dev dashboard --no-open</code> prints, with "
-        "<code>/copies</code> before its <code>#</code>.</p>"
+        "<code>lup-dev dashboard --copies</code> opens it.</p>"
         f"<script>{script}</script>",
     )
 

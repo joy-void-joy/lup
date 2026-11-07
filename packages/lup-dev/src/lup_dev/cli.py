@@ -108,6 +108,7 @@ from lup_dev.host.dashboard import (
     DashboardShown,
     ShowDashboard,
     Showing,
+    plain_page,
 )
 from lup_dev.host.names import shaped
 from lup_dev.host.on_trial import (
@@ -1337,6 +1338,16 @@ def dashboard_open(
             )
         ),
     ] = None,
+    copies: Annotated[
+        bool,
+        typer.Option(
+            "--copies",
+            help=(
+                "Open the plain page, what runs and the copies kept, with nothing of "
+                "the review's: for when the review itself is broken."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Open the dashboard: every agent, what each is doing, and your inbox, in one page.
 
@@ -1346,22 +1357,24 @@ def dashboard_open(
     dashboard listens on an address of this machine's beyond localhost, as its
     WireGuard one (`LUP_DASHBOARD_ADDRESSES`), it prints that address instead,
     drawn as a QR code for your phone to scan where `qrencode` is installed:
-    the page, opened once, keeps the token as its cookie. `timings` says how
-    long its keys took to reach the screen in the browsers you used it in.
+    the page, opened once, keeps the token as its cookie. `--copies` opens the
+    plain page there instead, which works where the review doesn't. `timings` says
+    how long its keys took to reach the screen in the browsers you used it in.
     """
     if context.invoked_subcommand is not None:
         return
     shown = answering("the dashboard").ask(ShowDashboard(), DashboardShown)
     chosen = shown.chosen(address)
-    typer.echo(chosen)
+    where = plain_page if copies else str
+    typer.echo(where(chosen))
     if chosen != shown.address:
         typer.echo(
-            qr_code(chosen)
+            qr_code(where(chosen))
             or f"To scan it as a QR code, install `{QRENCODE.named()}`: "
             f"{QRENCODE.install}, then run this again."
         )
     if opened:
-        webbrowser.open(shown.address)
+        webbrowser.open(where(shown.address))
 
 
 @dashboard.command("timings")
