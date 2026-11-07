@@ -17,6 +17,10 @@ Its answer goes out whole, and only where it differs from the one sent last
 service's output, so a view growing too long or too slow to send whole shows
 there. While it's watched, the watch holds the repository's process
 (`Holder.watching`), so it doesn't end between answers.
+
+An action of a module's (`Acting`, `ModuleActions`) is put to the process the same
+way, the operator's alone; what it changed shows in that module's views, each
+shown being answered again once it has run (`ActionRun`).
 """
 
 import asyncio
@@ -29,9 +33,16 @@ from pydantic import Field
 from lup.types import Model
 from lup_dev.clock import Clock, SystemClock
 from lup_dev.host.protocol import HostError, Reply
-from lup_dev.host.service import Reading
-from lup_dev.host.watch import Changes, Remarked, Touched
-from lup_dev.host.workers import RepositoryAsking, Viewed, Viewing, Watching
+from lup_dev.host.service import Handler, Reading
+from lup_dev.host.watch import ActionRun, Changes, Remarked, Touched
+from lup_dev.host.workers import (
+    Acted,
+    Acting,
+    RepositoryAsking,
+    Viewed,
+    Viewing,
+    Watching,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -106,12 +117,13 @@ class ModuleViews(Model, Reading[Viewing], arbitrary_types_allowed=True):
                 seen = self.changes.count
                 reply = await self.viewed(request)
                 yield reply
-                await self.triggered(request.repository, reply.watch, seen)
+                await self.triggered(request, reply.watch, seen)
 
-    async def triggered(self, repository: Path, watch: Watching, seen: int) -> None:
-        """Wait for the first of a view's triggers since the count `seen`: a change touching the agent it's of, at one of the events it names or by an item; a review mark it read moving; or `longest` gone by. A view of no agent, no mark and no `longest` waits for ever."""
+    async def triggered(self, request: Viewing, watch: Watching, seen: int) -> None:
+        """Wait for the first of a view's triggers since the count `seen`: a change touching the agent it's of, at one of the events it names or by an item; a review mark it read moving; an action of its module's run; or `longest` gone by."""
+        repository = request.repository
         of = watch.of
-        touched: list[Touched | Remarked] = (
+        touched: list[Touched | Remarked | ActionRun] = (
             []
             if of is None
             else [
@@ -125,7 +137,11 @@ class ModuleViews(Model, Reading[Viewing], arbitrary_types_allowed=True):
                 for by in ["item", *watch.on]
             ]
         )
-        wanted = [*touched, *watch.marks]
+        wanted = [
+            *touched,
+            *watch.marks,
+            ActionRun(repository=repository, module=request.module),
+        ]
         waits: list[asyncio.Task[int | None]] = [
             asyncio.ensure_future(self.changes.touching(wanted, seen))
         ]
@@ -138,3 +154,32 @@ class ModuleViews(Model, Reading[Viewing], arbitrary_types_allowed=True):
         finally:
             for each in waits:
                 each.cancel()
+
+
+class ModuleActions(Model, Handler[Acting], arbitrary_types_allowed=True):
+    """Answers `Acting` for the operator, through each repository's process; each of the module's views shown is answered again once it has run."""
+
+    asking: RepositoryAsking
+    changes: Changes
+    """Told an action ran, which each of its module's views shown waits on."""
+
+    @override
+    def request(self) -> type[Acting]:
+        return Acting
+
+    @override
+    async def answer(self, request: Acting) -> Reply:
+        """Run the action in its repository's process, the repository's process held while it runs.
+
+        Raise `HostError` where its process can't answer it, or answers what isn't an action's.
+        """
+        try:
+            reply = await self.asking.asked(request.repository, request)
+        finally:
+            self.changes.changed(
+                [ActionRun(repository=request.repository, module=request.module)]
+            )
+        if not isinstance(reply, Acted):
+            message = f"the repository's process answered an action with {reply.kind}"
+            raise HostError(message)
+        return reply

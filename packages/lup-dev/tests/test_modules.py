@@ -40,7 +40,7 @@ from lup_dev.cli import module_command
 from lup_dev.declaration.kinds import Folds, Mounted, Tones, Verbs
 from lup_dev.declaration.looks import BRANCH_FOLD, CORE_LOOKS, ROLE_FOLD
 from lup_dev.declaration.resolve import resolve
-from lup_dev.declaration.serving import Operator
+from lup_dev.declaration.serving import Operator, ask
 from lup_dev.errors import LupDevError
 from lup_dev.host.courier import Conversation
 from lup_dev.host.protocol import Limits, Register, Reply, Request
@@ -49,6 +49,8 @@ from lup_dev.host.records import Reader as RecordsReader
 from lup_dev.host.records import Record, Recorded, Records, Transcript
 from lup_dev.host.watch import Remarked
 from lup_dev.host.workers import (
+    Acting,
+    ActionAnswer,
     Called,
     Calling,
     Happening,
@@ -908,6 +910,36 @@ class ViewerServing(ModuleServing):
             summary=[lup.Span(text=f"{viewed.session} is glad", tone="warm")]
         )
 
+    @lup.action(verb="done", says="greet them")
+    async def wave(self, asked: Greeting) -> str:
+        """Wave at someone, refusing the shy."""
+        if asked.name == "shy":
+            message = "they'd rather you didn't"
+            raise lup.ActionRefusedError(message)
+        return f"waved at {asked.name}"
+
+    @lup.action(verb="done", says="greet them together")
+    async def gather(self, asked: list[Greeting]) -> Greeting:
+        """Greet everyone a send marked, at once."""
+        return Greeting(name=" and ".join(each.name for each in asked))
+
+    @lup.action(verb="done", says="say nothing")
+    async def nod(self, asked: Greeting) -> None:
+        """Nod at someone, what changes showing in a view."""
+        del asked
+
+    @lup.view
+    async def waving(self, viewed: Shown) -> lup.Blocks:
+        """Offer waving, in a fold and on the view."""
+        line = lup.Line(
+            id="2",
+            offers=[lup.Offer.of(ViewerServing.wave, Greeting(name=viewed.what))],
+        )
+        return lup.Blocks(
+            blocks=[lup.Fold(id="1", kind="greeting", summary=[], content=[line])],
+            offers=[lup.Offer.of(ViewerServing.gather, Greeting(name=viewed.what))],
+        )
+
     @lup.command
     async def greet(self, asked: Greeting, by: Operator) -> str:
         """Greet someone, as the operator."""
@@ -1068,6 +1100,125 @@ def test_a_view_of_no_agent_is_watched_at_nothing_of_one(tmp_path: Path) -> None
     assert asyncio.run(viewing(tmp_path).view(asked)).watch == Watching()
 
 
+def acting(tmp_path: Path, action: str, *names: str) -> Acting:
+    return Acting(
+        repository=tmp_path / ".git",
+        module="viewer",
+        action=action,
+        arguments=[{"name": each} for each in names],
+    )
+
+
+def test_an_action_runs_on_each_mark_saying_what_came_of_each(tmp_path: Path) -> None:
+    acted = asyncio.run(
+        viewing(tmp_path).act(acting(tmp_path, "wave", "kai", "shy", "ana"))
+    )
+    assert acted.answers == [
+        ActionAnswer(said="waved at kai"),
+        ActionAnswer(refused="they'd rather you didn't"),
+        ActionAnswer(said="waved at ana"),
+    ]
+
+
+def test_an_action_taking_a_list_takes_every_mark_of_a_send_at_once(
+    tmp_path: Path,
+) -> None:
+    acted = asyncio.run(viewing(tmp_path).act(acting(tmp_path, "gather", "kai", "ana")))
+    said = Greeting(name="kai and ana").model_dump_json()
+    assert acted.answers == [ActionAnswer(said=said), ActionAnswer(said=said)]
+
+
+def test_an_action_answering_nothing_says_nothing(tmp_path: Path) -> None:
+    acted = asyncio.run(viewing(tmp_path).act(acting(tmp_path, "nod", "kai")))
+    assert acted.answers == [ActionAnswer()]
+
+
+def test_an_action_given_what_it_doesn_t_take_is_refused_saying_why(
+    tmp_path: Path,
+) -> None:
+    asked = acting(tmp_path, "wave").model_copy(update={"arguments": [{"nobody": 1}]})
+    [answer] = asyncio.run(viewing(tmp_path).act(asked)).answers
+    assert answer.refused is not None
+    assert "`wave` doesn't take what it was given" in answer.refused
+
+
+def test_an_action_of_another_repository_or_none_is_refused(tmp_path: Path) -> None:
+    modules = viewing(tmp_path)
+    elsewhere = acting(tmp_path, "wave", "kai").model_copy(
+        update={"repository": tmp_path / "other.git"}
+    )
+    with pytest.raises(LupDevError, match="was asked of"):
+        asyncio.run(modules.act(elsewhere))
+    with pytest.raises(LupDevError, match="has an action `nope`"):
+        asyncio.run(modules.act(acting(tmp_path, "nope", "kai")))
+    # A view isn't an action, whatever its name.
+    with pytest.raises(LupDevError, match="has an action `plain`"):
+        asyncio.run(modules.act(acting(tmp_path, "plain", "kai")))
+
+
+def test_an_action_is_the_operator_s_alone(tmp_path: Path) -> None:
+    room = Room(launch=launch(tmp_path))
+    with pytest.raises(LupDevError, match="never by `Room`"):
+        ask(ViewerServing, "wave", room)
+    ask(ViewerServing, "wave", Operator())
+
+
+def test_a_view_s_offers_name_whose_action_each_is(tmp_path: Path) -> None:
+    asked = Viewing(
+        repository=tmp_path / ".git",
+        module="viewer",
+        view="waving",
+        argument={"what": "kai"},
+    )
+    viewed = asyncio.run(viewing(tmp_path).view(asked))
+    [fold] = viewed.blocks.blocks
+    assert isinstance(fold, lup.Fold)
+    assert isinstance(fold.content, list)
+    [offer] = fold.content[0].offers
+    assert offer.action == Acting.named()
+    assert offer.argument == {
+        "action": "wave",
+        "argument": {"name": "kai", "shout": False},
+        "repository": str(tmp_path / ".git"),
+        "module": "viewer",
+    }
+    assert viewed.blocks.offers[0].argument["action"] == "gather"
+    # What it carries is what the door runs, by the request the page sends.
+    sent = Acting(
+        repository=Path(str(offer.argument["repository"])),
+        module=str(offer.argument["module"]),
+        action=str(offer.argument["action"]),
+        arguments=[offer.argument["argument"]],
+    )
+    assert asyncio.run(viewing(tmp_path).act(sent)).answers == [
+        ActionAnswer(said="waved at kai")
+    ]
+
+
+class UnknownVerb(ModuleServing):
+    """An action answering a verb nobody declares."""
+
+    module: Module
+
+    @lup.action(verb="nobody's", says="do it")
+    async def nobody(self, asked: Greeting) -> None:
+        """Do it."""
+        del asked
+
+
+class Unheard(Module):
+    """An action answering a verb nobody declares."""
+
+    name = "unheard"
+
+    serving: Serving = Serving.of(UnknownVerb)
+
+
+def test_an_action_answering_a_verb_nobody_declares_fails_the_load() -> None:
+    with pytest.raises(ProjectError, match="answers the verb `nobody's`, which no"):
+        resolve(Project(modules=Modules.only(Core(), Unheard())))
+
+
 def test_a_view_of_another_repository_is_refused(tmp_path: Path) -> None:
     asked = Viewing(
         repository=tmp_path / "other.git",
@@ -1193,6 +1344,9 @@ def test_a_module_s_commands_and_views_run_on_the_command_line(
     helped = runner.invoke(app, ["greet", "--help"])
     assert "Greet someone, as the operator." in helped.output
     assert "--shout" in helped.output
+    assert runner.invoke(app, ["wave", "kai"]).output == "waved at kai\n"
+    assert '"kai"' in runner.invoke(app, ["gather", "kai"]).output
+    assert runner.invoke(app, ["nod", "kai"]).output == ""
 
 
 def test_a_command_its_runner_may_not_run_is_refused_as_it_runs(

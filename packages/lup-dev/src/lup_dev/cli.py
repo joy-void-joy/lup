@@ -140,7 +140,7 @@ from lup_dev.host.timings import (
     TimingsStore,
 )
 from lup_dev.host.timings import routes as timings_routes
-from lup_dev.host.views import ModuleViews
+from lup_dev.host.views import ModuleActions, ModuleViews
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import JudgeHook, WorkerJudge, Workers, WorkersAsking
 from lup_dev.inbox.bearings import RepositoryBearings
@@ -598,7 +598,7 @@ def control_routes(
     trying: Trying | None = None,
     landing: LandingTools | None = None,
 ) -> list[Route]:
-    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; the dashboard's, `dashboard`'s address; the drawer's, what a branch changed since the operator approved it, read from lup's state at `layout`, each file a landing waits on in `waits` held there; the landings waiting; the review marks, as `delivery`'s inbox holds them; the review's threads; what a page measured of itself, kept in lup's state; a module's view the dashboard shows, through `views`, watched at its own triggers, where it's given; and what's on trial, moved through `trying` and accepted through `landing`, where they're given."""
+    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; the dashboard's, `dashboard`'s address; the drawer's, what a branch changed since the operator approved it, read from lup's state at `layout`, each file a landing waits on in `waits` held there; the landings waiting; the review marks, as `delivery`'s inbox holds them; the review's threads; what a page measured of itself, kept in lup's state; a module's view the dashboard shows, through `views`, watched at its own triggers, and its actions, where it's given; and what's on trial, moved through `trying` and accepted through `landing`, where they're given."""
     return [
         *inbox_routes(delivery, recorded),
         Route.to(dashboard_shown(dashboard)),
@@ -607,7 +607,14 @@ def control_routes(
         *marks_routes(delivery.inbox.marks, delivery.clock, delivery.inbox.changes),
         *threaded_routes(delivery),
         *timings_routes(TimingsStore(home=layout.host.timings), delivery.clock),
-        *([] if views is None else [Route.reading(views, watch=views.watched)]),
+        *(
+            []
+            if views is None
+            else [
+                Route.reading(views, watch=views.watched),
+                Route.to(ModuleActions(asking=views.asking, changes=views.changes)),
+            ]
+        ),
         Route.to(CopiesAnswering(layout=layout)),
         Route.to(CopySwitch(layout=layout, start=restore_detached(layout))),
         *([] if trying is None else trial_routes(trying, delivery, landing)),

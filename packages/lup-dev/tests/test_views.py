@@ -38,9 +38,12 @@ from lup_dev.host.protocol import (
     Stop,
 )
 from lup_dev.host.service import Answerer, HostService, Route
-from lup_dev.host.views import ModuleViews
-from lup_dev.host.watch import Changes, Remarked, Touched
+from lup_dev.host.views import ModuleActions, ModuleViews
+from lup_dev.host.watch import ActionRun, Changes, Remarked, Touched
 from lup_dev.host.workers import (
+    Acted,
+    Acting,
+    ActionAnswer,
     Holder,
     RepositoryAsking,
     Viewed,
@@ -623,3 +626,74 @@ def test_a_view_watched_as_the_service_stops_ends_with_it(
     assert first.blocks.text() == "a1: hello"
     assert end == ""
     assert not [line for line in logged if "failed" in line]
+
+
+def acting() -> Acting:
+    return Acting(repository=REPOSITORY, module="shown", action="wave", arguments=[{}])
+
+
+def test_a_watched_view_is_answered_again_as_an_action_of_its_module_runs(
+    clock: FakeClock,
+) -> None:
+    asked = Asked(Watching())
+    changes = Changes()
+    ran = ActionRun(repository=REPOSITORY, module="shown")
+
+    async def exercised() -> list[str]:
+        watched = views(asked, changes, [], clock).watched(viewing())
+        seen = [texts(await anext(watched))]
+        coming = asyncio.ensure_future(anext(watched))
+        asked.text = "acted"
+        changes.changed([ran.model_copy(update={"module": "other"})])
+        changes.changed([ran.model_copy(update={"repository": Path("/other/.git")})])
+        await settled()
+        assert not coming.done()
+        changes.changed([ran])
+        seen.append(texts(await asyncio.wait_for(coming, PATIENCE)))
+        await watched.aclose()
+        return seen
+
+    assert asyncio.run(exercised()) == ["zero", "acted"]
+
+
+class Acts(Asked):
+    """Answers an action as a test says: with a reply, or by refusing."""
+
+    def __init__(self, reply: Reply | None) -> None:
+        super().__init__(Watching())
+        self.reply = reply
+        self.acted: list[Request] = []
+
+    @override
+    async def asked(self, repository: Path, request: Request) -> Reply:
+        self.acted.append(request)
+        if self.reply is None:
+            message = "its process refused"
+            raise HostError(message)
+        return self.reply
+
+
+def test_an_action_runs_in_its_repository_s_process_and_tells_its_module_s_views() -> (
+    None
+):
+    answered = Acted(answers=[ActionAnswer(said="waved")])
+    process = Acts(answered)
+    changes = Changes()
+    actions = ModuleActions(asking=process, changes=changes)
+    assert asyncio.run(actions.answer(acting())) == answered
+    assert process.acted == [acting()]
+    assert changes.touches == {ActionRun(repository=REPOSITORY, module="shown"): 1}
+
+
+def test_an_action_its_process_refuses_is_refused_and_still_tells_its_views() -> None:
+    changes = Changes()
+    actions = ModuleActions(asking=Acts(None), changes=changes)
+    with pytest.raises(HostError, match="its process refused"):
+        asyncio.run(actions.answer(acting()))
+    assert changes.count == 1
+
+
+def test_a_process_answering_an_action_with_what_isn_t_one_is_refused() -> None:
+    actions = ModuleActions(asking=Acts(Viewed(blocks=Blocks())), changes=Changes())
+    with pytest.raises(HostError, match="answered an action with module-viewed"):
+        asyncio.run(actions.answer(acting()))

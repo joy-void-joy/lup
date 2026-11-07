@@ -46,18 +46,19 @@ import threading
 import traceback
 from collections.abc import Awaitable, Callable
 from concurrent.futures import Future
+from datetime import timedelta
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from lup.blocks import Blocks, OfAgent, Watch
-from lup.doors import served
+from lup.doors import ActionRefusedError, Method, served
 from lup.events import Event, Publishing, events
 from lup.publishing import Place, Published, Refusal
 from lup.tools.serving import Answer
-from lup.tools.tool import Accepted, Refused
+from lup.tools.tool import Accepted, Refused, answered
 from lup.types import Model
 from lup_dev.clock import Clock
 from lup_dev.declaration.load import load
@@ -67,7 +68,9 @@ from lup_dev.declaration.serving import (
     Asker,
     Lup,
     ModuleServing,
+    NoOperatorHost,
     Operator,
+    OperatorHost,
     Publisher,
     Related,
     Room,
@@ -80,11 +83,14 @@ from lup_dev.declaration.serving import (
 )
 from lup_dev.errors import LupDevError
 from lup_dev.host.client import Detached, HostClient
-from lup_dev.host.protocol import HostError, Register, Reply
+from lup_dev.host.protocol import HostError, Register, Reply, Request
 from lup_dev.host.records import Recorded
 from lup_dev.host.service import Dispatcher, Handler, Reading, Route, unix_server
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import (
+    Acted,
+    Acting,
+    ActionAnswer,
     Called,
     Calling,
     Happened,
@@ -238,6 +244,26 @@ class HostMarks(Model, Marks, arbitrary_types_allowed=True):
         return read.marks
 
 
+class HostOperator(Model, OperatorHost, arbitrary_types_allowed=True):
+    """The host service as a module's method asks it for the operator, on its control socket, which no room reaches."""
+
+    layout: HostLayout
+    clock: Clock
+    patience: timedelta = timedelta(days=1)
+    """How long a reply may take: accepting a branch runs the gate on its merge."""
+
+    @override
+    async def asked[R: Reply](self, request: Request, reply: type[R]) -> R:
+        """Ask the host service, off the event loop, for as long as it takes."""
+        host = HostClient(
+            layout=self.layout,
+            clock=self.clock,
+            starter=Detached(),
+            timeout=self.patience,
+        )
+        return await asyncio.to_thread(host.ask, request, reply)
+
+
 class RepositoryModules(Model, arbitrary_types_allowed=True):
     """A repository's modules, as its declaration resolves them: what they serve, and each answer, for whichever of its launches asks."""
 
@@ -253,6 +279,8 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
     """Where its views read the items of lup's inbox a conversation exchanged."""
     marks: Marks
     """Where its views read their modules' review marks."""
+    host: OperatorHost = NoOperatorHost()
+    """The host service, as what the operator asks of its modules asks it."""
 
     @classmethod
     def loaded(
@@ -274,6 +302,7 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
                 clock=services.clock,
             ),
             marks=HostMarks(layout=services.layout.host, clock=services.clock),
+            host=HostOperator(layout=services.layout.host, clock=services.clock),
         )
 
     @classmethod
@@ -338,6 +367,8 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
                 marks=self.marks, repository=self.repository, module=owner.module.name
             ),
             branches=self.resolved.branches,
+            repository=self.repository,
+            host=self.host,
         )
 
     def serving(self, name: str) -> Served | None:
@@ -432,7 +463,53 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
             marks=made.marks.read,
             longest=declared.longest,
         )
-        return Viewed(blocks=blocks, watch=watch)
+        return Viewed(
+            blocks=blocks.of_module(self.repository, viewing.module), watch=watch
+        )
+
+    def acting(self, module: str, action: str) -> Served | None:
+        """Return the class serving `module`'s action `action`, with its module; none where none does."""
+        return next(
+            (
+                each
+                for each in self.resolved.served
+                if each.module.name == module
+                and (method := served(each.serving).get(action)) is not None
+                and method.acting() is not None
+            ),
+            None,
+        )
+
+    async def act(self, acting: Acting) -> Acted:
+        """Run one of the modules' actions for the operator, on each mark of it: once for each, or once with them all where it takes a list of its model, and say what came of each.
+
+        Raise `LupDevError` where it's another repository's, or where no module of
+        the repository has it. What's said of one mark alone, a refusal among it, is
+        in its answer, so one refused keeps the others from nothing, and stays drafted.
+        """
+        if acting.repository != self.repository:
+            message = (
+                f"an action of {acting.repository} was asked of {self.repository}'s "
+                "process"
+            )
+            raise LupDevError(message)
+        owner = self.acting(acting.module, acting.action)
+        if owner is None:
+            message = (
+                f"no module `{acting.module}` of this repository has an action "
+                f"`{acting.action}`"
+            )
+            raise LupDevError(message)
+        asker = Operator()
+        ask(owner.serving, acting.action, asker)
+        method = served(owner.serving)[acting.action]
+        made = self.made(owner)
+        if method.taken.gathers():
+            answer = await ran(made, method, acting.arguments, asker)
+            return Acted(answers=[answer for _ in acting.arguments])
+        return Acted(
+            answers=[await ran(made, method, each, asker) for each in acting.arguments]
+        )
 
     async def call(self, calling: Calling) -> Answer:
         """Run one call to a module's tool, asked by the conversation calling, and return what the agent reads."""
@@ -488,6 +565,32 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
             failures=[each.failure for each in ran if each.failure is not None],
             refusals=[refusal for each in ran for refusal in each.refusals],
         )
+
+
+async def ran(
+    made: ModuleServing, method: Method, given: JsonValue, asker: Asker
+) -> ActionAnswer:
+    """Run the action `method` of `made` on what it's `given`, as the page sent it, and say what came of it: what it answers, in words or a model's JSON, or why it refused, what it was given not being what it takes among that."""
+    try:
+        value = TypeAdapter[BaseModel | list[BaseModel]](
+            method.taken.model.annotation
+        ).validate_python(given)
+    except ValidationError as wrong:
+        return ActionAnswer(
+            refused=f"`{method.taken.name}` doesn't take what it was given: {wrong}"
+        )
+    try:
+        answer = await method.called(made, value, asker)
+    except (ActionRefusedError, LupDevError) as refused:
+        return ActionAnswer(refused=str(refused))
+    if answer is None:
+        return ActionAnswer()
+    if isinstance(answer, BaseModel | str):
+        return ActionAnswer(said=answered(answer))
+    message = (
+        f"the action `{method.taken.name}` answered {answer!r}, not a model or words"
+    )
+    raise LupDevError(message)
 
 
 class Hooks(Model, Publisher):
@@ -601,6 +704,24 @@ class Views(Model, Reading[Viewing]):
         raise HostError(message)
 
 
+class Actions(Model, Handler[Acting]):
+    """Answers `Acting`: one of the modules' actions, for the operator."""
+
+    modules: RepositoryModules
+
+    @override
+    def request(self) -> type[Acting]:
+        return Acting
+
+    @override
+    async def answer(self, request: Acting) -> Reply:
+        """Run the action, or refuse it saying why, as what the operator asked for rather than a failure of the process's (`HostError`)."""
+        try:
+            return await self.modules.act(request)
+        except LupDevError as refused:
+            raise HostError(str(refused)) from refused
+
+
 class Happens(Model, Handler[Happening]):
     """Answers `Happening`: the modules' hooks run at its event."""
 
@@ -678,6 +799,7 @@ def routes(
         Route.to(Calls(modules=modules)),
         Route.to(Relays(modules=modules)),
         Route.reading(Views(modules=modules)),
+        Route.to(Actions(modules=modules)),
         Route.to(Happens(modules=modules)),
     ]
 
