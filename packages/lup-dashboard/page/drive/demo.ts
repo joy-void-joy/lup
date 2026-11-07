@@ -47,6 +47,8 @@ export interface DemoOptions {
     grows?: number;
     /** How many seconds after the page first asks for the approval's files their types are read: long enough to watch by default. */
     typesRead?: number;
+    /** How many seconds a merge's gate stands in as taking: long enough to watch by default. */
+    mergeTakes?: number;
     /**
      * Open the review as one buffer grouped by agent (`?panes=off`). Left out, the address asks for it grouped by thread
      * (`?threads`), which most of these tests drive.
@@ -89,6 +91,9 @@ export async function demo(options: DemoOptions = {}): Promise<Demo> {
     }
     if (options.grows !== undefined) {
         args.push("--grows", String(options.grows));
+    }
+    if (options.mergeTakes !== undefined) {
+        args.push("--merge-takes", String(options.mergeTakes));
     }
     if (options.typesRead !== undefined) {
         args.push("--types-read", String(options.typesRead));

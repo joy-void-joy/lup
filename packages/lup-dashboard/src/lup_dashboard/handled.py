@@ -20,7 +20,8 @@ handlers as one that refuses, or keeps what it would do in the state:
   restore`, in a process of its own, which stops it. Here nothing runs or stops:
   the state's own link and approval are moved and what came of it kept
   (`withheld_switch`);
-- what's on trial (`ListTrial`, `PickBranches`, `AcceptBranch`, `DropBranch`): the
+- what's on trial (`ListTrial`, `PickBranches`, `ChangeBranches`, `AcceptBranch`,
+  `DropBranch`): the
   host computes `live` with git, and accepts a branch in a room. Over a copy of
   the operator's state nothing's on trial (`NothingOnTrial`); the stand-in demo holds
   branches, with the host's own handlers over what stands in for git
@@ -76,6 +77,7 @@ from lup_dev.host.courier import Courier, Heard, Telling, Waker
 from lup_dev.host.names import Names
 from lup_dev.host.on_trial import (
     AcceptBranch,
+    ChangeBranches,
     DropBranch,
     LastSwitch,
     ListTrial,
@@ -338,7 +340,7 @@ def nothing_on_trial() -> list[Route]:
 
     return [
         Route(kind=each.named(), answer=refused)
-        for each in [ListTrial, PickBranches, AcceptBranch, DropBranch]
+        for each in [ListTrial, PickBranches, ChangeBranches, AcceptBranch, DropBranch]
     ]
 
 
@@ -519,7 +521,9 @@ def handled(
         *(
             nothing_on_trial()
             if trial is None
-            else trial.routes(lup, delivery, clock, say, start)
+            else trial.routes(
+                lup, delivery, clock=clock, say=say, start=start, changes=changes
+            )
         ),
         *beyond,
         Route.reading(module_views, watch=module_views.watched),

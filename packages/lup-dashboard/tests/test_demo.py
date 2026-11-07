@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, override
 
 import pytest
 
-from lup_dashboard.demo import FIX_CLOCK, Demo
+from lup_dashboard.demo import FIX_CLOCK, ON_DEV, Demo
 from lup_dev.clock import Clock
 from lup_dev.host.on_trial import CopySwitching, SwitchCopy
 from lup_dev.host.protocol import Listed, ListLaunches, Refused
@@ -348,7 +348,7 @@ def test_the_demo_lists_what_s_on_trial_by_the_host_s_own_listing() -> None:
     assert said[0] == "what runs · dev + clearer-marks steady-list"
     assert said[1].startswith("[x] steady-list ")
     assert said[3].startswith("[ ] rival-marks    conflicts with `clearer-marks`")
-    assert "out, by you · needs your yes, then minutes to build" in said[4]
+    assert said[4] == "▸ out · 1"
     assert any(
         each.startswith(" *  dev d38dbd2 + clearer-marks steady-list") for each in said
     )
@@ -356,15 +356,37 @@ def test_the_demo_lists_what_s_on_trial_by_the_host_s_own_listing() -> None:
 
 def test_a_set_with_a_copy_kept_moves_the_host_there_and_nothing_else() -> None:
     demo = Demo(clock=Fixed(), size=0)
-    [came] = act(demo, "pick", {"branch": "clearer-marks", "on": False})
-    assert came.said == "The host moves to 1c0ffee, in a few seconds."
+    # Leaving rival out too, as what `clearer-marks` keeps out would come in otherwise.
+    answers = act(
+        demo,
+        "pick",
+        {"branch": "clearer-marks", "on": False},
+        {"branch": "rival-marks", "on": False},
+    )
+    assert answers[0].said == "The host moves to 1c0ffee, in a few seconds."
     assert demo.host.withheld.switched == ["1c0ffee"]
     said = what_runs(demo).splitlines()
     assert said[0] == "what runs · dev + steady-list"
-    assert said[2].startswith("[ ] clearer-marks")
     assert [each for each in said if each.startswith(" *")] == [
         " *  dev d38dbd2 + steady-list                running"
     ]
+
+
+def test_ticking_one_box_leaves_the_rest_as_they_stand() -> None:
+    demo = Demo(clock=Fixed(), size=0)
+    act(demo, "pick", {"branch": "steady-list", "on": False})
+    # Nobody took the rival out, and nothing lets it in yet: it isn't said to be out by them.
+    said = what_runs(demo)
+    assert "[ ] rival-marks    conflicts with" in said
+    assert "out · 2" in said
+
+
+def test_taking_out_what_keeps_a_rival_out_lets_it_in() -> None:
+    demo = Demo(clock=Fixed(), size=0)
+    [came] = act(demo, "pick", {"branch": "clearer-marks", "on": False})
+    assert "waits on your yes" in came.said
+    assert "[x] rival-marks" in what_runs(demo)
+    assert demo.host.withheld.switched == []
 
 
 def test_a_set_never_run_asks_its_yes_moving_nothing_the_host_runs() -> None:
@@ -384,19 +406,19 @@ def test_every_box_of_a_send_is_one_pick_and_one_switch_at_most() -> None:
         "pick",
         {"branch": "clearer-marks", "on": False},
         {"branch": "steady-list", "on": False},
+        {"branch": "rival-marks", "on": False},
     )
-    assert [each.refused for each in answers] == [None, None]
+    assert [each.refused for each in answers] == [None, None, None]
     assert demo.host.withheld.switched == ["2c0ffee"]
 
 
-def test_two_that_conflict_aren_t_picked_together_as_the_host_says() -> None:
+def test_two_that_conflict_aren_t_taken_in_together_as_the_host_says() -> None:
     demo = Demo(clock=Fixed(), size=0)
     [came] = act(demo, "pick", {"branch": "rival-marks", "on": True})
     assert came.refused is not None
     assert "can't be picked together" in came.refused
     assert "Nothing moved" in came.refused
     assert demo.host.withheld.switched == []
-    # With what it conflicts with taken out in the same send, it runs.
     [one, _] = act(
         demo,
         "pick",
@@ -407,30 +429,46 @@ def test_two_that_conflict_aren_t_picked_together_as_the_host_says() -> None:
     assert "waits on your yes" in what_runs(demo).splitlines()[0]
 
 
+async def merged(demo: Demo, branch: str) -> ActionAnswer:
+    """Ask a branch merged, as Ctrl+Enter does, and wait for what runs apart on this loop to finish."""
+    acting = Acting(
+        repository=demo.lup_session().repository,
+        module="versions",
+        action="merge",
+        arguments=[{"branches": [branch]}],
+    )
+    acted = await demo.ask(acting)
+    assert isinstance(acted, Acted)
+    this = asyncio.current_task()
+    await asyncio.gather(*[each for each in asyncio.all_tasks() if each is not this])
+    [answer] = acted.answers
+    return answer
+
+
 def test_a_branch_merged_is_off_trial_and_what_runs_doesn_t_restart() -> None:
-    demo = Demo(clock=Fixed(), size=0)
-    [came] = act(demo, "merge", {"branches": ["steady-list"]})
-    assert came.refused is None
-    assert "`steady-list` is on `dev`" in came.said
+    demo = Demo(clock=Fixed(), size=0, merge_takes=timedelta(0))
+    [came] = [asyncio.run(merged(demo, "steady-list"))]
+    assert "`steady-list` is merging" in came.said
     assert demo.host.withheld.switched == []
-    assert "steady-list " not in "\n".join(what_runs(demo).splitlines()[1:5])
-
-
-def test_a_branch_dropped_is_off_trial_and_one_it_kept_out_comes_back() -> None:
-    demo = Demo(clock=Fixed(), size=0)
-    [came] = act(demo, "drop", {"branch": "clearer-marks"})
-    assert "waits on your yes" in came.said
     said = what_runs(demo)
-    assert "[x] rival-marks" in said
-    assert "[x] clearer-marks" not in said
-    assert demo.host.withheld.switched == []
+    assert "Landed `steady-list` on `dev`" in said
+    assert "[x] steady-list" not in said
 
 
-def test_a_branch_out_of_what_runs_dropped_moves_nothing() -> None:
-    demo = Demo(clock=Fixed(), size=0)
-    [came] = act(demo, "drop", {"branch": "quiet-banner"})
-    assert came.said == "`quiet-banner` is off trial."
-    assert "quiet-banner" not in what_runs(demo)
+def test_a_merge_follows_dev_twice_keeping_the_zone_of_what_runs() -> None:
+    demo = Demo(clock=Fixed(), size=0, merge_takes=timedelta(0))
+    asyncio.run(merged(demo, "steady-list"))
+    # `dev` now holds `steady-list`, so `dev` + `clearer-marks` is what ran, and nobody's asked.
+    first = what_runs(demo).splitlines()[0]
+    assert first == "what runs · dev + clearer-marks"
+
+
+def test_a_merge_the_gate_stops_stays_on_trial_saying_why() -> None:
+    demo = Demo(clock=Fixed(), size=0, merge_takes=timedelta(0))
+    asyncio.run(merged(demo, "rival-marks"))
+    said = what_runs(demo)
+    assert "Not landed: the gate failed on the merge of `rival-marks`" in said
+    assert "rival-marks" in said
 
 
 def test_a_version_on_dev_as_it_stands_runs_again_its_boxes_with_it() -> None:
@@ -438,13 +476,19 @@ def test_a_version_on_dev_as_it_stands_runs_again_its_boxes_with_it() -> None:
     [came] = act(
         demo,
         "run_again",
-        {"commit": "1c0ffee", "current": True, "branches": ["steady-list"]},
+        {
+            "commit": "1c0ffee",
+            "current": True,
+            "branches": ["steady-list"],
+            "tips": ["steady-list-tip"],
+            "dev": ON_DEV,
+        },
     )
     assert came.said == "The host moves to 1c0ffee, in a few seconds."
     assert demo.host.withheld.switched == ["1c0ffee"]
     said = what_runs(demo)
-    assert "[ ] clearer-marks" in said
     assert "[x] steady-list" in said
+    assert "[x] clearer-marks" not in said
 
 
 def test_an_older_version_runs_again_by_the_host_s_own_switch_saying_what_live_holds() -> (

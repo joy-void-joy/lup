@@ -36,7 +36,7 @@ from lup_dashboard.handled import Handled, handled
 from lup_dashboard.host import Host
 from lup_dashboard.layout import DemoLayout
 from lup_dashboard.standins import StandInReader, StandInRecords, StoodIn
-from lup_dashboard.trialed import Conflict, Merges, TrialStandIn
+from lup_dashboard.trialed import Conflict, Trees, TrialStandIn
 from lup_dev import Modules, Project, Versions
 from lup_dev.approval import Approval as ApprovedZone
 from lup_dev.approval import WorkspaceTool
@@ -298,6 +298,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     """Where what the page measured of itself is kept, laid out as the host keeps
     it (`HostLayout.timings`), for `lup-dev dashboard timings --kept` to read;
     none keeps it in the demo's own directory, gone as the demo stops."""
+    merge_takes: timedelta = timedelta(seconds=4)
+    """How long a merge's gate stands in as taking, so a session can watch its line say so."""
     first_thread: int = 301
     """The number of the demo's first thread (`stand_in_threads`), the rest and
     their check numbered after it: past the demo's own items, as the ledger
@@ -416,7 +418,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
 
     def on_trial(self) -> TrialStandIn:
         """Return what stands in for git behind what's on trial (`trial_seeded`): a rival that conflicts with one of what's running, and the zone of each set that's run, by what each of the copies kept holds."""
-        merges = Merges(
+        trees = Trees(
             conflicts=[
                 Conflict(
                     one="clearer-marks",
@@ -426,15 +428,23 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             ]
         )
         return TrialStandIn(
-            merges=merges,
+            trees=trees,
             zones={
-                merges.tree(
+                trees.tree(
                     ON_DEV, ["clearer-marks", "steady-list"]
                 ): "the zone at 0c0ffee",
-                merges.tree(ON_DEV, ["steady-list"]): "the zone at 1c0ffee",
-                merges.tree(ON_DEV, []): "the zone at 2c0ffee",
+                trees.tree(ON_DEV, ["steady-list"]): "the zone at 1c0ffee",
+                trees.tree(ON_DEV, []): "the zone at 2c0ffee",
             },
             propose=self.proposed,
+            takes=self.merge_takes,
+            failing={
+                "rival-marks": (
+                    "Not landed: the gate failed on the merge of `rival-marks` onto "
+                    "`dev`, and nothing has changed.\nFAILED tests/test_panes.py::"
+                    "test_each_mark_says_what_it_counts\n1 failed, 3808 passed"
+                )
+            },
         )
 
     def proposed(self, repository: Path) -> int | None:
