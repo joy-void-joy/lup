@@ -359,7 +359,10 @@ from lup_dev.inbox.exchanges import Exchanges
 from lup_dev.inbox.marks import MarkStore, StoredMarks
 from lup_dev.inbox.protocol import Exchanged
 from lup_dev.layout import Layout
-from lup_dev.worker import RepositoryModules, routes, serve
+from lup_dev.clock import SystemClock
+from lup_dev.host.protocol import Listed, ListLaunches
+from lup_dev.layout import HostLayout
+from lup_dev.worker import HostOperator, RepositoryModules, routes, serve
 
 
 class SaidServing(ModuleServing):
@@ -375,6 +378,12 @@ class SaidServing(ModuleServing):
         \"\"\"What the test wrote last.\"\"\"
         text = Path({said!r}).read_text()
         return lup.Blocks(blocks=[lup.Line.of("1", f"{{viewed.agent}}: {{text}}")])
+
+    @lup.action(verb="done", says="count who's served")
+    async def counting(self, asked: lup.OfAgent) -> str:
+        \"\"\"Ask the host, as the operator, who it serves, while the host waits on this.\"\"\"
+        listed = await self.host.asked(ListLaunches(), Listed)
+        return f"{{asked.session}}: {{len(listed.launches)}} served"
 
 
 class Shown(Module):
@@ -408,6 +417,10 @@ modules = RepositoryModules(
     layout=Layout(state=Path({data!r}), data=Path({data!r})),
     exchanges=Unexchanged(),
     marks=StoredMarks(store=MarkStore.kept_in(Layout(state=Path({data!r}), data=Path({data!r})))),
+    host=HostOperator(
+        layout=HostLayout(sockets=Path({sockets!r}), state=Path({host_state!r})),
+        clock=SystemClock(),
+    ),
 )
 asyncio.run(
     serve(routes(modules, judge, called), Path(sys.argv[2]), Path(sys.argv[3]), said)
@@ -481,7 +494,10 @@ class Hosted:
             courier=Reads(),
             judge=WorkerJudge(modules=workers),
             say=said.append,
-            routes=[Route.reading(route, watch=route.watched)],
+            routes=[
+                Route.reading(route, watch=route.watched),
+                Route.to(ModuleActions(asking=asking, changes=changes)),
+            ],
             modules=workers,
             asking=asking,
             changes=changes,
@@ -540,7 +556,13 @@ def copy(short: Path) -> tuple[Path, Path]:
     command = short / "copy" / "lup-dev"
     command.parent.mkdir()
     command.write_text(
-        STAND_IN.format(python=sys.executable, said=str(said), data=str(short / "data"))
+        STAND_IN.format(
+            python=sys.executable,
+            said=str(said),
+            data=str(short / "data"),
+            sockets=str(short / "host"),
+            host_state=str(short / "state"),
+        )
     )
     command.chmod(0o755)
     return command, said
@@ -626,6 +648,33 @@ def test_a_view_watched_as_the_service_stops_ends_with_it(
     assert first.blocks.text() == "a1: hello"
     assert end == ""
     assert not [line for line in logged if "failed" in line]
+
+
+def test_an_action_runs_in_its_repository_s_process_asking_the_host_back_on_its_socket(
+    isolated: HostLayout, short: Path, clock: FakeClock
+) -> None:
+    command, _ = copy(short)
+    asked = Acting(
+        repository=short / ".git",
+        module="shown",
+        action="counting",
+        arguments=[AGENT.model_dump(mode="json"), AGENT.model_dump(mode="json")],
+    )
+    host = HostClient(layout=isolated, clock=clock, starter=Detached())
+    logged: list[str] = []
+    with Hosted(isolated, command, logged).serving():
+        host.register(registered(short, command))
+        acted = Acted.model_validate_json(
+            sent(isolated.control, asked.model_dump_json())
+        )
+        refused = Refused.model_validate_json(
+            sent(
+                isolated.launch("one").request,
+                asked.model_dump_json(),
+            )
+        )
+    assert acted.answers == [ActionAnswer(said="s1: 1 served")] * 2
+    assert "module-act" in refused.error, refused.error
 
 
 def acting() -> Acting:
