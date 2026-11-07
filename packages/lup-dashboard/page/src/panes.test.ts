@@ -6,10 +6,10 @@ import { describe, expect, it } from "vitest";
 
 import { carried, implied, reachOf, type Marked, type Verb } from "./grammar";
 import { adopted } from "./looks";
-import { instanceOf, type Blocks, type Line } from "./views";
+import { instanceOf, type Blocks, type Fold, type Line } from "./views";
 import type { Merged } from "./looks";
 import { arrivalIn, bufferKey, bufferSpans, listLaid, listedByAgent, listedByThread, nearestShown, panesAsked, pathTo, rowAt, spanAt, titled, type ListReading, type Row } from "./panes";
-import { EMPTY, NO_AGENT, PARTIES, ROOT_TITLE, aboutAt, checkOwner, followedFrom, groupAt, laid, opened, whose as whoseOf, type Around, type Conversation, type Draft, type Drawers, type Item, type Laid, type OwnedCheck, type Party, type Showing, type ThreadRead, type ThreadShown, type Threading } from "./review";
+import { withWrittenDuring, EMPTY, NO_AGENT, PARTIES, ROOT_TITLE, aboutAt, checkOwner, followedFrom, groupAt, laid, opened, whose as whoseOf, type Around, type Conversation, type Draft, type Drawers, type Item, type Laid, type OwnedCheck, type Party, type Showing, type ThreadRead, type ThreadShown, type Threading } from "./review";
 import { partyNamed, threadBanner } from "./Review";
 
 const AT = "2026-10-30T12:00:00Z";
@@ -844,5 +844,32 @@ describe("a module's row and its own buffer", () => {
         // Laid out whole, as a send does, or with another buffer on screen, it's on nobody's group but whom it reaches.
         const whole = laid([], [], banner, header, draft, NOTHING, [], new Map(), called, { looks: adopted(), remote: REMOTE, read: true });
         expect(whole.groups.map((each) => each.conversation?.session)).toEqual(["lead"]);
+    });
+});
+
+
+describe("what's done to the draft while a reply is being sent", () => {
+    const REMARK = { id: "sent", item: 1, text: "sent with it" };
+    const MARK = (id: string) => ({ id, action: "module-act", argument: {}, verb: "done", says: "it", block: `block ${id}`, version: null });
+
+    it("keeps what's written or marked meanwhile, and leaves out what the send took", () => {
+        const before: Draft = { ...EMPTY, comments: [REMARK], marks: [MARK("applied")], done: [1] };
+        const typedMeanwhile = { id: "new", item: 2, text: "typed while it went" };
+        const during: Draft = { ...before, comments: [REMARK, typedMeanwhile], marks: [MARK("applied"), MARK("made meanwhile")], done: [1, 7] };
+        const left = withWrittenDuring(before, during, EMPTY);
+        expect(left.comments?.map((each) => each.text)).toEqual(["typed while it went"]);
+        expect(left.marks?.map((each) => each.id)).toEqual(["made meanwhile"]);
+        expect(left.done).toEqual([7]);
+    });
+
+    it("takes the words as they are now, of a comment the send left where it edited it meanwhile", () => {
+        const before: Draft = { ...EMPTY, comments: [REMARK] };
+        const during: Draft = { ...EMPTY, comments: [{ ...REMARK, text: "sent with it, and more" }] };
+        expect(withWrittenDuring(before, during, before).comments?.map((each) => each.text)).toEqual(["sent with it, and more"]);
+    });
+
+    it("leaves as it is what the send left, nothing having been done meanwhile", () => {
+        const before: Draft = { ...EMPTY, marks: [MARK("refused")] };
+        expect(withWrittenDuring(before, before, before).marks?.map((each) => each.id)).toEqual(["refused"]);
     });
 });

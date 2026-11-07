@@ -25,7 +25,7 @@ import { everyone, launches, ring, running, type Activity, type Agent, type Runn
 import { ApiError, ask, type Asked, type OfCopy, type Replied } from "./api";
 import { cited } from "./comments";
 import { useNow, useSame, useThreads, useViews, useWatched, type ThreadAsked } from "./hooks";
-import { ACT, MOVE, markedPart, type Acting, type Marked, type Moved, type Moving } from "./grammar";
+import { ACT, MOVE, actionsToRun, markedPart, type Acting, type Marked, type Moved, type Moving } from "./grammar";
 import { feed, keyState } from "./editor";
 import { keyKind, reviewKeys, writtenKey, writtenVim, type Here, type Part } from "./keys";
 import { Keys } from "./Keys";
@@ -50,6 +50,7 @@ import {
     messages,
     pruned,
     remarks,
+    withWrittenDuring,
     countToRead,
     seeingOf,
     whose,
@@ -640,6 +641,8 @@ export function App() {
     // What's typed in a comment, the editor showing it already, not yet laid out: the review lays it out once typing
     // pauses (`TYPED`), or at once as anything else lays it out.
     const typed = useRef<Draft | null>(null);
+    // The draft as it last changed while a reply is being sent, what's written or marked meanwhile.
+    const writtenDuring = useRef<Draft | null>(null);
     const typing = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // What the review is laid out from, all of it read, the threads among it, so it's never laid out by agent first:
@@ -678,6 +681,7 @@ export function App() {
     }, [ready, threadsRead, draft]);
 
     const change = useCallback((next: Draft, typedOnly: boolean = false) => {
+        writtenDuring.current = next;
         // What the last Ctrl+Enter said of a reply as it was goes with it; one being sent is said until it's sent.
         setSending((before) => (before === null || before.state === "sending" ? before : null));
         if (typing.current !== null) {
@@ -1006,17 +1010,11 @@ export function App() {
         const moving = new Map<string, { repository: string; module: string; marks: { key: Record<string, unknown>; up_to: string | null; through: string | null; forward: boolean; seen: boolean }[]; ids: string[] }>();
         // What's moved from the pile, by where it goes: one request each, a thread opened once for all of them.
         const gathering = new Map<string, { thread: number | null; title: string | null; numbers: number[]; says: string; ids: string[] }>();
-        // Each module's action, with every mark of it, in the order first marked: one request each, which runs them together where it takes them so.
-        const acting = new Map<string, { repository: string; module: string; action: string; marks: Marked[] }>();
         for (const mark of marks) {
             switch (mark.action) {
-                case ACT: {
-                    const argument = mark.argument as unknown as Acting;
-                    const key = JSON.stringify([argument.repository, argument.module, argument.action]);
-                    const was = acting.get(key) ?? { repository: argument.repository, module: argument.module, action: argument.action, marks: [] };
-                    acting.set(key, { ...was, marks: [...was.marks, mark] });
+                case ACT:
+                    // Each module's action, after everything else (`actionsToRun`).
                     break;
-                }
                 case MOVE: {
                     const argument = mark.argument as unknown as Moving;
                     const key = JSON.stringify([argument.repository, argument.thread, argument.title]);
@@ -1110,32 +1108,47 @@ export function App() {
                 said.push(...marks.filter((mark) => each.ids.includes(mark.id)).map((mark) => markedPart(mark, called, threadNamed)));
             }
         }
-        // Each module's action, last, since one may move the host, which stops this one: its marks out of the draft the host
-        // keeps before it's asked, so it isn't done again from a draft kept from before, and back in where it's refused.
-        let keeping = drafted;
-        for (const each of acting.values()) {
-            const ids = new Set(each.marks.map((mark) => mark.id));
-            keeping = { ...keeping, marks: (keeping.marks ?? []).filter((mark) => !ids.has(mark.id)) };
-            const held = await answered({ kind: "inbox-keep-draft", draft: keeping }, (answer) => (answer.kind === "inbox-drafted" ? answer : null));
-            if ("refused" in held) {
-                said.push({ kind: "said", text: `${each.marks[0]?.says ?? each.action}: ${held.refused}` });
-                keeping = { ...keeping, marks: [...(keeping.marks ?? []), ...each.marks] };
+        // Each module's actions, last, and of those, last of all and one at most, what may move the host, which stops this
+        // one: its marks out of the draft the host keeps before it's asked, so it isn't done again from a draft kept from
+        // before, and back in where it's refused. Its answer lost, as to the host stopping for it, its marks stay out.
+        const { run, held } = actionsToRun(marks);
+        for (const each of run) {
+            const [first] = each.marks;
+            if (first === undefined) {
                 continue;
             }
-            const request: Asked = { kind: ACT, repository: each.repository, module: each.module, action: each.action, arguments: each.marks.map((mark) => (mark.argument as unknown as Acting).argument as never) };
-            const reply = await answered(request, (answer) => (answer.kind === "module-acted" ? answer : null));
-            if ("refused" in reply) {
-                said.push({ kind: "said", text: `${each.marks[0]?.says ?? each.action}: ${reply.refused}` });
-                keeping = { ...keeping, marks: [...(keeping.marks ?? []), ...each.marks] };
+            const asked = first.argument as unknown as Acting;
+            const request: Asked = { kind: ACT, repository: asked.repository, module: asked.module, action: asked.action, arguments: each.marks.map((mark) => (mark.argument as unknown as Acting).argument as never) };
+            if (each.last) {
+                const ids = new Set([...applied, ...each.marks.map((mark) => mark.id)]);
+                const out = await answered({ kind: "inbox-keep-draft", draft: { ...drafted, marks: marks.filter((mark) => !ids.has(mark.id)) } }, (answer) => (answer.kind === "inbox-drafted" ? answer : null));
+                if ("refused" in out) {
+                    said.push({ kind: "said", text: `kept drafted: ${out.refused}` });
+                    continue;
+                }
+            }
+            let reply: Replied;
+            try {
+                reply = await ask(request);
+            } catch (failed) {
+                if (each.last) {
+                    applied.push(...each.marks.map((mark) => mark.id));
+                    said.push({ kind: "said", text: "the host went away as it was asked, as moving it does: what runs says what came of it" });
+                } else {
+                    said.push({ kind: "said", text: `kept drafted: ${unreached(failed)}` });
+                }
+                continue;
+            }
+            if (reply.kind !== "module-acted") {
+                said.push({ kind: "said", text: `kept drafted: ${reply.kind === "refused" ? reply.error : `the host answered \`${reply.kind}\``}` });
                 continue;
             }
             const told = new Set<string>();
+            const answers = reply.answers;
             each.marks.forEach((mark, at) => {
-                const answer = reply.shown.answers[at];
+                const answer = answers[at];
                 const refused = answer?.refused ?? null;
-                if (refused !== null) {
-                    keeping = { ...keeping, marks: [...(keeping.marks ?? []), mark] };
-                } else {
+                if (refused === null) {
                     applied.push(mark.id);
                 }
                 // A set of marks an action took together has the one answer.
@@ -1145,6 +1158,9 @@ export function App() {
                     said.push({ kind: "said", text: words.replace(/\.$/, "") });
                 }
             });
+        }
+        if (held.length > 0) {
+            said.push({ kind: "said", text: `kept drafted: ${held[0]?.says ?? "it"}: what moves the host goes one a send, so send it again once it's back` });
         }
         return { applied, said };
     }
@@ -1171,6 +1187,7 @@ export function App() {
         }
         typed.current = null;
         pending.current = null;
+        writtenDuring.current = null;
         const whole = pruned(impliedNow.current.length === 0 ? drafted : { ...drafted, marks: [...(drafted.marks ?? []), ...impliedNow.current] });
         // A comment on a check is the operator's answer to it, which the page sends apart: the inbox knows no item by its
         // number.
@@ -1197,11 +1214,6 @@ export function App() {
             const { applied, said: came } = await applying(marks, left);
             told.push(...came);
             left = { ...left, marks: marks.filter((each) => !applied.includes(each.id)) };
-            // The host may be stopping by now, for what an action asked of it, which is no send refused.
-            const keptAfter = await answered({ kind: "inbox-keep-draft", draft: left }, (answer) => (answer.kind === "inbox-drafted" ? answer : null));
-            if ("refused" in keptAfter) {
-                told.push({ kind: "said", text: keptAfter.refused });
-            }
         }
         const unanswered = [];
         for (const each of onChecks) {
@@ -1213,9 +1225,28 @@ export function App() {
                 told.push({ kind: "said", text: `check ${cited(each.item)} answered` });
             }
         }
-        if (unanswered.length > 0) {
-            left = { ...left, comments: [...(left.comments ?? []), ...unanswered] };
-            await ask({ kind: "inbox-keep-draft", draft: left });
+        // What was written or marked while this was sent goes with what's left, a keep it set going before the send's end
+        // bringing nothing back; and what's kept is what's left then: the host may be stopping by now, for what an action
+        // asked of it, which is no send refused.
+        const during = writtenDuring.current;
+        writtenDuring.current = null;
+        left = during === null ? left : withWrittenDuring(drafted, during, left);
+        left = { ...left, comments: [...(left.comments ?? []), ...unanswered] };
+        if (keeping.current !== null) {
+            clearTimeout(keeping.current);
+            keeping.current = null;
+        }
+        if (typing.current !== null) {
+            clearTimeout(typing.current);
+            typing.current = null;
+        }
+        typed.current = null;
+        pending.current = null;
+        if (marks.length > 0 || unanswered.length > 0 || during !== null) {
+            const keptAfter = await answered({ kind: "inbox-keep-draft", draft: left }, (answer) => (answer.kind === "inbox-drafted" ? answer : null));
+            if ("refused" in keptAfter) {
+                told.push({ kind: "said", text: keptAfter.refused });
+            }
         }
         setSaid(`Sent: ${told.map(partSaid).join("; ") || "nothing"}.`, `Sent: ${partsSaid(told, "; ") || "nothing"}.`);
         setDraft(left);

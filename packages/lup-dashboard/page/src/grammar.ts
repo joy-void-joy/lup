@@ -198,6 +198,20 @@ export interface Acting {
     argument: Marked["argument"];
 }
 
+/** Return the marks of `marks` the send asks of a module, in what order: each of its actions, every mark of one together, those that may move the host (`Offer.runs`) last, and one of those at most, the rest held back. */
+export function actionsToRun<M extends Pick<Marked, "action" | "argument" | "runs">>(marks: readonly M[]): { run: { key: string; marks: M[]; last: boolean }[]; held: M[] } {
+    const acting = new Map<string, { key: string; marks: M[]; last: boolean }>();
+    for (const mark of marks.filter((each) => each.action === ACT)) {
+        const argument = mark.argument as unknown as Acting;
+        const key = JSON.stringify([argument.repository, argument.module, argument.action]);
+        const was = acting.get(key) ?? { key, marks: [], last: mark.runs === "last" };
+        acting.set(key, { ...was, marks: [...was.marks, mark] });
+    }
+    const each = [...acting.values()];
+    const lasts = each.filter((one) => one.last);
+    return { run: [...each.filter((one) => !one.last), ...lasts.slice(0, 1)], held: lasts.slice(1).flatMap((one) => one.marks) };
+}
+
 /** The actions of what an item offers (`lup_dev.inbox.store`): an answer marked in one of the draft's lists, and a comment on it whole, which the editor opens. */
 const ITEM_MARKED = "inbox-mark";
 const ITEM_COMMENTED = "inbox-comment";

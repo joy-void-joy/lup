@@ -761,6 +761,30 @@ export function withWritten(draft: Draft, list: Written[]): Draft {
     return { ...draft, comments: list.filter(isComment), letters: list.filter(isLetter), remarks: list.filter(isRemark) };
 }
 
+/**
+ * Return `left`, what a send left of the draft, with what was done to the draft while it was being sent: `before` as it
+ * began, `during` as it last stood. So whatever's written or marked meanwhile survives the send's end, which keeps `left`:
+ * each thing written whose words aren't what they were, and each mark or item marked that wasn't; what `before` held and
+ * the send took is gone from `left`, and stays gone.
+ */
+export function withWrittenDuring(before: Draft, during: Draft, left: Draft): Draft {
+    const was = new Map(written(before).map((each) => [writtenId(each), each.text]));
+    const fresh = written(during).filter((each) => was.get(writtenId(each)) !== each.text);
+    const replaced = new Set(fresh.map(writtenId));
+    const marksWere = new Set((before.marks ?? []).map((each) => each.id));
+    const listed = (list: "done" | "declined" | "parked") => {
+        const wasThere = new Set(before[list] ?? []);
+        return [...new Set([...(left[list] ?? []), ...(during[list] ?? []).filter((each) => !wasThere.has(each))])];
+    };
+    return {
+        ...withWritten(left, [...written(left).filter((each) => !replaced.has(writtenId(each))), ...fresh]),
+        done: listed("done"),
+        declined: listed("declined"),
+        parked: listed("parked"),
+        marks: [...(left.marks ?? []), ...(during.marks ?? []).filter((each) => !marksWere.has(each.id))],
+    };
+}
+
 /** Return whether what's written is a message, to an agent or on a thread, rather than a comment on an item or a remark in a drawer. */
 export function isLetter(each: Written): each is Letter {
     return !("item" in each) && !("quote" in each);
