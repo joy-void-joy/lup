@@ -96,10 +96,12 @@ describe("what runs, in the review", () => {
 
     it("says on the line of keys what each key would do on a branch, and what that takes, before it's pressed", async () => {
         await review.goTo("[x] clearer-marks");
-        const line = await dashboard.page.locator(".keys-line, .keys").first().innerText();
-        expect(line).toContain("take it out: moves the host in seconds");
+        await dashboard.page.waitForFunction(() => document.querySelector(".keys")?.textContent?.includes("[x] clearer-marks") === true);
+        const line = await dashboard.page.locator(".keys").first().innerText();
         expect(line).toContain("merge it onto dev");
         expect(line).toContain("drop it");
+        // Past what fits on one row, it's the same words the palette and the mark say.
+        expect(await dashboard.page.locator(".keys").first().textContent()).toContain("take it out: moves the host in seconds");
     });
 
     it("keeps a box ticked in the draft, moving nothing until Ctrl+Enter, and takes it off with the key again", async () => {
