@@ -7,15 +7,18 @@ from typing import TYPE_CHECKING, cast, override
 
 import pytest
 
-from lup.blocks import Blocks, Line, Offer
+from lup.blocks import Block, Blocks, Fold, Line, Offer
+from lup.doors import served
 from lup_dev import Core, Modules, Project, Versions
+from lup_dev.declaration.modules.versions import RunningAgain
 from lup_dev.declaration.resolve import resolve
-from lup_dev.declaration.serving import OperatorHost
+from lup_dev.declaration.serving import Operator, OperatorHost, Room, ask
+from lup_dev.errors import LupDevError
 from lup_dev.host.on_trial import (
     AcceptBranch,
     BranchListed,
+    ChangeBranches,
     CopySwitching,
-    DropBranch,
     LastSwitch,
     ListTrial,
     PickBranches,
@@ -59,6 +62,8 @@ def branch(
     out: bool = False,
     conflict: str = "",
     party: Conversation | None = LANDER,
+    merging: bool = False,
+    merge_said: str = "",
 ) -> BranchListed:
     return BranchListed(
         branch=name,
@@ -68,6 +73,8 @@ def branch(
         out=out,
         conflict=conflict,
         party=party,
+        merging=merging,
+        merge_said=merge_said,
     )
 
 
@@ -207,14 +214,34 @@ def seen(host: Host, tmp_path: Path) -> Blocks:
     return asyncio.run(modules(host, tmp_path).view(viewing)).blocks
 
 
+def every(blocks: list[Block]) -> list[Block]:
+    """Return `blocks`, and what's under each that folds any."""
+    return [
+        inner
+        for each in blocks
+        for inner in [
+            each,
+            *(
+                every(each.content)
+                if isinstance(each, Fold) and isinstance(each.content, list)
+                else []
+            ),
+        ]
+    ]
+
+
 def line(blocks: Blocks, id_: str) -> Line:
-    found = next(each for each in blocks.blocks if each.id == id_)
+    found = next(each for each in every(blocks.blocks) if each.id == id_)
     assert isinstance(found, Line)
     return found
 
 
 def offered(blocks: Blocks, id_: str, verb: str) -> Offer:
     return next(each for each in line(blocks, id_).offers if each.verb == verb)
+
+
+def verbs_on(blocks: Blocks, id_: str) -> list[str | None]:
+    return [each.verb for each in line(blocks, id_).offers]
 
 
 def acted(host: Host, tmp_path: Path, action: str, *arguments: JsonValue) -> Acted:
@@ -230,7 +257,7 @@ def acted(host: Host, tmp_path: Path, action: str, *arguments: JsonValue) -> Act
 def test_a_repository_without_versions_places_no_row_and_one_with_it_does() -> None:
     without = resolve(Project(modules=Modules.only(Core())))
     assert all(each.place.under == "agent" for each in without.looks.drawers)
-    assert "run" not in [each.name for each in without.looks.verbs]
+    assert "merge" not in [each.name for each in without.looks.verbs]
     selected = resolve(Project(modules=Modules.only(Core(), Versions(running="live"))))
     [row] = [
         each for each in selected.looks.drawers if each.place.under == "repository"
@@ -240,7 +267,7 @@ def test_a_repository_without_versions_places_no_row_and_one_with_it_does() -> N
         "what_runs",
         "what runs",
     )
-    assert "run" in [each.name for each in selected.looks.verbs]
+    assert "merge" in [each.name for each in selected.looks.verbs]
 
 
 def test_the_view_says_what_runs_as_the_sketch_has_it(tmp_path: Path) -> None:
@@ -250,7 +277,7 @@ def test_the_view_says_what_runs_as_the_sketch_has_it(tmp_path: Path) -> None:
         "[x] fix-a  on trial",
         "[x] fix-b  on trial",
         "[ ] rival  conflicts with `fix-b`, in `a.py`",
-        "[ ] later  out, by you · needs your yes, then minutes to build",
+        "▸ out · 1",
         "",
         "Ctrl+Enter runs what's marked: a set you've run moves the host in seconds, restarting it; one you haven't needs your yes, then minutes to build.",
         "",
@@ -261,50 +288,112 @@ def test_the_view_says_what_runs_as_the_sketch_has_it(tmp_path: Path) -> None:
     ]
 
 
-def test_the_row_counts_what_conflicts_as_flagged_for_the_operator(
+def test_what_s_left_out_folds_under_one_line_its_box_still_taking_it_back(
     tmp_path: Path,
 ) -> None:
     blocks = seen(Host(), tmp_path)
+    fold = next(each for each in blocks.blocks if each.id == "out")
+    assert isinstance(fold, Fold)
+    assert not fold.open
+    assert line(blocks, "branch later").said().startswith("[ ] later")
+    assert verbs_on(blocks, "branch later") == ["done", "merge"]
+
+
+def test_the_row_counts_what_conflicts_nobody_left_out(tmp_path: Path) -> None:
+    blocks = seen(Host(), tmp_path)
     assert (blocks.tally.holds, blocks.tally.flagged, blocks.tally.review) == (0, 1, 0)
+    left = SKETCH.model_copy(
+        update={
+            "branches": [
+                branch("rival", conflict="it conflicts with `a`", out=True),
+            ]
+        }
+    )
+    assert seen(Host(left), tmp_path).tally.flagged == 0
 
 
-def test_a_box_says_what_ticking_it_takes_before_it_s_pressed(tmp_path: Path) -> None:
+def test_each_key_on_a_box_says_what_it_takes_before_it_s_pressed(
+    tmp_path: Path,
+) -> None:
+    no_rival = SKETCH.model_copy(
+        update={
+            "branches": [each for each in SKETCH.branches if each.branch != "rival"]
+        }
+    )
+    blocks = seen(Host(no_rival), tmp_path)
+    # What's left without `fix-b` is `fix-a`, with a copy; without `fix-a`, `fix-b`, with none.
+    assert (
+        offered(blocks, "branch fix-b", "decline").says
+        == "leave it out: moves the host in seconds"
+    )
+    assert (
+        offered(blocks, "branch fix-a", "decline").says
+        == "leave it out: needs your yes, then minutes to build"
+    )
     blocks = seen(Host(), tmp_path)
-    # Out of what runs leaves `fix-a` alone: a kept copy holds that.
+    # Never run, only its merge could say for sure.
     assert (
-        offered(blocks, "branch fix-b", "run").says
-        == "take it out: moves the host in seconds"
+        offered(blocks, "branch later", "done").says
+        == "take it in: never run: likely your yes, then minutes to build"
     )
-    # Leaves `fix-b` alone: no copy holds that, and it's run as a version with none.
-    assert (
-        offered(blocks, "branch fix-a", "run").says
-        == "take it out: needs your yes, then minutes to build"
-    )
-    assert (
-        offered(blocks, "branch later", "run").says
-        == "put it in: needs your yes, then minutes to build"
-    )
-    assert (
-        "refused while what it conflicts with"
-        in offered(blocks, "branch rival", "run").says
+    assert "refused while what it conflicts with" in (
+        offered(blocks, "branch rival", "done").says
     )
 
 
-def test_each_box_offers_what_the_operator_may_do_with_it(tmp_path: Path) -> None:
+def test_leaving_out_what_keeps_another_out_says_that_comes_in(tmp_path: Path) -> None:
+    listed = trial(
+        [
+            branch("a", within=True),
+            branch("b", conflict="it conflicts with `a`, in `x.py`"),
+        ]
+    )
+    says = offered(seen(Host(listed), tmp_path), "branch a", "decline").says
+    assert says.startswith("leave it out, and b comes in: ")
+
+
+def test_d_means_yes_and_x_no_each_marking_nothing_on_a_box_that_way_already(
+    tmp_path: Path,
+) -> None:
     blocks = seen(Host(), tmp_path)
-    assert [each.verb for each in line(blocks, "branch fix-a").offers] == [
-        "run",
-        "done",
-        "decline",
-    ]
-    tick = offered(blocks, "branch fix-a", "run")
-    assert tick.action == Acting.named()
-    assert tick.argument["action"] == "pick"
-    assert tick.argument["argument"] == {"branch": "fix-a", "on": False}
-    assert offered(blocks, "branch later", "run").argument["argument"] == {
+    assert verbs_on(blocks, "branch fix-a") == ["decline", "merge"]
+    assert verbs_on(blocks, "branch later") == ["done", "merge"]
+    leave = offered(blocks, "branch fix-a", "decline")
+    assert leave.argument["action"] == "pick"
+    assert leave.argument["argument"] == {
+        "branch": "fix-a",
+        "on": False,
+        "tip": "fix-a-tip",
+    }
+    assert leave.draws == "[ ]"
+    assert leave.runs == "last"
+    take = offered(blocks, "branch later", "done")
+    assert take.argument["argument"] == {
         "branch": "later",
         "on": True,
+        "tip": "later-tip",
     }
+    assert take.draws == "[x]"
+
+
+def test_x_on_a_box_out_by_a_conflict_alone_stops_it_coming_back(
+    tmp_path: Path,
+) -> None:
+    blocks = seen(Host(), tmp_path)
+    assert verbs_on(blocks, "branch rival") == ["done", "decline", "merge"]
+    assert offered(blocks, "branch rival", "decline").says == (
+        "leave it out: it stops coming back by itself"
+    )
+
+
+def test_merging_offers_its_own_key_on_a_branch(tmp_path: Path) -> None:
+    merge = offered(seen(Host(), tmp_path), "branch fix-a", "merge")
+    assert merge.argument["action"] == "merge"
+    assert merge.argument["argument"] == {
+        "branches": ["fix-a"],
+        "tips": ["fix-a-tip"],
+    }
+    assert merge.says == "merge it onto dev"
 
 
 def test_a_comment_on_a_branch_reaches_who_landed_it(tmp_path: Path) -> None:
@@ -336,11 +425,14 @@ def test_a_branch_whose_lander_ended_says_where_a_comment_waits(tmp_path: Path) 
     assert "a1 has ended: a comment waits for their session" in said
 
 
-def test_a_branch_nobody_is_known_to_have_landed_takes_no_comment(
+def test_a_branch_nobody_is_known_to_have_landed_says_so_and_takes_no_comment(
     tmp_path: Path,
 ) -> None:
     listed = trial([branch("old", within=True, party=None)])
-    assert line(seen(Host(listed), tmp_path), "branch old").by is None
+    found = line(seen(Host(listed), tmp_path), "branch old")
+    assert found.by is None
+    assert "who landed it isn't known: a comment has nobody to reach" in found.said()
+    assert "has ended" not in found.said()
 
 
 def test_with_no_session_running_it_says_merging_needs_one(tmp_path: Path) -> None:
@@ -349,11 +441,10 @@ def test_with_no_session_running_it_says_merging_needs_one(tmp_path: Path) -> No
     assert "no session of this repository is running: start one first" in blocks.text()
     assert (
         "refused until a session of this repository runs"
-        in offered(blocks, "branch fix-a", "done").says
+        in offered(blocks, "branch fix-a", "merge").says
     )
     running = seen(Host(), tmp_path)
     assert "no session of this repository" not in running.text()
-    assert offered(running, "branch fix-a", "done").says == "merge it onto dev"
 
 
 def test_a_session_of_another_repository_is_no_room_to_merge_in(tmp_path: Path) -> None:
@@ -362,25 +453,88 @@ def test_a_session_of_another_repository_is_no_room_to_merge_in(tmp_path: Path) 
     assert "no session of this repository is running" in blocks.text()
 
 
-def test_a_version_offers_running_it_again_only_where_a_copy_is_kept(
+def test_a_branch_merging_says_so_and_offers_nothing_more(tmp_path: Path) -> None:
+    listed = trial([branch("a", within=True, merging=True)])
+    found = line(seen(Host(listed), tmp_path), "branch a")
+    assert "merging: its gate runs in a session's room" in found.said()
+    assert found.offers == []
+
+
+def test_what_stopped_a_merge_is_said_on_its_line_and_whole_under_it(
     tmp_path: Path,
 ) -> None:
+    words = "Not landed: the gate failed\nFAILED tests/test_a.py\n1 failed"
+    listed = trial([branch("a", within=True, merge_said=words)])
+    blocks = seen(Host(listed), tmp_path)
+    found = line(blocks, "branch a")
+    assert "Not landed: the gate failed" in found.said()
+    assert "FAILED" not in found.said()
+    # It can be tried again from there.
+    assert "merge" in verbs_on(blocks, "branch a")
+    assert line(blocks, "said a 1").said() == "FAILED tests/test_a.py"
+
+
+def test_a_merge_that_failed_shows_though_the_branch_is_out(tmp_path: Path) -> None:
+    listed = trial([branch("a", out=True, merge_said="Not landed: no")])
+    blocks = seen(Host(listed), tmp_path)
+    assert "Not landed: no" in blocks.text()
+    assert "out" not in [each.id for each in blocks.blocks]
+
+
+def test_what_a_room_wrote_is_kept_to_one_printable_line(tmp_path: Path) -> None:
+    listed = trial(
+        [branch("a", conflict="it conflicts with `b`, in `x\x1b[31m\ny.py`")]
+    )
+    found = line(seen(Host(listed), tmp_path), "branch a").said()
+    assert "\x1b" not in found
+    assert "\n" not in found
+
+
+def test_what_the_last_merges_said_shows_once_their_branches_are_gone(
+    tmp_path: Path,
+) -> None:
+    listed = trial([], merged=["Landed fix-a on `dev`.\nCleaned up its worktree."])
+    text = seen(Host(listed), tmp_path).text()
+    assert "Landed fix-a on `dev`." in text
+    assert "Cleaned up" not in text
+
+
+def test_y_on_a_version_runs_it_again_only_where_a_copy_is_kept(tmp_path: Path) -> None:
     blocks = seen(Host(), tmp_path)
-    assert offered(blocks, "version c3", "run").argument["argument"] == {
+    run = offered(blocks, "version c3", "done")
+    assert run.argument["argument"] == {
         "commit": "c3",
         "current": True,
         "branches": ["fix-a"],
+        "tips": ["fix-a-tip"],
+        "dev": DEV,
     }
-    assert [each.verb for each in line(blocks, "version c1").offers] == ["done"]
-    assert [each.verb for each in line(blocks, "version c2").offers] == ["done"]
-    assert (
-        offered(blocks, "version c1", "done").says
-        == "merge it: each of its branches onto dev"
+    assert run.draws == " *  "
+    assert run.runs == "last"
+    assert verbs_on(blocks, "version c1") == ["merge"]
+    assert verbs_on(blocks, "version c2") == ["merge"]
+    assert offered(blocks, "version c1", "merge").says == (
+        "merge it: each of its branches onto dev"
     )
-    assert offered(blocks, "version c1", "done").argument["argument"] == {
+    assert offered(blocks, "version c1", "merge").argument["argument"] == {
         "branches": ["fix-a", "fix-b"],
         "tips": ["fix-a-tip", "fix-b-tip"],
     }
+
+
+def test_a_version_offers_no_merge_that_couldn_t_succeed(tmp_path: Path) -> None:
+    old = version("c0", "gone", copy_kept="c0", ran=AT)
+    moved = version("c8", "fix-a", copy_kept="c8", ran=AT).model_copy(
+        update={"tips": {"fix-a": "an-older-tip"}}
+    )
+    merging = version("c9", "busy", copy_kept="c9", ran=AT)
+    listed = trial(
+        [branch("fix-a", within=True), branch("busy", within=True, merging=True)],
+        [old, moved, merging],
+    )
+    blocks = seen(Host(listed), tmp_path)
+    for each in ["version c0", "version c8", "version c9"]:
+        assert "merge" not in verbs_on(blocks, each)
 
 
 def test_a_version_of_nothing_but_dev_has_nothing_to_merge(tmp_path: Path) -> None:
@@ -405,6 +559,22 @@ def test_a_set_picked_that_waits_on_the_operator_s_yes_says_so_on_the_summary(
     )
     assert seen(Host(listed), tmp_path).text().splitlines()[0] == (
         "what runs · dev · dev + fix-a waits on your yes"
+    )
+
+
+def test_a_version_gone_back_to_says_what_the_running_branch_still_holds(
+    tmp_path: Path,
+) -> None:
+    listed = trial(
+        [branch("fix-a", within=True)],
+        [
+            version("c1", copy_kept="c1", running=True, ran=AT),
+            version("c2", "fix-a", copy_kept="c2"),
+        ],
+        live="c2",
+    )
+    assert seen(Host(listed), tmp_path).text().splitlines()[0] == (
+        "what runs · dev · live holds dev + fix-a"
     )
 
 
@@ -434,61 +604,60 @@ def test_what_can_t_be_read_is_said_in_the_view_rather_than_failing_it(
     ]
 
 
-def test_ticking_makes_one_pick_of_what_runs_and_every_box_marked(
-    tmp_path: Path,
-) -> None:
+def test_every_box_of_a_send_is_one_change_of_those_alone(tmp_path: Path) -> None:
     host = Host()
     answer = acted(
         host,
         tmp_path,
         "pick",
-        {"branch": "fix-a", "on": False},
-        {"branch": "later", "on": True},
+        {"branch": "fix-a", "on": False, "tip": "fix-a-tip"},
+        {"branch": "later", "on": True, "tip": "later-tip"},
     )
-    assert host.changing() == [
-        PickBranches(branches=["fix-b", "later"], repository=REPOSITORY)
+    assert host.sent == [
+        ChangeBranches(
+            taking=["later"],
+            leaving=["fix-a"],
+            seen={"fix-a": "fix-a-tip", "later": "later-tip"},
+            repository=REPOSITORY,
+        )
     ]
     assert answer.answers == [
-        ActionAnswer(said="did trial-pick"),
-        ActionAnswer(said="did trial-pick"),
+        ActionAnswer(said="did trial-change"),
+        ActionAnswer(said="did trial-change"),
     ]
 
 
-def test_a_box_sent_again_picks_the_same_set(tmp_path: Path) -> None:
-    host = Host()
-    acted(host, tmp_path, "pick", {"branch": "fix-a", "on": True})
-    assert host.changing() == [
-        PickBranches(branches=["fix-a", "fix-b"], repository=REPOSITORY)
-    ]
+class Refusing(Host):
+    """A host refusing every request of `kind`, in `words`, reading all else."""
+
+    def __init__(self, kind: type[Request], words: str) -> None:
+        super().__init__()
+        self.kind = kind
+        self.words = words
+
+    @override
+    async def asked[R: Reply](self, request: Request, reply: type[R]) -> R:
+        if isinstance(request, self.kind):
+            self.sent.append(request)
+            raise HostError(self.words)
+        return await super().asked(request, reply)
 
 
-def test_a_refused_pick_refuses_every_box_of_it_in_the_host_s_words(
+def test_a_refused_change_refuses_every_box_of_it_in_the_host_s_words(
     tmp_path: Path,
 ) -> None:
-    host = Host()
-
-    async def refused(request: Request, reply: type[Reply]) -> Reply:
-        if isinstance(request, PickBranches):
-            message = "`fix-b` and `rival` can't be picked together"
-            raise HostError(message)
-        return await Host.asked(host, request, reply)
-
-    host.asked = refused  # type: ignore[method-assign]
+    words = "`fix-b` and `rival` can't be picked together"
     answer = acted(
-        host,
+        Refusing(ChangeBranches, words),
         tmp_path,
         "pick",
         {"branch": "rival", "on": True},
         {"branch": "later", "on": True},
     )
-    assert [each.refused for each in answer.answers] == [
-        "`fix-b` and `rival` can't be picked together"
-    ] * 2
+    assert [each.refused for each in answer.answers] == [words, words]
 
 
-def test_merging_accepts_each_branch_in_turn_as_the_host_s_own_request(
-    tmp_path: Path,
-) -> None:
+def test_a_merge_asks_the_host_apart_at_the_tip_it_was_seen(tmp_path: Path) -> None:
     host = Host()
     answer = acted(
         host,
@@ -497,39 +666,56 @@ def test_merging_accepts_each_branch_in_turn_as_the_host_s_own_request(
         {"branches": ["fix-a", "fix-b"], "tips": ["fix-a-tip", "fix-b-tip"]},
     )
     assert host.changing() == [
-        AcceptBranch(branch="fix-a", repository=REPOSITORY),
-        AcceptBranch(branch="fix-b", repository=REPOSITORY),
+        AcceptBranch(
+            branch="fix-a", repository=REPOSITORY, tip="fix-a-tip", apart=True
+        ),
+        AcceptBranch(
+            branch="fix-b", repository=REPOSITORY, tip="fix-b-tip", apart=True
+        ),
     ]
     assert answer.answers == [ActionAnswer(said="did trial-accept\ndid trial-accept")]
 
 
-def test_a_branch_landed_again_since_it_was_marked_isn_t_merged_or_dropped(
-    tmp_path: Path,
-) -> None:
-    host = Host()
-    merged = acted(
-        host, tmp_path, "merge", {"branches": ["fix-a"], "tips": ["an-older-tip"]}
+def test_a_merge_refused_stays_drafted_saying_why_and_what_went(tmp_path: Path) -> None:
+    class HalfRefusing(Host):
+        @override
+        async def asked[R: Reply](self, request: Request, reply: type[R]) -> R:
+            if isinstance(request, AcceptBranch) and request.branch == "fix-b":
+                message = "fix-b landed again since you marked it: look at it again"
+                raise HostError(message)
+            return await super().asked(request, reply)
+
+    answer = acted(
+        HalfRefusing(),
+        tmp_path,
+        "merge",
+        {"branches": ["fix-a", "fix-b"], "tips": ["fix-a-tip", "an-older-tip"]},
     )
-    dropped = acted(host, tmp_path, "drop", {"branch": "fix-a", "tip": "an-older-tip"})
-    assert (
-        merged.answers[0].refused
-        == "fix-a landed again since you marked it: look at it again"
+    [only] = answer.answers
+    assert only.refused == (
+        "fix-b landed again since you marked it: look at it again\ndid trial-accept"
     )
-    assert (
-        dropped.answers[0].refused
-        == "fix-a landed again since you marked it: look at it again"
-    )
-    assert host.changing() == []
 
 
-def test_dropping_is_the_host_s_own_request(tmp_path: Path) -> None:
-    host = Host()
-    answer = acted(host, tmp_path, "drop", {"branch": "fix-a", "tip": "fix-a-tip"})
-    assert host.changing() == [DropBranch(branch="fix-a", repository=REPOSITORY)]
-    assert answer.answers == [ActionAnswer(said="did trial-drop")]
+def test_a_merge_sent_again_asks_only_what_s_left(tmp_path: Path) -> None:
+    listed = trial([branch("fix-a", merging=True), branch("fix-b", within=True)])
+    host = Host(listed)
+    answer = acted(host, tmp_path, "merge", {"branches": ["gone", "fix-a", "fix-b"]})
+    assert host.changing() == [
+        AcceptBranch(branch="fix-b", repository=REPOSITORY, apart=True)
+    ]
+    # Nothing's refused: a branch off trial clears its mark, said.
+    assert answer.answers == [
+        ActionAnswer(
+            said=(
+                "`gone` isn't on trial any more.\n`fix-a` is merging already.\n"
+                "did trial-accept"
+            )
+        )
+    ]
 
 
-def test_a_version_on_dev_as_it_stands_runs_again_by_being_picked(
+def test_a_version_on_dev_as_it_stands_runs_again_by_being_picked_as_it_was_seen(
     tmp_path: Path,
 ) -> None:
     host = Host()
@@ -537,10 +723,51 @@ def test_a_version_on_dev_as_it_stands_runs_again_by_being_picked(
         host,
         tmp_path,
         "run_again",
-        {"commit": "c3", "current": True, "branches": ["fix-a"]},
+        {
+            "commit": "c3",
+            "current": True,
+            "branches": ["fix-a"],
+            "tips": ["fix-a-tip"],
+            "dev": DEV,
+        },
     )
-    assert host.changing() == [PickBranches(branches=["fix-a"], repository=REPOSITORY)]
+    assert host.changing() == [
+        PickBranches(
+            branches=["fix-a"],
+            repository=REPOSITORY,
+            seen={"fix-a": "fix-a-tip"},
+            dev=DEV,
+        )
+    ]
     assert answer.answers == [ActionAnswer(said="did trial-pick")]
+
+
+def test_a_version_moved_since_it_was_marked_says_so_running_nothing(
+    tmp_path: Path,
+) -> None:
+    host = Host()
+    moved_dev: dict[str, JsonValue] = {
+        "commit": "c3",
+        "current": True,
+        "branches": ["fix-a"],
+        "tips": ["fix-a-tip"],
+        "dev": "an0ther",
+    }
+    relanded: dict[str, JsonValue] = {
+        **moved_dev,
+        "dev": DEV,
+        "tips": ["an-older-tip"],
+    }
+    gone: dict[str, JsonValue] = {
+        **moved_dev,
+        "dev": DEV,
+        "branches": ["gone"],
+        "tips": ["its-tip"],
+    }
+    answers = acted(host, tmp_path, "run_again", moved_dev, relanded, gone).answers
+    assert host.changing() == []
+    assert [each.refused for each in answers] == [None, None, None]
+    assert all("moved since you marked it" in each.said for each in answers)
 
 
 def test_an_older_version_runs_again_by_the_host_s_own_switch_to_its_copy(
@@ -554,16 +781,9 @@ def test_an_older_version_runs_again_by_the_host_s_own_switch_to_its_copy(
     )
     listed = trial([branch("fix-a", within=True), branch("fix-b")], [older, moved])
     blocks = seen(Host(listed), tmp_path)
-    assert offered(blocks, "version c0", "run").argument["argument"] == {
-        "commit": "c0",
-        "current": False,
-        "branches": ["fix-a"],
-    }
-    assert offered(blocks, "version c8", "run").argument["argument"] == {
-        "commit": "c8",
-        "current": False,
-        "branches": ["fix-b"],
-    }
+    for each in ["version c0", "version c8"]:
+        again = offered(blocks, each, "done").argument["argument"]
+        assert not RunningAgain.model_validate(again).current
     host = Host()
     answer = acted(host, tmp_path, "run_again", {"commit": "c0"})
     assert host.changing() == [SwitchCopy(commit="c0")]
@@ -572,34 +792,36 @@ def test_an_older_version_runs_again_by_the_host_s_own_switch_to_its_copy(
     ]
 
 
-def test_a_version_gone_back_to_says_what_the_running_branch_still_holds(
-    tmp_path: Path,
-) -> None:
-    listed = trial(
-        [branch("fix-a", within=True)],
-        [
-            version("c1", copy_kept="c1", running=True, ran=AT),
-            version("c2", "fix-a", copy_kept="c2"),
-        ],
-        live="c2",
-    )
-    assert seen(Host(listed), tmp_path).text().splitlines()[0] == (
-        "what runs · dev · live holds dev + fix-a"
-    )
+def test_a_version_doesn_t_run_again_while_a_merge_runs(tmp_path: Path) -> None:
+    host = Host(trial([branch("busy", merging=True)]))
+    [only] = acted(host, tmp_path, "run_again", {"commit": "c0"}).answers
+    assert "busy is merging" in (only.refused or "")
+    assert host.changing() == []
 
 
 def test_an_action_on_a_repository_computing_no_running_branch_is_refused(
     tmp_path: Path,
 ) -> None:
     host = Host(None)
-    answer = acted(host, tmp_path, "pick", {"branch": "fix-a", "on": True})
+    answer = acted(host, tmp_path, "merge", {"branches": ["fix-a"]})
     assert answer.answers[0].refused == f"{REPOSITORY} computes no running branch"
 
 
-@pytest.mark.parametrize("action", ["pick", "merge", "drop", "run_again"])
-def test_each_action_is_the_operator_s_and_answers_a_verb_declared(
-    action: str, tmp_path: Path
+@pytest.mark.parametrize(
+    ("action", "verb"),
+    [("pick", "done"), ("merge", "merge"), ("run_again", "done")],
+)
+def test_each_action_is_the_operator_s_alone_on_a_verb_declared(
+    action: str, verb: str, tmp_path: Path
 ) -> None:
-    resolved = modules(Host(), tmp_path).resolved
-    owner = next(each for each in resolved.served if each.module.name == "versions")
-    assert modules(Host(), tmp_path).acting("versions", action) == owner
+    resolved = modules(Host(), tmp_path)
+    owner = resolved.acting("versions", action)
+    assert owner is not None
+    method = served(owner.serving)[action]
+    door = method.acting()
+    assert door is not None
+    assert door.verb == verb
+    assert verb in [each.name for each in resolved.resolved.looks.verbs]
+    ask(owner.serving, action, Operator())
+    with pytest.raises(LupDevError, match="never by `Room`"):
+        ask(owner.serving, action, Room(launch=register()))
