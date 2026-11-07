@@ -1,4 +1,4 @@
-// The review in two panes, as the page opens, and by thread where its address asks (`page/src/panes.ts`): the three levels
+// The review in two panes, as the page opens (`page/src/panes.ts`): the three levels
 // of the keys, moving between the panes, a comment written in one buffer and still anchored as another comes and goes,
 // search within the buffer on screen, what Ctrl+Enter sends from any of them, and what's read by being on screen.
 import type { Request } from "playwright";
@@ -49,7 +49,7 @@ describe("the panes by agent", () => {
     let review: Review;
 
     beforeAll(async () => {
-        served = await demo({ size: 0, panes: "opened" });
+        served = await demo({ size: 0 });
         dashboard = await open(served.url);
         review = await dashboard.review();
         await review.holds(THEIR_ITEM);
@@ -378,11 +378,50 @@ describe("the panes by agent", () => {
         expect(row).toContain("@transcript-reader");
         await page.keyboard.press("Enter");
         await review.until("read the thread whole", (view) => !view.state.doc.toString().includes("reading…") && view.state.doc.toString().includes("━━ @transcript-reader"));
+        // Whole, saying whom the words reach, over it and on the line they're written under.
+        expect(await review.text()).toContain("to lup-impl/parser on @transcript-reader");
+        // A friction in it folded to its header, saying where it's read.
+        await review.goTo("── @57 friction · in the pile to read · lup-impl/parser");
         expect(await page.evaluate(() => document.querySelector(".where-whom")?.textContent ?? "")).toContain("lup-impl/parser");
         await listRow(dashboard, "what's for you");
         await page.keyboard.press("Enter");
         await review.holds("@54 approval");
         expect(dashboard.thrown).toEqual([]);
+    });
+
+    it("goes from an item of what's for the operator to its thread with gt, onto the item", async () => {
+        const { page } = dashboard;
+        await review.goTo("── @51 question");
+        await review.settled(300, 0);
+        await page.keyboard.press("g");
+        await page.keyboard.press("t");
+        await review.until("went to the thread", (view) => view.state.doc.toString().startsWith("━━ @transcript-reader") && !view.state.doc.toString().includes("reading…"));
+        await review.until("put the cursor on the item", (view) => view.state.doc.lineAt(view.state.selection.main.head).text.includes("@51 question"));
+    });
+
+    it("comes back with Ctrl+O, to where it went from", async () => {
+        const { page } = dashboard;
+        await page.keyboard.press("Control+o");
+        await review.until("went back to what's for the operator", (view) => view.state.doc.toString().includes("@54 approval"));
+        await review.until("put the cursor back on the item", (view) => view.state.doc.lineAt(view.state.selection.main.head).text.includes("@51 question"));
+        expect(dashboard.thrown).toEqual([]);
+    });
+
+    it("goes from an agent's name on a thread's banner to their own buffer with gd, and back with Ctrl+O", async () => {
+        const { page } = dashboard;
+        await listRow(dashboard, "@auth-survey");
+        await page.keyboard.press("Enter");
+        await review.until("read the thread whole", (view) => view.state.doc.toString().startsWith("━━ @auth-survey") && !view.state.doc.toString().includes("reading…"));
+        await review.goTo("lup-impl/explore-auth holds");
+        await review.settled(300, 0);
+        await page.keyboard.press("g");
+        await page.keyboard.press("d");
+        await review.holds("to lup-impl/explore-auth\u0020──");
+        await page.keyboard.press("Control+o");
+        await review.until("went back to the thread", (view) => view.state.doc.toString().startsWith("━━ @auth-survey"));
+        await listRow(dashboard, "what's for you");
+        await page.keyboard.press("Enter");
+        await review.holds("@54 approval");
     });
 
     it("sends with Ctrl+Enter from Normal mode, from any buffer, the comment and the message going whole", async () => {
@@ -412,7 +451,7 @@ describe("what's read by being on screen, in panes", () => {
 
     beforeEach(async () => {
         told = [];
-        served = await demo({ size: 0, panes: "opened" });
+        served = await demo({ size: 0 });
         dashboard = await open(served.url, { clock: true });
         dashboard.page.on("request", (request: Request) => {
             if (request.method() === "POST" && request.url().endsWith("/api/ask")) {
@@ -434,6 +473,8 @@ describe("what's read by being on screen, in panes", () => {
     });
 
     const moved = () => told.flatMap((each) => each.marks as { key: Record<string, unknown>; up_to: string; seen: boolean }[]);
+    /** Each mark moved as far as the voice session's turn's end, or the how it felt in view just after it. */
+    const movedTo56 = () => moved().filter((each) => each.up_to === "56" || each.up_to === "58");
     const passes = (ms: number) => dashboard.page.clock.runFor(ms);
     const row = (text: string) => dashboard.page.evaluate((wanted) => [...document.querySelectorAll(".list-buffer .cm-line")].find((each) => (each.textContent ?? "").includes(wanted))?.textContent ?? "", text);
 
@@ -449,7 +490,8 @@ describe("what's read by being on screen, in panes", () => {
         await review.settled(300);
         await passes(4000);
         await review.settled(300);
-        const [mark] = moved().filter((each) => each.up_to === "56");
+        await expect.poll(() => movedTo56().length, { timeout: 15_000 }).toBeGreaterThan(0);
+        const [mark] = movedTo56();
         expect(mark?.seen).toBe(true);
         // Their agent's, never a thread's, though the list reads threads.
         expect(mark?.key.node).toBeUndefined();
@@ -464,12 +506,13 @@ describe("what's read by being on screen, in panes", () => {
         await review.settled(300);
         await passes(10_000);
         await review.settled(300);
-        expect(moved().filter((each) => each.up_to === "56")).toEqual([]);
+        expect(movedTo56()).toEqual([]);
         await listRow(dashboard, "main");
         await dashboard.page.keyboard.press("Enter");
         await review.until("left what's for the operator", (view) => !view.state.doc.toString().includes("── @45 note"));
         await review.settled(300);
-        const [mark] = moved().filter((each) => each.up_to === "56");
+        await expect.poll(() => movedTo56().length, { timeout: 15_000 }).toBeGreaterThan(0);
+        const [mark] = movedTo56();
         expect(mark?.seen).toBe(true);
     });
 
@@ -484,7 +527,7 @@ describe("the panes on a phone", () => {
     let dashboard: Dashboard;
 
     beforeAll(async () => {
-        served = await demo({ size: 0, panes: "opened" });
+        served = await demo({ size: 0 });
         dashboard = await open(served.url, { viewport: { width: 400, height: 800 } });
         const review = await dashboard.review();
         await review.settled();
@@ -513,67 +556,6 @@ describe("the panes on a phone", () => {
         await hidden(".pane-list");
         await page.click(".overview-button");
         await shown(".pane-list");
-        expect(dashboard.thrown).toEqual([]);
-    });
-});
-
-describe("the panes by thread", () => {
-    let served: Demo;
-    let dashboard: Dashboard;
-    let review: Review;
-
-    beforeAll(async () => {
-        served = await demo({ size: 0, panes: "threads" });
-        dashboard = await open(served.url);
-        review = await dashboard.review();
-        await review.holds("waiting on you ·");
-        await review.settled();
-    });
-
-    afterAll(async () => {
-        await dashboard?.close();
-        await served?.close();
-    });
-
-    it("opens on what's for the operator, by thread, with no section that isn't", async () => {
-        const text = await review.text();
-        expect(text).toMatch(/^waiting on you · /m);
-        expect(text).not.toMatch(/^(open|settled) · /m);
-        // Who else is running, under it, so it never looks empty.
-        expect(text).toMatch(/^agents · \d+/m);
-        const list = await listText(dashboard);
-        expect(list.some((each) => each.includes("@transcript-reader"))).toBe(true);
-    });
-
-    it("opens one thread's conversation, whole, saying whom the words reach", async () => {
-        const { page } = dashboard;
-        await listRow(dashboard, "@transcript-reader");
-        await page.keyboard.press("Enter");
-        await review.until("read the thread whole", (view) => !view.state.doc.toString().includes("reading…") && view.state.doc.toString().includes("━━ @transcript-reader"));
-        const text = await review.text();
-        expect(text).not.toMatch(/^waiting on you · /m);
-        expect(text).toContain("to lup-impl/parser on @transcript-reader");
-        const whom = await page.evaluate(() => document.querySelector(".where-whom")?.textContent ?? "");
-        expect(whom).toContain("lup-impl/parser");
-        expect(dashboard.thrown).toEqual([]);
-    });
-
-    it("goes from an item of what's for the operator to its thread with gt, onto the item", async () => {
-        const { page } = dashboard;
-        await listRow(dashboard, "what's for you");
-        await page.keyboard.press("Enter");
-        await review.goTo("── @51 question");
-        await page.keyboard.press("g");
-        await page.keyboard.press("t");
-        await review.until("went to the thread", (view) => !/^waiting on you · /m.test(view.state.doc.toString()) && !view.state.doc.toString().includes("reading…"));
-        await review.until("put the cursor on the item", (view) => view.state.doc.lineAt(view.state.selection.main.head).text.includes("@51 question"));
-    });
-
-    it("comes back with Ctrl+O, to where it went from", async () => {
-        const { page } = dashboard;
-        await page.keyboard.press("Control+o");
-        await review.until("went back to what's for the operator", (view) => /^waiting on you · /m.test(view.state.doc.toString()));
-        await review.until("put the cursor back on the item", (view) => view.state.doc.lineAt(view.state.selection.main.head).text.includes("@51 question"));
         expect(dashboard.thrown).toEqual([]);
     });
 });

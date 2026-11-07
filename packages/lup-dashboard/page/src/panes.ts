@@ -1,9 +1,8 @@
 // The review in two panes, as the page opens (`docs/dashboard.md`, *The panes*): on the left, a list, itself a buffer with
 // vim's keys; on the right, one buffer at a time (`Showing`), a subset of the review's tree that the one layout lays out
-// (`laid`, `review.ts`). This is the list, by agent, or by thread where the address asks (`?panes=threads`), read from what
-// the review is laid out from, each row saying what it opens, how it stands and how much of it waits on the operator; its
-// text, whose each line is, and what's drawn on it. And how the list's rows and a buffer say whom the operator's words
-// reach. Pure: `Panes.tsx` draws it.
+// (`laid`, `review.ts`). This is the list, by agent, read from what the review is laid out from, each row saying what it
+// opens, how it stands and how much of it waits on the operator; its text, whose each line is, and what's drawn on it. And
+// how the list's rows and a buffer say whom the operator's words reach. Pure: `Panes.tsx` draws it.
 import type { Folding, Span } from "./comments";
 import { doing, type Activity } from "./agents";
 import type { Run } from "./reconcile";
@@ -42,21 +41,9 @@ import { instanceOf, NOTHING_WAITS, type BlocksTally, type Remote, type Running,
 
 export type { Showing };
 
-/** What the list goes by. */
-export type PanesBy = "agents" | "threads";
-
-/**
- * Return what the panes go by, as the page's address asks: by agent, as the page opens; by thread where it says
- * `?panes=threads`; none, the review as one buffer beside the overview, where it says `?panes=off`, or `?threads`, that buffer
- * grouped by thread.
- */
-export function panesAsked(search: string): PanesBy | null {
-    const address = new URLSearchParams(search);
-    const asked = address.get("panes");
-    if (asked === "threads") {
-        return asked;
-    }
-    return asked === "off" || (asked === null && address.has("threads")) ? null : "agents";
+/** Return whether the page's address lays the review out in panes, as the page opens, but where it says `?panes=off`, one buffer beside the overview. */
+export function panesAsked(search: string): boolean {
+    return new URLSearchParams(search).get("panes") !== "off";
 }
 
 /** Return what names a buffer among the others, which the cursor is kept by while another is on screen, and its row in the list. */
@@ -79,20 +66,19 @@ export function bufferKey(showing: Showing): string {
  * How much of what a row stands for waits on the operator, each counted once by what it is to them: what stays stopped
  * until they answer it (an approval, a held change, a question, a problem, a file a landing waits on); what's flagged for
  * their eyes, with nothing stopped (a file with flagged writes, a check, a thread done for them to confirm, a
- * disagreement, a question that waits on no answer); the files to review with nothing holding them; what's news; the pile
- * to read; and, no status at all, what they've drafted there themselves.
+ * disagreement, a question that waits on no answer); the files to review with nothing holding them; what's news; and, no
+ * status at all, what they've drafted there themselves.
  */
 export interface Tally extends BlocksTally {
     news: number;
-    pile: number;
     written: number;
 }
 
-const NOTHING: Tally = { ...NOTHING_WAITS, news: 0, pile: 0, written: 0 };
+const NOTHING: Tally = { ...NOTHING_WAITS, news: 0, written: 0 };
 
 /** Return `tallies` added up. */
 function added(tallies: readonly Tally[]): Tally {
-    return tallies.reduce((sum, each) => ({ holds: sum.holds + each.holds, flagged: sum.flagged + each.flagged, review: sum.review + each.review, news: sum.news + each.news, pile: sum.pile + each.pile, written: sum.written + each.written }), NOTHING);
+    return tallies.reduce((sum, each) => ({ holds: sum.holds + each.holds, flagged: sum.flagged + each.flagged, review: sum.review + each.review, news: sum.news + each.news, written: sum.written + each.written }), NOTHING);
 }
 
 /** A stretch of a row's line, in the look it's drawn in, a class of the review's. */
@@ -125,9 +111,6 @@ export interface Row {
 /** How wide the list writes a row, tallies at its end, in characters. */
 const COLUMNS = 46;
 
-/** What the pile to read is marked with, which only the list counts. */
-const PILE = "≈";
-
 /**
  * Return the stretches of `tally`, each count in its colour, at the row's end, what stands in the order it asks of the
  * operator; what they've drafted before them, muted and set apart, being no status, so what stands stays where it is as
@@ -139,7 +122,6 @@ function tallied(tally: Tally): Stretch[] {
         { count: tally.flagged, glyph: GLYPHS.asking, look: "mark-asking" },
         { count: tally.review, glyph: GLYPHS["to-review"], look: "mark-to-review" },
         { count: tally.news, glyph: GLYPHS.news, look: "mark-news" },
-        { count: tally.pile, glyph: PILE, look: "mark-pile" },
     ].filter((one) => one.count > 0);
     const marks = standing.flatMap((one, at) => [...(at === 0 ? [] : [{ text: " " }]), { text: `${one.glyph}${one.count}`, look: one.look }]);
     return tally.written === 0 ? marks : [{ text: `${DRAFTED.comment.glyph}${tally.written}`, look: "list-written" }, ...(marks.length === 0 ? [] : [{ text: "  " }]), ...marks];
@@ -184,7 +166,7 @@ export interface ListReading {
     states: ReadonlyMap<string, string | null>;
     threads: Threading | null;
     landings?: Shown["landings"];
-    /** The checks waiting on the operator, by agent (`checkOwner`), where the list goes by agent. */
+    /** The checks waiting on the operator, by agent (`checkOwner`). */
     checks?: readonly OwnedCheck[];
     /** What's new to the operator, which an item's row says. */
     seeing?: Seeing;
@@ -254,7 +236,7 @@ function agentTally(group: Grouping, reading: ListReading): Tally {
             files = mount(conversation.repository, drawn.module, drawn.view, of, shown, remote).answer?.blocks.tally ?? NOTHING_WAITS;
         }
     }
-    return { holds: asked.holds + files.holds, flagged: asked.flagged + files.flagged, review: files.review, news: newsCount, pile: 0, written: comments + letters + remarks };
+    return { holds: asked.holds + files.holds, flagged: asked.flagged + files.flagged, review: files.review, news: newsCount, written: comments + letters + remarks };
 }
 
 /** Return whoever owns a check waiting on the operator, or a task the list shows (`taskShown`). */
@@ -312,11 +294,11 @@ function byName(groups: readonly Grouping[], called: ListReading["called"]): Gro
 }
 
 /** Return the row of the agent `group` is of, set in `depth` deep: how they stand, their name and their tally; under it, what they're doing, drawn, and what they're working on. */
-function agentRow(group: Grouping, depth: number, reading: ListReading, nesting: boolean = true): Row {
+function agentRow(group: Grouping, depth: number, reading: ListReading): Row {
     const conversation = group.conversation;
     const tally = agentTally(group, reading);
     const set = "  ".repeat(depth);
-    const under = nesting ? nestOf(group, depth, reading) : undefined;
+    const under = nestOf(group, depth, reading);
     if (conversation === null) {
         return {
             id: `agent ${group.key}`,
@@ -429,7 +411,7 @@ function taskRow(read: ThreadRead, set: string, depth: number, threads: Threadin
         waiting ? state : { text: state.text, look: "list-sub" },
     ];
     // What asks them alone: what's new is on the item's row under who sent it, read by being seen there, as a thread's mark isn't.
-    const quiet = { ...tally, news: 0, pile: 0 };
+    const quiet = { ...tally, news: 0 };
     return { id: `thread ${read.thread.number}`, lines: [{ stretches: padded(left, quiet) }], opens: { kind: "thread", number: read.thread.number }, says: `@${read.thread.name}: ${about(read.thread)}`, writes: true };
 }
 
@@ -552,7 +534,7 @@ function threadState(read: ThreadRead): { text: string; look: string } {
     }
 }
 
-/** Return how thread `read` stands: what stays stopped on the operator in it, the files a landing waits on among that; what's flagged for their eyes, its being done for them to confirm among that; what's news and the pile; and what's drafted on it. */
+/** Return how thread `read` stands: what stays stopped on the operator in it, the files a landing waits on among that; what's flagged for their eyes, its being done for them to confirm among that; what's news; and what's drafted on it. */
 function threadTally(read: ThreadRead, threads: Threading, draft: Draft): Tally {
     const written = (draft.letters ?? []).filter((each) => each.thread === read.thread.number && each.text.trim() !== "").length;
     const settled = new Set([...(draft.done ?? []), ...(draft.declined ?? []), ...(draft.parked ?? [])]);
@@ -563,27 +545,7 @@ function threadTally(read: ThreadRead, threads: Threading, draft: Draft): Tally 
         flagged: asking.length - holds + (read.state === "done to confirm" ? 1 : 0),
         review: 0,
         news: (read.new ?? []).length,
-        pile: (read.pile ?? []).length,
         written,
-    };
-}
-
-/** Return thread `read`'s row, set in `depth` deep: its name, how it stands and its tally; under it, what it's about and who holds it. */
-function threadRow(read: ThreadRead, depth: number, threads: Threading, reading: ListReading): Row {
-    const set = "  ".repeat(depth);
-    const state = threadState(read);
-    const holder = read.thread.holder == null ? null : reading.called(read.thread.holder);
-    const answering = read.answering == null ? null : reading.called(read.answering);
-    const who = answering === null ? (holder === null ? "nobody holds it" : `${holder}, ended`) : holder === answering ? `${holder} holds` : `${answering} answers`;
-    return {
-        id: `thread ${read.thread.number}`,
-        lines: [
-            { stretches: padded([{ text: set }, { text: `@${read.thread.name}`, look: "list-name" }, { text: " " }, state], threadTally(read, threads, reading.draft)) },
-            { stretches: [{ text: `${set}    ${cutAt(`${about(read.thread)} · ${who}`, COLUMNS + 20)}`, look: "list-sub" }] },
-        ],
-        opens: { kind: "thread", number: read.thread.number },
-        says: `@${read.thread.name}: ${about(read.thread)}`,
-        writes: true,
     };
 }
 
@@ -600,60 +562,6 @@ function threadsNested(threads: readonly ThreadRead[], all: readonly ThreadRead[
     }
     const walk = (read: ThreadRead, depth: number): { read: ThreadRead; depth: number }[] => [{ read, depth }, ...(under.get(read.thread.number) ?? []).flatMap((child) => walk(child, depth + 1))];
     return (under.get(null) ?? []).flatMap((each) => walk(each, 0));
-}
-
-/**
- * Return the list by thread: what's for the operator; each agent running, a line each, whom they talk to; every thread
- * still open, nested under its parent; those nobody answers for under `No agent`; and those settled or declined, under a
- * line folding them.
- */
-export function listedByThread(reading: ListReading): Row[] {
-    const threads = reading.threads;
-    if (threads === null) {
-        return [];
-    }
-    const reads = threads.read.threads;
-    const closed = (read: ThreadRead) => read.state === "settled" || read.state === "declined";
-    const groups = groupsOf(reading);
-    const counted = added(reads.map((each) => threadTally(each, threads, reading.draft)));
-    // What asks the operator in no thread, as lup's own approvals, by whom it's from.
-    const asked = new Set(reads.flatMap((each) => (each.asks ?? []).map((ask) => ask.node)));
-    const loose = reading.items.filter((each) => toAnswer(each, reading.draft) && !asked.has(each.number));
-    const rows: Row[] = [forYouRow({ ...counted, holds: counted.holds + loose.filter((each) => each.holds).length, flagged: counted.flagged + loose.filter((each) => !each.holds).length })];
-    const runningGroups = groups.filter((each) => each.conversation !== null && reading.running.has(each.key));
-    rows.push(heading("heading running", "running", `${runningGroups.length}`));
-    // Whom to talk to, a line each: what's theirs is under the threads here, each a row of its own.
-    const asAgents: ListReading = { ...reading, threads: null };
-    for (const { group, depth } of nested(runningGroups, reading.parents)) {
-        rows.push(agentRow(group, depth, asAgents, false));
-    }
-    const open = reads.filter((each) => !closed(each));
-    const parties = reading.parties ?? PARTIES;
-    const partyOf = (read: ThreadRead) => parties.find((each) => each.holdsTask(read, reading.running));
-    rows.push(heading("heading threads", "threads", `${open.length} open`));
-    for (const { read, depth } of threadsNested(open.filter((each) => partyOf(each) === undefined), reads)) {
-        rows.push(threadRow(read, depth, threads, reading));
-    }
-    for (const party of parties) {
-        const held = open.filter((each) => partyOf(each) === party);
-        if (held.length > 0) {
-            rows.push(partyRow(party, held.length, added(held.map((each) => threadTally(each, threads, reading.draft)))));
-            for (const { read, depth } of threadsNested(held, reads)) {
-                rows.push(threadRow(read, depth, threads, reading));
-            }
-        }
-    }
-    const done = reads.filter(closed);
-    if (done.length > 0) {
-        rows.push({
-            ...heading("heading settled", "settled", `${done.length}`),
-            under: { key: "list settled", closed: true, kind: "section", rows: threadsNested(done, reads).map(({ read, depth }) => threadRow(read, depth, threads, reading)) },
-        });
-    }
-    for (const group of byName(groups.filter((each) => each.conversation === null), reading.called)) {
-        rows.push(agentRow(group, 0, asAgents, false));
-    }
-    return rows;
 }
 
 /** Return the rows holding the row named `id`, outermost first, and it last; none where it's in none of `rows`. */
@@ -682,9 +590,8 @@ export interface BufferSpan extends Span {
 }
 
 /**
- * Return what the rows of the list stand for in the buffer `laid`, `showing`: each group, its agent's row or its
- * thread's; each item and check, its own; and a thread's own buffer, whole, its thread's row, its items being under their
- * senders.
+ * Return what the rows of the list stand for in the buffer `laid`, `showing`: each group, its agent's row; each item and
+ * check, its own; and a thread's own buffer, whole, its thread's row, its items being under their senders.
  */
 export function bufferSpans(laid: Laid, showing: Showing): BufferSpan[] {
     if (showing.kind === "thread") {
@@ -695,7 +602,7 @@ export function bufferSpans(laid: Laid, showing: Showing): BufferSpan[] {
     }
     return [
         ...laid.groups.map((each) => ({
-            id: each.thread === null ? `agent ${each.place.replace(/^(now|later) /, "")}` : `thread ${each.thread.thread.number}`,
+            id: `agent ${each.place.replace(/^(now|later) /, "")}`,
             from: each.banner.from,
             to: each.end,
             depth: each.depth,
@@ -727,7 +634,7 @@ export interface Marked extends Span {
     look: string;
 }
 
-/** One fold of the list, a section's. */
+/** One fold of the list, what's nested under a row. */
 export interface ListFold extends Span {
     key: string;
     closed: boolean;

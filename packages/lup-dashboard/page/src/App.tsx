@@ -1,9 +1,8 @@
-// The page: everything waiting for the operator as one review grouped by
-// thread, each thread's conversation read from the host as the review shows it
-// (`inbox-threads`, `inbox-thread`), and each agent in a group of their own
-// among the agents, every agent running having one, its banner saying what the agent
-// is doing, what they're working on and their context, its drawers at the
-// group's end holding their tasks, their whole conversation and what their branch
+// The page: everything waiting for the operator as one review, each agent in a
+// group of their own, every agent running having one, each thread read from the
+// host as the list and a thread's own buffer show it (`inbox-threads`,
+// `inbox-thread`), an agent's banner saying what the agent is doing, what
+// they're working on and their context, its drawers at the group's end holding their tasks, their whole conversation and what their branch
 // changed since the operator approved it; the operator's reply written into it,
 // their messages to agents and their remarks in the drawers among it, and what
 // they mark, and a line saying what the next Ctrl+Enter sends, to each agent it
@@ -25,7 +24,7 @@ import { everyone, launches, ring, running, type Activity, type Agent, type Runn
 import { ApiError, ask, type Asked, type OfCopy, type Replied } from "./api";
 import { cited } from "./comments";
 import { useNow, useSame, useThreads, useViews, useWatched, type ThreadAsked } from "./hooks";
-import { ACT, MOVE, actionsToRun, markedPart, type Acting, type Marked, type Moved, type Moving } from "./grammar";
+import { ACT, actionsToRun, markedPart, type Acting, type Marked, type Moved } from "./grammar";
 import { feed, keyState } from "./editor";
 import { keyKind, reviewKeys, writtenKey, writtenVim, type Here, type Part } from "./keys";
 import { Keys } from "./Keys";
@@ -63,7 +62,6 @@ import {
     type Drawers,
     type Head,
     type ThreadRead,
-    type ThreadsRead,
     type Item,
     type Keeping,
     type OwnedCheck,
@@ -232,7 +230,7 @@ export function App() {
         adopt(made);
         return made;
     }, [declared]);
-    const parts = useMemo(() => reviewKeys(looks.kinds, looks.verbs, panesAsked(location.search) !== null), [looks]);
+    const parts = useMemo(() => reviewKeys(looks.kinds, looks.verbs, panesAsked(location.search)), [looks]);
     // A fold kind of another repository's taking a letter one already took is refused it, and said.
     useEffect(() => {
         if (looks.refused.length > 0) {
@@ -255,17 +253,14 @@ export function App() {
         useMemo<readonly Wait[]>(() => (landingsWatch.reply?.kind === "policy-landings" ? (landingsWatch.reply.waiting ?? []) : []), [landingsWatch.reply]),
         (list) => JSON.stringify(list),
     );
-    // As one buffer the review is grouped by agent; `?threads` in the page's address groups it by thread (`docs/dashboard.md`,
-    // *The review*): there, and with `?panes=off`, the host is asked for threads where it's by thread alone.
-    // The panes, by agent as the page opens, by thread where the address asks (`panes.ts`); as one buffer where it asks that.
+    // The panes, as the page opens (`panes.ts`); as one buffer where the address asks that.
     const panes = panesAsked(location.search);
-    const byThread = panes === null ? new URLSearchParams(location.search).has("threads") : panes === "threads";
     // Whether the keys of the page do nothing but move between panes (`Pane mode`).
     const [paneMode, setPaneMode] = useState(false);
     // The review's threads, as the host reads them for it (`docs/inbox.md`, *Threads in the review*): the same object
     // while the host says the same of them, which it says again at every hook.
-    // The panes by agent read them for one thing alone: the checks waiting on the operator, each under whoever owns it.
-    const threadsWatch = useWatched(byThread || panes === "agents" ? { kind: "inbox-threads" } : null);
+    // Read in panes alone: for the tasks listed, the checks waiting on the operator and a thread's own buffer.
+    const threadsWatch = useWatched(panes ? { kind: "inbox-threads" } : null);
     const threadsRead = useSame(
         useMemo(() => (threadsWatch.reply?.kind === "inbox-threads-read" ? threadsWatch.reply : null), [threadsWatch.reply]),
         (each) => JSON.stringify(each),
@@ -285,30 +280,25 @@ export function App() {
         }, [threadsRead, landings]),
         (map) => JSON.stringify([...map]),
     );
-    // Each thread's conversation the review shows: each waiting on the operator or new, from where they last read it;
-    // and each they open, of the front or of what's settled, and read whole where they open what came before
-    // (`openThread`).
+    // Each thread's conversation the page reads: each with a check, for what it asks, from where they last read it; and
+    // each whose own buffer they open, whole (`openThread`).
     const [opening, setOpening] = useState<readonly ThreadAsked[]>([]);
     const openThread = useCallback((number: number, whole: boolean) => {
         setOpening((before) => (before.some((each) => each.number === number && each.whole === whole) ? before : [...before, { number, whole }]));
     }, []);
     const threadsAsked = useMemo(() => {
-        const asking = (each: ThreadRead) => (byThread ? each.section !== "every thread" || landingIn.has(each.thread.number) : (each.asks ?? []).some((ask) => ask.what === "a check"));
+        const asking = (each: ThreadRead) => (each.asks ?? []).some((ask) => ask.what === "a check");
         const shown = (threadsRead?.threads ?? []).filter(asking).map((each) => ({ number: each.thread.number, whole: false }));
         return [...shown, ...opening.filter((each) => each.whole || !shown.some((one) => one.number === each.number))];
-        // `byThread` says it once, as the page loads.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [threadsRead, landingIn, opening]);
+    }, [threadsRead, opening]);
     const conversations = useThreads(threadsAsked);
-    // By agent in panes, the checks waiting on the operator, each in the thread it's in, whose thread that thread read says.
+    // The checks waiting on the operator, each in the thread it's in, whose thread that thread read says.
     const checksWaiting = useSame(
         useMemo(
             () =>
-                panes !== "agents" || threadsRead === null
+                threadsRead === null
                     ? []
                     : threadsRead.threads.flatMap((thread) => (conversations.shown.get(thread.thread.number)?.checks ?? []).filter((check) => (check.answer ?? null) === null && (thread.asks ?? []).some((ask) => ask.node === check.check.number)).map((check) => ({ check, thread }))),
-            // `panes` says it once, as the page loads.
-            // eslint-disable-next-line react-hooks/exhaustive-deps
             [threadsRead, conversations],
         ),
         (list) => JSON.stringify(list),
@@ -497,9 +487,9 @@ export function App() {
     );
     // What's only to read, which the top bar counts apart from what asks the operator; and of what asks them, what holds
     // something stopped until they answer it, apart from what only wants their eyes.
-    const toReadCount = countToRead(waiting, draft, seeing, byThread ? (threadsRead?.threads ?? null) : null);
-    const stoppedOnYou = holdingOn(byThread ? threadsRead : null, landingIn, waiting, draft.parked ?? []);
-    const flaggedForYou = waitingOn(byThread ? threadsRead : null, landingIn, waiting, draft.parked ?? []) + checksWaiting.length + (panes === "agents" ? (threadsRead?.threads ?? []).filter((each) => each.state === "done to confirm").length : 0) - stoppedOnYou;
+    const toReadCount = countToRead(waiting, draft, seeing);
+    const stoppedOnYou = holdingOn(waiting, draft.parked ?? []);
+    const flaggedForYou = waitingOn(waiting, draft.parked ?? []) + checksWaiting.length + (threadsRead?.threads ?? []).filter((each) => each.state === "done to confirm").length - stoppedOnYou;
 
     // What the draft marks or comments on that's past waiting, answered or replaced since it was written: laid out with
     // what's drafted on it, which stays in view, saying so, until it's sent.
@@ -571,7 +561,7 @@ export function App() {
     // ask first, but for its own reload to a new build.
     const reloading = useRef(false);
     useEffect(() => {
-        if (panes === null) {
+        if (!panes) {
             return undefined;
         }
         const asking = (event: BeforeUnloadEvent) => {
@@ -645,10 +635,9 @@ export function App() {
     const writtenDuring = useRef<Draft | null>(null);
     const typing = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // What the review is laid out from, all of it read, the threads among it, so it's never laid out by agent first:
-    // until then it's laid out empty, and the host told nothing; nor where the host refused one of them, the review
-    // showing what it can, by agent where the host reads no threads.
-    const ready = draftRead && kept !== null && inbox.reply !== null && reply !== null && (!byThread || threadsWatch.reply !== null);
+    // What the review is laid out from, all of it read: until then it's laid out empty, and the host told nothing; nor
+    // where the host refused one of them, the review showing what it can.
+    const ready = draftRead && kept !== null && inbox.reply !== null && reply !== null;
     const whole = reply?.kind === "listed" && inbox.reply?.kind === "inbox-items" && order.reply?.kind === "inbox-ordered";
     const keepOrder = useCallback((keeping: Keeping) => {
         void ask({ kind: "inbox-keep-order", ...keeping }).then((answer) => {
@@ -657,28 +646,6 @@ export function App() {
             }
         });
     }, []);
-
-    // An item of the pile to read left for later, as items were before the pile was there, is no longer: the pile is
-    // where a friction or how it felt is read, or moved into a thread, and a park on one only hid it from the count.
-    useEffect(() => {
-        // Never while a comment's typing waits to be laid out, which the draft as it stands here doesn't hold yet.
-        if (!ready || !byThread || threadsRead === null || typed.current !== null) {
-            return;
-        }
-        const piled = new Set(threadsRead.threads.flatMap((each) => each.pile ?? []));
-        const parked = draft.parked ?? [];
-        if (!parked.some((each) => piled.has(each))) {
-            return;
-        }
-        const next = { ...draft, parked: parked.filter((each) => !piled.has(each)) };
-        setDraft(next);
-        setEpoch((before) => before + 1);
-        void ask({ kind: "inbox-keep-draft", draft: next }).then((answer) => {
-            if (answer.kind === "refused") {
-                setSaid(answer.error);
-            }
-        });
-    }, [ready, threadsRead, draft]);
 
     const change = useCallback((next: Draft, typedOnly: boolean = false) => {
         writtenDuring.current = next;
@@ -1008,20 +975,11 @@ export function App() {
         const said: ReplyPart[] = [];
         const reviews = new Map<string, { conversation: InboxConversation; place: Placing; decline: boolean; files: Viewed[]; ids: string[] }>();
         const moving = new Map<string, { repository: string; module: string; marks: { key: Record<string, unknown>; up_to: string | null; through: string | null; forward: boolean; seen: boolean }[]; ids: string[] }>();
-        // What's moved from the pile, by where it goes: one request each, a thread opened once for all of them.
-        const gathering = new Map<string, { thread: number | null; title: string | null; numbers: number[]; says: string; ids: string[] }>();
         for (const mark of marks) {
             switch (mark.action) {
                 case ACT:
                     // Each module's action, after everything else (`actionsToRun`).
                     break;
-                case MOVE: {
-                    const argument = mark.argument as unknown as Moving;
-                    const key = JSON.stringify([argument.repository, argument.thread, argument.title]);
-                    const was = gathering.get(key) ?? { thread: argument.thread, title: argument.title, numbers: [], says: mark.says, ids: [] };
-                    gathering.set(key, { ...was, numbers: [...was.numbers, ...argument.numbers], ids: [...was.ids, mark.id] });
-                    break;
-                }
                 case "policy-review-since": {
                     const argument = mark.argument as { conversation: InboxConversation; worktree?: string | null; branch?: string | null; files: Viewed[]; decline?: boolean };
                     const place = { worktree: argument.worktree ?? null, branch: argument.branch ?? null };
@@ -1081,21 +1039,6 @@ export function App() {
             if (came.ok) {
                 applied.push(...each.ids);
             }
-        }
-        // What's moved from the pile, into each thread at once, saying who answers for it.
-        for (const each of gathering.values()) {
-            const request: Asked = { kind: MOVE, numbers: each.numbers, thread: each.thread, title: each.title };
-            const reply = await answered(request, (answer) => (answer.kind === "inbox-moved-into-thread" ? answer : null));
-            const count = each.numbers.length === 1 ? cited(each.numbers[0] ?? 0) : `${each.numbers.length} items`;
-            if ("refused" in reply) {
-                said.push({ kind: "said", text: `${count} not moved ${each.says}: ${reply.refused}` });
-                continue;
-            }
-            applied.push(...each.ids);
-            const moved = reply.shown;
-            const answering = moved.read.answering ?? null;
-            const whom = answering === null ? "nobody answers for it yet" : `told to ${called(answering)}`;
-            said.push({ kind: "said", text: `${count} moved into ${moved.opened === true ? "a new thread, " : ""}@${moved.read.thread.name}, ${whom}` });
         }
         // Each module's review marks of a repository moved together, as the host keeps them.
         for (const each of moving.values()) {
@@ -1371,8 +1314,8 @@ export function App() {
                         </>
                     )}
                 </span>
-                <button type="button" className="overview-button" onClick={() => setOverview(!overview)} title={panes === null ? "the overview of every agent and item" : "the list"}>
-                    {panes === null ? "Overview" : "List"} <kbd>{"\\"}</kbd>
+                <button type="button" className="overview-button" onClick={() => setOverview(!overview)} title={panes ? "the list" : "the overview of every agent and item"}>
+                    {panes ? "List" : "Overview"} <kbd>{"\\"}</kbd>
                 </button>
                 <button type="button" onClick={() => setPalette(true)}>
                     Go to <kbd>Ctrl</kbd> <kbd>K</kbd>
@@ -1412,7 +1355,7 @@ export function App() {
                         overview={overview}
                         setOverview={setOverview}
                         order={ready ? kept : null}
-                        keepOrder={whole && panes === null ? keepOrder : null}
+                        keepOrder={whole && !panes ? keepOrder : null}
                         panes={panes}
                         checks={ready ? checksWaiting : NO_CHECKS}
                         paning={setPaneMode}
@@ -1575,35 +1518,14 @@ interface Naming {
     setAside?: readonly { said: string }[];
 }
 
-/**
- * Say how many threads wait on the operator, as the review's first section counts them, what asks them in no thread
- * among them, by whom it's from; how many items do, before the threads are read. What's left for later, `parked`, counts
- * neither way: the operator said not now, and it comes back as it's unparked.
- */
-export function waitingOn(read: ThreadsRead | null, landing: ReadonlyMap<number, number>, waiting: readonly Item[], parked: readonly number[] = []): number {
-    const asking = waiting.filter((each) => each.asks && !parked.includes(each.number));
-    if (read === null) {
-        return asking.length;
-    }
-    const threads = read.threads.filter((each) => each.section === "waiting on you" || landing.has(each.thread.number));
-    const asked = new Set(read.threads.flatMap((each) => (each.asks ?? []).map((ask) => ask.node)));
-    const loose = new Set(asking.filter((each) => !asked.has(each.number)).map((each) => (each.sender.party === "conversation" ? whose(each.sender) : "lup")));
-    return threads.length + loose.size;
+/** Say how many items wait on the operator. What's left for later, `parked`, doesn't count: the operator said not now, and it comes back as it's unparked. */
+export function waitingOn(waiting: readonly Item[], parked: readonly number[] = []): number {
+    return waiting.filter((each) => each.asks && !parked.includes(each.number)).length;
 }
 
-/**
- * Say how many of what `waitingOn` counts hold something stopped until the operator answers (`Item.holds`, `Ask.holds`):
- * threads with something in them that does, or a landing waiting on them; each agent with something in no thread that does.
- */
-export function holdingOn(read: ThreadsRead | null, landing: ReadonlyMap<number, number>, waiting: readonly Item[], parked: readonly number[] = []): number {
-    const holding = waiting.filter((each) => each.holds && !parked.includes(each.number));
-    if (read === null) {
-        return holding.length;
-    }
-    const threads = read.threads.filter((each) => (each.section === "waiting on you" && (each.asks ?? []).some((ask) => ask.holds)) || landing.has(each.thread.number));
-    const asked = new Set(read.threads.flatMap((each) => (each.asks ?? []).map((ask) => ask.node)));
-    const loose = new Set(holding.filter((each) => !asked.has(each.number)).map((each) => (each.sender.party === "conversation" ? whose(each.sender) : "lup")));
-    return threads.length + loose.size;
+/** Say how many of what `waitingOn` counts hold something stopped until the operator answers (`Item.holds`). */
+export function holdingOn(waiting: readonly Item[], parked: readonly number[] = []): number {
+    return waiting.filter((each) => each.holds && !parked.includes(each.number)).length;
 }
 
 /**
@@ -1657,8 +1579,6 @@ export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): 
     const read = items.filter((each) => !asked(each) && !commented.includes(each.number) && each.reason.reason !== "question");
     const reviewing = new Map<string, number>();
     const declining = new Map<string, number>();
-    // What's moved from the pile, by where it goes.
-    const gathering = new Map<string, number>();
     const marked: ReplyPart[] = [];
     const thread = (number: number) => naming.thread?.(number) ?? null;
     for (const mark of draft.marks ?? []) {
@@ -1671,14 +1591,9 @@ export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): 
             const argument = mark.argument as { launch?: string; session?: string; agent?: string | null; on?: boolean };
             const who = naming.holder(argument) ?? "an agent no longer running";
             marked.push({ kind: "said", text: argument.on === true ? `holding ${who}'s flagged writes` : `letting ${who}'s flagged writes land` });
-        } else if (mark.action === MOVE) {
-            gathering.set(mark.says, (gathering.get(mark.says) ?? 0) + 1);
         } else {
             marked.push(markedPart(mark, naming.called, thread));
         }
-    }
-    for (const [into, count] of gathering) {
-        marked.push({ kind: "said", text: `${count === 1 ? "1 moved" : `${count} moved`} ${into}` });
     }
     const doing = (how: string, list: readonly Item[]): ReplyPart[] => (list.length === 0 ? [] : [{ kind: "items", done: how, numbers: list.map((each) => each.number) }]);
     return [

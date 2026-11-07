@@ -1,12 +1,12 @@
 // Every line of the page on one row (`docs/dashboard.md`, *The keys*): the top bar, the line under the review and the
 // line of keys say a sentence each at the demo's width, wherever the cursor is, a list of numbers counted; what each
-// leaves out is shown whole by `g<`; no key that isn't built is offered; and a park on an item of the pile to read, left
-// from before the pile was there, is dropped.
+// leaves out is shown whole by `g<`; and no key that isn't built is offered.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { open, type Dashboard } from "./dashboard.ts";
 import { demo, type Demo } from "./demo.ts";
 import type { Review } from "./review.ts";
+import { DEMO_ITEM } from "./typing.ts";
 
 let served: Demo;
 let dashboard: Dashboard;
@@ -16,8 +16,7 @@ beforeAll(async () => {
     served = await demo({ size: 0 });
     dashboard = await open(served.url);
     review = await dashboard.review();
-    await review.holds("agents · ");
-    await review.holds("── @66 note · lup-impl/explore-auth");
+    await review.holds(DEMO_ITEM);
     await review.settled(1500);
 });
 
@@ -59,21 +58,10 @@ const overrun = () =>
     });
 
 describe("every line of the page on one row, at the demo's width, in headless Chromium", () => {
-    it("drops a park on an item of the pile to read, the pile being where it's read", async () => {
-        // The demo's draft left @58, how it felt, for later before the pile was there.
-        await dashboard.page.waitForFunction(() => document.querySelector(".status")?.textContent?.includes("for later") === false);
-        // Kept so on the host, which the page calls with the cookie it traded its token for.
-        const draft = await dashboard.page.evaluate(async () => {
-            const answer = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "inbox-draft" }) });
-            return ((await answer.json()) as { draft: { parked: number[] } }).draft;
-        });
-        expect(draft.parked).toEqual([]);
-    });
-
-    it("keeps the line of keys and the line under the review to one row on every section's line, banner and item header", async () => {
+    it("keeps the line of keys and the line under the review to one row on every drawer's line, banner and item header", async () => {
         // The demo's late question first, however fast this runs: it gives the lines around it, @66's the longest of them,
         // Space h on the parser, and nothing the demo brings after it makes a line longer.
-        await review.holds("── @61 question · lup-impl/parser");
+        await review.holds("── @61 question");
         const wrong: string[] = [];
         let heads = 0;
         // Each found as it's gone to, by its place among them: the parser's two writes come later, and move the text.
@@ -105,13 +93,17 @@ describe("every line of the page on one row, at the demo's width, in headless Ch
     });
 
     it("says what's left to answer on a thread's banner by its count, each by its number in the palette", async () => {
-        await review.goTo("━━ @lup-impl · the session's own · lup-impl holds · a held change, landing waits on 1 file");
-        expect(await keys()).toContain("␣d mark its news read, 1 left to answer");
+        await dashboard.openRow("@lup-impl");
+        await review.until("read the thread whole", (view) => view.state.doc.toString().startsWith("━━ @lup-impl") && !view.state.doc.toString().includes("reading…"));
+        await review.goTo("━━ @lup-impl · the session's own · lup-impl holds");
+        expect(await keys()).toContain("␣d mark its news read, each item with it, 1 left to answer");
         await dashboard.keys.press(["g", "?"]);
         await dashboard.page.waitForSelector(".keys-palette [cmdk-group-heading]");
-        expect(await dashboard.page.locator(".keys-palette [cmdk-group]").first().innerText()).toContain("mark its news read, @55 left to answer");
+        expect(await dashboard.page.locator(".keys-palette [cmdk-group]").first().innerText()).toContain("mark its news read, each item with it, @55 left to answer");
         await dashboard.keys.press(["Escape"]);
         await dashboard.page.waitForSelector(".keys-palette", { state: "detached" });
+        await dashboard.openRow("what's for you");
+        await review.holds("── @54 approval");
     });
 
     it("offers no key that isn't built: pause is on no line, in no palette", async () => {

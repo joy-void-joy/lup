@@ -83,7 +83,6 @@ from lup_dev.inbox.store import (
     Decided,
     Decision,
     Done,
-    Draft,
     Edit,
     Flagged,
     Found,
@@ -534,7 +533,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         )
 
     def seeded(self, inbox: Inbox) -> None:
-        """Keep the demo's state in `inbox`, as the host keeps its own: each item (`every`), with the files of each that changes any; each conversation's whereabouts (`cast`); each thread, its check, what's in each and its status (`stand_in_threads`); how far the operator has read and seen each, as of 3 minutes before the demo began, so what came since is new; and their draft from before the pile to read was there, the voice session's how it felt, @58, left for later, a park the page drops."""
+        """Keep the demo's state in `inbox`, as the host keeps its own: each item (`every`), with the files of each that changes any; each conversation's whereabouts (`cast`); each thread, its check, what's in each and its status (`stand_in_threads`); how far the operator has read and seen each, as of 3 minutes before the demo began, so what came since is new."""
         items = sorted(self.every(), key=lambda each: each.number)
         threaded = self.stand_in_threads()
         numbered = {each.thread.name: each.thread.number for each in threaded.threads}
@@ -577,7 +576,6 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             for status in threaded.statuses:
                 ledger.drawn(status)
             self.read_before(inbox, items, threaded)
-            inbox.drafted(Draft(parked=[58]))
 
     def read_before(self, inbox: Inbox, items: list[Item], threaded: Threaded) -> None:
         """Mark what the operator has read and seen as of 3 minutes before the demo began: each thread up to the last item in it that came by then, and each agent's group up to the last of theirs still waiting that was made by then."""

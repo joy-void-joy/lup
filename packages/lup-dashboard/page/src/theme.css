@@ -1462,33 +1462,6 @@ kbd {
     color: var(--muted);
 }
 
-/* A section of the review grouped by thread: its line, saying what it holds, set apart above it; what waits on the
-   operator in their colour. */
-/* A line's room above is padding, never a margin: CodeMirror measures each line's height without its margins, and a
-   margin there threw vim's j, which moves by the heights measured, past the next line where two sections' lines met. */
-.buffer .cm-line.review-section {
-    color: var(--fg);
-    font-weight: 700;
-    border-bottom: 1px solid var(--muted);
-    padding-top: 0.6em;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-
-.buffer .cm-line.review-section.section-waiting-on-you {
-    color: var(--warn);
-    border-bottom-color: var(--warn);
-}
-
-/* The line in open the roots of sessions that have ended are under: a section's within the front, quieter. */
-.buffer .cm-line.aside-ended {
-    color: var(--muted);
-    font-weight: 700;
-    padding-top: 0.3em;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-
 /* A thread's banner: a thread waiting on the operator barred in their colour, one done for them to confirm too; one
    settled or declined dimmed. */
 .buffer .cm-line.thread-banner.state-waiting-on-the-operator,
@@ -1518,22 +1491,6 @@ kbd {
 }
 
 .buffer .cm-line.aside-check-text {
-    color: var(--fg);
-}
-
-/* The pile to read: a line for each thread with something in it, then each friction and how it felt by its title, set
-   in under it, its text set in further. */
-.buffer .cm-line.aside-pile-thread {
-    padding-left: 6px;
-    color: var(--cyan);
-    font-weight: 700;
-}
-
-.buffer .cm-line.aside-pile {
-    color: var(--orange);
-}
-
-.buffer .cm-line.aside-pile-text {
     color: var(--fg);
 }
 
@@ -1636,7 +1593,6 @@ kbd {
 }
 
 .outline-agent,
-.outline-thread,
 .outline-approvals {
     color: var(--cyan);
     font-weight: 700;
@@ -1838,10 +1794,6 @@ kbd {
 .list-asks {
     color: var(--orange);
     font-weight: 700;
-}
-
-.mark-pile {
-    color: var(--purple);
 }
 
 .mark-parked {

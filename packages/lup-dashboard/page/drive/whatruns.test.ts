@@ -72,7 +72,7 @@ const drawn = () => dashboard.page.evaluate(() => [...document.querySelectorAll(
 
 describe("what runs, in the review", () => {
     beforeAll(async () => {
-        served = await demo({ size: 0, panes: "opened", mergeTakes: 5 });
+        served = await demo({ size: 0, arrives: 3600, grows: 3600, mergeTakes: 5 });
         dashboard = await open(served.url);
         review = await dashboard.review();
         await review.settled();
@@ -278,7 +278,7 @@ describe("what runs, in the review", () => {
 
 describe("what's done while a reply is being sent", () => {
     beforeAll(async () => {
-        served = await demo({ size: 0, panes: "opened" });
+        served = await demo({ size: 0, arrives: 3600, grows: 3600 });
         dashboard = await open(served.url);
         review = await dashboard.review();
         await review.settled();

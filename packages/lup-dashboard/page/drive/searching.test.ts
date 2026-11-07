@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { open, type Dashboard } from "./dashboard.ts";
 import { demo, type Demo } from "./demo.ts";
 import type { Review } from "./review.ts";
+import { DEMO_ITEM } from "./typing.ts";
 
 let served: Demo;
 let dashboard: Dashboard;
@@ -15,7 +16,7 @@ let review: Review;
 /** Return once the review, as the page has just made it, holds all it's going to at first. */
 async function loaded(): Promise<void> {
     review = await dashboard.review();
-    await review.holds("── @66 note · lup-impl/explore-auth");
+    await review.holds(DEMO_ITEM);
     await review.settled(1500);
 }
 
@@ -92,9 +93,9 @@ const backInReview = () =>
     dashboard.page.waitForFunction(() => document.querySelector(".keys-palette") === null && document.activeElement?.closest(".review-buffer") != null, undefined, { polling: 20 });
 
 /**
- * Five places, each under a closed fold as the review opens: an item's context, and two conversations in the agents'
- * section, in each the line of the fold of the agent's words and those words. None of what comes to the demo later holds
- * it, unlike the parser's words, which the late question's context does.
+ * Five places, each under a closed fold as the review opens: two conversations' drawers, in each the line of the fold of
+ * the agent's words and those words, an item's context between them. None of what comes to the demo later holds it, unlike
+ * the parser's words, which the late question's context does.
  */
 const LINE = "Rendering frames 1 to 600.";
 
@@ -123,13 +124,13 @@ describe("searching the review backward with ?, in headless Chromium", () => {
         await below(OPENED);
         expect(await found(LINE)).toMatchObject({ on: 4, hidden: [true, true, true, false, false] });
 
-        // Back onto that conversation's line of those words, then into the other conversation.
+        // Back onto that conversation's line of those words, then into the item's context, before the other conversation.
         await dashboard.keys.press(["n"]);
         await onPlace(LINE, 3);
         expect((await found(LINE)).hidden).toEqual([true, true, true, false, false]);
         await dashboard.keys.press(["n"]);
         await onPlace(LINE, 2);
-        expect((await found(LINE)).hidden).toEqual([true, false, false, false, false]);
+        expect((await found(LINE)).hidden).toEqual([true, true, false, false, false]);
         await dashboard.keys.press(["N"]);
         await onPlace(LINE, 3);
         await dashboard.keys.press(["n", "n", "n"], 50);
@@ -146,12 +147,15 @@ describe("searching the review backward with ?, in headless Chromium", () => {
         await search("/", LINE.replace(".", "\\."));
         await onPlace(LINE, 0);
         await below(OPENED);
-        expect((await found(LINE)).hidden).toEqual([false, true, true, true, true]);
+        expect((await found(LINE)).hidden).toEqual([false, false, true, true, true]);
         await dashboard.keys.press(["n"]);
         await onPlace(LINE, 1);
+        expect((await found(LINE)).hidden).toEqual([false, false, true, true, true]);
+        await dashboard.keys.press(["n"]);
+        await onPlace(LINE, 2);
         expect((await found(LINE)).hidden).toEqual([false, false, false, true, true]);
         await dashboard.keys.press(["N"]);
-        await onPlace(LINE, 0);
+        await onPlace(LINE, 1);
     });
 
     it("opens the folds around the match a count reaches, for ?, / and n alike", async () => {
@@ -170,7 +174,7 @@ describe("searching the review backward with ?, in headless Chromium", () => {
         await dashboard.keys.type(LINE.replace(".", "\\."));
         await dashboard.keys.press(["Enter"]);
         await onPlace(LINE, 1);
-        expect((await found(LINE)).hidden).toEqual([true, false, false, true, true]);
+        expect((await found(LINE)).hidden).toEqual([false, false, true, true, true]);
         await dashboard.keys.press(["g", "g", "2", "n"], 50);
         await onPlace(LINE, 1);
     });

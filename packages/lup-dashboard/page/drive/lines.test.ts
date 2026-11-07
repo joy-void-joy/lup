@@ -3,16 +3,18 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { open, type Dashboard } from "./dashboard.ts";
 import { demo, type Demo } from "./demo.ts";
 import type { Review } from "./review.ts";
+import { DEMO_ITEM } from "./typing.ts";
 
 let served: Demo;
 let dashboard: Dashboard;
 let review: Review;
 
 beforeAll(async () => {
-    served = await demo({ size: 0 });
+    // Nothing of the demo's own comes as the keys go down.
+    served = await demo({ size: 0, arrives: 3600, grows: 3600 });
     dashboard = await open(served.url);
     review = await dashboard.review();
-    await review.holds("agents · ");
+    await review.holds(DEMO_ITEM);
     await review.settled(1500);
 });
 
@@ -27,15 +29,17 @@ afterAll(async () => {
 
 /**
  * Where the cursor is and where `key` should take it: the line it's on, by its number, and its text; the next line shown
- * after it, or before it for `k`, a line under a closed fold not shown, the fold's summary line standing for it; and the
- * text's length, which says whether the review was laid out anew in between, as the demo's arrivals lay it out.
+ * after it, or before it for `k`, a line under a closed fold not shown, the fold's summary line standing for it, and the
+ * empty line after the text's last line break not one, which no cursor rests on; and the text's length, which says whether
+ * the review was laid out anew in between, as the demo's arrivals lay it out.
  */
 const position = (key: "j" | "k") =>
     review.evaluate((view, forward) => {
         const doc = view.state.doc;
         const line = doc.lineAt(view.state.selection.main.head);
         let next: number | null = null;
-        for (let number = line.number + (forward ? 1 : -1); number >= 1 && number <= doc.lines; number += forward ? 1 : -1) {
+        const last = doc.line(doc.lines).length === 0 ? doc.lines - 1 : doc.lines;
+        for (let number = line.number + (forward ? 1 : -1); number >= 1 && number <= last; number += forward ? 1 : -1) {
             const each = doc.line(number);
             const block = view.lineBlockAt(each.from);
             if (block.from === each.from && !(block.from <= line.from && block.to >= line.from)) {
@@ -82,24 +86,19 @@ const to = async (end: "first" | "last") => {
     await dashboard.keys.press(end === "first" ? ["g", "g"] : ["G"]);
 };
 
-/** Open the fold of the section whose line starts with `name`, its line the cursor's. */
-async function opened(name: string): Promise<void> {
-    await review.goTo(`${name} · `);
-    await dashboard.keys.press(["z", "o"]);
-}
-
-describe("moving through the review grouped by thread, line by line, in headless Chromium", () => {
-    it("moves j and k exactly one line shown at a time from the first line to the last and back, the sections as they start", async () => {
+describe("moving through the review, line by line, in headless Chromium", () => {
+    it("moves j and k exactly one line shown at a time from the first line to the last and back, the folds as they start", async () => {
         await to("first");
         expect(await stepped("j")).toEqual([]);
         await to("last");
         expect(await stepped("k")).toEqual([]);
     });
 
-    it("goes ]g and [g to each group in turn across the sections, a closed fold's line standing for the groups under it", async () => {
-        // Walked again where the review was laid out anew meanwhile, as the demo's arrivals lay it out, moving what's below.
+    it("goes ]g and [g to each group in turn, the first from the review's first line", async () => {
+        // Walked again where the review was laid out anew meanwhile, what's been seen no longer saying it's new moving what's
+        // below, a key going where its layout says before it's in the editor.
+        let walked: { landings: number[]; forward: number[]; back: number[] } = { landings: [], forward: [], back: [] };
         for (let tried = 0; tried < 5; tried += 1) {
-            const length = await review.evaluate((view) => view.state.doc.length);
             const landings = await review.evaluate((view) => {
                 const doc = view.state.doc;
                 const found: number[] = [];
@@ -112,8 +111,9 @@ describe("moving through the review grouped by thread, line by line, in headless
                 return [...new Set(found)];
             });
             await to("first");
+            // The first group's banner is the first line.
             const forward: number[] = [];
-            for (const _ of landings) {
+            for (const _ of landings.slice(1)) {
                 await dashboard.keys.press(["]", "g"]);
                 forward.push(await here());
             }
@@ -122,22 +122,32 @@ describe("moving through the review grouped by thread, line by line, in headless
                 await dashboard.keys.press(["[", "g"]);
                 back.push(await here());
             }
-            if ((await review.evaluate((view) => view.state.doc.length)) === length) {
-                expect(forward).toEqual(landings);
-                expect(back).toEqual(landings.toReversed().slice(1));
-                return;
+            walked = { landings, forward, back };
+            if (forward.join() === landings.slice(1).join() && back.join() === landings.toReversed().slice(1).join()) {
+                break;
             }
+            await review.settled(400, 0);
         }
-        expect.unreachable("the review was laid out anew at every walk");
+        expect(walked.forward).toEqual(walked.landings.slice(1));
+        expect(walked.back).toEqual(walked.landings.toReversed().slice(1));
     });
 
-    it("moves j and k exactly one line shown at a time with every section open, and a thread whole in open, its lines pointing to items above among it", async () => {
-        for (const name of ["to read", "settled", "agents"]) {
-            await opened(name);
+    it("moves j and k exactly one line shown at a time with an agent's drawers open", async () => {
+        await review.goTo("━━ lup · dev · lup-impl/parser");
+        for (const drawer of ["since you approved", "messages", "trace"]) {
+            await dashboard.keys.press(["]", drawer === "since you approved" ? "s" : drawer === "messages" ? "M" : "v"]);
+            await review.until(`go to the ${drawer}`, (view, wanted) => view.state.doc.lineAt(view.state.selection.main.head).text.startsWith(wanted), drawer);
+            await dashboard.keys.press(["z", "o"]);
         }
-        await review.goTo("━━ @transcript-reader · The transcript reader · lup-impl/parser holds · working");
-        await dashboard.keys.press(["z", "o"]);
-        await review.holds("↑ @51 question · in waiting on you · gd goes there");
+        await to("first");
+        expect(await stepped("j")).toEqual([]);
+        await to("last");
+        expect(await stepped("k")).toEqual([]);
+    });
+
+    it("moves j and k exactly one line shown at a time in a thread's own buffer", async () => {
+        await dashboard.openRow("@transcript-reader");
+        await review.until("read the thread whole", (view) => view.state.doc.toString().startsWith("━━ @transcript-reader") && !view.state.doc.toString().includes("reading…"));
         await to("first");
         expect(await stepped("j")).toEqual([]);
         await to("last");
