@@ -47,13 +47,8 @@ export interface DemoOptions {
     grows?: number;
     /** How many seconds after the page first asks for the approval's files their types are read: long enough to watch by default. */
     typesRead?: number;
-    /**
-     * Open the review as one buffer grouped by agent (`?panes=off`). Left out, the address asks for it grouped by thread
-     * (`?threads`), which most of these tests drive.
-     */
-    byAgent?: boolean;
-    /** Open the review in two panes (`page/src/panes.ts`): as the operator's page opens, its address asking nothing (`opened`), or by thread (`?panes=threads`); it takes the place of `byAgent`. */
-    panes?: "opened" | "threads";
+    /** Open the review as one buffer beside the overview (`?panes=off`). Left out, it opens as the operator's page does, in two panes (`page/src/panes.ts`). */
+    oneBuffer?: boolean;
 }
 
 /** A demo running, until it's closed. */
@@ -101,12 +96,8 @@ export async function demo(options: DemoOptions = {}): Promise<Demo> {
     }
     const served = await start("uv", args, { what: "`lup-dashboard demo`", cwd: ROOT });
     const url = new URL(served.first);
-    if (options.panes === "threads") {
-        url.searchParams.set("panes", options.panes);
-    } else if (options.byAgent === true) {
+    if (options.oneBuffer === true) {
         url.searchParams.set("panes", "off");
-    } else if (options.panes === undefined) {
-        url.searchParams.set("threads", "");
     }
     return { url: url.href, close: served.stop, [Symbol.asyncDispose]: served.stop };
 }

@@ -39,26 +39,35 @@ export interface Paced<T> {
 
 /**
  * Return what's shown of `value`, given at `now`, `paced` having shown what it shows since its `at`: `value` itself
- * where `every` has passed since, taken at `now`; else what was shown, and how long until `value` is due.
+ * where `every` has passed since and the render it's given in was `asked` for, taken at `now`; else what was shown, and
+ * how long until `value` is due.
  */
-export function paced<T>(was: Paced<T>, value: T, now: number, every: number): { paced: Paced<T>; due: number | null } {
+export function paced<T>(was: Paced<T>, value: T, now: number, every: number, asked: boolean = true): { paced: Paced<T>; due: number | null } {
     if (value === was.shown) {
         return { paced: was, due: null };
     }
     const due = was.at + every - now;
-    return due <= 0 ? { paced: { shown: value, at: now }, due: null } : { paced: was, due };
+    return due <= 0 && asked ? { paced: { shown: value, at: now }, due: null } : { paced: was, due: Math.max(due, 0) };
 }
 
 /**
  * `value`, taken no sooner than `every()` milliseconds after it was last taken: at once where it's been that long, else
  * once it has, as it stands then. What's laid out from it is laid out no more often, however often it's given anew,
  * as what the host answers at each hook of agents at work.
+ *
+ * Taken only in a render asked for by what it depends on, `value` given anew or its own timer, never as time alone has
+ * passed: a render a state set to what it held asks for, as the cursor's at a key that doesn't move it, may be one React
+ * drops, keeping its hooks' state and not its effects, so what was laid out from a value taken there would never reach
+ * the effect putting it in the editor, whose dependencies say it has (`bailoutHooks`, `react-dom`).
  */
 export function usePaced<T>(value: T, every: () => number): T {
     const kept = useRef<Paced<T>>({ shown: value, at: 0 });
     const waiting = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const [, wake] = useState(0);
-    const next = paced(kept.current, value, Date.now(), every());
+    const [woken, wake] = useState(0);
+    const last = useRef({ value, woken });
+    const asked = last.current.value !== value || last.current.woken !== woken;
+    last.current = { value, woken };
+    const next = paced(kept.current, value, Date.now(), every(), asked);
     kept.current = next.paced;
     if (next.due !== null && waiting.current === null) {
         waiting.current = setTimeout(() => {

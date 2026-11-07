@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { open, type Dashboard } from "./dashboard.ts";
 import { demo, type Demo } from "./demo.ts";
 import type { Review } from "./review.ts";
+import { DEMO_ITEM } from "./typing.ts";
 
 let served: Demo;
 let dashboard: Dashboard;
@@ -13,7 +14,7 @@ beforeAll(async () => {
     served = await demo({ size: 0 });
     dashboard = await open(served.url);
     review = await dashboard.review();
-    await review.holds("── @66 note · lup-impl/explore-auth");
+    await review.holds(DEMO_ITEM);
     await review.settled(1500);
 });
 
