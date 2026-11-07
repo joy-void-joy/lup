@@ -13,6 +13,7 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from lup.types import Model
+from lup_dev.host.on_trial import CopySwitching, PickBranches, SwitchCopy, TrialSaid
 from lup_dev.host.protocol import (
     Holding,
     Listed,
@@ -69,14 +70,7 @@ from lup_dev.inbox.threaded import (
 )
 from lup_dev.policy.since import ReviewSince, ShowSince, Since, SinceReviewed
 from lup_dev.policy.waits import LandingsWaiting, ShowLandings
-from lup_dev.switching import (
-    CopiesListed,
-    CopySwitching,
-    ListCopies,
-    SwitchCopy,
-    TrialSaid,
-)
-from lup_dev.trial import PickBranches
+from lup_dev.switching import CopiesListed, ListCopies
 
 type Asked = Annotated[
     ListLaunches

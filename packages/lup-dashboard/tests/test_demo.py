@@ -9,6 +9,7 @@ import pytest
 
 from lup_dashboard.demo import FIX_CLOCK, Demo
 from lup_dev.clock import Clock
+from lup_dev.host.on_trial import CopySwitching, SwitchCopy
 from lup_dev.host.protocol import Listed, ListLaunches, Refused
 from lup_dev.inbox.protocol import (
     Context,
@@ -31,7 +32,7 @@ from lup_dev.policy.since import (
     ViewedFile,
 )
 from lup_dev.policy.waits import LandingsWaiting, ShowLandings
-from lup_dev.switching import CopiesListed, CopySwitching, ListCopies, SwitchCopy
+from lup_dev.switching import CopiesListed, ListCopies
 from lup_ledger.parties import Conversation
 
 LUP = Path("/home/op/lup.git")

@@ -16,6 +16,7 @@ from lup_dev.approval import Approval, WorkspaceTool, approved
 from lup_dev.copies import Copies, Kept
 from lup_dev.host.client import Detached, HostClient
 from lup_dev.host.dashboard import DashboardShown
+from lup_dev.host.on_trial import CopySwitching, LastSwitch, SwitchCopy
 from lup_dev.host.protocol import HostError, Listed, ListLaunches, Reply, Request
 from lup_dev.layout import CopyLayout, HostLayout, Layout
 from lup_dev.snapshots import Snapshots, written
@@ -25,10 +26,8 @@ from lup_dev.switching import (
     CopiesAnswering,
     CopiesListed,
     CopySwitch,
-    CopySwitching,
     FellBack,
     Fetched,
-    LastSwitch,
     ListCopies,
     Pages,
     Processes,
@@ -36,7 +35,6 @@ from lup_dev.switching import (
     Serving,
     Started,
     Stayed,
-    SwitchCopy,
     Switched,
     Switching,
     assets,

@@ -36,6 +36,15 @@ from lup_dev.composing import Composed, Unmerged, apart
 from lup_dev.copies import Copies
 from lup_dev.errors import LupDevError
 from lup_dev.git import Git
+from lup_dev.host.on_trial import (
+    AcceptBranch,
+    CopySwitching,
+    DropBranch,
+    ListTrial,
+    PickBranches,
+    TrialListed,
+    TrialSaid,
+)
 from lup_dev.host.protocol import Branches, HostError, Reply
 from lup_dev.host.service import Handler
 from lup_dev.inbox.delivery import Delivery
@@ -43,24 +52,12 @@ from lup_dev.inbox.store import cited
 from lup_dev.layout import CopyLayout, Layout
 from lup_dev.policy.landing import LandingTools, Turns
 from lup_dev.snapshots import Snapshots
-from lup_dev.switching import (
-    CopySwitching,
-    TrialSaid,
-    host_copies,
-    last_switch,
-    needs_ledger,
-    own_repository,
-)
+from lup_dev.switching import host_copies, last_switch, needs_ledger, own_repository
 from lup_dev.trial import (
-    AcceptBranch,
-    DropBranch,
-    ListTrial,
     OnTrial,
     Origin,
-    PickBranches,
     Plan,
     Trial,
-    TrialListed,
     Trials,
     accepted,
     files_said,

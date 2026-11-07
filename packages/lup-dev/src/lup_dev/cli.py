@@ -110,6 +110,16 @@ from lup_dev.host.dashboard import (
     Showing,
 )
 from lup_dev.host.names import shaped
+from lup_dev.host.on_trial import (
+    AcceptBranch,
+    BranchListed,
+    DropBranch,
+    LastSwitch,
+    ListTrial,
+    PickBranches,
+    TrialListed,
+    TrialSaid,
+)
 from lup_dev.host.protocol import (
     Branches,
     GitHubRepository,
@@ -295,23 +305,13 @@ from lup_dev.stored import read_model, write_model
 from lup_dev.switching import (
     CopiesAnswering,
     CopySwitch,
-    LastSwitch,
     Programs,
     Serving,
     Switch,
     Switched,
     Switching,
-    TrialSaid,
     host_starter,
     restore_detached,
-)
-from lup_dev.trial import (
-    AcceptBranch,
-    BranchListed,
-    DropBranch,
-    ListTrial,
-    PickBranches,
-    TrialListed,
 )
 from lup_dev.trial import named as in_sentence
 from lup_dev.trying import (

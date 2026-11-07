@@ -24,7 +24,7 @@ What's kept per version (`Version`) is how a copy built for one stays kept
 
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
@@ -33,7 +33,7 @@ from lup_dev.approval import approved_branches
 from lup_dev.composing import Apart, Composed, Unmerged, dedupe
 from lup_dev.git import Git, GitError, refs_astray
 from lup_dev.host.courier import Conversation as Caller
-from lup_dev.host.protocol import Request
+from lup_dev.host.on_trial import BranchListed, TrialListed
 from lup_dev.stored import read_model, write_model
 from lup_ledger.parties import Conversation
 
@@ -408,33 +408,6 @@ class Origin(Model):
         )
 
 
-class BranchListed(Model):
-    """One branch on trial, as a page shows it."""
-
-    branch: str
-    tip: str
-    subject: str = ""
-    landed: datetime
-    within: bool = False
-    """It's in `live`."""
-    out: bool = False
-    """The operator took it out."""
-    conflict: str = ""
-    """What keeps it out, where it doesn't merge; empty where it does."""
-    built: bool = False
-    """A copy of `dev` and it alone is kept: picking it alone is immediate."""
-
-
-class TrialListed(Model):
-    """What's on trial, as a page shows it."""
-
-    integration: str
-    running: str
-    dev: str | None = None
-    live: str | None = None
-    branches: list[BranchListed] = []
-
-
 def trial_listed(
     layout: Layout, repository: Path, built: list[str]
 ) -> TrialListed | None:
@@ -475,40 +448,3 @@ def trial_listed(
             for each in trial.branches
         ],
     )
-
-
-class ListTrial(Request, reads=False):
-    """Say what's on trial in a repository: the operator's alone."""
-
-    kind: Literal["trial"] = "trial"
-    repository: Path | None = None
-    """The repository's git directory; none for lup's own, which the service runs
-    from."""
-
-
-class PickBranches(Request, reads=False):
-    """Run `dev` plus exactly these branches: the operator's alone, through a terminal or the plain page."""
-
-    kind: Literal["trial-pick"] = "trial-pick"
-    branches: list[str]
-    repository: Path | None = None
-    """The repository's git directory; none for lup's own."""
-
-
-class AcceptBranch(Request, reads=False):
-    """Merge a branch on trial onto `dev`, and clean up after it, as a landing does: the operator's alone."""
-
-    kind: Literal["trial-accept"] = "trial-accept"
-    branch: str
-    repository: Path | None = None
-    """The repository's git directory; none for lup's own."""
-
-
-class DropBranch(Request, reads=False):
-    """Take a branch off trial: the operator's alone. What they say on it reaches who landed it, or waits for them."""
-
-    kind: Literal["trial-drop"] = "trial-drop"
-    branch: str
-    words: str = ""
-    repository: Path | None = None
-    """The repository's git directory; none for lup's own."""

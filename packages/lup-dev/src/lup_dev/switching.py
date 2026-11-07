@@ -61,13 +61,14 @@ from lup_dev.conversions import snapshot
 from lup_dev.copies import Copies, Kept, linked
 from lup_dev.host.client import Detached, HostClient
 from lup_dev.host.dashboard import DashboardShown, ShowDashboard
+from lup_dev.host.on_trial import CopySwitching, LastSwitch, SwitchCopy, TrialListed
 from lup_dev.host.protocol import HostError, Listed, ListLaunches, Reply, Request
 from lup_dev.host.service import Handler
 from lup_dev.layout import CopyLayout, HostLayout, JudgeLayout, Layout
 from lup_dev.settings import LupDevSettings
 from lup_dev.snapshots import Restored, Snapshot, Snapshots, written
 from lup_dev.stored import read_model, write_model
-from lup_dev.trial import TrialListed, trial_listed
+from lup_dev.trial import trial_listed
 from lup_ledger.environment.layout import LedgerLayout
 
 if TYPE_CHECKING:
@@ -528,16 +529,6 @@ type Switch = Switched | Stayed | FellBack
 """What a switch came to."""
 
 
-class LastSwitch(Model):
-    """What came of the last switch, kept for whoever didn't watch it."""
-
-    commit: str
-    at: datetime
-    said: str
-    answered: bool
-    """Whether the copy switched to answers."""
-
-
 class Switcher(ABC):
     """What moves the host service to a copy, and back where it doesn't answer."""
 
@@ -892,33 +883,6 @@ class CopiesListed(Reply):
     trial: TrialListed | None = None
     """What's on trial, to pick from; none where the repository computes no
     running branch."""
-
-
-class SwitchCopy(Request, reads=False):
-    """Move the host service to the copy of `commit`, in a process of its own that outlives this service; refused here where it would take restoring the ledger, which the terminal's command says the cost of first."""
-
-    kind: Literal["copy-switch"] = "copy-switch"
-    commit: str
-
-
-class CopySwitching(Reply):
-    """The switch is under way: this service is about to stop, and a page asks the next."""
-
-    kind: Literal["copy-switching"] = "copy-switching"
-    commit: str
-    log: Path
-    """Where the switch says what came of it, for one that doesn't answer."""
-    last: LastSwitch | None = None
-    """The switch before this one, for a page waiting to tell them apart."""
-
-
-class TrialSaid(Reply):
-    """What came of what was asked of what's on trial: in words, what's on trial then, and the switch it set going, where it did, which a page waits on."""
-
-    kind: Literal["trial-said"] = "trial-said"
-    said: str = ""
-    listed: TrialListed | None = None
-    switching: CopySwitching | None = None
 
 
 def last_switch(layout: Layout) -> LastSwitch | None:

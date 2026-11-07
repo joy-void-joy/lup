@@ -64,6 +64,7 @@ from lup_dev.declaration.resolve import Resolved
 from lup_dev.errors import LupDevError
 from lup_dev.host.courier import Courier, Heard, Telling, Waker
 from lup_dev.host.names import Names
+from lup_dev.host.on_trial import LastSwitch, PickBranches
 from lup_dev.host.protocol import HostError, Looks, Refused, Register, Reply, Request
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Recorded
@@ -96,8 +97,7 @@ from lup_dev.layout import CopyLayout, Layout
 from lup_dev.policy.waits import Waits
 from lup_dev.policy.waits import routes as waits_routes
 from lup_dev.stored import write_model
-from lup_dev.switching import CopiesAnswering, CopySwitch, LastSwitch, host_copies
-from lup_dev.trial import PickBranches
+from lup_dev.switching import CopiesAnswering, CopySwitch, host_copies
 from lup_dev.worker import RepositoryModules
 from lup_ledger.parties import Conversation
 

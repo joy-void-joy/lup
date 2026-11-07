@@ -12,17 +12,16 @@ from lup_dev.approval import Approval, ReleaseTool
 from lup_dev.composing import apart
 from lup_dev.copies import Copies, Kept
 from lup_dev.git import Git
+from lup_dev.host.on_trial import BranchListed, TrialListed
 from lup_dev.host.protocol import Branches, HostError
 from lup_dev.layout import CopyLayout, Layout
 from lup_dev.policy.landing import Turns
 from lup_dev.snapshots import Snapshot
 from lup_dev.stored import write_model
 from lup_dev.trial import (
-    BranchListed,
     OnTrial,
     Plan,
     Trial,
-    TrialListed,
     Trials,
     message_of,
     moved_on,
@@ -39,8 +38,8 @@ if TYPE_CHECKING:
 
     from conftest import FakeClock, Shell
 
+    from lup_dev.host.on_trial import TrialSaid
     from lup_dev.snapshots import Snapshots
-    from lup_dev.switching import TrialSaid
 
 
 AT = datetime(2026, 11, 6, tzinfo=UTC)

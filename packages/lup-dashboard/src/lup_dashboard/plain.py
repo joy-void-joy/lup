@@ -30,8 +30,8 @@ from lup.types import Model
 if TYPE_CHECKING:
     from datetime import datetime
 
-    from lup_dev.switching import CopiesListed, CopyListed, CopySwitching
-    from lup_dev.trial import BranchListed, TrialListed
+    from lup_dev.host.on_trial import BranchListed, CopySwitching, TrialListed
+    from lup_dev.switching import CopiesListed, CopyListed
 
 STYLE = """
 body { font: 15px/1.5 ui-monospace, monospace; margin: 2em auto; max-width: 70em; padding: 0 1em; }

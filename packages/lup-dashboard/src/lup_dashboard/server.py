@@ -51,18 +51,12 @@ from lup_dashboard.api import (
 from lup_dashboard.host import Host
 from lup_dashboard.plain import copies_page, picked, signing_in, switching_page
 from lup_dev.host.dashboard import hosted
+from lup_dev.host.on_trial import CopySwitching, PickBranches, SwitchCopy, TrialSaid
 from lup_dev.host.protocol import HostError, Refused
 from lup_dev.inbox.protocol import AnswerApproval, Reviewed, SendDraft, Settled
 from lup_dev.inbox.store import Approval, Item
 from lup_dev.settings import Address
-from lup_dev.switching import (
-    CopiesListed,
-    CopySwitching,
-    ListCopies,
-    SwitchCopy,
-    TrialSaid,
-)
-from lup_dev.trial import PickBranches
+from lup_dev.switching import CopiesListed, ListCopies
 
 
 class Access(Model):
