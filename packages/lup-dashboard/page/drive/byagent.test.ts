@@ -1,42 +1,34 @@
-// The review as one buffer grouped by agent, as its address may ask (`?panes=off`), and grouped by thread only where it asks
-// that (`docs/dashboard.md`, *The review*). The other tests drive the threads' layout, which `demo` asks for unless told otherwise.
+// The review by agent, as the page opens and as one buffer beside the overview, the fallback its address may ask for
+// (`?panes=off`; `docs/dashboard.md`, *The review*): what agents tell each other is in their messages drawers, each way alike.
+// A fold-wise selection lasting as the review is laid out anew, and what only the one buffer does.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { open, type Dashboard } from "./dashboard.ts";
-import { demo, type Demo } from "./demo.ts";
+import { demo, type Demo, type DemoOptions } from "./demo.ts";
 import type { Review } from "./review.ts";
 import { DEMO_ITEM } from "./typing.ts";
 
-/** A line opening a section of the threads' layout, as it writes one. */
-const SECTION = /^(waiting on you|new|open|to read|settled|agents) · /;
+const ways: [string, DemoOptions][] = [
+    ["as the page opens", { size: 0 }],
+    ["as one buffer", { size: 0, oneBuffer: true }],
+];
 
-let served: Demo;
-let dashboard: Dashboard;
-let review: Review;
+describe.each(ways)("the review by agent, %s", (_way, options) => {
+    let served: Demo;
+    let dashboard: Dashboard;
+    let review: Review;
 
-beforeAll(async () => {
-    served = await demo({ size: 0, byAgent: true });
-    dashboard = await open(served.url);
-    review = await dashboard.review();
-    await review.holds(DEMO_ITEM);
-    await review.settled();
-});
-
-afterAll(async () => {
-    await dashboard?.close();
-    await served?.close();
-});
-
-describe("the review grouped by agent", () => {
-    it("draws no section of the threads' layout, and throws nothing", async () => {
-        const lines = (await review.text()).split("\n");
-        expect(lines.filter((each) => SECTION.test(each))).toEqual([]);
-        expect(dashboard.thrown).toEqual([]);
+    beforeAll(async () => {
+        served = await demo(options);
+        dashboard = await open(served.url);
+        review = await dashboard.review();
+        await review.holds(DEMO_ITEM);
+        await review.settled();
     });
 
-    it("asks the host for no threads", async () => {
-        const asked = await dashboard.page.evaluate(() => new URLSearchParams(location.search).has("threads"));
-        expect(asked).toBe(false);
+    afterAll(async () => {
+        await dashboard?.close();
+        await served?.close();
     });
 
     it("shows what agents tell each other in both their messages drawers, and no copy of it among the operator's items", async () => {
@@ -51,6 +43,7 @@ describe("the review grouped by agent", () => {
         const summaries = lines.filter((each) => /^(messages|trace) · /.test(each));
         expect(summaries[0]).toMatch(/^messages · /);
         expect(summaries[1]).toMatch(/^trace · /);
+        expect(dashboard.thrown).toEqual([]);
     });
 
     it("writes a comment on what another agent wrote to them, whichever drawer it's written in, saying so", async () => {
@@ -80,6 +73,91 @@ describe("the review grouped by agent", () => {
         expect(await dashboard.page.locator(".bar .said").innerText()).toContain("lup-impl/explore-auth");
         await review.until("say the drawer holds nothing new", (view, was) => !view.state.doc.toString().includes(was), before);
         expect((await review.text()).split("\n").filter((each) => each === trace).length).toBeGreaterThan(0);
+        expect(dashboard.thrown).toEqual([]);
+    });
+});
+
+describe("the review as one buffer", () => {
+    let served: Demo;
+    let dashboard: Dashboard;
+    let review: Review;
+
+    /** The overview's rows, as it draws them. */
+    const rows = () => dashboard.page.evaluate(() => [...document.querySelectorAll(".outline .outline-row")].map((each) => each.textContent ?? ""));
+
+    beforeAll(async () => {
+        // Nothing of the demo's own comes as a key of this goes down, which reads what's laid out.
+        served = await demo({ size: 0, oneBuffer: true, arrives: 3600, grows: 3600 });
+        dashboard = await open(served.url);
+        review = await dashboard.review();
+        await review.holds(DEMO_ITEM);
+        await review.settled();
+    });
+
+    afterAll(async () => {
+        await dashboard?.close();
+        await served?.close();
+    });
+
+    it("lies beside the overview, every agent and their items in the review's order, and no list", async () => {
+        expect(await dashboard.page.locator(".panes").count()).toBe(0);
+        const listed = await rows();
+        expect(listed.some((each) => each.includes("lup-impl/parser") || each.includes("parser"))).toBe(true);
+        expect(listed.some((each) => each.includes("@66 note"))).toBe(true);
+        expect(listed.some((each) => each.startsWith("▪"))).toBe(true);
+        expect(dashboard.thrown).toEqual([]);
+    });
+
+    it("goes there from a click on an entry, or with gO and Enter, the keyboard back in the review", async () => {
+        await dashboard.page.locator(".outline-row", { hasText: "@66 note" }).click();
+        await review.until("put the cursor on the item", (view) => view.state.doc.lineAt(view.state.selection.main.head).text.startsWith("── @66 note"));
+        await dashboard.keys.press(["g", "O"]);
+        await dashboard.page.waitForFunction(() => document.activeElement?.closest(".outline") != null, undefined, { polling: 50 });
+        await dashboard.keys.press(["k", "Enter"]);
+        await review.until("put the cursor on the entry above", (view) => !view.state.doc.lineAt(view.state.selection.main.head).text.startsWith("── @66 note"));
+        await dashboard.page.waitForFunction(() => document.activeElement?.closest(".review-buffer") != null, undefined, { polling: 50 });
+    });
+
+    it("goes from an agent's name to their own views with gd, their conversation opened, and back with Ctrl+O", async () => {
+        await review.goTo("━━ lup · dev · lup-impl/explore-auth");
+        const banner = await review.line();
+        await review.evaluate((view, name) => {
+            const at = view.state.doc.lineAt(view.state.selection.main.head);
+            view.dispatch({ selection: { anchor: at.from + at.text.indexOf(name) + 2 } });
+        }, "lup-impl/explore-auth");
+        await review.settled(300, 0);
+        await dashboard.keys.press(["g", "d"]);
+        await review.until("on explore-auth's conversation", (view) => view.state.doc.lineAt(view.state.selection.main.head).text.startsWith("trace ·"));
+        await dashboard.keys.press(["Control+o"]);
+        await review.until("back on their banner", (view, was) => view.state.doc.lineAt(view.state.selection.main.head).text === was, banner);
+    });
+
+    it("says gt has nowhere to go, reading no threads", async () => {
+        await review.goTo("── @51 question");
+        await review.settled(300, 0);
+        await dashboard.keys.press(["g", "t"]);
+        await dashboard.page.waitForFunction(() => document.querySelector(".bar .said")?.textContent?.startsWith("gt: no thread here") === true);
+        expect(await review.line()).toContain("@51 question");
+    });
+});
+
+describe("a fold-wise selection as the review is laid out anew, in headless Chromium", () => {
+    it("is kept, its head under a closed fold, and acts as it did", async () => {
+        // The late question arriving as the selection's made, as what arrives does on the host.
+        await using served = await demo({ size: 6, arrives: 6 });
+        await using dashboard = await open(served.url);
+        const review = await dashboard.review();
+        await review.holds(DEMO_ITEM);
+        await review.settled(1500);
+        await dashboard.keys.press([" ", "F", "M"]);
+        await review.inMode("visual");
+        const before = await review.text();
+        await review.until("was laid out anew", (view, was) => view.state.doc.toString() !== was, before);
+        await dashboard.page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+        expect(await review.mode()).toBe("visual");
+        await dashboard.keys.press(["d"]);
+        await dashboard.page.waitForFunction(() => document.querySelector(".status")?.textContent?.includes("mark their messages read") === true);
+        expect(await review.decorated("mark-done")).toBeGreaterThan(1);
         expect(dashboard.thrown).toEqual([]);
     });
 });

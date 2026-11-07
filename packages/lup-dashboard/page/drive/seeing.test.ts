@@ -8,10 +8,10 @@ import { open, type Dashboard } from "./dashboard.ts";
 import { demo, type Demo } from "./demo.ts";
 import type { Review } from "./review.ts";
 
-/** A line of each thread's header in new, which says it's new until it's read. */
-const SURVEY = "━━ @auth-survey · Where auth is checked · lup-impl/explore-auth holds · 1 new";
-const VOICE = "━━ @guidance-voice · the session's own · guidance-voice holds · 1 new";
-const LEAD = "━━ @lup-impl · the session's own · lup-impl holds · 1 new";
+/** The header of an item of each agent's, which says it's new until it's read. */
+const SURVEY = "── @66 note · new · ";
+const VOICE = "── @56 turn ended · edited · new · ";
+const LEAD = "── @62 note · new · ";
 
 let served: Demo;
 let dashboard: Dashboard;
@@ -21,7 +21,8 @@ let told: Record<string, unknown>[] = [];
 
 beforeEach(async () => {
     told = [];
-    served = await demo({ size: 0 });
+    // Nothing of the demo's own comes meanwhile: what's on screen stays there as the page's clock is moved.
+    served = await demo({ size: 0, arrives: 3600, grows: 3600, typesRead: 0 });
     dashboard = await open(served.url, { clock: true });
     dashboard.page.on("request", (request: Request) => {
         if (request.method() === "POST" && request.url().endsWith("/api/ask")) {
@@ -48,8 +49,21 @@ const passes = (ms: number) => dashboard.page.clock.runFor(ms);
 /** Go to `text`, in the middle of the view, all of what's under it there. */
 const onScreen = async (text: string) => {
     await review.goTo(text);
+    // Its line drawn first: `zz` asks vim where the line is on screen, which it can't say of one a search hasn't brought in yet.
+    await review.until(
+        "brought the line in",
+        (view) => {
+            const at = view.state.selection.main.head;
+            return view.coordsAtPos(at) !== null;
+        },
+    );
     await dashboard.keys.press(["z", "z"]);
     await review.settled(300);
+    await review.until("had the line in view", (view) => {
+        const place = view.coordsAtPos(view.state.selection.main.head);
+        const within = view.scrollDOM.getBoundingClientRect();
+        return place !== null && place.top >= within.top && place.bottom <= within.bottom;
+    });
 };
 
 /** Go to the end of the review, or its start, and give the page time to say what moved. */
@@ -73,23 +87,36 @@ describe("what's new is read by being on screen, in headless Chromium", () => {
     });
 
     it("leaves what's on screen new while it's on screen, and reads it as it leaves", async () => {
-        await onScreen("── @66 note · lup-impl/explore-auth");
+        await onScreen("── @66 note");
         await passes(10_000);
         await review.settled(300);
         expect(moved()).toEqual([]);
         await review.holds(SURVEY);
-        await away("G");
-        const [mark] = moved();
+        await away("g", "g");
+        await expect.poll(() => moved().filter((each) => each.up_to === "66").length, { timeout: 15_000 }).toBeGreaterThan(0);
+        const [mark] = moved().filter((each) => each.up_to === "66");
         expect(mark?.seen).toBe(true);
-        expect(mark?.key.node).toEqual(expect.any(Number));
-        expect(mark?.up_to).toBe("66");
-        // Read, its thread no longer says it's new, and the item stays where it can be read, still to mark done.
+        // Their agent's mark, as what's listed reads threads and this isn't one's own buffer.
+        expect(mark?.key.node).toBeUndefined();
+        expect(mark?.key.session).toEqual(expect.any(String));
+        // Read, it no longer says it's new, and the item stays where it can be read, still to mark done.
         await gone(SURVEY);
         await review.holds("@66 note");
     });
 
+    it("moves the thread's own mark in its own buffer, as another takes the screen", async () => {
+        await dashboard.openRow("@auth-survey");
+        await review.until("read the thread whole", (view) => view.state.doc.toString().startsWith("━━ @auth-survey") && !view.state.doc.toString().includes("reading…"));
+        await onScreen("── @66 note");
+        await passes(10_000);
+        await review.settled(300);
+        await dashboard.openRow("what's for you");
+        await review.holds("── @54 approval");
+        await expect.poll(() => moved().filter((each) => typeof each.key.node === "number" && each.up_to === "66").length, { timeout: 15_000 }).toBeGreaterThan(0);
+    });
+
     it("leaves what was scrolled past quickly new", async () => {
-        await onScreen("── @56 turn ended · guidance-voice");
+        await onScreen("── @56 turn ended");
         await passes(500);
         await away("G");
         expect(moved()).toEqual([]);
@@ -97,7 +124,7 @@ describe("what's new is read by being on screen, in headless Chromium", () => {
     });
 
     it("counts no time while they're writing a comment, what's beside it staying new", async () => {
-        await onScreen("── @62 note · lup-impl");
+        await onScreen("── @62 note");
         await review.comment();
         await passes(10_000);
         await dashboard.keys.press(["Escape"]);
@@ -120,13 +147,13 @@ describe("what's new is read by being on screen, in headless Chromium", () => {
         await review.settled(300);
         await passes(10_000);
         await away("g", "g");
-        expect(ofTheDrawer().length).toBeGreaterThan(0);
+        await expect.poll(() => ofTheDrawer().length, { timeout: 15_000 }).toBeGreaterThan(0);
         expect(ofTheDrawer().every((each) => each.seen)).toBe(true);
         await gone("messages · 5 · 5 new");
     });
 
     it("reads what's been seen as the tab is hidden, whatever's still on screen", async () => {
-        await onScreen("── @66 note · lup-impl/explore-auth");
+        await onScreen("── @66 note");
         await passes(10_000);
         const ofIt = () => moved().filter((each) => each.up_to === "66");
         expect(ofIt()).toEqual([]);
@@ -135,6 +162,6 @@ describe("what's new is read by being on screen, in headless Chromium", () => {
             document.dispatchEvent(new Event("visibilitychange"));
         });
         await review.settled(300);
-        expect(ofIt()).toHaveLength(1);
+        await expect.poll(() => ofIt().length, { timeout: 15_000 }).toBe(1);
     });
 });

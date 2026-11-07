@@ -42,6 +42,8 @@ export interface Dashboard extends AsyncDisposable {
     thrown: Error[];
     /** The review's editor, once the page has made it. */
     review(): Promise<Review>;
+    /** In panes, go into the list, open the first row saying `text`, found by vim's search there, and return once the keyboard's in its buffer. */
+    openRow(text: string): Promise<void>;
     /**
      * Route what the page asks of `url` through `handler`, as `page.route` does, and return once the page's requests
      * reach a route. `page.route` returns before that's so: a key pressed straight after it, on a loaded machine, can
@@ -101,6 +103,17 @@ export async function open(url: string, options: OpenOptions = {}): Promise<Dash
             display: screen,
             thrown,
             review: () => review(page, thrown),
+            async openRow(text) {
+                await keys(session).press([" ", "w", "h"]);
+                await page.waitForFunction(() => document.activeElement?.closest(".list-buffer") != null, undefined, { polling: 50 });
+                await page.keyboard.press("g");
+                await page.keyboard.press("g");
+                await page.keyboard.press("/");
+                await page.keyboard.type(text.replaceAll("/", "\\/"));
+                await page.keyboard.press("Enter");
+                await page.keyboard.press("Enter");
+                await page.waitForFunction(() => document.activeElement?.closest(".review-buffer") != null, undefined, { polling: 50 });
+            },
             route: (url, handler) => routed(page, url, handler),
             async slow(rate) {
                 await session.send("Emulation.setCPUThrottlingRate", { rate });

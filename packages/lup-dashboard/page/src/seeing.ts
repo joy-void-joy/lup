@@ -122,7 +122,7 @@ export class Dwelling {
 
     /**
      * Return each mark that may move, as far as the first of its `sights` not yet seen, or held, and not past one still in
-     * `view` unless `leaving`, as the tab goes: so nothing folds or leaves its section while they're reading it. A mark is
+     * `view` unless `leaving`, as the tab goes: so nothing folds while they're reading it. A mark is
      * one position, so what's seen past what wasn't waits for it. Each is said once: `failed` says it again.
      */
     due(sights: readonly Sighted[], view: Viewing | null, leaving: boolean): Due[] {

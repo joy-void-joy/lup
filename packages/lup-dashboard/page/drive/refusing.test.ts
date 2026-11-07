@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { open, type Dashboard } from "./dashboard.ts";
 import { demo, type Demo } from "./demo.ts";
+import { DEMO_ITEM } from "./typing.ts";
 
 let served: Demo;
 let dashboard: Dashboard;
@@ -13,10 +14,9 @@ let dashboard: Dashboard;
 beforeAll(async () => {
     served = await demo({ size: 0 });
     dashboard = await open(served.url);
-    // At rest before a draft is kept: the page keeps one of its own as it loads, without the demo's park on an item of
-    // the pile, and on a loaded machine that takes the place of one kept meanwhile.
+    // At rest before a draft is kept: on a loaded machine what the page keeps as it loads takes the place of one kept meanwhile.
     const review = await dashboard.review();
-    await review.holds("── @66 note · lup-impl/explore-auth");
+    await review.holds(DEMO_ITEM);
     await review.settled(1500);
 });
 
@@ -39,7 +39,7 @@ async function loadedOn(draft: { done?: number[]; declined?: number[] }): Promis
     }, draft);
     await dashboard.page.reload();
     const review = await dashboard.review();
-    await review.holds("── @66 note · lup-impl/explore-auth");
+    await review.holds(DEMO_ITEM);
     await review.settled(1500);
 }
 
