@@ -38,7 +38,7 @@ import {
 } from "./review";
 import { currentTask } from "./views/adapters";
 import { mount } from "./views/index";
-import { NOTHING_WAITS, type BlocksTally, type Remote, type Running, type Shown } from "./views";
+import { instanceOf, NOTHING_WAITS, type BlocksTally, type Remote, type Running, type Shown } from "./views";
 
 export type { Showing };
 
@@ -68,6 +68,8 @@ export function bufferKey(showing: Showing): string {
             return `thread ${showing.number}`;
         case "party":
             return `party ${showing.name}`;
+        case "view":
+            return `view ${showing.repository} ${showing.module} ${showing.view}`;
         default:
             return showing.kind;
     }
@@ -503,6 +505,7 @@ export function listedByAgent(reading: ListReading): Row[] {
     for (const group of byName(groups.filter((each) => each.conversation === null), reading.called)) {
         rows.push(agentRow(group, 0, reading));
     }
+    rows.push(...viewRows(reading));
     if (threads !== null) {
         const done = threads.read.threads.filter(closedTask);
         if (done.length > 0) {
@@ -513,6 +516,22 @@ export function listedByAgent(reading: ListReading): Row[] {
         }
     }
     return rows;
+}
+
+/**
+ * Return a row for each view a repository's modules place under the repository rather than an agent: what its view says
+ * of itself and its marks, each its module's; the repository named where there are several; opening it as a buffer of
+ * its own.
+ */
+function viewRows(reading: ListReading): Row[] {
+    const { rows } = reading.looks;
+    return rows.map(({ repository, drawn }) => {
+        const opens: Showing = { kind: "view", repository, module: drawn.module, view: drawn.view, called: drawn.place.called };
+        const answer = reading.remote.get(instanceOf(repository, drawn.module, drawn.view, {}));
+        const words = (answer?.summary ?? []).map((each) => each.text).join("") || drawn.place.called;
+        const left: Stretch[] = [...(rows.length > 1 ? [{ text: `${repositoryNamed(repository)} ` }] : []), { text: words, look: "list-name" }];
+        return { id: bufferKey(opens), lines: [{ stretches: padded(left, { ...NOTHING, ...answer?.tally }) }], opens, says: drawn.place.called, writes: false };
+    });
 }
 
 /** Say how a thread stands in a word or two. */
@@ -671,6 +690,9 @@ export function bufferSpans(laid: Laid, showing: Showing): BufferSpan[] {
     if (showing.kind === "thread") {
         return [{ id: `thread ${showing.number}`, from: 0, to: laid.text.length, depth: 0 }];
     }
+    if (showing.kind === "view") {
+        return [{ id: bufferKey(showing), from: 0, to: laid.text.length, depth: 0 }];
+    }
     return [
         ...laid.groups.map((each) => ({
             id: each.thread === null ? `agent ${each.place.replace(/^(now|later) /, "")}` : `thread ${each.thread.thread.number}`,
@@ -788,6 +810,8 @@ export function titled(showing: Showing, reading: Pick<ListReading, "agents" | "
             const party = (reading.parties ?? PARTIES).find((each) => each.name === showing.name);
             return { name: party?.called ?? showing.name, whom: party?.whom ?? "" };
         }
+        case "view":
+            return { name: showing.called, whom: "a comment reaches whom its first line says" };
         case "thread": {
             const read = reading.threads?.read.threads.find((each) => each.thread.number === showing.number);
             if (read === undefined) {

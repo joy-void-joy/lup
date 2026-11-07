@@ -68,7 +68,8 @@ import { drawerMark, itemStanding, threadStanding } from "./outline";
 import { DRAFTED, GLYPHS } from "./Outline";
 import { linesOver, stickies, type Sticky } from "./stack";
 import { depths, levelled } from "./folds";
-import { carried, chainAt, findNode, implied, isMarked, marking, marksOn, movedInto, reachOf, reachedIn, type Act, type Destination, type Marked } from "./grammar";
+import { ask } from "./api";
+import { ACT, carried, chainAt, findNode, implied, isMarked, marking, marksOn, movedInto, reachOf, reachedIn, type Act, type Acting, type Destination, type Marked } from "./grammar";
 import { Listing, type ListHandle, type Viewed as ListViewed } from "./Panes";
 import { arrivalIn, bufferKey, bufferSpans, conversationNamed, listedByAgent, listedByThread, marginFolds, spanAt, titled, type PanesBy, type Showing } from "./panes";
 import { ThreadPalette } from "./Palette";
@@ -108,6 +109,7 @@ import {
     heading,
     isDrawer,
     isLetter,
+    isNobody,
     isRegion,
     isRemark,
     laid,
@@ -1123,7 +1125,7 @@ export function Review({
         pending,
         unfolded: (fold) => {
             const drawer = laidOut.drawers.find((each) => each.folds.some((own) => foldKey(own) === fold.key && own.kind === each.kind));
-            if (drawer !== undefined) {
+            if (drawer !== undefined && !isNobody(drawer.conversation)) {
                 told(drawer.conversation, drawer.kind);
             }
             // A thread's conversation, read as its fold opens: from where it was read, or what came before, whole.
@@ -2469,7 +2471,17 @@ export function Review({
      */
     function act(offer: Offer, conversation: Conversation | null) {
         void conversation;
-        say(`Nothing here does ${offer.says} yet: a module's actions come with #113's step 4.`);
+        if (offer.action !== ACT) {
+            say(`Nothing here does ${offer.says} yet: a module's actions come with #113's step 4.`);
+            return;
+        }
+        const argument = offer.argument as unknown as Acting;
+        void ask({ kind: ACT, repository: argument.repository, module: argument.module, action: argument.action, arguments: [argument.argument as never] })
+            .then((answer) => {
+                const one = answer.kind === "module-acted" ? answer.answers[0] : undefined;
+                say(answer.kind === "refused" ? `${offer.says}: ${answer.error}` : (one?.refused ?? (one?.said || offer.says)));
+            })
+            .catch((failed: unknown) => say(`${offer.says}: ${failed instanceof Error ? failed.message : String(failed)}`));
     }
 
     /** Return the folds of the item or the drawer `position` is in, as the editor holds them: those the fold keys reach. */

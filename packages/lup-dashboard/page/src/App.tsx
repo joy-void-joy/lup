@@ -25,7 +25,7 @@ import { everyone, launches, ring, running, type Activity, type Agent, type Runn
 import { ApiError, ask, type Asked, type OfCopy, type Replied } from "./api";
 import { cited } from "./comments";
 import { useNow, useSame, useThreads, useViews, useWatched, type ThreadAsked } from "./hooks";
-import { MOVE, markedPart, type Marked, type Moved, type Moving } from "./grammar";
+import { ACT, MOVE, markedPart, type Acting, type Marked, type Moved, type Moving } from "./grammar";
 import { feed, keyState } from "./editor";
 import { keyKind, reviewKeys, writtenKey, writtenVim, type Here, type Part } from "./keys";
 import { Keys } from "./Keys";
@@ -452,7 +452,7 @@ export function App() {
                         ? [{ repository: conversation.repository, module: each.module, view: each.view, argument: { runtime: conversation.runtime, session: conversation.session, agent: conversation.agent ?? null } }]
                         : [],
                 ),
-            ),
+            ).concat(looks.rows.map(({ repository, drawn }) => ({ repository, module: drawn.module, view: drawn.view, argument: {} as never }))),
         [live, looks],
     );
     const remote = useViews(useMemo(() => [...placed, ...loads], [placed, loads]));
@@ -999,15 +999,24 @@ export function App() {
      * one the host refused, or no request answers yet, stays drafted, said.
      */
     // lup: defer(issue=113, why="the page sends each mark's request at Ctrl+Enter until a module's actions are a door: then Ctrl+Enter has the host call each mark's declared action in the repository's process, so a send can't stop partway")
-    async function applying(marks: readonly Marked[]): Promise<{ applied: string[]; said: ReplyPart[] }> {
+    async function applying(marks: readonly Marked[], drafted: Draft): Promise<{ applied: string[]; said: ReplyPart[] }> {
         const applied: string[] = [];
         const said: ReplyPart[] = [];
         const reviews = new Map<string, { conversation: InboxConversation; place: Placing; decline: boolean; files: Viewed[]; ids: string[] }>();
         const moving = new Map<string, { repository: string; module: string; marks: { key: Record<string, unknown>; up_to: string | null; through: string | null; forward: boolean; seen: boolean }[]; ids: string[] }>();
         // What's moved from the pile, by where it goes: one request each, a thread opened once for all of them.
         const gathering = new Map<string, { thread: number | null; title: string | null; numbers: number[]; says: string; ids: string[] }>();
+        // Each module's action, with every mark of it, in the order first marked: one request each, which runs them together where it takes them so.
+        const acting = new Map<string, { repository: string; module: string; action: string; marks: Marked[] }>();
         for (const mark of marks) {
             switch (mark.action) {
+                case ACT: {
+                    const argument = mark.argument as unknown as Acting;
+                    const key = JSON.stringify([argument.repository, argument.module, argument.action]);
+                    const was = acting.get(key) ?? { repository: argument.repository, module: argument.module, action: argument.action, marks: [] };
+                    acting.set(key, { ...was, marks: [...was.marks, mark] });
+                    break;
+                }
                 case MOVE: {
                     const argument = mark.argument as unknown as Moving;
                     const key = JSON.stringify([argument.repository, argument.thread, argument.title]);
@@ -1101,6 +1110,42 @@ export function App() {
                 said.push(...marks.filter((mark) => each.ids.includes(mark.id)).map((mark) => markedPart(mark, called, threadNamed)));
             }
         }
+        // Each module's action, last, since one may move the host, which stops this one: its marks out of the draft the host
+        // keeps before it's asked, so it isn't done again from a draft kept from before, and back in where it's refused.
+        let keeping = drafted;
+        for (const each of acting.values()) {
+            const ids = new Set(each.marks.map((mark) => mark.id));
+            keeping = { ...keeping, marks: (keeping.marks ?? []).filter((mark) => !ids.has(mark.id)) };
+            const held = await answered({ kind: "inbox-keep-draft", draft: keeping }, (answer) => (answer.kind === "inbox-drafted" ? answer : null));
+            if ("refused" in held) {
+                said.push({ kind: "said", text: `${each.marks[0]?.says ?? each.action}: ${held.refused}` });
+                keeping = { ...keeping, marks: [...(keeping.marks ?? []), ...each.marks] };
+                continue;
+            }
+            const request: Asked = { kind: ACT, repository: each.repository, module: each.module, action: each.action, arguments: each.marks.map((mark) => (mark.argument as unknown as Acting).argument as never) };
+            const reply = await answered(request, (answer) => (answer.kind === "module-acted" ? answer : null));
+            if ("refused" in reply) {
+                said.push({ kind: "said", text: `${each.marks[0]?.says ?? each.action}: ${reply.refused}` });
+                keeping = { ...keeping, marks: [...(keeping.marks ?? []), ...each.marks] };
+                continue;
+            }
+            const told = new Set<string>();
+            each.marks.forEach((mark, at) => {
+                const answer = reply.shown.answers[at];
+                const refused = answer?.refused ?? null;
+                if (refused !== null) {
+                    keeping = { ...keeping, marks: [...(keeping.marks ?? []), mark] };
+                } else {
+                    applied.push(mark.id);
+                }
+                // A set of marks an action took together has the one answer.
+                const words = refused === null ? (answer?.said ?? "") : `kept drafted: ${refused}`;
+                if (words !== "" && !told.has(words)) {
+                    told.add(words);
+                    said.push({ kind: "said", text: words.replace(/\.$/, "") });
+                }
+            });
+        }
         return { applied, said };
     }
 
@@ -1149,12 +1194,13 @@ export function App() {
         let left = after.kind === "inbox-drafted" ? after.draft : now;
         const marks = left.marks ?? [];
         if (marks.length > 0) {
-            const { applied, said: came } = await applying(marks);
+            const { applied, said: came } = await applying(marks, left);
             told.push(...came);
             left = { ...left, marks: marks.filter((each) => !applied.includes(each.id)) };
-            const keptAfter = await ask({ kind: "inbox-keep-draft", draft: left });
-            if (keptAfter.kind === "refused") {
-                told.push({ kind: "said", text: keptAfter.error });
+            // The host may be stopping by now, for what an action asked of it, which is no send refused.
+            const keptAfter = await answered({ kind: "inbox-keep-draft", draft: left }, (answer) => (answer.kind === "inbox-drafted" ? answer : null));
+            if ("refused" in keptAfter) {
+                told.push({ kind: "said", text: keptAfter.refused });
             }
         }
         const unanswered = [];

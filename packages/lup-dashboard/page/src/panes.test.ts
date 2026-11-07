@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 
 import { carried, implied, reachOf, type Marked, type Verb } from "./grammar";
 import { adopted } from "./looks";
+import { instanceOf, type Blocks, type Line } from "./views";
+import type { Merged } from "./looks";
 import { arrivalIn, bufferKey, bufferSpans, listLaid, listedByAgent, listedByThread, nearestShown, panesAsked, pathTo, rowAt, spanAt, titled, type ListReading, type Row } from "./panes";
 import { EMPTY, NO_AGENT, PARTIES, ROOT_TITLE, aboutAt, checkOwner, followedFrom, groupAt, laid, opened, whose as whoseOf, type Around, type Conversation, type Draft, type Drawers, type Item, type Laid, type OwnedCheck, type Party, type Showing, type ThreadRead, type ThreadShown, type Threading } from "./review";
 import { partyNamed, threadBanner } from "./Review";
@@ -762,5 +764,85 @@ describe("whom a buffer's words reach", () => {
         const text = "── to s1/a1 ──\n";
         expect(partyNamed(text, text.indexOf("s1/a1") + 1, [LEAD, WORKER], called)).toEqual(WORKER);
         expect(partyNamed(text, 0, [LEAD, WORKER], called)).toBeUndefined();
+    });
+});
+
+
+describe("a module's row and its own buffer", () => {
+    const PLACE = { under: "repository" as const, letter: "V", called: "what runs", colour: "cyan" as const };
+    const DRAWN = { module: "versions", view: "what_runs", place: PLACE };
+    const ROW: Showing = { kind: "view", repository: REPOSITORY, module: "versions", view: "what_runs", called: "what runs" };
+    const FIX_A: Line = { block: "line", id: "branch fix-a", offers: [], spans: [{ text: "[x] fix-a  on trial", tone: "plain" }], by: { runtime: "claude", session: "lead" } };
+    const NOBODY: Line = { block: "line", id: "takes", offers: [], spans: [{ text: "what a set takes", tone: "plain" }] };
+    const OFFER = (verb: string, says: string) => ({ action: "module-act", argument: { repository: REPOSITORY, module: "versions", action: verb, argument: {} }, verb, runs: "send" as const, commented: false, says });
+    const ANSWER: Blocks = {
+        summary: [{ text: "what runs · dev + fix-a", tone: "plain" }],
+        waiting: false,
+        offers: [],
+        tally: { holds: 0, flagged: 1, review: 0 },
+        blocks: [{ ...FIX_A, offers: [OFFER("run", "take it out"), OFFER("done", "merge it")] }, NOBODY],
+    };
+    const REMOTE = new Map([[instanceOf(REPOSITORY, "versions", "what_runs", {}), ANSWER]]);
+    const placing = (rows: Merged["rows"]) => ({ ...reading(), looks: { ...adopted(), rows }, remote: REMOTE });
+
+    it("lists no row where no repository's modules place one", () => {
+        expect(listedByAgent(reading()).some((each) => each.id.startsWith("view "))).toBe(false);
+    });
+
+    it("lists what the view says of itself, with its marks, after the parties and opening its buffer", () => {
+        const rows = listedByAgent(placing([{ repository: REPOSITORY, drawn: DRAWN }]));
+        const row = rows.find((each) => each.id === bufferKey(ROW));
+        expect(row?.opens).toEqual(ROW);
+        const said = row?.lines[0]?.stretches.map((each) => each.text).join("") ?? "";
+        expect(said).toContain("what runs · dev + fix-a");
+        expect(said).toContain("◇1");
+        expect(rows.findIndex((each) => each.id === bufferKey(ROW))).toBeGreaterThan(rows.findIndex((each) => each.id === `party ${NO_AGENT.name}`));
+        expect(titled(ROW, { ...reading() }).name).toBe("what runs");
+    });
+
+    it("says its name until its view answers, and names the repository where several place one", () => {
+        const unread = listedByAgent({ ...placing([{ repository: "/r/zoetrope.git", drawn: DRAWN }, { repository: REPOSITORY, drawn: DRAWN }]) });
+        const said = unread.filter((each) => each.id.startsWith("view ")).map((each) => each.lines[0]?.stretches.map((one) => one.text).join("").trim());
+        expect(said[0]).toBe("zoetrope what runs");
+        expect(said[1]).toMatch(/^lup what runs · dev \+ fix-a +◇1$/);
+    });
+
+    const inBuffer = (draft: Draft = EMPTY) => laid([], [], banner, header, draft, NOTHING, [], new Map(), called, { showing: ROW, looks: adopted(), remote: REMOTE, read: true });
+
+    it("lays out only that view, open, whichever agents there are", () => {
+        const laidOut = inBuffer();
+        expect(laidOut.text).toContain("what runs · dev + fix-a\n[x] fix-a  on trial\nwhat a set takes");
+        expect(laidOut.groups).toEqual([]);
+        expect(bufferSpans(laidOut, ROW).map((each) => each.id)).toEqual([bufferKey(ROW)]);
+    });
+
+    it("reaches a verb on the block offering it, and nothing from a line offering none", () => {
+        const laidOut = inBuffer();
+        const verbs = (name: string): Verb => ({ name, key: name[0] ?? "", called: name });
+        const onBranch = reachOf(laidOut, laidOut.text.indexOf("[x] fix-a"), verbs("run"), { called });
+        expect(onBranch).toMatchObject({ says: "take it out" });
+        const onNote = reachOf(laidOut, laidOut.text.indexOf("what a set takes"), verbs("run"), { called });
+        expect(onNote.on).toBe(null);
+        const onSummary = reachOf(laidOut, 0, verbs("done"), { called });
+        expect(onSummary.on).toBe(null);
+    });
+
+    it("takes a comment on a line saying whom it reaches, and none on one that doesn't", () => {
+        const laidOut = inBuffer();
+        expect(opened(laidOut, laidOut.text.indexOf("[x] fix-a"))).toMatchObject({ to: { session: "lead" } });
+        expect(opened(laidOut, laidOut.text.indexOf("what a set takes"))).toBeUndefined();
+    });
+
+    it("keeps a comment on a branch under its line as what the view says comes and goes", () => {
+        const first = inBuffer();
+        const remark = opened(first, first.text.indexOf("[x] fix-a"));
+        expect(remark).toBeDefined();
+        const written = { ...(remark as object), id: "r1", text: "why this?" };
+        const draft: Draft = { ...EMPTY, remarks: [written as never] };
+        const laidOut = inBuffer(draft);
+        expect(laidOut.text).toContain("[x] fix-a  on trial\nwhy this?\nwhat a set takes");
+        // Laid out whole, as a send does, or with another buffer on screen, it's on nobody's group but whom it reaches.
+        const whole = laid([], [], banner, header, draft, NOTHING, [], new Map(), called, { looks: adopted(), remote: REMOTE, read: true });
+        expect(whole.groups.map((each) => each.conversation?.session)).toEqual(["lead"]);
     });
 });

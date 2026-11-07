@@ -315,6 +315,7 @@ from lup_dev.switching import (
 )
 from lup_dev.trial import named as in_sentence
 from lup_dev.trying import (
+    OwnViewsSaid,
     TrialAccepting,
     TrialDropping,
     TrialListing,
@@ -765,7 +766,16 @@ def host_serve(context: typer.Context) -> None:
         waker=wakers,
         pushes=pushes,
         companions=[
-            *([] if rehearsing else [types]),
+            *(
+                []
+                if rehearsing
+                else [
+                    types,
+                    OwnViewsSaid(
+                        layout=layout, asking=asking, changes=changes, say=typer.echo
+                    ),
+                ]
+            ),
             sweeping,
             *([] if dashboard is None else [dashboard]),
         ],

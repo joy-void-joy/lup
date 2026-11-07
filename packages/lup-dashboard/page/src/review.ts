@@ -472,7 +472,17 @@ export interface Group {
  * their conversation, live, what the operator writes at its end reaching them; every agent no longer running; or one
  * thread's conversation, whole. Each is a subset of the review's tree, laid out by the one layout.
  */
-export type Showing = { kind: "for you" } | { kind: "agent"; key: string } | { kind: "party"; name: string } | { kind: "thread"; number: number };
+export type Showing = { kind: "for you" } | { kind: "agent"; key: string } | { kind: "party"; name: string } | { kind: "thread"; number: number } | { kind: "view"; repository: string; module: string; view: string; called: string };
+
+/** Return who a module's view placed under its repository is laid out as of: no agent, so nothing it shows is anyone's unless a block says whose (`Line.by`). */
+export function ofNobody(repository: string): Conversation {
+    return { party: "conversation", repository, runtime: "", session: "" };
+}
+
+/** Return whether `conversation` is who a view placed under its repository is laid out as of (`ofNobody`). */
+export function isNobody(conversation: Conversation): boolean {
+    return conversation.session === "";
+}
 
 /**
  * A party beside the agents, a place for what no agent running answers, or, once the operator can make one, what they
@@ -759,7 +769,8 @@ export function isLetter(each: Written): each is Letter {
 /**
  * Return the agent whose drawer `remark` is on, which their group is laid out for: the one its block's view is of, as the
  * block's id names it (`instanceOf`, `blockId`), who's another than whom it goes to where it's on what another agent
- * wrote; else, on no such block, as one drafted before quotes named theirs, whom it goes to.
+ * wrote; else, on no such block, as one drafted before quotes named theirs, or on a view of no agent, as a module's own
+ * buffer, whom it goes to.
  */
 export function holderOf(remark: Remark): Conversation {
     const block = remark.quote.block ?? "";
@@ -767,8 +778,8 @@ export function holderOf(remark: Remark): Conversation {
     if (end < 0) {
         return remark.to;
     }
-    const [repository, , , argument] = JSON.parse(block.slice(0, end + 2)) as [string, string, string, OfAgent];
-    return conversationOf(repository, argument);
+    const [repository, , , argument] = JSON.parse(block.slice(0, end + 2)) as [string, string, string, Partial<OfAgent>];
+    return argument.runtime === undefined || argument.session === undefined ? remark.to : conversationOf(repository, { runtime: argument.runtime, session: argument.session, agent: argument.agent ?? null });
 }
 
 /** Return whether what's written is a remark in one of an agent's drawers. */
@@ -1703,6 +1714,14 @@ export function laid(
         const inIt = (group: Grouping) => party?.holds(group, shown.running) === true;
         for (const { group, depth } of nested(kept([...now, ...empty].filter(inIt), false), arranging.parents ?? null)) {
             layGroup(group, false, depth, "gone");
+        }
+    } else if (showing?.kind === "view") {
+        // A module's own buffer: its view, open, nobody's but as each of its blocks says.
+        const view = mount(showing.repository, showing.module, showing.view, {}, shown, remote);
+        const drawer = layDrawer(showing.view, ofNobody(showing.repository), view, "", true);
+        if (drawer !== null) {
+            laidDrawers.push(drawer);
+            nodes.push(drawer.node);
         }
     } else if (threading !== null) {
         layThreaded(threading);
@@ -2992,6 +3011,12 @@ export function laid(
                     blockLines.set(bid, linesOf(lines, block.version ?? null));
                 } else if (block.block === "line") {
                     lineBlocks.add(bid);
+                    // A line saying whom a comment on it reaches takes one, as a Markdown block's line does.
+                    if (block.by != null) {
+                        const said = lineOfView(block).text;
+                        markdown.set(bid, [said]);
+                        blockLines.set(bid, linesOf([said], block.version ?? null));
+                    }
                 } else if (block.block === "fold") {
                     walk(Array.isArray(block.content) ? block.content : (read(loaded(block.content))?.blocks ?? []));
                 }
@@ -3125,6 +3150,14 @@ export function laid(
                         into.asides.push(aside);
                         drawnIn(aside.from, line.drawn);
                         tones(aside.from, (block.spans ?? []).filter((each) => !isDrawn(each)));
+                        if (block.by != null) {
+                            const last = into.lines.at(-1);
+                            into.lines.push({ from: aside.from, to: aside.to, own: last === undefined ? 0 : last.own + (last.to - last.from) + 1, block: id, line: 0 });
+                            writers.set(id, conversationOf(view.repository, block.by));
+                            for (const comment of onWords.get(`${id} 0`) ?? []) {
+                                writeWritten(comment, into.blocks, children);
+                            }
+                        }
                         const file = answer.files?.get(block.id);
                         if (file !== undefined) {
                             reviewed.push({ from: aside.from, to: aside.to, file });
@@ -3773,7 +3806,8 @@ function openedIn(laidOut: Laid, drawer: Drawer, position: number): Remark | und
         return undefined;
     }
     const quote = onLines(laidOut, line, line, 0, shown.length, said(laidOut.text, drawer, [line], line.from, line.to));
-    return quote === null ? undefined : { id: "", to: writerOf(drawer, line), quote, text: "", ...coded(drawer, [line]) };
+    const to = writerOf(drawer, line);
+    return quote === null || isNobody(to) ? undefined : { id: "", to, quote, text: "", ...coded(drawer, [line]) };
 }
 
 /** Return whom a remark on `line` of `drawer` goes to: whoever wrote what it's on, as its block says where that's another agent (`Markdown.by`), else the drawer's agent. */
@@ -3847,7 +3881,8 @@ function quotedIn(laidOut: Laid, drawer: Drawer, from: number, to: number): Rema
     const lines = drawer.lines.slice(drawer.lines.indexOf(first), drawer.lines.indexOf(last) + 1);
     const top = ofLastBlock(drawer, first, last, offsets.start);
     const quote = onLines(laidOut, top.first, last, top.start, offsets.end - top.first.own, said(laidOut.text, drawer, lines, from, to));
-    return quote === null ? undefined : { id: "", to: writerOf(drawer, last), quote, text: "", ...coded(drawer, lines) };
+    const whom = writerOf(drawer, last);
+    return quote === null || isNobody(whom) ? undefined : { id: "", to: whom, quote, text: "", ...coded(drawer, lines) };
 }
 
 /** Say an item's comments as one answer, as its agent reads them: each under the passage it quotes, set off as a mail quotes, in the order of what they're on, each block's by its lines; those on the whole after. */
