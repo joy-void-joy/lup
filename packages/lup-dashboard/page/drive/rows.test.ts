@@ -93,9 +93,9 @@ describe("every line of the page on one row, at the demo's width, in headless Ch
     });
 
     it("says what's left to answer on a thread's banner by its count, each by its number in the palette", async () => {
-        await dashboard.openRow("@lup-impl");
-        await review.until("read the thread whole", (view) => view.state.doc.toString().startsWith("━━ @lup-impl") && !view.state.doc.toString().includes("reading…"));
-        await review.goTo("━━ @lup-impl · the session's own · lup-impl holds");
+        await dashboard.openRow("@the-build");
+        await review.until("read the thread whole", (view) => view.state.doc.toString().startsWith("━━ @the-build") && !view.state.doc.toString().includes("reading…"));
+        await review.goTo("━━ @the-build · Building lup's transcript reader · lup-impl holds");
         expect(await keys()).toContain("␣d mark its news read, each item with it, 1 left to answer");
         await dashboard.keys.press(["g", "?"]);
         await dashboard.page.waitForSelector(".keys-palette [cmdk-group-heading]");
