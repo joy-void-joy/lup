@@ -760,6 +760,32 @@ def test_a_merge_the_gate_stops_stays_on_trial_saying_why_as_the_host_says_it_in
     assert listed.merged == []
 
 
+def test_a_merge_waited_for_says_what_came_of_it_and_stays_where_it_didn_t_land(
+    world: World,
+) -> None:
+    conflicting(world)
+    stopped = Tools(world, said="Not landed: the gate failed on the merge.")
+    stopped.gate.set()
+    asked = AcceptBranch(branch="a", repository=world.repository)
+    said = asyncio.run(accepting(world, stopped).answer(asked))
+    assert isinstance(said, TrialSaid)
+    assert said.said.startswith("Not landed")
+    listed = world.trying.listed(world.repository)
+    assert listed is not None
+    [a] = [each for each in listed.branches if each.branch == "a"]
+    assert a.merge_said == "Not landed: the gate failed on the merge."
+    assert listed.merged == []
+    landing = Tools(world)
+    landing.gate.set()
+    said = asyncio.run(accepting(world, landing).answer(asked))
+    assert isinstance(said, TrialSaid)
+    assert said.said.startswith("Landed it.")
+    listed = world.trying.listed(world.repository)
+    assert listed is not None
+    assert "a" not in [each.branch for each in listed.branches]
+    assert [each.splitlines()[0] for each in listed.merged] == ["Landed it."]
+
+
 def test_a_merge_with_no_room_or_landed_again_is_refused_as_it_s_asked(
     world: World,
 ) -> None:

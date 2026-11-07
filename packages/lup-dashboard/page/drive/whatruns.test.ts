@@ -303,25 +303,40 @@ describe("what's done while a reply is being sent", () => {
             }
             await route.continue();
         });
+        /** What the host keeps of the draft: each remark's words, and what each mark says. */
+        const kept = () =>
+            page.evaluate(async () => {
+                const answer = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "inbox-draft" }) });
+                const read = (await answer.json()) as { draft?: { remarks?: { text: string }[]; marks?: { says: string }[] } };
+                return { remarks: (read.draft?.remarks ?? []).map((each) => each.text), marks: (read.draft?.marks ?? []).map((each) => each.says) };
+            });
         await review.goTo("[x] clearer-marks");
         await dashboard.keys.press([" ", "x"]);
         await says("leave it out");
         await dashboard.keys.press(["Control+Enter"]);
         await says("Sending your reply");
+        // Marked, and words begun, before the answer comes, the words too recent for the page to have laid them out.
         await review.goTo("[x] steady-list");
+        await dashboard.keys.press([" ", "m"]);
         await review.comment();
         await review.inMode("insert");
         await dashboard.keys.type("first part");
-        await page.waitForTimeout(450);
         release();
         await page.waitForFunction(() => document.querySelector('.status [data-sending="sending"]') === null);
+        await review.holds("first part");
         await dashboard.keys.type(" second part");
         await page.keyboard.press("Escape");
         await review.inMode("normal");
         await review.holds("first part second part");
         await says("to lup-impl/parser: a remark");
+        await says("merge it onto dev");
         // What was sent went: it's nowhere in what's drafted now, for the next send to do again.
         expect(await page.locator(".status").first().innerText()).not.toContain("leave it out");
+        await expect.poll(async () => (await kept()).remarks, { timeout: 10000 }).toEqual(["first part second part"]);
+        const draft = await kept();
+        expect(draft.remarks).toEqual(["first part second part"]);
+        expect(draft.marks.some((each) => each.includes("merge it onto dev"))).toBe(true);
+        expect(draft.marks.some((each) => each.includes("leave it out"))).toBe(false);
         expect(dashboard.thrown).toEqual([]);
     });
 });
