@@ -9,10 +9,10 @@ process serving another's. The service asks it, on a socket of its own under
 the host's sockets that no room mounts, what its modules serve, then passes it
 each hook the judge reads, each call to one of their tools or to one of the
 judge's own that asks the engine, each room's request of a kind they answer,
-each view the operator or a room asks of them, and each event their hooks run
-at, one typed request per connection, one reply,
-each answered at once whatever the others wait on. The launch travels with each
-request (`Calling`, `JudgeCalling`, `Relaying`, `Viewing`, `Happening`), never with the
+each view the operator or a room asks of them, each action the operator runs of
+them, and each event their hooks run at, one typed request per connection, one
+reply, each answered at once whatever the others wait on. The launch travels with
+each request (`Calling`, `JudgeCalling`, `Relaying`, `Viewing`, `Happening`), never with the
 process, which serves each launch of its repository alike.
 
 The process stays running, so a hook costs the judgement alone, not a start of
@@ -201,6 +201,37 @@ class Viewed(Reply):
     watch: Watching = Watching()
 
 
+class Acting(Request, reads=False):
+    """Run one of the repository's modules' actions, for the operator (`lup.action`), on each mark of it one send holds."""
+
+    kind: Literal["module-act"] = "module-act"
+    repository: Path
+    """The git directory of the repository whose modules run it: the host puts it
+    to that repository's process."""
+    module: str
+    """The module's name."""
+    action: str
+    """The action's name: its method's."""
+    arguments: list[JsonValue]
+    """What each mark gives it, in the order they were marked, as the page sent
+    them: the action's model validates each. An action taking a list of its model
+    is called once with them all; any other once for each."""
+
+
+class ActionAnswer(Model):
+    """What came of one mark of an action: what it says, in words or a model's JSON, and why it was refused, where it was."""
+
+    said: str = ""
+    refused: str | None = None
+
+
+class Acted(Reply):
+    """What came of each mark of an action, in the order they were given: a mark refused stays drafted, those before it having run."""
+
+    kind: Literal["module-acted"] = "module-acted"
+    answers: list[ActionAnswer]
+
+
 class JudgeHook(Request, reads=False):
     """Put one of a launch's hooks the judge reads to its judge."""
 
@@ -229,13 +260,13 @@ class HookJudged(Reply):
 
 
 type Answered = Annotated[
-    Offered | Called | Relayed | Happened | HookJudged | Viewed,
+    Offered | Called | Relayed | Happened | HookJudged | Viewed | Acted,
     Field(discriminator="kind"),
 ]
 """Whatever a repository's process replies, told apart by its `kind`."""
 
 type Replied = Annotated[
-    Refused | Offered | Called | Relayed | Happened | HookJudged | Viewed,
+    Refused | Offered | Called | Relayed | Happened | HookJudged | Viewed | Acted,
     Field(discriminator="kind"),
 ]
 """A repository's process's reply, or its refusal, told apart by its `kind`."""

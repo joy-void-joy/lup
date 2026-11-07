@@ -46,7 +46,7 @@
 // drawers*).
 import { foldedRanges } from "@codemirror/language";
 import { Compartment, EditorSelection, EditorState, RangeSetBuilder, StateEffect, type ChangeSet, type Range } from "@codemirror/state";
-import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
+import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
 import { Vim } from "@replit/codemirror-vim";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 
@@ -67,7 +67,8 @@ import { drawerMark, itemStanding } from "./outline";
 import { DRAFTED, GLYPHS } from "./Outline";
 import { linesOver, stickies, type Sticky } from "./stack";
 import { depths, levelled } from "./folds";
-import { carried, chainAt, findNode, implied, isMarked, marking, marksOn, reachOf, reachedIn, type Act, type Marked } from "./grammar";
+import { ask } from "./api";
+import { ACT, carried, chainAt, findNode, implied, isMarked, marking, marksOn, reachOf, reachedIn, type Act, type Acting, type Marked } from "./grammar";
 import { Listing, type ListHandle, type Viewed as ListViewed } from "./Panes";
 import { arrivalIn, bufferKey, bufferSpans, conversationNamed, listedByAgent, marginFolds, spanAt, titled, type Showing } from "./panes";
 import type { DrawerKind, FoldKind, Here } from "./keys";
@@ -105,6 +106,7 @@ import {
     heading,
     isDrawer,
     isLetter,
+    isNobody,
     isRegion,
     isRemark,
     laid,
@@ -618,15 +620,38 @@ function decorations(
     for (const mark of draft.marks ?? []) {
         const node = findNode(laidOut.nodes, mark.block);
         if (node !== undefined) {
-            marks.push({ from: node.from, to: node.from, value: Decoration.line({ class: `is-marked mark-${mark.verb}`, attributes: { "data-mark": mark.says } }) });
+            // One whose line reads otherwise while it's marked, as a box ticked, is that, and is struck through by no verb.
+            const draws = mark.draws ?? null;
+            marks.push({ from: node.from, to: node.from, value: Decoration.line({ class: draws === null ? `is-marked mark-${mark.verb}` : "is-marked", attributes: { "data-mark": mark.says } }) });
+            if (draws !== null) {
+                marks.push({ from: node.from, to: Math.min(node.from + draws.length, node.to), value: Decoration.replace({ widget: new MarkDrawn(draws) }) });
+            }
         }
     }
-    marks.sort((a, b) => a.from - b.from || a.to - b.to);
+    marks.sort((a, b) => a.from - b.from || a.value.startSide - b.value.startSide || a.to - b.to);
     const builder = new RangeSetBuilder<Decoration>();
     for (const each of marks) {
         builder.add(each.from, each.to, each.value);
     }
     return builder.finish();
+}
+
+/** What a mark draws in place of the first characters of its line (`Offer.draws`), in the draft's colour. */
+class MarkDrawn extends WidgetType {
+    constructor(readonly text: string) {
+        super();
+    }
+
+    override eq(other: MarkDrawn): boolean {
+        return other.text === this.text;
+    }
+
+    override toDOM(): HTMLElement {
+        const span = document.createElement("span");
+        span.className = "mark-drawn";
+        span.textContent = this.text;
+        return span;
+    }
 }
 
 /** Say a span that ticks as of `now`: what it says for its first minute where it says other, else its words with the time since its moment; a gauge as it was answered. */
@@ -1065,7 +1090,7 @@ export function Review({
         pending,
         unfolded: (fold) => {
             const drawer = laidOut.drawers.find((each) => each.folds.some((own) => foldKey(own) === fold.key && own.kind === each.kind));
-            if (drawer !== undefined) {
+            if (drawer !== undefined && !isNobody(drawer.conversation)) {
                 told(drawer.conversation, drawer.kind);
             }
             // A fold of a module's view's, read from another of its views as it opens.
@@ -2292,7 +2317,17 @@ export function Review({
      */
     function act(offer: Offer, conversation: Conversation | null) {
         void conversation;
-        say(`Nothing here does ${offer.says} yet: a module's actions come with #113's step 4.`);
+        if (offer.action !== ACT) {
+            say(`Nothing here does ${offer.says} yet: a module's actions come with #113's step 4.`);
+            return;
+        }
+        const argument = offer.argument as unknown as Acting;
+        void ask({ kind: ACT, repository: argument.repository, module: argument.module, action: argument.action, arguments: [argument.argument as never] })
+            .then((answer) => {
+                const one = answer.kind === "module-acted" ? answer.answers[0] : undefined;
+                say(answer.kind === "refused" ? `${offer.says}: ${answer.error}` : (one?.refused ?? (one?.said || offer.says)));
+            })
+            .catch((failed: unknown) => say(`${offer.says}: ${failed instanceof Error ? failed.message : String(failed)}`));
     }
 
     /** Return the folds of the item or the drawer `position` is in, as the editor holds them: those the fold keys reach. */

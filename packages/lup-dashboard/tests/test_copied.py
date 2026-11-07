@@ -30,6 +30,7 @@ from lup_dev.host.courier import Conversation as Talker
 from lup_dev.host.courier import Conversations
 from lup_dev.host.homes import kept
 from lup_dev.host.names import Names
+from lup_dev.host.on_trial import CopySwitching, PickBranches, SwitchCopy
 from lup_dev.host.protocol import (
     Holding,
     Limits,
@@ -51,7 +52,7 @@ from lup_dev.host.timings import (
     TimingsStore,
     Window,
 )
-from lup_dev.host.workers import Viewed, Viewing
+from lup_dev.host.workers import Acted, Acting, Viewed, Viewing
 from lup_dev.inbox import marks
 from lup_dev.inbox.marks import MarksFile, MarksMoved, MoveMarks, Moving, ReviewMark
 from lup_dev.inbox.protocol import (
@@ -128,8 +129,7 @@ from lup_dev.policy.since import (
 )
 from lup_dev.policy.waits import LandingsWaiting, ShowLandings
 from lup_dev.stored import write_model
-from lup_dev.switching import CopiesListed, CopySwitching, ListCopies, SwitchCopy
-from lup_dev.trial import PickBranches
+from lup_dev.switching import CopiesListed, ListCopies
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
 from lup_ledger.parties import Conversation, Operator
@@ -630,9 +630,13 @@ def test_every_request_the_page_may_send_acts_on_the_copy_alone(tmp_path: Path) 
         assert (
             "no copy of `lup-dev` is kept" in ask(SwitchCopy(commit="c"), Refused).error
         )
-        assert "a demo runs nothing on trial" in (
+        assert "runs nothing on trial" in (
             ask(PickBranches(branches=["rooms"]), Refused).error
         )
+        acting = Acting(
+            repository=REPOSITORY, module="nobody", action="a", arguments=[]
+        )
+        assert "no module `nobody`" in ask(acting, Refused).error
         since = ask(ShowSince(conversation=PARSER), Refused)
         assert since.error == Withholding().why
         marking = ReviewSince(
@@ -850,9 +854,17 @@ def test_every_request_the_page_may_send_acts_on_the_stand_in_demo_alone() -> No
         [_, before, _] = ask(ListCopies(), CopiesListed).copies
         switching = ask(SwitchCopy(commit=before.commit), CopySwitching)
         assert (
-            "a demo runs nothing on trial"
+            "`rooms` isn't on trial"
             in ask(PickBranches(branches=["rooms"]), Refused).error
         )
+        acting = Acting(
+            repository=demo.lup_session().repository,
+            module="versions",
+            action="pick",
+            arguments=[{"branch": "quiet-banner", "on": True}],
+        )
+        [came] = ask(acting, Acted).answers
+        assert "waits on your yes" in came.said
     finally:
         REACH.watched = None
     assert REACH.reached == []

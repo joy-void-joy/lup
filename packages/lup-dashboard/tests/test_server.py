@@ -25,6 +25,15 @@ from lup_dashboard.plain import (
 )
 from lup_dashboard.server import Access, application
 from lup_dev.clock import Clock
+from lup_dev.host.on_trial import (
+    BranchListed,
+    CopySwitching,
+    LastSwitch,
+    PickBranches,
+    SwitchCopy,
+    TrialListed,
+    TrialSaid,
+)
 from lup_dev.host.protocol import HostError, Listed, ListLaunches, Refused
 from lup_dev.host.records import Called
 from lup_dev.host.timings import TimingsStore
@@ -55,16 +64,7 @@ from lup_dev.inbox.threaded import (
     ThreadsRead,
     ThreadStated,
 )
-from lup_dev.switching import (
-    CopiesListed,
-    CopyListed,
-    CopySwitching,
-    LastSwitch,
-    ListCopies,
-    SwitchCopy,
-    TrialSaid,
-)
-from lup_dev.trial import BranchListed, PickBranches, TrialListed
+from lup_dev.switching import CopiesListed, CopyListed, ListCopies
 from lup_ledger.parties import Conversation, Operator
 
 if TYPE_CHECKING:
@@ -536,8 +536,16 @@ def test_the_demo_answers_a_module_s_view_with_the_module_s_own_layout_over_its_
         ("judge", "since", "s"),
         ("transcripts", "messages", "M"),
         ("transcripts", "conversation", "v"),
+        ("versions", "what_runs", "V"),
     ]
-    assert listed.standing == listed.looks[lup]
+    # A repository whose process hasn't said its own is drawn by lup's defaults, which
+    # select no `Versions`.
+    assert [each.view for each in listed.standing.drawers] == [
+        "tasks",
+        "since",
+        "messages",
+        "conversation",
+    ]
     assert {"earlier", "calls", "items", "call"} <= {
         each.name for each in listed.looks[lup].folds
     }

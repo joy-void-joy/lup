@@ -30,8 +30,8 @@ from lup.types import Model
 if TYPE_CHECKING:
     from datetime import datetime
 
-    from lup_dev.switching import CopiesListed, CopyListed, CopySwitching
-    from lup_dev.trial import BranchListed, TrialListed
+    from lup_dev.host.on_trial import BranchListed, CopySwitching, TrialListed
+    from lup_dev.switching import CopiesListed, CopyListed
 
 STYLE = """
 body { font: 15px/1.5 ui-monospace, monospace; margin: 2em auto; max-width: 70em; padding: 0 1em; }
@@ -94,8 +94,7 @@ if (token) {
     return document(
         "lup: the copies kept",
         '<h1>The copies kept</h1><p id="said">Open this with the dashboard\'s token: '
-        "the address <code>lup-dev dashboard --no-open</code> prints, with "
-        "<code>/copies</code> before its <code>#</code>.</p>"
+        "<code>lup-dev dashboard --copies</code> opens it.</p>"
         f"<script>{script}</script>",
     )
 

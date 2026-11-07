@@ -24,7 +24,7 @@ terminal too, and a room opens that terminal in a container (`lup.rooms`,
 
 It holds, too, the doors a module's methods are reached through, each a
 decorator (`lup.doors`): `lup.tool`, which a plain function given to an ask is
-made a tool with too, `lup.request`, `lup.on`, `lup.view` and `lup.command`; lup's events, one
+made a tool with too, `lup.request`, `lup.on`, `lup.view`, `lup.action` and `lup.command`; lup's events, one
 class each (`lup.events`); what a hook at `Publishing` reads and refuses
 (`lup.publishing`); and the building blocks a view is laid out from
 (`lup.blocks`). `lup_dev` serves them.
@@ -67,7 +67,7 @@ from lup.blocks import (
     Watch,
     kept_open,
 )
-from lup.doors import command, on, request, tool, view
+from lup.doors import ActionRefusedError, action, command, on, request, tool, view
 from lup.errors import LupError
 from lup.events import (
     CallFinished,
@@ -99,6 +99,7 @@ from lup.sessions.results import Friction, HowItFelt, Rejection, TurnResult, Usa
 from lup.sessions.surface import Agent
 
 __all__ = [
+    "ActionRefusedError",
     "Agent",
     "AgentUnavailableError",
     "AuthMissingError",
@@ -160,6 +161,7 @@ __all__ = [
     "UsageLimitReachedError",
     "Verb",
     "Watch",
+    "action",
     "command",
     "kept_open",
     "on",

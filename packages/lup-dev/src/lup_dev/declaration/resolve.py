@@ -367,7 +367,7 @@ def looked(modules: list[Module], found: list[Served]) -> Looks:
     Raise `ProjectError` where two take one letter, a fold kind's or a drawer's,
     or one name, a fold kind's, a drawer's or a tone's, a module clashing with
     the core's among them; where two verbs take one name or one key, or a verb
-    takes `f` or `F`, which lead the fold-wise selections after Space; where a tone takes a shell
+    takes `f` or `F`, which lead the fold-wise selections after Space; where an action answers a verb none declares; where a tone takes a shell
     tone's name, takes the look of a tone that's none of the shell's, the
     core's or the modules', or takes no look at all.
     """
@@ -386,6 +386,16 @@ def looked(modules: list[Module], found: list[Served]) -> Looks:
             ),
         ],
     )
+    unknown = [
+        f"`{each.serving.__name__}.{name}` answers the verb `{door.verb}`"
+        for each in found
+        for name, method in methods(each.serving).items()
+        if (door := method.acting()) is not None
+        and door.verb not in [verb.name for verb in verbs]
+    ]
+    if unknown:
+        message = f"Actions: {'; '.join(unknown)}, which no module declares"
+        raise ProjectError(message)
     placed = [
         (each.module.name, name, door.place)
         for each in found

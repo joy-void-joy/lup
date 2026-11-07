@@ -13,7 +13,7 @@ import { newId } from "./anchors";
 import { partSaid, type ReplyPart } from "./brief";
 import type { components } from "./generated/api";
 import { cited } from "./comments";
-import { EMPTY, isLetter, news, toAnswer, waits, writtenId, type Conversation, type Draft, type Group, type Item, type Laid, type Placed, type Region, type ThreadRead } from "./review";
+import { cutAt, EMPTY, isLetter, isNobody, news, toAnswer, waits, writtenId, type Conversation, type Draft, type Group, type Item, type Laid, type Placed, type Region, type ThreadRead } from "./review";
 import type { Block as ViewBlock, Offer } from "./views";
 
 export type Verb = components["schemas"]["Verb"];
@@ -172,6 +172,31 @@ function answering(offers: readonly Offer[] | undefined, verb: Verb): Offer[] {
     return (offers ?? []).filter((each) => each.verb === verb.name);
 }
 
+/** The request running one of a module's actions (`lup.blocks.ACT`), which a mark of one is applied by. */
+export const ACT = "module-act";
+
+/** What a mark of one of a module's actions is given (`Offer.of`, `Offer.of_module`): whose action it is, and what it takes. */
+export interface Acting {
+    repository: string;
+    module: string;
+    action: string;
+    argument: Marked["argument"];
+}
+
+/** Return the marks of `marks` the send asks of a module, in what order: each of its actions, every mark of one together, those that may move the host (`Offer.runs`) last, and one of those at most, the rest held back. */
+export function actionsToRun<M extends Pick<Marked, "action" | "argument" | "runs">>(marks: readonly M[]): { run: { key: string; marks: M[]; last: boolean }[]; held: M[] } {
+    const acting = new Map<string, { key: string; marks: M[]; last: boolean }>();
+    for (const mark of marks.filter((each) => each.action === ACT)) {
+        const argument = mark.argument as unknown as Acting;
+        const key = JSON.stringify([argument.repository, argument.module, argument.action]);
+        const was = acting.get(key) ?? { key, marks: [], last: mark.runs === "last" };
+        acting.set(key, { ...was, marks: [...was.marks, mark] });
+    }
+    const each = [...acting.values()];
+    const lasts = each.filter((one) => one.last);
+    return { run: [...each.filter((one) => !one.last), ...lasts.slice(0, 1)], held: lasts.slice(1).flatMap((one) => one.marks) };
+}
+
 /** The actions of what an item offers (`lup_dev.inbox.store`): an answer marked in one of the draft's lists, and a comment on it whole, which the editor opens. */
 const ITEM_MARKED = "inbox-mark";
 const ITEM_COMMENTED = "inbox-comment";
@@ -214,7 +239,8 @@ function blockNamed(block: ViewBlock): string {
         case "code":
             return block.path;
         case "line":
-            return (block.spans ?? []).map((each) => each.text).join("").trim();
+            // Cut, as the line of keys says it before what each key does: a long line's words would leave no room for them.
+            return cutAt((block.spans ?? []).map((each) => each.text).join("").trim(), 48);
         case "fold":
             return block.summary.map((each) => each.text).join("").trim();
         case "markdown":
@@ -254,6 +280,9 @@ export function reachOf(laidOut: Laid, at: number, verb: Verb, naming: Naming): 
         const outer = chain.findLast((each) => each.kind === "group");
         return outer === undefined ? null : (group(outer)?.conversation ?? null);
     };
+    // A module's own buffer isn't a drawer of anything: a verb on a line of it offering nothing reaches nothing, rather
+    // than every row under it.
+    const ownBuffer = chain.some((each) => each.kind === "view" && laidOut.drawers.some((one) => one.view.id === each.id && isNobody(one.conversation)));
     for (const node of chain.toReversed()) {
         switch (node.kind) {
             case "written": {
@@ -269,7 +298,7 @@ export function reachOf(laidOut: Laid, at: number, verb: Verb, naming: Naming): 
                     break;
                 }
                 const own = answering(block.offers, verb)[0];
-                const within = block.block === "fold" ? offering(node, verb) : [];
+                const within = block.block === "fold" && !ownBuffer ? offering(node, verb) : [];
                 if (within.length > 0) {
                     return { on: blockNamed(block), node, says: own?.says ?? verb.called, acts: actsOf(within, verb, conversationOf()) };
                 }
@@ -281,7 +310,7 @@ export function reachOf(laidOut: Laid, at: number, verb: Verb, naming: Naming): 
             case "view": {
                 // An item's body is its item's: the item says what its verbs do.
                 const drawer = laidOut.drawers.find((each) => each.view.id === node.id);
-                if (drawer === undefined) {
+                if (drawer === undefined || ownBuffer) {
                     break;
                 }
                 const own = answering(drawer.view.answer?.blocks.offers, verb)[0];
@@ -616,6 +645,8 @@ function offered(draft: Draft, act: Extract<Act, { kind: "mark" }>, verb: string
         says: act.offer.says,
         block: act.block,
         version: act.version,
+        ...(act.offer.runs === "last" ? { runs: "last" as const } : {}),
+        ...(act.offer.draws == null ? {} : { draws: act.offer.draws }),
     };
     return { ...draft, marks: [...marks, made] };
 }

@@ -18,7 +18,14 @@ handlers as one that refuses, or keeps what it would do in the state:
   nothing is installed or run: the number is kept (`Withheld.settled`);
 - the host service moved to a copy kept (`SwitchCopy`): the host runs `lup-dev
   restore`, in a process of its own, which stops it. Here nothing runs or stops:
-  the state's own link is moved and what came of it kept (`withheld_switch`);
+  the state's own link and approval are moved and what came of it kept
+  (`withheld_switch`);
+- what's on trial (`ListTrial`, `PickBranches`, `ChangeBranches`, `AcceptBranch`,
+  `DropBranch`): the
+  host computes `live` with git, and accepts a branch in a room. Over a copy of
+  the operator's state nothing's on trial (`NothingOnTrial`); the stand-in demo holds
+  branches, with the host's own handlers over what stands in for git
+  (`lup_dashboard/trialed.py`);
 - a held change answered, the same ways: the host writes the answer into the
   store of the hold's worktree, runs git in that worktree and logs the verdict,
   for the hook waiting on it to put the files back or keep them
@@ -35,11 +42,12 @@ handlers as one that refuses, or keeps what it would do in the state:
   (`Delivery.noticed`, `notify-send`). Here it's kept (`Withheld.notices`);
 - a launch renamed (`Rename`): its container renamed by podman
   (`Launches.moved`). Here there's no podman;
-- a module's view (`Viewing`): the repository's process, started from its
-  approved copy (`Workers`). Here this checkout's modules answer in this
-  process, given the state's records, items and marks, and none of the other
-  repositories a declaration names, which the host finds with git
-  (`Modules`);
+- a module's view or action (`Viewing`, `Acting`): the repository's process,
+  started from its approved copy (`Workers`). Here this checkout's modules answer
+  in this process, given the state's records, items and marks, none of the other
+  repositories a declaration names, which the host finds with git (`Modules`),
+  and these same routes for what they ask of the host as the operator
+  (`RoutesAsked`);
 - a launch's hooks (the service's `Courier`, `Answerer` and judge): never heard
   here, nothing served on a launch's sockets (`NoCourier`, `NoAnswerer`,
   `NoJudge`).
@@ -52,6 +60,7 @@ since the operator saw them, which the host reads with git in their worktrees
 (`ShowSince`, `ReviewSince`), and what it reads records with.
 """
 
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, get_args, override
@@ -61,16 +70,25 @@ from lup_dashboard.api import Asked, Replied
 from lup_dashboard.errors import LupDashboardError
 from lup_dashboard.host import Host, read
 from lup_dev.declaration.resolve import Resolved
+from lup_dev.declaration.serving import OperatorHost
 from lup_dev.errors import LupDevError
+from lup_dev.host.client import read_reply
 from lup_dev.host.courier import Courier, Heard, Telling, Waker
 from lup_dev.host.names import Names
+from lup_dev.host.on_trial import (
+    AcceptBranch,
+    ChangeBranches,
+    DropBranch,
+    LastSwitch,
+    ListTrial,
+    PickBranches,
+)
 from lup_dev.host.protocol import HostError, Looks, Refused, Register, Reply, Request
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Recorded
 from lup_dev.host.service import (
     Answerer,
     Dispatcher,
-    Handler,
     HoldingSetting,
     Launches,
     Renaming,
@@ -80,9 +98,9 @@ from lup_dev.host.service import (
 from lup_dev.host.service import Listing as LaunchesListing
 from lup_dev.host.timings import TimingsStore
 from lup_dev.host.timings import routes as timings_routes
-from lup_dev.host.views import ModuleViews
+from lup_dev.host.views import ModuleActions, ModuleViews
 from lup_dev.host.watch import Changes
-from lup_dev.host.workers import LaunchJudge, RepositoryAsking, Viewing
+from lup_dev.host.workers import Acting, LaunchJudge, RepositoryAsking, Viewing
 from lup_dev.inbox.delivery import Delivery
 from lup_dev.inbox.exchanges import Exchanges
 from lup_dev.inbox.marks import MarkStore, StoredMarks
@@ -96,17 +114,17 @@ from lup_dev.layout import CopyLayout, Layout
 from lup_dev.policy.waits import Waits
 from lup_dev.policy.waits import routes as waits_routes
 from lup_dev.stored import write_model
-from lup_dev.switching import CopiesAnswering, CopySwitch, LastSwitch, host_copies
-from lup_dev.trial import PickBranches
+from lup_dev.switching import CopiesAnswering, CopySwitch, host_copies
 from lup_dev.worker import RepositoryModules
 from lup_ledger.parties import Conversation
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable
+    from collections.abc import AsyncGenerator
 
     from lup.blocks import OfAgent
     from lup.tools.serving import Notice
     from lup.types import JsonObject
+    from lup_dashboard.trialed import TrialStandIn
     from lup_dev.clock import Clock
     from lup_dev.declaration.serving import Related
     from lup_dev.inbox.store import Inbox
@@ -221,8 +239,27 @@ class Modules(RepositoryModules):
         return []
 
 
+class RoutesAsked(MutableModel, OperatorHost, arbitrary_types_allowed=True):
+    """The host as a module's method asks it for the operator in a demo: each request answered by these same routes, as the host's control socket answers it, reaching no socket."""
+
+    routes: dict[str, Route] = {}
+    """Each kind the demo answers, what the page can't ask among it, by its kind."""
+    say: Callable[[str], None]
+
+    @override
+    async def asked[R: Reply](self, request: Request, reply: type[R]) -> R:
+        dispatcher = Dispatcher(
+            routes=self.routes,
+            answering="the demo",
+            say=self.say,
+            changes=Changes(),
+        )
+        replied = await dispatcher.answered(request.model_dump_json())
+        return read_reply(replied.model_dump_json().encode(), reply)
+
+
 class Views(MutableModel, RepositoryAsking, arbitrary_types_allowed=True):
-    """Each repository's modules, answering its views as its process would, in this process: `own`'s made from `declared`, every other's from lup's defaults, its declaration out of reach."""
+    """Each repository's modules, answering its views and running its actions as its process would, in this process: `own`'s made from `declared`, every other's from lup's defaults, its declaration out of reach."""
 
     own: Path
     """The repository whose declaration a demo has, by its git directory."""
@@ -240,6 +277,8 @@ class Views(MutableModel, RepositoryAsking, arbitrary_types_allowed=True):
     """The demo's items, as the host's handler lists a conversation's."""
     marks: MarkStore
     """The demo's review marks, as the host holds them."""
+    host: RoutesAsked
+    """What their methods ask of the host as the operator."""
     made: dict[Path, Modules] = {}
 
     def modules(self, repository: Path) -> Modules:
@@ -254,6 +293,7 @@ class Views(MutableModel, RepositoryAsking, arbitrary_types_allowed=True):
             layout=self.layout,
             exchanges=ItemsExchanged(repository=repository, listing=self.listing),
             marks=StoredMarks(store=self.marks),
+            host=self.host,
         )
         self.made = {**self.made, repository: made}
         return made
@@ -264,12 +304,17 @@ class Views(MutableModel, RepositoryAsking, arbitrary_types_allowed=True):
 
     @override
     async def asked(self, repository: Path, request: Request) -> Reply:
-        """Answer a view of `repository`'s, or refuse it saying why, as its process does (`lup_dev.worker.Views`)."""
-        if not isinstance(request, Viewing):
-            message = f"a demo asks a repository's modules no `{request.kind}`"
-            raise HostError(message)
+        """Answer a view of `repository`'s or run an action of it, or refuse it saying why, as its process does (`lup_dev.worker.Views`, `.Actions`)."""
+        modules = self.modules(repository)
         try:
-            return await self.modules(repository).view(request)
+            match request:
+                case Viewing():
+                    return await modules.view(request)
+                case Acting():
+                    return await modules.act(request)
+                case _:
+                    message = f"a demo asks a repository's modules no `{request.kind}`"
+                    raise HostError(message)
         except LupDevError as refused:
             raise HostError(str(refused)) from refused
 
@@ -285,17 +330,18 @@ class Views(MutableModel, RepositoryAsking, arbitrary_types_allowed=True):
         return {each: self.modules(each).resolved.looks for each in self.repositories}
 
 
-class NothingOnTrial(Model, Handler[PickBranches]):
-    """Answers `PickBranches` for a demo, which holds nothing on trial: its plain page lists no branch to pick."""
+def nothing_on_trial() -> list[Route]:
+    """Return the routes of what's on trial for a demo over a copy of the operator's state, which holds nothing of it: its plain page lists no branch to pick, and a module's view says why it reads nothing."""
 
-    @override
-    def request(self) -> type[PickBranches]:
-        return PickBranches
-
-    @override
-    async def answer(self, request: PickBranches) -> Reply:
-        message = f"a demo runs nothing on trial, so it can't pick {request.branches}"
+    async def refused(raw: str) -> Reply:
+        del raw
+        message = "a demo over a copy of your state runs nothing on trial"
         raise HostError(message)
+
+    return [
+        Route(kind=each.named(), answer=refused)
+        for each in [ListTrial, PickBranches, ChangeBranches, AcceptBranch, DropBranch]
+    ]
 
 
 def withheld_switch(
@@ -313,6 +359,7 @@ def withheld_switch(
         at = clock.now()
         copies.switch(copies.place(kept))
         copies.recorded(kept.model_copy(update={"answered": at}))
+        write_model(lup.approved(kept.repository), kept.approval)
         said = (
             f"The demo's copy of {commit} is the one running, and nothing else moved."
         )
@@ -401,8 +448,9 @@ def handled(
     clock: Clock,
     say: Callable[[str], None],
     timings: Path | None,
+    trial: TrialStandIn | None = None,
 ) -> Handled:
-    """Return the host over the state at `lup`: `inbox` told to `changes`, each runtime's records read through `recorded`, the launches `served`, `own`'s views answered by `declared` and every other's by `defaults`, what the page measures of itself kept in `timings`, else in the state; and `beyond`, the routes of what the host's handlers can't answer over it. `who` is who answers, as a refusal names it.
+    """Return the host over the state at `lup`: `inbox` told to `changes`, each runtime's records read through `recorded`, the launches `served`, `own`'s views answered by `declared` and every other's by `defaults`, what the page measures of itself kept in `timings`, else in the state; what's on trial as `trial` holds it, where it holds any; and `beyond`, the routes of what the host's handlers can't answer over it. `who` is who answers, as a refusal names it.
 
     Raise `LupDashboardError` where a kind the page may ask has no route.
     """
@@ -439,6 +487,7 @@ def handled(
         clock=clock,
     )
     launches.served = {each.launch.launch: each for each in served}
+    asked = RoutesAsked(say=say)
     views = Views(
         own=own,
         declared=declared,
@@ -450,8 +499,10 @@ def handled(
         recorded=recorded,
         listing=ItemsListing(delivery=delivery),
         marks=inbox.marks,
+        host=asked,
     )
     module_views = ModuleViews(asking=views, changes=changes, say=say, clock=clock)
+    start = withheld_switch(lup, withheld, clock)
     routes = [
         Route.reading(
             LaunchesListing(
@@ -466,13 +517,19 @@ def handled(
         *waits_routes(waits),
         *timings_routes(TimingsStore(home=timings or lup.host.timings), clock),
         Route.to(CopiesAnswering(layout=lup)),
-        Route.to(
-            CopySwitch(layout=lup, start=withheld_switch(lup, withheld, clock)),
+        Route.to(CopySwitch(layout=lup, start=start)),
+        *(
+            nothing_on_trial()
+            if trial is None
+            else trial.routes(
+                lup, delivery, clock=clock, say=say, start=start, changes=changes
+            )
         ),
-        Route.to(NothingOnTrial()),
         *beyond,
         Route.reading(module_views, watch=module_views.watched),
+        Route.to(ModuleActions(asking=views, changes=changes)),
     ]
+    asked.routes = {each.kind: each for each in routes}
     return Handled(
         dispatcher=Dispatcher(
             routes=answering(routes, who), answering=who, say=say, changes=changes

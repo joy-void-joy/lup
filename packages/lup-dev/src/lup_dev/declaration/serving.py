@@ -5,6 +5,7 @@ the library's doors (`lup.doors`): `@lup.tool`, an agent's call through MCP;
 `@lup.request`, a room's request, routed by the `kind` of the model it takes;
 `@lup.on(Event)`, run at one of lup's events; `@lup.view`, what the dashboard
 shows and its command prints, laid out from lup's blocks (`lup.blocks`);
+`@lup.action`, what the operator's key runs on what a view's block offers;
 `@lup.command`, a command under the module's on the command line. A
 module lists its classes in its
 `serving`, `Serving.of(GitHubServing)`. A class only groups methods: it narrows
@@ -15,7 +16,9 @@ declaration names (`related`), where each runtime keeps its records and how
 they're read (`recorded`), the items of lup's inbox a conversation exchanged, which the core
 keeps (`exchanges`), its review marks, how far the operator reviewed each
 thing its views show, which the core keeps too (`marks`), the branches the
-declaration names (`branches`), and the publishing door (`publish`).
+declaration names (`branches`), the repository's git directory (`repository`),
+the host service, as the operator asks it (`host`), and the publishing door
+(`publish`).
 
 **Who asks is the method's** (`Asker`), by its `by` parameter, which hands it its
 caller: `Agent`, a conversation of a launch's session calling a tool; `Room`,
@@ -24,7 +27,7 @@ lup itself running a hook at an event of a launch, its conversation with it for
 a session's events; `Operator`, the operator, from the dashboard or a terminal
 on the host. Each door has those who come through it (`askers`), and those a
 method leaving `by` out is for: a tool's are `Agent`, a hook's `Lup`, a view's
-`Operator | Room`; a request and a command have none, so each says (`by: Room`,
+`Operator | Room`, an action's `Operator`; a request and a command have none, so each says (`by: Room`,
 `by: Operator | Room`). Defining a class checks each of its
 methods: a `by` naming someone its door never brings, or a request without one,
 fails the class's definition, naming the method (`checked`). Who actually asked
@@ -44,11 +47,12 @@ asks, as each request carries it.
 from abc import ABC, abstractmethod
 from pathlib import Path
 from types import UnionType
-from typing import TYPE_CHECKING, get_args
+from typing import TYPE_CHECKING, get_args, override
 
 from pydantic import BaseModel, PydanticUndefinedAnnotation
 
 from lup.doors import (
+    ActionDoor,
     CommandDoor,
     Door,
     Method,
@@ -65,7 +69,7 @@ from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.module import Module
 from lup_dev.errors import LupDevError
 from lup_dev.host.courier import Conversation
-from lup_dev.host.protocol import Branches, Register, Reply, Request
+from lup_dev.host.protocol import Branches, HostError, Register, Reply, Request
 from lup_dev.host.records import Recorded
 from lup_dev.inbox.exchanges import Exchanges
 from lup_dev.inbox.marks import ReviewMarks
@@ -128,6 +132,8 @@ def askers(door: Door) -> Askers:
             return Askers(through=[Lup], default=[Lup])
         case ViewDoor():
             return Askers(through=[Operator, Room], default=[Operator, Room])
+        case ActionDoor():
+            return Askers(through=[Operator], default=[Operator])
         case CommandDoor():
             return Askers(through=[Operator, Room], default=[])
 
@@ -251,6 +257,32 @@ class UnpublishedError(LupDevError):
     """What a method would publish was refused at `Publishing`; its message lists each refusal."""
 
 
+class OperatorHost(ABC):
+    """The host service, as a module's method asks it for the operator: what only they may ask, through the socket no room reaches."""
+
+    @abstractmethod
+    async def asked[R: Reply](self, request: Request, reply: type[R]) -> R:
+        """Return the host's reply to `request`, read as `reply`, however long it takes.
+
+        Raise `HostError` where it refuses, saying why, or can't be reached.
+        """
+
+
+class NoOperatorHost(Model, OperatorHost):
+    """What's there of the host for a method anyone but the operator asks: nothing, however it's reached, so an agent's call or a room's request never becomes theirs."""
+
+    asker: str = "this"
+    """Who asks, as the refusal names them."""
+
+    @override
+    async def asked[R: Reply](self, request: Request, reply: type[R]) -> R:
+        message = (
+            f"`{request.kind}` is the operator's, and it's {self.asker} asking: "
+            "`self.host` is there for the operator's views and actions alone"
+        )
+        raise HostError(message)
+
+
 class Related(Model):
     """Another repository the declaration names for the project's sessions to read, as the host finds it."""
 
@@ -289,6 +321,12 @@ class ModuleServing(Model, arbitrary_types_allowed=True):
     branches: Branches = Branches()
     """The branches the declaration it's made from names: the integration branch,
     and the one the host runs."""
+    repository: Path = Path()
+    """The repository's git directory."""
+    host: OperatorHost = NoOperatorHost()
+    """The host service, as the operator asks it: for a method the operator is
+    asking, its view or its action, and for no one else, whatever a door lets them
+    do, so anyone else's asking raises (`NoOperatorHost`)."""
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: object) -> None:
@@ -337,6 +375,15 @@ def tool_names(owner: type[ModuleServing]) -> list[str]:
         method.taken.name
         for method in served(owner).values()
         if method.tooled() is not None
+    ]
+
+
+def actions(owner: type[ModuleServing]) -> list[ActionDoor]:
+    """Return the door of each action `owner` serves, with no instance."""
+    return [
+        door
+        for method in served(owner).values()
+        if (door := method.acting()) is not None
     ]
 
 

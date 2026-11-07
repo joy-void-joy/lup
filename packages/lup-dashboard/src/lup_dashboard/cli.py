@@ -165,6 +165,12 @@ def demo(
             )
         ),
     ] = None,
+    merge_takes: Annotated[
+        float | None,
+        typer.Option(
+            help="How many seconds a merge's gate stands in as taking: a few by default, long enough to watch its line say so."
+        ),
+    ] = None,
     types_read: Annotated[
         float | None,
         typer.Option(
@@ -216,6 +222,7 @@ def demo(
             or approval_lines
             or arrives
             or grows
+            or merge_takes
             or types_read
         ):
             message = (
@@ -237,6 +244,8 @@ def demo(
         host.arrives = timedelta(seconds=arrives)
     if grows is not None:
         host.grows = timedelta(seconds=grows)
+    if merge_takes is not None:
+        host.merge_takes = timedelta(seconds=merge_takes)
     if types_read is not None:
         host.types_read = timedelta(seconds=types_read)
     served(host, port, address, token_file=token_file)

@@ -22,22 +22,24 @@ What's kept per version (`Version`) is how a copy built for one stays kept
 (`pins`, `Copies.pin`), and how `live`'s history reads as a list of them.
 """
 
+from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
 from lup.types import Model
-from lup_dev.approval import approved_branches
+from lup_dev.approval import approved, approved_branches
 from lup_dev.composing import Apart, Composed, Unmerged, dedupe
 from lup_dev.git import Git, GitError, refs_astray
 from lup_dev.host.courier import Conversation as Caller
-from lup_dev.host.protocol import Request
+from lup_dev.host.on_trial import BranchListed, TrialListed, VersionListed
 from lup_dev.stored import read_model, write_model
 from lup_ledger.parties import Conversation
 
 if TYPE_CHECKING:
+    from lup_dev.copies import Kept
     from lup_dev.host.protocol import Branches
     from lup_dev.layout import Layout
 
@@ -78,6 +80,10 @@ class Version(Model):
     dev: str
     tips: dict[str, str] = {}
     at: datetime
+    fingerprint: str | None = None
+    """The fingerprint of the host zone it holds, where it was read as it was made,
+    which says whether it's what's approved, or what a copy of another commit
+    holds; none where it wasn't, as a landing's."""
 
 
 class Trial(Model):
@@ -109,6 +115,18 @@ class Trial(Model):
         """Return each branch in `live`, with the commit of it there."""
         latest = self.latest
         return {} if latest is None else latest.tips
+
+
+class AcceptingTools(ABC):
+    """What accepting a branch needs beyond what's on trial: a session's room, for its gate and its worktree's removal."""
+
+    @abstractmethod
+    def ready(self, repository: Path, on: OnTrial) -> None:
+        """Raise `HostError` where accepting `on` can't start: no session of the repository runs."""
+
+    @abstractmethod
+    async def accepted(self, repository: Path, on: OnTrial) -> str:
+        """Merge `on` onto the integration branch, at the tip it landed with, cleaning up after it, and say what came of it, which needn't be that it landed: a failed gate is said, not raised. Raise `HostError` where it can't be tried."""
 
 
 class Trials(Model):
@@ -313,10 +331,26 @@ def pins(trial: Trial) -> list[str]:
 
 
 def moved_on(
-    trial: Trial, commit: str, dev: str, plan_: Plan, at: datetime, *, keeping: int = 50
+    trial: Trial,
+    commit: str,
+    dev: str,
+    plan_: Plan,
+    at: datetime,
+    *,
+    keeping: int = 50,
+    fingerprint: str | None = None,
 ) -> Trial:
-    """Return `trial` with `live` at `commit`, what `plan_` holds and what keeps each other out, keeping the last `keeping` of the versions still pinned, and this one."""
-    version = Version(commit=commit, dev=dev, tips=plan_.tips, at=at)
+    """Return `trial` with `live` at `commit`, what `plan_` holds and what keeps each other out, keeping the last `keeping` of the versions still pinned, and this one, whose host zone has `fingerprint`, where it was read: `live` staying at a commit it holds, nothing's read of it, and what was stays."""
+    known = next(
+        (each.fingerprint for each in trial.versions if each.commit == commit), None
+    )
+    version = Version(
+        commit=commit,
+        dev=dev,
+        tips=plan_.tips,
+        at=at,
+        fingerprint=fingerprint or known,
+    )
     branches = [
         each.model_copy(update={"conflict": plan_.conflicts.get(each.branch, "")})
         for each in trial.branches
@@ -408,37 +442,60 @@ class Origin(Model):
         )
 
 
-class BranchListed(Model):
-    """One branch on trial, as a page shows it."""
+def versions_listed(
+    versions: list[Version],
+    kept: list[Kept],
+    runs: str | None,
+    fingerprint: str | None,
+) -> list[VersionListed]:
+    """Return `versions`, in their order, as a page lists them: each with the copy of `kept` that runs it, by its commit, else by the host zone they hold; and the latest of what's approved, the commit `runs` with `fingerprint`, as what runs.
 
-    branch: str
-    tip: str
-    subject: str = ""
-    landed: datetime
-    within: bool = False
-    """It's in `live`."""
-    out: bool = False
-    """The operator took it out."""
-    conflict: str = ""
-    """What keeps it out, where it doesn't merge; empty where it does."""
-    built: bool = False
-    """A copy of `dev` and it alone is kept: picking it alone is immediate."""
+    >>> at = datetime(2026, 11, 7)
+    >>> older = Version(commit="a", dev="d", at=at, fingerprint="z")
+    >>> newer = Version(commit="b", dev="d", at=at, fingerprint="z")
+    >>> [each.running for each in versions_listed([older, newer], [], "c", "z")]
+    [False, True]
+    """
 
+    def holding(version: Version, commit: str, zone: str | None) -> bool:
+        same = version.fingerprint is not None and version.fingerprint == zone
+        return version.commit == commit or same
 
-class TrialListed(Model):
-    """What's on trial, as a page shows it."""
+    current = next(
+        (
+            each.commit
+            for each in reversed(versions)
+            if runs is not None and holding(each, runs, fingerprint)
+        ),
+        None,
+    )
 
-    integration: str
-    running: str
-    dev: str | None = None
-    live: str | None = None
-    branches: list[BranchListed] = []
+    def listed(version: Version) -> VersionListed:
+        copy = next(
+            (
+                each
+                for each in kept
+                if holding(version, each.commit, each.approval.fingerprint)
+            ),
+            None,
+        )
+        return VersionListed(
+            commit=version.commit,
+            dev=version.dev,
+            tips=version.tips,
+            at=version.at,
+            copy_kept=None if copy is None else copy.commit,
+            running=version.commit == current,
+            ran=None if copy is None else copy.answered,
+        )
+
+    return [listed(each) for each in versions]
 
 
 def trial_listed(
-    layout: Layout, repository: Path, built: list[str]
+    layout: Layout, repository: Path, kept: list[Kept]
 ) -> TrialListed | None:
-    """Return what's on trial for the repository at `repository`, as a page lists it, `built` being the commits whose copies are kept; none where it computes no running branch, or what's kept doesn't read, as what a later lup kept might not: the plain page is what's left when things are broken, so it lists the copies whatever this says."""
+    """Return what's on trial for the repository at `repository`, as a page lists it, `kept` being the copies kept of it; none where it computes no running branch, or what's kept doesn't read, as what a later lup kept might not: the plain page is what's left when things are broken, so it lists the copies whatever this says."""
     if computed_ref(layout, repository) is None:
         return None
     branches = approved_branches(layout, repository)
@@ -447,6 +504,8 @@ def trial_listed(
     except ValidationError:
         return None
     within = trial.tips
+    approval = approved(layout, repository)
+    built = [each.commit for each in kept]
 
     def alone(each: OnTrial) -> bool:
         return any(
@@ -471,44 +530,15 @@ def trial_listed(
                 out=each.out,
                 conflict=each.conflict,
                 built=alone(each),
+                party=each.party,
             )
             for each in trial.branches
         ],
+        versions=versions_listed(
+            trial.versions,
+            kept,
+            None if approval is None else approval.commit,
+            None if approval is None else approval.fingerprint,
+        ),
+        runs=None if approval is None else approval.commit,
     )
-
-
-class ListTrial(Request, reads=False):
-    """Say what's on trial in a repository: the operator's alone."""
-
-    kind: Literal["trial"] = "trial"
-    repository: Path | None = None
-    """The repository's git directory; none for lup's own, which the service runs
-    from."""
-
-
-class PickBranches(Request, reads=False):
-    """Run `dev` plus exactly these branches: the operator's alone, through a terminal or the plain page."""
-
-    kind: Literal["trial-pick"] = "trial-pick"
-    branches: list[str]
-    repository: Path | None = None
-    """The repository's git directory; none for lup's own."""
-
-
-class AcceptBranch(Request, reads=False):
-    """Merge a branch on trial onto `dev`, and clean up after it, as a landing does: the operator's alone."""
-
-    kind: Literal["trial-accept"] = "trial-accept"
-    branch: str
-    repository: Path | None = None
-    """The repository's git directory; none for lup's own."""
-
-
-class DropBranch(Request, reads=False):
-    """Take a branch off trial: the operator's alone. What they say on it reaches who landed it, or waits for them."""
-
-    kind: Literal["trial-drop"] = "trial-drop"
-    branch: str
-    words: str = ""
-    repository: Path | None = None
-    """The repository's git directory; none for lup's own."""
