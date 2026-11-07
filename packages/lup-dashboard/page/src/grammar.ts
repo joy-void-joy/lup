@@ -296,6 +296,9 @@ export function reachOf(laidOut: Laid, at: number, verb: Verb, naming: Naming): 
         const outer = chain.findLast((each) => each.kind === "group");
         return outer === undefined ? null : (group(outer)?.conversation ?? null);
     };
+    // A module's own buffer isn't a drawer of anything: a verb on a line of it offering nothing reaches nothing, rather
+    // than every row under it.
+    const ownBuffer = chain.some((each) => each.kind === "view" && laidOut.drawers.some((one) => one.view.id === each.id && isNobody(one.conversation)));
     for (const node of chain.toReversed()) {
         switch (node.kind) {
             case "written": {
@@ -311,7 +314,7 @@ export function reachOf(laidOut: Laid, at: number, verb: Verb, naming: Naming): 
                     break;
                 }
                 const own = answering(block.offers, verb)[0];
-                const within = block.block === "fold" ? offering(node, verb) : [];
+                const within = block.block === "fold" && !ownBuffer ? offering(node, verb) : [];
                 if (within.length > 0) {
                     return { on: blockNamed(block), node, says: own?.says ?? verb.called, acts: actsOf(within, verb, conversationOf()) };
                 }
@@ -321,10 +324,9 @@ export function reachOf(laidOut: Laid, at: number, verb: Verb, naming: Naming): 
                 break;
             }
             case "view": {
-                // An item's body is its item's: the item says what its verbs do. And a module's own buffer isn't a drawer of
-                // anything: a verb on a line of it offering nothing reaches nothing, rather than every row.
+                // An item's body is its item's: the item says what its verbs do.
                 const drawer = laidOut.drawers.find((each) => each.view.id === node.id);
-                if (drawer === undefined || isNobody(drawer.conversation)) {
+                if (drawer === undefined || ownBuffer) {
                     break;
                 }
                 const own = answering(drawer.view.answer?.blocks.offers, verb)[0];
@@ -779,6 +781,8 @@ function offered(draft: Draft, act: Extract<Act, { kind: "mark" }>, verb: string
         says: act.offer.says,
         block: act.block,
         version: act.version,
+        ...(act.offer.runs === "last" ? { runs: "last" as const } : {}),
+        ...(act.offer.draws == null ? {} : { draws: act.offer.draws }),
     };
     return { ...draft, marks: [...marks, made] };
 }

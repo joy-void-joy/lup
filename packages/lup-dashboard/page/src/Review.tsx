@@ -47,7 +47,7 @@
 // drawers*).
 import { foldedRanges } from "@codemirror/language";
 import { Compartment, EditorSelection, EditorState, RangeSetBuilder, StateEffect, type ChangeSet, type Range } from "@codemirror/state";
-import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
+import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
 import { Vim } from "@replit/codemirror-vim";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 
@@ -660,10 +660,15 @@ function decorations(
     for (const mark of draft.marks ?? []) {
         const node = findNode(laidOut.nodes, mark.block);
         if (node !== undefined) {
-            marks.push({ from: node.from, to: node.from, value: Decoration.line({ class: `is-marked mark-${mark.verb}`, attributes: { "data-mark": mark.says } }) });
+            // One whose line reads otherwise while it's marked, as a box ticked, is that, and is struck through by no verb.
+            const draws = mark.draws ?? null;
+            marks.push({ from: node.from, to: node.from, value: Decoration.line({ class: draws === null ? `is-marked mark-${mark.verb}` : "is-marked", attributes: { "data-mark": mark.says } }) });
+            if (draws !== null) {
+                marks.push({ from: node.from, to: Math.min(node.from + draws.length, node.to), value: Decoration.replace({ widget: new MarkDrawn(draws) }) });
+            }
         }
     }
-    marks.sort((a, b) => a.from - b.from || a.to - b.to);
+    marks.sort((a, b) => a.from - b.from || a.value.startSide - b.value.startSide || a.to - b.to);
     const builder = new RangeSetBuilder<Decoration>();
     for (const each of marks) {
         builder.add(each.from, each.to, each.value);
@@ -685,6 +690,24 @@ export function threadTarget(laidOut: Laid, thread: number, node: number | null)
     const pointer = node === null ? undefined : laidOut.pointers.find((each) => each.thread === thread && each.node === node && within(each.from));
     const region = node === null ? undefined : laidOut.regions.find((each) => each.item.number === node && within(each.header.from));
     return pointer?.from ?? region?.header.from ?? whole.banner.from;
+}
+
+/** What a mark draws in place of the first characters of its line (`Offer.draws`), in the draft's colour. */
+class MarkDrawn extends WidgetType {
+    constructor(readonly text: string) {
+        super();
+    }
+
+    override eq(other: MarkDrawn): boolean {
+        return other.text === this.text;
+    }
+
+    override toDOM(): HTMLElement {
+        const span = document.createElement("span");
+        span.className = "mark-drawn";
+        span.textContent = this.text;
+        return span;
+    }
 }
 
 /** Say a span that ticks as of `now`: what it says for its first minute where it says other, else its words with the time since its moment; a gauge as it was answered. */

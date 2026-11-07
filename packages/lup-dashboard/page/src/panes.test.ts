@@ -775,12 +775,13 @@ describe("a module's row and its own buffer", () => {
     const FIX_A: Line = { block: "line", id: "branch fix-a", offers: [], spans: [{ text: "[x] fix-a  on trial", tone: "plain" }], by: { runtime: "claude", session: "lead" } };
     const NOBODY: Line = { block: "line", id: "takes", offers: [], spans: [{ text: "what a set takes", tone: "plain" }] };
     const OFFER = (verb: string, says: string) => ({ action: "module-act", argument: { repository: REPOSITORY, module: "versions", action: verb, argument: {} }, verb, runs: "send" as const, commented: false, says });
+    const OUT: Fold = { block: "fold", id: "out", kind: "group", summary: [{ text: "out · 1", tone: "muted" }], open: false, barred: false, offers: [], content: [{ ...NOBODY, id: "left out", offers: [OFFER("done", "take it in")] }] };
     const ANSWER: Blocks = {
         summary: [{ text: "what runs · dev + fix-a", tone: "plain" }],
         waiting: false,
         offers: [],
         tally: { holds: 0, flagged: 1, review: 0 },
-        blocks: [{ ...FIX_A, offers: [OFFER("run", "take it out"), OFFER("done", "merge it")] }, NOBODY],
+        blocks: [{ ...FIX_A, offers: [OFFER("decline", "leave it out"), OFFER("merge", "merge it")] }, NOBODY, OUT],
     };
     const REMOTE = new Map([[instanceOf(REPOSITORY, "versions", "what_runs", {}), ANSWER]]);
     const placing = (rows: Merged["rows"]) => ({ ...reading(), looks: { ...adopted(), rows }, remote: REMOTE });
@@ -811,7 +812,7 @@ describe("a module's row and its own buffer", () => {
 
     it("lays out only that view, open, whichever agents there are", () => {
         const laidOut = inBuffer();
-        expect(laidOut.text).toContain("what runs · dev + fix-a\n[x] fix-a  on trial\nwhat a set takes");
+        expect(laidOut.text).toContain("what runs · dev + fix-a\n[x] fix-a  on trial\nwhat a set takes\nout · 1");
         expect(laidOut.groups).toEqual([]);
         expect(bufferSpans(laidOut, ROW).map((each) => each.id)).toEqual([bufferKey(ROW)]);
     });
@@ -819,12 +820,15 @@ describe("a module's row and its own buffer", () => {
     it("reaches a verb on the block offering it, and nothing from a line offering none", () => {
         const laidOut = inBuffer();
         const verbs = (name: string): Verb => ({ name, key: name[0] ?? "", called: name });
-        const onBranch = reachOf(laidOut, laidOut.text.indexOf("[x] fix-a"), verbs("run"), { called });
-        expect(onBranch).toMatchObject({ says: "take it out" });
-        const onNote = reachOf(laidOut, laidOut.text.indexOf("what a set takes"), verbs("run"), { called });
+        const onBranch = reachOf(laidOut, laidOut.text.indexOf("[x] fix-a"), verbs("decline"), { called });
+        expect(onBranch).toMatchObject({ says: "leave it out" });
+        const onNote = reachOf(laidOut, laidOut.text.indexOf("what a set takes"), verbs("decline"), { called });
         expect(onNote.on).toBe(null);
-        const onSummary = reachOf(laidOut, 0, verbs("done"), { called });
+        const onSummary = reachOf(laidOut, 0, verbs("merge"), { called });
         expect(onSummary.on).toBe(null);
+        // A line folding rows reaches none of them from its own line, as the summary line doesn't.
+        const onOut = reachOf(laidOut, laidOut.text.indexOf("out · 1"), verbs("done"), { called });
+        expect(onOut.on).toBe(null);
     });
 
     it("takes a comment on a line saying whom it reaches, and none on one that doesn't", () => {
