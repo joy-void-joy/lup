@@ -15,6 +15,10 @@ conversation holding it, or none. What's in it are edges drawn to it:
 
 How it stands is read from those edges at each read, never stored
 (`Standing.read`): its status, what in it waits on the operator, and who's on it.
+
+A root an earlier lup kept for a session stays on the ledger, and is read as
+absent (`Thread.root`, `without_roots`): what's under it reads as at the top,
+and what's in it as in no thread.
 """
 
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, Self, override
@@ -30,16 +34,23 @@ if TYPE_CHECKING:
 
 type State = Literal[
     "working",
+    "nobody running",
     "waiting on the operator",
     "parked",
     "done to confirm",
     "settled",
     "declined",
 ]
-"""Where a thread stands: worked on; waiting on the operator, for a check or
-an item of theirs to answer; parked until something comes; done in an agent's
-word, for the operator to confirm; settled, by the operator, or by lup on a
-thread it made of what came before threads; or declined."""
+"""Where a thread stands: worked on; nobody running to work on it, its holder
+ended or never there and nobody above it answering, which is read at each read
+and never drawn; waiting on the operator, for a check or an item of theirs to
+answer; parked until something comes; done in an agent's word, for the operator
+to confirm; settled, by the operator, or by lup on a thread it made of what came
+before threads; or declined."""
+
+ROOT = "a main session's root thread"
+"""What an earlier lup titled the thread it kept for each session, which is read
+as absent (`Thread.root`)."""
 
 
 def thread_only(edge: Edge, target: Node) -> str | None:
@@ -70,6 +81,18 @@ class Thread(Node):
     holder: Conversation | None = None
     """The conversation leading it; none where nobody does."""
 
+    @property
+    def root(self) -> bool:
+        """Whether it's a root an earlier lup kept for a session, which is read as absent: its title says so, as it opened each.
+
+        >>> from datetime import UTC, datetime
+        >>> from pathlib import Path
+        >>> made = {"number": 4, "repository": Path("/r"), "by": Operator(), "at": datetime(2026, 1, 1, tzinfo=UTC), "name": "dev"}
+        >>> Thread(title=ROOT, **made).root, Thread(title="Lag", **made).root
+        (True, False)
+        """
+        return self.parent is None and self.title == ROOT
+
     @override
     def refused(self, found: Callable[[int], Node | None]) -> str | None:
         """Refuse a parent that isn't a thread of the same repository, or that is under this thread, which would make a loop."""
@@ -88,6 +111,16 @@ class Thread(Node):
                 case _:
                     return f"its parent, @{number}, is a `{parent.kind}`, not a thread"
         return None
+
+
+def without_roots(threads: list[Thread]) -> list[Thread]:
+    """Return `threads`, a repository's or every one's, as they're read: each root gone (`Thread.root`), and each thread right under one at the top."""
+    roots = [each.number for each in threads if each.root]
+    return [
+        each.model_copy(update={"parent": None}) if each.parent in roots else each
+        for each in threads
+        if each.number not in roots
+    ]
 
 
 class Check(Node):
@@ -328,14 +361,20 @@ KINDS = Kinds(
 """The kinds the ledger declares itself."""
 
 
-def stood(status: Status | None, *, waiting: bool) -> State:
-    """Say where a thread stands given its latest `status`, none where nothing said one, and whether something in it `waiting` on the operator: as its status says, but for a thread working or reopened, which waits on the operator where something in it does.
+def stood(status: Status | None, *, waiting: bool, running: bool = True) -> State:
+    """Say where a thread stands given its latest `status`, none where nothing said one, whether something in it `waiting` on the operator, and whether anyone `running` answers for it: as its status says, but for a thread working or reopened, which waits on the operator where something in it does, and else is worked on only where someone answers for it.
 
     >>> stood(None, waiting=True), stood(None, waiting=False)
     ('waiting on the operator', 'working')
+    >>> stood(None, waiting=False, running=False), stood(None, waiting=True, running=False)
+    ('nobody running', 'waiting on the operator')
     """
     stands = "working" if status is None else status.stands
-    return "waiting on the operator" if stands == "working" and waiting else stands
+    if stands != "working":
+        return stands
+    if waiting:
+        return "waiting on the operator"
+    return "working" if running else "nobody running"
 
 
 class Member(Model):
@@ -386,16 +425,24 @@ class Standing(Model):
     in it, but an item moved in whole from another, whose writer wrote it there."""
 
     @classmethod
-    def read(cls, thread: Thread, drawn: list[Edge], members: list[Member]) -> Self:
-        """Read where `thread` stands from `drawn`, the edges drawn to it, oldest first, and `members`, what's in it.
+    def read(
+        cls,
+        thread: Thread,
+        drawn: list[Edge],
+        members: list[Member],
+        *,
+        running: bool = True,
+    ) -> Self:
+        """Read where `thread` stands from `drawn`, the edges drawn to it, oldest first, `members`, what's in it, and whether anyone `running` answers for it.
 
         Its latest status says it, but for a thread working or reopened, which
-        waits on the operator where a member does.
+        waits on the operator where a member does, and else is worked on only
+        where someone answers for it (`stood`).
         """
         statuses = [each for each in drawn if isinstance(each, Status)]
         status = statuses[-1] if statuses else None
         waiting = [each for each in members if each.node.waiting(each.drawn)]
-        state = stood(status, waiting=bool(waiting))
+        state = stood(status, waiting=bool(waiting), running=running)
         holder = [] if thread.holder is None else [thread.holder]
         writers = [
             each.node.by
