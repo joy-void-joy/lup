@@ -29,15 +29,16 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 from lup.types import Model
-from lup_dev.approval import approved_branches
+from lup_dev.approval import approved, approved_branches
 from lup_dev.composing import Apart, Composed, Unmerged, dedupe
 from lup_dev.git import Git, GitError, refs_astray
 from lup_dev.host.courier import Conversation as Caller
-from lup_dev.host.on_trial import BranchListed, TrialListed
+from lup_dev.host.on_trial import BranchListed, TrialListed, VersionListed
 from lup_dev.stored import read_model, write_model
 from lup_ledger.parties import Conversation
 
 if TYPE_CHECKING:
+    from lup_dev.copies import Kept
     from lup_dev.host.protocol import Branches
     from lup_dev.layout import Layout
 
@@ -78,6 +79,10 @@ class Version(Model):
     dev: str
     tips: dict[str, str] = {}
     at: datetime
+    fingerprint: str | None = None
+    """The fingerprint of the host zone it holds, where it was read as it was made,
+    which says whether it's what's approved, or what a copy of another commit
+    holds; none where it wasn't, as a landing's."""
 
 
 class Trial(Model):
@@ -313,10 +318,19 @@ def pins(trial: Trial) -> list[str]:
 
 
 def moved_on(
-    trial: Trial, commit: str, dev: str, plan_: Plan, at: datetime, *, keeping: int = 50
+    trial: Trial,
+    commit: str,
+    dev: str,
+    plan_: Plan,
+    at: datetime,
+    *,
+    keeping: int = 50,
+    fingerprint: str | None = None,
 ) -> Trial:
-    """Return `trial` with `live` at `commit`, what `plan_` holds and what keeps each other out, keeping the last `keeping` of the versions still pinned, and this one."""
-    version = Version(commit=commit, dev=dev, tips=plan_.tips, at=at)
+    """Return `trial` with `live` at `commit`, what `plan_` holds and what keeps each other out, keeping the last `keeping` of the versions still pinned, and this one, whose host zone has `fingerprint`, where it was read."""
+    version = Version(
+        commit=commit, dev=dev, tips=plan_.tips, at=at, fingerprint=fingerprint
+    )
     branches = [
         each.model_copy(update={"conflict": plan_.conflicts.get(each.branch, "")})
         for each in trial.branches
@@ -408,10 +422,60 @@ class Origin(Model):
         )
 
 
+def versions_listed(
+    versions: list[Version],
+    kept: list[Kept],
+    runs: str | None,
+    fingerprint: str | None,
+) -> list[VersionListed]:
+    """Return `versions`, in their order, as a page lists them: each with the copy of `kept` that runs it, by its commit, else by the host zone they hold; and the latest of what's approved, the commit `runs` with `fingerprint`, as what runs.
+
+    >>> at = datetime(2026, 11, 7)
+    >>> older = Version(commit="a", dev="d", at=at, fingerprint="z")
+    >>> newer = Version(commit="b", dev="d", at=at, fingerprint="z")
+    >>> [each.running for each in versions_listed([older, newer], [], "c", "z")]
+    [False, True]
+    """
+
+    def holding(version: Version, commit: str, zone: str | None) -> bool:
+        same = version.fingerprint is not None and version.fingerprint == zone
+        return version.commit == commit or same
+
+    current = next(
+        (
+            each.commit
+            for each in reversed(versions)
+            if runs is not None and holding(each, runs, fingerprint)
+        ),
+        None,
+    )
+
+    def listed(version: Version) -> VersionListed:
+        copy = next(
+            (
+                each
+                for each in kept
+                if holding(version, each.commit, each.approval.fingerprint)
+            ),
+            None,
+        )
+        return VersionListed(
+            commit=version.commit,
+            dev=version.dev,
+            tips=version.tips,
+            at=version.at,
+            copy_kept=None if copy is None else copy.commit,
+            running=version.commit == current,
+            ran=None if copy is None else copy.answered,
+        )
+
+    return [listed(each) for each in versions]
+
+
 def trial_listed(
-    layout: Layout, repository: Path, built: list[str]
+    layout: Layout, repository: Path, kept: list[Kept]
 ) -> TrialListed | None:
-    """Return what's on trial for the repository at `repository`, as a page lists it, `built` being the commits whose copies are kept; none where it computes no running branch, or what's kept doesn't read, as what a later lup kept might not: the plain page is what's left when things are broken, so it lists the copies whatever this says."""
+    """Return what's on trial for the repository at `repository`, as a page lists it, `kept` being the copies kept of it; none where it computes no running branch, or what's kept doesn't read, as what a later lup kept might not: the plain page is what's left when things are broken, so it lists the copies whatever this says."""
     if computed_ref(layout, repository) is None:
         return None
     branches = approved_branches(layout, repository)
@@ -420,6 +484,8 @@ def trial_listed(
     except ValidationError:
         return None
     within = trial.tips
+    approval = approved(layout, repository)
+    built = [each.commit for each in kept]
 
     def alone(each: OnTrial) -> bool:
         return any(
@@ -444,7 +510,15 @@ def trial_listed(
                 out=each.out,
                 conflict=each.conflict,
                 built=alone(each),
+                party=each.party,
             )
             for each in trial.branches
         ],
+        versions=versions_listed(
+            trial.versions,
+            kept,
+            None if approval is None else approval.commit,
+            None if approval is None else approval.fingerprint,
+        ),
+        runs=None if approval is None else approval.commit,
     )

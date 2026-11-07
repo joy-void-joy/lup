@@ -3113,6 +3113,15 @@ class Lander(Model, arbitrary_types_allowed=True):
         }
 
 
+def no_room(branch: str) -> str:
+    """Say why `branch` can't be accepted where no session of its repository runs."""
+    return (
+        f"accepting `{branch}` runs the gate on its merge and removes its worktree in "
+        "a session's room, and no session of this repository is running: start one, "
+        "then accept it again"
+    )
+
+
 def served_launches(host: HostLayout, repository: Path) -> dict[str, Register]:
     """Return each launch of the repository at `repository` the service still serves, by its id, as its record has it."""
     # Each launch's conversations are kept beside its record, and aren't a record.
@@ -3516,12 +3525,7 @@ class LandingTools(Model, RoomTools, arbitrary_types_allowed=True):
         served = served_launches(self.layout.host, repository)
         launch = served.get(on.launch or "") or next(iter(served.values()), None)
         if launch is None or on.caller is None:
-            message = (
-                f"accepting `{on.branch}` runs the gate on its merge and removes its "
-                "worktree in a session's room, and no session of this repository is "
-                "running: start one, then accept it again"
-            )
-            raise HostError(message)
+            raise HostError(no_room(on.branch))
         lander = Lander(
             delivery=self.delivery,
             remotes=self.remotes,

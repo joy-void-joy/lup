@@ -27,12 +27,12 @@ Each is held to one at a time in a repository, with a landing's merge (`Turns`).
 import asyncio
 from collections.abc import Callable
 from pathlib import Path
-from typing import override
+from typing import TYPE_CHECKING, override
 
-from lup.types import Model
+from lup.types import Model, MutableModel
 from lup_dev.approval import approved, approved_branches
 from lup_dev.clock import Clock
-from lup_dev.composing import Composed, Unmerged, apart
+from lup_dev.composing import Apart, Composed, Unmerged, apart
 from lup_dev.copies import Copies
 from lup_dev.errors import LupDevError
 from lup_dev.git import Git
@@ -46,7 +46,9 @@ from lup_dev.host.on_trial import (
     TrialSaid,
 )
 from lup_dev.host.protocol import Branches, HostError, Reply
-from lup_dev.host.service import Handler
+from lup_dev.host.service import Companion, Handler
+from lup_dev.host.watch import Changes
+from lup_dev.host.workers import Listing, RepositoryAsking
 from lup_dev.inbox.delivery import Delivery
 from lup_dev.inbox.store import cited
 from lup_dev.layout import CopyLayout, Layout
@@ -60,6 +62,7 @@ from lup_dev.trial import (
     Trial,
     Trials,
     accepted,
+    computed_ref,
     files_said,
     move_ref,
     moved_on,
@@ -70,6 +73,9 @@ from lup_dev.trial import (
     trial_listed,
 )
 from lup_ledger.environment.layout import LedgerLayout
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
 
 
 class Computed(Model):
@@ -135,31 +141,18 @@ class Trying(Model, arbitrary_types_allowed=True):
         message = f"`{remote}` has no `{branches.integration}` to compute from"
         raise HostError(message)
 
-    def computed(
-        self, git: Git, trial: Trial, branches: Branches, dev: str
-    ) -> Computed:
-        """Compute `live` from `trial` on the commit `dev`, each branch `dev` holds off trial, and make its next commit, no ref naming it yet."""
-        now = accepted(git, dev, trial)
-        with apart(git) as store:
-            found = plan(store, dev, branches.integration, now)
-            commit = next_commit(
-                store, now, dev, branches.integration, found, at=self.clock.now()
-            )
-        return Computed(trial=now, plan=found, dev=dev, commit=commit)
+    def composing(self, git: Git) -> AbstractContextManager[Apart]:
+        """Hold what `live` is merged in, for the repository `git` is pinned to: a store apart (`lup_dev.composing`), which a demo's stand-in answers for (`lup_dashboard/trialed.py`)."""
+        return apart(git)
 
-    def kept(
-        self, repository: Path, git: Git, computed: Computed, remote: str
+    def holds(self, git: Git, dev: str, trial: Trial) -> Trial:
+        """Return `trial` without each branch the commit `dev` holds, as git says (`accepted`)."""
+        return accepted(git, dev, trial)
+
+    def moved_to(
+        self, git: Git, branches: Branches, commit: str, remote: str
     ) -> list[str]:
-        """Keep `computed`, naming its commit where lup's asked and on `remote`, and say what's left undone: `live` still moves where a ref can't, or the network's down, as what's kept is what reads."""
-        branches = approved_branches(self.layout, repository)
-        commit = computed.commit or computed.trial.live or computed.dev
-        stands = moved_on(
-            computed.trial, commit, computed.dev, computed.plan, self.clock.now()
-        )
-        Trials.of(self.layout, repository).write(stands)
-        Copies(layout=self.layout.judge(repository)).pin(pins(stands))
-        if computed.commit is None:
-            return []
+        """Name `commit` where lup's asked and on `remote`, and say what's left undone: `live` still moves where a ref can't, or the network's down, as what's kept is what reads."""
         left = move_ref(git, branches, commit)
         said = [] if left is None else [f"{left}."]
         try:
@@ -167,6 +160,43 @@ class Trying(Model, arbitrary_types_allowed=True):
         except LupDevError as failed:
             said.append(f"`{branches.running}` isn't on `{remote}` yet: {failed}")
         return said
+
+    def computed(
+        self, git: Git, trial: Trial, branches: Branches, dev: str
+    ) -> Computed:
+        """Compute `live` from `trial` on the commit `dev`, each branch `dev` holds off trial, and make its next commit, no ref naming it yet."""
+        now = self.holds(git, dev, trial)
+        with self.composing(git) as store:
+            found = plan(store, dev, branches.integration, now)
+            commit = next_commit(
+                store, now, dev, branches.integration, found, at=self.clock.now()
+            )
+        return Computed(trial=now, plan=found, dev=dev, commit=commit)
+
+    def kept(
+        self,
+        repository: Path,
+        git: Git,
+        computed: Computed,
+        remote: str,
+        fingerprint: str | None = None,
+    ) -> list[str]:
+        """Keep `computed`, whose host zone has `fingerprint`, where it's been read, naming its commit (`moved_to`), and say what's left undone."""
+        branches = approved_branches(self.layout, repository)
+        commit = computed.commit or computed.trial.live or computed.dev
+        stands = moved_on(
+            computed.trial,
+            commit,
+            computed.dev,
+            computed.plan,
+            self.clock.now(),
+            fingerprint=fingerprint,
+        )
+        Trials.of(self.layout, repository).write(stands)
+        Copies(layout=self.layout.judge(repository)).pin(pins(stands))
+        if computed.commit is None:
+            return []
+        return self.moved_to(git, branches, commit, remote)
 
     async def moved_dev(self, repository: Path, remote: str = "origin") -> list[str]:
         """Follow `dev` having moved, a landing or an accepting moved it, as `live` holds it: compute it again, asking nothing where nothing the host runs changes, and the approval where something does; say what came of it, a line each."""
@@ -182,8 +212,15 @@ class Trying(Model, arbitrary_types_allowed=True):
         trial = Trials.of(self.layout, repository).read()
         dev = self.dev_tip(git, branches, trial, remote)
         found = self.computed(git, trial, branches, dev)
-        said = self.kept(repository, git, found, remote)
-        return [*said, *self.fell_out(found), *self.asked(repository, found)]
+        fingerprint = (
+            None if found.commit is None else self.fingerprint(repository, found.commit)
+        )
+        said = self.kept(repository, git, found, remote, fingerprint)
+        return [
+            *said,
+            *self.fell_out(found),
+            *self.asked(repository, found, fingerprint),
+        ]
 
     def fell_out(self, computed: Computed) -> list[str]:
         """Say each branch that stopped merging as `live` moved, keeping it out, a line each."""
@@ -194,11 +231,12 @@ class Trying(Model, arbitrary_types_allowed=True):
             and each.branch in computed.trial.tips
         ]
 
-    def asked(self, repository: Path, computed: Computed) -> list[str]:
-        """Ask the operator about `computed`'s commit, where it runs what isn't approved; say so. It's asked nothing where that's the same."""
+    def asked(
+        self, repository: Path, computed: Computed, fingerprint: str | None
+    ) -> list[str]:
+        """Ask the operator about `computed`'s commit, whose host zone has `fingerprint`, where it runs what isn't approved; say so. It's asked nothing where that's the same."""
         if computed.commit is None:
             return []
-        fingerprint = self.fingerprint(repository, computed.commit)
         approval = approved(self.layout, repository)
         if approval is not None and approval.fingerprint == fingerprint:
             return []
@@ -248,7 +286,7 @@ class Trying(Model, arbitrary_types_allowed=True):
         tips = {
             each.branch: each.tip for each in trial.branches if each.branch in names
         }
-        with apart(git) as store:
+        with self.composing(git) as store:
             match store.merged(dev, tips):
                 case Composed():
                     return
@@ -273,7 +311,7 @@ class Trying(Model, arbitrary_types_allowed=True):
         fingerprint = self.fingerprint(repository, commit)
         approval = approved(self.layout, repository)
         if approval is not None and approval.fingerprint == fingerprint:
-            said = self.kept(repository, git, found, remote)
+            said = self.kept(repository, git, found, remote, fingerprint)
             return self.said(
                 repository,
                 [
@@ -294,7 +332,7 @@ class Trying(Model, arbitrary_types_allowed=True):
             None,
         )
         if copy is None:
-            said = self.kept(repository, git, found, remote)
+            said = self.kept(repository, git, found, remote, fingerprint)
             number = self.propose(repository)
             return self.said(
                 repository,
@@ -318,7 +356,7 @@ class Trying(Model, arbitrary_types_allowed=True):
                 f"{copy.commit} --ledger`, in a terminal, says how much, and asks"
             )
             raise HostError(message)
-        self.kept(repository, git, found, remote)
+        self.kept(repository, git, found, remote, fingerprint)
         last = last_switch(self.layout)
         running = copies.running()
         from_copy = copy if copy.answered is not None or running is None else running
@@ -379,7 +417,43 @@ class Trying(Model, arbitrary_types_allowed=True):
     def listed(self, repository: Path) -> TrialListed | None:
         """Return what's on trial in `repository`, as a page lists it."""
         kept = Copies(layout=self.layout.judge(repository)).kept()
-        return trial_listed(self.layout, repository, [each.commit for each in kept])
+        listed = trial_listed(self.layout, repository, kept)
+        if listed is None:
+            return None
+        return listed.model_copy(update={"last": last_switch(self.layout)})
+
+
+class OwnViewsSaid(MutableModel, Companion, arbitrary_types_allowed=True):
+    """Has lup's own repository's process say how its views look as the service starts, where it computes its running branch: the review's row of what runs is placed by what that says, and a switch restarts the service, with no process running until something asks one, a session at work or the page watching what it doesn't yet know to."""
+
+    layout: Layout
+    asking: RepositoryAsking
+    changes: Changes
+    """Told once it has said, so a page's listing is answered again."""
+    say: Callable[[str], None]
+    saying: asyncio.Task[None] | None = None
+
+    @override
+    async def begin(self) -> None:
+        copies = host_copies(self.layout)
+        repository = None if copies is None else own_repository(copies)
+        if repository is None or computed_ref(self.layout, repository) is None:
+            return
+        self.saying = asyncio.create_task(self.asked(repository))
+
+    @override
+    async def end(self) -> None:
+        if self.saying is not None:
+            self.saying.cancel()
+
+    async def asked(self, repository: Path) -> None:
+        """Ask `repository`'s process what it serves, which starts it, and tell whoever watches; say why not, where it can't."""
+        try:
+            await self.asking.asked(repository, Listing())
+        except HostError as failed:
+            self.say(f"{repository}: how its views look isn't known yet: {failed}")
+            return
+        self.changes.changed()
 
 
 class TrialListing(Model, Handler[ListTrial]):

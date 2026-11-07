@@ -12,6 +12,7 @@ from typing import Literal
 
 from lup.types import Model
 from lup_dev.host.protocol import Reply, Request
+from lup_ledger.parties import Conversation
 
 
 class BranchListed(Model):
@@ -29,6 +30,38 @@ class BranchListed(Model):
     """What keeps it out, where it doesn't merge; empty where it does."""
     built: bool = False
     """A copy of `dev` and it alone is kept: picking it alone is immediate."""
+    party: Conversation | None = None
+    """Who landed it, as the inbox knows them: whom the operator's words on it
+    reach, or wait for."""
+
+
+class LastSwitch(Model):
+    """What came of the last switch, kept for whoever didn't watch it."""
+
+    commit: str
+    at: datetime
+    said: str
+    answered: bool
+    """Whether the copy switched to answers."""
+
+
+class VersionListed(Model):
+    """One of `live`'s commits, as a page shows it: what it holds, and what running it again takes."""
+
+    commit: str
+    dev: str
+    """The commit of the integration branch it's on."""
+    tips: dict[str, str] = {}
+    """Each branch in it, with the commit of it there."""
+    at: datetime
+    copy_kept: str | None = None
+    """The commit of the copy kept of it, which running it again moves the host
+    to, a copy of another commit holding what the host runs of it the same; none
+    where none is kept, so running it asks the operator's yes and builds."""
+    running: bool = False
+    """It's what the host runs: what's approved holds what it holds."""
+    ran: datetime | None = None
+    """When its copy last answered; none for one never run, or with no copy."""
 
 
 class TrialListed(Model):
@@ -39,6 +72,13 @@ class TrialListed(Model):
     dev: str | None = None
     live: str | None = None
     branches: list[BranchListed] = []
+    versions: list[VersionListed] = []
+    """Each of `live`'s commits whose branches are still on trial, oldest first."""
+    runs: str | None = None
+    """The commit approved, whose copy the host runs: another than `live` where
+    `live` holds what the host runs the same, or waits on the operator's yes."""
+    last: LastSwitch | None = None
+    """What came of the last switch, which a page says where it fell back."""
 
 
 class ListTrial(Request, reads=False):
@@ -76,16 +116,6 @@ class DropBranch(Request, reads=False):
     words: str = ""
     repository: Path | None = None
     """The repository's git directory; none for lup's own."""
-
-
-class LastSwitch(Model):
-    """What came of the last switch, kept for whoever didn't watch it."""
-
-    commit: str
-    at: datetime
-    said: str
-    answered: bool
-    """Whether the copy switched to answers."""
 
 
 class SwitchCopy(Request, reads=False):

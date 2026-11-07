@@ -922,9 +922,7 @@ def listed_copies(layout: Layout) -> CopiesListed:
         copies=[listed(each) for each in kept],
         tables=tables,
         last=last,
-        trial=None
-        if repository is None
-        else trial_listed(layout, repository, [each.commit for each in kept]),
+        trial=None if repository is None else trial_listed(layout, repository, kept),
     )
 
 
