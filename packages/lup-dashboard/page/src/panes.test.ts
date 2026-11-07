@@ -789,14 +789,14 @@ describe("a module's row and its own buffer", () => {
         expect(listedByAgent(reading()).some((each) => each.id.startsWith("view "))).toBe(false);
     });
 
-    it("lists what the view says of itself, with its marks, after the parties and opening its buffer", () => {
+    it("lists what the view says of itself, with its marks, straight under what's for the operator and opening its buffer", () => {
         const rows = listedByAgent(placing([{ repository: REPOSITORY, drawn: DRAWN }]));
         const row = rows.find((each) => each.id === bufferKey(ROW));
         expect(row?.opens).toEqual(ROW);
         const said = row?.lines[0]?.stretches.map((each) => each.text).join("") ?? "";
         expect(said).toContain("what runs · dev + fix-a");
         expect(said).toContain("◇1");
-        expect(rows.findIndex((each) => each.id === bufferKey(ROW))).toBeGreaterThan(rows.findIndex((each) => each.id === `party ${NO_AGENT.name}`));
+        expect(rows.findIndex((each) => each.id === bufferKey(ROW))).toBe(rows.findIndex((each) => each.id === "for you") + 1);
         expect(titled(ROW, { ...reading() }).name).toBe("what runs");
     });
 

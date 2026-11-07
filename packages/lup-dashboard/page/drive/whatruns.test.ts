@@ -80,10 +80,10 @@ afterAll(async () => {
 });
 
 describe("what runs, in the review", () => {
-    it("lists a row saying what runs, after the piles, whose Enter opens it as an ordinary buffer", async () => {
+    it("lists a row saying what runs, near the top, whose Enter opens it as an ordinary buffer", async () => {
         const list = await listText();
         const row = list.findIndex((each) => each.includes("what runs · dev + clearer-marks"));
-        expect(row).toBeGreaterThan(list.findIndex((each) => each.includes("No agent")));
+        expect(row).toBe(list.findIndex((each) => each.includes("what's for you")) + 1);
         expect(list[row]).toContain("◇1");
         await openWhatRuns();
         const text = await review.text();

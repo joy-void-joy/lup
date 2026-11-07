@@ -461,7 +461,7 @@ function partyRow(party: Party, count: number, tally: Tally): Row {
 }
 
 /**
- * Return the list by agent: what's for the operator; each agent running, a subagent under their parent, a repository
+ * Return the list by agent: what's for the operator; each view a repository's modules place under it; each agent running, a subagent under their parent, a repository
  * named where there are several; each party, each agent it holds with what's theirs nested under them, and each task it
  * holds that nobody ever owned; and lup's approvals. What nobody's in, no party and not running, isn't an agent.
  */
@@ -469,7 +469,8 @@ export function listedByAgent(reading: ListReading): Row[] {
     const groups = groupsOf(reading);
     const counted = groups.map((each) => ({ group: each, tally: agentTally(each, reading) }));
     const tallyOf = (group: Grouping) => counted.find((each) => each.group === group)?.tally ?? NOTHING;
-    const rows: Row[] = [forYouRow(added(counted.map((each) => each.tally)))];
+    // What runs comes straight under what's for the operator, always in sight however long the list gets.
+    const rows: Row[] = [forYouRow(added(counted.map((each) => each.tally))), ...viewRows(reading)];
     const parties = reading.parties ?? PARTIES;
     // Each agent under the first party holding them; the rest, running, on their own.
     const partyOf = (group: Grouping) => parties.find((each) => each.holds(group, reading.running));
@@ -505,7 +506,6 @@ export function listedByAgent(reading: ListReading): Row[] {
     for (const group of byName(groups.filter((each) => each.conversation === null), reading.called)) {
         rows.push(agentRow(group, 0, reading));
     }
-    rows.push(...viewRows(reading));
     if (threads !== null) {
         const done = threads.read.threads.filter(closedTask);
         if (done.length > 0) {
