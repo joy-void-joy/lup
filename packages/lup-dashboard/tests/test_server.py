@@ -536,8 +536,16 @@ def test_the_demo_answers_a_module_s_view_with_the_module_s_own_layout_over_its_
         ("judge", "since", "s"),
         ("transcripts", "messages", "M"),
         ("transcripts", "conversation", "v"),
+        ("versions", "what_runs", "V"),
     ]
-    assert listed.standing == listed.looks[lup]
+    # A repository whose process hasn't said its own is drawn by lup's defaults, which
+    # select no `Versions`.
+    assert [each.view for each in listed.standing.drawers] == [
+        "tasks",
+        "since",
+        "messages",
+        "conversation",
+    ]
     assert {"earlier", "calls", "items", "call"} <= {
         each.name for each in listed.looks[lup].folds
     }
