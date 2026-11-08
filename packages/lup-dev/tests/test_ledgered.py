@@ -207,7 +207,8 @@ def test_the_files_are_converted_once_each_item_keeping_its_number_and_where_it_
     assert kept.nowhere == 1
     assert inbox.items == {each.number: each for each in stored_items()}
     assert inbox.whereabouts[WORKER.key()].name == "parser"
-    assert ledger.numbered() == 13
+    # Past every number an item kept, so none is given out again.
+    assert ledger.numbered() > max(inbox.items)
     assert inbox.draft() == Draft(done=[3], parked=[4])
     assert inbox.order() == Order(places=["agent:s1"])
     assert inbox.talk(MAIN) == Talk(comments=[TalkComment(step=1, text="Hm.")])
@@ -299,6 +300,7 @@ def test_a_new_item_takes_the_ledger_s_next_number_and_whereabouts_take_none(
     converted(ledger, stored(tmp_path / "inbox"))
     inbox = Inbox.opened(ledger)
     subagent = MAIN.model_copy(update={"agent": "a2"})
+    last = ledger.numbered()
 
     placed = inbox.placed(
         Whereabouts(
@@ -309,7 +311,8 @@ def test_a_new_item_takes_the_ledger_s_next_number_and_whereabouts_take_none(
         Message(kind="note", text="Next."), MAIN, Operator(), None, at(40)
     )
 
-    assert made.number == 13
+    # One past the number taken just before: the whereabouts placed between took none.
+    assert made.number == last + 1
     assert Inbox.opened(ledger).whereabouts[subagent.key()] == placed
     assert ledger.every(Node) == ledger.every(ItemNode)
 

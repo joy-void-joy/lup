@@ -36,6 +36,15 @@ def wrote(ledger: LedgerLayout, *, versions: int = 0, edges: int = 0) -> None:
     connection.close()
 
 
+def given_last(ledger: LedgerLayout) -> int:
+    """The number the ledger gave out last, read from the versions `wrote` kept: the sequence's next is one past it."""
+    connection = sqlite3.connect(ledger.database)
+    try:
+        return connection.execute("SELECT max(number) FROM versions").fetchone()[0]
+    finally:
+        connection.close()
+
+
 @pytest.fixture
 def ledger(tmp_path: Path) -> LedgerLayout:
     placed = LedgerLayout(home=tmp_path / "state" / "ledger")
@@ -61,7 +70,7 @@ def test_a_snapshot_holds_the_database_whole_and_links_its_attachments(
     assert taken.written.tables == 2
     assert taken.written.versions == 2
     assert taken.written.edges == 1
-    assert taken.written.next == 3
+    assert taken.written.next == given_last(ledger) + 1
     place = snapshots.place(taken)
     assert written(place.database) == taken.written
     assert place.attachment("abc").read_text() == "an attachment"
@@ -158,15 +167,16 @@ def test_restoring_never_reuses_a_number_the_ledger_it_replaces_gave_out(
     taken = snapshots.taken(AT, "copy", "abc123")
     assert taken is not None
     wrote(ledger, versions=7)
+    last = given_last(ledger)
     given_out = written(ledger.database)
     assert given_out is not None
-    assert given_out.next == 10
+    assert given_out.next == last + 1
 
     snapshots.restored(taken, LATER)
 
     now = written(ledger.database)
     assert now is not None
-    assert now.next == 10
+    assert now.next == last + 1
     assert now.versions == taken.written.versions
 
 
@@ -202,6 +212,7 @@ def test_restoring_leaves_the_write_ahead_log_with_what_it_replaces(
 ) -> None:
     taken = snapshots.taken(AT, "copy", "abc123")
     assert taken is not None
+    last = given_last(ledger)
     writing = sqlite3.connect(ledger.database)
     writing.execute("PRAGMA journal_mode = WAL")
     writing.execute("PRAGMA wal_autocheckpoint = 0")
@@ -214,7 +225,8 @@ def test_restoring_leaves_the_write_ahead_log_with_what_it_replaces(
     assert not wal.exists()
     now = written(ledger.database)
     assert now is not None
-    assert now.next == 43
+    # The next number when the snapshot was taken, moved on 40 by what the log alone holds.
+    assert now.next == last + 1 + 40
     assert (restored.aside / ledger.database.name).is_file()
 
 
