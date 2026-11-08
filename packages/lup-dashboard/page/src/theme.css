@@ -1490,6 +1490,37 @@ kbd {
     color: var(--ok);
 }
 
+/* A concern's block: its header slanted in the text's own colour, unlike an agent's banner; barred orange where the
+   agent said it's done and the operator hasn't cleared it, for their eyes; muted where they cleared it. Above one
+   nested under it held elsewhere, what it's under, dim, as context; a line under it naming one nested under it. */
+.buffer .cm-line.aside-concern-open,
+.buffer .cm-line.aside-concern-for-your-eyes,
+.buffer .cm-line.aside-concern-quiet,
+.buffer .cm-line.aside-concern-gone {
+    font-style: italic;
+    font-weight: 700;
+}
+
+.buffer .cm-line.aside-concern-for-your-eyes {
+    box-shadow: inset 4px 0 0 var(--orange);
+}
+
+.buffer .cm-line.aside-concern-quiet,
+.buffer .cm-line.aside-concern-gone {
+    color: var(--muted);
+}
+
+.buffer .cm-line.aside-concern-context {
+    color: var(--muted);
+    font-style: italic;
+    opacity: 0.55;
+}
+
+.buffer .cm-line.aside-concern-nested {
+    color: var(--muted);
+    font-style: italic;
+}
+
 .buffer .cm-line.aside-check-text {
     color: var(--fg);
 }

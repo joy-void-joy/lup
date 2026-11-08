@@ -148,6 +148,19 @@ export function cutAt(text: string, most: number): string {
     return `${text.slice(0, cut > 0 ? cut : most - 1).trimEnd()}…`;
 }
 
+/**
+ * A concern laid out as a block (`laid`): in its holder's own buffer, its party's, what's for the operator where it wants
+ * their eyes, or what's settled. From its first line to its last, the messages written on it among them; its header, the
+ * line a verb on it reaches it from; the concern as the host reads it; what's written on it; or, `dim`, one line, context
+ * above one nested under it held elsewhere, whose own block is where it's held.
+ */
+export interface ConcernBlock extends Span {
+    read: ThreadRead;
+    header: Span;
+    dim: boolean;
+    blocks: Block[];
+}
+
 /** A check in a thread, where it's laid out: from its first line to its last, the comments under it among them. */
 export interface CheckLine extends Span {
     check: CheckRead;
@@ -371,7 +384,7 @@ export interface Group {
  * their conversation, live, what the operator writes at its end reaching them; every agent no longer running; or one
  * thread's conversation, whole. Each is a subset of the review's tree, laid out by the one layout.
  */
-export type Showing = { kind: "for you" } | { kind: "agent"; key: string } | { kind: "party"; name: string } | { kind: "thread"; number: number } | { kind: "view"; repository: string; module: string; view: string; called: string };
+export type Showing = { kind: "for you" } | { kind: "agent"; key: string } | { kind: "party"; name: string } | { kind: "thread"; number: number } | { kind: "settled" } | { kind: "view"; repository: string; module: string; view: string; called: string };
 
 /** Return who a module's view placed under its repository is laid out as of: no agent, so nothing it shows is anyone's unless a block says whose (`Line.by`). */
 export function ofNobody(repository: string): Conversation {
@@ -462,6 +475,77 @@ export function concernReads(read: ThreadRead): NonNullable<ThreadRead["reads"]>
     return read.reads ?? "open";
 }
 
+/** Return the checks in a concern still waiting on the operator, each with its words, as the host reads them. */
+export function checksWaiting(read: ThreadRead): CheckRead[] {
+    return (read.checks ?? []).filter((each) => (each.answer ?? null) === null && (read.asks ?? []).some((ask) => ask.node === each.check.number));
+}
+
+/** Return whether a concern wants the operator's eyes, what's for them laid out: said done and not cleared, or open with a check waiting on them. */
+export function wantsEyes(read: ThreadRead): boolean {
+    const reads = concernReads(read);
+    return reads === "for your eyes" || (reads === "open" && checksWaiting(read).length > 0);
+}
+
+/** Return whose a concern is, where it's laid out among the agents: whoever answers for it, else who left it (`keptUnder`), else whoever asked a check in it; none where nobody did, as one the operator opened that nobody took. */
+export function concernOwner(read: ThreadRead): Conversation | null {
+    const asker = checksWaiting(read).find((each) => each.check.by.party === "conversation")?.check.by ?? null;
+    return keptUnder(read) ?? (asker !== null && asker.party === "conversation" ? asker : null);
+}
+
+/**
+ * Return the concerns of `all` the buffer `showing` lays out as blocks: in an agent's own, each they answer for that isn't
+ * gone; in what's for the operator, each wanting their eyes (`wantsEyes`); in a party's, each it holds that isn't gone; in
+ * what's settled, each the operator cleared; none elsewhere, or that the host says is nothing to list.
+ */
+export function concernsIn(all: readonly ThreadRead[], showing: Showing | null, party: Party | undefined, running: ReadonlyMap<string, unknown>): ThreadRead[] {
+    const listed = (read: ThreadRead) => read.bare !== true && concernReads(read) !== "gone";
+    switch (showing?.kind) {
+        case "agent":
+            return all.filter((each) => {
+                const owner = taskOwner(each);
+                return listed(each) && owner !== null && whose(owner) === showing.key;
+            });
+        case "for you":
+            return all.filter((each) => each.bare !== true && wantsEyes(each));
+        case "party":
+            return party === undefined ? [] : all.filter((each) => listed(each) && party.holdsTask(each, running));
+        case "settled":
+            return all.filter((each) => (each.cleared ?? null) !== null);
+        default:
+            return [];
+    }
+}
+
+/**
+ * Return the buffer a concern's block is in, where its row and `gt` go: what's settled, where it's gone; else its holder's
+ * own, or whoever answers for it above them; else the party holding it, `No agent` where nobody running answers for it.
+ */
+export function concernHome(read: ThreadRead, running: ReadonlyMap<string, unknown>, parties: readonly Party[] = PARTIES): Showing {
+    if (concernReads(read) === "gone") {
+        return { kind: "settled" };
+    }
+    const owner = taskOwner(read);
+    const party = parties.find((each) => each.holdsTask(read, running));
+    if (owner !== null && running.has(whose(owner))) {
+        return { kind: "agent", key: whose(owner) };
+    }
+    return party === undefined ? { kind: "settled" } : { kind: "party", name: party.name };
+}
+
+/**
+ * Say a concern's two marks, in a few words: the agent's, `done` where they said it is, else where it stands; then the
+ * operator's, `for you to clear` where it's done and they haven't, `cleared` or `declined` where they have.
+ */
+export function concernSaid(read: ThreadRead): string {
+    const cleared = read.cleared ?? null;
+    const done = (read.done ?? null) !== null;
+    const agent = done ? "done" : cleared !== null ? "open" : read.state === "waiting on the operator" ? "working" : read.state;
+    if (cleared !== null) {
+        return `${agent}, ${cleared.kind === "ledger:declined" ? "declined" : "cleared"}`;
+    }
+    return done ? `${agent}, for you to clear` : agent;
+}
+
 /** A concern where a nest lays it out: as one of its own, or, `dim`, as context above one of its own nested under it, and how deep. */
 export interface Nested {
     read: ThreadRead;
@@ -548,14 +632,12 @@ export interface Arranging {
     threads?: Threading | null;
     /** The one buffer to lay out of the review, where it's laid out in panes; none lays it out whole. */
     showing?: Showing | null;
-    /** The checks waiting on the operator, each laid out under whoever owns it (`checkOwner`), in panes; none else. */
-    checks?: readonly OwnedCheck[];
     /** Whether what the review is laid out from is all read, so a buffer with nothing in it holds nothing; unsaid, it is. */
     read?: boolean;
     /** What a buffer with nothing in it says until it's read. */
     unread?: string;
-    /** The threads done, for the operator to confirm, each laid out under whose it is (`keptUnder`), in panes; none else. */
-    confirming?: readonly ThreadRead[];
+    /** Every concern, as the host reads it (`inbox-threads`), each laid out as a block where its buffer holds it, in panes; none else. */
+    concerns?: readonly ThreadRead[];
     /** The parties a buffer may show; unsaid, those declared here (`PARTIES`). */
     parties?: readonly Party[];
 }
@@ -683,11 +765,21 @@ export interface Laid {
     asides: Aside[];
     /** Each check laid out, in the text's order. */
     checks: CheckLine[];
-    /** Each line saying a thread's done, for the operator to confirm, which `gt` goes from to the thread. */
-    confirms: (Span & { thread: ThreadRead })[];
+    /** Each concern laid out, in the text's order, as a block or dim as context. */
+    concerns: ConcernBlock[];
 }
 
 export const EMPTY: Draft = { comments: [], letters: [], remarks: [], done: [], declined: [], parked: [], marks: [] };
+
+/** Return the concern laid out at `position`, as a block, from its header to its last line; none on a line of one dim as context, or elsewhere. */
+export function concernAt(laidOut: Laid, position: number): ConcernBlock | undefined {
+    return laidOut.concerns.findLast((each) => !each.dim && position >= each.from && position <= each.to);
+}
+
+/** Return the concern a line at `position` names, one laid out there as a block, or the one a line of a block names, dim as context or nested under it, which `gt` goes to: the innermost; none elsewhere. */
+export function concernNamedAt(laidOut: Laid, position: number): ConcernBlock | undefined {
+    return laidOut.concerns.find((each) => each.dim && position >= each.from && position <= each.to) ?? concernAt(laidOut, position);
+}
 
 /** Return what names an item among the folds' owners: its number; a drawer: its kind and whose it is. */
 export function ownerOf(owner: { item: Item } | { drawer: DrawerKind; conversation: Conversation }): string {
@@ -1603,27 +1695,24 @@ export function laid(
     const showing = arranging.showing ?? null;
     // Whether what the review is laid out from is read yet: until then, a buffer's empty for that alone.
     const readYet = arranging.read ?? true;
-    // The checks each group's agent owns, by `whose` they are; and a group for each owner with none.
-    const checksOf = new Map<string, OwnedCheck[]>();
-    const checkOwners: Conversation[] = [];
-    for (const each of arranging.checks ?? []) {
-        const owner = checkOwner(each);
-        if (owner !== null) {
-            checksOf.set(whose(owner), [...(checksOf.get(whose(owner)) ?? []), each]);
-            checkOwners.push(owner);
+    // Every concern the host reads; of them, those the buffer on screen lays out as blocks (`concernsIn`), each under its
+    // owner's group, by `whose` they are, with a group for each owner who has none; and those no one owns, after them.
+    const allConcerns = arranging.concerns ?? [];
+    const concernsOf = new Map<string, ThreadRead[]>();
+    const concernOwners: Conversation[] = [];
+    const unowned: ThreadRead[] = [];
+    const party = showing?.kind === "party" ? (arranging.parties ?? PARTIES).find((each) => each.name === showing.name) : undefined;
+    for (const each of concernsIn(allConcerns, showing, party, arranging.running ?? new Map())) {
+        const owner = showing?.kind === "agent" ? taskOwner(each) : showing?.kind === "settled" ? null : concernOwner(each);
+        if (owner === null) {
+            unowned.push(each);
+        } else {
+            concernsOf.set(whose(owner), [...(concernsOf.get(whose(owner)) ?? []), each]);
+            concernOwners.push(owner);
         }
     }
-    // The threads done for the operator to confirm each group's agent owns, likewise.
-    const confirmsOf = new Map<string, ThreadRead[]>();
-    const confirmLines: (Span & { thread: ThreadRead })[] = [];
-    for (const each of arranging.confirming ?? []) {
-        const owner = keptUnder(each);
-        if (owner !== null) {
-            confirmsOf.set(whose(owner), [...(confirmsOf.get(whose(owner)) ?? []), each]);
-            checkOwners.push(owner);
-        }
-    }
-    empty.push(...emptyGroups(checkOwners, [...now, ...empty]));
+    const concernLines: ConcernBlock[] = [];
+    empty.push(...emptyGroups(concernOwners, [...now, ...empty]));
     if (showing?.kind === "agent") {
         // One agent's own buffer: what's left for later of theirs, then their group, what's live and what's written to
         // them last.
@@ -1634,12 +1723,19 @@ export function laid(
             layGroup(group, false, 0, "own");
         }
     } else if (showing?.kind === "party") {
-        // What each agent the party holds left, under their banner.
-        const party = (arranging.parties ?? PARTIES).find((each) => each.name === showing.name);
+        // What each agent the party holds left, under their banner, the concerns it holds among it; then the concerns
+        // nobody left, the operator having opened them, under a line saying so.
         const inIt = (group: Grouping) => party?.holds(group, shown.running) === true;
         for (const { group, depth } of nested(kept([...now, ...empty].filter(inIt), false), arranging.parents ?? null)) {
             layGroup(group, false, depth, "gone");
         }
+        if (unowned.length > 0) {
+            breaks.push(layNote("── opened by you, nobody's taken them ──", "concerns nobody's").from);
+            layConcerns(unowned, nodes, "nobody");
+        }
+    } else if (showing?.kind === "settled") {
+        // Each concern the operator cleared, as a block, read here alone where it's gone from everywhere else.
+        layConcerns(unowned, nodes, "settled");
     } else if (showing?.kind === "view") {
         // A module's own buffer: its view, open, nobody's but as each of its blocks says.
         const view = mount(showing.repository, showing.module, showing.view, {}, shown, remote);
@@ -1653,7 +1749,7 @@ export function laid(
     } else if (showing?.kind === "for you") {
         // What's for the operator: each group with an item, or something it holds waits on them, or written to under its
         // banner; each with its drawers, a line each until opened.
-        const holds = (group: Grouping) => group.items.length > 0 || checksOf.has(group.key) || confirmsOf.has(group.key) || letters.some((each) => each.to != null && whose(each.to) === group.key) || sinceWaits(group) !== null;
+        const holds = (group: Grouping) => group.items.length > 0 || concernsOf.has(group.key) || letters.some((each) => each.to != null && whose(each.to) === group.key) || sinceWaits(group) !== null;
         const holding = [...now, ...empty].filter(holds);
         for (const { group, depth } of nested(kept(holding, false), arranging.parents ?? null)) {
             layGroup(group, false, depth);
@@ -1730,7 +1826,7 @@ export function laid(
         outer: outer.sort((a, b) => a.from - b.from || b.to - a.to),
         asides,
         checks: checkLines,
-        confirms: confirmLines,
+        concerns: concernLines,
     };
 
     /** Lay a line of the buffer's own, no part's but its own: what's said where there's nothing else to read. */
@@ -1978,7 +2074,7 @@ export function laid(
             }
             const check = entry.spot.part == null ? checks.get(entry.spot.node) : undefined;
             if (check !== undefined) {
-                layCheck(check, number, within);
+                layCheck(check, number, within, groups.at(-1)?.blocks ?? []);
             } else if (entry.said != null) {
                 layWords(entry, number, from, within);
             }
@@ -1996,20 +2092,19 @@ export function laid(
      * thread; several, a row saying how many, opening to the list, as Space and a verb's key on it reaches each, so a list
      * of them doesn't push what's around it down.
      */
-    function layChecks(number: number, checks: readonly OwnedCheck[], within: Placed[]): void {
+    function layChecks(number: number, checks: readonly CheckRead[], within: Placed[], into: Block[], set: string): void {
         const [only] = checks;
         if (checks.length === 1 && only !== undefined) {
-            layCheck(only.check, number, within, only.thread.thread.name);
+            layCheck(only, number, within, into, set);
             return;
         }
-        const named = only?.thread.thread.name ?? `${number}`;
         const id = `checks ${number}`;
-        const said = `◇ ${checks.length} checks in @${named}`;
+        const said = `${set}◇ ${checks.length} checks`;
         const summary = w.line(said, id);
         asides.push({ kind: "check", ...summary });
         const children: Placed[] = [];
         for (const each of checks) {
-            layCheck(each.check, number, children);
+            layCheck(each, number, children, into, set);
         }
         const end = w.at - 1;
         const fold: Fold = { of: id, kind: "pile", name: "", label: said, closed: true, summary, from: summary.to, to: end };
@@ -2019,18 +2114,18 @@ export function laid(
         within.push(part(id, "block", summary.from, end, { block, children }));
     }
 
-    /** Lay a check of thread `number` into `within`: what's to try, its lines set in, what the operator saw where they answered it, and the comments drafted on it, an answer in their words; where it's laid out outside its thread, `of` names it. */
-    function layCheck(check: CheckRead, number: number, within: Placed[], of: string | null = null): void {
+    /** Lay a check of thread `number` into `within`, set in by `set`: what's to try, its lines set in, what the operator saw where they answered it, and the comments drafted on it, an answer in their words, which go `into` the blocks of what's laid out around it. */
+    function layCheck(check: CheckRead, number: number, within: Placed[], into: Block[], set: string = ""): void {
         const id = `check ${check.check.number}`;
         const answer = check.answer ?? null;
         const [first = "", ...rest] = check.check.text.split("\n");
-        const head = w.line(`${answer === null ? "◇" : "✓"} check ${cited(check.check.number)}${of === null ? "" : ` in @${of}`}: ${first}`, id);
+        const head = w.line(`${set}${answer === null ? "◇" : "✓"} check ${cited(check.check.number)}: ${first}`, id);
         asides.push({ kind: answer === null ? "check" : "checked", ...head });
         for (const line of rest) {
-            asides.push({ kind: "check-text", ...w.line(`${SET_IN}${line}`, id) });
+            asides.push({ kind: "check-text", ...w.line(`${set}${SET_IN}${line}`, id) });
         }
         if (answer !== null) {
-            asides.push({ kind: "you", ...w.line(`${SET_IN}you: ${answer.text === "" ? "tried it" : answer.text}`, id) });
+            asides.push({ kind: "you", ...w.line(`${set}${SET_IN}you: ${answer.text === "" ? "tried it" : answer.text}`, id) });
         }
         const children: Placed[] = [];
         const blocks: Block[] = [];
@@ -2046,8 +2141,91 @@ export function laid(
         const block: ViewBlock = { block: "line", id, offers, spans: [] };
         within.push(part(id, "block", head.from, w.at - 1, { block, children }));
         checkLines.push({ from: head.from, to: w.at - 1, check, thread: number });
-        // What's drafted on it is the thread's group's, which is the one being laid out.
-        groups.at(-1)?.blocks.push(...blocks);
+        into.push(...blocks);
+    }
+
+    /**
+     * Lay `solid`, the concerns this buffer holds as its own under one group or none, into `within`, each a block
+     * (`layConcern`), under its parent where that's one of them, else under what it's nested in, dim, as context
+     * (`concernsNested`); `at` names where they're laid out, which a dim line is named by, as one may be above several.
+     */
+    function layConcerns(solid: readonly ThreadRead[], within: Placed[], at: string): void {
+        const here = new Set(solid.map((each) => each.thread.number));
+        for (const entry of concernsNested(solid, allConcerns)) {
+            layConcern(entry, within, at, here);
+        }
+    }
+
+    /**
+     * Lay a concern as a block, set in by how deep it's nested (`entry`), into `within`: its header saying what it is and
+     * its two marks (`concernSaid`), which a verb on it reaches it from, Space d clearing it and Space x declining it, a
+     * comment writing on it; why it's parked; the agent's account, where they said it's done; each passage of the
+     * operator's it came from, with what became of it; each check in it waiting, Space d ticking it; each concern nested
+     * under it that isn't laid out here, a line each, `gt` going to its own block; and what's written on it, under it.
+     * Dim, it's one line, its words, context above one nested under it held elsewhere. `here` is what this buffer lays out
+     * of them.
+     */
+    function layConcern(entry: Nested, within: Placed[], at: string, here: ReadonlySet<number>): void {
+        const { read, depth, dim } = entry;
+        const number = read.thread.number;
+        const set = "  ".repeat(depth);
+        if (dim) {
+            const id = `concern ${number} context ${at}`;
+            const line = w.line(`${set}${concernWords(read)}`, id);
+            asides.push({ kind: "concern-context", ...line });
+            within.push(part(id, "frame", line.from, line.to));
+            concernLines.push({ ...line, header: line, read, dim: true, blocks: [] });
+            return;
+        }
+        const id = `concern ${number}`;
+        const inner = `${set}${SET_IN}`;
+        const header = w.line(`${set}§ ${concernWords(read)} · ${concernSaid(read)}`, id);
+        asides.push({ kind: `concern-${concernReads(read).replaceAll(" ", "-")}`, ...header });
+        const children: Placed[] = [];
+        const blocks: Block[] = [];
+        const laidHere: ConcernBlock = { from: header.from, to: header.to, header, read, dim: false, blocks };
+        concernLines.push(laidHere);
+        const status = read.status ?? null;
+        if (concernReads(read) === "open" && status !== null && status.kind === "ledger:parked" && (status.why ?? "") !== "") {
+            asides.push({ kind: "summary", ...w.line(`${inner}parked: ${status.why ?? ""}`, id) });
+        }
+        const done = read.done ?? null;
+        if (done !== null) {
+            const [first = "", ...rest] = done.to_try.split("\n");
+            asides.push({ kind: "to-try", ...w.line(`${inner}done, they say: ${first}`, id) });
+            for (const line of rest) {
+                asides.push({ kind: "check-text", ...w.line(`${inner}${SET_IN}${line}`, id) });
+            }
+        }
+        const answering = read.answering ?? null;
+        for (const passage of read.passages ?? []) {
+            const words = (passage.words.split("\n").find((each) => each.trim() !== "") ?? "").trim();
+            const became = passage.answer != null ? `answered in ${cited(passage.answer)}` : `open: waits on ${answering === null ? "whoever takes it" : name(answering)}`;
+            asides.push({ kind: "by", ...w.line(`${inner}you · ${cited(passage.spot.node)}.${passage.spot.part ?? 0} · ${became}`, id) });
+            asides.push({ kind: "you", ...w.line(`${inner}${SET_IN}${cutAt(words, 100)}`, id) });
+        }
+        const waiting = (read.checks ?? []).filter((each) => (each.answer ?? null) === null && (read.asks ?? []).some((ask) => ask.node === each.check.number));
+        if (waiting.length > 0 && concernReads(read) !== "quiet" && concernReads(read) !== "gone") {
+            layChecks(number, waiting, children, blocks, inner);
+        }
+        for (const child of allConcerns.filter((each) => (each.thread.parent ?? null) === number && !here.has(each.thread.number) && each.bare !== true && concernReads(each) !== "gone")) {
+            // Who holds it, or who left it where nobody running answers for it, which its marks say.
+            const owner = taskOwner(child);
+            const leaver = child.left_by ?? null;
+            const whose = owner !== null ? [name(owner)] : leaver !== null ? [`left by ${name(leaver)}`] : [];
+            const lineId = `concern ${child.thread.number} under ${number}`;
+            const line = w.line([`${inner}↳ ${concernWords(child)}`, concernSaid(child), ...whose].join(" · "), lineId);
+            asides.push({ kind: "concern-nested", ...line });
+            children.push(part(lineId, "frame", line.from, line.to));
+            concernLines.push({ ...line, header: line, read: child, dim: true, blocks: [] });
+        }
+        for (const letter of letters) {
+            if (letter.thread === number) {
+                writeWritten(letter, blocks, children);
+            }
+        }
+        laidHere.to = w.at - 1;
+        within.push(part(id, "frame", header.from, laidHere.to, { children }));
     }
 
     /**
@@ -2214,31 +2392,15 @@ export function laid(
         for (const item of group.items) {
             node.children.push(layItem(item, isParked));
         }
-        // What of a thread asks the operator to try, which no item says: each thread's checks one row saying how many,
-        // opening to the list; one that's done, for them to confirm, settled from its own buffer, which `gt` goes to.
-        const layAsks = () => {
-            if (isParked) {
-                return;
-            }
-            const byThread = new Map<number, OwnedCheck[]>();
-            for (const each of checksOf.get(group.key) ?? []) {
-                byThread.set(each.thread.thread.number, [...(byThread.get(each.thread.thread.number) ?? []), each]);
-            }
-            for (const [number, checks] of byThread) {
-                layChecks(number, checks, node.children);
-            }
-            for (const each of confirmsOf.get(group.key) ?? []) {
-                const status = each.status ?? null;
-                const toTry = status !== null && status.kind === "ledger:done" ? (status.to_try.split("\n")[0] ?? "") : "";
-                const confirm = `confirm ${each.thread.number}`;
-                const line = w.line(`◇ @${each.thread.name} is done, to confirm: ${toTry} · gt goes there`, confirm);
-                asides.push({ kind: "to-try", ...line });
-                confirmLines.push({ ...line, thread: each });
-                node.children.push(part(confirm, "frame", line.from, line.to));
+        // The concerns this buffer lays out under them, each a block: in their own buffer, every one they answer for; in
+        // what's for the operator, those wanting their eyes; in a party's, those it holds.
+        const layOwn = () => {
+            if (!isParked) {
+                layConcerns(concernsOf.get(group.key) ?? [], node.children, place);
             }
         };
         if (shape !== "own") {
-            layAsks();
+            layOwn();
         }
         if (shape === "own") {
             const drawersBefore = made.drawers.length;
@@ -2250,11 +2412,11 @@ export function laid(
                 const said = w.line(read ? "They haven't said anything yet." : "Reading their conversation…", `${id} live`);
                 asides.push({ kind: "summary", ...said });
             }
-            layAsks();
+            layOwn();
             if (conversation !== null) {
                 layWriting(made, node, id, `to ${name(conversation)}`, talksTo);
             }
-        } else if ((checksOf.get(group.key) ?? []).length > 0 || confirmsOf.has(group.key) || (group.items.length === 0 && made.drawers.length === 0 && blocks.length > 0)) {
+        } else if (concernsOf.has(group.key) || (group.items.length === 0 && made.drawers.length === 0 && blocks.length > 0)) {
             w.line("", `${id} end`);
         }
     }
@@ -3149,15 +3311,15 @@ export function reachedBy(laidOut: Laid, written: Written, party: Conversation |
         return `to ${called(party)}`;
     }
     if (isLetter(written) && written.thread != null) {
-        const thread = laidOut.groups.find((each) => each.thread?.thread.number === written.thread)?.thread?.thread.name;
-        return `to no one, kept in @${thread ?? written.thread}`;
+        const concern = laidOut.concerns.find((each) => each.read.thread.number === written.thread)?.read ?? laidOut.groups.find((each) => each.thread?.thread.number === written.thread)?.thread;
+        return `to no one, kept on ${concern == null ? `@${written.thread}` : concernWords(concern)}`;
     }
     return "to no agent: no session's push asked it";
 }
 
 /** Return every comment, message and remark shown, as blocks of the editor's list of what's written. */
 export function blocksOf(laidOut: Laid): Block[] {
-    return [...laidOut.groups.flatMap((each) => each.blocks), ...scopes(laidOut).flatMap((each) => each.blocks)];
+    return [...laidOut.groups.flatMap((each) => each.blocks), ...laidOut.concerns.flatMap((each) => each.blocks), ...scopes(laidOut).flatMap((each) => each.blocks)];
 }
 
 /** Return the comment, message or remark shown at `position`, where it's in one; a comment's end counts, so an empty one can be typed in. */
@@ -3327,6 +3489,11 @@ export function opened(laidOut: Laid, position: number): Written | undefined {
     const check = checkAt(laidOut, position);
     if (check !== undefined) {
         return { id: "", item: check.check.check.number, quote: null, text: "" };
+    }
+    // On a concern, a message on it, to whoever answers for it, or to no one where nobody does.
+    const concern = concernAt(laidOut, position);
+    if (concern !== undefined) {
+        return { id: "", to: concern.read.answering ?? null, thread: concern.read.thread.number, text: "" };
     }
     const group = groupAt(laidOut, position);
     if (group !== undefined) {

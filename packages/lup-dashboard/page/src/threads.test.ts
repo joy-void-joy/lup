@@ -409,7 +409,7 @@ describe("a thread's own buffer", () => {
         expect(where[0]).toEqual({ kind: "to", text: "to s1/a1" });
         const nobody = lay(307, { ...EMPTY, letters: [{ id: "m2", to: null, thread: 307, text: "A note to myself." }] });
         const kept = nobody.groups[0]?.blocks[0];
-        expect(heading(nobody, kept?.from ?? 0, true, nobody.written, { group: () => "", item: () => "", party: called })[0]).toEqual({ kind: "to", text: "to no one, kept in @voice" });
+        expect(heading(nobody, kept?.from ?? 0, true, nobody.written, { group: () => "", item: () => "", party: called })[0]).toEqual({ kind: "to", text: "to no one, kept on The voice" });
     });
 
     it("reads a thread up to what it shows as the operator acts in it, an item marked or commented on, a check ticked, a message on it, never past news left unread", () => {
@@ -420,12 +420,12 @@ describe("a thread's own buffer", () => {
             });
         expect(upTo(303, EMPTY)).toEqual([]);
         // An item marked read in @auth: it's read up to the last item it shows, as Space d on its banner reads it.
-        expect(upTo(303, { ...EMPTY, done: [70] })).toEqual([[303, "70", "@auth read"]]);
-        expect(upTo(303, { ...EMPTY, comments: [{ id: "c1", item: 70, text: "Thanks." }] as Draft["comments"] })).toEqual([[303, "70", "@auth read"]]);
+        expect(upTo(303, { ...EMPTY, done: [70] })).toEqual([[303, "70", "The auth read"]]);
+        expect(upTo(303, { ...EMPTY, comments: [{ id: "c1", item: 70, text: "Thanks." }] as Draft["comments"] })).toEqual([[303, "70", "The auth read"]]);
         // A check ticked in @reader, and a message written on it: read up to what it shows, what's asked not holding it back.
         const tick = { id: "t1", action: "inbox-check-answer", argument: { number: 311 }, verb: "done", says: "tick it", block: "check 311", version: null };
-        expect(upTo(302, { ...EMPTY, marks: [tick] })).toEqual([[302, "67", "@reader read"]]);
-        expect(upTo(302, { ...EMPTY, letters: [{ id: "m1", to: WORKER, thread: 302, text: "Go on." }] })).toEqual([[302, "67", "@reader read"]]);
+        expect(upTo(302, { ...EMPTY, marks: [tick] })).toEqual([[302, "67", "The reader read"]]);
+        expect(upTo(302, { ...EMPTY, letters: [{ id: "m1", to: WORKER, thread: 302, text: "Go on." }] })).toEqual([[302, "67", "The reader read"]]);
         // A message on @auth leaves its note unread: it's read no further than before it, so the note stays new.
         expect(upTo(303, { ...EMPTY, letters: [{ id: "m2", to: WORKER, thread: 303, text: "Go on." }] })).toEqual([]);
         // Read already by the operator's own mark, it's theirs alone.
@@ -479,7 +479,7 @@ describe("a thread's own buffer", () => {
         const out = lay(307, draft);
         const block = out.groups[0]?.blocks[0];
         const reach = block === undefined ? null : reaching(out, block.from, "send");
-        expect(reach).toMatchObject({ says: "send it to no one: it stays on the thread, waking nobody", acts: [{ kind: "readdress", id: "m1", to: null }] });
+        expect(reach).toMatchObject({ says: "send it to no one: it stays on the concern, waking nobody", acts: [{ kind: "readdress", id: "m1", to: null }] });
         const nobody = reach === null || reach.on === null ? draft : marking(draft, reach.acts, "send");
         expect(nobody.letters?.[0]?.to).toBeNull();
         const back = lay(307, nobody);
@@ -487,7 +487,7 @@ describe("a thread's own buffer", () => {
         expect(again === undefined ? null : reaching(back, again.from, "send")).toMatchObject({ says: "send it to s1/a1", acts: [{ kind: "readdress", to: WORKER }] });
     });
 
-    it("says on the line under the review where each message on a thread goes, and a check answered in words", () => {
+    it("says on the line under the review where each message on a concern goes, by what it's called, and a check answered in words", () => {
         const draft = {
             ...EMPTY,
             letters: [
@@ -496,8 +496,8 @@ describe("a thread's own buffer", () => {
             ],
             comments: [{ id: "c1", item: 311, quote: null, text: "Found it." }],
         };
-        const naming = { called: (party: Item["sender"]) => (party.party === "operator" ? "you" : called(party)), named: () => "", holder: () => null, thread: (number: number) => (number === 307 ? "voice" : "auth"), checks: new Set([311]) };
-        expect(toSend(draft, [], naming).map(partSaid)).toEqual(["to s1/a1: a message on @voice", "to no one: a message on @auth", "to the check: answering @311"]);
+        const naming = { called: (party: Item["sender"]) => (party.party === "operator" ? "you" : called(party)), named: () => "", holder: () => null, thread: (number: number) => (number === 307 ? "The voice" : "The auth"), checks: new Set([311]) };
+        expect(toSend(draft, [], naming).map(partSaid)).toEqual(["to s1/a1: a message on The voice", "to no one: a message on The auth", "to the check: answering @311"]);
     });
 
     it("folds a friction and how it felt in its conversation to its header, saying where each is", () => {

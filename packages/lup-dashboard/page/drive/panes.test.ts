@@ -354,13 +354,15 @@ describe("the panes by agent", () => {
         await review.holds("to guidance-voice");
     });
 
-    it("shows a check under whoever owns its thread, and answers it from there", async () => {
+    it("shows a check in its concern's block, in the buffer of whoever owns it, and answers it from there", async () => {
         const { page } = dashboard;
         await listRow(dashboard, "parser");
         await page.keyboard.press("Enter");
         await review.holds("check @");
-        const line = (await review.text()).split("\n").find((each) => each.startsWith("◇ check @")) ?? "";
-        expect(line).toContain(" in @transcript-reader:");
+        const lines = (await review.text()).split("\n");
+        const at = lines.findIndex((each) => each.trimStart().startsWith("◇ check @"));
+        const line = lines[at] ?? "";
+        expect(lines.slice(0, at).findLast((each) => each.trimStart().startsWith("§ "))).toContain("§ The transcript reader");
         const number = /check @(\d+)/.exec(line)?.[1] ?? "";
         // Counted with what wants the operator's eyes, on its task's row, whose question holds apart from it.
         const taskSays = (flagged: boolean) => page.waitForFunction((wanted) => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("The transcript reader") && (each.textContent ?? "").includes("◇1") === wanted), flagged, { polling: 50 });
@@ -374,18 +376,17 @@ describe("the panes by agent", () => {
         await taskSays(true);
     });
 
-    it("lists tasks under whoever owns them, and reads one across agents from its row", async () => {
+    it("lists concerns under whoever owns them, and jumps from a row to its block in their own buffer", async () => {
         const { page } = dashboard;
         await listRow(dashboard, "The transcript reader");
         const row = await page.evaluate(() => document.querySelector(".list-buffer .cm-activeLine")?.textContent ?? "");
         expect(row).toContain("The transcript reader");
         await page.keyboard.press("Enter");
-        await review.until("read the thread whole", (view) => !view.state.doc.toString().includes("reading…") && view.state.doc.toString().includes("━━ @transcript-reader"));
-        // Whole, saying whom the words reach, over it and on the line they're written under.
-        expect(await review.text()).toContain("to lup-impl/parser on @transcript-reader");
-        // A friction in it folded to its header, saying where it's read.
-        await review.goTo("── @57 friction · in the pile to read · lup-impl/parser");
+        await review.until("land on its block, in the parser's own buffer", (view) => view.state.doc.lineAt(view.state.selection.main.head).text.trimStart().startsWith("§ The transcript reader"));
         expect(await page.evaluate(() => document.querySelector(".where-whom")?.textContent ?? "")).toContain("lup-impl/parser");
+        // Their own buffer, no other view: what's written there reaches them.
+        expect(await review.text()).toContain("── to lup-impl/parser ──");
+        expect(await review.text()).not.toContain("━━ @transcript-reader");
         await listRow(dashboard, "what's for you");
         await page.keyboard.press("Enter");
         await review.holds("@54 approval");
@@ -411,14 +412,13 @@ describe("the panes by agent", () => {
         expect(dashboard.thrown).toEqual([]);
     });
 
-    it("goes from an item of what's for the operator to its thread with gt, onto the item", async () => {
+    it("goes from an item of what's for the operator to its concern's block with gt", async () => {
         const { page } = dashboard;
         await review.goTo("── @51 question");
         await review.settled(300, 0);
         await page.keyboard.press("g");
         await page.keyboard.press("t");
-        await review.until("went to the thread", (view) => view.state.doc.toString().startsWith("━━ @transcript-reader") && !view.state.doc.toString().includes("reading…"));
-        await review.until("put the cursor on the item", (view) => view.state.doc.lineAt(view.state.selection.main.head).text.includes("@51 question"));
+        await review.until("went to its concern's block", (view) => view.state.doc.lineAt(view.state.selection.main.head).text.trimStart().startsWith("§ The transcript reader"));
     });
 
     it("comes back with Ctrl+O, to where it went from", async () => {
@@ -429,18 +429,25 @@ describe("the panes by agent", () => {
         expect(dashboard.thrown).toEqual([]);
     });
 
-    it("goes from an agent's name on a thread's banner to their own buffer with gd, and back with Ctrl+O", async () => {
+    it("goes from what's nested in a concern to its block with gt, from the name of who holds it to their own buffer with gd, and back with Ctrl+O", async () => {
         const { page } = dashboard;
-        await listRow(dashboard, "Where auth is checked");
+        await listRow(dashboard, "Building lup's transcript reader");
         await page.keyboard.press("Enter");
-        await review.until("read the thread whole", (view) => view.state.doc.toString().startsWith("━━ @auth-survey") && !view.state.doc.toString().includes("reading…"));
-        await review.goTo("lup-impl/explore-auth holds");
+        await review.until("land on its block, in lup-impl's own buffer", (view) => view.state.doc.lineAt(view.state.selection.main.head).text.trimStart().startsWith("§ Building lup's transcript reader"));
+        // What's nested under it held by another, a line each.
+        await review.goTo("↳ Where auth is checked");
+        await review.goTo("lup-impl/explore-auth");
         await review.settled(300, 0);
         await page.keyboard.press("g");
         await page.keyboard.press("d");
         await review.holds("to lup-impl/explore-auth\u0020──");
         await page.keyboard.press("Control+o");
-        await review.until("went back to the thread", (view) => view.state.doc.toString().startsWith("━━ @auth-survey"));
+        await review.until("went back to the build", (view) => view.state.doc.toString().includes("§ Building lup's transcript reader"));
+        await review.goTo("↳ Where auth is checked");
+        await review.settled(300, 0);
+        await page.keyboard.press("g");
+        await page.keyboard.press("t");
+        await review.until("went to its block, in explore-auth's own buffer", (view) => view.state.doc.lineAt(view.state.selection.main.head).text.trimStart().startsWith("§ Where auth is checked"));
         await listRow(dashboard, "what's for you");
         await page.keyboard.press("Enter");
         await review.holds("@54 approval");

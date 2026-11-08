@@ -110,37 +110,3 @@ describe("what's offered, in headless Chromium", () => {
         await said(dashboard, "@54 not approved: it's declined at");
     });
 });
-
-describe("what's offered in a thread's own buffer, in headless Chromium", () => {
-    let served: Demo;
-    let dashboard: Dashboard;
-    let review: Review;
-
-    beforeAll(async () => {
-        served = await demo({ size: 0 });
-        dashboard = await open(served.url);
-        review = await dashboard.review();
-        await review.holds(DEMO_ITEM);
-        await review.settled(1500);
-    });
-
-    afterEach(() => {
-        expect(dashboard.thrown).toEqual([]);
-    });
-
-    afterAll(async () => {
-        await dashboard?.close();
-        await served?.close();
-    });
-
-    it("offers only a comment on what's past waiting, Space d going on to the thread it's in", async () => {
-        // Read as its buffer opens, in the thread's history.
-        await dashboard.openRow("The transcript reader");
-        await review.holds("── @47 note");
-        await review.goTo("── @47 note");
-        await offers(dashboard, "comment on it");
-        const keys = await dashboard.page.locator(".keys").first().innerText();
-        expect(keys).not.toContain("leave it for later");
-        expect(keys).toContain("@transcript-reader");
-    });
-});

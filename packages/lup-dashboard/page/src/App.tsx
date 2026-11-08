@@ -50,7 +50,11 @@ import {
     pruned,
     remarks,
     withWrittenDuring,
+    checksWaiting as checksOf,
+    concernReads,
+    concernWords,
     countToRead,
+    cutAt,
     seeingOf,
     whose,
     type AgentDrawers,
@@ -280,26 +284,17 @@ export function App() {
         }, [threadsRead, landings]),
         (map) => JSON.stringify([...map]),
     );
-    // Each thread's conversation the page reads: each with a check, for what it asks, from where they last read it; and
-    // each whose own buffer they open, whole (`openThread`).
+    // Each thread's conversation the page reads: each whose own buffer they open, whole (`openThread`).
     const [opening, setOpening] = useState<readonly ThreadAsked[]>([]);
     const openThread = useCallback((number: number, whole: boolean) => {
         setOpening((before) => (before.some((each) => each.number === number && each.whole === whole) ? before : [...before, { number, whole }]));
     }, []);
-    const threadsAsked = useMemo(() => {
-        const asking = (each: ThreadRead) => (each.asks ?? []).some((ask) => ask.what === "a check");
-        const shown = (threadsRead?.threads ?? []).filter(asking).map((each) => ({ number: each.thread.number, whole: false }));
-        return [...shown, ...opening.filter((each) => each.whole || !shown.some((one) => one.number === each.number))];
-    }, [threadsRead, opening]);
-    const conversations = useThreads(threadsAsked);
-    // The checks waiting on the operator, each in the thread it's in, whose thread that thread read says.
+    const conversations = useThreads(opening);
+    // The checks waiting on the operator, each in the concern it's in, as the host reads it, but where they've cleared it.
     const checksWaiting = useSame(
         useMemo(
-            () =>
-                threadsRead === null
-                    ? []
-                    : threadsRead.threads.flatMap((thread) => (conversations.shown.get(thread.thread.number)?.checks ?? []).filter((check) => (check.answer ?? null) === null && (thread.asks ?? []).some((ask) => ask.node === check.check.number)).map((check) => ({ check, thread }))),
-            [threadsRead, conversations],
+            () => (threadsRead === null ? [] : threadsRead.threads.filter((thread) => (thread.cleared ?? null) === null).flatMap((thread) => checksOf(thread).map((check) => ({ check, thread })))),
+            [threadsRead],
         ),
         (list) => JSON.stringify(list),
     );
@@ -337,7 +332,10 @@ export function App() {
     );
     const named = useCallback((item: Item) => called(item.sender), [called]);
     // A thread by its name, as the reply says what's marked on it: none where the host hasn't said it yet.
-    const threadNamed = (number: number) => threadsRead?.threads.find((each) => each.thread.number === number)?.thread.name ?? null;
+    const threadNamed = (number: number) => {
+        const read = threadsRead?.threads.find((each) => each.thread.number === number);
+        return read === undefined ? null : cutAt(concernWords(read), 40);
+    };
 
     // The conversations running, in the order the host lists them: the review gives each a group.
     const live = useMemo<Live[]>(
@@ -489,7 +487,7 @@ export function App() {
     // something stopped until they answer it, apart from what only wants their eyes.
     const toReadCount = countToRead(waiting, draft, seeing);
     const stoppedOnYou = holdingOn(waiting, draft.parked ?? []);
-    const flaggedForYou = waitingOn(waiting, draft.parked ?? []) + checksWaiting.length + (threadsRead?.threads ?? []).filter((each) => each.state === "done to confirm").length - stoppedOnYou;
+    const flaggedForYou = waitingOn(waiting, draft.parked ?? []) + checksWaiting.length + (threadsRead?.threads ?? []).filter((each) => concernReads(each) === "for your eyes").length - stoppedOnYou;
 
     // What the draft marks or comments on that's past waiting, answered or replaced since it was written: laid out with
     // what's drafted on it, which stays in view, saying so, until it's sent.
@@ -1548,7 +1546,7 @@ export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): 
     const reaching = (who: string, what: string) => to.set(who, [...(to.get(who) ?? []), what]);
     const letters = messages(draft);
     // A message on a thread says which; one to no one stays there.
-    const on = (each: (typeof letters)[number]) => (each.thread == null ? "" : ` on @${naming.thread?.(each.thread) ?? each.thread}`);
+    const on = (each: (typeof letters)[number]) => (each.thread == null ? "" : ` on ${naming.thread?.(each.thread) ?? `@${each.thread}`}`);
     for (const [said, count] of tallyOf(letters.map((each) => `${each.to == null ? "no one" : naming.called(each.to)}\n${on(each)}`))) {
         const [who = "", where = ""] = said.split("\n");
         reaching(who, `${count === 1 ? "a message" : `${count} messages`}${where}`);

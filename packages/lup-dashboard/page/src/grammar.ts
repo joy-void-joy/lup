@@ -13,7 +13,7 @@ import { newId } from "./anchors";
 import { partSaid, type ReplyPart } from "./brief";
 import type { components } from "./generated/api";
 import { cited } from "./comments";
-import { cutAt, EMPTY, isLetter, isNobody, news, toAnswer, waits, writtenId, type Conversation, type Draft, type Group, type Item, type Laid, type Placed, type Region, type ThreadRead } from "./review";
+import { concernReads, concernWords, cutAt, EMPTY, isLetter, isNobody, news, toAnswer, waits, writtenId, type Conversation, type Draft, type Group, type Item, type Laid, type Placed, type Region, type ThreadRead } from "./review";
 import type { Block as ViewBlock, Offer } from "./views";
 
 export type Verb = components["schemas"]["Verb"];
@@ -127,10 +127,10 @@ function writtenReach(laidOut: Laid, node: Placed, verb: Verb, naming: Naming): 
     if (letter === undefined || !isLetter(letter) || letter.thread == null) {
         return null;
     }
-    const group = laidOut.groups.find((each) => each.thread?.thread.number === letter.thread);
-    const answering = group?.conversation ?? null;
+    const concern = laidOut.concerns.find((each) => !each.dim && each.read.thread.number === letter.thread)?.read;
+    const answering = concern === undefined ? (laidOut.groups.find((each) => each.thread?.thread.number === letter.thread)?.conversation ?? null) : (concern.answering ?? null);
     if (letter.to != null) {
-        return { on: "your message", node, says: "send it to no one: it stays on the thread, waking nobody", acts: [{ kind: "readdress", id: writtenId(letter), to: null }] };
+        return { on: "your message", node, says: "send it to no one: it stays on the concern, waking nobody", acts: [{ kind: "readdress", id: writtenId(letter), to: null }] };
     }
     return answering === null ? null : { on: "your message", node, says: `send it to ${naming.called(answering)}`, acts: [{ kind: "readdress", id: writtenId(letter), to: answering }] };
 }
@@ -335,6 +335,16 @@ export function reachOf(laidOut: Laid, at: number, verb: Verb, naming: Naming): 
                 }
                 break;
             }
+            case "frame": {
+                const concern = laidOut.concerns.find((each) => !each.dim && `concern ${each.read.thread.number}` === node.id);
+                if (concern !== undefined) {
+                    const found = concernReach(concern.read, node, verb, naming);
+                    if (found !== null) {
+                        return found;
+                    }
+                }
+                break;
+            }
             case "group": {
                 const made = group(node);
                 if (made === undefined) {
@@ -432,6 +442,36 @@ function groupReach(laidOut: Laid, node: Placed, group: Group, verb: Verb, namin
     }
 }
 
+/**
+ * Return where `verb` lands on a concern laid out as a block at `node`, the host reading it as `read`: done clears it,
+ * settling it, and decline declines it, each the operator's mark, which leaves the agent's as it is and the concerns
+ * nested under it as they stand, whatever waits on them in it, each still waiting where it's laid out; one cleared already
+ * says so and does nothing. Comment writes on it, to whoever answers for it, or to no one where nobody does. None for
+ * what else.
+ */
+function concernReach(read: ThreadRead, node: Placed, verb: Verb, naming: Naming): Reach | null {
+    const on = concernWords(read);
+    const cleared = (read.cleared ?? null) !== null;
+    switch (verb.name) {
+        case CORE.done:
+            if (cleared) {
+                return { on, node, says: "cleared already", acts: [] };
+            }
+            return { on, node, says: concernReads(read) === "for your eyes" ? "clear it: it's done" : "clear it", acts: [threadAct(read, node.id, SETTLE)] };
+        case CORE.decline:
+            if (cleared) {
+                return { on, node, says: "cleared already", acts: [] };
+            }
+            return { on, node, says: "decline it: nothing more will be done", acts: [threadAct(read, node.id, DECLINE)] };
+        case CORE.comment: {
+            const answering = read.answering ?? null;
+            return { on, node, says: answering === null ? "write on it, to no one" : `write on it, to ${naming.called(answering)}`, acts: [{ kind: "comment" }] };
+        }
+        default:
+            return null;
+    }
+}
+
 /** The host's requests settling and declining a thread, the operator's (`docs/inbox.md`, *Threads in the review*). */
 export const SETTLE = "inbox-settle-thread";
 export const DECLINE = "inbox-decline-thread";
@@ -440,7 +480,7 @@ export const DECLINE = "inbox-decline-thread";
  * What a mark on a thread does to it, by its action, as the reply says it after the thread's name, `@auth settled`:
  * the host's requests settling and declining it, and the core's review mark on its node, reading it.
  */
-const THREAD_DONE = { [SETTLE]: "settled", [DECLINE]: "declined", "review-mark": "read" } as const;
+const THREAD_DONE = { [SETTLE]: "cleared", [DECLINE]: "declined", "review-mark": "read" } as const;
 
 /**
  * Return how many things in thread `read` still wait on the operator, as the host reads them (`ThreadRead.asks`): a
@@ -464,7 +504,7 @@ function waitingSaid(count: number): string {
 
 /** Return an act on thread `read`, shown on its banner, `block`: `action`, the host's, settling or declining it, saying so, `@auth settled`. */
 function threadAct(read: ThreadRead, block: string, action: typeof SETTLE | typeof DECLINE): Act {
-    const says = partSaid({ kind: "thread", name: read.thread.name, done: THREAD_DONE[action] });
+    const says = partSaid({ kind: "thread", name: cutAt(concernWords(read), 40), done: THREAD_DONE[action] });
     const offer: Offer = { action, argument: { number: read.thread.number }, verb: null, chord: null, runs: "send", commented: false, says };
     return { kind: "mark", offer, block, version: null };
 }
@@ -481,7 +521,7 @@ export function readAct(read: ThreadRead, block: string, upTo: number): Act {
         chord: null,
         runs: "send",
         commented: false,
-        says: partSaid({ kind: "thread", name: read.thread.name, done: THREAD_DONE["review-mark"] }),
+        says: partSaid({ kind: "thread", name: cutAt(concernWords(read), 40), done: THREAD_DONE["review-mark"] }),
     };
     return { kind: "mark", offer, block, version: null };
 }

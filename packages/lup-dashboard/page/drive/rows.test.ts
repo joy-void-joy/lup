@@ -92,14 +92,15 @@ describe("every line of the page on one row, at the demo's width, in headless Ch
         expect(wrong).toEqual([]);
     });
 
-    it("says what's left to answer on a thread's banner by its count, each by its number in the palette", async () => {
-        await dashboard.openRow("Building lup's transcript reader");
-        await review.until("read the thread whole", (view) => view.state.doc.toString().startsWith("━━ @the-build") && !view.state.doc.toString().includes("reading…"));
-        await review.goTo("━━ @the-build · Building lup's transcript reader · lup-impl holds");
-        expect(await keys()).toContain("␣d mark its news read, each item with it, 1 left to answer");
+    it("says what's left to answer on an agent's banner by its count, each by its number in the palette", async () => {
+        await dashboard.openRow("lup-impl");
+        await review.until("lay out lup-impl's own buffer", (view) => view.state.doc.toString().includes("── to lup-impl ──"));
+        await dashboard.keys.press(["g", "g"]);
+        await dashboard.page.waitForFunction(() => /left to answer/.test(document.querySelector(".keys")?.textContent ?? ""), undefined, { polling: 50 });
+        expect(await keys()).toMatch(/␣d mark .*, 1 left to answer/);
         await dashboard.keys.press(["g", "?"]);
         await dashboard.page.waitForSelector(".keys-palette [cmdk-group-heading]");
-        expect(await dashboard.page.locator(".keys-palette [cmdk-group]").first().innerText()).toContain("mark its news read, each item with it, @55 left to answer");
+        expect(await dashboard.page.locator(".keys-palette [cmdk-group]").first().innerText()).toContain("@55 left to answer");
         await dashboard.keys.press(["Escape"]);
         await dashboard.page.waitForSelector(".keys-palette", { state: "detached" });
         await dashboard.openRow("what's for you");

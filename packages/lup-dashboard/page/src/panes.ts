@@ -11,6 +11,7 @@ import { itemStanding } from "./outline";
 import { DRAFTED, GLYPHS } from "./Outline";
 import {
     checkOwner,
+    concernHome,
     concernReads,
     concernsNested,
     concernWords,
@@ -60,6 +61,8 @@ export function bufferKey(showing: Showing): string {
             return `party ${showing.name}`;
         case "view":
             return `view ${showing.repository} ${showing.module} ${showing.view}`;
+        case "settled":
+            return "heading settled";
         default:
             return showing.kind;
     }
@@ -460,9 +463,10 @@ function taskRow(entry: Nested, set: string, threads: Threading, reading: ListRe
     return {
         id: `thread ${number}`,
         lines: [{ stretches: padded(left, tally) }],
-        opens: { kind: "thread", number },
+        opens: concernHome(read, reading.running, reading.parties ?? PARTIES),
         says: [words, word.text, ...(leaver === null ? [] : [`left by ${reading.called(leaver)}`])].filter((each) => each !== "").join(", "),
-        writes: !quiet,
+        writes: false,
+        node: number,
     };
 }
 
@@ -546,7 +550,7 @@ export function listedByAgent(reading: ListReading): Row[] {
         const done = threads.read.threads.filter(cleared);
         if (done.length > 0) {
             rows.push({
-                ...heading("heading settled", "settled", `${done.length}`),
+                ...heading("heading settled", "settled", `${done.length}`, { kind: "settled" }),
                 under: { key: "list settled", closed: true, kind: "section", rows: concernsNested(done, threads.read.threads).map((each) => taskRow(each, "", threads, reading, "settled")) },
             });
         }
@@ -647,6 +651,11 @@ export function bufferSpans(laid: Laid, showing: Showing): BufferSpan[] {
     if (showing.kind === "view") {
         return [{ id: bufferKey(showing), from: 0, to: laid.text.length, depth: 0 }];
     }
+    // A concern's block is its own row's, dim as context or nested under another its own row's too.
+    const concerns = laid.concerns.map((each) => ({ id: `thread ${each.read.thread.number}`, from: each.from, to: each.to, depth: each.dim ? 101 : 100 }));
+    if (showing.kind === "settled") {
+        return [{ id: "heading settled", from: 0, to: laid.text.length, depth: 0 }, ...concerns];
+    }
     return [
         ...laid.groups.map((each) => ({
             id: `agent ${each.place.replace(/^(now|later) /, "")}`,
@@ -655,8 +664,7 @@ export function bufferSpans(laid: Laid, showing: Showing): BufferSpan[] {
             depth: each.depth,
         })),
         ...laid.regions.map((each) => ({ id: `item ${each.item.number}`, from: each.header.from, to: each.end, depth: 100 })),
-        // A check is its task's: they're one row in the list.
-        ...laid.checks.map((each) => ({ id: `thread ${each.thread}`, from: each.from, to: each.to, depth: 100 })),
+        ...concerns,
     ];
 }
 
@@ -766,6 +774,8 @@ export function titled(showing: Showing, reading: Pick<ListReading, "agents" | "
         }
         case "view":
             return { name: showing.called, whom: "a comment reaches whom its first line says" };
+        case "settled":
+            return { name: "settled", whom: "each concern you cleared: what you write on one reaches whoever answers for it" };
         case "thread": {
             const read = reading.threads?.read.threads.find((each) => each.thread.number === showing.number);
             if (read === undefined) {
