@@ -35,6 +35,7 @@ from lup_dev.inbox.threaded import (
     ListThreads,
     MovedIntoThread,
     MoveIntoThread,
+    Passage,
     ReopenThread,
     SettleThread,
     ShowThread,
@@ -466,6 +467,10 @@ def test_a_part_moved_in_stands_open_until_an_item_there_cites_it_never_asking_t
     docs = work.read()["docs"]
     assert docs.unanswered == [part]
     assert (docs.section, docs.asks) == ("every thread", [])
+    # The passage it came from, open.
+    assert docs.passages == [
+        Passage(spot=part, words="And write it up in the docs.", answer=None)
+    ]
     [moved] = [
         each
         for each in work.shown(docs.thread, whole=True).entries
@@ -480,9 +485,39 @@ def test_a_part_moved_in_stands_open_until_an_item_there_cites_it_never_asking_t
     )
     after = work.read()["docs"]
     assert after.unanswered == []
+    # And what became of it: the note that answered it.
+    assert [each.answer for each in after.passages] == [cited]
     entries = {each.spot: each for each in work.shown(after.thread, whole=True).entries}
     assert not entries[part].unanswered
     assert entries[Spot(node=cited)].under == part
+
+
+def test_a_thread_whose_title_reads_as_a_name_says_what_it_s_about_from_what_s_in_it(
+    work: Work,
+) -> None:
+    # As `send`'s `thread=` opens one named after a branch.
+    named = work.sent(
+        ThreadedRemark(
+            remark="The shape I'd want for the list's marks.\n\nMore below.",
+            thread="steady-list",
+        )
+    )
+    read = work.read()
+    assert work.thread_of(named).title == "steady-list"
+    assert read["steady-list"].about == "The shape I'd want for the list's marks."
+    # One with a title says nothing more.
+    assert read["lag"].about is None
+
+
+def test_a_thread_s_checks_are_read_with_it_each_with_the_operator_s_answer(
+    work: Work,
+) -> None:
+    [check] = work.read()["lag"].checks
+    assert (check.check.number, check.answer) == (work.check, None)
+    work.delivery.concerns().checked(work.check, "It held.")
+    [answered] = work.read()["lag"].checks
+    assert answered.answer is not None
+    assert answered.answer.text == "It held."
 
 
 def test_where_each_conversation_works_is_read_with_the_threads(work: Work) -> None:

@@ -4,7 +4,10 @@
 buffer of threads (`docs/dashboard.md`, *The review*); the host reads them for
 it, every repository's, and the operator settles, declines and reopens them:
 - **`inbox-threads`** (`ListThreads`) lists every thread (`ThreadRead`): where
-  it stands; its section (`Section`): `waiting on you` where something in it
+  it stands, and its two marks apart (`done`, `cleared`); what it's about,
+  where its title reads as a name (`about`); the passages of the operator's it
+  came from, with what became of each (`passages`); its checks (`checks`); its
+  section (`Section`): `waiting on you` where something in it
   asks them, a question, an approval, a held change, a problem, a check, or
   it's done for them to confirm; else `new` where something came that they
   haven't read and that asks nothing; else `every thread`; what in it asks
@@ -76,8 +79,8 @@ from lup_dev.inbox.store import (
     asks,
     ranked,
 )
-from lup_dev.inbox.texts import what
-from lup_dev.inbox.threads import Anchor, anchors, spoken
+from lup_dev.inbox.texts import opening, what
+from lup_dev.inbox.threads import Anchor, anchors, cue, spoken
 from lup_ledger.environment.store import Written
 from lup_ledger.parties import Conversation, Operator
 from lup_ledger.threads import (
@@ -95,6 +98,7 @@ from lup_ledger.threads import (
     State,
     Status,
     Thread,
+    answering,
     stood,
     without_roots,
 )
@@ -259,10 +263,33 @@ class Ask(Model):
     """Whether something stays stopped until they answer it (`ItemKind.holds`): an item's kind says; a check, nothing does."""
 
 
+class Passage(Model):
+    """A part of the operator's words moved into a thread, the passage it came from, and what became of it: the item in it that answered it, or none while it's open."""
+
+    spot: Spot
+    words: str
+    """The operator's words there, as they wrote them."""
+    answer: int | None = None
+    """The item in the thread that answered it, by its number, citing it or
+    answering the whole of what it's of; none while nothing does."""
+
+
+class CheckRead(Model):
+    """A check in a thread, with the operator's answer, where they gave one."""
+
+    check: Check
+    answer: Answered | None = None
+
+
 class ThreadRead(Model):
     """One thread as the review reads it: where it stands, the section it's in and why, what's new, and who answers for it."""
 
     thread: Thread
+    about: str | None = None
+    """What it's about, where its title is no real one but reads as a name,
+    one word of a name's letters, all lowercase (`untitled`): the first line of
+    the first thing in it with words; none where its title says it, or nothing
+    in it says anything."""
     state: State
     """Where it stands in a word, as its two marks and what's in it say
     (`stood`)."""
@@ -294,6 +321,12 @@ class ThreadRead(Model):
     """The parts of the operator's words moved into it that nothing in it
     answers yet (`Standing.unanswered`), in the order they came: each open in
     the thread, waiting on whoever answers for it, never on the operator."""
+    passages: list[Passage] = []
+    """Each part of the operator's words moved into it, in the order they came,
+    with what became of it: the passages it came from."""
+    checks: list[CheckRead] = []
+    """Each check in it, in the order it came, with the operator's answer where
+    they gave one."""
     members: int = 0
     """How much is in it: items, checks and parts moved in."""
     earlier: int = 0
@@ -347,13 +380,6 @@ class ThreadEntry(Model):
     to: Conversation | None = None
     """Whom those words were written to, where they're a review's message or
     remark (`Anchor.to`); none else."""
-
-
-class CheckRead(Model):
-    """A check in a thread, with the operator's answer, where they gave one."""
-
-    check: Check
-    answer: Answered | None = None
 
 
 class ThreadShown(Reply):
@@ -477,6 +503,22 @@ class ThreadStated(Reply):
     paths: list[Pathed] = []
 
 
+def untitled(title: str) -> bool:
+    """Say whether `title` is no real title but reads as a name: one word of a name's letters, all lowercase, as `send`'s `thread=` opens one named after a branch.
+
+    >>> untitled("close-wall-gaps"), untitled("findings-said-once"), untitled("")
+    (True, True, True)
+    >>> untitled("The cursor jumps"), untitled("Docs")
+    (False, False)
+    """
+    said = title.strip()
+    return said == "" or (
+        " " not in said
+        and said == said.lower()
+        and all(each.isalnum() or each in "-_." for each in said)
+    )
+
+
 def pile(item: Item) -> bool:
     """Say whether `item` is for the pile to read: a friction or how it felt."""
     return isinstance(item.reason, Friction | HowItFelt)
@@ -493,6 +535,9 @@ class Beside(Model):
     above it who does; none where nobody does."""
     unanswered: list[Spot] = []
     """In the order they came (`Standing.unanswered`)."""
+    answered: dict[Spot, int] = {}
+    """What answered each part of their words moved in that something did, by
+    the part, the answer's number (`lup_ledger.threads.answering`)."""
 
 
 class Concerned(Model, arbitrary_types_allowed=True):
@@ -506,7 +551,9 @@ class Concerned(Model, arbitrary_types_allowed=True):
 
     def beside(self, thread: Thread, *, moved: bool) -> Beside:
         """Return what `thread` is read with: its unanswered parts only where a part was `moved` in, which is all that reads them."""
-        standing = self.concerns.threads.standing(thread.number) if moved else None
+        threads = self.concerns.threads
+        members = threads.members(thread.number) if moved else []
+        standing = threads.standing(thread.number) if moved else None
         return Beside(
             mark=self.concerns.inbox.marks.of(
                 thread.repository, CORE, on_node(thread.number)
@@ -518,6 +565,11 @@ class Concerned(Model, arbitrary_types_allowed=True):
                 Spot(node=each.node.number, part=each.part)
                 for each in standing.unanswered
             ],
+            answered={
+                Spot(node=each.node.number, part=each.part): answer
+                for each in members
+                if (answer := answering(each, members)) is not None
+            },
         )
 
     def paths(self, conversations: Sequence[Conversation]) -> list[Pathed]:
@@ -643,8 +695,16 @@ class Readings(Model, arbitrary_types_allowed=True):
         placing = self.placed(
             thread, asking=asking, marks=marks, new=new, members=members
         )
+        passages = [
+            Passage(spot=spot, words=words, answer=beside.answered.get(spot))
+            for each in members
+            if each.part is not None
+            and (words := self.words(each)) is not None
+            and (spot := Spot(node=each.node, part=each.part))
+        ]
         return ThreadRead(
             thread=thread,
+            about=self.about(thread, members),
             state=stood(
                 marks, waiting=bool(asking), running=beside.answering is not None
             ),
@@ -657,6 +717,12 @@ class Readings(Model, arbitrary_types_allowed=True):
             new=new,
             pile=piled,
             unanswered=beside.unanswered,
+            passages=passages,
+            checks=[
+                CheckRead(check=check, answer=ledgered.answers.get(check.number))
+                for each in members
+                if (check := ledgered.checks.get(each.node)) is not None
+            ],
             members=len(members),
             earlier=read_to.members,
             mark=mark,
@@ -664,6 +730,33 @@ class Readings(Model, arbitrary_types_allowed=True):
             left_by=self.left_by(thread, beside.answering),
             bare=self.bare(number),
         )
+
+    def words(self, member: Joined) -> str | None:
+        """Return the operator's words of `member`, a part of an item of theirs moved into a thread, as they wrote them; none where it's no part, or its item is gone."""
+        item = None if member.part is None else self.source.items().get(member.node)
+        if item is None:
+            return None
+        return next(
+            (each.text for each in spoken(item) if each.id.part == member.part), None
+        )
+
+    def about(self, thread: Thread, members: list[Joined]) -> str | None:
+        """Return what `thread` is about where its title is no real one (`untitled`): the first line of the first thing in it with words, an item, a check or a part of the operator's words, cut short; none where its title says it, or nothing in it says anything."""
+        if not untitled(thread.title):
+            return None
+        items = self.source.items()
+
+        def said(member: Joined) -> str:
+            if member.part is not None:
+                return self.words(member) or ""
+            item = items.get(member.node)
+            if item is not None:
+                return opening(item)
+            check = self.ledgered.checks.get(member.node)
+            return "" if check is None else check.text
+
+        first = next((words for each in members if (words := said(each).strip())), None)
+        return None if first is None else cue(first, 60)
 
     @staticmethod
     def left_by(thread: Thread, answering: Conversation | None) -> Conversation | None:

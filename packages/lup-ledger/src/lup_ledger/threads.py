@@ -458,11 +458,21 @@ def answered(member: Member, members: list[Member]) -> bool:
     parent handed them answers there. A node itself in the thread, never a
     part, nor an item moved in whole from another, is what answers.
     """
+    return answering(member, members) is not None
+
+
+def answering(member: Member, members: list[Member]) -> int | None:
+    """Return the node in a thread whose members are `members` that answers `member`, a part of the operator's words moved in, the first drawn, by its number; none where nothing in it does, or `member` is no part (`answered`)."""
     if member.part is None:
-        return False
+        return None
     inside = [each.node.number for each in members if not each.moved]
-    return any(
-        each.answers(member.part) and each.source in inside for each in member.drawn
+    return next(
+        (
+            each.source
+            for each in member.drawn
+            if each.answers(member.part) and each.source in inside
+        ),
+        None,
     )
 
 
