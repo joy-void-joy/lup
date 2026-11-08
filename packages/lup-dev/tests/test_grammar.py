@@ -119,9 +119,28 @@ def test_add_puts_entries_beside_the_ones_there() -> None:
     assert names(added) == [*DEFAULTS, "runtime-mention"]
 
 
-def test_adding_a_name_already_there_is_refused() -> None:
-    with pytest.raises(ProjectError, match=r"`Rules.add` names `regex`, already there"):
-        Rules.default().add("regex").resolve(DEFAULTS, KNOWN)
+def test_adding_a_name_the_defaults_give_puts_the_entry_where_it_was() -> None:
+    assert names(Rules.default().add("regex").resolve(DEFAULTS, KNOWN)) == DEFAULTS
+    assert names(Rules.all().add("regex").resolve(DEFAULTS, KNOWN)) == KNOWN
+    mine = Step(name="ruff", command=["mine"])
+    placed = Gate.default().add(mine).resolve([step("ruff"), step("pytest")], [])
+    assert [each.entry for each in placed] == [mine, step("pytest")]
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        Rules.only("regex").add("regex"),
+        Rules.of("mine").add("mine"),
+        Rules.default().add("regex").add("regex"),
+        Rules.default().replace("regex", "mine").add("mine"),
+    ],
+)
+def test_adding_a_name_the_same_layer_gave_is_refused(selection: Rules) -> None:
+    with pytest.raises(
+        ProjectError, match=r"`Rules.add` names `(regex|mine)`, already"
+    ):
+        selection.resolve(DEFAULTS, KNOWN)
 
 
 def test_adding_one_name_twice_is_refused() -> None:

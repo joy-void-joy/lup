@@ -32,11 +32,13 @@ const table: Catalog = rules;
 // replaced that isn't there, one added that its own layer already gave.
 export class SelectionError extends Error {}
 
-// A rule a selection holds so far, with the layer of its chain that last gave it: 0
-// for its start, else the operation's (`Operation.layer`).
+// A rule a selection holds so far, with the layer of its chain that last gave it: the
+// operation's (`Operation.layer`), 0 for one its start names itself, and none for one
+// the defaults gave to `Rules.default()` or `Rules.all()`, below every layer, as
+// `Placed.layer` says in Python.
 interface Given {
     id: string;
-    layer: number;
+    layer: number | null;
 }
 
 // The rules as the engine lists them: every rule of the table, or, given each
@@ -77,7 +79,9 @@ function resolved(one: Selected): string[] {
 // A selection's rules: where it starts, then each operation in the order written,
 // `defaults` being what `Rules.default()` starts from.
 function applied(where: string, selection: Selection, defaults: string[]): string[] {
-    const start = started(where, selection.start, defaults).map((id) => ({ id, layer: 0 }));
+    const kind = selection.start.kind;
+    const layer = kind === 'default' || kind === 'all' ? null : 0;
+    const start = started(where, selection.start, defaults).map((id) => ({ id, layer }));
     return selection.operations
         .reduce((given, operation) => operated(where, operation, given), start)
         .map((each) => each.id);
@@ -103,9 +107,10 @@ function started(where: string, start: Start, defaults: string[]): string[] {
     }
 }
 
-// The rules `given` holds with `operation` applied. An add of a rule a layer below
-// gave keeps it, now given by the add's layer, as `Selection.taken` puts an entry on
-// one there in Python; one its own layer gave is refused.
+// The rules `given` holds with `operation` applied. An add of a rule from below, a
+// layer below's or the defaults', keeps it, now given by the add's layer, as
+// `Selection.taken` puts an entry on one there in Python; one its own layer gave is
+// refused.
 function operated(where: string, operation: Operation, given: Given[]): Given[] {
     const ids = given.map((each) => each.id);
     const layer = operation.layer;

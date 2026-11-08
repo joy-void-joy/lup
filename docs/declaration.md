@@ -97,7 +97,7 @@ What it costs: a field a base set can't be unset. Writing lup's default back set
 | `Modules.default()` | lup's default modules (`declaration/modules/shipped.py`) |
 | `Modules.only(*modules)` | exactly these, so a module a later release adds to the default doesn't come in |
 | `Modules()` | the modules below, to change: lup's default in a project, the project's in a person's layer |
-| `.add(*modules)` | a module that isn't there; one a layer below gives, with `module` as a layer on it, as `.edit` puts one; one already there in this layer steers to `.replace` |
+| `.add(*modules)` | a module that isn't there; one a layer below or lup's default gives, with `module` as a layer on it, as `.edit` puts one; one this layer added already steers to `.replace` |
 | `.drop(name, why=…)` | without the module of that name |
 | `.edit(module, why=…)` | the module of that name, with `module` as a layer on it; another class steers to `.replace`, so a swap is visible |
 | `.replace(name, module, why=…)` | another module in its place, from its own defaults: a project in another language replacing `Python` with its own |
@@ -115,12 +115,12 @@ Every collection a module holds is a selection (`Selection`, `declaration/gramma
 | `Kind.all()` | every entry lup knows | `Rules.all()` |
 | `Kind.only(*names)` | these known entries, and no other | `Rules.only("regex")` |
 | `Kind.of(*entries, before=…, after=…)` | these entries, with no defaults: a module's own | `Gate.of(Step(…), before="rules")` |
-| `.add(*entries, before=…, after=…)` | beside the entries there; a name a layer below gave takes the entry as `.edit` would put it there; one already there in this layer is an error | `Exemptions().add(Exemption(…))` |
+| `.add(*entries, before=…, after=…)` | beside the entries there; a name from below, a layer below's or the defaults', takes the entry as `.edit` would put it there; one this layer gave already is an error | `Exemptions().add(Exemption(…))` |
 | `.drop(*names, why=…)` | without these; a name not there is an error | `Rules().drop("tuple-shape", why=…)` |
 | `.replace(name, entry, why=…)` | `entry` in place of the one named | `Guidance().replace("core", Section(…))` |
 
 - **Recorded, resolved at load:** `Rules.default().drop(…)` takes the rules a later release adds to the default, and `Rules.only(…)` doesn't.
-- **An add over a layer below takes what's there,** since that layer may come to give the name after the add was written: a project adopting a module a person's layer adds, or a release adding to a module's own default a rule a project adds. Each operation keeps the layer that wrote it (`Operation.layer`), so the entry added is put on the one below as `.edit` would put it, a module's fields it set on that module's and any other entry in its place; it stays where that one was unless the add places it `before=` or `after=`. A module of another class by that name is another module, which `.replace` swaps in. Adding a name already there in the same layer, from its start or an earlier operation, stays an error: `Modules.default().add(Python())` is.
+- **An add over what's below takes what's there,** since what's below may come to give the name after the add was written: a project adopting a module a person's layer adds, or a release adding to its defaults a module or a rule a project adds. Below is a layer below, and the defaults `Kind.default()` and `Kind.all()` start from, which move under a project by design. Each operation keeps the layer that wrote it (`Operation.layer`), so the entry added is put on the one below as `.edit` would put it, a module's fields it set on that module's and any other entry in its place; it stays where that one was unless the add places it `before=` or `after=`. So `Modules.default().add(Versions(…))` loads whether or not `Versions` is a default, and `Modules.default().add(Python(tests=…))` changes the default `Python`'s test roots. A module of another class by that name is another module, which `.replace` swaps in. Adding a name the same layer gave already, by `Kind.only(…)`, `Kind.of(…)` or an earlier operation, stays an error: `Modules().add(Mine()).add(Mine())` is.
 - **Names are per kind and shared across modules,** so a step can go `before="rules"` though `rules` is `Python`'s; one name from two modules fails the load, naming both. Some kinds merge instead: a path pattern or a package given twice is one, and a related repository given twice with one path; two modules exempting one rule each keep theirs.
 - **Methods, not set arithmetic,** since the declaration is ruled code: `Rules.all() - {"regex"}` would meet lup's own `set-shape`.
 
