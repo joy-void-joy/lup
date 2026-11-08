@@ -447,6 +447,62 @@ export function keptUnder(read: ThreadRead): Conversation | null {
     return taskOwner(read) ?? read.left_by ?? null;
 }
 
+/**
+ * Return what a concern's row and its block say it is: its title; or, where its title is no real one but reads as a
+ * name, what the host says it's about (`ThreadRead.about`), in quotes, words from what's in it rather than a title, so
+ * neither reads as an agent's name.
+ */
+export function concernWords(read: ThreadRead): string {
+    const about = read.about ?? null;
+    return about === null ? read.thread.title : `“${about}”`;
+}
+
+/** Return how a concern reads on the dashboard, by its two marks, as the host says (`ThreadRead.reads`): open, for the operator's eyes, quiet or gone. */
+export function concernReads(read: ThreadRead): NonNullable<ThreadRead["reads"]> {
+    return read.reads ?? "open";
+}
+
+/** A concern where a nest lays it out: as one of its own, or, `dim`, as context above one of its own nested under it, and how deep. */
+export interface Nested {
+    read: ThreadRead;
+    depth: number;
+    dim: boolean;
+}
+
+/**
+ * Return `solid`, the concerns a nest shows as its own, each under its parent there, in the order each was opened, with
+ * how deep it's set in; and, above each whose parent isn't among them, as where it's nested under one someone else holds,
+ * or one gone, each of its ancestors up to one among them, dim, as context, once however many it's above. `all` is every
+ * concern the host reads, which the ancestors are found among.
+ */
+export function concernsNested(solid: readonly ThreadRead[], all: readonly ThreadRead[]): Nested[] {
+    const byNumber = new Map(all.map((each) => [each.thread.number, each]));
+    const own = new Set(solid.map((each) => each.thread.number));
+    const shown = new Map(solid.map((each) => [each.thread.number, each]));
+    for (const each of solid) {
+        let parent = each.thread.parent ?? null;
+        while (parent !== null && !shown.has(parent)) {
+            const above = byNumber.get(parent);
+            if (above === undefined) {
+                break;
+            }
+            shown.set(parent, above);
+            parent = above.thread.parent ?? null;
+        }
+    }
+    const under = new Map<number | null, ThreadRead[]>();
+    for (const each of [...shown.values()].toSorted((a, b) => a.thread.number - b.thread.number)) {
+        const parent = each.thread.parent ?? null;
+        const at = parent !== null && shown.has(parent) ? parent : null;
+        under.set(at, [...(under.get(at) ?? []), each]);
+    }
+    const walk = (read: ThreadRead, depth: number): Nested[] => [
+        { read, depth, dim: !own.has(read.thread.number) },
+        ...(under.get(read.thread.number) ?? []).flatMap((child) => walk(child, depth + 1)),
+    ];
+    return (under.get(null) ?? []).flatMap((each) => walk(each, 0));
+}
+
 /** What a comment is followed from as the review is laid out anew (`placed`, `anchors.ts`): where each comment was last seated on its block, and that block's lines then. */
 export type Followed = Pick<Laid, "seated" | "lines">;
 

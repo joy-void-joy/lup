@@ -11,6 +11,9 @@ import { itemStanding } from "./outline";
 import { DRAFTED, GLYPHS } from "./Outline";
 import {
     checkOwner,
+    concernReads,
+    concernsNested,
+    concernWords,
     cutAt,
     grouped,
     keptUnder,
@@ -27,6 +30,7 @@ import {
     type Grouping,
     type Item,
     type Laid,
+    type Nested,
     type OwnedCheck,
     type Party,
     type Seeing,
@@ -105,6 +109,8 @@ export interface Row {
     node?: number;
     /** The rows nested under it, folding under it, quiet until opened; what names their fold, and whether it starts closed. */
     under?: { key: string; closed: boolean; kind: string; rows: Row[] };
+    /** The row Enter goes to, where it opens nothing of its own: a concern's, from where it's context, dim, above one nested under it. */
+    goes?: string;
 }
 
 /** How wide the list writes a row, tallies at its end, in characters. */
@@ -188,24 +194,24 @@ function checksWaiting(key: string, reading: Pick<ListReading, "checks" | "draft
     }).length;
 }
 
-/** Return each thread open that the agent named `key` answers for, as a task (`taskOwner`). */
+/** Return each concern the agent named `key` answers for, as the list shows it under them (`taskOwner`, `taskShown`). */
 function tasksOf(key: string, reading: Pick<ListReading, "threads">): ThreadRead[] {
     return (reading.threads?.read.threads ?? []).filter((each) => {
         const owner = taskOwner(each);
-        return !closedTask(each) && owner !== null && whose(owner) === key;
+        return taskShown(each) && owner !== null && whose(owner) === key;
     });
 }
 
-/** Return whether a thread's over, settled or declined. */
-function closedTask(read: ThreadRead): boolean {
-    return read.state === "settled" || read.state === "declined";
+/** Return whether the operator cleared a concern, settled or declined, whatever the agent's mark says: it's under what's settled. */
+function cleared(read: ThreadRead): boolean {
+    return (read.cleared ?? null) !== null;
 }
 
-/** Return each thread that's done, for the operator to confirm, under the agent named `key`, who answers for it or left it (`keptUnder`). */
+/** Return each concern the agent said is done that the operator hasn't cleared, for their eyes, under the agent named `key`, who answers for it or left it (`keptUnder`). */
 function confirmingOf(key: string, reading: Pick<ListReading, "threads">): ThreadRead[] {
     return (reading.threads?.read.threads ?? []).filter((each) => {
         const owner = keptUnder(each);
-        return each.state === "done to confirm" && owner !== null && whose(owner) === key;
+        return concernReads(each) === "for your eyes" && owner !== null && whose(owner) === key;
     });
 }
 
@@ -254,9 +260,9 @@ function ownersIn(reading: Pick<ListReading, "checks" | "threads">): Conversatio
     return [...ofChecks, ...ofTasks];
 }
 
-/** Return whether the list shows a thread as a task: one still open, but what the host says is nothing to list. */
+/** Return whether the list shows a concern under whoever answers for it, or in a party: one not gone, as its two marks read (`concernReads`), but what the host says is nothing to list. */
 function taskShown(read: ThreadRead): boolean {
-    return !closedTask(read) && read.bare !== true;
+    return concernReads(read) !== "gone" && read.bare !== true;
 }
 
 /** Return the conversation of the agent named `key`, among those the review names; none where it isn't one of them, as lup's approvals. */
@@ -342,9 +348,9 @@ function agentRow(group: Grouping, depth: number, reading: ListReading, nesting:
 function nestOf(group: Grouping, depth: number, reading: ListReading): Row["under"] {
     const set = "  ".repeat(depth + 1);
     const items = group.items.map((each) => itemRow(each, group, set, reading));
-    const tasks = tasksOf(group.key, reading).filter(taskShown);
+    const tasks = tasksOf(group.key, reading);
     const threads = reading.threads;
-    const rows = [...items, ...(threads === null ? [] : threadsNested(tasks, threads.read.threads).map(({ read, depth: within }) => taskRow(read, set, within, threads, reading)))];
+    const rows = [...items, ...(threads === null ? [] : concernsNested(tasks, tasks).map((each) => taskRow(each, set, threads, reading, group.key)))];
     if (rows.length === 0) {
         return undefined;
     }
@@ -400,34 +406,64 @@ function fitted(left: readonly Stretch[]): Stretch[] {
 }
 
 /**
- * Return a task's row, set in by `set` and how deep it's nested among its owner's: one line, quiet, but what waits on the
- * operator there, saying who left it where nobody running answers for it, the name cut to leave room for that; opened, it
- * reads across agents as a conversation, the thread's own buffer.
+ * Return a concern's row, set in by `set` and how deep it's nested in its nest, `entry`, among those of `at`, the nest's:
+ * one line saying what it is (`concernWords`), in a look of its own, unlike an agent's name; then, as its two marks read
+ * (`concernReads`), `done` where it's for the operator's eyes, `cleared` where it's quiet, the whole row muted and
+ * counting nothing, and where it's gone, as under what's settled, how it ended; else what else says where it stands,
+ * parked, its holder ended, or who left it where nobody running answers for it; how many of what's nested under it are
+ * done or cleared; and what waits on the operator there. Dim, as context above one nested under it held elsewhere, it
+ * counts nothing and Enter goes to its own row. Opened, it reads across agents as a conversation, the thread's own buffer.
  */
-function taskRow(read: ThreadRead, set: string, depth: number, threads: Threading, reading: ListReading): Row {
-    const tally = threadTally(read, threads, reading.draft);
+function taskRow(entry: Nested, set: string, threads: Threading, reading: ListReading, at: string): Row {
+    const { read, depth, dim } = entry;
+    const inset = `${set}${"  ".repeat(depth)}`;
+    const words = concernWords(read);
+    const number = read.thread.number;
+    if (dim) {
+        return {
+            id: `context ${at} ${number}`,
+            lines: [{ stretches: fitted([{ text: inset }, { text: words, look: "list-context" }]) }],
+            opens: null,
+            says: `${words}: what it's nested under, held elsewhere`,
+            writes: false,
+            goes: `thread ${number}`,
+        };
+    }
+    const reads = concernReads(read);
+    const quiet = reads === "quiet" || reads === "gone";
+    // What asks them alone: what's new is on the item's row under who sent it, read by being seen there, as a thread's mark isn't.
+    const tally = quiet ? NOTHING : { ...threadTally(read, threads, reading.draft), news: 0 };
     const waiting = tally.holds + tally.flagged > 0;
     // Working in the ledger's word, though whoever held it has ended and someone else answers for it: nobody is.
     const holder = read.thread.holder ?? null;
     const answering = read.answering ?? null;
     const fell = read.state === "working" && holder !== null && answering !== null && whose(holder) !== whose(answering);
-    const state = fell ? { text: "holder ended", look: "list-sub" } : threadState(read);
     const leaver = read.left_by ?? null;
     const whoLeft = leaver === null ? null : `left by ${shortly(leaver, reading)}`;
-    // Being left says nobody's running, and the marks at the row's end what waits on the operator: a word for anything else.
-    const kept = read.state === "nobody running" || read.state === "waiting on the operator" ? null : state.text;
-    const says = whoLeft === null ? state.text : kept === null ? whoLeft : `${kept}, ${whoLeft}`;
-    const inset = `${set}${"  ".repeat(depth)}`;
-    const room = whoLeft === null ? read.thread.name.length + 1 : Math.max(COLUMNS - tallied(tally).reduce((sum, each) => sum + each.text.length, 0) - inset.length - says.length - 3, 14);
+    const stands = fell ? { text: "holder ended", look: "list-sub" } : concernState(read);
+    // Being left says nobody's running.
+    const word = whoLeft !== null && read.state === "nobody running" ? { ...stands, text: "" } : stands;
+    const says = whoLeft === null ? word.text : word.text === "" ? whoLeft : `${word.text}, ${whoLeft}`;
+    const nested = threads.read.threads.filter((each) => (each.thread.parent ?? null) === number && each.bare !== true);
+    const finished = nested.filter((each) => (each.done ?? null) !== null || cleared(each)).length;
+    const progress = nested.length === 0 ? "" : `${finished} of ${nested.length}`;
+    const after = [says, progress].filter((each) => each !== "");
+    const afterWidth = after.reduce((sum, each) => sum + each.length + 1, 0);
+    const room = Math.max(COLUMNS - tallied(tally).reduce((sum, each) => sum + each.text.length, 0) - inset.length - afterWidth - 2, 14);
+    const look = quiet ? "list-concern list-quiet" : "list-concern";
     const left: Stretch[] = [
         { text: inset },
-        { text: `@${cutName(read.thread.name, room)}`, look: waiting ? "list-name" : "list-sub" },
-        { text: " " },
-        waiting ? { text: says, look: state.look } : { text: says, look: "list-sub" },
+        { text: cutName(words, room), look },
+        ...(says === "" ? [] : [{ text: " " }, { text: says, look: waiting || reads === "for your eyes" ? word.look : "list-sub" }]),
+        ...(progress === "" ? [] : [{ text: " " }, { text: progress, look: "list-sub" }]),
     ];
-    // What asks them alone: what's new is on the item's row under who sent it, read by being seen there, as a thread's mark isn't.
-    const quiet = { ...tally, news: 0 };
-    return { id: `thread ${read.thread.number}`, lines: [{ stretches: padded(left, quiet) }], opens: { kind: "thread", number: read.thread.number }, says: `@${read.thread.name}: ${read.thread.title}${leaver === null ? "" : `, left by ${reading.called(leaver)}`}`, writes: true };
+    return {
+        id: `thread ${number}`,
+        lines: [{ stretches: padded(left, tally) }],
+        opens: { kind: "thread", number },
+        says: [words, word.text, ...(leaver === null ? [] : [`left by ${reading.called(leaver)}`])].filter((each) => each !== "").join(", "),
+        writes: !quiet,
+    };
 }
 
 /** Return `name` in `most` characters, its end cut where it doesn't fit. */
@@ -494,7 +530,7 @@ export function listedByAgent(reading: ListReading): Row[] {
         const held = byName(groups.filter((each) => partyOf(each) === party), reading.called);
         const tasks = threads === null ? [] : threads.read.threads.filter((each) => taskShown(each) && party.holdsTask(each, reading.running));
         const within: Row[] = [
-            ...(threads === null ? [] : threadsNested(tasks, threads.read.threads).map(({ read, depth }) => taskRow(read, "", depth, threads, reading))),
+            ...(threads === null ? [] : concernsNested(tasks, tasks).map((each) => taskRow(each, "", threads, reading, `party ${party.name}`))),
             ...held.flatMap((group) => group.items.map((item) => ({ item, group }))).toSorted((a, b) => a.item.number - b.item.number).map(({ item, group }) => itemRow(item, group, "", reading, true)),
             ...held.filter((group) => reading.agents.some((each) => whose(each) === group.key)).map((group) => agentRow(group, 0, reading, false)),
         ];
@@ -506,11 +542,12 @@ export function listedByAgent(reading: ListReading): Row[] {
         rows.push(agentRow(group, 0, reading));
     }
     if (threads !== null) {
-        const done = threads.read.threads.filter(closedTask);
+        // Each concern the operator cleared, gone or quiet, still readable here.
+        const done = threads.read.threads.filter(cleared);
         if (done.length > 0) {
             rows.push({
                 ...heading("heading settled", "settled", `${done.length}`),
-                under: { key: "list settled", closed: true, kind: "section", rows: threadsNested(done, threads.read.threads).map(({ read, depth }) => taskRow(read, "", depth, threads, reading)) },
+                under: { key: "list settled", closed: true, kind: "section", rows: concernsNested(done, done).map((each) => taskRow(each, "", threads, reading, "settled")) },
             });
         }
     }
@@ -533,23 +570,29 @@ function viewRows(reading: ListReading): Row[] {
     });
 }
 
-/** Say how a thread stands in a word or two. */
-function threadState(read: ThreadRead): { text: string; look: string } {
+/**
+ * Say how a concern stands in a word or two, by its two marks (`concernReads`): `done` for the operator's eyes; `cleared`
+ * while someone's still on it; how it ended, gone; else where it stands, but working or waiting on the operator, which
+ * the row's marks say, nothing.
+ */
+function concernState(read: ThreadRead): { text: string; look: string } {
+    switch (concernReads(read)) {
+        case "for your eyes":
+            return { text: "done", look: "mark-asking" };
+        case "quiet":
+            return { text: "cleared", look: "list-sub" };
+        case "gone":
+            return { text: (read.done ?? null) === null ? read.state : `done, ${read.state}`, look: "list-sub" };
+        default:
+            break;
+    }
     switch (read.state) {
-        case "waiting on the operator":
-            return { text: "waiting on you", look: "mark-waiting" };
-        case "done to confirm":
-            return { text: "done, to confirm", look: "mark-waiting" };
         case "parked":
             return { text: "parked", look: "mark-parked" };
-        case "settled":
-            return { text: "settled", look: "list-sub" };
-        case "declined":
-            return { text: "declined", look: "list-sub" };
         case "nobody running":
             return { text: "nobody running", look: "mark-ended" };
         default:
-            return { text: read.state, look: "mark-calling" };
+            return { text: "", look: "list-sub" };
     }
 }
 
@@ -561,26 +604,11 @@ function threadTally(read: ThreadRead, threads: Threading, draft: Draft): Tally 
     const holds = asking.filter((each) => each.holds).length;
     return {
         holds: holds + (threads.landing.get(read.thread.number) ?? 0),
-        flagged: asking.length - holds + (read.state === "done to confirm" ? 1 : 0),
+        flagged: asking.length - holds + (concernReads(read) === "for your eyes" ? 1 : 0),
         review: 0,
         news: (read.new ?? []).length,
         written,
     };
-}
-
-/** Return `threads`, each under its parent among them, in the order each was opened, with how deep it's set in. */
-function threadsNested(threads: readonly ThreadRead[], all: readonly ThreadRead[]): { read: ThreadRead; depth: number }[] {
-    const numbers = new Set(threads.map((each) => each.thread.number));
-    const under = new Map<number | null, ThreadRead[]>();
-    for (const each of threads.toSorted((a, b) => a.thread.number - b.thread.number)) {
-        let parent = each.thread.parent ?? null;
-        while (parent !== null && !numbers.has(parent)) {
-            parent = all.find((one) => one.thread.number === parent)?.thread.parent ?? null;
-        }
-        under.set(parent, [...(under.get(parent) ?? []), each]);
-    }
-    const walk = (read: ThreadRead, depth: number): { read: ThreadRead; depth: number }[] => [{ read, depth }, ...(under.get(read.thread.number) ?? []).flatMap((child) => walk(child, depth + 1))];
-    return (under.get(null) ?? []).flatMap((each) => walk(each, 0));
 }
 
 /** Return the rows holding the row named `id`, outermost first, and it last; none where it's in none of `rows`. */

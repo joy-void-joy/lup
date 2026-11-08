@@ -146,7 +146,7 @@ describe("moving through the review, line by line, in headless Chromium", () => 
     });
 
     it("moves j and k exactly one line shown at a time in a thread's own buffer", async () => {
-        await dashboard.openRow("@transcript-reader");
+        await dashboard.openRow("The transcript reader");
         await review.until("read the thread whole", (view) => view.state.doc.toString().startsWith("━━ @transcript-reader") && !view.state.doc.toString().includes("reading…"));
         await to("first");
         expect(await stepped("j")).toEqual([]);

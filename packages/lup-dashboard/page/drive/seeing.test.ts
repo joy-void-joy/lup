@@ -105,7 +105,7 @@ describe("what's new is read by being on screen, in headless Chromium", () => {
     });
 
     it("moves the thread's own mark in its own buffer, as another takes the screen", async () => {
-        await dashboard.openRow("@auth-survey");
+        await dashboard.openRow("Where auth is checked");
         await review.until("read the thread whole", (view) => view.state.doc.toString().startsWith("━━ @auth-survey") && !view.state.doc.toString().includes("reading…"));
         await onScreen("── @66 note");
         await passes(10_000);

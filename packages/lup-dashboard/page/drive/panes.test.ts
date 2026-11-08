@@ -67,7 +67,7 @@ describe("the panes by agent", () => {
         expect(list.some((each) => each.includes("guidance-voice"))).toBe(true);
         expect(list.some((each) => each.includes("No agent"))).toBe(true);
         // What an ended session held sits in No agent itself, saying who left it, never under their name.
-        expect(list.some((each) => each.includes("@docs-sweep left by docs-pass"))).toBe(true);
+        expect(list.some((each) => each.includes("The docs sweep left by docs-pass"))).toBe(true);
         expect(list.some((each) => each.includes("✕ docs-pass"))).toBe(false);
         expect(dashboard.thrown).toEqual([]);
     });
@@ -363,7 +363,7 @@ describe("the panes by agent", () => {
         expect(line).toContain(" in @transcript-reader:");
         const number = /check @(\d+)/.exec(line)?.[1] ?? "";
         // Counted with what wants the operator's eyes, on its task's row, whose question holds apart from it.
-        const taskSays = (flagged: boolean) => page.waitForFunction((wanted) => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("@transcript-reader") && (each.textContent ?? "").includes("◇1") === wanted), flagged, { polling: 50 });
+        const taskSays = (flagged: boolean) => page.waitForFunction((wanted) => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("The transcript reader") && (each.textContent ?? "").includes("◇1") === wanted), flagged, { polling: 50 });
         await taskSays(true);
         await review.goTo(`check @${number}`);
         await dashboard.keys.press([" ", "d"]);
@@ -376,9 +376,9 @@ describe("the panes by agent", () => {
 
     it("lists tasks under whoever owns them, and reads one across agents from its row", async () => {
         const { page } = dashboard;
-        await listRow(dashboard, "@transcript-reader");
+        await listRow(dashboard, "The transcript reader");
         const row = await page.evaluate(() => document.querySelector(".list-buffer .cm-activeLine")?.textContent ?? "");
-        expect(row).toContain("@transcript-reader");
+        expect(row).toContain("The transcript reader");
         await page.keyboard.press("Enter");
         await review.until("read the thread whole", (view) => !view.state.doc.toString().includes("reading…") && view.state.doc.toString().includes("━━ @transcript-reader"));
         // Whole, saying whom the words reach, over it and on the line they're written under.
@@ -412,7 +412,7 @@ describe("the panes by agent", () => {
 
     it("goes from an agent's name on a thread's banner to their own buffer with gd, and back with Ctrl+O", async () => {
         const { page } = dashboard;
-        await listRow(dashboard, "@auth-survey");
+        await listRow(dashboard, "Where auth is checked");
         await page.keyboard.press("Enter");
         await review.until("read the thread whole", (view) => view.state.doc.toString().startsWith("━━ @auth-survey") && !view.state.doc.toString().includes("reading…"));
         await review.goTo("lup-impl/explore-auth holds");

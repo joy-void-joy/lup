@@ -135,7 +135,7 @@ describe("what's offered in a thread's own buffer, in headless Chromium", () => 
 
     it("offers only a comment on what's past waiting, Space d going on to the thread it's in", async () => {
         // Read as its buffer opens, in the thread's history.
-        await dashboard.openRow("@transcript-reader");
+        await dashboard.openRow("The transcript reader");
         await review.holds("── @47 note");
         await review.goTo("── @47 note");
         await offers(dashboard, "comment on it");

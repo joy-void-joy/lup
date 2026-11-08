@@ -1767,6 +1767,17 @@ kbd {
     color: var(--cyan);
 }
 
+/* A concern's words, its title or what it's about, never read as an agent's name: in the text's own colour, slanted;
+   muted where the operator cleared it, quiet. */
+.list-concern {
+    color: var(--fg);
+    font-style: italic;
+}
+
+.list-concern.list-quiet {
+    color: var(--muted);
+}
+
 .list-sub,
 .list-count,
 .list-written {

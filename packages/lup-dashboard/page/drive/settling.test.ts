@@ -44,9 +44,12 @@ const offers = (text: string) =>
 /** Return once the top bar says `text`. */
 const said = (text: string) => dashboard.page.waitForFunction((text) => document.querySelector(".bar .said")?.textContent?.includes(text) === true, text);
 
+/** The demo's threads' titles, which their rows say, by name. */
+const TITLES: Record<string, string> = { "transcript-reader": "The transcript reader", "auth-survey": "Where auth is checked", "the-voice": "The guidance's voice" };
+
 /** Open the thread named `name` from its row, nested under whoever owns it, and return once it's read, the cursor on its banner. */
 async function thread(name: string): Promise<void> {
-    await dashboard.openRow(`@${name}`);
+    await dashboard.openRow(TITLES[name] ?? name);
     await review.until(`read @${name} whole`, (view, wanted) => view.state.doc.toString().startsWith(`━━ @${wanted} `) && !view.state.doc.toString().includes("reading…"), name);
     await dashboard.keys.press(["g", "g"]);
 }
@@ -124,7 +127,7 @@ describe("settling any thread, in headless Chromium", () => {
         await review.until("hold the message, open, waiting on whoever answers", (view) => /you · @\d+\.1 to lup-impl\/explore-auth · open: waits on lup-impl\/explore-auth/.test(view.state.doc.toString()));
         await thread("transcript-reader");
         await review.holds("✓ check @311");
-        await thread("the-voice");
-        expect(await review.line()).toMatch(/^━━ @the-voice · The guidance's voice · guidance-voice holds · settled/);
+        // Done and cleared, it's gone from the list, under what's settled alone, which is folded.
+        await dashboard.page.waitForFunction(() => ![...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("The guidance's voice")), undefined, { polling: 50 });
     });
 });
