@@ -3,8 +3,10 @@
 No test runs podman.
 """
 
+import asyncio
 import json
-from datetime import UTC, datetime
+import socket
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
@@ -12,6 +14,7 @@ import pytest
 from pydantic import ValidationError
 
 from lup.adapters.claude import Claude
+from lup.adapters.claude.standin import StandIn
 from lup.programs import Ran
 from lup.rooms import (
     Container,
@@ -23,10 +26,18 @@ from lup.rooms import (
     Podman,
     Room,
 )
-from lup.rooms.engine import Invocation, Process, StoredImage
+from lup.rooms.engine import (
+    Ending,
+    Invocation,
+    Piped,
+    Pipes,
+    Process,
+    StoredImage,
+    ended,
+)
 from lup.sessions.contract import guarded
 from lup.sessions.errors import RealCallInTestError
-from lup.sessions.terminal import Cli, TerminalSettings
+from lup.sessions.terminal import Cli, TerminalSettings, ToolServer
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -183,6 +194,133 @@ def test_a_run_without_a_terminal_on_its_own_network() -> None:
     assert "--interactive" not in command
     assert "--tty" not in command
     assert "--network=private" in command
+
+
+def test_a_piped_run_keeps_its_input_open_with_no_terminal() -> None:
+    engine, _ = podman()
+    invocation = Invocation(
+        container=Container(image=IMAGE, mounts=[Mount(source=Path("/srv/repo"))]),
+        command=["/opt/clis/claude"],
+        workdir=Path("/srv/repo"),
+        home=Path("/home/op"),
+        home_source=Path("/srv/rooms/home"),
+        piped=True,
+    )
+
+    command = engine.command(invocation)
+
+    assert "--interactive" in command
+    assert "--tty" not in command
+    assert not any(each.startswith("--detach-keys") for each in command)
+
+
+def test_a_held_run_makes_its_home_and_starts_its_command_piped(tmp_path: Path) -> None:
+    started: list[list[str]] = []
+
+    async def start(arguments: list[str]) -> Piped:
+        started.append(arguments)
+        return await StandIn.started(session="s-1", arguments=arguments)
+
+    engine = Podman(start=start)
+    invocation = Invocation(
+        container=Container(image=IMAGE, mounts=[Mount(source=tmp_path)]),
+        command=["/opt/clis/claude"],
+        workdir=tmp_path,
+        home=Path("/home/op"),
+        home_source=tmp_path / "room-home",
+        piped=True,
+    )
+
+    async def held() -> int:
+        piped = await engine.held(invocation)
+        return await ended(piped, timedelta(seconds=5))
+
+    assert asyncio.run(held()) == 0
+    assert started == [engine.command(invocation)]
+    assert (tmp_path / "room-home").is_dir()
+
+
+def test_a_held_run_refuses_one_that_isn_t_piped_alone(tmp_path: Path) -> None:
+    invocation = Invocation(
+        container=Container(image=IMAGE, mounts=[Mount(source=tmp_path)]),
+        command=["/opt/clis/claude"],
+        workdir=tmp_path,
+        home=Path("/home/op"),
+        home_source=tmp_path / "room-home",
+        terminal=True,
+        piped=True,
+    )
+
+    with pytest.raises(ContainerError, match="piped, with no terminal"):
+        asyncio.run(Podman().held(invocation))
+
+
+def test_a_held_run_is_refused_in_tests(tmp_path: Path) -> None:
+    invocation = Invocation(
+        container=Container(image=IMAGE, mounts=[Mount(source=tmp_path)]),
+        command=["/opt/clis/claude"],
+        workdir=tmp_path,
+        home=Path("/home/op"),
+        home_source=tmp_path / "room-home",
+        piped=True,
+    )
+
+    with pytest.raises(RealCallInTestError, match="recording `start`"):
+        asyncio.run(Podman().held(invocation))
+
+
+class Stuck(Piped):
+    """A piped program that ends only once it's made to, saying what it was sent."""
+
+    def __init__(self, pipes: Pipes) -> None:
+        self.own = pipes
+        self.signals: list[str] = []
+        self.made = asyncio.Event()
+
+    @property
+    @override
+    def pipes(self) -> Pipes:
+        return self.own
+
+    @override
+    async def waited(self) -> int:
+        await self.made.wait()
+        return 137
+
+    @override
+    def signalled(self, ending: Ending) -> None:
+        self.signals.append(ending)
+        if ending == "made":
+            self.made.set()
+
+
+def test_a_program_that_doesn_t_end_at_its_input_s_end_is_asked_then_made_to() -> None:
+    async def ending() -> tuple[int, list[str], bool]:
+        mine, theirs = socket.socketpair()
+        _, writing = await asyncio.open_unix_connection(sock=mine)
+        reading, _ = await asyncio.open_unix_connection(sock=theirs)
+        stuck = Stuck(Pipes(input=writing, output=reading))
+        status = await ended(stuck, timedelta(0))
+        return status, stuck.signals, writing.is_closing()
+
+    assert asyncio.run(ending()) == (137, ["asked", "made"], True)
+
+
+def test_a_container_is_stopped_by_its_name_and_a_stop_podman_refuses_raises() -> None:
+    engine, asked = podman(exited(0))
+
+    engine.stop("lup-lup-dev")
+
+    assert asked.processes[-1].arguments == [
+        "podman",
+        "stop",
+        "--ignore",
+        "--time=10",
+        "lup-lup-dev",
+    ]
+    failing, _ = podman(exited(125, "Error: no store"))
+    with pytest.raises(ContainerError, match="couldn't stop the container lup-x"):
+        failing.stop("lup-x")
 
 
 def test_a_mount_receiving_what_s_mounted_later_is_a_slave() -> None:
@@ -590,6 +728,11 @@ class RecordingEngine(ContainerEngine):
         self.ran.append(invocation)
         return 7
 
+    @override
+    async def held(self, invocation: Invocation) -> Piped:
+        self.ran.append(invocation)
+        return await StandIn.started(session="s-1", arguments=invocation.command)
+
 
 @pytest.fixture
 def worktree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -715,3 +858,45 @@ def test_a_launch_refuses_variables_the_terminal_needs_otherwise(
                 directory=tmp_path / "launch", cli=Cli(program=Path("/opt/clis/claude"))
             ),
         )
+
+
+def test_a_held_room_runs_the_agent_s_held_command_piped_with_nothing_pushed(
+    tmp_path: Path, worktree: Path
+) -> None:
+    engine = RecordingEngine()
+    room = Room(
+        agent=Claude(model="opus"),
+        container=Container(image=IMAGE, mounts=[Mount(source=tmp_path)]),
+        home_source=tmp_path / "room-home",
+        engine=engine,
+    )
+    settings = TerminalSettings(
+        directory=tmp_path / "launch",
+        cli=Cli(program=Path("/opt/clis/claude")),
+        servers=[ToolServer(name="lup", socket=Path("/run/lup/mcp.sock"), pushes=True)],
+        messages=Path("/run/lup/messages.sock"),
+    )
+    held = Claude(model="opus").held(settings)
+
+    async def holding() -> int:
+        piped = await room.hold(arguments=["--session-id", "s-1"], settings=settings)
+        return await ended(piped, timedelta(seconds=5))
+
+    assert asyncio.run(holding()) == 0
+    [ran] = engine.ran
+    assert ran.piped
+    assert not ran.terminal
+    assert ran.command == [*held.command, "--session-id", "s-1"]
+    assert "-p" not in ran.command
+    assert "--print" not in ran.command
+    assert "--dangerously-load-development-channels" not in ran.command
+    assert "--messaging-socket-path" not in ran.command
+    assert held.command[-5:] == [
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json",
+    ]
+    assert "--mcp-config" in held.command
+    assert engine.ensured == [IMAGE]

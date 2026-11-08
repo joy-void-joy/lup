@@ -282,18 +282,36 @@ class Running(Model, arbitrary_types_allowed=True):
             self.process.kill()
             return await self.process.wait()
 
+    async def waited(self) -> int:
+        """Wait for it to end, however it does, and return its status."""
+        return await self.process.wait()
 
-async def started(program: str | Path, *arguments: str) -> Running:
+    def terminate(self) -> None:
+        """Ask it to end (`SIGTERM`); nothing where it has ended."""
+        if self.process.returncode is None:
+            self.process.terminate()
+
+    def kill(self) -> None:
+        """Make it end (`SIGKILL`); nothing where it has ended."""
+        if self.process.returncode is None:
+            self.process.kill()
+
+
+async def started(program: str | Path, *arguments: str, limit: int = 2**16) -> Running:
     """Start `program` with `arguments` beside the event loop, its input and output the caller's to talk over, and return it running.
 
-    What it writes to its standard error reaches the caller's own. Raise
-    `ProgramMissingError` where it can't be started.
+    `limit` is the longest line its output's reader reads at once, asyncio's
+    64 KiB by default. What it writes to its standard error reaches the
+    caller's own. Raise `ProgramMissingError` where it can't be started.
     """
     command = [str(program), *arguments]
     try:
         # lup: ignore("subprocess", why="lup's one runner of programs, which every other module uses")
         process = await asyncio.create_subprocess_exec(
-            *command, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE
+            *command,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            limit=limit,
         )
     except OSError as missing:
         message = f"`{program}` can't be started: {missing}"

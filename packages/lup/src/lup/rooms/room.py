@@ -1,4 +1,4 @@
-"""`Room`: an agent behind a wall, opened in a terminal.
+"""`Room`: an agent behind a wall, opened in a terminal or held with none.
 
     room = Room(
         agent=agent,
@@ -14,6 +14,10 @@ missing, and runs the CLI in the container in the foreground, in the directory
 it's launched from, with the room's home the directory it's given, mounted at
 the host's home path. It returns the CLI's exit status; what the runtime saved
 that a launch carries back (`Terminal.preferences`) is the launch's to carry.
+
+`hold` starts the same room with no terminal, the agent compiled as a session
+held over its input and output (`Declaration.held`, `lup.sessions.held`), and
+returns it running beside the caller's event loop.
 """
 
 import sys
@@ -21,12 +25,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lup.rooms.container import AbsolutePath, Container, Mount
-from lup.rooms.engine import ContainerEngine, ContainerError, Invocation, Podman
+from lup.rooms.engine import (
+    ContainerEngine,
+    ContainerError,
+    Invocation,
+    Piped,
+    Podman,
+)
 from lup.sessions.declaration import Declaration
 from lup.types import Model
 
 if TYPE_CHECKING:
-    from lup.sessions.terminal import TerminalSettings
+    from lup.sessions.terminal import Terminal, TerminalSettings
 
 
 class Room(Model, arbitrary_types_allowed=True):
@@ -53,6 +63,30 @@ class Room(Model, arbitrary_types_allowed=True):
         disagree with the ones the CLI needs.
         """
         terminal = self.agent.terminal(settings)
+        invocation = self.invocation(terminal, arguments)
+        terminal.prepare()
+        self.engine.ensure(invocation.container.image)
+        return self.engine.run(
+            invocation.model_copy(update={"terminal": sys.stdin.isatty()})
+        )
+
+    async def hold(self, arguments: list[str], settings: TerminalSettings) -> Piped:
+        """Start the agent's runtime in the room as a session held with no terminal (`Declaration.held`), its input and output piped to the caller, and return it running.
+
+        `arguments` go after lup's own, as for `launch`, which checks the same.
+        """
+        held = self.agent.held(settings)
+        invocation = self.invocation(held, arguments)
+        held.prepare()
+        self.engine.ensure(invocation.container.image)
+        return await self.engine.held(invocation.model_copy(update={"piped": True}))
+
+    def invocation(self, terminal: Terminal, arguments: list[str]) -> Invocation:
+        """Return the run of `terminal`'s command in the room, `arguments` after it, in the directory it's started from.
+
+        Raise `ContainerError` where the room's variables disagree with the ones
+        the command needs, or the working directory isn't inside a mount.
+        """
         own = self.container
         clashing = [
             name
@@ -84,15 +118,10 @@ class Room(Model, arbitrary_types_allowed=True):
                 "from inside a mount"
             )
             raise ContainerError(message)
-        terminal.prepare()
-        self.engine.ensure(container.image)
-        return self.engine.run(
-            Invocation(
-                container=container,
-                command=[*self.before, *terminal.command, *arguments],
-                workdir=workdir,
-                home=Path.home(),
-                home_source=self.home_source,
-                terminal=sys.stdin.isatty(),
-            )
+        return Invocation(
+            container=container,
+            command=[*self.before, *terminal.command, *arguments],
+            workdir=workdir,
+            home=Path.home(),
+            home_source=self.home_source,
         )
