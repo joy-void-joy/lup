@@ -20,7 +20,6 @@ import {
     opened,
     scopeAt,
     threadPlace,
-    ROOT_TITLE,
     toAnswer,
     UNSEEN,
     type Around,
@@ -291,11 +290,16 @@ describe("a thread's own buffer", () => {
         expect(said(AUTH, 2)).toBe("━━ @auth · The auth · s1/a1 holds · working · 1 waiting, 1 new ━━");
     });
 
-    it("says what it's parked until, and whose its session is", () => {
+    it("says what it's parked until", () => {
         expect(lines(lay(306))[1]).toBe("parked: named once the reader lands");
-        const made = thread(320, "old-session", { holder: from("s7"), answering: null } as Partial<ThreadRead>);
-        const root = { ...made, thread: { ...made.thread, title: ROOT_TITLE, holder: from("s7") } } as ThreadRead;
-        expect(threadBanner(root, 0, called)).toBe("━━ @old-session · the session's own · its session has ended · working ━━");
+    });
+
+    it("says working of nothing nobody running answers for, whatever waits on the operator in it", () => {
+        const made = thread(320, "left", { holder: from("s7"), answering: null, state: "nobody running" } as Partial<ThreadRead>);
+        const left = { ...made, thread: { ...made.thread, holder: from("s7") } } as ThreadRead;
+        expect(threadBanner(left, 0, called)).toBe("━━ @left · The left · s7 held it · nobody running ━━");
+        const asking = { ...left, state: "waiting on the operator", asks: [{ node: 51, what: "a question", came: AT, holds: true }] } as ThreadRead;
+        expect(threadBanner(asking, 0, called)).toBe("━━ @left · The left · s7 held it · nobody running · 1 waiting ━━");
     });
 
     it("lays its whole conversation out in the order it came, under its banner, open: an item, the operator's words on it inside it, a message between agents folded to its header", () => {

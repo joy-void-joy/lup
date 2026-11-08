@@ -666,23 +666,12 @@ class Bearings(ABC):
         """Return what session `session`'s own conversation, starting anew in `launch`, is told; `running` being the main conversations the service serves, their own among them. None tells nothing."""
 
 
-class Roots(ABC):
-    """What a session's name is to the threads of their repository: names are one set there, a thread's and an agent's, but a session and their root thread share one (`inbox/concerns.py`, `Concerns.root`)."""
+class Namesakes(ABC):
+    """What an agent's name is to the threads of their repository: names are one set there, a thread's and an agent's (`inbox/namesakes.py`)."""
 
     @abstractmethod
-    def refused(
-        self,
-        repository: Path,
-        name: str,
-        *,
-        roots: bool,
-        session: parties.Conversation | None = None,
-    ) -> str | None:
-        """Say why an agent of `repository` can't take `name`: a node there has it; none where none does, where the node is `session`'s own root, whoever holds it, or, where `roots`, it's a root thread nobody holds but `session`, which a session taking the name takes as theirs."""
-
-    @abstractmethod
-    def renamed(self, session: parties.Conversation, name: str) -> None:
-        """Make `session`'s root thread follow their name, `name`: renamed with them, or, where a root nobody holds has it, that one taken as theirs."""
+    def refused(self, repository: Path, name: str) -> str | None:
+        """Say why an agent of `repository` can't take `name`: a node there has it; none where none does."""
 
 
 class Spoken(Model):
@@ -839,10 +828,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     bearings: Bearings | None = None
     """What a new main session is told of where their repository stands as
     they start; none tells nothing."""
-    roots: Roots | None = None
-    """What a session's name is to their repository's threads, which a name
-    a thread has refuses, but for a root thread the session takes; none
-    refuses none."""
+    namesakes: Namesakes | None = None
+    """What an agent's name is to their repository's threads, which a name a
+    thread has refuses; none refuses none."""
     refresh: Callable[[Register], list[Path]] | None = None
     """Brings the programs a recorded launch's room runs up to this copy's,
     returning those it rewrote; none leaves them as the launch wrote them."""
@@ -867,9 +855,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
 
         Its name is the one it asks, made unique among those served (`claimed`),
         and its container is named after it (`container_name`), unless it names
-        its own, as a record served again does. A record served again keeps the
-        name its session's root shares, since that root is their own
-        (`Roots.refused`), where the conversations kept beside it name them.
+        its own, as a record served again does.
         A launch served already, running a runtime the answerer doesn't know,
         whose judge isn't there, or asking exactly a name another holds, is
         refused. A directory left by a service before
@@ -882,15 +868,10 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             raise HostError(message)
         kept = read_model(self.layout.conversations(registering.launch), Conversations)
         conversations = kept or Conversations()
-        session = (
-            None
-            if conversations.session is None
-            else self.party(registering, conversations.session)
-        )
         name = claimed(
             registering,
             self.claims(),
-            lambda wanted: self.thread_named(registering.repository, wanted, session),
+            lambda wanted: self.thread_named(registering.repository, wanted),
         )
         container = registering.container or container_name(
             registering.repository, name
@@ -976,7 +957,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         return request
 
     async def renamed(self, launch: str, name: str) -> Register:
-        """Rename launch `launch`, its record, its session's kept name and its container with it, and return it as it stands; their root thread follows (`Roots.renamed`).
+        """Rename launch `launch`, its record, its session's kept name and its container with it, and return it as it stands.
 
         Raise `HostError` where no launch is served by that id, or another holds
         the name or the container it would give, or a thread of its repository
@@ -990,16 +971,13 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         if holder is not None:
             raise HostError(taken(holder, name))
         session = served.conversations.session
-        own = None if session is None else self.party(served.launch, session)
-        refused = self.thread_named(served.launch.repository, name, own)
+        refused = self.thread_named(served.launch.repository, name)
         if refused is not None:
             raise HostError(refused)
         named = served.launch.model_copy(update={"name": name})
         self.recorded(named)
         if session is not None:
             self.names.keep(session, name)
-        if own is not None and self.roots is not None:
-            self.roots.renamed(own, name)
         self.say(f"{launch}: renamed from `{served.launch.name}` to `{name}`")
         await self.moved(named, container_name(named.repository, name))
         current = self.served.get(launch)
@@ -1012,18 +990,11 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             repository=launch.repository, runtime=launch.runtime, session=session
         )
 
-    def thread_named(
-        self,
-        repository: Path,
-        name: str,
-        session: parties.Conversation | None = None,
-        *,
-        roots: bool = True,
-    ) -> str | None:
-        """Say why an agent of `repository` can't take `name`, a thread there having it (`Roots.refused`); none where it can, or nothing says."""
-        if self.roots is None:
+    def thread_named(self, repository: Path, name: str) -> str | None:
+        """Say why an agent of `repository` can't take `name`, a thread there having it (`Namesakes.refused`); none where it can, or nothing says."""
+        if self.namesakes is None:
             return None
-        return self.roots.refused(repository, name, roots=roots, session=session)
+        return self.namesakes.refused(repository, name)
 
     async def moved(self, launch: Register, container: str) -> None:
         """Rename `launch`'s container to `container` where podman has it, and record its name; otherwise it keeps its own.
@@ -1082,13 +1053,12 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             self.names.titled(session, title)
         starting = isinstance(heard.event, SessionStarted)
         last = self.names.last(session) if starting else None
-        own = self.party(current, session)
         wanted = [
             each
             for each in [given, last]
             if each is not None
             and held(each, self.claims(), current) is None
-            and self.thread_named(current.repository, each, own) is None
+            and self.thread_named(current.repository, each) is None
         ]
         name = next(iter(wanted), current.name or "")
         if name != current.name:
@@ -1543,7 +1513,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         saying which.
         """
         served = self.served[launch]
-        refused = self.thread_named(served.launch.repository, name, roots=False)
+        refused = self.thread_named(served.launch.repository, name)
         if refused is not None:
             raise HostError(refused)
         conversations = served.conversations
@@ -2037,9 +2007,9 @@ class HostService(Model, arbitrary_types_allowed=True):
     bearings: Bearings | None = None
     """What a new main session is told of where their repository stands as they
     start (`inbox/bearings.py`, which `cli.py` gives); none tells nothing."""
-    roots: Roots | None = None
-    """What a session's name is to their repository's threads (`inbox/roots.py`,
-    which `cli.py` gives); none refuses none."""
+    namesakes: Namesakes | None = None
+    """What an agent's name is to their repository's threads
+    (`inbox/namesakes.py`, which `cli.py` gives); none refuses none."""
     refresh: Callable[[Register], list[Path]] | None = None
     """Brings the programs a recorded launch's room runs up to this copy's when
     the service serves it again, returning those it rewrote: git's remote
@@ -2132,7 +2102,7 @@ class HostService(Model, arbitrary_types_allowed=True):
             spawns=self.spawns,
             operators=self.operators,
             bearings=self.bearings,
-            roots=self.roots,
+            namesakes=self.namesakes,
             refresh=self.refresh,
             podman=self.podman,
             changes=self.changes,

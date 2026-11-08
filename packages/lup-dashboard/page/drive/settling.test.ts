@@ -90,17 +90,17 @@ describe("settling any thread, in headless Chromium", () => {
 
     it("goes to a thread done from the line saying so, reads its news, settles it, ticks a check, and writes on a thread, Space s sending that to no one and back", async () => {
         await dashboard.openRow("what's for you");
-        await review.goTo("◇ @guidance-voice is done, to confirm");
+        await review.goTo("◇ @the-voice is done, to confirm");
         await review.settled(300, 0);
         await dashboard.keys.press(["g", "t"]);
-        await review.until("read the voice thread whole", (view) => view.state.doc.toString().startsWith("━━ @guidance-voice · the session's own · guidance-voice holds · done, to confirm") && !view.state.doc.toString().includes("reading…"));
+        await review.until("read the voice thread whole", (view) => view.state.doc.toString().startsWith("━━ @the-voice · The guidance's voice · guidance-voice holds · done, to confirm") && !view.state.doc.toString().includes("reading…"));
         await dashboard.keys.press(["g", "g"]);
         await offers("␣d mark its news read");
         await dashboard.keys.press([" ", "d"]);
-        await says("@guidance-voice read");
+        await says("@the-voice read");
         await offers("␣d settle it: it works");
         await dashboard.keys.press([" ", "d"]);
-        await says("@guidance-voice settled");
+        await says("@the-voice settled");
         await thread("transcript-reader");
         await review.goTo("◇ check @311");
         await dashboard.keys.press([" ", "d"]);
@@ -124,7 +124,7 @@ describe("settling any thread, in headless Chromium", () => {
         await review.until("hold the message, open, waiting on whoever answers", (view) => /you · @\d+\.1 to lup-impl\/explore-auth · open: waits on lup-impl\/explore-auth/.test(view.state.doc.toString()));
         await thread("transcript-reader");
         await review.holds("✓ check @311");
-        await thread("guidance-voice");
-        expect(await review.line()).toMatch(/^━━ @guidance-voice · the session's own · guidance-voice holds · settled/);
+        await thread("the-voice");
+        expect(await review.line()).toMatch(/^━━ @the-voice · The guidance's voice · guidance-voice holds · settled/);
     });
 });

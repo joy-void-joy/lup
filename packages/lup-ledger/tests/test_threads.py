@@ -15,6 +15,7 @@ from lup_ledger.parties import Conversation, Lup, Operator
 from lup_ledger.records import Edge, Kinds, Node
 from lup_ledger.threads import (
     KINDS,
+    ROOT,
     Answered,
     BranchLanded,
     Check,
@@ -29,6 +30,7 @@ from lup_ledger.threads import (
     Standing,
     Thread,
     TimeCame,
+    without_roots,
 )
 
 if TYPE_CHECKING:
@@ -608,3 +610,107 @@ def test_the_threads_parked_are_those_whose_latest_status_parks_them(
 
     assert threads.parked(REPOSITORY) == [paged]
     assert threads.parked() == [paged, other]
+
+
+def rooted(ledger: Ledger, name: str, holder: Conversation | None = MAIN) -> Thread:
+    """Keep a root as an earlier lup kept one for a session: at the top, titled `ROOT`, held by them."""
+    return ledger.kept(
+        Thread(
+            number=ledger.numbered(),
+            repository=REPOSITORY,
+            by=MAIN,
+            at=START,
+            name=name,
+            title=ROOT,
+            holder=holder,
+        )
+    )
+
+
+def test_a_root_is_found_by_no_read_and_what_s_under_it_reads_as_at_the_top(
+    ledger: Ledger, threads: Threads
+) -> None:
+    root = rooted(ledger, "dev")
+    sshole = opened(ledger, "sshole", parent=root.number, holder=None)
+    deeper = opened(ledger, "deeper", parent=sshole.number, holder=None)
+
+    with pytest.raises(LupLedgerError, match="no thread"):
+        threads.thread(root.number)
+    assert threads.named(REPOSITORY, "dev") is None
+    assert threads.thread(sshole.number).parent is None
+    assert threads.named(REPOSITORY, "sshole") == threads.thread(sshole.number)
+    assert threads.thread(deeper.number).parent == sshole.number
+    assert [(each.name, each.parent) for each in threads.of(REPOSITORY)] == [
+        ("sshole", None),
+        ("deeper", sshole.number),
+    ]
+    assert [each.name for each in threads.under(sshole.number)] == ["deeper"]
+    # Nobody answers for it by the root, whose holder goes on.
+    assert threads.answering(sshole.number) is None
+    assert threads.answering(deeper.number) is None
+    # The ledger keeps the root as it was.
+    assert ledger.node(root.number, Thread) == root
+
+
+def test_without_roots_reads_every_thread_at_once_as_threads_reads_each(
+    ledger: Ledger,
+) -> None:
+    root = rooted(ledger, "dev")
+    lag = opened(ledger, "lag", parent=root.number)
+    tabs = opened(ledger, "tabs", parent=lag.number)
+    titled = opened(ledger, "titled")
+
+    read = without_roots([root, lag, tabs, titled])
+
+    assert [(each.name, each.parent) for each in read] == [
+        ("lag", None),
+        ("tabs", lag.number),
+        ("titled", None),
+    ]
+    assert root.root
+    assert not titled.root
+    # A thread under another titled as a root is no root.
+    assert not tabs.model_copy(update={"title": ROOT}).root
+
+
+def test_a_root_parked_is_none_of_the_threads_parked(
+    ledger: Ledger, threads: Threads
+) -> None:
+    root = rooted(ledger, "dev")
+    lag = opened(ledger, "lag")
+    for each in [root, lag]:
+        ledger.drawn(
+            Parked(
+                target=each.number,
+                repository=REPOSITORY,
+                by=MAIN,
+                at=at(1),
+                until=[BranchLanded(branch="x")],
+            )
+        )
+
+    assert [each.target for each in threads.parked(REPOSITORY)] == [lag.number]
+
+
+def test_a_thread_nobody_running_answers_for_stands_nobody_running_never_working(
+    ledger: Ledger, threads: Threads
+) -> None:
+    lag = opened(ledger, "lag", holder=WORKER)
+    unheld = opened(ledger, "unheld", holder=None)
+    under = opened(ledger, "under", parent=lag.number, holder=None)
+
+    def ended(conversation: Conversation) -> bool:
+        return conversation != WORKER
+
+    assert threads.standing(lag.number).state == "working"
+    assert threads.standing(lag.number, live=ended).state == "nobody running"
+    assert threads.standing(unheld.number).state == "nobody running"
+    assert threads.standing(under.number).state == "working"
+    assert threads.standing(under.number, live=ended).state == "nobody running"
+    # What waits on the operator still says so; and a status said is said.
+    checked(ledger, unheld)
+    assert threads.standing(unheld.number).state == "waiting on the operator"
+    ledger.drawn(
+        Done(target=lag.number, repository=REPOSITORY, by=WORKER, at=at(2), to_try="x")
+    )
+    assert threads.standing(lag.number, live=ended).state == "done to confirm"

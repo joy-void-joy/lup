@@ -36,12 +36,12 @@ What's in it is edges drawn to it:
 - **its status** (`Status`), the latest one drawn:
   - parked until the first of its triggers comes: an issue closing, a branch or a commit landing, a conversation ending, a time, or a condition named as `defer`'s `when=` names one;
   - done, in an agent's word, with what to try;
-  - settled (`Settled`): by the operator; or by lup, saying why, where it made a thread of a past conversation and nothing in it waited on them (`docs/inbox.md`, *Threads*), its act and never put in their name. Never by an agent: the request settling one is the operator's (`inbox-settle-thread`), and nothing an agent reaches, the `thread` tool among it, settles one;
+  - settled (`Settled`): by the operator; or by lup, saying why, where an earlier lup made a thread of a past conversation and nothing in it waited on them, its act and never put in their name. Never by an agent: the request settling one is the operator's (`inbox-settle-thread`), and nothing an agent reaches, the `thread` tool among it, settles one;
   - declined, which only the operator does (`Declined.by`);
   - reopened, by the operator, or by lup where what a parked thread waits for comes.
 
 `Standing.read` says four things, where it stands said once for any reader (`stood`):
-- **Where it stands:** as its status says. While it's working or reopened, it waits on the operator where a member does. A check waits until they answer it (`Answered`), and each kind of node answers for itself, so a new kind changes nothing in the reading.
+- **Where it stands:** as its status says. While it's working or reopened, it waits on the operator where a member does, and else stands `nobody running` where nobody who goes on answers for it, read and never drawn. A check waits until they answer it (`Answered`), and each kind of node answers for itself, so a new kind changes nothing in the reading.
 - **What waits on the operator.**
 - **What waits on whoever answers for it:** each part moved in that nothing answers yet.
 - **Who's on it:** its holder, then each conversation that wrote what's in it.
@@ -54,6 +54,8 @@ What's in it is edges drawn to it:
 - what's in one, the references to it, and where it stands.
 
 A thread's sub-threads are read from its repository's threads by their `parent`, so a read covers at most one repository's threads.
+
+**A root an earlier lup kept** for each session, titled `a main session's root thread` at the top (`Thread.root`, `ROOT`), stays on the ledger and is read as absent: `Threads` finds none, by its number, its name or its repository's, nor parks one; a thread right under one reads as at the top (`without_roots`, which a reader of every thread at once goes through too); and what's in one reads as in no thread, where `Threads` is how it's read. Nothing is converted, so an earlier lup gone back to finds them as it left them.
 
 ## The store
 

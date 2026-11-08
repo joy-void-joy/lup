@@ -77,7 +77,6 @@ import { kindOf, type Merged } from "./looks";
 import { markerEnd, outdated, unfound } from "./exchange";
 import { source, sourced, without, type Source } from "./markdown";
 import {
-    ROOT_TITLE,
     ABOUT_MOST,
     cutAt,
     barsOf,
@@ -258,19 +257,16 @@ function asideClasses(aside: Aside, code: boolean): string {
 }
 
 /**
- * Say a thread's banner, as the core says it: its name and what it's about, a root by whose it is; who holds it, or who
- * answers for it where its holder has ended; and where it stands, and how much of it waits on the operator, a file a
- * landing waits on there, `landing`, among it, or is new.
+ * Say a thread's banner, as the core says it: its name and what it's about; who holds it, or who answers for it where its
+ * holder has ended; and where it stands, and how much of it waits on the operator, a file a landing waits on there,
+ * `landing`, among it, or is new.
  */
 export function threadBanner(read: ThreadRead, landing: number, called: (party: Conversation) => string): string {
     const thread = read.thread;
-    // A root is its session's own, named as they are: an ended session's, which lup knows only by its ids, is said so.
-    const root = thread.parent == null && thread.title === ROOT_TITLE;
     // A banner is one row: a long title cut.
-    const about = root ? "the session's own" : cutAt(thread.title, ABOUT_MOST);
+    const about = cutAt(thread.title, ABOUT_MOST);
     const holder = thread.holder == null ? null : called(thread.holder);
     const answering = read.answering == null ? null : called(read.answering);
-    const ended = root && holder !== null && holder !== answering ? "its session has ended" : null;
     const holds =
         holder === null
             ? answering === null
@@ -278,16 +274,18 @@ export function threadBanner(read: ThreadRead, landing: number, called: (party: 
                 : `nobody holds it, ${answering} answers`
             : holder === answering
               ? `${holder} holds`
-              : `${ended ?? `${holder} held it`}${answering === null ? "" : `, ${answering} answers`}`;
+              : `${holder} held it${answering === null ? "" : `, ${answering} answers`}`;
     const fresh = (read.new ?? []).length;
     const waiting = (read.asks ?? []).length + (landing === 0 ? 0 : 1);
     const status = read.status ?? null;
-    // Where it stands: working, where what waits on the operator in it is counted; parked until what wakes it.
+    // Where it stands: working, or nobody running, where what waits on the operator in it is counted; parked until what wakes it.
     const state =
         status !== null && status.kind === "ledger:parked"
             ? `parked until ${status.until.map((each) => until(each, called)).join(" or ")}`
             : read.state === "waiting on the operator"
-              ? "working"
+              ? answering === null
+                  ? "nobody running"
+                  : "working"
               : read.state === "done to confirm"
                 ? "done, to confirm"
                 : read.state;
