@@ -382,6 +382,33 @@ def test_the_operator_settles_declines_and_reopens_a_thread_whoever_answers_for_
         asyncio.run(ThreadStating(reading=reading).answer(SettleThread(number=9999)))
 
 
+def test_the_agent_s_mark_and_the_operator_s_are_read_apart_and_cleared_waits_on_nobody(
+    work: Work,
+) -> None:
+    concerns = work.delivery.concerns()
+    concerns.settled(work.voice)
+    voice = work.read()["voice"]
+    # Cleared, the agent's account of what's done kept beside it.
+    assert (voice.state, voice.section) == ("settled", "every thread")
+    assert isinstance(voice.cleared, Settled)
+    assert voice.done is not None
+    assert voice.done.to_try == "Say hello: it answers."
+    # Cleared while still at work, then said done: still cleared, never back
+    # before the operator.
+    concerns.declined(work.docs, "Not now.")
+    work.ran(work.lead.thread(Threading(name="docs", done="Read the docs.")))
+    docs = work.read()["docs"]
+    assert (docs.state, docs.section) == ("declined", "every thread")
+    assert isinstance(docs.cleared, Declined)
+    assert docs.done is not None
+    assert docs.done.to_try == "Read the docs."
+    # Open to the operator, said done: theirs to clear.
+    work.ran(work.lead.thread(Threading(name="lag", done="Type in a long one.")))
+    lag = work.read()["lag"]
+    assert (lag.state, lag.cleared) == ("done to confirm", None)
+    assert lag.done is not None
+
+
 def test_a_reply_of_the_operator_s_in_a_thread_done_reopens_it_back_to_whoever_held_it(
     work: Work,
 ) -> None:

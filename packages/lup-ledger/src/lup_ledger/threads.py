@@ -9,12 +9,12 @@ conversation holding it, or none. What's in it are edges drawn to it:
   as a friction the operator gathers there: each counts as a member too;
 - **a reference** from an item of another thread that touches it (`Refers`),
   which is no member;
-- **its status,** the latest of the edges saying where it stands (`Status`):
-  parked until something comes, done to confirm, settled, declined, or
-  reopened.
+- **its status,** the edges saying where it stands (`Status`): parked until
+  something comes, done to confirm, settled, declined, or reopened.
 
 How it stands is read from those edges at each read, never stored
-(`Standing.read`): its status, what in it waits on the operator, and who's on it.
+(`Standing.read`): its two marks, read apart (`Marks`), what in it waits on the
+operator, and who's on it.
 
 A root an earlier lup kept for a session stays on the ledger, and is read as
 absent (`Thread.root`, `without_roots`): what's under it reads as at the top,
@@ -30,7 +30,7 @@ from lup_ledger.parties import Conversation, Lup, Operator
 from lup_ledger.records import Edge, Kinds, Name, Node
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
 type State = Literal[
     "working",
@@ -286,7 +286,7 @@ type Trigger = Annotated[
 
 
 class Status(Edge):
-    """An edge saying where its thread stands: the latest drawn is its status.
+    """An edge saying where its thread stands: the latest drawn is its status, and each moves one of its two marks (`Marks`).
 
     Its source, where there is one, is the item that said it.
     """
@@ -344,8 +344,8 @@ class Declined(Status):
 class Reopened(Status):
     """A thread reopened: back to whoever was on it, after it was parked, done, settled or declined.
 
-    The operator reopens one, and lup does where what a parked one waits for
-    comes; an agent never does.
+    The operator reopens one, opening both its marks, and lup does where what a
+    parked one waits for comes, opening the agent's alone; an agent never does.
     """
 
     kind: Literal["ledger:reopened"] = "ledger:reopened"
@@ -361,17 +361,75 @@ KINDS = Kinds(
 """The kinds the ledger declares itself."""
 
 
-def stood(status: Status | None, *, waiting: bool, running: bool = True) -> State:
-    """Say where a thread stands given its latest `status`, none where nothing said one, whether something in it `waiting` on the operator, and whether anyone `running` answers for it: as its status says, but for a thread working or reopened, which waits on the operator where something in it does, and else is worked on only where someone answers for it.
+class Marks(Model):
+    """A thread's two marks, each its own, read apart from the edges saying where it stands: the agent's, done, parked or open, and the operator's, cleared or open.
 
-    >>> stood(None, waiting=True), stood(None, waiting=False)
+    Neither moves the other: an agent saying a thread is done after the
+    operator cleared it leaves it cleared, and the operator clearing one an
+    agent said is done keeps their account. A sub-thread has marks of its own,
+    whatever its parent's. The operator reopening it opens both; lup reopening
+    one parked, as what it waited for came, opens the agent's alone. Nothing new
+    is stored: they're the `Status` edges an earlier lup read as one, its latest.
+    """
+
+    agent: Annotated[Done | Parked, Field(discriminator="kind")] | None = None
+    """The agent's mark: the latest `Done` or `Parked`, where nothing reopened
+    it since; none where it's open."""
+    operator: Annotated[Settled | Declined, Field(discriminator="kind")] | None = None
+    """The operator's mark, cleared: the latest `Settled` or `Declined`, where
+    they didn't reopen it since; none where it's open."""
+
+    @classmethod
+    def read(cls, statuses: Sequence[Status]) -> Self:
+        """Read both marks from `statuses`, the edges saying where a thread stands, oldest first.
+
+        >>> from datetime import UTC, datetime
+        >>> from pathlib import Path
+        >>> worker = Conversation(repository=Path("/r"), runtime="r", session="s")
+        >>> drawn = {"target": 4, "repository": Path("/r"), "at": datetime(2026, 1, 1, tzinfo=UTC)}
+        >>> done = Done(by=worker, to_try="Type.", **drawn)
+        >>> settled = Settled(by=Operator(), **drawn)
+        >>> Marks.read([done, settled]) == Marks.read([settled, done]) == Marks(agent=done, operator=settled)
+        True
+        >>> Marks.read([done, settled, Reopened(by=Operator(), **drawn)])
+        Marks(agent=None, operator=None)
+        >>> Marks.read([settled, Reopened(by=Lup(), **drawn)]) == Marks(operator=settled)
+        True
+        """
+        agent: Done | Parked | None = None
+        operator: Settled | Declined | None = None
+        for each in statuses:
+            match each:
+                case Done() | Parked():
+                    agent = each
+                case Settled() | Declined():
+                    operator = each
+                case Reopened(by=Operator()):
+                    agent, operator = None, None
+                case Reopened():
+                    agent = None
+                case _:
+                    pass
+        return cls(agent=agent, operator=operator)
+
+    @property
+    def done(self) -> Done | None:
+        """The agent's account of what's done, where their mark says it is; none else."""
+        return self.agent if isinstance(self.agent, Done) else None
+
+
+def stood(marks: Marks, *, waiting: bool, running: bool = True) -> State:
+    """Say where a thread stands in a word, given its `marks`, whether something in it `waiting` on the operator, and whether anyone `running` answers for it: cleared, as the operator's mark says; else as the agent's says, done or parked; else waiting on the operator where something in it does, and else worked on only where someone answers for it.
+
+    >>> stood(Marks(), waiting=True), stood(Marks(), waiting=False)
     ('waiting on the operator', 'working')
-    >>> stood(None, waiting=False, running=False), stood(None, waiting=True, running=False)
+    >>> stood(Marks(), waiting=False, running=False), stood(Marks(), waiting=True, running=False)
     ('nobody running', 'waiting on the operator')
     """
-    stands = "working" if status is None else status.stands
-    if stands != "working":
-        return stands
+    if marks.operator is not None:
+        return marks.operator.stands
+    if marks.agent is not None:
+        return marks.agent.stands
     if waiting:
         return "waiting on the operator"
     return "working" if running else "nobody running"
@@ -415,6 +473,8 @@ class Standing(Model):
     status: SerializeAsAny[Status] | None = None
     """The latest edge saying where it stands, which carries what it says (what
     a parked thread waits for, what to try); none where nothing has."""
+    marks: Marks = Marks()
+    """Its two marks, the agent's and the operator's, each read apart."""
     waiting: list[Member] = []
     """What in it waits on the operator, oldest first, whatever its status."""
     unanswered: list[Member] = []
@@ -435,14 +495,15 @@ class Standing(Model):
     ) -> Self:
         """Read where `thread` stands from `drawn`, the edges drawn to it, oldest first, `members`, what's in it, and whether anyone `running` answers for it.
 
-        Its latest status says it, but for a thread working or reopened, which
-        waits on the operator where a member does, and else is worked on only
-        where someone answers for it (`stood`).
+        Its marks say it, each read apart (`Marks`), but for a thread open by
+        both, which waits on the operator where a member does, and else is
+        worked on only where someone answers for it (`stood`).
         """
         statuses = [each for each in drawn if isinstance(each, Status)]
         status = statuses[-1] if statuses else None
+        marks = Marks.read(statuses)
         waiting = [each for each in members if each.node.waiting(each.drawn)]
-        state = stood(status, waiting=bool(waiting), running=running)
+        state = stood(marks, waiting=bool(waiting), running=running)
         holder = [] if thread.holder is None else [thread.holder]
         writers = [
             each.node.by
@@ -457,6 +518,7 @@ class Standing(Model):
         return cls(
             state=state,
             status=status,
+            marks=marks,
             waiting=waiting,
             unanswered=unanswered,
             on=list(dict.fromkeys([*holder, *writers])),

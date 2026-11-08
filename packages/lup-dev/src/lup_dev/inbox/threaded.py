@@ -86,6 +86,7 @@ from lup_ledger.threads import (
     Declined,
     Done,
     In,
+    Marks,
     Moved,
     Parked,
     Refers,
@@ -134,6 +135,8 @@ class Ledgered(Model):
     """What's in each thread, by its number, in the order it came."""
     statuses: dict[int, Stated]
     """Each thread's latest status, by its number, where one was said."""
+    marks: dict[int, Marks] = {}
+    """Each thread's two marks, by its number, where a status was said."""
     checks: dict[int, Check]
     answers: dict[int, Answered]
     """Each check's answer, by its number, where the operator gave one."""
@@ -196,6 +199,10 @@ class Ledgered(Model):
                 for number in dict.fromkeys(target for target, _ in joined)
             },
             statuses={each.target: each for each in statuses},
+            marks={
+                number: Marks.read([each for each in statuses if each.target == number])
+                for number in dict.fromkeys(each.target for each in statuses)
+            },
             checks={each.number: each for each in checks},
             answers={each.target: each for each in answers},
             references={
@@ -257,9 +264,17 @@ class ThreadRead(Model):
 
     thread: Thread
     state: State
+    """Where it stands in a word, as its two marks and what's in it say
+    (`stood`)."""
     status: Stated | None = None
-    """Its latest status, which says what a parked one waits for and what to
-    try on one done; none where none was said."""
+    """Its latest status, which says what a parked one waits for; none where
+    none was said."""
+    done: Done | None = None
+    """The agent's mark, where it says it's done: their account of what's done,
+    and what to try (`Marks.done`); none where their mark is open or parked."""
+    cleared: Settled | Declined | None = None
+    """The operator's mark, where they cleared it, settled or declined, whatever
+    the agent's says; none where it's open to them."""
     section: Section
     since: datetime
     """Since when it's been in its section: what first asked the operator
@@ -564,6 +579,7 @@ class Readings(Model, arbitrary_types_allowed=True):
         items = self.source.items()
         members = ledgered.members.get(number, [])
         status = ledgered.statuses.get(number)
+        marks = ledgered.marks.get(number, Marks())
 
         def asked(member: Joined) -> Ask | None:
             # A part of the operator's words moved into a thread waits on its
@@ -596,7 +612,7 @@ class Readings(Model, arbitrary_types_allowed=True):
             thread, moved=any(each.part is not None for each in members)
         )
         mark = beside.mark
-        read_to = self.read_to(members, mark, status)
+        read_to = self.read_to(members, mark, marks)
 
         def unread(member: Joined) -> Item | None:
             item = (
@@ -625,14 +641,16 @@ class Readings(Model, arbitrary_types_allowed=True):
             if (item := unread(each)) is not None and pile(item)
         ]
         placing = self.placed(
-            thread, asking=asking, status=status, new=new, members=members
+            thread, asking=asking, marks=marks, new=new, members=members
         )
         return ThreadRead(
             thread=thread,
             state=stood(
-                status, waiting=bool(asking), running=beside.answering is not None
+                marks, waiting=bool(asking), running=beside.answering is not None
             ),
             status=status,
+            done=marks.done,
+            cleared=marks.operator,
             section=placing.section,
             since=placing.since,
             asks=asking,
@@ -673,9 +691,9 @@ class Readings(Model, arbitrary_types_allowed=True):
         )
 
     def read_to(
-        self, members: list[Joined], mark: ReviewMark | None, status: Stated | None
+        self, members: list[Joined], mark: ReviewMark | None, marks: Marks
     ) -> ReadTo:
-        """Return how far what's in a thread was last read: up to what its review `mark` names, or, where that's moved out of it since, what came by when the mark was moved; or what came by when the operator settled or declined it, `status`, where that's further: lup's settling isn't their reading."""
+        """Return how far what's in a thread was last read: up to what its review `mark` names, or, where that's moved out of it since, what came by when the mark was moved; or what came by when the operator cleared it, settled or declined, as their mark of it says (`marks`), where that's further: lup's settling isn't their reading."""
         marked = ReadTo()
         if mark is not None and mark.up_to is not None and mark.up_to.isdecimal():
             named = int(mark.up_to)
@@ -689,9 +707,10 @@ class Readings(Model, arbitrary_types_allowed=True):
                 if places
                 else ReadTo.by(members, mark.at)
             )
+        cleared = marks.operator
         closed = (
-            ReadTo.by(members, status.at)
-            if isinstance(status, Settled | Declined) and status.by == Operator()
+            ReadTo.by(members, cleared.at)
+            if cleared is not None and cleared.by == Operator()
             else ReadTo()
         )
         return marked if marked.members >= closed.members and marked.at else closed
@@ -701,15 +720,15 @@ class Readings(Model, arbitrary_types_allowed=True):
         thread: Thread,
         *,
         asking: list[Ask],
-        status: Stated | None,
+        marks: Marks,
         new: list[int],
         members: list[Joined],
     ) -> Placing:
-        """Return the section a thread is in, and since when."""
+        """Return the section a thread is in, and since when: one the agent says is done waits on the operator until they clear it."""
         if asking:
             return Placing(section="waiting on you", since=asking[0].came)
-        if isinstance(status, Done):
-            return Placing(section="waiting on you", since=status.at)
+        if marks.done is not None and marks.operator is None:
+            return Placing(section="waiting on you", since=marks.done.at)
         came = {each.node: each.came for each in members if each.part is None}
         if new:
             return Placing(section="new", since=came[new[0]])
@@ -725,7 +744,7 @@ class Readings(Model, arbitrary_types_allowed=True):
         members = ledgered.members.get(number, [])
         items = self.source.items()
         mark = read.mark
-        read_to = self.read_to(members, mark, read.status)
+        read_to = self.read_to(members, mark, ledgered.marks.get(number, Marks()))
         numbers = [each.node for each in members if each.part is None]
 
         def earlier(came: datetime) -> bool:
