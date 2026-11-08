@@ -115,9 +115,16 @@ def test_profiles_leaving_default_out_are_refused() -> None:
 
 def test_a_profile_added_twice_or_edited_where_missing_is_refused() -> None:
     with pytest.raises(ProjectError, match="already there"):
-        resolved_profiles(Profiles().add(Profile(name="default")))
+        resolved_profiles(
+            Profiles().add(Profile(name="work")).add(Profile(name="work"))
+        )
     with pytest.raises(ProjectError, match=re.escape("`Profiles.edit` names `work`")):
         resolved_profiles(Profiles().edit(Profile(name="work")))
+
+
+def test_a_profile_added_by_the_name_of_one_of_lup_s_is_a_layer_on_it() -> None:
+    [default] = resolved_profiles(Profiles().add(Profile(name="default", account="w")))
+    assert default == Profile(name="default", account="w")
 
 
 def test_a_file_binding_no_profiles_or_failing_is_refused() -> None:

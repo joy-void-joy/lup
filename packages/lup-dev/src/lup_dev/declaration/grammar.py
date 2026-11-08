@@ -20,6 +20,12 @@ declaration is read, against the defaults of the module holding it, so
 module's own default beneath them all, so a start still from below has nothing
 beneath it, and the default's operations, which the selection's begin with, run
 once, as the engine resolves a rule selection (`checker/src/catalog.ts`).
+
+Each operation keeps the layer that wrote it (`Operation.layer`), so `.add` tells
+a name a layer below gave from one its own layer gave. The first it puts on what
+was there, as `.edit` would, since the layer below may come to give a name after
+the one above was written: a project adopting a module that a person's layer
+adds. The second it refuses, adding a name twice in one layer being a slip.
 """
 
 from functools import reduce
@@ -155,14 +161,22 @@ class Of[E](Anchor):
     entries: list[E]
 
 
-class Add[E](Anchor):
+class Operation(Model):
+    """What every operation of a selection's chain records: the layer that wrote it."""
+
+    layer: int = 0
+    """Which layer of the chain wrote it: 0 for the one its start is in, then one
+    more for each layer composed over it (`Selection.over`)."""
+
+
+class Add[E](Anchor, Operation):
     """Add entries beside the ones there: `.add(…)`."""
 
     verb: Literal["add"] = "add"
     entries: list[E]
 
 
-class Drop(Model):
+class Drop(Operation):
     """Leave out the entries of these names: `.drop(…)`."""
 
     verb: Literal["drop"] = "drop"
@@ -170,7 +184,7 @@ class Drop(Model):
     why: str | None = None
 
 
-class Replace[E](Model):
+class Replace[E](Operation):
     """Put an entry in place of the one of this name: `.replace(…)`."""
 
     verb: Literal["replace"] = "replace"
@@ -179,7 +193,7 @@ class Replace[E](Model):
     why: str | None = None
 
 
-class Edit[E](Model):
+class Edit[E](Operation):
     """Put a layer on the entry of the same name: `.edit(…)`, on modules."""
 
     verb: Literal["edit"] = "edit"
@@ -196,6 +210,9 @@ class Placed[E](Anchor):
     then one for each operation."""
     why: str | None = None
     """The reason given with what put it there."""
+    layer: int = 0
+    """The layer of the chain that last gave or changed it, by its start or an
+    operation (`Operation.layer`)."""
 
 
 class Selection[E](Model):
@@ -230,7 +247,11 @@ class Selection[E](Model):
     def add(
         self, *entries: E, before: str | None = None, after: str | None = None
     ) -> Self:
-        """Add `entries` beside the ones there; a name already there is an error."""
+        """Add `entries` beside the ones there.
+
+        An entry of a name a layer below gave goes on that one, as `.edit` puts
+        one (`taken`); one of a name this layer already gave is an error.
+        """
         return self.then(Add(entries=list(entries), before=before, after=after))
 
     def drop(self, *names: str, why: str | None = None) -> Self:
@@ -282,11 +303,25 @@ class Selection[E](Model):
         """Return this selection as a layer over `below`.
 
         Starting from the value below, it keeps below's start and records its
-        operations after below's; starting over, it replaces below whole.
+        operations after below's, each as written by a layer over below's
+        topmost; starting over, it replaces below whole.
+
+        >>> class Ids(Named[str]):
+        ...     '''Names.'''
+        >>> mine = Ids().add("c").over(Ids().add("b").over(Ids.of("a")))
+        >>> [operation.layer for operation in mine.operations]
+        [1, 2]
         """
         if not isinstance(self.start, Below):
             return self
-        operations = [*below.operations, *self.operations]
+        above = max((each.layer for each in below.operations), default=0) + 1
+        operations = [
+            *below.operations,
+            *(
+                each.model_copy(update={"layer": each.layer + above})
+                for each in self.operations
+            ),
+        ]
         return type(self)(start=below.start, operations=operations)
 
     def resolve(self, defaults: list[E], known: list[E]) -> list[Placed[E]]:
@@ -295,8 +330,8 @@ class Selection[E](Model):
         `defaults` are what `Kind.default()` starts from, `known` what
         `Kind.all()` starts from and `Kind.only(…)` picks from; `Kind()` starts
         from nothing (`started`). Raise `ProjectError` on a name that isn't
-        there, naming the ones that are, and on adding a name that's already
-        there.
+        there, naming the ones that are, and on adding a name its own layer
+        already gave.
         """
         entries = self.started(defaults, known)
         for position, operation in enumerate(self.operations, start=1):
@@ -344,13 +379,17 @@ class Selection[E](Model):
         """Return `entries` with `operation`, at `position` in the chain, applied."""
         names = [self.named(each.entry) for each in entries]
         kind = type(self).__name__
+        layer = operation.layer
         match operation:
             case Add(entries=added, before=before, after=after):
                 adding = [self.named(entry) for entry in added]
+                mine = [
+                    self.named(each.entry) for each in entries if each.layer == layer
+                ]
                 there = [
                     name
                     for at, name in enumerate(adding)
-                    if name in names or name in adding[:at]
+                    if name in mine or name in adding[:at]
                 ]
                 if there:
                     message = (
@@ -358,18 +397,27 @@ class Selection[E](Model):
                         "`.replace` puts another in its place"
                     )
                     raise ProjectError(message)
+                put = {
+                    name: Placed(
+                        entry=entry,
+                        before=before,
+                        after=after,
+                        position=position,
+                        layer=layer,
+                    )
+                    for name, entry in zip(adding, added, strict=True)
+                }
                 return [
-                    *entries,
                     *(
-                        self.placed(
-                            Placed(
-                                entry=entry,
-                                before=before,
-                                after=after,
-                                position=position,
-                            )
-                        )
-                        for entry in added
+                        self.taken(each, put[name])
+                        if (name := self.named(each.entry)) in put
+                        else each
+                        for each in entries
+                    ),
+                    *(
+                        self.placed(each)
+                        for name, each in put.items()
+                        if name not in names
                     ),
                 ]
             case Drop(names=dropped):
@@ -386,7 +434,7 @@ class Selection[E](Model):
                         f"but `{renamed}` is already there"
                     )
                     raise ProjectError(message)
-                put = Placed(entry=entry, position=position, why=why)
+                put = Placed(entry=entry, position=position, why=why, layer=layer)
                 return [
                     self.placed(put.model_copy(update=each.anchored()))
                     if self.named(each.entry) == name
@@ -396,9 +444,11 @@ class Selection[E](Model):
             case Edit(entry=entry, why=why):
                 name = self.named(entry)
                 self.present("edit", [name], names)
-                layer = Placed(entry=entry, position=position, why=why)
+                put = Placed(entry=entry, position=position, why=why, layer=layer)
                 return [
-                    self.edited(each, layer) if self.named(each.entry) == name else each
+                    self.edited(each, put).model_copy(update={"layer": layer})
+                    if self.named(each.entry) == name
+                    else each
                     for each in entries
                 ]
 
@@ -412,6 +462,17 @@ class Selection[E](Model):
         For most kinds, `layer` takes its place where `below` was.
         """
         return layer.model_copy(update=below.anchored())
+
+    def taken(self, below: Placed[E], added: Placed[E]) -> Placed[E]:
+        """Return the entry `below`, which a layer below gave, with `added`, an entry of its name a layer above adds, on it.
+
+        As an edit puts it (`edited`), the later layer's word winning. It goes
+        where the add places it, `before=` or `after=`, else where `below` was.
+        """
+        anchored = added.before is not None or added.after is not None
+        placed = added if anchored else below
+        update = {**placed.anchored(), "layer": added.layer}
+        return self.edited(below, added).model_copy(update=update)
 
     def present(self, verb: str, names: list[str], there: list[str]) -> None:
         """Raise `ProjectError` where `.verb` names an entry that isn't there."""

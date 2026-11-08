@@ -134,6 +134,7 @@ def test_a_check_request_carries_each_modules_selection_as_recorded() -> None:
     )
     [selected] = json.loads(request.model_dump_json())["rules"]
     left_out = {
+        "layer": 0,
         "verb": "drop",
         "names": ["runtime-mention"],
         "why": DefaultRules().left_out[0].why,
@@ -144,8 +145,14 @@ def test_a_check_request_carries_each_modules_selection_as_recorded() -> None:
             "start": {"kind": "all"},
             "operations": [
                 left_out,
-                {"verb": "drop", "names": ["regex"], "why": "a grammar"},
-                {"verb": "add", "entries": ["elif"], "before": None, "after": None},
+                {"layer": 1, "verb": "drop", "names": ["regex"], "why": "a grammar"},
+                {
+                    "layer": 1,
+                    "verb": "add",
+                    "entries": ["elif"],
+                    "before": None,
+                    "after": None,
+                },
             ],
         },
         "default": {"start": {"kind": "all"}, "operations": [left_out]},

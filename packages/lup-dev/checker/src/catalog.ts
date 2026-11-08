@@ -29,8 +29,15 @@ const table: Catalog = rules;
 
 // A selection the table can't resolve, said as the declaration's own errors say it
 // (`lup_dev/declaration/grammar.py`): a name the table doesn't hold, one dropped or
-// replaced that isn't there, one added that is.
+// replaced that isn't there, one added that its own layer already gave.
 export class SelectionError extends Error {}
+
+// A rule a selection holds so far, with the layer of its chain that last gave it: 0
+// for its start, else the operation's (`Operation.layer`).
+interface Given {
+    id: string;
+    layer: number;
+}
 
 // The rules as the engine lists them: every rule of the table, or, given each
 // module's selection, those their union runs, as a check resolves them.
@@ -70,10 +77,10 @@ function resolved(one: Selected): string[] {
 // A selection's rules: where it starts, then each operation in the order written,
 // `defaults` being what `Rules.default()` starts from.
 function applied(where: string, selection: Selection, defaults: string[]): string[] {
-    return selection.operations.reduce(
-        (ids, operation) => operated(where, operation, ids),
-        started(where, selection.start, defaults)
-    );
+    const start = started(where, selection.start, defaults).map((id) => ({ id, layer: 0 }));
+    return selection.operations
+        .reduce((given, operation) => operated(where, operation, given), start)
+        .map((each) => each.id);
 }
 
 function started(where: string, start: Start, defaults: string[]): string[] {
@@ -96,12 +103,18 @@ function started(where: string, start: Start, defaults: string[]): string[] {
     }
 }
 
-function operated(where: string, operation: Operation, ids: string[]): string[] {
+// The rules `given` holds with `operation` applied. An add of a rule a layer below
+// gave keeps it, now given by the add's layer, as `Selection.taken` puts an entry on
+// one there in Python; one its own layer gave is refused.
+function operated(where: string, operation: Operation, given: Given[]): Given[] {
+    const ids = given.map((each) => each.id);
+    const layer = operation.layer;
     switch (operation.verb) {
         case 'add': {
             held(where, 'Rules.add', operation.entries);
+            const mine = given.filter((each) => each.layer === layer).map((each) => each.id);
             const twice = operation.entries.filter(
-                (id, at) => ids.includes(id) || operation.entries.indexOf(id) < at
+                (id, at) => mine.includes(id) || operation.entries.indexOf(id) < at
             );
             if (twice.length > 0) {
                 throw new SelectionError(
@@ -109,11 +122,15 @@ function operated(where: string, operation: Operation, ids: string[]): string[] 
                         '`.replace` puts another in its place'
                 );
             }
-            return [...ids, ...operation.entries];
+            const kept = given.map((each) =>
+                operation.entries.includes(each.id) ? { id: each.id, layer } : each
+            );
+            const added = operation.entries.filter((id) => !ids.includes(id));
+            return [...kept, ...added.map((id) => ({ id, layer }))];
         }
         case 'drop':
             there(where, 'Rules.drop', operation.names, ids);
-            return ids.filter((id) => !operation.names.includes(id));
+            return given.filter((each) => !operation.names.includes(each.id));
         case 'replace': {
             there(where, 'Rules.replace', [operation.name], ids);
             held(where, 'Rules.replace', [operation.entry]);
@@ -123,7 +140,9 @@ function operated(where: string, operation: Operation, ids: string[]): string[] 
                         `\`${operation.name}\`, but \`${operation.entry}\` is already there`
                 );
             }
-            return ids.map((id) => (id === operation.name ? operation.entry : id));
+            return given.map((each) =>
+                each.id === operation.name ? { id: operation.entry, layer } : each
+            );
         }
         case 'edit':
             throw new SelectionError(
