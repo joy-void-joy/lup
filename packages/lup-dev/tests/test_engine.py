@@ -460,6 +460,10 @@ def test_no_module_holding_rules_runs_none(project: Project) -> None:
             "`Rules.add` names `runtime-mention`, already there",
         ),
         (
+            Rules.only("regex").add("regex"),
+            "`Rules.add` names `regex`, already there",
+        ),
+        (
             Rules().drop("regex").drop("regex"),
             "`Rules.drop` names `regex`, which isn't there",
         ),
@@ -513,10 +517,17 @@ def test_the_rules_a_selection_runs_are_listed_in_the_tables_order() -> None:
     ]
 
 
-def test_a_layer_adding_a_rule_the_module_s_default_runs_runs_it_once() -> None:
-    assert listing(editing(Rules().add("regex"))) == listing(
-        resolve(Declaration()).rules
-    )
+@pytest.mark.parametrize(
+    "rules",
+    [Rules().add("regex"), Rules.default().add("regex")],
+    ids=["below", "default"],
+)
+def test_adding_a_rule_the_module_s_default_runs_runs_it_once(rules: Rules) -> None:
+    assert listing(editing(rules)) == listing(resolve(Declaration()).rules)
+
+
+def test_adding_a_rule_every_rule_holds_runs_every_rule_once() -> None:
+    assert listing(editing(Rules.all().add("regex"))) == TABLE
 
 
 def test_the_selected_modules_rules_are_listed_together() -> None:

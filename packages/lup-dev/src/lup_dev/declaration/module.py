@@ -272,7 +272,7 @@ class Modules(Selection[Module]):
 
     @override
     def taken(self, below: Placed[Module], added: Placed[Module]) -> Placed[Module]:
-        """Return the module `below`, which a layer below gave, with `added`'s module, which a layer above adds, on it.
+        """Return the module `below`, from a layer below or the defaults, with `added`'s module, which a layer above adds, on it.
 
         A module of another class is another module of the same name, which
         `.replace` puts in its place, so the swap is said where it's made.
@@ -281,7 +281,7 @@ class Modules(Selection[Module]):
             name = below.entry.name
             message = (
                 f"`Modules.add` puts `{type(added.entry).__name__}` on `{name}`, "
-                f"which a layer below gives as `{type(below.entry).__name__}`, "
+                f"already there from below as `{type(below.entry).__name__}`, "
                 f'another class: `.replace("{name}", …)` puts another module in '
                 "its place"
             )
