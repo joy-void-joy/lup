@@ -9,8 +9,8 @@ import { adopted } from "./looks";
 import { instanceOf, type Blocks, type Fold, type Line } from "./views";
 import type { Merged } from "./looks";
 import { arrivalIn, bufferKey, bufferSpans, listLaid, listedByAgent, nearestShown, panesAsked, pathTo, rowAt, spanAt, titled, type ListReading, type Row } from "./panes";
-import { withWrittenDuring, EMPTY, NO_AGENT, PARTIES, aboutAt, checkOwner, followedFrom, groupAt, laid, opened, whose as whoseOf, type Around, type Conversation, type Draft, type Drawers, type Item, type Laid, type OwnedCheck, type Party, type Showing, type ThreadRead, type ThreadShown, type Threading } from "./review";
-import { partyNamed, threadBanner } from "./Review";
+import { withWrittenDuring, EMPTY, NO_AGENT, PARTIES, aboutAt, checkOwner, followedFrom, groupAt, laid, opened, whose as whoseOf, type Around, type Conversation, type Draft, type Drawers, type Item, type Laid, type OwnedCheck, type Party, type Showing, type ThreadRead, type Threading } from "./review";
+import { partyNamed } from "./Review";
 
 const AT = "2026-10-30T12:00:00Z";
 const WAITING: Item["rank"] = { name: "waiting on you", order: 0, notifies: true };
@@ -206,7 +206,7 @@ describe("one buffer at a time", () => {
     });
 
     it("names each buffer apart, which the cursor's kept by", () => {
-        const keys = [{ kind: "for you" }, { kind: "party", name: "no agent" }, { kind: "agent", key: "a" }, { kind: "agent", key: "b" }, { kind: "thread", number: 1 }, { kind: "thread", number: 2 }] as Showing[];
+        const keys = [{ kind: "for you" }, { kind: "party", name: "no agent" }, { kind: "agent", key: "a" }, { kind: "agent", key: "b" }, { kind: "settled" }] as Showing[];
         expect(new Set(keys.map(bufferKey)).size).toBe(keys.length);
     });
 });
@@ -277,7 +277,7 @@ describe("the list by agent", () => {
         const region = out.regions.find((each) => each.item.number === 70);
         expect(spanAt(spans, region?.header.from ?? 0, () => true)).toBe("item 70");
         expect(spanAt(spans, region?.header.from ?? 0, (id) => id !== "item 70")).toBe(`agent ${whoseOf(LEAD)}`);
-        expect(spanAt(bufferSpans(out, { kind: "thread", number: 3 }), 5, () => true)).toBe("thread 3");
+        expect(spanAt(bufferSpans(out, { kind: "settled" }), 5, () => true)).toBe("heading settled");
     });
 
     it("lists what's for the operator, who's running, a subagent under their parent, then No agent", () => {
@@ -624,13 +624,9 @@ describe("the tasks", () => {
     })();
     const SETTLED = { kind: "ledger:settled", target: 305, repository: REPOSITORY, by: { party: "operator" }, at: AT, why: "" } as unknown as NonNullable<ThreadRead["cleared"]>;
     const DONE = thread(305, "done", { state: "settled", cleared: SETTLED, reads: "gone" });
-    const SHOWN: ThreadShown = { kind: "inbox-thread-shown", read: READER, entries: [{ spot: { node: 51 }, came: AT, member: true }], left: 0, items: [QUESTION], checks: [], references: [], under: [], on: [], paths: [] } as unknown as ThreadShown;
     const threads: Threading = {
         read: { kind: "inbox-threads-read", threads: [READER, CHILD, NOBODY, DONE], paths: [], working: [] },
-        shown: new Map([[302, SHOWN]]),
-        whole: new Map([[302, SHOWN]]),
         landing: new Map(),
-        banner: (read, landing) => threadBanner(read, landing, called),
     };
     const withThreads = (): ListReading => ({ ...reading(), threads });
 
@@ -953,24 +949,6 @@ describe("the tasks", () => {
             const spans = bufferSpans(out, OWN);
             expect(spanAt(spans, out.text.indexOf("Keep the marks apart."), () => true)).toBe("thread 360");
         });
-    });
-
-    it("lays out one thread's own buffer: open, whoever answers named on its last line", () => {
-        const out = laid(ITEMS, [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called, { threads, showing: { kind: "thread", number: 302 }, looks: adopted() });
-        expect(out.groups.map((each) => each.thread?.thread.number)).toEqual([302]);
-        expect(out.groups[0]?.fold?.closed).toBe(false);
-        expect(out.text.trimEnd().split("\n").at(-1)).toBe("── to s1/a1 on @reader ──");
-    });
-
-    it("lays out no thread outside its own buffer, whatever threads are read", () => {
-        const out = laid(ITEMS, [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called, { threads, showing: { kind: "for you" }, looks: adopted() });
-        expect(out.groups.map((each) => each.thread)).toEqual(out.groups.map(() => null));
-    });
-
-    it("says whom the words reach from a thread's buffer, and where nobody answers for it", () => {
-        const named = (number: number) => titled({ kind: "thread", number }, withThreads());
-        expect(named(302)).toEqual({ name: "@reader", whom: "your words reach s1/a1" });
-        expect(named(304).whom).toContain("nobody answers");
     });
 });
 

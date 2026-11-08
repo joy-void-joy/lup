@@ -55,8 +55,6 @@ export function bufferKey(showing: Showing): string {
     switch (showing.kind) {
         case "agent":
             return `agent ${showing.key}`;
-        case "thread":
-            return `thread ${showing.number}`;
         case "party":
             return `party ${showing.name}`;
         case "view":
@@ -415,7 +413,7 @@ function fitted(left: readonly Stretch[]): Stretch[] {
  * counting nothing, and where it's gone, as under what's settled, how it ended; else what else says where it stands,
  * parked, its holder ended, or who left it where nobody running answers for it; how many of what's nested under it are
  * done or cleared; and what waits on the operator there. Dim, as context above one nested under it held elsewhere, it
- * counts nothing and Enter goes to its own row. Opened, it reads across agents as a conversation, the thread's own buffer.
+ * counts nothing and Enter goes to its own row. Opened, it goes to its block where it's held (`concernHome`).
  */
 function taskRow(entry: Nested, set: string, threads: Threading, reading: ListReading, at: string): Row {
     const { read, depth, dim } = entry;
@@ -642,12 +640,9 @@ export interface BufferSpan extends Span {
 
 /**
  * Return what the rows of the list stand for in the buffer `laid`, `showing`: each group, its agent's row; each item and
- * check, its own; and a thread's own buffer, whole, its thread's row, its items being under their senders.
+ * check, its own; and a concern's block, its concern's row, as is a line of one dim or nested naming another.
  */
 export function bufferSpans(laid: Laid, showing: Showing): BufferSpan[] {
-    if (showing.kind === "thread") {
-        return [{ id: `thread ${showing.number}`, from: 0, to: laid.text.length, depth: 0 }];
-    }
     if (showing.kind === "view") {
         return [{ id: bufferKey(showing), from: 0, to: laid.text.length, depth: 0 }];
     }
@@ -776,14 +771,6 @@ export function titled(showing: Showing, reading: Pick<ListReading, "agents" | "
             return { name: showing.called, whom: "a comment reaches whom its first line says" };
         case "settled":
             return { name: "settled", whom: "each concern you cleared: what you write on one reaches whoever answers for it" };
-        case "thread": {
-            const read = reading.threads?.read.threads.find((each) => each.thread.number === showing.number);
-            if (read === undefined) {
-                return { name: "a thread", whom: "" };
-            }
-            const answering = read.answering ?? null;
-            return { name: `@${read.thread.name}`, whom: answering === null ? "nobody answers for it: what you write stays on it" : `your words reach ${reading.called(answering)}` };
-        }
         case "agent": {
             const conversation = conversationNamed(showing.key, reading);
             if (conversation === undefined) {

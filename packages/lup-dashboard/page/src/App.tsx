@@ -1,7 +1,6 @@
 // The page: everything waiting for the operator as one review, each agent in a
 // group of their own, every agent running having one, each thread read from the
-// host as the list and a thread's own buffer show it (`inbox-threads`,
-// `inbox-thread`), an agent's banner saying what the agent is doing, what
+// host as the list and each concern's block show it (`inbox-threads`), an agent's banner saying what the agent is doing, what
 // they're working on and their context, its drawers at the group's end holding their tasks, their whole conversation and what their branch
 // changed since the operator approved it; the operator's reply written into it,
 // their messages to agents and their remarks in the drawers among it, and what
@@ -23,7 +22,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { everyone, launches, ring, running, type Activity, type Agent, type Running } from "./agents";
 import { ApiError, ask, type Asked, type OfCopy, type Replied } from "./api";
 import { cited } from "./comments";
-import { useNow, useSame, useThreads, useViews, useWatched, type ThreadAsked } from "./hooks";
+import { useNow, useSame, useViews, useWatched } from "./hooks";
 import { ACT, actionsToRun, markedPart, type Acting, type Marked, type Moved } from "./grammar";
 import { feed, keyState } from "./editor";
 import { keyKind, reviewKeys, writtenKey, writtenVim, type Here, type Part } from "./keys";
@@ -71,7 +70,6 @@ import {
     type OwnedCheck,
     type Since,
     type Threading,
-    type ThreadShown,
     type Viewed,
     type Wait,
 } from "./review";
@@ -263,7 +261,7 @@ export function App() {
     const [paneMode, setPaneMode] = useState(false);
     // The review's threads, as the host reads them for it (`docs/inbox.md`, *Threads in the review*): the same object
     // while the host says the same of them, which it says again at every hook.
-    // Read in panes alone: for the tasks listed, the checks waiting on the operator and a thread's own buffer.
+    // Read in panes alone: for the concerns listed and laid out as blocks, and the checks waiting on the operator.
     const threadsWatch = useWatched(panes ? { kind: "inbox-threads" } : null);
     const threadsRead = useSame(
         useMemo(() => (threadsWatch.reply?.kind === "inbox-threads-read" ? threadsWatch.reply : null), [threadsWatch.reply]),
@@ -284,12 +282,6 @@ export function App() {
         }, [threadsRead, landings]),
         (map) => JSON.stringify([...map]),
     );
-    // Each thread's conversation the page reads: each whose own buffer they open, whole (`openThread`).
-    const [opening, setOpening] = useState<readonly ThreadAsked[]>([]);
-    const openThread = useCallback((number: number, whole: boolean) => {
-        setOpening((before) => (before.some((each) => each.number === number && each.whole === whole) ? before : [...before, { number, whole }]));
-    }, []);
-    const conversations = useThreads(opening);
     // The checks waiting on the operator, each in the concern it's in, as the host reads it, but where they've cleared it.
     const checksWaiting = useSame(
         useMemo(
@@ -307,11 +299,10 @@ export function App() {
                 new Map(
                     [
                         ...(threadsRead?.paths ?? []),
-                        ...[...conversations.shown.values(), ...conversations.whole.values()].flatMap((each: ThreadShown) => each.paths ?? []),
                         ...(inbox.reply?.kind === "inbox-items" ? (inbox.reply.paths ?? []) : []),
                     ].map((each) => [whose(each.conversation), each]),
                 ),
-            [inbox.reply, threadsRead, conversations],
+            [inbox.reply, threadsRead],
         ),
         (map) => JSON.stringify([...map]),
     );
@@ -496,21 +487,9 @@ export function App() {
     // What sending the draft sets aside, as the host says it, each part said before it's sent.
     const setAside = useMemo(() => (inbox.reply?.kind === "inbox-items" ? inbox.reply.set_aside : []), [inbox.reply]);
 
-    const threading = useMemo<Omit<Threading, "banner"> | null>(
-        () => (threadsRead === null ? null : { read: threadsRead, shown: conversations.shown, whole: conversations.whole, landing: landingIn }),
-        [threadsRead, conversations, landingIn],
-    );
-    // The checks the threads shown hold, by number: a comment on one is the operator's answer to it, in their words.
-    const checks = useMemo(
-        () => new Set([...conversations.shown.values(), ...conversations.whole.values()].flatMap((each: ThreadShown) => (each.checks ?? []).map((check) => check.check.number))),
-        [conversations],
-    );
-    // Every item the threads shown hold that still waits, whose context and files are read as those the inbox lists are:
-    // one answered or done, the thread's history, folds to its header, and reads nothing more.
-    const threadItems = useMemo(
-        () => [...conversations.shown.values(), ...conversations.whole.values()].flatMap((each: ThreadShown) => each.items.filter(waits)),
-        [conversations],
-    );
+    const threading = useMemo<Threading | null>(() => (threadsRead === null ? null : { read: threadsRead, landing: landingIn }), [threadsRead, landingIn]);
+    // The checks the concerns hold, by number: a comment on one is the operator's answer to it, in their words.
+    const checks = useMemo(() => new Set((threadsRead?.threads ?? []).flatMap((each) => (each.checks ?? []).map((check) => check.check.number))), [threadsRead]);
     const main = useRef<HTMLElement>(null);
 
     /** Return the conversation running the switch `argument` turns is of, by their launch, session and subagent; none for one not running. */
@@ -700,8 +679,8 @@ export function App() {
 
     useEffect(() => {
         // Each item's context, where an agent's call made it, and each file an item changes (`changing`), asked
-        // once it's in the inbox or a thread shown; an approval's again once the judge has read their types.
-        for (const item of [...waiting, ...threadItems]) {
+        // once it's in the inbox; an approval's again once the judge has read their types.
+        for (const item of waiting) {
             const number = item.number;
             if (item.call != null && !asked.current.contexts.has(number)) {
                 asked.current.contexts.add(number);
@@ -1324,7 +1303,6 @@ export function App() {
                     <Review
                         items={ready ? laidItems : NONE}
                         threads={ready ? threading : null}
-                        openThread={openThread}
                         agents={ready ? agentsShown : NO_ONE}
                         draft={draft}
                         typed={typed}

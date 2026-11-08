@@ -104,7 +104,7 @@ const MARKS: Part[] = [
             { keys: "·", does: "a file folded whole: automatic, a test, data, a first approval's", short: "folded" },
             { keys: "•", does: "news, to read rather than answer: a note, a turn's last words, a friction, how it felt, a stop", short: "news" },
             { keys: "‖", does: "an item left for later", short: "parked" },
-            { keys: "new", does: "an item that came after you marked its agent seen, or, in a thread's own buffer, last read the thread, Space d on its banner, and that you haven't commented on", short: "new" },
+            { keys: "new", does: "an item that came after you marked its agent seen, Space d on its banner, and that you haven't commented on", short: "new" },
             { keys: "▶ ○ ✕", does: "an agent calling a tool, between calls, ended", short: "agents" },
             { keys: "¶", does: "your own words drafted there, unsent: a comment, a message, a remark; muted beside an agent in the list, how many, and no status (¶2)", short: "your draft" },
             { keys: "¶ ✓ ✔ ✗", does: "in yellow, what your next Ctrl+Enter does with it: your comment on it goes, it's marked read, it's approved, it's declined", short: "your reply" },
