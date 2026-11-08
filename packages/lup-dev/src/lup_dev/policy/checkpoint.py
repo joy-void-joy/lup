@@ -81,6 +81,7 @@ from lup_dev.policy.holds import (
 from lup_dev.policy.importers import Conversation, Found, ImportersPass, Spawner
 from lup_dev.policy.judge import Change, Judge, Judgement, RemovedNote
 from lup_dev.policy.report import (
+    Fitted,
     Kind,
     Known,
     Look,
@@ -90,8 +91,10 @@ from lup_dev.policy.report import (
     Quiet,
     Refused,
     Reports,
+    Words,
     approval,
     fitted,
+    heard,
     information,
     moved,
     news,
@@ -168,12 +171,23 @@ class Bench(Model, arbitrary_types_allowed=True):
         """Say whether the hook's runtime ended it before its answer, as the host service marks it: a hold its call waits on gives up."""
         return self.ended is not None and self.ended.exists()
 
-    def said(self, repository: Path, parts: list[Part]) -> str:
+    def said(self, repository: Path, parts: list[Part]) -> Fitted:
         """Say `parts` in what the judge's answer may take of a hook (`fitted`), a report too long kept whole in `repository`'s git directory."""
         reports = Reports(
             layout=GitDirectoryLayout(common=repository), clock=self.services.clock
         )
         return fitted(parts, self.runtime.fits() - self.reserve, reports)
+
+    def told(
+        self,
+        repository: Path,
+        session: str,
+        agent: str,
+        parts: Callable[[Words], list[Part]],
+    ) -> str:
+        """Tell conversation `agent` of `session` the parts `parts` says to a reader who knows the standing words they were told (`Words`), fitted to a hook (`said`), and remember those it tells them."""
+        record = ConversationRecord(layout=self.services.layout, session=session)
+        return record.telling(agent, lambda words: self.said(repository, parts(words)))
 
 
 class Reply(Model):
@@ -313,16 +327,19 @@ class Checked(Model):
     notices: list[str] = []
     """What else the agent hears: holds approved, late answers."""
 
-    def parts(self) -> list[Part]:
-        """Say everything the checkpoint did that the agent should hear, a part per section: what was refused, what a move brought, the notices and the notes removed, each always whole, and the findings, which a long report tells short (`fitted`)."""
+    def parts(self, words: Words) -> list[Part]:
+        """Say everything the checkpoint did that the agent should hear, to a reader who knows `words`, a part per section: what was refused, what a move brought, the notices and the notes removed, each always whole, and the findings, which a long report tells short (`fitted`)."""
+        moves = moved(self.moves, words)
         return [
-            *(
-                Part(whole=said)
-                for said in [refusal(self.refused), moved(self.moves), *self.notices]
-                if said
-            ),
+            *(Part(whole=said) for said in [refusal(self.refused)] if said),
+            *moves,
+            *(Part(whole=said) for said in self.notices if said),
             *information(
-                self.findings, self.information, self.untouched, self.importers
+                self.findings,
+                self.information,
+                self.untouched,
+                self.importers,
+                words.then(heard(moves)),
             ),
             *([Part(whole=removed_notes(self.removed))] if self.removed else []),
         ]
@@ -1740,7 +1757,10 @@ def remember(
     }
     session.judged = []
     session.participants = []
-    session.mail = [*session.mail, *(mail for mail in mailed if mail.checked.parts())]
+    session.mail = [
+        *session.mail,
+        *(mail for mail in mailed if mail.checked.parts(Words())),
+    ]
     worktree.keep(session)
     return checked
 
@@ -2044,10 +2064,17 @@ class Conversations(MutableModel):
     quiet: ByConversation[Kind] = {}
     """The kinds of findings each quiet conversation isn't told after their calls
     (`Quiet`), until they lift the quiet or their conversation ends."""
+    words: dict[str, Words] = {}
+    """The standing words around findings each conversation was told (`Words`),
+    until their runtime compacts or clears them or their conversation ends."""
 
     def quieted(self, agent: str) -> Quiet:
         """Return what conversation `agent` asked not to be told; nothing where they aren't quiet."""
         return Quiet(kinds=self.quiet.get(agent, []))
+
+    def without(self, agent: str) -> dict[str, Words]:
+        """Return the standing words each conversation was told, but `agent`."""
+        return {each: words for each, words in self.words.items() if each != agent}
 
 
 class ConversationRecord(Model):
@@ -2060,7 +2087,9 @@ class ConversationRecord(Model):
     starts again. A conversation's quiet lasts across their session's starts
     again, a compaction or a resume, and
     ends with a subagent's conversation: the session's own has no end their
-    runtime reports, and a cleared one starts under an id of its own.
+    runtime reports, and a cleared one starts under an id of its own. The
+    standing words they were told are kept as long, but forgotten at a
+    compaction or a clear, which leaves them knowing none of it.
     """
 
     layout: Layout
@@ -2091,27 +2120,57 @@ class ConversationRecord(Model):
             self.keep(kept)
 
     def closed(self, agent: str) -> None:
-        """Note that subagent `agent`'s conversation ended, and their quiet with it."""
+        """Note that subagent `agent`'s conversation ended, and their quiet and the standing words they were told with it."""
         with self.lock():
             kept = self.read()
-            if agent not in kept.working and agent not in kept.quiet:
+            if all(
+                agent not in each for each in [kept.working, kept.quiet, kept.words]
+            ):
                 return
             kept.working = [each for each in kept.working if each != agent]
             kept.quiet = {
                 each: kinds for each, kinds in kept.quiet.items() if each != agent
             }
+            kept.words = kept.without(agent)
             self.keep(kept)
+
+    def forgot(self, agent: str) -> None:
+        """Forget the standing words conversation `agent` was told, which their runtime compacted or cleared (`Words`), so they're told them again."""
+        with self.lock():
+            kept = self.read()
+            if agent not in kept.words:
+                return
+            kept.words = kept.without(agent)
+            self.keep(kept)
+
+    def telling(self, agent: str, tell: Callable[[Words], Fitted]) -> str:
+        """Tell conversation `agent` what `tell` says to a reader who knows the standing words they were told, and remember those it tells them (`Words`).
+
+        Under the record's lock, so two of their calls finishing together tell
+        each word once.
+        """
+        with self.lock():
+            kept = self.read()
+            known = kept.words.get(agent, Words())
+            told = tell(known)
+            knows = known.then(told.words)
+            if knows != known:
+                kept.words = {**kept.words, agent: knows}
+                self.keep(kept)
+        return told.text
 
     def restarted(self) -> None:
         """Forget the subagents at work: the session starts, or starts again.
 
         A subagent still at work is noted again at their next call. What their
         turns ended past is kept, so a resumed session isn't held again on it, and so
-        is each conversation's quiet.
+        is each conversation's quiet, and the standing words each was told.
         """
         with self.lock():
             kept = self.read()
-            self.keep(Conversations(passed=kept.passed, quiet=kept.quiet))
+            self.keep(
+                Conversations(passed=kept.passed, quiet=kept.quiet, words=kept.words)
+            )
 
     def quiet(self, agent: str) -> Quiet:
         """Return what conversation `agent` asked not to be told; nothing where they aren't quiet."""
@@ -2341,16 +2400,14 @@ def end_turn(
         if not bench.interrupted()
     ]
     left = [found for end in endings for found in end.remaining]
-    told = Checked(
+    done = Checked(
         refused=[found for end in endings for found in end.checked.refused],
         moves=[move for end in endings for move in end.checked.moves],
         notices=[notice for end in endings for notice in end.checked.notices],
-    ).parts()
-    listed = [
-        *([Part(whole=removed_notes(notes))] if notes else []),
-        *Checked.together(waiting).parts(),
-    ]
-    telling = bool(text([*told, *listed]))
+    )
+    removed = [Part(whole=removed_notes(notes))] if notes else []
+    mail = Checked.together(waiting)
+    telling = bool(text([*done.parts(Words()), *removed, *mail.parts(Words())]))
     with record.lock():
         kept = record.read()
         passed = kept.passed.get(agent, [])
@@ -2358,8 +2415,12 @@ def end_turn(
         if not (holds or telling):
             kept.passed = {**kept.passed, agent: left}
             record.keep(kept)
-    parts = [*told, *(turn_end(left) if holds else []), *listed]
-    return Reply(block=bench.said(repository, parts))
+
+    def parts(words: Words) -> list[Part]:
+        told = [*done.parts(words), *(turn_end(left) if holds else [])]
+        return [*told, *removed, *mail.parts(words.then(heard(told)))]
+
+    return Reply(block=bench.told(repository, session, agent, parts))
 
 
 class Reported(Model, ABC):
@@ -2402,9 +2463,10 @@ class SessionStarted(Reported, events.SessionStarted):
     conversation is told the deferred work their repository's gate last found due
     (`Due`), once at each start, since the gate doesn't fail on it. A
     conversation whose context their runtime compacted or cleared forgets the
-    findings they knew, so what still stands is told again at their next call.
-    One still quiet is told so, since what a compaction keeps may leave out that
-    they asked.
+    findings they knew, so what still stands is told again at their next call,
+    and the standing words around them (`Words`), so the next report tells those
+    again too. One still quiet is told so, since what a compaction keeps may
+    leave out that they asked.
     """
 
     forgotten: bool = False
@@ -2416,10 +2478,11 @@ class SessionStarted(Reported, events.SessionStarted):
         held = reached(bench, self, starts=True)
         if held is None:
             return Reply()
+        record = ConversationRecord(layout=bench.services.layout, session=self.session)
         if self.forgotten:
             for worktree in worktrees(bench, held):
                 worktree.forget(self.session, self.agent)
-        record = ConversationRecord(layout=bench.services.layout, session=self.session)
+            record.forgot(self.agent)
         quiet = record.quiet(self.agent).reminder()
         if self.agent:
             return Reply(context=quiet)
@@ -2785,7 +2848,8 @@ class CallFinished(Reported, events.CallFinished):
             if not bench.interrupted()
         ]
         told = Checked.together([*checked, *waiting])
-        return Reply(context=bench.said(held.repository, told.parts()))
+        context = bench.told(held.repository, self.session, self.agent, told.parts)
+        return Reply(context=context)
 
 
 class TurnEnded(Reported, events.TurnEnded):

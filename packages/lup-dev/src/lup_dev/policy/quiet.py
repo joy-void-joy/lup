@@ -30,7 +30,7 @@ from lup_dev.policy.checkpoint import (
     watch,
     worktrees,
 )
-from lup_dev.policy.report import Kind, Look, Part, Quiet, placed, summary
+from lup_dev.policy.report import Kind, Look, Part, Quiet, Words, placed, summary
 from lup_dev.policy.worktrees import SessionIndex
 
 if TYPE_CHECKING:
@@ -108,16 +108,18 @@ def lifted(bench: Bench, session: str, agent: str, *, quiet: Quiet) -> str:
             unheard_in(bench, each, session, agent) for each in worktrees(bench, held)
         ]
     )
-    parts = summary(
-        [found for each in unheard for found in each.touched],
-        [found for each in unheard for found in each.importers],
-    )
-    if held is None or not parts:
+    touched = [found for each in unheard for found in each.touched]
+    importers = [found for each in unheard for found in each.importers]
+    if held is None or not (touched or importers):
         return (
             f"{opening} Nothing stands in the files you touched that you weren't told."
         )
     heading = f"{opening} What stands in the files you touched that you weren't told:"
-    return bench.said(held.repository, [Part(whole=heading), *parts])
+
+    def parts(words: Words) -> list[Part]:
+        return [Part(whole=heading), *summary(touched, importers, words)]
+
+    return bench.told(held.repository, session, agent, parts)
 
 
 def unheard_in(bench: Bench, worktree: Worktree, session: str, agent: str) -> Unheard:

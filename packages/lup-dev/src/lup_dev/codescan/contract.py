@@ -62,6 +62,11 @@ class Finding(Model):
     """
     steer: str = ""
     """Where a lup rule steers instead; empty for pyright's and ruff's findings."""
+    detail: str = ""
+    """What a lup rule's check saw here, alone: `message` without the rule's
+    mistake, which a report tells once it has told the rule's mistake and steer
+    (`lup_dev.policy.report.Words`). Empty where there's no mistake apart: for
+    pyright's and ruff's findings, and for those the judge makes itself."""
     fixable: bool = False
     """Whether `ruff check --fix` fixes it, ruff's fix for it being safe.
 
