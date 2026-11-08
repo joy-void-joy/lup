@@ -191,6 +191,7 @@ def test_lups_own_declaration_is_its_modules_with_its_changes() -> None:
         "transcripts",
         "private",
         "lup-development",
+        "versions",
     ]
     assert (resolved.held, resolved.flagged) == (Project().held, Project().flagged)
     assert [each.name for each in resolved.gate][:4] == [
