@@ -409,6 +409,16 @@ def test_the_agent_s_mark_and_the_operator_s_are_read_apart_and_cleared_waits_on
     lag = work.read()["lag"]
     assert (lag.state, lag.cleared) == ("done to confirm", None)
     assert lag.done is not None
+    # How each reads on their dashboard, by both marks: the voice and the docs
+    # said done and cleared, gone; the lag for their eyes; home open to both.
+    concerns.settled(work.home)
+    read = work.read()
+    assert {name: each.reads for name, each in read.items()} == {
+        "docs": "gone",
+        "home": "quiet",
+        "lag": "for your eyes",
+        "voice": "gone",
+    }
 
 
 def test_a_reply_of_the_operator_s_in_a_thread_done_reopens_it_back_to_whoever_held_it(

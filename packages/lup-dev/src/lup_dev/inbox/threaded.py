@@ -112,6 +112,14 @@ type Section = Literal["waiting on you", "new", "every thread"]
 done for them to confirm; else something came they haven't read that asks
 nothing; else nothing calls for them."""
 
+type Reads = Literal["open", "for your eyes", "quiet", "gone"]
+"""How a concern reads on the operator's dashboard, by its two marks
+(`lup_ledger.threads.Marks`; #372, *Concerns*): open to both, a row like any
+other; said done by the agent and not cleared, for the operator's eyes;
+cleared by the operator while someone running still answers for it, a quiet row
+out of the counts; cleared and said done, or cleared with nobody running on it,
+gone, read under what's settled alone."""
+
 type Stated = Annotated[
     Parked | Done | Settled | Declined | Reopened, Field(discriminator="kind")
 ]
@@ -302,6 +310,9 @@ class ThreadRead(Model):
     cleared: Settled | Declined | None = None
     """The operator's mark, where they cleared it, settled or declined, whatever
     the agent's says; none where it's open to them."""
+    reads: Reads = "open"
+    """How it reads on their dashboard, by both marks and whether anyone
+    running answers for it (`how_it_reads`)."""
     section: Section
     since: datetime
     """Since when it's been in its section: what first asked the operator
@@ -501,6 +512,26 @@ class ThreadStated(Reply):
     kind: Literal["inbox-thread-stated"] = "inbox-thread-stated"
     read: ThreadRead
     paths: list[Pathed] = []
+
+
+def how_it_reads(marks: Marks, *, answering: bool) -> Reads:
+    """Say how a concern reads on the operator's dashboard (`Reads`), by its two `marks`, and whether anyone running is `answering` for it.
+
+    >>> from datetime import UTC, datetime
+    >>> from pathlib import Path
+    >>> agent = Conversation(repository=Path("/r"), runtime="r", session="s")
+    >>> drawn = {"target": 4, "repository": Path("/r"), "at": datetime(2026, 1, 1, tzinfo=UTC)}
+    >>> done, settled = Done(by=agent, to_try="Type.", **drawn), Settled(by=Operator(), **drawn)
+    >>> how_it_reads(Marks(), answering=True), how_it_reads(Marks(agent=done), answering=False)
+    ('open', 'for your eyes')
+    >>> how_it_reads(Marks(operator=settled), answering=True), how_it_reads(Marks(operator=settled), answering=False)
+    ('quiet', 'gone')
+    >>> how_it_reads(Marks(agent=done, operator=settled), answering=True)
+    'gone'
+    """
+    if marks.operator is None:
+        return "open" if marks.done is None else "for your eyes"
+    return "quiet" if marks.done is None and answering else "gone"
 
 
 def untitled(title: str) -> bool:
@@ -711,6 +742,7 @@ class Readings(Model, arbitrary_types_allowed=True):
             status=status,
             done=marks.done,
             cleared=marks.operator,
+            reads=how_it_reads(marks, answering=beside.answering is not None),
             section=placing.section,
             since=placing.since,
             asks=asking,
