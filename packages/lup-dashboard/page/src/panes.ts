@@ -350,7 +350,7 @@ function nestOf(group: Grouping, depth: number, reading: ListReading): Row["unde
     const items = group.items.map((each) => itemRow(each, group, set, reading));
     const tasks = tasksOf(group.key, reading);
     const threads = reading.threads;
-    const rows = [...items, ...(threads === null ? [] : concernsNested(tasks, tasks).map((each) => taskRow(each, set, threads, reading, group.key)))];
+    const rows = [...items, ...(threads === null ? [] : concernsNested(tasks, threads.read.threads).map((each) => taskRow(each, set, threads, reading, group.key)))];
     if (rows.length === 0) {
         return undefined;
     }
@@ -530,7 +530,7 @@ export function listedByAgent(reading: ListReading): Row[] {
         const held = byName(groups.filter((each) => partyOf(each) === party), reading.called);
         const tasks = threads === null ? [] : threads.read.threads.filter((each) => taskShown(each) && party.holdsTask(each, reading.running));
         const within: Row[] = [
-            ...(threads === null ? [] : concernsNested(tasks, tasks).map((each) => taskRow(each, "", threads, reading, `party ${party.name}`))),
+            ...(threads === null ? [] : concernsNested(tasks, threads.read.threads).map((each) => taskRow(each, "", threads, reading, `party ${party.name}`))),
             ...held.flatMap((group) => group.items.map((item) => ({ item, group }))).toSorted((a, b) => a.item.number - b.item.number).map(({ item, group }) => itemRow(item, group, "", reading, true)),
             ...held.filter((group) => reading.agents.some((each) => whose(each) === group.key)).map((group) => agentRow(group, 0, reading, false)),
         ];
@@ -547,7 +547,7 @@ export function listedByAgent(reading: ListReading): Row[] {
         if (done.length > 0) {
             rows.push({
                 ...heading("heading settled", "settled", `${done.length}`),
-                under: { key: "list settled", closed: true, kind: "section", rows: concernsNested(done, done).map((each) => taskRow(each, "", threads, reading, "settled")) },
+                under: { key: "list settled", closed: true, kind: "section", rows: concernsNested(done, threads.read.threads).map((each) => taskRow(each, "", threads, reading, "settled")) },
             });
         }
     }

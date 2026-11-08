@@ -392,6 +392,25 @@ describe("the panes by agent", () => {
         expect(dashboard.thrown).toEqual([]);
     });
 
+    it("nests a concern under its holder, what it's under held by another dim above it, Enter there going to that one's own row", async () => {
+        const { page } = dashboard;
+        await listRow(dashboard, "The transcript reader");
+        const list = await listText(dashboard);
+        const at = list.findIndex((each) => each.trim() === "The transcript reader" || each.includes("The transcript reader "));
+        // The parser's own, under the build their session holds, dim as context.
+        expect(list[at - 1]?.trim()).toBe("Building lup's transcript reader");
+        await page.keyboard.press("k");
+        const dimLine = () => page.evaluate(() => document.querySelector(".list-buffer .cm-activeLine .list-context") !== null);
+        await page.waitForFunction(() => document.querySelector(".list-buffer .cm-activeLine .list-context") !== null, undefined, { polling: 50 });
+        await page.keyboard.press("Enter");
+        await page.waitForFunction(() => {
+            const line = document.querySelector(".list-buffer .cm-activeLine");
+            return (line?.textContent ?? "").includes("Building lup's transcript reader") && line?.querySelector(".list-context") === null;
+        }, undefined, { polling: 50 });
+        expect(await dimLine()).toBe(false);
+        expect(dashboard.thrown).toEqual([]);
+    });
+
     it("goes from an item of what's for the operator to its thread with gt, onto the item", async () => {
         const { page } = dashboard;
         await review.goTo("── @51 question");

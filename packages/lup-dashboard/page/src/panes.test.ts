@@ -683,6 +683,31 @@ describe("the tasks", () => {
         expect(rows.at(-1)?.under?.rows.map((each) => each.id)).toEqual(["thread 353"]);
     });
 
+    it("nests a concern solid under its holder, and where it's under one held by someone else, that one dim above it, counting nothing, Enter going to its own row", () => {
+        // The operator's sketch: the lead's redesign, two of its five done, the worker's part of it done under the worker.
+        const titled = (read: ThreadRead, title: string, parent: number | null = null) => ({ ...read, thread: { ...read.thread, title, parent } }) as ThreadRead;
+        const redesign = titled(held(360, "redesign", {}), "redesign the workflow");
+        const ledger = titled({ ...thread(361, "ledger", { answering: WORKER, state: "done to confirm", reads: "for your eyes", done: SAID_DONE }) }, "concerns in the ledger", 360);
+        const parts = [362, 363, 364, 365].map((number, at) => titled(held(number, `part-${at}`, at === 0 ? { state: "done to confirm", reads: "for your eyes", done: SAID_DONE } : {}), `part ${at}`, 360));
+        const rows = listedByAgent({ ...reading(), threads: { ...threads, read: { ...threads.read, threads: [redesign, ledger, ...parts] } } });
+        expect(leads(rows).map((each) => each.id)).toEqual(["item 70", "thread 360", "thread 362", "thread 363", "thread 364", "thread 365"]);
+        const worker = rows.find((each) => each.id === `agent ${whoseOf(WORKER)}`);
+        const context = `context ${whoseOf(WORKER)} 360`;
+        expect(worker?.under?.rows.map((each) => each.id)).toEqual(["item 51", context, "thread 361"]);
+        const dim = worker?.under?.rows.find((each) => each.id === context);
+        expect(dim?.goes).toBe("thread 360");
+        expect(dim?.opens).toBeNull();
+        const lines = listLaid(rows).text.split("\n");
+        expect(lines.find((each) => each.includes("redesign the workflow"))).toMatch(/^ {2}redesign the workflow 2 of 5$/);
+        expect(lines.filter((each) => each.includes("redesign the workflow"))[1]).toBe("    redesign the workflow");
+        expect(lines.find((each) => each.includes("concerns in the ledger"))).toMatch(/^ {6}concerns in the ledger done +◇1$/);
+        // The worker's row counts their question and their part done, nothing of what's dim.
+        expect(lines.find((each) => each.includes(" a1"))).toMatch(/◆1 ◇1$/);
+        const laidOut = listLaid(rows);
+        const at = laidOut.text.indexOf("    redesign the workflow\n");
+        expect(laidOut.marks.find((each) => each.from === at + 4)?.look).toBe("list-context");
+    });
+
     it("lists what's settled folded", () => {
         const rows = listedByAgent(withThreads());
         expect(rows.at(-1)?.id).toBe("heading settled");

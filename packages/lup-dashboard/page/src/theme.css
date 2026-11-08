@@ -1778,6 +1778,13 @@ kbd {
     color: var(--muted);
 }
 
+/* A concern above one nested under it, held elsewhere: context, dim, counting nothing. */
+.list-context {
+    color: var(--muted);
+    font-style: italic;
+    opacity: 0.55;
+}
+
 .list-sub,
 .list-count,
 .list-written {
