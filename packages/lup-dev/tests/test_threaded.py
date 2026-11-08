@@ -14,6 +14,7 @@ from lup_dev.host.pushes import Pushes
 from lup_dev.inbox.delivery import Delivery, Unanswerable
 from lup_dev.inbox.marks import CORE, ReviewMark, on_node
 from lup_dev.inbox.notices import Notices
+from lup_dev.inbox.protocol import Exchanged, ItemsListing, ListItems
 from lup_dev.inbox.store import (
     KINDS,
     Approval,
@@ -551,6 +552,54 @@ def test_a_message_written_on_a_thread_reaches_whoever_answers_for_it_and_shows_
     )
     work.delivery.concerns().landed(ending, work.lag)
     assert work.read()["lag"].unanswered == []
+
+
+def test_what_the_operator_and_an_agent_say_in_a_concern_shows_in_that_agent_s_messages(
+    work: Work, clock: FakeClock
+) -> None:
+    """The thread's own buffer goes, its conversation read in each agent's `messages` drawer instead: their exchange, both ways, is there."""
+
+    def drawer(party: Conversation) -> Exchanged:
+        listed = asyncio.run(
+            ItemsListing(delivery=work.delivery).answer(ListItems(conversation=party))
+        )
+        assert isinstance(listed, Exchanged)
+        return listed
+
+    clock.sleep(60)
+    # The operator writes on the concern, to whoever answers for it.
+    work.delivery.inbox.drafted(
+        Draft(
+            letters=[
+                Letter(to=LEAD, thread=work.lag.number, text="Long ones only, please.")
+            ]
+        )
+    )
+    [review] = asyncio.run(work.delivery.reviewed()).reviews
+    [part] = work.read()["lag"].unanswered
+    clock.sleep(60)
+    # The agent answers that passage there, citing it.
+    answer = work.sent(
+        ThreadedRemark(
+            remark=f"Long ones only, as @{part.node}.{part.part} says.", thread="lag"
+        )
+    )
+    assert work.read()["lag"].unanswered == []
+    # The operator answers the agent's question in the concern.
+    clock.sleep(60)
+    ruled = asyncio.run(
+        work.delivery.answer(work.question, [Ruling(decision=1, verdict="leaning")], "")
+    )
+
+    lead = drawer(LEAD)
+    received = {each.item.number: each.words for each in lead.received}
+    sent = {each.item.number: each.words for each in lead.sent}
+    told = received[review.number]
+    assert told is not None
+    assert "Long ones only, please." in told.text
+    assert sent[answer] is not None
+    assert sent[work.question] is not None
+    assert received[ruled.number] is not None
 
 
 def test_a_message_to_no_one_stays_in_its_thread_as_the_operator_s_waking_nobody(
