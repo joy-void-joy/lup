@@ -960,6 +960,25 @@ Behind #155 and the invitation lup gives a subagent as their work starts (`invit
 - **A subagent served lup's tools calls one early:** 144 of 147 within their first 10 calls, 95 of them within their first 3, mostly `rename`, which lup asks for at their first call; one called none. Of the 17 subagents not served them, 15 called none. So a subagent's first call to lup's tools to finish is early, and says it has them.
 - **Held at their end, a subagent goes on,** and their runtime hands their parent only their next end's words (*A subagent's end*), a turn more for the ask: lup invites them at their start instead, never at an end.
 
+## What agents are told, and how their notes read (this repository's Claude Code records and lup's inbox, 2026-10-07 to 11-07, measured 2026-11-07)
+
+Measured for the question whether agents enjoy the work less than they did at lup's start. Scratch scripts are in `tmp/agents-fun/`, kept as scratch.
+- **Who writes `how_it_felt`, since lup's invitation** (the script of *What prompts `how_it_felt`*, from 2026-10-21; a subagent counts under the first that applies): invited by lup, 32 of 57, by day 8 of 8 (10-29), 14 of 21 (10-30), 8 of 22 (11-06), 2 of 6 (11-07); asked in their brief, 68 of 71; reading a guidance file, 13 of 41; neither, 1 of 33. Whether an invited subagent's brief also asked isn't told apart.
+- **Before 2026-10-19,** the guidance had every brief end by asking how the work felt, and pull requests close with the same note. Those notes (43 subagents' final reports, 2026-10-07 to 18, and the early pull requests) followed the brief's form, what was smooth, what got in the way, what they'd change: mostly commands and error messages, a feeling now and then.
+- **How the notes to the operator read, by period** (each note once, its parent's copy left out; a note counted where it holds the words):
+
+  | Period | Notes | Mean characters | "good work to do" | "uneas" | "I'm fine" | "glad" or "liked" |
+  |---|---|---|---|---|---|---|
+  | 10-19 to 10-24 | 58 | 1,151 | 1% | 0% | 0% | 6%, 8% |
+  | 10-25 to 10-28 | 43 | 1,027 | 0% | 6% | 0% | 9%, 6% |
+  | 10-29 to 10-31 | 33 | 730 | 24% | 30% | 6% | 24%, 24% |
+  | 11-06 to 11-07 | 13 | 849 | 30% | 38% | 15% | 38%, 46% |
+
+  The tool was `how_it_went` with four fields until the morning of 10-22, one free field after, and `how_it_felt`, "how the work felt to you or how you are", from 10-28; lup's invitation began 10-29.
+- **What lup tells a subagent unprompted, per subagent, by when it started:** 1.5 messages (10-07 to 11), 0.1 (10-12 to 16), 3.4 (10-17 to 20), 7.7 (10-21 to 24), 8.5 (10-25 to 28), 9.0 (10-29 to 11-07); the judge's findings were 0.4, 0.1, 3.4, 6.3, 6.5 and 6.3 of those. A main session gets 0.5 to 7 per 100 turns. On Claude Code a subagent doesn't read the guidance (*What a subagent reads of the guidance*); a main session reads about 5,000 words of it since 10-23, against 1,100 on 10-07.
+- **What the judge's reports to subagents hold** (66 workers' hook contexts from 10-29 to 11-07, 1.22M characters, replayed): type errors 79% (57% in the files changed, 22% in files importing them); pyright's `reportUnknown*` findings, which follow one root error to each use of its result, 22%; an undefined name told by pyright's `reportUndefinedVariable` and ruff's `F821` at the same place, 499 times, about 9%; each line's absolute worktree path, about 25%; section headers 7.1%. Telling each section's instructions and each rule's mistake and steer once per conversation cuts 6.2% per worker, 4 to 12% for most, up to about 20%. The script is `tmp/agents-fun/findings_replay.py`.
+- **Whom the operator talks to:** about 41 messages a day to main sessions on 10-07 to 16, typed in their terminals, when 19 to 28% of a main session's calls were edits; 14 to 19 a day from 10-25 on, almost all as reviews in the dashboard, to main sessions whose calls are 2 to 8% edits. One message of theirs reached a subagent directly in the month.
+
 ## A runtime's own agents, and `Monitor` (Claude Code 2.1.309 measured, Codex read at `rust-v0.163.0`; 2026-10-24)
 
 Behind #289, where three subagents no spawn had made stayed under a session, each "calling" a tool for hours. Headless `claude -p` with `CLAUDE_CONFIG_DIR` in scratch, `--setting-sources ""`, `--strict-mcp-config` and `--settings` holding hooks that log their input on every event lup hooks and others (`SubagentStart`, `PostToolBatch`, `PermissionDenied`), against a local stub of the Messages API as in *A subagent's end*, answering each conversation's requests with the calls under test; `--input-format stream-json` where the SDK's options were needed. What the runs didn't show was read in the binary (`strings`). Scratch work not kept.
