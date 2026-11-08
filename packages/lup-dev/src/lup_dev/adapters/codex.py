@@ -114,6 +114,11 @@ start a turn (`turn/start`) runs inside the terminal's own process under
 turn: the operator typing in their terminal starts one, told it at
 `UserPromptSubmit`.
 
+Nor is a Codex session held with no terminal yet (`holding` is none), so `lup-dev
+spawn codex` refuses: `Codex.held`, in `lup`, says how it would be held, its
+app-server on a socket in the room, and where that differs from a session held
+over its input and output.
+
 Nor can lup see what Codex holds for a thread while one of its calls runs, so
 a held call of lup's ends there on what reaches the inbox and on its time limit
 alone (`queues` is none): a gap declared with its evidence, read at
@@ -1992,6 +1997,7 @@ def adapter() -> Adapter:
         spawned=spawned,
         woken=None,
         pushing=None,
+        holding=None,
         hooks=hooks,
         channel=CodexChannel(),
         agent=agent,

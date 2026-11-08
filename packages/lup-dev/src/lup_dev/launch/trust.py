@@ -94,6 +94,7 @@ import tempfile
 import termios
 import tomllib
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from contextlib import contextmanager
 from importlib.machinery import SOURCE_SUFFIXES, FileFinder, SourceFileLoader
 from importlib.util import resolve_name
@@ -867,6 +868,29 @@ class Terminal(Model, Asker):
                 if answer is not None:
                     return answer
                 typer.echo(f"Answer y or n. {question} [y/N]: ", nl=False)
+
+
+class Unattended(Model, Asker):
+    """No terminal: what's said goes to the launch's log, and each question waits for its answer in the inbox alone, which the dashboard gives, as a held launch's launcher asks (`lup_dev.launch.held`)."""
+
+    say_to: Callable[[str], None]
+    """Where it says what it would print."""
+
+    @override
+    def say(self, text: str) -> None:
+        self.say_to(text)
+
+    @override
+    def show(self, text: str) -> None:
+        del text
+
+    @override
+    def ask(self, question: str, elsewhere: Elsewhere) -> bool | None:
+        """Wait for the question's answer in the inbox, and return none: it's answered elsewhere."""
+        self.say_to(f"{question} It waits for your answer in the inbox.")
+        while elsewhere.given() is None:
+            select.select([elsewhere], [], [])
+        return None
 
 
 class Approving(Model, arbitrary_types_allowed=True):
@@ -2387,11 +2411,17 @@ class Trust(Model, arbitrary_types_allowed=True):
         )
 
 
-def machine_trust(root: Path, inside: list[str], reading: Path | None = None) -> Trust:
+def machine_trust(
+    root: Path,
+    inside: list[str],
+    reading: Path | None = None,
+    asker: Asker | None = None,
+) -> Trust:
     """Return trust on launch for the repository at `root`, with this machine's settings, the terminal, the inbox in the host service, uv, the service's client, and the engine and ruff to judge the zone's change with.
 
-    `inside` names the runtimes whose session this runs inside, and `reading`
-    the worktree an approval it asks has its types read in (`Trust.reading`).
+    `inside` names the runtimes whose session this runs inside, `reading`
+    the worktree an approval it asks has its types read in (`Trust.reading`),
+    and `asker` where it asks, this terminal by default.
     """
     settings = LupDevSettings()
     layout = Layout.of(settings)
@@ -2402,7 +2432,7 @@ def machine_trust(root: Path, inside: list[str], reading: Path | None = None) ->
         root=root,
         reading=reading,
         layout=layout,
-        asker=Terminal(),
+        asker=Terminal() if asker is None else asker,
         approvals=InboxApprovals(host=host),
         toolchain=toolchain,
         host=host,

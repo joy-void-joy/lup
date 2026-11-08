@@ -90,6 +90,7 @@ from lup_dev.host.courier import (
     Telling,
     Waker,
 )
+from lup_dev.host.holders import Holders
 from lup_dev.host.homes import kept
 from lup_dev.host.names import (
     Names,
@@ -824,6 +825,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     pushes: Pushes
     """Each launch's open connections to lup's tool server, kept while each is
     served, for what's pushed to its session."""
+    holders: Holders | None = None
+    """The launches whose session a launcher holds, kept while each is served,
+    for what's given their session; none keeps none."""
     say: Callable[[str], None]
     names: Names
     """The name each session last had, so a session resumed takes it back, and
@@ -965,6 +969,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         finally:
             del self.opening[request.launch]
         self.layout.record(request.launch).write_text(request.model_dump_json(indent=2))
+        if self.holders is not None:
+            self.holders.opened(request)
         if Launched.named() in offered.events:
             launched = Happening(launch=request, event=Launched())
             self.background(self.happened(request, launched))
@@ -1465,6 +1471,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             message = f"no launch named `{launch}` is served"
             raise HostError(message)
         served.ending.set()
+        if self.holders is not None:
+            self.holders.closed(launch)
         for server in served.servers:
             await closed(server)
         if Stopped.named() in served.offered.events:
@@ -2028,6 +2036,10 @@ class HostService(Model, arbitrary_types_allowed=True):
     pushes: Pushes = Field(default_factory=Pushes)
     """Each launch's open connections to lup's tool server, which the inbox
     pushes to its session through, given the same (`cli.py`)."""
+    holders: Holders | None = None
+    """The launches whose session a launcher holds, which the inbox gives an idle
+    session's turn through, and an interrupt and an end go through, given the
+    same (`cli.py`); none keeps none."""
     spawns: Spawns | None = None
     """How each runtime recorded its subagents' spawns, read once at a
     subagent's first hook (`cli.py`'s adapters); none reads nothing."""
@@ -2127,6 +2139,7 @@ class HostService(Model, arbitrary_types_allowed=True):
             line_limit=self.line_limit,
             waker=self.waker,
             pushes=self.pushes,
+            holders=self.holders,
             say=self.say,
             names=Names(path=self.layout.names),
             spawns=self.spawns,

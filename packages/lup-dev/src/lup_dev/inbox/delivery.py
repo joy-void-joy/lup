@@ -144,8 +144,9 @@ from lup.events import (
 from lup.types import Model, MutableModel
 from lup_dev.clock import Clock
 from lup_dev.host.courier import Failure, Heard, Post, Posted, Waker
+from lup_dev.host.holders import HeldPrompt, Holders
 from lup_dev.host.names import Names
-from lup_dev.host.protocol import Register
+from lup_dev.host.protocol import HostError, Register
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Queued, Queues, Queuing
 from lup_dev.inbox.citations import failing, resolved, unresolved
@@ -880,6 +881,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     pushes: Pushes
     """Each launch's open connections to lup's tool server, which a push to its
     session goes through."""
+    holders: Holders | None = None
+    """The launches whose session a launcher holds with no terminal, which an
+    idle one's turn is given through (`given`); none holds none."""
     layout: HostLayout
     """Where each launch's sockets are, its session's messaging socket among them."""
     notices: Notices
@@ -2456,7 +2460,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         await self.notices.notify(summary, body)
 
     async def wake(self, party: Conversation) -> None:
-        """Start a turn of an idle `party`'s session on what waits for them: pushed through lup's tool server, where their runtime takes a push, else their doorbell rung through the session's messaging socket.
+        """Start a turn of an idle `party`'s session on what waits for them: given their held session through its launcher, where a launcher holds it (`given`); else pushed through lup's tool server, where their runtime takes a push, else their doorbell rung through the session's messaging socket.
 
         Only a session's main conversation is woken, only while they're idle,
         and never for quiet items alone (`Item.quiet`), which a wake for another
@@ -2476,9 +2480,69 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         loud = [item for item in waiting if not item.quiet]
         if party.agent is not None or busy or place is None or not loud:
             return
+        if self.holders is not None and self.holders.holds(place.launch):
+            await self.given(party, place, waiting)
+            return
         if self.pushed(party, place, waiting):
             return
         await self.rung(party, place, waiting)
+
+    async def given(
+        self, party: Conversation, place: Whereabouts, waiting: list[Item]
+    ) -> None:
+        """Give what waits for idle `party` to their held session as its next turn, through its launcher, each item whole, as a push carries them (`pushed`).
+
+        The turn's text carries a token, which their turn's start carries
+        whole, so it's taken as a push is (`taken`); what it gave stays
+        waiting meanwhile, told by no hook or held call. Where the launcher
+        can't be reached, or no turn's start carries the token within
+        `patience`, it's told as anything waiting is, at their next call, and
+        that's said: a held session has no other way in.
+        """
+        holders = self.holders
+        if holders is None:
+            return
+        token = secrets.token_hex(8)
+        text = SEPARATOR.join(self.said(item) for item in waiting)
+        prompt = holders.prompt(party.runtime, text, token)
+        if prompt is None:
+            return
+        presence = self.presence(party)
+        presence.woken = True
+        pushed = Pushed(token=token, numbers=[item.number for item in waiting])
+        presence.pushed = pushed
+        who = self.roster().who(party)
+        try:
+            await holders.asked(place.launch, HeldPrompt(text=prompt))
+        except HostError as unreached:
+            if presence.pushed == pushed:
+                presence.pushed = None
+                presence.woken = False
+            self.say(
+                f"{place.launch}: what waits for {who} wasn't given their held "
+                f"session, so it's told at their next call: {unreached}"
+            )
+            return
+        task = asyncio.create_task(self.unless_given(party, place, pushed))
+        self.waits = [*(each for each in self.waits if not each.done()), task]
+        numbers = ", ".join(cited(number) for number in pushed.numbers)
+        self.say(f"{place.launch}: gave {numbers} to {who}, held")
+
+    async def unless_given(
+        self, party: Conversation, place: Whereabouts, pushed: Pushed
+    ) -> None:
+        """Wait `patience` for `party`'s held session to start a turn on what `pushed` gave it; where none does, leave it to be told as anything waiting is, and say so."""
+        await asyncio.sleep(self.patience.total_seconds())
+        presence = self.presence(party)
+        if presence.pushed != pushed:
+            return
+        presence.pushed = None
+        presence.woken = False
+        self.say(
+            f"{place.launch}: {self.roster().who(party)}'s held session started no "
+            f"turn on what it was given within {self.patience.total_seconds():g} "
+            "seconds, so it's told at their next call"
+        )
 
     def pushed(
         self, party: Conversation, place: Whereabouts, waiting: list[Item]

@@ -64,6 +64,7 @@ from lup_dev.git import GitError
 from lup_dev.host.client import HostClient, RoomClient, Starter
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard, Posted, Spawned, Spawns
+from lup_dev.host.holders import HeldPrompt, Holders
 from lup_dev.host.names import Names, container_name
 from lup_dev.host.on_trial import AcceptBranch, DropBranch, TrialSaid
 from lup_dev.host.protocol import (
@@ -511,6 +512,7 @@ def inboxed(
     queues: dict[str, Queues] | None = None,
     coming: Callable[[Delivery], Coming] | None = None,
     trying: Callable[[Turns], Trying] | None = None,
+    holding: bool = False,
 ) -> Generator[Watched]:
     """A host service with lup's inbox and the dashboard's kind, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter; containers asked of `podman`, where given; each hook answered by `judge`, else with nothing, and each launch's modules served by `modules`, where given; `land` pushing through the remotes `remotes` makes over the delivery, where given, else through remotes telling no one, running in a launch's room through `rooms`, reading a file's parse through `parser`, and waking parked threads through what `coming` makes over the delivery, where given; what's on trial moved through what `trying` makes over the landings' turns, where given; a new main session told its bearings where `bearings` asks, its integration branch `dev`; what each runtime holds for a conversation read by `queues`, where given, a held call looking at it, and at its time limit, every few milliseconds."""
     known = cli.Adapters(known=cli.adapters())
@@ -518,10 +520,12 @@ def inboxed(
     wakers = cli.Wakers(adapters=known)
     changes = Changes()
     pushes = Pushes()
+    holders = Holders(layout=machine, prompt=wakers.held) if holding else None
     delivery = Watched(
         inbox=inbox_opened(machine, changes),
         waker=wakers,
         pushes=pushes,
+        holders=holders,
         layout=machine.host,
         notices=notices,
         clock=clock,
@@ -586,6 +590,7 @@ def inboxed(
         changes=changes,
         waker=wakers,
         pushes=pushes,
+        holders=holders,
         podman=podman,
         companions=(
             []
@@ -605,6 +610,7 @@ def launched(
     runtime: str,
     *,
     repository: Path | None = None,
+    held: bool = False,
 ) -> Register:
     """Register a launch of `runtime` in `tmp_path` with the running service, its repository `tmp_path`'s `.git` unless `repository` names another."""
     judge = tmp_path / "judges" / "bin" / "lup-dev"
@@ -623,6 +629,7 @@ def launched(
         # one holding the worktree, where a test writes its records.
         home=tmp_path.parent,
         own=tmp_path.parent,
+        held=held,
     )
     client(machine.host, clock).register(registered)
     return registered
@@ -1601,6 +1608,121 @@ def test_an_idle_claude_session_is_pushed_what_waits_and_takes_it_at_its_turns_s
     assert after == ""
     assert frames == []
     assert f"one: pushed @1 to `{tmp_path.name}`" in said
+
+
+def until(condition: Callable[[], bool]) -> bool:
+    """Say whether `condition` comes to hold within a minute, as what the service does on its own thread comes to pass."""
+    for _ in range(6000):
+        if condition():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+class Launcher(Socket):
+    """A stand-in for a held launch's launcher: each request read whole, and done."""
+
+    def __init__(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        super().__init__(path)
+
+    @override
+    def serve(self) -> None:
+        while True:
+            try:
+                connection, _ = self.listening.accept()
+            except OSError:
+                return
+            with connection, connection.makefile("rb") as stream:
+                self.frames.append(stream.read().decode())
+                connection.sendall(b'{"kind": "done"}')
+            self.rang.set()
+
+
+def test_an_idle_held_session_is_given_what_waits_through_its_launcher_and_takes_it_at_its_turns_start(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        messages = Socket(machine.host.launch("one").messages)
+        launcher = Launcher(machine.launch("one").held)
+        started = send(hook, claude("SessionStart", source="startup"))
+        _, title = named_at_start(started)
+        assert send(hook, claude("Stop", stop_hook_active=False)) == ""
+        inbox("send", "one", "Wake up.")
+        [given] = launcher.ringing()
+        prompt = HeldPrompt.model_validate_json(given)
+        pending = delivery.inbox.item(1).state
+        taken = send(
+            hook,
+            claude("UserPromptSubmit", prompt=prompt.text, session_title=title),
+        )
+        state = delivery.inbox.item(1).state
+        after = send(hook, bash("b1"))
+        launcher.close()
+        frames = messages.close()
+    # The items themselves, wrapped as a channel's message is, told once.
+    content, _, rest = prompt.text.partition("\n")
+    assert content.startswith('<channel source="lup" wake="')
+    assert rest == f"{first_note('Wake up.')}\n</channel>"
+    assert pending == Waiting()
+    assert state == Told(at=clock.now(), how="wake")
+    assert taken == ""
+    assert after == ""
+    assert frames == []
+    assert f"one: gave @1 to `{tmp_path.name}`, held" in said
+
+
+def test_a_held_session_whose_launcher_can_t_be_reached_is_told_at_its_next_call(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        inbox("send", "one", "Anyone?")
+        state = delivery.inbox.item(1).state
+        told = send(hook, bash("b1"))
+    assert state == Waiting()
+    assert context(told) == first_note("Anyone?")
+    assert any(
+        line.startswith(
+            f"one: what waits for `{tmp_path.name}` wasn't given their held "
+            "session, so it's told at their next call: launch `one`'s launcher"
+        )
+        for line in said
+    )
+
+
+def test_a_held_session_starting_no_turn_in_time_is_told_at_its_next_call_and_never_rung(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(
+        machine, clock, notices, said, holding=True, patience=timedelta(0)
+    ) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        messages = Socket(machine.host.launch("one").messages)
+        launcher = Launcher(machine.launch("one").held)
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        inbox("send", "one", "Anyone?")
+        launcher.ringing()
+        put_back = until(lambda: any("started no turn" in line for line in said))
+        state = delivery.inbox.item(1).state
+        told = send(hook, bash("b1"))
+        launcher.close()
+        frames = messages.close()
+    assert put_back
+    assert state == Waiting()
+    assert context(told) == first_note("Anyone?")
+    assert frames == []
+    assert (
+        f"one: `{tmp_path.name}`'s held session started no turn on what it was "
+        "given within 0 seconds, so it's told at their next call"
+    ) in said
 
 
 def test_a_push_not_taken_in_time_is_put_back_and_its_launch_rung_through_the_socket_from_then_on(

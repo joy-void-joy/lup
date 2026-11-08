@@ -2059,6 +2059,21 @@ def test_claude_pushes_through_a_channel_and_codex_takes_no_push() -> None:
     assert codex.adapter().pushing is None
 
 
+def test_claude_is_held_under_a_session_it_names_and_codex_isn_t_yet() -> None:
+    holding = claude.adapter().holding
+    assert holding is not None
+    session = holding.minted()
+    assert holding.fresh(session) == ["--session-id", session]
+    assert holding.resuming(session) == ["--resume", session]
+    with pytest.raises(ValueError, match="hexadecimal UUID"):
+        holding.resuming("--dangerously-skip-permissions")
+    # An idle held session's turn reads as a pushed one's prompt does.
+    assert holding.prompt("Hi.", "t1") == (
+        '<channel source="lup" wake="t1">\nHi.\n</channel>'
+    )
+    assert codex.adapter().holding is None
+
+
 def test_claude_adds_what_a_conversation_is_told_to_every_answer() -> None:
     started = '{"session_id": "s1", "cwd": "/w", "hook_event_name": "SessionStart"}'
     assert json.loads(claude.told(started, "", ITEMS) or "") == {

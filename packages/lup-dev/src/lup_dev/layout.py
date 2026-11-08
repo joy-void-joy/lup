@@ -725,6 +725,16 @@ class LaunchLayout(Model):
         return self.directory.with_name(f"{self.directory.name}.lock")
 
     @property
+    def held(self) -> Path:
+        """The socket the launcher of a held session listens on, for the host service to reach it (`lup_dev.launch.held`): beside the launch's directory, where no room mounts it, so no room can speak to its own session as the operator."""
+        return self.directory.with_name(f"{self.directory.name}.sock")
+
+    @property
+    def log(self) -> Path:
+        """What the launcher of a held session prints, which has no terminal: kept where its launch failed before it was served, removed as it ends otherwise."""
+        return self.directory.with_name(f"{self.directory.name}.log")
+
+    @property
     def gitconfig(self) -> Path:
         """The room's git configuration, in place of the operator's (`GIT_CONFIG_GLOBAL`), mounted read-only."""
         return self.directory / "gitconfig"
@@ -1088,6 +1098,10 @@ class Layout(Model):
     def launch(self, launch: str) -> LaunchLayout:
         """Say where launch `launch`'s own places are."""
         return LaunchLayout(directory=self.launches / launch)
+
+    def writer(self, runtime: str, session: str) -> Path:
+        """Say where the lock is that the one launch writing `runtime`'s session `session` holds while its runtime runs it, which the runtime itself doesn't refuse a second of (`docs/launch.md`, *A session held with no terminal*)."""
+        return self.state / "writers" / runtime / f"{session}.lock"
 
     @property
     def worktrees(self) -> Path:
