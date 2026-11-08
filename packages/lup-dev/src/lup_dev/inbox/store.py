@@ -1272,7 +1272,8 @@ class Whereabouts(Model):
     words: list[str] = []
     """lup's own words left for them, oldest first: told beside their next call
     or at their next turn's or session's start, and never holding their turn's
-    end (`Delivery.left`). Kept here, so a restart of the service loses none."""
+    end (`Delivery.left`). Kept here, so a restart of the service loses none;
+    each is kept apart too as one of their lines (`Left`), which stays once told."""
     felt_asked: bool = False
     """Whether a landing of a branch they worked on has invited them to say how
     the work felt (`Lander.invited`): one does once, whatever launch they're
@@ -1298,6 +1299,42 @@ class Whereabouts(Model):
     root: int | None = None
     """For a session's own conversation, their root thread, once it's opened or
     taken; none before, and for a subagent."""
+
+
+class Carried(Model):
+    """Someone's words a line lup left a conversation carries whole (`Left.carries`): an item landing in a thread they answer for, or moved there, or a part of the operator's words moved there (`Concerns.whole`)."""
+
+    item: int
+    part: int | None = None
+    """The part of the operator's words moved, by its number within `item`;
+    none where the item is carried whole."""
+    thread: int
+    """The thread it landed or was moved in, by its number."""
+    moved: Party | None = None
+    """Who moved it there; none where it landed there."""
+
+
+class Left(Model):
+    """One of lup's own lines left for a conversation (`Delivery.left`), kept once it's left, so a view of their words shows what lup told them (`docs/inbox.md`, *A conversation's items in its view*).
+
+    The words are told once, from their whereabouts (`Whereabouts.words`);
+    this stays, a plain record of its own beside them (`left_for`), rewritten
+    once, as it's told. What a finding after a write says, and lup's words
+    told once as a session starts, a name, its tools, are never left so.
+    """
+
+    conversation: Conversation
+    number: int
+    """Its place among the lines left for them, from 1."""
+    at: datetime
+    """When it was left."""
+    text: str
+    """What they're told, as it's told."""
+    told: datetime | None = None
+    """When they were told it; none until they are."""
+    carries: Carried | None = None
+    """Someone's words it carries whole, which a view shows as theirs reaching
+    the conversation; none for lup's own line."""
 
 
 class TalkComment(Model):
@@ -1824,6 +1861,17 @@ def heard(key: str) -> str:
     return f"{HEARD}{key}"
 
 
+def left_for(key: str, number: int | None = None) -> str:
+    """Name lup's line `number` left for the conversation keyed `key` among the ledger's plain records (`Left`), or, with no number, what the name of each of theirs starts with: apart from `HEARD`'s, so a reading of every whereabouts never meets one.
+
+    >>> left_for("5cf8", 3)
+    'inbox:left:5cf8:000003'
+    >>> left_for("5cf8")
+    'inbox:left:5cf8:'
+    """
+    return f"inbox:left:{key}:" + ("" if number is None else f"{number:06d}")
+
+
 def talked_on(key: str) -> str:
     """Name what the operator wrote on the conversation keyed `key` among the ledger's plain records.
 
@@ -1868,6 +1916,10 @@ class Inbox(MutableModel, arbitrary_types_allowed=True):
     """By number."""
     whereabouts: dict[str, Whereabouts] = {}
     """By conversation's key."""
+    lines: dict[str, list[Left]] = {}
+    """lup's lines left for each conversation, oldest first, by the
+    conversation's key: read from the ledger as each is first asked for
+    (`lines_of`), since only a view of the conversation reads them."""
     marks: MarkStore
     """Every repository's review marks, each module's latest held, on the same
     ledger (`lup_dev.inbox.marks`)."""
@@ -2244,3 +2296,87 @@ class Inbox(MutableModel, arbitrary_types_allowed=True):
         self.whereabouts = {**self.whereabouts, key: place}
         self.version += 1
         return place
+
+    def lines_of(self, conversation: Conversation) -> list[Left]:
+        """Return lup's lines left for `conversation`, oldest first (`Left`), told or not; read from the ledger the first time they're asked for.
+
+        Raise `InboxError` where one doesn't read.
+        """
+        key = conversation.key()
+        held = self.lines.get(key)
+        if held is not None:
+            return held
+        try:
+            read = self.ledger.plains(left_for(key), Left)
+        except LupLedgerError as unread:
+            message = f"lup's lines for a conversation don't read: {unread}"
+            raise InboxError(message) from unread
+        found = list(read.values())
+        self.lines = {**self.lines, key: found}
+        return found
+
+    def left(
+        self,
+        place: Whereabouts,
+        words: str,
+        at: datetime,
+        carries: Carried | None = None,
+    ) -> Left:
+        """Leave lup's `words` for the conversation of `place`, at `at`, to be told once (`Whereabouts.words`), and keep them as a line of theirs that stays (`Left`), with what it `carries`; telling `changes` of the conversation, whose view shows it. Both in one transaction; return the line."""
+        conversation = place.conversation
+        key = conversation.key()
+        earlier = self.lines_of(conversation)
+        line = Left(
+            conversation=conversation,
+            number=len(earlier) + 1,
+            at=at,
+            text=words,
+            carries=carries,
+        )
+        waiting = place.model_copy(update={"words": [*place.words, words]})
+        with self.ledger.writing():
+            self.ledger.rewritten(left_for(key, line.number), line)
+            self.ledger.rewritten(heard(key), waiting)
+        self.whereabouts = {**self.whereabouts, key: waiting}
+        self.lines = {**self.lines, key: [*earlier, line]}
+        self.version += 1
+        self.touched(conversation)
+        return line
+
+    def taken(self, place: Whereabouts, at: datetime) -> list[str]:
+        """Take lup's words left for the conversation of `place`, told them at `at`, so they're told once: none left for them after, and each of their lines not told yet kept as told at `at`. Return the words, oldest first."""
+        conversation = place.conversation
+        key = conversation.key()
+        held = self.lines_of(conversation)
+        told = {
+            each.number: each.model_copy(update={"told": at})
+            for each in held
+            if each.told is None
+        }
+        emptied = place.model_copy(update={"words": []})
+        with self.ledger.writing():
+            for each in told.values():
+                self.ledger.rewritten(left_for(key, each.number), each)
+            self.ledger.rewritten(heard(key), emptied)
+        self.whereabouts = {**self.whereabouts, key: emptied}
+        self.lines = {**self.lines, key: [told.get(each.number, each) for each in held]}
+        self.version += 1
+        if told:
+            self.touched(conversation)
+        return place.words
+
+    def touched(self, conversation: Conversation) -> None:
+        """Tell `changes` that what `conversation` exchanged changed, as an item they sent or were sent does, so a view of them is answered again."""
+        if self.changes is None:
+            return
+        self.changes.changed(
+            [
+                Touched(
+                    repository=conversation.repository,
+                    runtime=conversation.runtime,
+                    session=conversation.session,
+                    agent=conversation.agent,
+                    by="item",
+                )
+            ]
+        )
