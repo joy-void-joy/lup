@@ -195,6 +195,9 @@ class Holder(Model, arbitrary_types_allowed=True):
     a test gives its own."""
     every: float = 0.5
     """How many seconds apart those looks are."""
+    answering: timedelta = timedelta(seconds=10)
+    """How long the requests the host made as the session ended may take to be
+    answered, before the launcher goes on to end the launch."""
 
     async def held(
         self, room: Room, arguments: list[str], settings: TerminalSettings
@@ -261,6 +264,10 @@ class Holder(Model, arbitrary_types_allowed=True):
             await asyncio.wait([reading], timeout=self.finishing.total_seconds())
             reading.cancel()
             server.close()
+            # What the host asked as the session ended is answered before the
+            # loop ends, the end's own reply among it.
+            closing = asyncio.ensure_future(server.wait_closed())
+            await asyncio.wait([closing], timeout=self.answering.total_seconds())
             socket.unlink(missing_ok=True)
 
     async def heard(self, exited: asyncio.Future[int]) -> bool:
