@@ -2,6 +2,7 @@
 
 import asyncio
 import socket
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, override
@@ -9,6 +10,7 @@ from typing import TYPE_CHECKING, override
 import pytest
 
 from lup.programs import Apart, detached
+from lup_dev import cli
 from lup_dev.host.client import Detached, HostClient, Outstanding
 from lup_dev.host.held import (
     CalledUp,
@@ -142,6 +144,34 @@ def test_a_spawn_whose_launcher_ends_first_is_refused_with_what_it_wrote(
     assert isinstance(answer, Refused)
     assert "ended before its session was up" in answer.error
     assert "\nthe room never started: " in answer.error
+
+
+def test_a_launcher_is_started_from_its_worktree_with_nothing_there_on_its_path(
+    layout: Layout, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The launcher starts in its worktree, which a room writes: a module planted there is never what it imports."""
+    started: list[list[str]] = []
+    places: list[Path | None] = []
+
+    def recorded(
+        program: str, *arguments: str, log: Path, cwd: Path | None = None
+    ) -> Apart:
+        started.append([program, *arguments])
+        places.append(cwd)
+        return detached("true", log=log)
+
+    monkeypatch.setattr(cli, "detached", recorded)
+    [spawning, *_] = cli.held_routes(layout, Holders(layout=layout), Launchers())
+    spec = HeldLaunch(launch="a1", runtime="claude", worktree=tmp_path)
+
+    asyncio.run(
+        spawning.answer(Spawn(runtime="claude", worktree=tmp_path).model_dump_json())
+    )
+
+    [command] = started
+    assert command[:5] == [sys.executable, "-P", "-m", "lup_dev.cli", "spawn"]
+    assert HeldLaunch.model_validate_json(command[-1]).worktree == spec.worktree
+    assert places == [tmp_path]
 
 
 def test_a_launcher_is_started_as_the_hidden_command_given_its_launch() -> None:

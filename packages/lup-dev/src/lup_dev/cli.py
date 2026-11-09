@@ -94,7 +94,7 @@ from lup_dev.gate import (
 )
 from lup_dev.gate import Ran as GateRan
 from lup_dev.git import Git, GitError, nul_separated
-from lup_dev.host.client import FromRoom, HostClient, RoomClient
+from lup_dev.host.client import FromRoom, HostClient, RoomClient, own_command
 from lup_dev.host.copying import Copying
 from lup_dev.host.courier import (
     Courier,
@@ -666,7 +666,7 @@ def held_routes(layout: Layout, holders: Holders, launchers: Launchers) -> list[
     """Route what the operator asks of sessions held with no terminal, and their launchers' word that one is up: each launcher started from the `lup-dev` the service runs, in its worktree, what it prints in its launch's log (`lup_dev.host.held`)."""
 
     def start(spec: HeldLaunch, log: Path) -> Apart:
-        program, *rest = launcher_command([sys.executable, "-m", "lup_dev.cli"], spec)
+        program, *rest = launcher_command(own_command(), spec)
         return detached(program, *rest, log=log, cwd=spec.worktree)
 
     return [
@@ -3168,9 +3168,7 @@ def spawn_trial(
                 return None
 
             ran = answered(
-                sys.executable,
-                "-m",
-                "lup_dev.cli",
+                *own_command(),
                 "launch",
                 runtime,
                 "--resume",
