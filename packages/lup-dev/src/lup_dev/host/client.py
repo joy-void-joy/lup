@@ -278,8 +278,10 @@ def own_command() -> list[str]:
 class Detached(Model, Starter):
     """Starts `lup-dev host` in a session of its own, which outlives whoever starts it."""
 
-    command: list[str] = [sys.executable, "-m", "lup_dev.cli", "host"]
-    """The command running the service: the running `lup_dev`'s, by default."""
+    command: list[str] = [*own_command(), "host"]
+    """The command running the service: the running `lup_dev`'s, by default,
+    started from whatever directory its caller is in, a worktree among them,
+    so nothing there is on its path (`own_command`)."""
 
     @override
     def start(self, log: Path) -> None:
