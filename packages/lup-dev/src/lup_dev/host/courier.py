@@ -90,6 +90,11 @@ class Heard(Model):
     says (`docs/field-notes.md`, *A conversation resumed in a later launch*).
     A new main session is told where their repository stands then, and only
     then."""
+    anew: bool = False
+    """At a session's own start, whether it's a new process of the runtime,
+    started or resumed, rather than its conversation cleared or compacted in
+    the process that ran it: what an earlier process was given on its input
+    and never took is then lost with it (`Delivery.given`)."""
     takes_title: bool = False
     """Whether the runtime takes a title for the session from this hook's
     answer (`Telling.title`): at the session's own start or prompt, where their

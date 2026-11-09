@@ -1008,9 +1008,15 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 return Posted()
             case SessionStarted():
                 presence.turning = False
-                if self.holders is not None and self.holders.holds(launch.launch):
-                    # What was given an earlier process of a held session's
-                    # and never taken is told this one as anything waiting is.
+                if (
+                    heard.anew
+                    and self.holders is not None
+                    and self.holders.holds(launch.launch)
+                ):
+                    # What was given an earlier process of a held session's and
+                    # never taken went with it: it's told this one as anything
+                    # waiting is. A clear or a compaction keeps the process, and
+                    # its input with it.
                     presence.pushed = None
                 if party.agent is None and self.starting is not None:
                     task = asyncio.create_task(self.starting(launch))
@@ -2501,8 +2507,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         waiting meanwhile, told by no hook or held call, however long that
         takes: it's in the session's input, which it reads at its next
         boundary, a call under way ending first, so telling it at a hook too
-        would tell it twice. A new start of the session voids it
-        (`telling`). Where the launcher can't be reached, it's told as
+        would tell it twice. A new process of the session voids it
+        (`Heard.anew`, `telling`), never a clear or a compaction in the same
+        one. Where the launcher can't be reached, it's told as
         anything waiting is, at their next call, and that's said.
         """
         holders = self.holders

@@ -382,6 +382,12 @@ read 2026-10-21), with what each does beside it. On Linux, `Glob` and `Grep`
 are absent by default, and Claude searches with `find` and `grep` through
 `Bash`, which is judged."""
 
+type NewProcess = Literal["startup", "resume", "fork"]
+"""The starts (`SessionStart`'s `source`) of a new process of Claude Code: one
+started, resumed or forked by `--fork-session`; `/clear` and a compaction come
+in the process that ran before (`Heard.anew`)."""
+
+
 type FreshStart = Literal["startup", "clear"]
 """The starts (`SessionStart`'s `source`) whose conversation begins empty: a
 session started, or cleared with `/clear`, which gives them an id of their own; a
@@ -659,6 +665,7 @@ class SessionStart(Payload):
             fits=fits,
             title=self.session_title,
             fresh=self.source in get_args(FreshStart.__value__) and not self.agent_id,
+            anew=self.source in get_args(NewProcess.__value__) and not self.agent_id,
             takes_title=self.source in get_args(TitledStart.__value__)
             and not self.agent_id,
         )

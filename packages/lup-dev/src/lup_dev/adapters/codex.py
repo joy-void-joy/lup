@@ -478,6 +478,12 @@ class Payload(Model, ABC):
         """Return what to print where lup's judge couldn't answer the hook at all, `said` saying why."""
 
 
+type NewProcess = Literal["startup", "resume", "fork"]
+"""The starts (`SessionStart`'s `source`) of a thread in a new process: started,
+resumed or forked; a clear and a compaction come in the process that ran
+before (`Heard.anew`)."""
+
+
 type FreshStart = Literal["startup", "clear"]
 """The starts (`SessionStart`'s `source`) whose thread begins empty: started, or
 cleared; a resume, a compaction or a fork carries one on (`Heard.fresh`)."""
@@ -504,6 +510,7 @@ class SessionStart(Payload):
             judged=True,
             fits=fits,
             fresh=self.source in get_args(FreshStart.__value__) and not self.agent_id,
+            anew=self.source in get_args(NewProcess.__value__) and not self.agent_id,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:

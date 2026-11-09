@@ -1762,6 +1762,25 @@ def test_what_a_held_session_is_given_mid_call_is_told_once_as_its_turn_takes_it
     assert frames == []
 
 
+def test_a_held_session_s_compaction_keeps_what_it_was_given_for_its_turn(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """A compaction comes in the process that was given the turn, which it still reads: told at the compaction too, it would be told twice."""
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        launcher = Launcher(machine.launch("one").held)
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        inbox("send", "one", "Anyone?")
+        launcher.ringing()
+        compacted = send(hook, claude("SessionStart", source="compact"))
+        state = delivery.inbox.item(1).state
+        launcher.close()
+    assert first_note("Anyone?") not in compacted
+    assert state == Waiting()
+
+
 def test_what_a_held_session_never_took_is_told_its_next_start(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
