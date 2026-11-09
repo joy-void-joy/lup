@@ -107,6 +107,27 @@ def test_removing_through_a_directory_swapped_for_a_link_removes_nothing(
     assert (kept / ".venv" / "file").read_text() == "the operator's"
 
 
+def test_a_path_out_of_the_tree_through_dots_is_neither_read_nor_removed(
+    tmp_path: Path,
+) -> None:
+    root, main, _ = tree(tmp_path)
+    outside = tmp_path / "outside"
+    (outside / ".venv").mkdir(parents=True)
+    # Inside the tree by its text, outside it on disk.
+    out = Path(f"{main}/../../../outside")
+    assert out.is_relative_to(root)
+
+    hidden = Hidden.of(root, [main, out], [VENV])
+
+    assert [each.path for each in hidden.found] == [main / ".venv"]
+    assert hidden.appeared([out]) == []
+    assert status(root, out / ".venv") is None
+    assert not removed(root, out / ".venv")
+    assert not removed(root, main / "..")
+    assert (outside / ".venv").is_dir()
+    assert main.is_dir()
+
+
 def test_removing_outside_the_tree_or_the_tree_itself_removes_nothing(
     tmp_path: Path,
 ) -> None:
