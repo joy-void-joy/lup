@@ -28,9 +28,7 @@ from lup_dev.host.workers import Acted, Acting, Viewed, Viewing
 from lup_dev.inbox.marks import MarksMoved, MoveMarks
 from lup_dev.inbox.protocol import (
     AnswerApproval,
-    AnswerCheck,
     AnswerItem,
-    CheckShown,
     Context,
     Conversed,
     Drafted,
@@ -102,7 +100,6 @@ type Asked = Annotated[
     | DeclineThread
     | ReopenThread
     | MoveIntoThread
-    | AnswerCheck
     | Viewing
     | Acting
     | KeepTimings
@@ -123,7 +120,7 @@ last saw them read and their files marked reviewed or their landing declined,
 the landings waiting on the operator, review marks moved as a reply is sent,
 the threads as the review reads them and one's conversation, a thread
 settled, declined or reopened, frictions and how it felt moved into one from
-the pile to read, a check answered, a module's view, which the
+the pile to read, a module's view, which the
 page draws from its blocks (`docs/host.md`, *The views the dashboard shows*),
 one of a module's actions run,
 what the page measured of itself in the operator's browser, which the host
@@ -152,7 +149,6 @@ type Replied = Annotated[
     | ThreadShown
     | ThreadStated
     | MovedIntoThread
-    | CheckShown
     | Viewed
     | Acted
     | TimingsKept

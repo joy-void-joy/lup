@@ -124,19 +124,18 @@ def without_roots(threads: list[Thread]) -> list[Thread]:
 
 
 class Check(Node):
-    """Something only the operator can try, in a thread: an experiment, a measurement, a step on the host.
+    """Something only the operator could try, which an agent's question once put in a thread: an experiment, a measurement, a step on the host.
 
-    It waits on the operator until they answer it (`Answered`).
+    No call makes one any more: what an agent wants tried goes in their own
+    words in what they send. Those on the ledger stay readable, each with the
+    operator's answer where they gave one (`Answered`), and wait on nobody, so
+    none keeps a thread waiting on the operator.
     """
 
     kind: Literal["ledger:check"] = "ledger:check"
     name: Name | None = None
     text: str
     """What to try, and what to look for, in the words of the agent asking."""
-
-    @override
-    def waiting(self, drawn: list[Edge]) -> bool:
-        return not any(isinstance(each, Answered) for each in drawn)
 
 
 class In(Edge):

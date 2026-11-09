@@ -551,7 +551,7 @@ class Reader(Model, arbitrary_types_allowed=True):
         if isinstance(node, Check):
             answers = [each for each in member.drawn if isinstance(each, Answered)]
             stands = (
-                "waiting on the operator"
+                "never answered"
                 if not answers
                 else f"answered at {clocked(answers[-1].at)}"
             )
@@ -859,8 +859,6 @@ def stood(standing: Standing) -> str:
 
     def named(member: Member) -> str:
         match member.node:
-            case Check():
-                return "check"
             case ItemNode() as node if member.part is None:
                 return kind(node.item(Waiting()))
             case _:

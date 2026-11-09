@@ -36,8 +36,7 @@ calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
 - `thread` says what the agent does with one thread besides sending into it:
   open it, work in it, hold it, hand it, move the operator's words into it,
   park it, say it's done (`inbox/concerns.py`); each tool that sends takes a
-  `thread` it lands in (`THREAD`), and `ask` takes `checks`, each a check
-  in the question's thread;
+  `thread` it lands in (`THREAD`);
 - `edit` changes what the agent sent the operator: a passage of its text, or
   its text whole (`docs/inbox.md`, *Editing what was sent*).
 
@@ -95,7 +94,7 @@ from lup_dev.inbox.texts import (
     body,
     what,
 )
-from lup_dev.inbox.threads import cue, parts_of, spoken
+from lup_dev.inbox.threads import parts_of, spoken
 from lup_ledger.parties import Conversation, Operator, Party
 from lup_ledger.threads import (
     BranchLanded,
@@ -160,7 +159,7 @@ class Choice(Model):
     lean: str = Field(description="Which way you lean, and why, in a line or two.")
 
 
-class Asking(Model):
+class Asking(Model, extra="forbid"):
     """A question for the operator."""
 
     question: str = Field(
@@ -179,17 +178,6 @@ class Asking(Model):
             "Hold this call until the operator answers, and return the answer; "
             "without it, the call returns at once and the answer reaches you at a "
             "later call."
-        ),
-    )
-    # lup: defer(issue=363, why="a field that still works and that its description says to leave empty, until it's settled what comes after a check")
-    checks: list[str] = Field(
-        default=[],
-        description=(
-            "Leave this empty. What you want the operator to try goes in your own "
-            "words in `question`: what you built, what it should do, and why it's "
-            "worth their time, never a list of commands with expected results. A "
-            "line here becomes a row of its own waiting on them until they answer "
-            "it, with nothing tying it to the question it came with."
         ),
     )
     thread: str | None = Field(default=None, description=THREAD)
@@ -641,10 +629,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
 
         What you want the operator to try goes in your own words in `question`:
         what you built, what it should do, and why it's worth their time, never
-        a list of commands with expected results. Leave `checks` empty: a line
-        there becomes a row of its own, waiting on them in the question's thread
-        with nothing tying it to the question, until they answer it with what
-        they saw, which reaches you then.
+        a list of commands with expected results.
         """
         question = Question(
             text=asked.question,
@@ -658,26 +643,16 @@ class Speaker(Model, arbitrary_types_allowed=True):
             thread = None if found is not None else self.threaded(asked.thread)
         except InboxError as refused:
             return Said(text=f"Not asked: {refused}")
-        if (
-            found is None
-            and thread is None
-            and asked.checks
-            and self.concerns.working(self.party) is None
-        ):
-            thread = self.concerns.opened(
-                self.party, cue(asked.question), self.party.repository
-            )
         item = (
             await self.said(question, thread)
             if found is None
             else self.delivery.inbox.item(found)
         )
         number = item.number
-        checks = [] if found is not None else self.checked(item, asked.checks)
         if not asked.wait:
             return self.answered(
                 f"Your question is with the operator, {cited(number)}"
-                f"{self.landing(thread)}{self.checking(checks)}. Their answer "
+                f"{self.landing(thread)}. Their answer "
                 "reaches you at a later call; `wait_inbox` waits for it.",
                 item,
             )
@@ -706,26 +681,6 @@ class Speaker(Model, arbitrary_types_allowed=True):
             ),
             item,
         )
-
-    def checked(self, item: Item, lines: list[str]) -> list[int]:
-        """Put a check for each of `lines` in the thread `item`, a question, landed in, one opened for it where they named none and work in none (`ask`), and return their numbers."""
-        concerns = self.concerns
-        thread = concerns.containing(item.number)
-        if thread is None or not lines:
-            return []
-        return [each.number for each in concerns.checks(self.party, thread, lines)]
-
-    @staticmethod
-    def checking(checks: list[int]) -> str:
-        """Say the checks a question put to the operator beside it, after its number; nothing where it put none.
-
-        >>> Speaker.checking([7, 8])
-        ', and its checks @7 and @8 wait on them'
-        """
-        if not checks:
-            return ""
-        said = and_said([cited(each) for each in checks])
-        return f", and its {'check' if len(checks) == 1 else 'checks'} {said} wait{'s' if len(checks) == 1 else ''} on them"
 
     @lup.tool
     async def send(self, sending: Sending) -> Said:

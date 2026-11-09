@@ -57,9 +57,7 @@ from lup_dev.inbox import marks
 from lup_dev.inbox.marks import MarksFile, MarksMoved, MoveMarks, Moving, ReviewMark
 from lup_dev.inbox.protocol import (
     AnswerApproval,
-    AnswerCheck,
     AnswerItem,
-    CheckShown,
     Context,
     Conversed,
     Drafted,
@@ -695,8 +693,6 @@ def test_every_request_the_page_may_send_acts_on_the_copy_alone(tmp_path: Path) 
         assert reopened.read.state != "settled"
         declined = ask(DeclineThread(number=first, why="no"), ThreadStated)
         assert declined.read.state == "declined"
-        unchecked = ask(AnswerCheck(number=standing.note), Refused)
-        assert "isn't a check" in unchecked.error
         unmoved = ask(MoveIntoThread(numbers=[standing.note], thread=first), Refused)
         assert "only frictions and how it felt" in unmoved.error
         rulings = [Ruling(decision=1, verdict="leaning")]
@@ -848,7 +844,6 @@ def test_every_request_the_page_may_send_acts_on_the_stand_in_demo_alone() -> No
         ask(SettleThread(number=first), ThreadStated)
         ask(ReopenThread(number=first, why="again"), ThreadStated)
         ask(DeclineThread(number=first, why="no"), ThreadStated)
-        ask(AnswerCheck(number=311), CheckShown)
         ask(MoveIntoThread(numbers=[57], title="The gate"), MovedIntoThread)
         rulings = [
             Ruling(decision=1, verdict="leaning"),

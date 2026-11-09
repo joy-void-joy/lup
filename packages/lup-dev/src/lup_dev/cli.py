@@ -178,9 +178,7 @@ from lup_dev.inbox.namesakes import NodeNames
 from lup_dev.inbox.notices import NotifySend, Unsaid
 from lup_dev.inbox.protocol import (
     AnswerApproval,
-    AnswerCheck,
     AnswerItem,
-    CheckShown,
     Context,
     FinishItem,
     Items,
@@ -190,7 +188,6 @@ from lup_dev.inbox.protocol import (
     Readout,
     SendItem,
     Settled,
-    ShowCheck,
     ShowContext,
     ShowDiff,
     ShowItem,
@@ -1835,15 +1832,8 @@ def inbox_answer(
     for the agent who made it: the write has landed, and your reply comes to
     them as "yes, but".
 
-    A check, which an agent's question put in a thread for you to try, takes
-    what you saw, or nothing for a tick; `--comment` gives it without asking.
-    The agent who asked it is told.
     """
     client = answering()
-    check = client.ask(ShowCheck(number=number), CheckShown)
-    if check.check is not None:
-        check_answered(client, check, comment)
-        return
     approvals = InboxApprovals(host=client)
     seen = client.ask(ShowItem(number=number), Shown)
     item = seen.item
@@ -1893,26 +1883,6 @@ def inbox_answer(
         f"{done} {cited(number)}: your {noun}, {cited(answer.number)}, is for "
         f"{called(answer.recipient, answered.paths)}."
     )
-
-
-def check_answered(client: HostClient, shown: CheckShown, comment: str | None) -> None:
-    """Answer the check `shown` with what the operator saw: `comment` where given, else asked at this terminal after it, nothing for a tick."""
-    check = shown.check
-    if check is None:
-        return
-    if not shown.waiting:
-        message = f"{cited(check.number)} is answered already"
-        raise InboxError(message)
-    if comment is None:
-        where = "" if shown.thread is None else f" in @{shown.thread}"
-        typer.echo(f"{cited(check.number)}, a check{where}:\n{check.text}")
-    said: str = (
-        typer.prompt("What you saw (empty for a tick)", default="", show_default=False)
-        if comment is None
-        else comment
-    )
-    client.ask(AnswerCheck(number=check.number, text=said), CheckShown)
-    typer.echo(f"Answered {cited(check.number)}: whoever asked it is told.")
 
 
 def held_answer(

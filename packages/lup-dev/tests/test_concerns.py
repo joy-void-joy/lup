@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, override
 import pytest
 
 from lup.sessions import results
+from lup.tools.tool import Refused
 from lup_dev import cli
 from lup_dev.host.names import Names
 from lup_dev.host.protocol import Limits, Register
@@ -126,6 +127,33 @@ def said(coroutine: object) -> str:
     """Run a tool's call, and return what it says."""
     assert asyncio.iscoroutine(coroutine)
     return asyncio.run(coroutine).text
+
+
+def kept_check(
+    delivery: Delivery, thread: Thread, by: Conversation, text: str
+) -> Check:
+    """Keep a check in `thread`, by `by`, as an earlier lup's `ask` did with its `checks`: no call makes one any more."""
+    ledger = delivery.inbox.ledger
+    concerns = delivery.concerns()
+    check = ledger.kept(
+        Check(
+            number=ledger.numbered(),
+            repository=thread.repository,
+            by=by,
+            at=concerns.now(),
+            text=text,
+        )
+    )
+    ledger.drawn(
+        In(
+            source=check.number,
+            target=thread.number,
+            repository=thread.repository,
+            by=by,
+            at=concerns.now(),
+        )
+    )
+    return check
 
 
 def told(delivery: Delivery, party: Conversation) -> list[str]:
@@ -257,24 +285,19 @@ def test_a_concern_opened_under_one_someone_answers_for_is_held_by_nobody_and_un
     )
 
 
-def test_a_question_with_checks_has_a_concern_opened_for_it_where_its_asker_works_in_none(
-    delivery: Delivery,
-) -> None:
+def test_ask_takes_no_checks_saying_so(delivery: Delivery) -> None:
     register = launched(delivery, "dev", "s1")
     lead = speaker(delivery, register, main("s1"))
+    [ask] = [each for each in lead.tools() if each.spec().name == "ask"]
 
-    answer = said(lead.ask(Asking(question="Does it hold?", checks=["Run it."])))
-    concerns = delivery.concerns()
+    refused = asyncio.run(
+        ask.call({"question": "Does it hold?", "checks": ["Run it."]})
+    )
 
-    question = next(iter(delivery.inbox.items))
-    thread = concerns.containing(question)
-    assert thread is not None
-    assert (thread.title, thread.holder) == ("Does it hold?", main("s1"))
-    assert f"in @{thread.name}" in answer
-    assert [each.node.kind for each in concerns.threads.members(thread.number)] == [
-        "inbox:item",
-        "ledger:check",
-    ]
+    assert isinstance(refused, Refused)
+    assert "checks" in refused.rejection.reason
+    assert delivery.inbox.items == {}
+    assert delivery.inbox.ledger.every(Check) == []
 
 
 def test_a_subagent_starts_on_its_parent_s_thread_and_thread_names_one_or_opens_it(
@@ -723,54 +746,41 @@ def test_a_holder_that_ended_holds_nothing_and_the_thread_above_answers(
     assert delivery.concerns().answering(lag) is None
 
 
-def test_ask_puts_its_checks_in_the_question_s_thread_and_an_answer_reaches_the_asker(
+def test_a_check_an_earlier_lup_kept_waits_on_nobody_and_reads_with_its_answer(
     delivery: Delivery,
 ) -> None:
     register = launched(delivery, "dev", "s1")
     lead = speaker(delivery, register, main("s1"))
-
-    asked = said(
-        lead.ask(
-            Asking(
-                question="Does the room start?",
-                checks=["Launch a fresh room: it starts in 5 s.", "Run `lup` twice."],
-                thread="Room start",
-            )
-        )
-    )
-    question = newest(delivery)
+    said(lead.thread(Threading(name="room-start", title="Room start", hold=True)))
+    said(lead.note(ThreadedRemark(remark="It starts slowly.")))
     concerns = delivery.concerns()
     room = concerns.named(REPOSITORY, "room-start")
-    checks = [
-        each.node
-        for each in concerns.threads.members(room.number)
-        if isinstance(each.node, Check)
-    ]
-    standing = concerns.standing(room)
-    concerns.checked(checks[0].number, "It took 9 s.")
-    with pytest.raises(InboxError, match="answered already"):
-        concerns.checked(checks[0].number, "")
-
-    assert asked == (
-        f"Your question is with the operator, @{question}, in @room-start, and its checks "
-        f"@{checks[0].number} and @{checks[1].number} wait on them. Their answer "
-        "reaches you at a later call; `wait_inbox` waits for it."
-    )
-    assert [each.text for each in checks] == [
-        "Launch a fresh room: it starts in 5 s.",
-        "Run `lup` twice.",
-    ]
-    assert standing.state == "waiting on the operator"
-    assert len(standing.waiting) == 3
-    answered = delivery.inbox.ledger.drawn_to(checks[0].number, Answered)
-    assert [(each.text, each.by) for each in answered] == [("It took 9 s.", Operator())]
-    assert told(delivery, main("s1")) == [
-        (
-            f"lup: the operator answered your check @{checks[0].number} in "
-            f'@room-start:\n<checked item="{checks[0].number}" thread="room-start">'
-            "It took 9 s.</checked>"
+    started = kept_check(delivery, room, main("s1"), "Launch a fresh room.")
+    twice = kept_check(delivery, room, main("s1"), "Run `lup` twice.")
+    delivery.inbox.ledger.drawn(
+        Answered(
+            target=started.number,
+            repository=REPOSITORY,
+            by=Operator(),
+            at=concerns.now(),
+            text="It took 9 s.",
         )
-    ]
+    )
+    reader = Reader(delivery=delivery, reader=main("s1"))
+
+    standing = concerns.standing(room)
+    read = reader.read(
+        delivery.inbox.about(REPOSITORY), Narrowing(thread="room-start")
+    ).text
+
+    assert (standing.state, standing.waiting) == ("working", [])
+    assert read.endswith(
+        f"@{started.number}  2026-10-01 12:00  a check from you, answered at 2026-10-01 12:00:\n"
+        f'<check item="{started.number}">\nLaunch a fresh room.\n'
+        '<answered from="operator">It took 9 s.</answered>\n</check>\n\n'
+        f"@{twice.number}  2026-10-01 12:00  a check from you, never answered:\n"
+        f'<check item="{twice.number}">Run `lup` twice.</check>'
+    )
 
 
 def test_the_operator_settles_declines_and_reopens_telling_whoever_answers(
@@ -814,11 +824,14 @@ def test_a_thread_reads_whole_with_where_it_stands_what_s_under_and_what_names_i
     said(lead.thread(Threading(name="fix", title="Fix it", under="lag")))
     said(lead.note(ThreadedRemark(remark="Typing fast moves it.")))
     typing = newest(delivery)
-    said(
-        lead.ask(Asking(question="Long comments only?", checks=["Type in a long one."]))
-    )
+    said(lead.ask(Asking(question="Long comments only?")))
     question = newest(delivery)
-    [check] = delivery.inbox.ledger.every(Check)
+    check = kept_check(
+        delivery,
+        delivery.concerns().named(REPOSITORY, "lag"),
+        main("s1"),
+        "Type in a long one.",
+    )
     said(lead.note(ThreadedRemark(remark="See @lag.", thread="fix")))
     seen = newest(delivery)
     lag = delivery.concerns().named(REPOSITORY, "lag").number
@@ -830,7 +843,7 @@ def test_a_thread_reads_whole_with_where_it_stands_what_s_under_and_what_names_i
 
     assert read == (
         f'Thread @lag (@{lag}), "The cursor jumps", held by you: waiting on '
-        "the operator: 1 question, 1 check.\n"
+        "the operator: 1 question.\n"
         "Under it:\n"
         '- @fix, "Fix it": working\n'
         "Elsewhere, naming it:\n"
@@ -839,7 +852,7 @@ def test_a_thread_reads_whole_with_where_it_stands_what_s_under_and_what_names_i
         f'<item item="{typing}" kind="note" from="dev">Typing fast moves it.</item>\n\n'
         f"@{question}  2026-10-01 12:00  a question from you to the operator, waiting:\n"
         f'<item item="{question}" kind="question" from="dev">Long comments only?</item>\n\n'
-        f"@{check.number}  2026-10-01 12:00  a check from you, waiting on the operator:\n"
+        f"@{check.number}  2026-10-01 12:00  a check from you, never answered:\n"
         f'<check item="{check.number}">Type in a long one.</check>'
     )
     assert none == "No thread is `nothing`: `thread` takes a thread's name or number."

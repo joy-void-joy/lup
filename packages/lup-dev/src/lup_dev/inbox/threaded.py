@@ -6,9 +6,10 @@ it, every repository's, and the operator settles, declines and reopens them:
 - **`inbox-threads`** (`ListThreads`) lists every thread (`ThreadRead`): where
   it stands, and its two marks apart (`done`, `cleared`); what it's about,
   where its title reads as a name (`about`); the passages of the operator's it
-  came from, with what became of each (`passages`); its checks (`checks`); its
+  came from, with what became of each (`passages`); the checks an earlier lup
+  put in it, which wait on nobody (`checks`); its
   section (`Section`): `waiting on you` where something in it
-  asks them, a question, an approval, a held change, a problem, a check, or
+  asks them, a question, an approval, a held change, a problem, or
   it's done for them to confirm; else `new` where something came that they
   haven't read and that asks nothing; else `every thread`; what in it asks
   them (`Ask`), each in the order it came, and since when it's been in its
@@ -262,13 +263,13 @@ class Spot(Model):
 
 
 class Ask(Model):
-    """One thing in a thread asking the operator: an item or a check waiting on them, by its number, what it is in a few words (`a question`, `a check`), and when it came into the thread."""
+    """One thing in a thread asking the operator: an item waiting on them, by its number, what it is in a few words (`a question`), and when it came into the thread."""
 
     node: int
     what: str
     came: datetime
     holds: bool = False
-    """Whether something stays stopped until they answer it (`ItemKind.holds`): an item's kind says; a check, nothing does."""
+    """Whether something stays stopped until they answer it, as its kind says (`ItemKind.holds`)."""
 
 
 class Passage(Model):
@@ -668,27 +669,16 @@ class Readings(Model, arbitrary_types_allowed=True):
             # A part of the operator's words moved into a thread waits on its
             # holder, not on them: it shows open in the thread until an item
             # there cites it, and never keeps the operator from inbox zero. An
-            # item moved in whole asks where it landed, if anywhere.
+            # item moved in whole asks where it landed, if anywhere. A check
+            # asks nothing: none is made any more, and those kept wait on nobody.
             if member.part is not None or member.moved:
                 return None
             item = items.get(member.node)
-            if item is not None:
-                waiting = asks(item.recipient, item.reason, item.state)
-                return (
-                    Ask(
-                        node=item.number,
-                        what=what(item),
-                        came=member.came,
-                        holds=item.holds,
-                    )
-                    if waiting
-                    else None
-                )
-            check = ledgered.checks.get(member.node)
-            answer = ledgered.answers.get(member.node)
-            if check is None or not check.waiting([] if answer is None else [answer]):
+            if item is None or not asks(item.recipient, item.reason, item.state):
                 return None
-            return Ask(node=check.number, what="a check", came=member.came)
+            return Ask(
+                node=item.number, what=what(item), came=member.came, holds=item.holds
+            )
 
         asking = [ask for each in members if (ask := asked(each)) is not None]
         beside = self.source.beside(

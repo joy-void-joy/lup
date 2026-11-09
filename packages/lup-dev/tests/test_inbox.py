@@ -2326,9 +2326,7 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
                 mcp, "how_it_felt", stamped(hook, lup_call("how_it_felt", quiet, "h1"))
             ),
             call(mcp, "stop", stamped(hook, lup_call("stop", stopping, "s1"))),
-            call(
-                mcp2, "concern", stamped(hook2, codex_call("concern", jammed, "c1"))
-            ),
+            call(mcp2, "concern", stamped(hook2, codex_call("concern", jammed, "c1"))),
             call(
                 mcp2,
                 "how_it_felt",
@@ -2906,7 +2904,7 @@ def introduction() -> str:
         "these, you're one of them."
     )
     direct = (
-        "`friction` and `how_it_felt` reach the operator directly, whatever your "
+        "`concern` and `how_it_felt` reach the operator directly, whatever your "
         "parent passes on."
     )
     lines = [f"- `{spec.name}`: {spec.summary}" for spec in served]
@@ -13957,7 +13955,7 @@ def test_a_subagent_hears_only_what_s_addressed_to_them_in_their_parent_s_thread
     assert heard.endswith(": The parser is done.")
 
 
-def test_lup_dev_inbox_answer_answers_a_check_and_whoever_asked_it_is_told(
+def test_ask_with_checks_is_refused_and_lup_dev_inbox_answer_answers_no_check(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     with inboxed(machine, clock, notices, said) as delivery:
@@ -13972,25 +13970,21 @@ def test_lup_dev_inbox_answer_answers_a_check_and_whoever_asked_it_is_told(
                 "checks": ["Launch a fresh room: it starts within 5 s."],
             },
         )
-        question = newest(delivery)
-        [check] = [each.number for each in delivery.inbox.ledger.every(Check)]
-        answered = inbox("answer", str(check), "--comment", "It took 9 s.")
-        again = refused("answer", str(check), "--comment", "Again.")
-        told = context(send(hook, bash("b1")))
-    assert asked == (
-        (
-            f"Your question is with the operator, @{question}, in "
-            f"@does-a-fresh-room-start-fast, and its check @{check} waits on them. "
-            "Their answer reaches you at a later call; `wait_inbox` waits for it."
-        ),
-        False,
-    )
-    assert answered == f"Answered @{check}: whoever asked it is told.\n"
-    assert again == f"@{check} is answered already"
-    # Working in no thread, the asker had one opened for the question, as a check is a thread's.
-    assert told == (
-        f"lup: the operator answered your check @{check} in "
-        "@does-a-fresh-room-start-fast:\n"
-        f'<checked item="{check}" thread="does-a-fresh-room-start-fast">It took 9 s.'
-        "</checked>"
-    )
+        ledger = delivery.inbox.ledger
+        check = ledger.kept(
+            Check(
+                number=ledger.numbered(),
+                repository=tmp_path / ".git",
+                by=Operator(),
+                at=clock.now(),
+                text="Launch a fresh room.",
+            )
+        )
+        answered = refused("answer", str(check.number), "--comment", "It took 9 s.")
+    # What an agent wants tried goes in their own words: `checks` is no field of `ask`.
+    text, error = asked
+    assert error
+    assert "checks" in text
+    assert delivery.inbox.items == {}
+    # A check an earlier lup kept is no item to answer.
+    assert str(check.number) in answered

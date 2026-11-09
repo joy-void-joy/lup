@@ -65,7 +65,16 @@ from lup_dev.layout import Layout
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
 from lup_ledger.parties import Conversation, Lup, Operator
-from lup_ledger.threads import ROOT, Declined, In, Reopened, Settled, Thread
+from lup_ledger.threads import (
+    ROOT,
+    Answered,
+    Check,
+    Declined,
+    In,
+    Reopened,
+    Settled,
+    Thread,
+)
 from lup_ledger.threads import Done as ThreadDone
 
 if TYPE_CHECKING:
@@ -104,7 +113,8 @@ class Work:
     """A session, `lead`, at work in a repository: four threads, each standing differently.
 
     - `home`, which they hold and work in: a note and a friction, the pile's;
-    - `lag`: a question with its decision and a check, both asking the operator;
+    - `lag`: a question with its decision, asking the operator, and a check an
+      earlier lup kept, which asks nothing;
     - `voice`: a note, then done, for the operator to confirm;
     - `docs`: a note, read.
     """
@@ -144,17 +154,12 @@ class Work:
                 Asking(
                     question="Long comments only?",
                     decisions=[Choice(decision="Long ones", lean="yes")],
-                    checks=["Type in a long one."],
                     thread="lag",
                 )
             )
         )
         self.lag = self.thread_of(self.question)
-        [self.check] = [
-            each.node
-            for each in self.reading().readings_now().ledgered.members[self.lag.number]
-            if each.node != self.question
-        ]
+        self.check = self.kept_check("Type in a long one.")
         self.voiced = self.sent(ThreadedRemark(remark="Voice works.", thread="voice"))
         self.voice = self.thread_of(self.voiced)
         self.ran(
@@ -163,6 +168,29 @@ class Work:
         self.documented = self.sent(ThreadedRemark(remark="Docs.", thread="docs"))
         self.docs = self.thread_of(self.documented)
         delivery.done(self.documented)
+
+    def kept_check(self, text: str) -> int:
+        """Keep a check in `lag`, as an earlier lup's `ask` did with its `checks`: no call makes one any more. Return its number."""
+        ledger = self.delivery.inbox.ledger
+        check = ledger.kept(
+            Check(
+                number=ledger.numbered(),
+                repository=REPOSITORY,
+                by=LEAD,
+                at=self.clock.now(),
+                text=text,
+            )
+        )
+        ledger.drawn(
+            In(
+                source=check.number,
+                target=self.lag.number,
+                repository=REPOSITORY,
+                by=LEAD,
+                at=self.clock.now(),
+            )
+        )
+        return check.number
 
     def ran(self, coroutine: object) -> int:
         """Run a tool's call; return the number of the item it made, as its answer cites it, or 0."""
@@ -215,9 +243,9 @@ def test_each_thread_s_section_says_what_asks_the_operator_what_s_new_and_the_pi
     assert sorted(read) == ["docs", "home", "lag", "voice"]
     lag, voice, home, docs = read["lag"], read["voice"], read["home"], read["docs"]
     assert (lag.section, lag.state) == ("waiting on you", "waiting on the operator")
+    # The check an earlier lup kept beside the question asks nothing.
     assert [(each.node, each.what, each.holds) for each in lag.asks] == [
         (work.question, "a question", True),
-        (work.check, "a check", False),
     ]
     assert lag.since == lag.asks[0].came
     assert (voice.section, voice.state, voice.asks) == (
@@ -519,15 +547,25 @@ def test_a_thread_whose_title_reads_as_a_name_says_what_it_s_about_from_what_s_i
     assert read["lag"].about is None
 
 
-def test_a_thread_s_checks_are_read_with_it_each_with_the_operator_s_answer(
+def test_a_thread_s_checks_are_read_with_it_each_with_the_operator_s_answer_asking_nothing(
     work: Work,
 ) -> None:
     [check] = work.read()["lag"].checks
     assert (check.check.number, check.answer) == (work.check, None)
-    work.delivery.concerns().checked(work.check, "It held.")
-    [answered] = work.read()["lag"].checks
+    work.delivery.inbox.ledger.drawn(
+        Answered(
+            target=work.check,
+            repository=REPOSITORY,
+            by=Operator(),
+            at=work.clock.now(),
+            text="It held.",
+        )
+    )
+    read = work.read()["lag"]
+    [answered] = read.checks
     assert answered.answer is not None
     assert answered.answer.text == "It held."
+    assert [each.node for each in read.asks] == [work.question]
 
 
 def test_where_each_conversation_works_is_read_with_the_threads(work: Work) -> None:
