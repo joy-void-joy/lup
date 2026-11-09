@@ -2220,8 +2220,10 @@ def swept(
     reaches its session without its launcher, and its runtime outlives its
     input during a call, a held hook or a background command
     (`docs/field-notes.md`, *A session held with no terminal*), spending on
-    with no one reading. Each launch ended is said, and a launch ended first
-    elsewhere is passed over; its environments go with it. A launch runs it
+    with no one reading; one podman can't stop is said and left for the next
+    sweep, so it keeps no other launch from starting. Each launch ended is
+    said, and a launch ended first elsewhere is passed over; its environments
+    go with it. A launch runs it
     before it registers, and the host service on its own (`Sweeping`).
     """
 
@@ -2240,7 +2242,15 @@ def swept(
             if state is not None and not stopped(state):
                 if not each.held:
                     return False
-                podman.stop(each.container)
+                try:
+                    podman.stop(each.container)
+                except ContainerError as failed:
+                    say(
+                        f"{each.container}, launch {each.launch}'s room, held by a "
+                        f"launcher that's gone, wasn't stopped, so it stays for the "
+                        f"next sweep: {failed}"
+                    )
+                    return False
                 say(
                     f"Stopped {each.container}: launch {each.launch}'s session was "
                     "held by a launcher that's gone."

@@ -2837,6 +2837,7 @@ def test_a_held_launch_whose_room_won_t_stop_stays_registered_for_the_sweep(
     standin = machine.engine.standin
     assert standin is not None
     machine.host.heard.append(standin.session)
+
     def yes(question: str) -> str:
         del question
         return ""
@@ -3061,6 +3062,38 @@ def test_a_held_launch_s_room_still_running_after_its_launcher_died_is_stopped(
     )
     assert said.index("unregister dead") > stopping
     assert not machine.layout.launch("dead").held.exists()
+
+
+def test_a_held_room_podman_can_t_stop_is_said_and_left_for_the_next_sweep(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock)
+    machine.host.served.extend(
+        [
+            dead(project).model_copy(update={"held": True}),
+            dead(project).model_copy(
+                update={"launch": "gone", "container": "lup-gone"}
+            ),
+        ]
+    )
+    machine.engine.containers["lup-dead"] = "running"
+    machine.engine.stopping_fails = True
+
+    serving = cli.swept(
+        machine.layout, machine.host, machine.launcher.podman, machine.events.record
+    )
+
+    assert serving == ["dead"]
+    said = machine.events.said
+    assert any(
+        each.startswith(
+            "lup-dead, launch dead's room, held by a launcher that's gone, wasn't "
+            "stopped, so it stays for the next sweep: podman couldn't stop"
+        )
+        for each in said
+    )
+    assert "unregister gone" in said
+    assert "unregister dead" not in said
 
 
 def test_a_held_launch_whose_launcher_still_runs_is_left_running(
