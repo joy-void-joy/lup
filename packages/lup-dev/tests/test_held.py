@@ -284,6 +284,7 @@ WORDS = {
     "single word READY": "READY",
     "single word PEAR": "PEAR",
     "single word MANGO": "MANGO",
+    "single word PLUM": "PLUM",
     "first ask you": "PAPAYA",
     "List, in order": "PAPAYA PEAR MANGO KIWI",
 }
@@ -353,7 +354,7 @@ class Played(HostClient):
                 answer = next(
                     (word for cue, word in self.words.items() if cue in text), None
                 )
-                if "time.sleep" in text:
+                if "time.sleep" in text or "wait_inbox" in text:
                     self.calling.append(True)
                 elif answer is not None:
                     self.item(self.conversation, Operator(), answer)

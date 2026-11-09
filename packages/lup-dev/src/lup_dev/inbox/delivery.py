@@ -1008,6 +1008,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 return Posted()
             case SessionStarted():
                 presence.turning = False
+                if self.holders is not None and self.holders.holds(launch.launch):
+                    # What was given an earlier process of a held session's
+                    # and never taken is told this one as anything waiting is.
+                    presence.pushed = None
                 if party.agent is None and self.starting is not None:
                     task = asyncio.create_task(self.starting(launch))
                     self.looks = [
@@ -2494,10 +2498,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
         The turn's text carries a token, which their turn's start carries
         whole, so it's taken as a push is (`taken`); what it gave stays
-        waiting meanwhile, told by no hook or held call. Where the launcher
-        can't be reached, or no turn's start carries the token within
-        `patience`, it's told as anything waiting is, at their next call, and
-        that's said: a held session has no other way in.
+        waiting meanwhile, told by no hook or held call, however long that
+        takes: it's in the session's input, which it reads at its next
+        boundary, a call under way ending first, so telling it at a hook too
+        would tell it twice. A new start of the session voids it
+        (`telling`). Where the launcher can't be reached, it's told as
+        anything waiting is, at their next call, and that's said.
         """
         holders = self.holders
         if holders is None:
@@ -2523,36 +2529,27 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 f"session, so it's told at their next call: {unreached}"
             )
             return
-        task = asyncio.create_task(self.unless_given(party, place, pushed))
-        self.waits = [*(each for each in self.waits if not each.done()), task]
         numbers = ", ".join(cited(number) for number in pushed.numbers)
         self.say(f"{place.launch}: gave {numbers} to {who}, held")
 
     async def interrupted(self, launch: str) -> None:
-        """Take `launch`'s session for idle once lup interrupted its held session's turn, which runs no turn's end, and start a turn on what waits for them, the operator's words that came during it among it."""
+        """Take `launch`'s session for idle once lup interrupted its held session's turn, which runs no turn's end, and start a turn on what waits for them, the operator's words that came during it among it.
+
+        A call of theirs lup held, a `wait_inbox` the interrupt cut, is taken
+        for ended as at a turn's end, what it would return not counted told,
+        whether or not the cut reached it, so it neither keeps the session
+        taken for busy nor tells what the wake gives.
+        """
         party = self.running(launch)
         if party is None:
             return
         presence = self.presence(party)
+        for each in presence.held:
+            each.ended = True
+        presence.held = []
         presence.turning = False
         presence.woken = False
         await self.wake(party)
-
-    async def unless_given(
-        self, party: Conversation, place: Whereabouts, pushed: Pushed
-    ) -> None:
-        """Wait `patience` for `party`'s held session to start a turn on what `pushed` gave it; where none does, leave it to be told as anything waiting is, and say so."""
-        await asyncio.sleep(self.patience.total_seconds())
-        presence = self.presence(party)
-        if presence.pushed != pushed:
-            return
-        presence.pushed = None
-        presence.woken = False
-        self.say(
-            f"{place.launch}: {self.roster().who(party)}'s held session started no "
-            f"turn on what it was given within {self.patience.total_seconds():g} "
-            "seconds, so it's told at their next call"
-        )
 
     def pushed(
         self, party: Conversation, place: Whereabouts, waiting: list[Item]

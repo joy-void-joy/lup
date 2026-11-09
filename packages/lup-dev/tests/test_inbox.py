@@ -1728,9 +1728,10 @@ def test_an_interrupt_through_lup_takes_the_held_session_for_idle_and_gives_it_w
     assert first_note("Stop that.") in HeldPrompt.model_validate_json(given).text
 
 
-def test_a_held_session_starting_no_turn_in_time_is_told_at_its_next_call_and_never_rung(
+def test_what_a_held_session_is_given_mid_call_is_told_once_as_its_turn_takes_it(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
+    """After a restart of the service, a session mid-call is taken for idle and given a turn, which it reads only once its call ends, however long that takes: no hook tells it meanwhile."""
     with inboxed(
         machine, clock, notices, said, holding=True, patience=timedelta(0)
     ) as delivery:
@@ -1738,23 +1739,45 @@ def test_a_held_session_starting_no_turn_in_time_is_told_at_its_next_call_and_ne
         hook = machine.host.launch("one").hook
         messages = Socket(machine.host.launch("one").messages)
         launcher = Launcher(machine.launch("one").held)
+        started = send(hook, claude("SessionStart", source="startup"))
+        _, title = named_at_start(started)
+        inbox("send", "one", "Anyone?")
+        [given] = launcher.ringing()
+        prompt = HeldPrompt.model_validate_json(given).text
+        during = [
+            send(hook, bash("b1")),
+            send(hook, claude("PostToolUse", tool_name="Bash", tool_use_id="b1")),
+        ]
+        pending = delivery.inbox.item(1).state
+        taken = send(
+            hook, claude("UserPromptSubmit", prompt=prompt, session_title=title)
+        )
+        state = delivery.inbox.item(1).state
+        launcher.close()
+        frames = messages.close()
+    assert during == ["", ""]
+    assert pending == Waiting()
+    assert taken == ""
+    assert state == Told(at=clock.now(), how="wake")
+    assert frames == []
+
+
+def test_what_a_held_session_never_took_is_told_its_next_start(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        launcher = Launcher(machine.launch("one").held)
         send(hook, claude("SessionStart", source="startup"))
         send(hook, claude("Stop", stop_hook_active=False))
         inbox("send", "one", "Anyone?")
         launcher.ringing()
-        put_back = until(lambda: any("started no turn" in line for line in said))
+        resumed = send(hook, claude("SessionStart", source="resume"))
         state = delivery.inbox.item(1).state
-        told = send(hook, bash("b1"))
         launcher.close()
-        frames = messages.close()
-    assert put_back
-    assert state == Waiting()
-    assert context(told) == first_note("Anyone?")
-    assert frames == []
-    assert (
-        f"one: `{tmp_path.name}`'s held session started no turn on what it was "
-        "given within 0 seconds, so it's told at their next call"
-    ) in said
+    assert first_note("Anyone?") in context(resumed)
+    assert isinstance(state, Told)
 
 
 def test_a_push_not_taken_in_time_is_put_back_and_its_launch_rung_through_the_socket_from_then_on(

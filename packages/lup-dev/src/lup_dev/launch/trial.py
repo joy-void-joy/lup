@@ -15,7 +15,8 @@ would mean:
    any package's script could be, tries to write a turn to the session's
    input through `/proc`; the step fails where it can;
 4. **interrupts:** a turn running a long command is ended through the host, and
-   the session takes the operator's next words;
+   the session takes the operator's next words; then the same while it waits
+   in `wait_inbox`, a call lup holds;
 5. **survives a restart:** the host service stops and starts again, the session
    and its room untouched, and the operator's words still reach it;
 6. **ends:** the host ends the session and its room;
@@ -383,7 +384,23 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
             "That was interrupted on purpose. Answer with the single word PEAR.",
             "PEAR",
         )
-        return f"The turn ended at the interrupt, and then: {answer}"
+        self.sent(
+            "Call lup's `wait_inbox` tool now, with no `within`, and wait for it. "
+            "When it returns, answer with the single word LATE."
+        )
+        self.until(
+            lambda: self.calling(launch.launch),
+            "the session didn't call `wait_inbox`",
+        )
+        self.host.ask(Interrupt(launch=launch.launch), Done)
+        waited = self.answered(
+            "That was interrupted on purpose too. Answer with the single word PLUM.",
+            "PLUM",
+        )
+        return (
+            f"The turn ended at the interrupt, and then: {answer} Interrupted in "
+            f"`wait_inbox`, then: {waited}"
+        )
 
     def restarted(self) -> str:
         """Stop the host service and start it again, see the session served and its room running, and its answer come back."""
