@@ -50,6 +50,7 @@ what a commit holds, as a forge reads them (`docs/field-notes.md`, *Host-side gi
 in a repository the room writes*).
 """
 
+import asyncio
 import hashlib
 import io
 import os
@@ -58,12 +59,13 @@ from itertools import batched
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal
 
-from lup.programs import ProgramError, Ran, run
+from lup.programs import ProgramError, Ran, awaited, run
 from lup.types import Model
 from lup_dev.errors import LupDevError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
+    from datetime import timedelta
 
 
 class GitError(LupDevError):
@@ -388,6 +390,40 @@ class Git(Model):
         self, *arguments: str, stdin: bytes | None = None, ok: list[int] | None = None
     ) -> Ran:
         """Run git with `arguments`; raise `GitError` on an exit status not in `ok`, or where git can't run."""
+        program, *words = self.command(*arguments)
+        try:
+            return run(program, *words, cwd=self.cwd, stdin=stdin, ok=ok)
+        except ProgramError as failed:
+            message = f"git {' '.join(arguments)} failed: {failed}"
+            raise GitError(message) from failed
+
+    async def awaited(
+        self, *arguments: str, within: timedelta, ok: list[int] | None = None
+    ) -> Ran:
+        """Run git with `arguments` as `run` does, on the event loop, which goes on meanwhile, killed past `within`; raise `GitError` where it ends with a status not in `ok`, can't run, or runs past `within`.
+
+        For git the host service runs on what a room writes: a ref or
+        `packed-refs` the room made a FIFO holds a read of it forever, and
+        `run` would hold the service's loop with it.
+        """
+        program, *words = self.command(*arguments)
+        try:
+            return await asyncio.wait_for(
+                awaited(program, *words, cwd=self.cwd, ok=ok),
+                within.total_seconds(),
+            )
+        except TimeoutError as slow:
+            message = (
+                f"git {' '.join(arguments)} ran past {within}, and was stopped: "
+                "something it reads may be a pipe nothing writes"
+            )
+            raise GitError(message) from slow
+        except ProgramError as failed:
+            message = f"git {' '.join(arguments)} failed: {failed}"
+            raise GitError(message) from failed
+
+    def command(self, *arguments: str) -> list[str]:
+        """Return the command running git with `arguments`, what could run code turned off, pinned where it is (`pinning`)."""
         safe = [
             "--no-replace-objects",
             *graphless(),
@@ -402,7 +438,7 @@ class Git(Model):
         ]
         pinned = [] if self.common is None else pinning(self.common, self.worktree)
         staged = [] if self.index is None else ["env", f"GIT_INDEX_FILE={self.index}"]
-        program, *words = [
+        return [
             *ungrafted(),
             *pinned,
             *staged,
@@ -411,11 +447,6 @@ class Git(Model):
             *self.arguments,
             *arguments,
         ]
-        try:
-            return run(program, *words, cwd=self.cwd, stdin=stdin, ok=ok)
-        except ProgramError as failed:
-            message = f"git {' '.join(arguments)} failed: {failed}"
-            raise GitError(message) from failed
 
     def text(self, *arguments: str) -> str:
         """Run git and return what it printed, without the trailing newline."""

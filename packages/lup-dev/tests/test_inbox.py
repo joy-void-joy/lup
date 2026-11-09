@@ -14133,11 +14133,24 @@ def started_on_dev(repository: Path) -> str:
 class SpawnsMade:
     """What a test's `spawn` did: each program it ran on the host, and each launch whose launcher it started."""
 
-    def __init__(self, *, limit: int = 32, status: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        limit: int = 32,
+        status: int = 0,
+        hung: bool = False,
+        **fields: object,
+    ) -> None:
         self.limit = limit
         self.status = status
+        self.hung = hung
+        """Whether the room's git never ends, as one the room stopped wouldn't."""
+        self.fields = fields
+        """The tool's other fields, as the test sets them."""
         self.programs: list[Program] = []
         self.launches: list[HeldLaunch] = []
+        self.running = threading.Event()
+        """Set once a program is running."""
 
     def tools(
         self, delivery: Delivery, machine: Layout, launchers: Launchers
@@ -14146,6 +14159,9 @@ class SpawnsMade:
 
         async def ran(program: Program) -> Ran:
             self.programs.append(program)
+            self.running.set()
+            if self.hung:
+                await asyncio.Event().wait()
             failed = b"fatal: a branch named that exists" if self.status else b""
             return Ran(command=program.command, status=self.status, error=failed)
 
@@ -14162,6 +14178,7 @@ class SpawnsMade:
                 "run": ran,
                 "starting": started_on_dev,
                 "limit": self.limit,
+                **self.fields,
             }
         )
 
@@ -14613,3 +14630,127 @@ def test_sessions_lists_a_launch_an_agent_spawned_under_its_spawner_saying_how(
             "lup-three, running  spawned by `w`, handed a concern"
         ),
     ]
+
+
+def test_a_ref_the_room_made_a_pipe_stops_its_spawn_and_holds_nothing_else_of_the_service(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """git reading a ref that's a FIFO nothing writes waits forever: off the service's loop and stopped in time, it neither holds the hooks of every launch nor the spawn past its limit."""
+    worktree = tmp_path / "w"
+    spawnable(worktree)
+    os.mkfifo(worktree / ".git" / "refs" / "heads" / "stuck")
+    spawned = SpawnsMade(reading=timedelta(seconds=3))
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        spawning=lambda delivery, launchers: spawned.tools(
+            delivery, machine, launchers
+        ),
+    ):
+        launched(machine, clock, worktree, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            spawning = pool.submit(
+                call, mcp, "spawn", {"name": "x", "brief": "Do it.", "start": "stuck"}
+            )
+            time.sleep(0.5)
+            meanwhile = send(hook, bash("b1"))
+            pending = not spawning.done()
+            answer, _ = spawning.result(timeout=60)
+    assert pending
+    assert meanwhile == ""
+    assert answer.startswith("Not spawned: `stuck` couldn't be read: git rev-parse")
+    assert "ran past 0:00:03, and was stopped" in answer
+    assert spawned.programs == []
+
+
+def test_a_room_git_that_never_ends_stops_its_spawn_and_holds_no_other(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    worktree = tmp_path / "w"
+    spawnable(worktree)
+    spawned = SpawnsMade(hung=True, making=timedelta(seconds=2), limit=1)
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        spawning=lambda delivery, launchers: spawned.tools(
+            delivery, machine, launchers
+        ),
+    ):
+        launched(machine, clock, worktree, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            first = pool.submit(call, mcp, "spawn", {"name": "x", "brief": "Do it."})
+            assert spawned.running.wait(timeout=60)
+            # Counted while under way: the limit of one holds a second off.
+            second, _ = call(mcp, "spawn", {"name": "y", "brief": "Do it."})
+            stopped, _ = first.result(timeout=60)
+        # Its count let go once it's stopped.
+        third, _ = call(mcp, "spawn", {"name": "z", "brief": "Do it."})
+    root = worktree / ".git" / "tree"
+    assert second.startswith(
+        "Not spawned: 1 session agents spawned runs already, the most that may at "
+        "once, against loops of spawns: `x`."
+    )
+    assert stopped == (
+        f"Not spawned: its worktree, {root / 'x'}, wasn't made in your room within "
+        "0:00:02, so its git was stopped"
+    )
+    assert third.startswith(f"Not spawned: its worktree, {root / 'z'}")
+    assert spawned.launches == []
+
+
+def test_a_repository_s_spawns_count_against_its_own_limit_as_well_as_the_host_s(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    worktree = tmp_path / "w"
+    spawnable(worktree)
+    repository = worktree / ".git"
+    spawned = SpawnsMade(each=1)
+    spawner = Conversation(repository=repository, runtime="claude", session="s1")
+    elsewhere = Conversation(
+        repository=tmp_path / "other.git", runtime="claude", session="o1"
+    )
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        spawning=lambda delivery, launchers: spawned.tools(
+            delivery, machine, launchers
+        ),
+    ):
+        launched(machine, clock, worktree, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        launched(
+            machine,
+            clock,
+            tmp_path / "theirs",
+            "theirs",
+            "claude",
+            repository=elsewhere.repository,
+            spawner=Spawner(launch="one", conversation=elsewhere),
+        )
+        another, _ = call(mcp, "spawn", {"name": "x", "brief": "Do it."})
+        launched(
+            machine,
+            clock,
+            tmp_path / "ours",
+            "ours",
+            "claude",
+            repository=repository,
+            spawner=Spawner(launch="one", conversation=spawner),
+        )
+        ours, _ = call(mcp, "spawn", {"name": "y", "brief": "Do it."})
+    assert another.startswith("`x` is starting")
+    assert ours.startswith(
+        "Not spawned: 1 session agents spawned of this repository runs already"
+    )
+    assert "`ours`" in ours
