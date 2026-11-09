@@ -42,6 +42,11 @@ class Holding(Model, arbitrary_types_allowed=True):
     minted: Callable[[], str]
     """A new session's id, which the launch gives it up front, so the lock on
     its writer is taken before it starts."""
+    normal: Callable[[str], str]
+    """A session's id in the one form the runtime gives it, by which its
+    writer's lock is kept and its hooks name it: an id typed in another form
+    of the same, its letters' case or its braces, given back so; raising
+    `ValueError` for one that can't be the runtime's."""
     fresh: Callable[[str], list[str]]
     """The arguments starting a new session under the id given."""
     resuming: Callable[[str], list[str]]

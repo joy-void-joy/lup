@@ -2771,29 +2771,28 @@ def named_session(
         return NamedSession(
             session=an_id(adapter, adapter.resumed(arguments)), arguments=arguments
         )
-    session = held.resume or holding.minted()
     try:
+        session = (
+            holding.minted() if held.resume is None else holding.normal(held.resume)
+        )
         naming = (
             holding.fresh(session) if held.resume is None else holding.resuming(session)
         )
     except ValueError as unnamed:
-        message = f"`{session}` can't be a session of {adapter.runtime.name()}'s"
+        message = f"`{held.resume}` can't be a session of {adapter.runtime.name()}'s"
         raise LaunchError(message) from unnamed
     return NamedSession(session=session, arguments=[*naming, *held.arguments])
 
 
 def an_id(adapter: Adapter, resumed: str | None) -> str | None:
-    """Return what a terminal launch's arguments resume where it's one of the runtime's session ids, which its writer's lock is kept by; none for a search term its picker opens on, or for none."""
+    """Return what a terminal launch's arguments resume where it's one of the runtime's session ids, in the one form the runtime gives it, by which its writer's lock is kept and the host heard it; none for a search term its picker opens on, or for none."""
     if resumed is None:
         return None
     holding = adapter.holding
     try:
-        if holding is not None:
-            holding.resuming(resumed)
-        segment(resumed)
+        return segment(resumed if holding is None else holding.normal(resumed))
     except ValueError:
         return None
-    return resumed
 
 
 def run_elsewhere(launcher: Launcher, session: str) -> Register | None:

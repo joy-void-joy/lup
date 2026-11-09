@@ -1681,6 +1681,15 @@ def resuming(session: str) -> list[str]:
     return ["--resume", str(UUID(session))]
 
 
+def normal(session: str) -> str:
+    """Return a Claude Code session's id in the form it gives one, a UUID's: lowercase, hyphenated; refuse one that isn't a UUID.
+
+    >>> normal("{0F6B1D2E6A624A399A8C1F2D3E4F5A6B}")
+    '0f6b1d2e-6a62-4a39-9a8c-1f2d3e4f5a6b'
+    """
+    return str(UUID(session))
+
+
 def minted() -> str:
     """Return a new session's id, as Claude Code takes one with `--session-id`: a UUID."""
     return str(uuid4())
@@ -3517,6 +3526,7 @@ def adapter() -> Adapter:
         pushing=Pushing(capabilities={CHANNEL: {}}, notice=pushed),
         holding=Holding(
             minted=minted,
+            normal=normal,
             fresh=fresh,
             resuming=resuming,
             session=held_session,

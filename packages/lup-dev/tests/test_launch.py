@@ -3205,3 +3205,28 @@ def test_a_terminal_launch_goes_on_whatever_yama_says(
     machine.traced("0")
 
     assert cli.launched(machine.adapter, [], project, machine.launcher) == 7
+
+
+def test_a_session_typed_in_another_form_of_its_id_is_the_same_session(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    machine = Machine(tmp_path, clock, sockets=sockets)
+    session = "0f6b1d2e-6a62-4a39-9a8c-1f2d3e4f5a6b"
+    machine.host.served.append(
+        dead(project).model_copy(update={"launch": "t1", "name": "a-terminal"})
+    )
+    machine.host.heard.append(session)
+
+    for typed in [session.upper(), "{" + session.replace("-", "") + "}"]:
+        with pytest.raises(LaunchError, match="run by launch `a-terminal`"):
+            cli.launched(
+                machine.adapter, ["--resume", typed], project, machine.launcher
+            )
+        with pytest.raises(LaunchError, match="run by launch `a-terminal`"):
+            cli.launched(
+                machine.adapter,
+                [],
+                project,
+                machine.launcher,
+                held=holding(project, resume=typed),
+            )
