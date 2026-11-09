@@ -266,11 +266,22 @@ class Starter(ABC):
         """Start the service, detached, appending what it prints to `log`."""
 
 
+def own_command() -> list[str]:
+    """Return the command running the `lup-dev` this process runs, from wherever it's started: its interpreter with `-P`, so its working directory, which may be a worktree a room writes, is never put on its path, and a module a room left there is never imported.
+
+    >>> own_command()[1:]
+    ['-P', '-m', 'lup_dev.cli']
+    """
+    return [sys.executable, "-P", "-m", "lup_dev.cli"]
+
+
 class Detached(Model, Starter):
     """Starts `lup-dev host` in a session of its own, which outlives whoever starts it."""
 
-    command: list[str] = [sys.executable, "-m", "lup_dev.cli", "host"]
-    """The command running the service: the running `lup_dev`'s, by default."""
+    command: list[str] = [*own_command(), "host"]
+    """The command running the service: the running `lup_dev`'s, by default,
+    started from whatever directory its caller is in, a worktree among them,
+    so nothing there is on its path (`own_command`)."""
 
     @override
     def start(self, log: Path) -> None:

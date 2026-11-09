@@ -89,6 +89,7 @@ from lup_dev.launch.trust import (
     Trusted,
     TrustError,
     Unanswered,
+    Unattended,
     Unchanged,
     UvToolchain,
     building,
@@ -2823,6 +2824,32 @@ def test_the_terminal_stops_asking_where_the_approval_was_answered_elsewhere(
     assert capsys.readouterr().out == "Approve? [y/N]: \n"
 
 
+class Later(Silent):
+    """An approval answered elsewhere after the terminal first looks: readable throughout, its answer none at first, then yes."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.theirs.send(b"answered")
+        self.looks = 0
+
+    def given(self) -> bool | None:
+        self.looks += 1
+        return None if self.looks == 1 else True
+
+
+def test_a_terminal_whose_input_ended_answers_nothing_and_waits_for_the_answer_elsewhere(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    read, write = os.pipe()
+    os.close(write)
+
+    assert Terminal(stdin=read).ask("Approve?", Later()) is None
+    assert capsys.readouterr().out == (
+        "Approve? [y/N]: \nNothing answers here, its input having ended: it waits "
+        "for your answer in the inbox.\n\n"
+    )
+
+
 def test_a_service_that_doesnt_know_approvals_is_said_with_what_to_do(
     audiobook: Path, kit: Kit, machine: Layout, clock: FakeClock
 ) -> None:
@@ -3434,3 +3461,19 @@ def test_lup_dev_trust_keeps_the_first_copy_and_says_so(
             "the dashboard answer."
         )
     ]
+
+
+def test_a_launcher_with_no_terminal_gives_up_an_approval_no_answer_comes_to(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    said: list[str] = []
+
+    with pytest.raises(TrustError, match="no answer to the approval came within"):
+        Unattended(say_to=said.append, within=timedelta(0)).ask("Approve?", Silent())
+
+    assert said == ["Approve? It waits for your answer in the inbox."]
+    assert capsys.readouterr().out == ""
+
+
+def test_a_launcher_with_no_terminal_takes_the_answer_given_in_the_inbox() -> None:
+    assert Unattended(say_to=lambda _: None).ask("Approve?", Arrived()) is None

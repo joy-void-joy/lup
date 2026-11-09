@@ -250,12 +250,14 @@ from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal, get_args, override
+from uuid import UUID, uuid4
 
 from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 from pydantic.alias_generators import to_camel
 
 import lup
 from lup import events
+from lup.adapters.claude.held import ClaudeHeld
 from lup.adapters.claude.layout import ClaudeLayout
 from lup.adapters.claude.settings import ClaudeSettings
 from lup.adapters.claude.terminal import own_settings
@@ -264,7 +266,7 @@ from lup.rooms.homes import inside, lines, opened, plain
 from lup.sessions.terminal import Cli, Hook, TerminalError
 from lup.tools.serving import Notice
 from lup.types import JsonObject, Model, MutableModel, Settings
-from lup_dev.adapters import Adapter, Pushing
+from lup_dev.adapters import Adapter, Holding, Pushing
 from lup_dev.host import written
 from lup_dev.host.courier import Failure, Heard, Spawned, Telling
 from lup_dev.host.homes import Found, home_of, served, translated
@@ -332,7 +334,9 @@ if TYPE_CHECKING:
     import httpx
 
     from lup.events import SessionEvent
+    from lup.rooms.engine import Pipes
     from lup.sessions.declaration import Declaration
+    from lup.sessions.held import HeldSession
     from lup_dev.host.protocol import Register
 
 type Writing = Literal["Edit", "Write"]
@@ -377,6 +381,12 @@ Claude Code's tools reference names them (code.claude.com/docs/en/tools-referenc
 read 2026-10-21), with what each does beside it. On Linux, `Glob` and `Grep`
 are absent by default, and Claude searches with `find` and `grep` through
 `Bash`, which is judged."""
+
+type NewProcess = Literal["startup", "resume", "fork"]
+"""The starts (`SessionStart`'s `source`) of a new process of Claude Code: one
+started, resumed or forked by `--fork-session`; `/clear` and a compaction come
+in the process that ran before (`Heard.anew`)."""
+
 
 type FreshStart = Literal["startup", "clear"]
 """The starts (`SessionStart`'s `source`) whose conversation begins empty: a
@@ -655,6 +665,7 @@ class SessionStart(Payload):
             fits=fits,
             title=self.session_title,
             fresh=self.source in get_args(FreshStart.__value__) and not self.agent_id,
+            anew=self.source in get_args(NewProcess.__value__) and not self.agent_id,
             takes_title=self.source in get_args(TitledStart.__value__)
             and not self.agent_id,
         )
@@ -1632,6 +1643,56 @@ def pushed(text: str, token: str) -> Notice:
     """
     message = ChannelMessage(content=text, meta={"wake": token})
     return Notice(method=f"notifications/{CHANNEL}", params=message.model_dump())
+
+
+def held_prompt(text: str, token: str) -> str:
+    """Return the user turn that starts an idle held session on `text`: wrapped as a channel's message is, its tag carrying `token`, so the session reads the same as when it's pushed to, and its turn's start, whose prompt is the turn whole, takes it by its token.
+
+    >>> print(held_prompt("Hi.", "t1"))
+    <channel source="lup" wake="t1">
+    Hi.
+    </channel>
+    """
+    return f'<channel source="{SERVER}" wake="{token}">\n{text}\n</channel>'
+
+
+def held_session(pipes: Pipes, said: Callable[[str], None]) -> HeldSession:
+    """Return a session of Claude Code held over its room's pipes (`lup.adapters.claude.held`)."""
+    return ClaudeHeld(pipes=pipes, said=said)
+
+
+def fresh(session: str) -> list[str]:
+    """Return the arguments starting a new session of Claude Code under the id `session`.
+
+    >>> fresh("0f6b1d2e-6a62-4a39-9a8c-1f2d3e4f5a6b")
+    ['--session-id', '0f6b1d2e-6a62-4a39-9a8c-1f2d3e4f5a6b']
+    """
+    return ["--session-id", str(UUID(session))]
+
+
+def resuming(session: str) -> list[str]:
+    """Return the arguments resuming Claude Code's session `session`, refusing an id that isn't a UUID, as Claude Code's never aren't.
+
+    >>> resuming("../x")
+    Traceback (most recent call last):
+    ...
+    ValueError: badly formed hexadecimal UUID string
+    """
+    return ["--resume", str(UUID(session))]
+
+
+def normal(session: str) -> str:
+    """Return a Claude Code session's id in the form it gives one, a UUID's: lowercase, hyphenated; refuse one that isn't a UUID.
+
+    >>> normal("{0F6B1D2E6A624A399A8C1F2D3E4F5A6B}")
+    '0f6b1d2e-6a62-4a39-9a8c-1f2d3e4f5a6b'
+    """
+    return str(UUID(session))
+
+
+def minted() -> str:
+    """Return a new session's id, as Claude Code takes one with `--session-id`: a UUID."""
+    return str(uuid4())
 
 
 def hooks(
@@ -3463,6 +3524,14 @@ def adapter() -> Adapter:
         spawned=spawned,
         woken=woken,
         pushing=Pushing(capabilities={CHANNEL: {}}, notice=pushed),
+        holding=Holding(
+            minted=minted,
+            normal=normal,
+            fresh=fresh,
+            resuming=resuming,
+            session=held_session,
+            prompt=held_prompt,
+        ),
         hooks=hooks,
         channel=ClaudeChannel(),
         agent=agent,

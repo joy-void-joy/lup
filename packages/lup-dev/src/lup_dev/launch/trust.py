@@ -92,9 +92,12 @@ import os
 import select
 import tempfile
 import termios
+import time
 import tomllib
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from contextlib import contextmanager
+from datetime import timedelta
 from importlib.machinery import SOURCE_SUFFIXES, FileFinder, SourceFileLoader
 from importlib.util import resolve_name
 from pathlib import Path, PurePosixPath
@@ -806,14 +809,20 @@ class Asker(ABC):
         """Ask `question`, no by default, until it's answered here or `elsewhere`: whether the operator answered yes here; none where it was answered elsewhere first."""
 
 
-def line(descriptor: int) -> str:
-    """Read one line from `descriptor` a byte at a time, so nothing past it leaves the stream `select` watches; empty at its end."""
+def line(descriptor: int) -> str | None:
+    """Read one line from `descriptor` a byte at a time, so nothing past it leaves the stream `select` watches; none where its input ended before anything of one was read."""
+    ended = False
 
     def read() -> Iterator[bytes]:
-        while (byte := os.read(descriptor, 1)) not in [b"", b"\n"]:
+        nonlocal ended
+        while (byte := os.read(descriptor, 1)) != b"\n":
+            if byte == b"":
+                ended = True
+                return
             yield byte
 
-    return b"".join(read()).decode(errors="replace")
+    said = b"".join(read())
+    return None if ended and not said else said.decode(errors="replace")
 
 
 def yes(said: str) -> bool | None:
@@ -852,21 +861,67 @@ class Terminal(Model, Asker):
         """Ask until the operator answers y or n, Enter answering no, while watching for an answer given elsewhere.
 
         Where one comes first, the question stops, and what was typed of an
-        answer is dropped, so it reaches nothing after.
+        answer is dropped, so it reaches nothing after. Where the input ends,
+        as a launch's run by a program with nothing to answer does, nobody
+        answers here, rather than its end reading as Enter, a no: the
+        question waits for its answer elsewhere alone.
         """
         typer.echo(f"{question} [y/N]: ", nl=False)
+        watched: list[int | Elsewhere] = [self.stdin, elsewhere]
         while True:
-            readable, _, _ = select.select([self.stdin, elsewhere], [], [])
+            readable, _, _ = select.select(watched, [], [])
             if elsewhere in readable and elsewhere.given() is not None:
                 typer.echo()
                 if os.isatty(self.stdin):
                     termios.tcflush(self.stdin, termios.TCIFLUSH)
                 return None
             if self.stdin in readable:
-                answer = yes(line(self.stdin))
+                said = line(self.stdin)
+                if said is None:
+                    typer.echo(
+                        "\nNothing answers here, its input having ended: it waits "
+                        "for your answer in the inbox."
+                    )
+                    watched = [elsewhere]
+                    continue
+                answer = yes(said)
                 if answer is not None:
                     return answer
                 typer.echo(f"Answer y or n. {question} [y/N]: ", nl=False)
+
+
+class Unattended(Model, Asker):
+    """No terminal: what's said goes to the launch's log, and each question waits for its answer in the inbox alone, which the dashboard gives, as a held launch's launcher asks (`lup_dev.launch.held`)."""
+
+    say_to: Callable[[str], None]
+    """Where it says what it would print."""
+    within: timedelta = timedelta(hours=1)
+    """How long a question waits for its answer before nothing waits on it any
+    more: a launch with no one waiting on it isn't started by a late answer."""
+
+    @override
+    def say(self, text: str) -> None:
+        self.say_to(text)
+
+    @override
+    def show(self, text: str) -> None:
+        del text
+
+    @override
+    def ask(self, question: str, elsewhere: Elsewhere) -> bool | None:
+        """Wait for the question's answer in the inbox, and return none: it's answered elsewhere; raise `TrustError` where none comes within `within`."""
+        self.say_to(f"{question} It waits for your answer in the inbox.")
+        deadline = time.monotonic() + self.within.total_seconds()
+        while elsewhere.given() is None:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                message = (
+                    f"no answer to the approval came within {self.within}, so the "
+                    "launch that asked it doesn't start"
+                )
+                raise TrustError(message)
+            select.select([elsewhere], [], [], left)
+        return None
 
 
 class Approving(Model, arbitrary_types_allowed=True):
@@ -2387,11 +2442,17 @@ class Trust(Model, arbitrary_types_allowed=True):
         )
 
 
-def machine_trust(root: Path, inside: list[str], reading: Path | None = None) -> Trust:
+def machine_trust(
+    root: Path,
+    inside: list[str],
+    reading: Path | None = None,
+    asker: Asker | None = None,
+) -> Trust:
     """Return trust on launch for the repository at `root`, with this machine's settings, the terminal, the inbox in the host service, uv, the service's client, and the engine and ruff to judge the zone's change with.
 
-    `inside` names the runtimes whose session this runs inside, and `reading`
-    the worktree an approval it asks has its types read in (`Trust.reading`).
+    `inside` names the runtimes whose session this runs inside, `reading`
+    the worktree an approval it asks has its types read in (`Trust.reading`),
+    and `asker` where it asks, this terminal by default.
     """
     settings = LupDevSettings()
     layout = Layout.of(settings)
@@ -2402,7 +2463,7 @@ def machine_trust(root: Path, inside: list[str], reading: Path | None = None) ->
         root=root,
         reading=reading,
         layout=layout,
-        asker=Terminal(),
+        asker=Terminal() if asker is None else asker,
         approvals=InboxApprovals(host=host),
         toolchain=toolchain,
         host=host,

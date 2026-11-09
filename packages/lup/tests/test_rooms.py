@@ -3,8 +3,11 @@
 No test runs podman.
 """
 
+import asyncio
+import inspect
 import json
-from datetime import UTC, datetime
+import socket
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
@@ -12,6 +15,8 @@ import pytest
 from pydantic import ValidationError
 
 from lup.adapters.claude import Claude
+from lup.adapters.claude.held import unpushed
+from lup.adapters.claude.standin import StandIn
 from lup.programs import Ran
 from lup.rooms import (
     Container,
@@ -23,10 +28,20 @@ from lup.rooms import (
     Podman,
     Room,
 )
-from lup.rooms.engine import Invocation, Process, StoredImage
+from lup.rooms.engine import (
+    Contained,
+    Ending,
+    Invocation,
+    Piped,
+    Pipes,
+    Process,
+    StoredImage,
+    ended,
+)
+from lup.sessions import connected
 from lup.sessions.contract import guarded
 from lup.sessions.errors import RealCallInTestError
-from lup.sessions.terminal import Cli, TerminalSettings
+from lup.sessions.terminal import Cli, TerminalSettings, ToolServer
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -183,6 +198,127 @@ def test_a_run_without_a_terminal_on_its_own_network() -> None:
     assert "--interactive" not in command
     assert "--tty" not in command
     assert "--network=private" in command
+
+
+def test_a_held_run_makes_its_home_and_starts_its_command_with_no_input(
+    tmp_path: Path,
+) -> None:
+    started: list[list[str]] = []
+    standins: list[StandIn] = []
+
+    async def start(arguments: list[str]) -> Contained:
+        started.append(arguments)
+        standin = StandIn(session="s-1", arguments=arguments)
+        standins.append(standin)
+        return standin
+
+    engine = Podman(start=start)
+    invocation = Invocation(
+        container=Container(image=IMAGE, mounts=[Mount(source=tmp_path)]),
+        command=["/opt/clis/claude"],
+        workdir=tmp_path,
+        home=Path("/home/op"),
+        home_source=tmp_path / "room-home",
+    )
+
+    async def held() -> Contained:
+        return await engine.held(invocation)
+
+    assert asyncio.run(held()) is standins[0]
+    assert started == [engine.command(invocation)]
+    assert "--interactive" not in started[0]
+    assert "--tty" not in started[0]
+    assert (tmp_path / "room-home").is_dir()
+
+
+def test_a_held_run_refuses_a_terminal(tmp_path: Path) -> None:
+    invocation = Invocation(
+        container=Container(image=IMAGE, mounts=[Mount(source=tmp_path)]),
+        command=["/opt/clis/claude"],
+        workdir=tmp_path,
+        home=Path("/home/op"),
+        home_source=tmp_path / "room-home",
+        terminal=True,
+    )
+
+    with pytest.raises(ContainerError, match="has no terminal"):
+        asyncio.run(Podman().held(invocation))
+
+
+def test_a_held_run_is_refused_in_tests(tmp_path: Path) -> None:
+    invocation = Invocation(
+        container=Container(image=IMAGE, mounts=[Mount(source=tmp_path)]),
+        command=["/opt/clis/claude"],
+        workdir=tmp_path,
+        home=Path("/home/op"),
+        home_source=tmp_path / "room-home",
+    )
+
+    with pytest.raises(RealCallInTestError, match="recording `start`"):
+        asyncio.run(Podman().held(invocation))
+
+
+class Stuck(Contained):
+    """A run that ends only once it's made to, saying what it was sent."""
+
+    def __init__(self) -> None:
+        self.signals: list[str] = []
+        self.made = asyncio.Event()
+
+    @override
+    async def waited(self) -> int:
+        await self.made.wait()
+        return 137
+
+    @override
+    def signalled(self, ending: Ending) -> None:
+        self.signals.append(ending)
+        if ending == "made":
+            self.made.set()
+
+
+def test_a_program_that_doesn_t_end_at_its_input_s_end_is_asked_then_made_to() -> None:
+    async def ending() -> tuple[int, list[str], bool]:
+        mine, theirs = socket.socketpair()
+        reading, writing = await asyncio.open_unix_connection(sock=mine)
+        heard, _ = await asyncio.open_unix_connection(sock=theirs)
+        stuck = Stuck()
+        status = await ended(
+            Piped(run=stuck, pipes=Pipes(input=writing, output=reading)), timedelta(0)
+        )
+        # Its input's end written, what it says after can still be read.
+        return status, stuck.signals, await heard.read() == b""
+
+    assert asyncio.run(ending()) == (137, ["asked", "made"], True)
+
+
+def test_a_command_runs_inside_a_running_container_as_its_own_processes_do() -> None:
+    engine, asked = podman(exited(3, "refused"))
+
+    ran = engine.inside("lup-lup-dev", ["python3", "-c", "print(1)"])
+
+    assert (ran.status, ran.output) == (3, b"refused")
+    assert asked.processes[-1] == Process(
+        arguments=["podman", "exec", "lup-lup-dev", "python3", "-c", "print(1)"],
+        capture=True,
+    )
+
+
+def test_a_container_is_stopped_by_its_name_and_a_stop_podman_refuses_raises() -> None:
+    engine, asked = podman(exited(0))
+
+    engine.stop("lup-lup-dev")
+
+    assert asked.processes[-1].arguments == [
+        "podman",
+        "stop",
+        "--ignore",
+        "--time=10",
+        "lup-lup-dev",
+    ]
+    failing, _ = podman(exited(125, "Error: no store"))
+    with pytest.raises(ContainerError, match="couldn't stop the container lup-x"):
+        failing.stop("lup-x")
 
 
 def test_a_mount_receiving_what_s_mounted_later_is_a_slave() -> None:
@@ -590,6 +726,17 @@ class RecordingEngine(ContainerEngine):
         self.ran.append(invocation)
         return 7
 
+    @override
+    async def held(self, invocation: Invocation) -> Contained:
+        """Connect as the room's first program would, to the socket its command names, which a test places on the host."""
+        self.ran.append(invocation)
+        return await StandIn.connected(
+            session="s-1",
+            arguments=invocation.command,
+            place=Path(invocation.command[3]),
+            lingering=False,
+        )
+
 
 @pytest.fixture
 def worktree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -715,3 +862,113 @@ def test_a_launch_refuses_variables_the_terminal_needs_otherwise(
                 directory=tmp_path / "launch", cli=Cli(program=Path("/opt/clis/claude"))
             ),
         )
+
+
+def test_a_held_room_runs_its_first_program_on_the_launcher_s_socket_then_the_held_command(
+    tmp_path: Path, worktree: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    engine = RecordingEngine()
+    starting = ["/launch/bin/lup-environment", '["uv", "sync"]']
+    room = Room(
+        agent=Claude(model="opus"),
+        container=Container(image=IMAGE, mounts=[Mount(source=tmp_path)]),
+        home_source=tmp_path / "room-home",
+        engine=engine,
+        before=starting,
+    )
+    launch = tmp_path / "launch"
+    settings = TerminalSettings(
+        directory=launch,
+        cli=Cli(program=Path("/opt/clis/claude")),
+        servers=[ToolServer(name="lup", socket=Path("/run/lup/mcp.sock"), pushes=True)],
+        messages=Path("/run/lup/messages.sock"),
+    )
+    held = Claude(model="opus").held(settings)
+    # The test's room is no container: it reaches the socket at its host path,
+    # one short enough for a socket's.
+    listening = tmp_path_factory.mktemp("s") / "session.sock"
+
+    async def holding() -> int:
+        piped = await room.hold(
+            arguments=["--session-id", "s-1"],
+            settings=settings,
+            listening=listening,
+            connecting=listening,
+        )
+        gone = not listening.exists()
+        status = await ended(piped, timedelta(seconds=5))
+        assert gone
+        return status
+
+    assert asyncio.run(holding()) == 0
+    [ran] = engine.ran
+    assert not ran.terminal
+    assert ran.command == [
+        "python3",
+        "-I",
+        str(launch / "connected.py"),
+        str(listening),
+        *starting,
+        *held.command,
+        "--session-id",
+        "s-1",
+    ]
+    assert (launch / "connected.py").read_text() == inspect.getsource(connected)
+    assert "-p" not in ran.command
+    assert "--print" not in ran.command
+    assert "--dangerously-load-development-channels" not in ran.command
+    assert "--messaging-socket-path" not in ran.command
+    assert held.command[-5:] == [
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json",
+    ]
+    # The terminal's own command whole, lup's settings and hooks among it, then
+    # the stream-json flags: nothing pushed, no messaging socket.
+    terminal = Claude(model="opus").terminal(unpushed(settings))
+    assert held.command[:-5] == terminal.command
+    settings_file = held.command[held.command.index("--settings") + 1]
+    assert held.files[Path(settings_file)] == terminal.files[Path(settings_file)]
+    assert '"hooks"' in held.files[Path(settings_file)]
+    mode = held.command.index("--permission-mode")
+    assert held.command[mode + 1] == "bypassPermissions"
+    assert engine.ensured == [IMAGE]
+
+
+def test_a_held_room_whose_first_program_never_connects_is_made_to_end(
+    tmp_path: Path, worktree: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    class Silent(RecordingEngine):
+        """Starts a room that connects to nothing and ends with status 1."""
+
+        @override
+        async def held(self, invocation: Invocation) -> Contained:
+            self.ran.append(invocation)
+            standin = StandIn(session="s-1", arguments=invocation.command)
+            standin.status = 1
+            standin.ended.set()
+            return standin
+
+    room = Room(
+        agent=Claude(model="opus"),
+        container=Container(image=IMAGE, mounts=[Mount(source=tmp_path)]),
+        home_source=tmp_path / "room-home",
+        engine=Silent(),
+    )
+    settings = TerminalSettings(
+        directory=tmp_path / "launch", cli=Cli(program=Path("/opt/clis/claude"))
+    )
+    listening = tmp_path_factory.mktemp("s") / "session.sock"
+
+    with pytest.raises(ContainerError, match="first program ended with status 1"):
+        asyncio.run(
+            room.hold(
+                arguments=[],
+                settings=settings,
+                listening=listening,
+                connecting=listening,
+            )
+        )
+    assert not listening.exists()

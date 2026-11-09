@@ -96,6 +96,9 @@ def worktree(directory: Path, repository: Path) -> Path | None:
                 "--git-common-dir",
             ],
             cwd=directory,
+            # A held session's input is its socket, which nothing but its
+            # runtime is to hold.
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             check=False,

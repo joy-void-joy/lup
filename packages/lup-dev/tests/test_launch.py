@@ -10,9 +10,11 @@ import csv
 import io
 import json
 import shlex
+import socket
 import stat
 import subprocess
 import sys
+import threading
 import tomllib
 from datetime import timedelta
 from functools import partial
@@ -21,12 +23,14 @@ from typing import TYPE_CHECKING, override
 
 import pytest
 from filelock import FileLock
+from pydantic import Field
 from typer.testing import CliRunner
 
 import lup
 from lup import events
+from lup.adapters.claude.standin import StandIn
 from lup.programs import Ran, run
-from lup.rooms.engine import Podman, Process
+from lup.rooms.engine import Contained, Podman, Process
 from lup.sessions.bridge import Bridge
 from lup.sessions.terminal import (
     Cli,
@@ -36,6 +40,7 @@ from lup.sessions.terminal import (
     TerminalSettings,
     ToolServer,
 )
+from lup.types import Model
 from lup_dev import Core, Modules, Project, Session, cli
 from lup_dev.adapters import Adapter, claude, codex
 from lup_dev.approval import Approval, ReleaseTool
@@ -47,18 +52,26 @@ from lup_dev.declaration.requirements import Printed, Tools
 from lup_dev.declaration.resolve import Selected, resolve
 from lup_dev.forge.github import GitHubError, Visibility
 from lup_dev.git import GitError
-from lup_dev.host.client import HostClient, Starter
+from lup_dev.host.client import HostClient, Outstanding, Starter, asked
+from lup_dev.host.held import CalledUp, End, HeldLaunch
+from lup_dev.host.holders import HeldEnd, HeldInterrupt, HeldPrompt
 from lup_dev.host.homes import home_of
 from lup_dev.host.names import container_name
 from lup_dev.host.protocol import (
+    Done,
     GitHubRepository,
     HostError,
     Limits,
+    Listed,
     Register,
     Registered,
+    Reply,
+    Request,
+    Talker,
 )
 from lup_dev.launch.clis import Channel, ChannelError
 from lup_dev.launch.guidance import OPENING
+from lup_dev.launch.held import Writing
 from lup_dev.launch.room import RoomError
 from lup_dev.launch.session import (
     LaunchError,
@@ -71,7 +84,7 @@ from lup_dev.launch.session import (
     trusted,
 )
 from lup_dev.launch.trust import Outcome, Unchanged
-from lup_dev.layout import Layout, digest
+from lup_dev.layout import HostPaths, Layout, digest
 from lup_dev.migration import sized
 from lup_dev.policy.worktrees import Making
 from lup_dev.private.withheld import Facts, Withheld
@@ -210,12 +223,26 @@ class Events:
         self.said.append(event)
 
 
+class Held(Model, arbitrary_types_allowed=True):
+    """A session's writer, held by a launch a test stands in for."""
+
+    writing: Writing
+    lock: FileLock
+
+
 class Host(HostClient):
     """The host service's client, with no service behind: each call recorded."""
 
     events: Events
     served: list[Register] = []
     sockets: Path
+    heard: list[str] = []
+    """The sessions whose hooks the service heard, in each launch."""
+    asked: list[Request] = []
+    up: threading.Event = Field(default_factory=threading.Event)
+    ending: list[Held] = []
+    """The locks a held request lets go before it's answered, as the launch it
+    ends would, where a test says."""
 
     @override
     def ensure(self) -> None:
@@ -241,6 +268,40 @@ class Host(HostClient):
     @override
     def unregister(self, launch: str) -> None:
         self.events.record(f"unregister {launch}")
+
+    @override
+    def listed(self) -> Listed:
+        """List the launches served, each held one's session heard where `heard` says."""
+        return Listed(
+            launches=self.served,
+            talkers={
+                each.launch: [
+                    Talker(path=each.name or "", own=each.name or "", session=session)
+                    for session in self.heard
+                ]
+                for each in self.served
+            },
+        )
+
+    @override
+    def ask[R: Reply](self, request: Request, reply: type[R]) -> R:
+        self.events.record(f"ask {request.kind}")
+        self.asked.append(request)
+        if isinstance(request, CalledUp):
+            self.up.set()
+        return reply.model_validate(Done().model_dump())
+
+    @override
+    def held(self, request: Request) -> Outstanding:
+        """Answer a held request at once: done, after `ending` runs."""
+        self.events.record(f"held {request.kind}")
+        self.asked.append(request)
+        for each in self.ending:
+            each.writing.let_go(each.lock)
+        mine, theirs = socket.socketpair()
+        theirs.sendall(Done().model_dump_json().encode())
+        theirs.close()
+        return Outstanding(connection=mine)
 
 
 class Nothing(Starter):
@@ -311,6 +372,16 @@ class Engine:
         self.unshared: list[list[str]] = []
         self.during: Callable[[], object] | None = None
         """What the room does while it runs, where a test has it do something."""
+        self.held_run: list[str] = []
+        """A held run's command, where one started."""
+        self.standin: StandIn | None = None
+        self.lingering = False
+        """Whether a held session's turns run until interrupted."""
+        self.started = threading.Event()
+        self.sockets = Path("/nowhere")
+        """The launch's socket directory, where a held run connects."""
+        self.stopping_fails = False
+        """Whether podman fails to stop a container."""
 
     def __call__(self, process: Process) -> Ran:
         self.processes.append(process)
@@ -343,6 +414,12 @@ class Engine:
                 return Ran(command=process.arguments, status=0)
             case ["unshare", *unshared]:
                 self.unshared.append(unshared)
+                return Ran(command=process.arguments, status=0)
+            case ["stop", "--ignore", _, name]:
+                self.record(f"stop {name}")
+                if self.stopping_fails:
+                    return Ran(command=process.arguments, status=125)
+                self.containers.pop(name, None)
                 return Ran(command=process.arguments, status=0)
             case ["run", *_]:
                 self.record("run")
@@ -380,6 +457,30 @@ class Engine:
         ]
         return ran
 
+    async def start(self, arguments: list[str]) -> Contained:
+        """Start a held run: Claude Code's wire answered in-process, connected as the room's first program connects, to the launch's session socket on the host, the session it was started under kept."""
+        self.record("held")
+        self.held_run = arguments
+        [name] = [
+            each.removeprefix("--name=")
+            for each in arguments
+            if each.startswith("--name=")
+        ]
+        self.containers[name] = "running"
+        session = (
+            arguments[arguments.index("--session-id") + 1]
+            if "--session-id" in arguments
+            else arguments[arguments.index("--resume") + 1]
+        )
+        self.standin = await StandIn.connected(
+            session=session,
+            arguments=arguments,
+            place=self.sockets / "session.sock",
+            lingering=self.lingering,
+        )
+        self.started.set()
+        return self.standin
+
 
 class Here(Facts):
     """The host as a launch's list of private values reads it: made-up, its remotes' hosts their own names, every repository public."""
@@ -413,6 +514,7 @@ class Machine:
         local: str | None = None,
         profiles: str | None = None,
         settled: bool = True,
+        sockets: Path | None = None,
     ) -> None:
         self.events = Events()
         self.unnamed = unnamed
@@ -431,9 +533,12 @@ class Machine:
             data=tmp_path / "data",
             config=tmp_path / "config" / "lup",
         )
-        self.sockets = tmp_path / "run" / "host" / "launches" / "this"
-        self.sockets.mkdir(parents=True)
+        self.sockets = sockets or tmp_path / "run" / "host" / "launches" / "this"
+        """The launch's socket directory: one short enough for a Unix socket's
+        path where a held launch makes its session's there."""
+        self.sockets.mkdir(parents=True, exist_ok=True)
         self.engine = Engine(record, ran=ran)
+        self.engine.sockets = self.sockets
         self.host = Host(
             layout=self.layout.host,
             clock=clock,
@@ -448,7 +553,7 @@ class Machine:
             layout=self.layout,
             trust=self.trust,
             host=self.host,
-            podman=Podman(execute=self.engine),
+            podman=Podman(execute=self.engine, start=self.engine.start),
             tools=Found(record, missing),
             clock=clock,
             terminal=TerminalVariables(
@@ -463,12 +568,24 @@ class Machine:
             github=self.github,
             facts=Here(tmp_path / "home"),
             rules=self.rules,
+            pause=paused,
+            host_paths=HostPaths(proc=tmp_path / "proc"),
         )
+        self.traced("1")
         self.adapter = claude.adapter().model_copy(
             update={"channel": Offline(events=self.events)}
         )
         if settled:
             self.settle()
+
+    def traced(self, scope: str | None) -> None:
+        """Set Yama's `ptrace_scope` as the launch reads it; none where Yama isn't there."""
+        place = self.launcher.host_paths.ptrace_scope
+        if scope is None:
+            place.unlink(missing_ok=True)
+            return
+        place.parent.mkdir(parents=True, exist_ok=True)
+        place.write_text(f"{scope}\n")
 
     def settle(self, account: str = "default") -> None:
         """Make each runtime's home of the project's rooms, and sign `account` in to each, as an earlier launch would have."""
@@ -534,6 +651,17 @@ class Machine:
     def judge(self, root: Path) -> Path:
         common = root / ".git"
         return self.layout.judge(common).command("lup-dev")
+
+
+@pytest.fixture
+def sockets(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A launch's socket directory whose path is short enough for a Unix socket's inside it, as `tmp_path`'s may not be under xdist."""
+    return tmp_path_factory.mktemp("s")
+
+
+async def paused(seconds: float) -> None:
+    """Wait no time at all: a held launch's looks for its first hook, without the clock."""
+    del seconds
 
 
 def dead(project: Path) -> Register:
@@ -2558,3 +2686,547 @@ def test_a_codex_launch_moves_its_threads_from_before_too(
     ]
     assert (room / rollout.relative_to(theirs)).is_file()
     assert home_of(machine.layout.host, "codex", THREAD) == room
+
+
+# A launch held with no terminal
+
+
+def holding(project: Path, *, resume: str | None = None) -> HeldLaunch:
+    """A held launch of Claude Code in `project`, under the id the host minted."""
+    return HeldLaunch(launch="h1", runtime="claude", worktree=project, resume=resume)
+
+
+def in_background(
+    machine: Machine, held: HeldLaunch
+) -> tuple[threading.Thread, list[int]]:
+    """Run the held launch in a thread of its own, as its launcher's process would, its status kept."""
+    statuses: list[int] = []
+    thread = threading.Thread(
+        target=lambda: statuses.append(
+            cli.launched(
+                machine.adapter, [], held.worktree, machine.launcher, held=held
+            )
+        )
+    )
+    thread.start()
+    return thread, statuses
+
+
+def test_a_held_launch_holds_its_session_over_stream_json_until_it_s_ended(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    machine = Machine(tmp_path, clock, sockets=sockets)
+    machine.engine.lingering = True
+
+    def heard() -> None:
+        machine.engine.started.wait(10)
+        if machine.engine.standin is not None:
+            machine.host.heard.append(machine.engine.standin.session)
+
+    hearing = threading.Thread(target=heard)
+    hearing.start()
+    thread, statuses = in_background(machine, holding(project))
+    assert machine.host.up.wait(10)
+    hearing.join()
+    socket_path = machine.layout.launch("h1").held
+    standin = machine.engine.standin
+    assert standin is not None
+
+    for request in [
+        HeldPrompt(text="<channel>hello</channel>"),
+        HeldInterrupt(),
+        HeldEnd(),
+    ]:
+        asked(socket_path, request, Done, timedelta(seconds=10))
+    thread.join(10)
+
+    assert statuses == [0]
+    run = machine.engine.held_run
+    session = standin.session
+    assert "-p" not in run
+    assert "--print" not in run
+    assert "--dangerously-load-development-channels" not in run
+    assert "--messaging-socket-path" not in run
+    # No input of podman's: the session's input and output are the socket the
+    # room's first program connects to, which nothing after it reaches.
+    assert "--interactive" not in run
+    assert "--tty" not in run
+    directory = machine.layout.launch("h1").directory
+    image = run.index(next(each for each in run if each.startswith("localhost/")))
+    assert run[image + 1 : image + 5] == [
+        "python3",
+        "-I",
+        str(directory / "connected.py"),
+        "/run/lup/session.sock",
+    ]
+    assert not (machine.sockets / "session.sock").exists()
+    assert run[-7:] == [
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json",
+        "--session-id",
+        session,
+    ]
+    assert standin.prompts == ["<channel>hello</channel>"]
+    assert standin.interrupts == 1
+    [held] = [each for each in machine.host.served if each.launch == "h1"]
+    assert held.held
+    [called] = [each for each in machine.host.asked if isinstance(each, CalledUp)]
+    assert called == CalledUp(launch="h1", name="dev", session=session)
+    said = machine.events.said
+    assert said.index("held") < said.index("ask called-up")
+    assert "Session: A turn started." in said
+    assert (
+        "Session: A turn ended: error_during_execution, aborted_tools, an error."
+        in said
+    )
+    assert "stop lup-work-dev" in said
+    assert said.index("stop lup-work-dev") < said.index("unregister h1")
+    assert not socket_path.exists()
+    assert not machine.layout.launch("h1").directory.exists()
+    assert Writing.of(machine.layout, "claude", session).held_by() is None
+
+
+def test_a_held_session_whose_first_hook_isn_t_heard_isn_t_called_up(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    machine = Machine(tmp_path, clock, sockets=sockets)
+
+    status = cli.launched(
+        machine.adapter, [], project, machine.launcher, held=holding(project)
+    )
+
+    assert status == 0
+    said = machine.events.said
+    assert not any(each.startswith("ask called-up") for each in said)
+    standin = machine.engine.standin
+    assert standin is not None
+    assert (
+        f"No hook of the session {standin.session} reached lup within 0:01:00, so "
+        "it isn't called up: it would run without lup's judge. Its runtime may "
+        "have stopped running hooks; it's ended."
+    ) in said
+    assert said.index("stop lup-work-dev") < said.index("unregister h1")
+    assert machine.engine.containers == {}
+
+
+def test_a_held_launch_whose_room_won_t_stop_stays_registered_for_the_sweep(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    machine = Machine(tmp_path, clock, sockets=sockets)
+    machine.engine.stopping_fails = True
+
+    cli.launched(machine.adapter, [], project, machine.launcher, held=holding(project))
+
+    said = machine.events.said
+    assert any(
+        each.startswith("The room, lup-work-dev, wasn't stopped: podman couldn't stop")
+        for each in said
+    )
+    assert (
+        "Launch `dev`'s room, lup-work-dev, may still run: the launch stays "
+        "registered, for the host's sweep to stop it and end it once this "
+        "launcher is gone."
+    ) in said
+    assert "unregister h1" not in said
+    # Its session's lock goes with its launcher, as any lock does, but the launch
+    # stays registered, naming the session the room may still write: a launch
+    # taking it over is refused until the sweep has stopped the room.
+    standin = machine.engine.standin
+    assert standin is not None
+    machine.host.heard.append(standin.session)
+
+    def yes(question: str) -> str:
+        del question
+        return ""
+
+    taking = machine.launcher.model_copy(update={"ask": yes})
+    with pytest.raises(LaunchError, match="run by launch `dev`, its hooks naming it"):
+        cli.launched(machine.adapter, ["--resume", standin.session], project, taking)
+
+
+def test_a_held_launch_resumes_the_session_it_names(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    machine = Machine(tmp_path, clock, sockets=sockets)
+    session = "0f6b1d2e-6a62-4a39-9a8c-1f2d3e4f5a6b"
+
+    cli.launched(
+        machine.adapter,
+        [],
+        project,
+        machine.launcher,
+        held=holding(project, resume=session),
+    )
+
+    assert machine.engine.held_run[-2:] == ["--resume", session]
+
+
+def test_a_held_launch_refuses_a_session_id_that_can_t_be_one(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    machine = Machine(tmp_path, clock, sockets=sockets)
+
+    with pytest.raises(LaunchError, match="can't be a session of claude's"):
+        cli.launched(
+            machine.adapter,
+            [],
+            project,
+            machine.launcher,
+            held=holding(project, resume="../../etc"),
+        )
+
+    assert not any(each.startswith("register") for each in machine.events.said)
+
+
+def test_a_session_another_launch_writes_is_refused_naming_it(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    machine = Machine(tmp_path, clock, sockets=sockets)
+    session = "0f6b1d2e-6a62-4a39-9a8c-1f2d3e4f5a6b"
+    writing = Writing.of(machine.layout, "claude", session)
+    lock = writing.taken("other")
+
+    try:
+        with pytest.raises(LaunchError, match="written by launch `other`"):
+            cli.launched(
+                machine.adapter,
+                [],
+                project,
+                machine.launcher,
+                held=holding(project, resume=session),
+            )
+    finally:
+        writing.let_go(lock)
+
+    assert not any(each.startswith("register") for each in machine.events.said)
+
+
+def test_a_terminal_resuming_a_held_session_takes_it_over_on_a_yes(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    machine = Machine(tmp_path, clock, sockets=sockets)
+    session = "0f6b1d2e-6a62-4a39-9a8c-1f2d3e4f5a6b"
+    writing = Writing.of(machine.layout, "claude", session)
+    lock = writing.taken("h9")
+    machine.host.served.append(holding_one(project))
+    machine.host.ending.append(Held(writing=writing, lock=lock))
+    asked_here: list[str] = []
+
+    def answering(question: str) -> str:
+        asked_here.append(question)
+        return ""
+
+    terminal = machine.launcher.model_copy(update={"ask": answering})
+
+    status = cli.launched(machine.adapter, ["--resume", session], project, terminal)
+
+    assert status == 7
+    assert asked_here == [
+        (
+            f"The session {session} is held by launch `held-one`, with no "
+            "terminal. End it and take it over here? [Y/n] "
+        )
+    ]
+    assert End(launch="h9") in machine.host.asked
+    assert (
+        "Launch `held-one` ended; its session is taken over here."
+        in machine.events.said
+    )
+    assert machine.engine.run()[-2:] == ["--resume", session]
+    assert writing.held_by() is None
+
+
+def holding_one(project: Path) -> Register:
+    """A held launch, `h9`, as the host serves it."""
+    return dead(project).model_copy(
+        update={"launch": "h9", "name": "held-one", "held": True}
+    )
+
+
+def test_a_terminal_launch_taking_over_by_its_flag_ends_the_held_one_asking_nothing(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    machine = Machine(tmp_path, clock, sockets=sockets)
+    session = "0f6b1d2e-6a62-4a39-9a8c-1f2d3e4f5a6b"
+    writing = Writing.of(machine.layout, "claude", session)
+    lock = writing.taken("h9")
+    machine.host.served.append(holding_one(project))
+    machine.host.ending.append(Held(writing=writing, lock=lock))
+
+    status = cli.launched(
+        machine.adapter,
+        ["--resume", session],
+        project,
+        machine.launcher,
+        take_over=True,
+    )
+
+    assert status == 7
+    assert End(launch="h9") in machine.host.asked
+    assert machine.engine.run()[-2:] == ["--resume", session]
+
+
+def test_a_session_another_terminal_writes_is_refused_without_a_question(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    machine = Machine(tmp_path, clock, sockets=sockets)
+    session = "0f6b1d2e-6a62-4a39-9a8c-1f2d3e4f5a6b"
+    writing = Writing.of(machine.layout, "claude", session)
+    lock = writing.taken("t1")
+    machine.host.served.append(
+        dead(project).model_copy(update={"launch": "t1", "name": "a-terminal"})
+    )
+    asked_here: list[str] = []
+
+    def answering(question: str) -> str:
+        asked_here.append(question)
+        return ""
+
+    terminal = machine.launcher.model_copy(update={"ask": answering})
+    try:
+        for taking_over in [False, True]:
+            with pytest.raises(LaunchError, match="written by launch `t1`"):
+                cli.launched(
+                    machine.adapter,
+                    ["--resume", session],
+                    project,
+                    terminal,
+                    take_over=taking_over,
+                )
+    finally:
+        writing.let_go(lock)
+
+    assert asked_here == []
+    assert not any(isinstance(each, End) for each in machine.host.asked)
+
+
+def test_a_terminal_resuming_a_held_session_with_no_terminal_to_ask_is_refused(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    machine = Machine(tmp_path, clock, sockets=sockets)
+    session = "0f6b1d2e-6a62-4a39-9a8c-1f2d3e4f5a6b"
+    writing = Writing.of(machine.layout, "claude", session)
+    lock = writing.taken("h9")
+    machine.host.served.append(holding_one(project))
+
+    try:
+        with pytest.raises(LaunchError, match="written by launch `h9`"):
+            cli.launched(
+                machine.adapter, ["--resume", session], project, machine.launcher
+            )
+    finally:
+        writing.let_go(lock)
+
+    assert not any(each.startswith("held") for each in machine.events.said)
+
+
+def test_codex_has_no_held_session_yet(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    machine = Machine(tmp_path, clock, sockets=sockets)
+
+    with pytest.raises(LaunchError, match="codex has no session held"):
+        cli.launched(
+            codex.adapter(),
+            [],
+            project,
+            machine.launcher,
+            held=holding(project).model_copy(update={"runtime": "codex"}),
+        )
+
+    assert machine.events.said == []
+
+
+def test_a_held_launch_s_room_still_running_after_its_launcher_died_is_stopped(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    machine = Machine(tmp_path, clock, sockets=sockets)
+    held = dead(project).model_copy(update={"held": True})
+    machine.host.served.append(held)
+    machine.engine.containers["lup-dead"] = "running"
+    machine.layout.launch("dead").directory.mkdir(parents=True)
+    machine.layout.launch("dead").held.touch()
+
+    serving = cli.swept(
+        machine.layout, machine.host, machine.launcher.podman, machine.events.record
+    )
+
+    assert serving == []
+    said = machine.events.said
+    stopping = said.index("stop lup-dead")
+    assert said[stopping + 1] == (
+        "Stopped lup-dead: launch dead's session was held by a launcher that's gone."
+    )
+    assert said.index("unregister dead") > stopping
+    assert not machine.layout.launch("dead").held.exists()
+
+
+def test_a_held_room_podman_can_t_stop_is_said_and_left_for_the_next_sweep(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock)
+    machine.host.served.extend(
+        [
+            dead(project).model_copy(update={"held": True}),
+            dead(project).model_copy(
+                update={"launch": "gone", "container": "lup-gone"}
+            ),
+        ]
+    )
+    machine.engine.containers["lup-dead"] = "running"
+    machine.engine.stopping_fails = True
+
+    serving = cli.swept(
+        machine.layout, machine.host, machine.launcher.podman, machine.events.record
+    )
+
+    assert serving == ["dead"]
+    said = machine.events.said
+    assert any(
+        each.startswith(
+            "lup-dead, launch dead's room, held by a launcher that's gone, wasn't "
+            "stopped, so it stays for the next sweep: podman couldn't stop"
+        )
+        for each in said
+    )
+    assert "unregister gone" in said
+    assert "unregister dead" not in said
+
+
+def test_a_held_launch_whose_launcher_still_runs_is_left_running(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    machine = Machine(tmp_path, clock, sockets=sockets)
+    machine.host.served.append(live(project).model_copy(update={"held": True}))
+    machine.engine.containers["lup-live"] = "running"
+    machine.layout.launches.mkdir(parents=True, exist_ok=True)
+
+    with FileLock(machine.layout.launch("live").lock):
+        serving = cli.swept(
+            machine.layout, machine.host, machine.launcher.podman, machine.events.record
+        )
+
+    assert serving == ["live"]
+    assert "stop lup-live" not in machine.events.said
+    assert machine.engine.containers == {"lup-live": "running"}
+
+
+def test_a_terminal_launch_s_room_still_running_is_left_to_its_session(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    machine = Machine(tmp_path, clock, sockets=sockets)
+    machine.host.served.append(dead(project))
+    machine.engine.containers["lup-dead"] = "running"
+
+    serving = cli.swept(
+        machine.layout, machine.host, machine.launcher.podman, machine.events.record
+    )
+
+    assert serving == ["dead"]
+    assert "stop lup-dead" not in machine.events.said
+
+
+def test_spawning_refuses_inside_an_agents_session(
+    project: Path, tmp_path: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    machine = Machine(tmp_path, clock)
+    monkeypatch.setattr(cli, "adapters", stubbed(machine))
+    monkeypatch.setattr(cli, "launching", machine.launching)
+    monkeypatch.setenv("CLAUDE_CODE_CHILD_SESSION", "1")
+
+    for words in [["claude"], ["interrupt", "dev"], ["end", "dev"]]:
+        result = runner.invoke(cli.app, ["spawn", *words])
+
+        assert isinstance(result.exception, LaunchError)
+        assert "inside a claude session" in str(result.exception)
+    assert machine.events.said == []
+
+
+def test_a_session_a_served_launch_s_hooks_name_is_refused_though_it_holds_no_lock(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    """A terminal launch that started its session with no id lup knew holds no lock on it, but the host heard its hooks name it."""
+    machine = Machine(tmp_path, clock, sockets=sockets)
+    session = "0f6b1d2e-6a62-4a39-9a8c-1f2d3e4f5a6b"
+    machine.host.served.append(
+        dead(project).model_copy(update={"launch": "t1", "name": "a-terminal"})
+    )
+    machine.host.heard.append(session)
+
+    with pytest.raises(LaunchError, match="run by launch `a-terminal`, its hooks"):
+        cli.launched(
+            machine.adapter,
+            [],
+            project,
+            machine.launcher,
+            held=holding(project, resume=session),
+        )
+
+    assert not any(each.startswith("register") for each in machine.events.said)
+
+
+def test_a_terminal_resuming_by_a_search_term_takes_no_lock(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock)
+
+    status = cli.launched(
+        machine.adapter, ["--resume", "the spawn/trial work"], project, machine.launcher
+    )
+
+    assert status == 7
+    assert not (machine.layout.state / "writers").exists() or not any(
+        (machine.layout.state / "writers").rglob("*.lock")
+    )
+
+
+@pytest.mark.parametrize("scope", ["0", None])
+def test_a_held_launch_refuses_where_any_process_may_trace_another(
+    scope: str | None, project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock)
+    machine.traced(scope)
+
+    with pytest.raises(LaunchError, match=r"Yama's `ptrace_scope` (is 0|isn't there)"):
+        cli.launched(
+            machine.adapter, [], project, machine.launcher, held=holding(project)
+        )
+
+    assert machine.events.said == []
+
+
+def test_a_terminal_launch_goes_on_whatever_yama_says(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock)
+    machine.traced("0")
+
+    assert cli.launched(machine.adapter, [], project, machine.launcher) == 7
+
+
+def test_a_session_typed_in_another_form_of_its_id_is_the_same_session(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    machine = Machine(tmp_path, clock, sockets=sockets)
+    session = "0f6b1d2e-6a62-4a39-9a8c-1f2d3e4f5a6b"
+    machine.host.served.append(
+        dead(project).model_copy(update={"launch": "t1", "name": "a-terminal"})
+    )
+    machine.host.heard.append(session)
+
+    for typed in [session.upper(), "{" + session.replace("-", "") + "}"]:
+        with pytest.raises(LaunchError, match="run by launch `a-terminal`"):
+            cli.launched(
+                machine.adapter, ["--resume", typed], project, machine.launcher
+            )
+        with pytest.raises(LaunchError, match="run by launch `a-terminal`"):
+            cli.launched(
+                machine.adapter,
+                [],
+                project,
+                machine.launcher,
+                held=holding(project, resume=typed),
+            )

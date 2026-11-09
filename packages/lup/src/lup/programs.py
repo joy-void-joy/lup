@@ -1,4 +1,4 @@
-"""Running a program: `run` waits for it and returns how it ended, `awaited` does so on an event loop, `started` keeps one running beside it, and `detached` starts one that outlives its caller.
+"""Running a program: `run` waits for it and returns how it ended, `awaited` does so on an event loop, `started` keeps one running beside it to talk to over its input and output, `spawned` one with its output the caller's, and `detached` starts one that outlives its caller.
 
     ran = run("git", "status", "--porcelain", cwd=root)
     ran.text()                                    # what it printed
@@ -304,6 +304,45 @@ async def started(program: str | Path, *arguments: str) -> Running:
     return Running(
         command=command, process=process, input=process.stdin, output=process.stdout
     )
+
+
+class Child(Model, arbitrary_types_allowed=True):
+    """A program running beside the event loop, its input nothing and its output the caller's own: what `spawned` returns."""
+
+    process: asyncio.subprocess.Process
+
+    async def waited(self) -> int:
+        """Wait for it to end, however it does, and return its status."""
+        return await self.process.wait()
+
+    def terminate(self) -> None:
+        """Ask it to end (`SIGTERM`); nothing where it has ended."""
+        if self.process.returncode is None:
+            self.process.terminate()
+
+    def kill(self) -> None:
+        """Make it end (`SIGKILL`); nothing where it has ended."""
+        if self.process.returncode is None:
+            self.process.kill()
+
+
+async def spawned(program: str | Path, *arguments: str) -> Child:
+    """Start `program` with `arguments` beside the event loop, its input nothing, what it prints and says reaching the caller's own, and return it running.
+
+    For a program the caller talks to some other way, as a held session's room
+    over a socket of its own (`lup.rooms.room.Room.hold`). Raise
+    `ProgramMissingError` where it can't be started.
+    """
+    command = [str(program), *arguments]
+    try:
+        # lup: ignore("subprocess", why="lup's one runner of programs, which every other module uses")
+        process = await asyncio.create_subprocess_exec(
+            *command, stdin=asyncio.subprocess.DEVNULL
+        )
+    except OSError as missing:
+        message = f"`{program}` can't be started: {missing}"
+        raise ProgramMissingError(message) from missing
+    return Child(process=process)
 
 
 class Apart(Model, arbitrary_types_allowed=True):
