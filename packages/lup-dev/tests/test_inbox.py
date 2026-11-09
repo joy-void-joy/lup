@@ -38,7 +38,7 @@ from typer.testing import CliRunner
 
 from lup import events
 from lup.github.serving import GitHubServing
-from lup.programs import Apart, Ran, run
+from lup.programs import Apart, ProgramMissingError, Ran, run
 from lup.programs import detached as started_apart
 from lup.rooms import Podman
 from lup.tools.serving import Answer as ToolAnswer
@@ -650,6 +650,7 @@ def launched(
     repository: Path | None = None,
     held: bool = False,
     spawner: Spawner | None = None,
+    model: str | None = None,
 ) -> Register:
     """Register a launch of `runtime` in `tmp_path` with the running service, its repository `tmp_path`'s `.git` unless `repository` names another, spawned by `spawner` where it's given."""
     judge = tmp_path / "judges" / "bin" / "lup-dev"
@@ -670,6 +671,7 @@ def launched(
         own=tmp_path.parent,
         held=held,
         spawner=spawner,
+        model=model,
     )
     client(machine.host, clock).register(registered)
     return registered
@@ -14143,11 +14145,14 @@ class SpawnsMade:
         limit: int = 32,
         status: int = 0,
         hung: bool = False,
+        missing: bool = False,
         **fields: object,
     ) -> None:
         self.limit = limit
         self.status = status
         self.hung = hung
+        self.missing = missing
+        """Whether each launcher can't be started, as where `lup-dev` is gone."""
         """Whether the room's git never ends, as one the room stopped wouldn't."""
         self.fields = fields
         """The tool's other fields, as the test sets them."""
@@ -14171,6 +14176,9 @@ class SpawnsMade:
 
         def start(spec: HeldLaunch, log: Path) -> Apart:
             self.launches.append(spec)
+            if self.missing:
+                message = f"`lup-dev` can't be run, logging to {log}"
+                raise ProgramMissingError(message)
             return started_apart("true", log=log)
 
         served = cli.spawn_tools(
@@ -14973,3 +14981,59 @@ def test_a_side_job_s_report_to_a_spawner_cleared_in_their_launch_reaches_who_to
     assert report.recipient == successor
     assert isinstance(report.reason, Ended)
     assert stale == []
+
+
+def test_a_spawn_whose_launcher_can_t_start_removes_its_worktree_and_branch(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    worktree = tmp_path / "w"
+    spawnable(worktree)
+    repository = worktree / ".git"
+    spawned = SpawnsMade(missing=True)
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        spawning=lambda delivery, launchers: spawned.tools(
+            delivery, machine, launchers
+        ),
+    ) as delivery:
+        launched(machine, clock, worktree, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        before = numbers(delivery)
+        answer, _ = call(mcp, "spawn", {"name": "x", "brief": "Do it."})
+        after = numbers(delivery)
+    root = repository / "tree" / "x"
+    assert answer.startswith("Not spawned: its launcher didn't start: ")
+    assert answer.endswith("; its worktree and branch were removed")
+    assert [each.command[-3:] for each in spawned.programs[1:]] == [
+        ["remove", "--force", str(root)],
+        ["branch", "-D", "x"],
+    ]
+    # No brief for a session that never comes.
+    assert after == before
+
+
+def test_what_an_agent_spawns_runs_on_the_model_its_own_launch_was_given(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    worktree = tmp_path / "w"
+    spawnable(worktree)
+    spawned = SpawnsMade()
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        spawning=lambda delivery, launchers: spawned.tools(
+            delivery, machine, launchers
+        ),
+    ):
+        launched(machine, clock, worktree, "one", "claude", model="haiku")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        call(mcp, "spawn", {"name": "x", "brief": "Do it."})
+    [launch] = spawned.launches
+    assert launch.arguments == ["--model", "haiku"]

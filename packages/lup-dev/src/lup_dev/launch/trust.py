@@ -1735,6 +1735,10 @@ class Trust(Model, arbitrary_types_allowed=True):
     (`Git.pinned`), never led through the worktree's `.git` file again, which
     a room writes. None finds it through `root`, as the operator's own
     `lup-dev trust` does in their worktree."""
+    asked_for: str = ""
+    """Who a launch asks an approval for, said first in it, where that's not
+    the operator at their terminal: an agent's spawn, which chose when to ask,
+    naming who spawned it; empty says nothing."""
     reading: Path | None = None
     """The worktree an approval it asks has its types read in, where that's not
     `root` (`proposed`): a bare repository's own directory holds no project, so
@@ -2154,7 +2158,11 @@ class Trust(Model, arbitrary_types_allowed=True):
                 )
                 raise TrustError(message)
             change = self.change(standing)
-            summary = change.summary()
+            summary = (
+                f"{self.asked_for}\n\n{change.summary()}"
+                if self.asked_for
+                else change.summary()
+            )
             question = change.question()
             diff = change.diff()
             number = self.approvals.asked(
@@ -2463,14 +2471,15 @@ def machine_trust(
     asker: Asker | None = None,
     *,
     found: Path | None = None,
+    asked_for: str = "",
 ) -> Trust:
     """Return trust on launch for the repository at `root`, with this machine's settings, the terminal, the inbox in the host service, uv, the service's client, and the engine and ruff to judge the zone's change with.
 
     `inside` names the runtimes whose session this runs inside, `reading`
     the worktree an approval it asks has its types read in (`Trust.reading`),
-    `asker` where it asks, this terminal by default, and `found` the
+    `asker` where it asks, this terminal by default, `found` the
     repository's git directory, where a launch found it already
-    (`Trust.found`).
+    (`Trust.found`), and `asked_for` whom it asks for (`Trust.asked_for`).
     """
     settings = LupDevSettings()
     layout = Layout.of(settings)
@@ -2480,6 +2489,7 @@ def machine_trust(
     return Trust(
         root=root,
         found=found,
+        asked_for=asked_for,
         reading=reading,
         layout=layout,
         asker=Terminal() if asker is None else asker,

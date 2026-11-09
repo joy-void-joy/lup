@@ -17,6 +17,7 @@ at a terminal (`docs/judging-writes.md`, *Staging part of a file*).
 """
 
 import asyncio
+import itertools
 import secrets
 import shutil
 import sys
@@ -2764,6 +2765,7 @@ def launched(
             own=homing.home.directory,
             held=held is not None,
             spawner=None if held is None else held.spawner,
+            model=model_named([*arguments, *([] if held is None else held.arguments)]),
         )
         naming = named_session(adapter, arguments, held)
         session, arguments = naming.session, naming.arguments
@@ -2912,6 +2914,20 @@ def located(worktree: Path, pinned: Path | None) -> Found:
         )
         raise LaunchError(message)
     return found
+
+
+def model_named(arguments: list[str]) -> str | None:
+    """Return the model a launch's runtime arguments name with `--model`, the last where they name it twice; none where they name none.
+
+    >>> model_named(["--resume", "s1", "--model", "haiku"]), model_named(["--model=opus"]), model_named([])
+    ('haiku', 'opus', None)
+    """
+    named = [
+        after if each == "--model" else each.removeprefix("--model=")
+        for each, after in itertools.pairwise([*arguments, ""])
+        if each == "--model" or each.startswith("--model=")
+    ]
+    return named[-1] if named and named[-1] else None
 
 
 def orphaned(launches: list[Register]) -> list[Register]:
@@ -3094,12 +3110,15 @@ def released(podman: Podman, launch: LaunchLayout, say: Callable[[str], None]) -
         )
 
 
-def launching(say: Callable[[str], None], *, unattended: bool = False) -> Launcher:
+def launching(
+    say: Callable[[str], None], *, unattended: bool = False, asked_for: str = ""
+) -> Launcher:
     """Return what a launch reaches on this machine, as its settings place it.
 
     It runs outside every agent's session, which the command checks first.
     `unattended`, a held launch's launcher with no terminal, an approval waits
-    for its answer in the inbox alone, what trust says going to `say`.
+    for its answer in the inbox alone, what trust says going to `say`, and
+    saying first whom it's asked for, `asked_for`, where that's said.
     """
     layout = Layout.of(LupDevSettings())
     clock = SystemClock()
@@ -3107,7 +3126,11 @@ def launching(say: Callable[[str], None], *, unattended: bool = False) -> Launch
     def trust(root: Path, found: Path) -> Outcome:
         if unattended:
             return machine_trust(
-                root, [], asker=Unattended(say_to=say), found=found
+                root,
+                [],
+                asker=Unattended(say_to=say),
+                found=found,
+                asked_for=asked_for,
             ).ensure()
         return trusted(root, [], found=found)
 
@@ -3541,13 +3564,34 @@ def spawn_launcher(
         adapter,
         [],
         held.worktree,
-        launching(said, unattended=True),
+        launching(said, unattended=True, asked_for=asked_for(held)),
         name=held.name,
         profile=held.profile,
         account=held.account,
         held=held,
     )
     raise typer.Exit(code=status)
+
+
+def asked_for(held: HeldLaunch) -> str:
+    """Say whom a held launch asks an approval for, first in it, where an agent spawned it: a room chose when it's asked, starting a session at whatever the running branch's tip then holds.
+
+    >>> from lup_dev.host.protocol import Spawner
+    >>> from lup_ledger.parties import Conversation
+    >>> spawner = Spawner(launch="a1", conversation=Conversation(repository=Path("/r.git"), runtime="r", session="s1"))
+    >>> asked_for(HeldLaunch(launch="b2", runtime="r", worktree=Path("/r.git/tree/x"), spawner=spawner))
+    "**Asked by an agent's spawn,** not at your terminal: a session of launch `a1`, s1, spawned one in /r.git/tree/x, whose start waits on this. Declining it starts nothing."
+    """
+    spawner = held.spawner
+    if spawner is None:
+        return ""
+    by = spawner.conversation
+    who = by.session if by.agent is None else f"{by.session}, its subagent {by.agent}"
+    return (
+        f"**Asked by an agent's spawn,** not at your terminal: a session of launch "
+        f"`{spawner.launch}`, {who}, spawned one in {held.worktree}, whose start "
+        "waits on this. Declining it starts nothing."
+    )
 
 
 def machine_accounts() -> Accounts:

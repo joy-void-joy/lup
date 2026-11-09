@@ -3477,3 +3477,24 @@ def test_a_launcher_with_no_terminal_gives_up_an_approval_no_answer_comes_to(
 
 def test_a_launcher_with_no_terminal_takes_the_answer_given_in_the_inbox() -> None:
     assert Unattended(say_to=lambda _: None).ask("Approve?", Arrived()) is None
+
+
+def test_a_spawn_s_approval_says_first_who_asked_it_and_trust_reads_the_repository_it_was_given(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    """A launch found its repository already: trust's git is pinned to that git directory, never led through the worktree's `.git`, and an agent's spawn says first that it asked."""
+    common = Path(shell.git(lup, "rev-parse", "--absolute-git-dir"))
+    trust = trusting(lup, kit, yes()).model_copy(
+        update={"found": common, "asked_for": "**Asked by an agent's spawn.**"}
+    )
+
+    trust.ensure()
+
+    assert trust.repository() == common
+    assert trust.git() == Git.pinned(common)
+    assert isinstance(trust.approvals, Here)
+    [asking] = trust.approvals.asking
+    assert Text.from_ansi(asking.summary).plain.startswith(
+        "**Asked by an agent's spawn.**\n\n"
+    )
+    assert asking.repository == common

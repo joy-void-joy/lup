@@ -361,6 +361,10 @@ class Register(Request, reads=False):
     call: its session's own conversation is theirs, as a subagent is their
     parent's. None for a launch the operator started, and in a record from
     before agents spawned."""
+    model: str | None = None
+    """The model its runtime's arguments named (`--model`), as its launcher was
+    given them, never the room: what the sessions it spawns run on. None where
+    they named none, the profile's then choosing."""
 
 
 class Rename(Request, reads=False):

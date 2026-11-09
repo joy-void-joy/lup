@@ -74,13 +74,13 @@ from typing import TYPE_CHECKING, override
 from pydantic import Field, JsonValue
 
 import lup
-from lup.programs import Ran
+from lup.programs import ProgramError, Ran
 from lup.tools.serving import Answer
 from lup.tools.tool import Accepted, AgentTool, ToolSpec
 from lup.tools.tool import Refused as Rejected
 from lup.types import Model, MutableModel
 from lup_dev.git import Git, GitError
-from lup_dev.host.held import HeldLaunch, Launchers, Spawning, tail
+from lup_dev.host.held import HeldLaunch, Launchers, Spawning
 from lup_dev.host.protocol import Register, Spawner, branch_name
 from lup_dev.host.rooms import RoomTools
 from lup_dev.host.service import Program, executed
@@ -327,9 +327,15 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
         made = await self.worktree(
             launch, self.claimed(reserved, wanted, taken), commit
         )
-        thread = (
-            None if spawn.concern is None else concerns.addressed(party, spawn.concern)
-        )
+        try:
+            thread = (
+                None
+                if spawn.concern is None
+                else concerns.addressed(party, spawn.concern)
+            )
+        except InboxError as unopened:
+            message = f"{unopened}{await self.unmade(launch, made)}"
+            raise SpawnError(message) from unopened
         child = Conversation(
             repository=repository, runtime=launch.runtime, session=session
         )
@@ -338,25 +344,80 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
             conversation=party,
             concern=None if thread is None else thread.number,
         )
-        starting = await self.spawning.started(
-            lambda minted: HeldLaunch(
-                launch=minted,
-                runtime=launch.runtime,
-                worktree=made.root,
-                session=session,
-                repository=repository,
-                spawner=spawner,
+        try:
+            starting = await self.spawning.started(
+                lambda minted: HeldLaunch(
+                    launch=minted,
+                    runtime=launch.runtime,
+                    worktree=made.root,
+                    session=session,
+                    repository=repository,
+                    spawner=spawner,
+                    arguments=modelled(launch.model),
+                )
             )
-        )
-        handed = None if thread is None else concerns.handed(party, thread, child)
-        brief = Message(kind="note", text=spawn.brief)
-        sent = await self.delivery.posted(
-            brief, party, child, launch.worktree, call=bound.call
-        )
-        await self.delivery.copied(
-            brief, child, party, launch.worktree, call=bound.call, thread=handed
-        )
+        except (ProgramError, OSError) as unstarted:
+            message = (
+                f"its launcher didn't start: {unstarted}"
+                f"{await self.unmade(launch, made)}{opened(thread)}"
+            )
+            raise SpawnError(message) from unstarted
+        try:
+            handed = None if thread is None else concerns.handed(party, thread, child)
+            brief = Message(kind="note", text=spawn.brief)
+            sent = await self.delivery.posted(
+                brief, party, child, launch.worktree, call=bound.call
+            )
+            await self.delivery.copied(
+                brief, child, party, launch.worktree, call=bound.call, thread=handed
+            )
+        except (InboxError, OSError) as unsent:
+            # A session up with no brief would wait on nobody: its launcher is
+            # ended before it starts one.
+            await asyncio.to_thread(
+                self.launchers.started[starting.launch].end, self.making
+            )
+            message = (
+                f"its brief wasn't sent, so its launcher was ended: {unsent}"
+                f"{await self.unmade(launch, made)}{opened(thread)}"
+            )
+            raise SpawnError(message) from unsent
         return said(made, start, sent.number, starting.log, handed)
+
+    async def unmade(self, launch: Register, made: Made) -> str:
+        """Remove a spawn's worktree and branch, which nothing ran in yet, by the spawner's room's own git, stopped past `making`, and say how it went, to follow a refusal's reason."""
+        container = launch.container
+        if container is None:
+            return f"; its worktree, {made.root}, and branch `{made.branch}` stay"
+        steps = [
+            ["worktree", "remove", "--force", str(made.root)],
+            ["branch", "-D", made.branch],
+        ]
+        for step in steps:
+            program = Program(
+                command=[
+                    "podman",
+                    "exec",
+                    "--workdir",
+                    str(launch.repository),
+                    container,
+                    "git",
+                    "--git-dir",
+                    str(launch.repository),
+                    *step,
+                ],
+                payload="",
+                directory=launch.repository,
+            )
+            try:
+                ran = await asyncio.wait_for(
+                    self.run(program), self.making.total_seconds()
+                )
+            except TimeoutError:
+                return f"; its worktree, {made.root}, and branch `{made.branch}` stay"
+            if ran.status != 0:
+                return f"; its worktree, {made.root}, and branch `{made.branch}` stay"
+        return "; its worktree and branch were removed"
 
     def limited(self, repository: Path) -> Reserved:
         """Count a spawn in `repository` against the limits, the host's and the repository's, and return it counted; refuse it past either, naming those that run.
@@ -496,10 +557,11 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
             runtime=spec.runtime,
             session=spec.session,
         )
+        # Not what the log says: it can name what's no room's to read, as
+        # another repository's paths.
         text = (
             f"lup: the session spawned in {spec.worktree} never came up, so it "
-            f"isn't running. The end of what its launcher wrote ({log}):\n\n"
-            f"{tail(log)}"
+            f"isn't running. Its launcher's log, the operator's to read, is {log}."
         )
         await self.delivery.posted(
             Message(kind="problem", text=text),
@@ -551,6 +613,20 @@ async def branches(git: Git, wanted: str, within: timedelta) -> list[str]:
         message = f"the branches named `{wanted}` couldn't be read: {unread}"
         raise SpawnError(message) from unread
     return found.output.decode().splitlines()
+
+
+def opened(thread: Thread | None) -> str:
+    """Say the concern a refused spawn named stays, where it named one, to follow the refusal's reason."""
+    return "" if thread is None else f"; @{thread.name} stays as it is"
+
+
+def modelled(model: str | None) -> list[str]:
+    """Return the runtime's arguments a spawned session runs with: the spawner's launch's model, where its arguments named one, so the agents it spawns run on the model it does, the trial's cheap one among them.
+
+    >>> modelled("haiku"), modelled(None)
+    (['--model', 'haiku'], [])
+    """
+    return [] if model is None else ["--model", model]
 
 
 def said(made: Made, start: str, brief: int, log: Path, handed: Thread | None) -> str:

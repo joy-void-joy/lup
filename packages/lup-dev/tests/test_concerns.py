@@ -1335,10 +1335,10 @@ def test_a_spawn_whose_session_never_came_up_reaches_its_spawner_as_a_problem(
     assert (item.sender, item.recipient) == (main("c1"), main("s1"))
     assert isinstance(item.reason, Message)
     assert item.reason.kind == "problem"
+    # Not what the log says, which can name what's no room's to read.
     assert item.reason.text == (
         "lup: the session spawned in /work/x never came up, so it isn't running. "
-        f"The end of what its launcher wrote ({log}):\n\nThe room's image didn't "
-        "build."
+        f"Its launcher's log, the operator's to read, is {log}."
     )
     assert not item.quiet
 

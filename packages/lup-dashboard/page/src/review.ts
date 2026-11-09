@@ -1432,12 +1432,18 @@ export function nested(groups: Grouping[], parents: ReadonlyMap<string, string> 
         return groups.map((group) => ({ group, depth: 0 }));
     }
     const keys = new Set(groups.map((each) => each.key));
+    // A room's hook can name another session as its own, so the host's tree can loop: each key is passed once.
     const forebear = (key: string): string | undefined => {
+        const passed = new Set([key]);
         let at = parents.get(key);
         while (at !== undefined && !keys.has(at)) {
+            if (passed.has(at)) {
+                return undefined;
+            }
+            passed.add(at);
             at = parents.get(at);
         }
-        return at;
+        return at === key ? undefined : at;
     };
     const under = new Map<string, Grouping[]>();
     const roots: Grouping[] = [];
@@ -1450,13 +1456,20 @@ export function nested(groups: Grouping[], parents: ReadonlyMap<string, string> 
         }
     }
     const out: { group: Grouping; depth: number }[] = [];
+    const laid = new Set<string>();
     const walk = (group: Grouping, depth: number) => {
+        if (laid.has(group.key)) {
+            return;
+        }
+        laid.add(group.key);
         out.push({ group, depth });
         for (const child of under.get(group.key) ?? []) {
             walk(child, depth + 1);
         }
     };
     roots.forEach((each) => walk(each, 0));
+    // Those on a loop have no root above them: each is laid at the top, where it would be with no parent.
+    groups.forEach((each) => walk(each, 0));
     return out;
 }
 
