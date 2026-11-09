@@ -146,7 +146,6 @@ import {
     type Item,
     type Keeping,
     type Laid,
-    type OwnedCheck,
     type PlacedFile,
     type Region,
     type Scope,
@@ -156,7 +155,6 @@ import {
     type Where,
     type Written,
     reachedBy,
-    checkAt,
 } from "./review";
 import { filesOf, freshRows, type Fresh } from "./since";
 import { NOTHING_WAITS, type Instance, type Offer, type Remote, type Running, type Span as ViewSpan } from "./views";
@@ -245,8 +243,6 @@ interface Props {
     panes?: boolean;
     /** Told as Pane mode begins and ends, where the keys of the page do nothing but move between panes. */
     paning?: (yes: boolean) => void;
-    /** The checks waiting on the operator, each laid out under whoever owns it, in panes. */
-    checks?: readonly OwnedCheck[];
     /** What a buffer says while what it's laid out from isn't read, in panes: as a token refused can't be, and it isn't being. */
     unreadSaid?: string;
 }
@@ -496,7 +492,7 @@ function decorations(
         marks.push(...concern.blocks.flatMap((block) => remarks(laidOut, block)));
         concern.blocks.forEach(reaching);
     }
-    // Each line of a concern's block, no item's nor drawer's: its header, the passages it came from, a check, what's done.
+    // Each line of a concern's block, no item's nor drawer's: its header, the passages it came from, what's done.
     for (const aside of laidOut.asides) {
         marks.push({ from: aside.from, to: aside.from, value: Decoration.line({ class: `aside-${aside.kind} thread-line` }) });
     }
@@ -807,8 +803,6 @@ const offLastLine = EditorState.transactionFilter.of((transaction) => {
     return [transaction, { selection: EditorSelection.single(doc.line(doc.lines - 1).from), sequential: true }];
 });
 
-const NO_CHECKS: readonly OwnedCheck[] = [];
-
 export function Review({
     items: itemsGiven,
     threads: threadsGiven = null,
@@ -847,7 +841,6 @@ export function Review({
     sizing,
     panes = false,
     paning,
-    checks: checksGiven = NO_CHECKS,
     unreadSaid = "Reading what's there…",
 }: Props) {
     // In panes, the one buffer on screen, and where the keyboard is: in a pane, or, in Pane mode, nowhere, a pane selected.
@@ -888,8 +881,8 @@ export function Review({
     // How the review is being first read (`readBy`): until it's read, what the host answers is laid out as it comes.
     const loading = useRef<Reading>({ since: null, last: 0, read: false });
     const answered = useMemo(
-        () => ({ items: itemsGiven, agents: agentsGiven, banner: bannerGiven, called: calledGiven, around: aroundGiven, drawers: drawersGiven, seeing: seeingGiven, order: orderGiven, parents, looks, running, landings, remote, threadsRead: threadsGiven, checks: checksGiven }),
-        [itemsGiven, agentsGiven, bannerGiven, calledGiven, aroundGiven, drawersGiven, seeingGiven, orderGiven, parents, looks, running, landings, remote, threadsGiven, checksGiven],
+        () => ({ items: itemsGiven, agents: agentsGiven, banner: bannerGiven, called: calledGiven, around: aroundGiven, drawers: drawersGiven, seeing: seeingGiven, order: orderGiven, parents, looks, running, landings, remote, threadsRead: threadsGiven }),
+        [itemsGiven, agentsGiven, bannerGiven, calledGiven, aroundGiven, drawersGiven, seeingGiven, orderGiven, parents, looks, running, landings, remote, threadsGiven],
     );
     // While a comment is being typed, what's typed laid out once typing pauses, the host's answers wait as long as
     // they may, so the keys aren't held up behind a layout: what came meanwhile is laid out with what was typed.
@@ -901,7 +894,7 @@ export function Review({
     const threadsAll = threadsRead;
     // The same object while what it holds is the same, as the rest of what's taken is.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    const arranging = useMemo(() => ({ ...arrangedBy }), [arrangedBy.parents, arrangedBy.looks, arrangedBy.running, arrangedBy.landings, arrangedBy.remote, arrangedBy.checks]);
+    const arranging = useMemo(() => ({ ...arrangedBy }), [arrangedBy.parents, arrangedBy.looks, arrangedBy.running, arrangedBy.landings, arrangedBy.remote]);
     /** The words a group's banner says: `banner`'s, its parts' after them, and whether it's what's left for later. */
     const bannerLine = (head: Head, later: boolean, parts: string) => `━━ ${banner(head)}${parts === "" ? "" : ` · ${parts}`}${later ? " · later" : ""} ━━`;
     // The review as it was last laid out into the editor, which each comment is followed from (`Arranging.previous`):
@@ -972,7 +965,7 @@ export function Review({
             blocks: blocksOf(laidOut),
             // In the text's order, as CodeMirror takes the folds a transaction makes: a fold over others, as an
             // automatic file's or an item's marked read, is laid out after them.
-            folds: [...scopesOf(laidOut).flatMap((each) => each.folds), ...laidOut.groups.flatMap((each) => (each.fold === null ? [] : [each.fold])), ...laidOut.outer]
+            folds: [...scopesOf(laidOut).flatMap((each) => each.folds), ...laidOut.groups.flatMap((each) => (each.fold === null ? [] : [each.fold]))]
                 .map((each) => ({ ...each, key: foldKey(each) }))
                 .sort((a, b) => a.from - b.from || b.to - a.to),
             sources: sourcesOf(laidOut),
@@ -1170,10 +1163,6 @@ export function Review({
         if (isLetter(each) || isRemark(each)) {
             return reachedBy(laidOut, each, each.to ?? null, called);
         }
-        // A comment on a check answers it, which tells whoever asked it.
-        if (laidOut.checks.some((check) => check.check.check.number === each.item)) {
-            return `answering the check ${cited(each.item)}`;
-        }
         const item = laidOut.regions.find((region) => region.item.number === each.item)?.item;
         const party = item === undefined ? null : recipient(item);
         return reachedBy(laidOut, each, party, called);
@@ -1332,7 +1321,7 @@ export function Review({
                 ? laidOut.drawers.find((each) => each.kind === "since")?.header.from
                 : going.item === null
                   ? undefined
-                  : (laidOut.regions.find((each) => each.item.number === going.item)?.header.from ?? laidOut.checks.find((each) => each.check.check.number === going.item)?.from ?? laidOut.concerns.find((each) => !each.dim && each.read.thread.number === going.item)?.header.from);
+                  : (laidOut.regions.find((each) => each.item.number === going.item)?.header.from ?? laidOut.concerns.find((each) => !each.dim && each.read.thread.number === going.item)?.header.from);
             const to = asked ?? (run !== undefined && leftThere !== undefined ? Math.min(run.from + leftThere.into, run.to) : arrivalIn(laidOut, draft));
             const at = asked === undefined ? uncovered(laidFor.folds.filter((each) => isFolded(current.state, each)), to) : to;
             current.dispatch({ selection: { anchor: at }, annotations: rebuilt.of(true), effects: asked === undefined ? [] : reaching(current.state, at) });
@@ -1486,14 +1475,13 @@ export function Review({
         send();
     }
 
-    /** Return the concern what's at `at` is of: a concern's own line, or one dim or nested naming another, a check's, an item's as the threads read say. */
+    /** Return the concern what's at `at` is of: a concern's own line, or one dim or nested naming another, an item's as the threads read say. */
     function taskAt(at: number): ThreadRead | null {
         const reads = threadsAll?.read.threads ?? [];
         const told = concernNamedAt(laidOut, at)?.read;
-        const check = checkAt(laidOut, at)?.thread;
         const number = regionAt(laidOut, at)?.item.number;
         const held = (each: ThreadRead) => number !== undefined && ((each.asks ?? []).some((ask) => ask.node === number) || (each.new ?? []).includes(number) || (each.pile ?? []).includes(number));
-        return told ?? reads.find((each) => each.thread.number === check) ?? reads.find(held) ?? null;
+        return told ?? reads.find(held) ?? null;
     }
 
     /** Go to the block of concern `read` where it's held (`concernHome`): there, where it's the buffer on screen, else in its buffer, shown. */
@@ -1642,10 +1630,10 @@ export function Review({
         return layOut(editor.latest.current, party).groups.flatMap((each) => (each.conversation === null ? [] : [each.conversation]));
     }
 
-    /** Open a row of the list: an item or a check the buffer on screen holds is gone to there, as the overview went; a concern there only where it's the buffer it's held in (`concernHome`); else its buffer shows, on it. */
+    /** Open a row of the list: an item the buffer on screen holds is gone to there, as the overview went; a concern there only where it's the buffer it's held in (`concernHome`); else its buffer shows, on it. */
     function openRow(next: Showing, how: "in" | "stay" | "write", node: number | null = null) {
         const held = bufferKey(next) === bufferKey(showing) ? laidOut.concerns.find((each) => !each.dim && each.read.thread.number === node)?.header.from : undefined;
-        const there = node === null ? undefined : (laidOut.regions.find((each) => each.item.number === node)?.header.from ?? laidOut.checks.find((each) => each.check.check.number === node)?.from ?? held);
+        const there = node === null ? undefined : (laidOut.regions.find((each) => each.item.number === node)?.header.from ?? held);
         if (there === undefined || goingTo.current !== null) {
             openBuffer(next, how, node);
             return;
@@ -1827,10 +1815,6 @@ export function Review({
      * drawer's line, on the line the cursor is on, a comment on an item whole; none where it opens none.
      */
     function commentSays(at: number): { says: string; on: string | null } | null {
-        const check = checkAt(laidOut, at);
-        if (check !== undefined) {
-            return { says: "answer it in your words", on: `check ${cited(check.check.check.number)}` };
-        }
         const concern = concernAt(laidOut, at);
         if (concern !== undefined) {
             const answering = concern.read.answering ?? null;
@@ -2081,27 +2065,7 @@ export function Review({
                 : [...landings].reverse().find((each) => each.at < head);
             goTo(target?.region, false);
         },
-        answer: (forward) => {
-            // Where checks are laid out, what asks the operator in the text's order: an item to answer, a check not answered.
-            const current = view.current;
-            if (laidOut.checks.length === 0 || current === null) {
-                goTo(answerAfter(laidOut, draft, editor.head(), forward), true);
-                return;
-            }
-            const stops = [
-                ...laidOut.regions.filter((each) => toAnswer(each.item, draft)).map(arrival),
-                ...laidOut.checks.filter((each) => (each.check.answer ?? null) === null && !(draft.marks ?? []).some((mark) => mark.action === "inbox-check-answer" && mark.block === `check ${each.check.check.number}`)).map((each) => each.from),
-            ].sort((a, b) => a - b);
-            const head = editor.toLaid(editor.head());
-            const target = forward ? stops.find((each) => each > head) : stops.findLast((each) => each < head);
-            if (target === undefined) {
-                say(`Nothing waits on you ${forward ? "after" : "before"} this.`);
-                return;
-            }
-            const at = editor.fromLaid(target);
-            opening(current, at);
-            bring(current, at);
-        },
+        answer: (forward) => goTo(answerAfter(laidOut, draft, editor.head(), forward), true),
         matter: (forward) => {
             const current = view.current;
             if (current === null) {
@@ -2217,12 +2181,12 @@ export function Review({
             recordJump(current, head, target);
         },
         thread: () => {
-            // From a concern's line, one dim or nested naming another, a check, or an item in a concern, to the concern's
-            // block where it's held.
+            // From a concern's line, one dim or nested naming another, or an item in a concern, to the concern's block
+            // where it's held.
             const at = editor.toLaid(editor.head());
             const read = taskAt(at);
             if (read === null) {
-                say("gt: no concern here to go to. It goes from a concern's line, a check, or an item in a concern, to the concern's block where it's held: put the cursor on one.");
+                say("gt: no concern here to go to. It goes from a concern's line, or an item in a concern, to the concern's block where it's held: put the cursor on one.");
                 return;
             }
             goToConcern(read);
@@ -2298,10 +2262,10 @@ export function Review({
     }, [narrow]);
     // In panes, the list, read from what the review is laid out from: it lays out one buffer of it at a time.
     const listReading = useMemo(
-        () => ({ items, draft, agents, parents: arrangedBy.parents, called, banner: (item: Item) => bannerLine({ item }, false, ""), drawers, looks: arrangedBy.looks, remote: arrangedBy.remote, running: arrangedBy.running, activities, states, threads: threadsAll, landings: arrangedBy.landings, checks: arrangedBy.checks, seeing: seenGiven, showing }),
+        () => ({ items, draft, agents, parents: arrangedBy.parents, called, banner: (item: Item) => bannerLine({ item }, false, ""), drawers, looks: arrangedBy.looks, remote: arrangedBy.remote, running: arrangedBy.running, activities, states, threads: threadsAll, landings: arrangedBy.landings, seeing: seenGiven, showing }),
         // `bannerLine` says what `banner` does.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-        [items, draft, agents, arrangedBy.parents, called, banner, drawers, arrangedBy.looks, arrangedBy.remote, arrangedBy.running, activities, states, threadsAll, arrangedBy.landings, arrangedBy.checks, seenGiven, showing],
+        [items, draft, agents, arrangedBy.parents, called, banner, drawers, arrangedBy.looks, arrangedBy.remote, arrangedBy.running, activities, states, threadsAll, arrangedBy.landings, seenGiven, showing],
     );
     const listed = useMemo(() => (panes ? listedByAgent(listReading) : []), [panes, listReading]);
     const title = panes ? titled(showing, listReading) : null;

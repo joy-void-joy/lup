@@ -1,7 +1,6 @@
 // Clearing is the operator's, on any concern (`docs/dashboard.md`, *The panes*): on its block, in its holder's own
-// buffer, its party's or what's for them, Space d clears it and Space x declines it, whatever waits on them in it; a check
-// in it is ticked with Space d; a message is written on it, Space s sending that to no one and back; and it's all sent
-// with Ctrl+Enter.
+// buffer, its party's or what's for them, Space d clears it and Space x declines it, whatever waits on them in it; a message
+// is written on it, Space s sending that to no one and back; and it's all sent with Ctrl+Enter.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { open, type Dashboard } from "./dashboard.ts";
@@ -53,7 +52,7 @@ async function concern(title: string): Promise<void> {
 
 describe("clearing any concern, in headless Chromium", () => {
     it("clears a concern with Space d on its block, whatever waits on the operator in it, and declines it with Space x instead, either taking the other's mark off", async () => {
-        // A question and a check wait on the operator in it: they stay waiting where each is laid out.
+        // A question waits on the operator in it: it stays waiting where it's laid out.
         await concern("The transcript reader");
         await offers("␣d clear it");
         await offers("␣x decline it: nothing more will be done");
@@ -67,17 +66,13 @@ describe("clearing any concern, in headless Chromium", () => {
         await dashboard.page.waitForFunction(() => document.querySelector(".status")?.textContent?.includes("The transcript reader") === false);
     });
 
-    it("clears one said done from its block in what's for the operator, ticks a check in another, and writes on a concern, Space s sending that to no one and back", async () => {
+    it("clears one said done from its block in what's for the operator, and writes on a concern, Space s sending that to no one and back", async () => {
         await dashboard.openRow("what's for you");
         await review.goTo("§ The guidance's voice · done, for you to clear");
         await review.settled(300, 0);
         await offers("␣d clear it: it's done");
         await dashboard.keys.press([" ", "d"]);
         await says("The guidance's voice cleared");
-        await concern("The transcript reader");
-        await review.goTo("◇ check @311");
-        await dashboard.keys.press([" ", "d"]);
-        await says("tick it: you tried it");
         await concern("Where auth is checked");
         await dashboard.keys.press(["o"]);
         await review.inMode("insert");
@@ -91,14 +86,11 @@ describe("clearing any concern, in headless Chromium", () => {
         await says("to lup-impl/explore-auth: a message on Where auth is checked");
     });
 
-    it("sends it all with Ctrl+Enter: the concern cleared, the check answered, the message on its concern", async () => {
+    it("sends it all with Ctrl+Enter: the concern cleared, the message on its concern", async () => {
         await dashboard.keys.press(["Control+Enter"]);
         await said("Sent");
         // The message, a passage of the operator's in the concern now, open until the agent answers it.
         await review.until("hold the message on its block, open, waiting on whoever answers", (view) => /you · @\d+\.1 · open: waits on lup-impl\/explore-auth/.test(view.state.doc.toString()));
-        // The check answered, the block holds none waiting.
-        await concern("The transcript reader");
-        await review.until("lay out its block with no check waiting", (view) => !view.state.doc.toString().includes("◇ check @311"));
         // Done and cleared, it's gone from the list, under what's settled alone, which is folded; and read there.
         await dashboard.page.waitForFunction(() => ![...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("The guidance's voice")), undefined, { polling: 50 });
         expect((await listed()).some((each) => each.startsWith("settled · "))).toBe(true);
