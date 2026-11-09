@@ -14881,3 +14881,63 @@ def test_a_call_up_whose_give_fails_is_answered_and_what_waits_stays_waiting(
     assert answered == Finished()
     assert state == Waiting()
     assert any("wasn't given their held session" in line for line in said)
+
+
+def test_a_side_job_starts_on_its_spawner_s_thread_through_the_bearings_a_fresh_session_is_told(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """A fresh session's start notes it before anything's told, for its bearings: noted there with the parent the host recorded, the side job starts where its spawner works."""
+    worktree = tmp_path / "w"
+    spawnable(worktree)
+    repository = worktree / ".git"
+    spawner = Conversation(repository=repository, runtime="claude", session="s1")
+    with inboxed(machine, clock, notices, said, bearings=True) as delivery:
+        launched(machine, clock, worktree, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        call(mcp, "thread", {"name": "home", "title": "Home", "hold": True})
+        side_job(machine, clock, tmp_path, spawner)
+        send(
+            machine.host.launch("two").hook,
+            claude("SessionStart", source="startup", session_id="c1"),
+        )
+        home = delivery.concerns().named(repository, "home")
+        place = delivery.inbox.whereabouts[
+            spawner.model_copy(update={"session": "c1"}).key()
+        ]
+    assert place.parent == spawner
+    assert place.thread == home.number
+    assert place.started == home.number
+
+
+def test_a_session_a_spawned_room_s_hook_named_has_no_parent_in_a_launch_of_its_own(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """A room's hook can name any session: within the spawned launch it's taken as that launch's, its parent the spawner. Resumed in a launch the host recorded no spawner for, that parent isn't kept."""
+    worktree = tmp_path / "w"
+    spawner = Conversation(repository=worktree / ".git", runtime="claude", session="s1")
+    named = spawner.model_copy(update={"session": "v1"})
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, worktree, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        side_job(machine, clock, tmp_path, spawner)
+        send(
+            machine.host.launch("two").hook,
+            claude("SessionStart", source="startup", session_id="v1"),
+        )
+        within = delivery.parent(named)
+        launched(
+            machine,
+            clock,
+            tmp_path / "three",
+            "three",
+            "claude",
+            repository=spawner.repository,
+        )
+        send(
+            machine.host.launch("three").hook,
+            claude("SessionStart", source="resume", session_id="v1"),
+        )
+        after = delivery.parent(named)
+    assert within == spawner
+    assert after is None

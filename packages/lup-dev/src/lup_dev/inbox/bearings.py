@@ -190,7 +190,9 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
             repository=launch.repository, runtime=launch.runtime, session=session
         )
         last = self.last(starting)
-        self.delivery.heard_in(starting, launch, None)
+        self.delivery.heard_in(
+            starting, launch, self.delivery.spawner_of(launch, starting)
+        )
         since = None if last is None else self.started(last)
         branch = self.running(launch.repository)
         try:

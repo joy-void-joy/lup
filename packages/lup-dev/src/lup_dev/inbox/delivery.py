@@ -1288,18 +1288,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     def parent_of(
         self, launch: Register, conversation: Caller, spawner: Caller | None
     ) -> Conversation | None:
-        """Return the conversation that spawned `conversation` of `launch`: for a subagent, `spawner`, as their runtime recorded the spawn; for a session's own, the agent who spawned their launch through lup, as the host recorded it (`Register.spawner`), never as the room says.
-
-        A session an agent spawned keeps them as their parent when resumed in
-        a launch of the operator's, which records no spawner: what they say to
-        `parent` still reaches whoever handed them the work.
-        """
+        """Return the conversation that spawned `conversation` of `launch`: for a subagent, `spawner`, as their runtime recorded the spawn; for a session's own, the agent who spawned their launch through lup, as the host recorded it (`Register.spawner`), never as the room says, nor as the inbox kept it from an earlier launch, which a room's hook naming another session could have set."""
         if conversation.agent is not None:
             return None if spawner is None else self.party(launch, spawner)
-        if launch.spawner is not None:
-            return launch.spawner.conversation
-        place = self.inbox.whereabouts.get(self.party(launch, conversation).key())
-        return None if place is None else place.parent
+        return self.spawner_of(launch, self.party(launch, conversation))
 
     def subagents(self, party: Conversation) -> list[Whereabouts]:
         """Return where each subagent `party` spawned was last heard, those heard in the launch `party` was last heard in alone, and each session they spawned through lup, whatever launch it runs in, in the order each was first heard: those that ended among them."""
