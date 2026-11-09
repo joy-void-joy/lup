@@ -2831,6 +2831,19 @@ def test_a_held_launch_whose_room_won_t_stop_stays_registered_for_the_sweep(
         "launcher is gone."
     ) in said
     assert "unregister h1" not in said
+    # Its session's lock goes with its launcher, as any lock does, but the launch
+    # stays registered, naming the session the room may still write: a launch
+    # taking it over is refused until the sweep has stopped the room.
+    standin = machine.engine.standin
+    assert standin is not None
+    machine.host.heard.append(standin.session)
+    def yes(question: str) -> str:
+        del question
+        return ""
+
+    taking = machine.launcher.model_copy(update={"ask": yes})
+    with pytest.raises(LaunchError, match="run by launch `dev`, its hooks naming it"):
+        cli.launched(machine.adapter, ["--resume", standin.session], project, taking)
 
 
 def test_a_held_launch_resumes_the_session_it_names(
