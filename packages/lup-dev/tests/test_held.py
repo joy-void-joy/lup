@@ -3,6 +3,7 @@
 import asyncio
 import socket
 import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, override
@@ -1111,9 +1112,22 @@ def test_a_launcher_a_service_before_started_for_a_spawn_is_counted_while_it_run
             SpawnedLauncher(spec=spec, pid=pid).model_dump_json()
         )
 
-    running = detached("sh", "-c", "sleep 60", "a1", log=tmp_path / "a1.log")
+    # A program that keeps the launch's id among its arguments, as the
+    # launcher's command does: a shell may replace itself with what it runs.
+    running = detached(
+        sys.executable,
+        "-c",
+        "import time; time.sleep(60)",
+        "a1",
+        log=tmp_path / "a1.log",
+    )
     gone = detached("true", "b1", log=tmp_path / "b1.log")
     gone.process.wait()
+    cmdline = Path("/proc") / str(running.process.pid) / "cmdline"
+    for _ in range(600):
+        if b"a1" in cmdline.read_bytes():
+            break
+        time.sleep(0.01)
     kept("a1", running.process.pid)
     kept("b1", gone.process.pid)
     try:
