@@ -753,6 +753,11 @@ class LaunchLayout(Model):
         return self.directory.with_name(f"{self.directory.name}.log")
 
     @property
+    def spawned(self) -> Path:
+        """What an agent's spawn started the launch's launcher with, and its process: kept while the launcher runs, so a service started again counts it against the limits before its launch registers (`Launchers.spawning`)."""
+        return self.directory.with_name(f"{self.directory.name}.spawned.json")
+
+    @property
     def gitconfig(self) -> Path:
         """The room's git configuration, in place of the operator's (`GIT_CONFIG_GLOBAL`), mounted read-only."""
         return self.directory / "gitconfig"

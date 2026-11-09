@@ -2424,6 +2424,9 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
     """Waits the seconds between two sweeps; a test gives its own."""
     stopping: asyncio.Event = Field(default_factory=asyncio.Event)
     task: asyncio.Task[None] | None = None
+    ending: dict[str, asyncio.Task[None]] = {}
+    """Each side job whose spawner's launch the service doesn't serve, by
+    its launch, while its launcher is asked to end it."""
 
     @override
     async def begin(self) -> None:
@@ -2462,7 +2465,29 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
         await self.pruned()
         if self.reap is not None:
             await self.reap()
+        await self.orphans_ended()
         self.woken()
+
+    async def orphans_ended(self) -> None:
+        """Ask the launcher of each side job whose spawner's launch the service doesn't serve to end it, in the background, as that launch's end does (`Launches.close`): one that registered after its spawner ended, or whose spawner's end a restart cut short, would run on for nobody, its reports reaching someone gone. Where the launches can't be listed, say so; the next sweep looks again."""
+        self.ending = {
+            launch: task for launch, task in self.ending.items() if not task.done()
+        }
+        try:
+            launches = await asyncio.to_thread(self.host.launches)
+        except (HostError, OSError) as failed:
+            self.say(f"Side jobs whose spawner ended weren't looked for: {failed}")
+            return
+        for each in orphaned(launches):
+            if each.launch not in self.ending:
+                self.say(
+                    f"{each.launch}: a side job whose spawner's launch "
+                    f"{each.spawner.launch if each.spawner else '?'} ended, so it's "
+                    "ended too"
+                )
+                self.ending[each.launch] = asyncio.create_task(
+                    asyncio.to_thread(ended_held, self.host, each, self.say)
+                )
 
     def woken(self) -> None:
         """Wake each thread parked until what the sweep sees come (`Coming.swept`), on the event loop, as the inbox is written; where it fails, say why, with its traceback, and the next sweep goes on."""
@@ -2856,6 +2881,7 @@ def launched(
                             launcher.say(line)
                         if held is not None:
                             own.log.unlink(missing_ok=True)
+                            own.spawned.unlink(missing_ok=True)
         finally:
             own.lock.unlink(missing_ok=True)
             if writing is not None and writer is not None:
@@ -2886,6 +2912,34 @@ def located(worktree: Path, pinned: Path | None) -> Found:
         )
         raise LaunchError(message)
     return found
+
+
+def orphaned(launches: list[Register]) -> list[Register]:
+    """Return each held side job among `launches` whose spawner's launch isn't among them: what ends with its spawner (`Launches.side_jobs`)."""
+    served = {each.launch: each for each in launches}
+    return [
+        each
+        for each in launches
+        if each.held
+        and each.spawner is not None
+        and each.spawner.concern is None
+        and each.spawner.launch not in served
+    ]
+
+
+def ended_held(host: HostClient, launch: Register, say: Callable[[str], None]) -> None:
+    """End `launch`'s held session through its launcher, once it has ended; where it can't be, say so, for the operator to end it."""
+    try:
+        outstanding = host.held(End(launch=launch.launch))
+        try:
+            outstanding.reply(Done)
+        finally:
+            outstanding.close()
+    except (HostError, OSError) as failed:
+        say(
+            f"{launch.launch}: the side job wasn't ended, `lup-dev spawn end "
+            f"{launch.name}` ends it: {failed}"
+        )
 
 
 class NamedSession(Model):

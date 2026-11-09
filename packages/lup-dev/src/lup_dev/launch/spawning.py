@@ -373,7 +373,7 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
         }
         starting = {
             each.launch: (each.repository or repository, each.worktree.name)
-            for each in self.launchers.spawning()
+            for each in self.launchers.spawning(self.layout)
             if each.launch not in running
         }
         under_way = {

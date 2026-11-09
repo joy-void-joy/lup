@@ -28,6 +28,7 @@ from lup_dev.host.held import (
     Interrupting,
     Launchers,
     Spawn,
+    SpawnedLauncher,
     Spawning,
     Starting,
     launcher_command,
@@ -208,7 +209,7 @@ def test_a_launcher_an_agent_s_spawn_started_is_counted_until_it_ends_and_one_ne
         await CallingUp(launchers=launchers).answer(
             CalledUp(launch=up.launch, name="two", session="s-2")
         )
-        counted = launchers.spawning()
+        counted = launchers.spawning(layout)
         for each in [never, up]:
             ending.append(each.launch)
             launcher = launchers.started[each.launch]
@@ -221,7 +222,7 @@ def test_a_launcher_an_agent_s_spawn_started_is_counted_until_it_ends_and_one_ne
     never, _ = ending
     assert len(counted) == 2
     assert [each.launch for each in lost] == [never]
-    assert launchers.spawning() == []
+    assert launchers.spawning(layout) == []
     assert launchers.specs == {}
 
 
@@ -1088,3 +1089,59 @@ def test_a_brief_told_twice_fails_its_spawn_step(
     assert "was told \"turn's start\", where it's given once as the first turn" in (
         side.seen
     )
+
+
+def test_a_launcher_a_service_before_started_for_a_spawn_is_counted_while_it_runs(
+    layout: Layout, tmp_path: Path
+) -> None:
+    """Kept beside its lock: a service started since knows it by its process, and forgets it once that's gone."""
+    spawner = Spawner(
+        launch="s0",
+        conversation=Conversation(
+            repository=tmp_path / ".git", runtime="claude", session="p1"
+        ),
+    )
+    layout.launches.mkdir(parents=True)
+
+    def kept(launch: str, pid: int) -> None:
+        spec = HeldLaunch(
+            launch=launch, runtime="claude", worktree=tmp_path, spawner=spawner
+        )
+        layout.launch(launch).spawned.write_text(
+            SpawnedLauncher(spec=spec, pid=pid).model_dump_json()
+        )
+
+    running = detached("sh", "-c", "sleep 60", "a1", log=tmp_path / "a1.log")
+    gone = detached("true", "b1", log=tmp_path / "b1.log")
+    gone.process.wait()
+    kept("a1", running.process.pid)
+    kept("b1", gone.process.pid)
+    try:
+        counted = Launchers().spawning(layout)
+    finally:
+        running.process.kill()
+        running.process.wait()
+
+    assert [each.launch for each in counted] == ["a1"]
+    assert layout.launch("a1").spawned.exists()
+    assert not layout.launch("b1").spawned.exists()
+
+
+def test_a_side_job_whose_spawner_s_launch_isn_t_served_is_orphaned_and_a_builder_isn_t() -> (
+    None
+):
+    spawner = Spawner(
+        launch="gone",
+        conversation=Conversation(
+            repository=Path("/w/.git"), runtime="claude", session="p1"
+        ),
+    )
+    side = held("side").model_copy(update={"spawner": spawner})
+    built = held("built").model_copy(
+        update={"spawner": spawner.model_copy(update={"concern": 4})}
+    )
+    kept = held("kept").model_copy(
+        update={"spawner": spawner.model_copy(update={"launch": "here"})}
+    )
+
+    assert cli.orphaned([side, built, kept, held("here")]) == [side]

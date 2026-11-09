@@ -21,10 +21,12 @@ import os
 import secrets
 import signal
 import traceback
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from datetime import timedelta
 from pathlib import Path
 from typing import Literal, override
+
+from pydantic import ValidationError
 
 from lup.programs import Apart
 from lup.rooms.container import AbsolutePath
@@ -70,6 +72,13 @@ class HeldLaunch(Model):
     whose worktree says it, as a launch's does."""
     spawner: Spawner | None = None
     """Who spawned it, where an agent did (`Register.spawner`)."""
+
+
+class SpawnedLauncher(Model):
+    """A launcher an agent's spawn started, as the service keeps it beside the launch's lock: what it was started with, and its process."""
+
+    spec: HeldLaunch
+    pid: int
 
 
 class Spawn(Request, reads=False):
@@ -179,15 +188,47 @@ class Launchers(MutableModel, arbitrary_types_allowed=True):
         }
         return lost
 
-    def spawning(self) -> list[HeldLaunch]:
-        """Return each launch an agent spawned whose launcher this service started and that hasn't been seen to end: counted against the limit before its launch registers."""
-        return [
+    def spawning(
+        self, layout: Layout, paths: HostPaths | None = None
+    ) -> list[HeldLaunch]:
+        """Return each launch an agent spawned whose launcher hasn't been seen to end: counted against the limits before its launch registers. Those this service started, and those a service before it started, kept beside their lock in `layout` while their launcher runs (`LaunchLayout.spawned`), by their process (`launching`); one kept whose launcher is gone is forgotten."""
+        mine = [
             spec
             for launch, spec in self.specs.items()
             if spec.spawner is not None
             and launch in self.started
             and not self.started[launch].ended()
         ]
+        looked = HostPaths() if paths is None else paths
+        kept = [
+            each
+            for each in kept_launchers(layout)
+            if each.spec.launch not in self.specs
+        ]
+        for each in kept:
+            if not launching(looked, each.pid, each.spec.launch):
+                layout.launch(each.spec.launch).spawned.unlink(missing_ok=True)
+        return [
+            *mine,
+            *(
+                each.spec
+                for each in kept
+                if launching(looked, each.pid, each.spec.launch)
+            ),
+        ]
+
+
+def kept_launchers(layout: Layout) -> list[SpawnedLauncher]:
+    """Return each launcher an agent's spawn started that a service kept beside its launch's lock; one that doesn't read left out."""
+
+    def read() -> Iterator[SpawnedLauncher]:
+        for each in sorted(layout.launches.glob("*.spawned.json")):
+            try:
+                yield SpawnedLauncher.model_validate_json(each.read_text())
+            except (ValidationError, OSError):
+                continue
+
+    return list(read())
 
 
 def launching(paths: HostPaths, pid: int, launch: str) -> bool:
@@ -247,6 +288,9 @@ class Spawning(Model, Handler[Spawn], arbitrary_types_allowed=True):
         launcher = await asyncio.to_thread(self.start, spec, log)
         self.launchers.started = {**self.launchers.started, launch: launcher}
         self.launchers.specs = {**self.launchers.specs, launch: spec}
+        if spec.spawner is not None:
+            kept = SpawnedLauncher(spec=spec, pid=launcher.process.pid)
+            self.layout.launch(launch).spawned.write_text(kept.model_dump_json())
         return Starting(launch=launch, pid=launcher.process.pid, log=log)
 
 
