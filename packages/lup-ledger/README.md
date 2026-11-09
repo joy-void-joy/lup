@@ -1,6 +1,6 @@
 # The ledger: lup's typed graph, and threads
 
-The ledger keeps the work as a typed graph: nodes, the edges between them, and every version of every node. Threads are its first kind. A thread is one concern: what's in it (items, the operator's parts, checks) and where it stands. It's one of the core's submodules, always present. The host service opens it at its start, and keeps the inbox on it: each item a node, where it stands and what it answers edges (`docs/inbox.md`, *Kept on the ledger*). Agents open threads, work in them and are told what lands there through lup's tools (`docs/inbox.md`, *Threads*).
+The ledger keeps the work as a typed graph: nodes, the edges between them, and every version of every node. Threads are its first kind. A thread is one concern: what's in it (items, the operator's parts, checks) and where it stands. It's one of the core's submodules, always present. The host service opens it at its start, and keeps the inbox on it: each item a node, where it stands and what it answers edges (`docs/inbox.md`, *Kept on the ledger*). Agents open threads with the `concern` tool, work in them and are told what lands there (`docs/inbox.md`, *Threads*).
 
 ## Records
 
@@ -37,7 +37,7 @@ What's in it is edges drawn to it:
 - **its status** (`Status`), each edge saying where it stands:
   - parked until the first of its triggers comes: an issue closing, a branch or a commit landing, a conversation ending, a time, or a condition named as `defer`'s `when=` names one;
   - done, in an agent's word, with what to try;
-  - settled (`Settled`): by the operator; or by lup, saying why, where an earlier lup made a thread of a past conversation and nothing in it waited on them, its act and never put in their name. Never by an agent: the request settling one is the operator's (`inbox-settle-thread`), and nothing an agent reaches, the `thread` tool among it, settles one;
+  - settled (`Settled`): by the operator; or by lup, saying why, where an earlier lup made a thread of a past conversation and nothing in it waited on them, its act and never put in their name. Never by an agent: the request settling one is the operator's (`inbox-settle-thread`), and nothing an agent reaches, the `concern` tool among it, settles one;
   - declined, which only the operator does (`Declined.by`);
   - reopened, by the operator, or by lup where what a parked thread waits for comes.
 
