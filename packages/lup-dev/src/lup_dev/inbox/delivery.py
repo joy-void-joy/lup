@@ -494,6 +494,19 @@ def changed_since(code: Quoted) -> str | None:
     return " ".join(str(number) for number in gone) if gone else None
 
 
+def body_quoted(letter: Letter) -> list[Tag]:
+    """Return the lines of a thread's body `letter` is written on, as a quote its message tag carries before the operator's words; none where it's on no lines.
+
+    >>> from lup_dev.inbox.store import Quote
+    >>> on = Quote(text="It starts at `read_indent`.", start=0, end=27)
+    >>> [each.written() for each in body_quoted(Letter(thread=4, quote=on, text="It's `lex`."))]
+    ['<quote of="body">It starts at `read_indent`.</quote>']
+    """
+    if letter.quote is None:
+        return []
+    return [Tag(name="quote", attributes={"of": "body"}, parts=[letter.quote.text])]
+
+
 def remarking(remark: Remark, attributes: dict[str, str]) -> Tag:
     """Tag one of the operator's remarks in an agent's drawer, as a review tells it: its passage's quote, saying on code which quoted lines have changed since (`changed_since`), then their reply; `attributes` say whose it is where it's told as context, or its id where it's the reader's own."""
     since = None if remark.code is None else changed_since(remark.code)
@@ -1531,7 +1544,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 Tag(
                     name="message",
                     attributes={**numbered(at), **on_thread(each)},
-                    parts=[each.text],
+                    parts=[*body_quoted(each), each.text],
                 )
                 for at, each in enumerate(review.letters)
                 if each.to == to
@@ -2043,8 +2056,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             thread = self.on_thread(letter)
             if thread is None:
                 continue
+            on = readable([*body_quoted(letter), letter.text])
             note = self.inbox.made(
-                Message(kind="note", text=letter.text, repository=thread.repository),
+                Message(kind="note", text=on, repository=thread.repository),
                 Operator(),
                 Operator(),
                 None,

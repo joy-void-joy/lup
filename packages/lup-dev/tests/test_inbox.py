@@ -5072,6 +5072,7 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
     concerning = [
         "name",
         "under",
+        "body",
         "move",
         "join",
         "hold",

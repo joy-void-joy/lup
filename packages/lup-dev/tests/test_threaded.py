@@ -169,7 +169,7 @@ class Work:
         delivery.done(self.documented)
 
     def kept_check(self, text: str) -> int:
-        """Keep a check in `lag`, as an earlier lup's `ask` did with its `checks`: no call makes one any more. Return its number."""
+        """Keep a check in `lag`, as an earlier lup's `ask` did with its `checks`: no call makes one. Return its number."""
         ledger = self.delivery.inbox.ledger
         check = ledger.kept(
             Check(
@@ -707,6 +707,50 @@ def test_a_message_to_no_one_stays_in_its_thread_as_the_operator_s_waking_nobody
     assert isinstance(note.state, Done)
 
 
+def test_a_comment_on_lines_of_a_concern_s_body_reaches_whoever_answers_for_it_quoting_them(
+    work: Work, clock: FakeClock
+) -> None:
+    work.ran(
+        work.lead.concern(
+            Concerning(name="lag", body="It jumps on a long comment.\nNot a short one.")
+        )
+    )
+    on = Quote(
+        text="Not a short one.",
+        block=f"concern {work.lag.number} body",
+        lines=["Not a short one."],
+        start=0,
+        end=16,
+    )
+    clock.sleep(60)
+    work.delivery.inbox.drafted(
+        Draft(
+            letters=[
+                Letter(to=LEAD, thread=work.lag.number, quote=on, text="It does too."),
+                Letter(thread=work.docs.number, quote=on, text="Note to self."),
+            ]
+        )
+    )
+    [review] = asyncio.run(work.delivery.reviewed()).reviews
+
+    told = work.delivery.said(work.delivery.inbox.item(review.number))
+    [note] = [
+        each
+        for each in work.delivery.inbox.items.values()
+        if each.sender == Operator()
+        and isinstance(each.reason, Message)
+        and each.reason.repository == REPOSITORY
+    ]
+
+    assert (
+        '<message id="'
+        f'{review.number}.1" thread="lag">\n<quote of="body">Not a short one.</quote>\n'
+        "It does too.\n</message>"
+    ) in told
+    assert isinstance(note.reason, Message)
+    assert note.reason.text == "> Not a short one.\n\nNote to self."
+
+
 def test_a_message_on_a_thread_is_refused_to_no_one_on_none_or_to_another_repository(
     work: Work,
 ) -> None:
@@ -1071,7 +1115,7 @@ def test_a_thread_opened_by_whom_nobody_running_answers_for_says_its_opener_left
     assert (gate.thread.by, gate.answering, gate.left_by) == (Operator(), None, None)
 
 
-def test_what_s_nothing_to_list_is_empty_nobody_s_on_and_nothing_said_of_it_or_under_it(
+def test_what_s_nothing_to_list_is_empty_bodiless_nobody_s_on_and_nothing_said_of_it_or_under_it(
     work: Work,
 ) -> None:
     for name, title, under in [
@@ -1082,9 +1126,11 @@ def test_what_s_nothing_to_list_is_empty_nobody_s_on_and_nothing_said_of_it_or_u
         ("child", "Child", "parent"),
         ("full", "Full", None),
         ("holding", "Holding", "full"),
+        ("bodied", "Bodied", None),
     ]:
         work.ran(work.lead.concern(Concerning(name=name, title=title, under=under)))
     work.ran(work.lead.concern(Concerning(name="parked", park=Parking(issue=12))))
+    work.ran(work.lead.concern(Concerning(name="bodied", body="What it is.")))
     work.sent(ThreadedRemark(remark="Here.", thread="full"))
     held = work.read()
     ended(work)
@@ -1113,6 +1159,12 @@ def test_what_s_nothing_to_list_is_empty_nobody_s_on_and_nothing_said_of_it_or_u
     assert read["parked"].state == "parked"
     assert not read["worked"].bare
     assert not read["full"].bare
+    # A body is something in it to read, and the review carries it.
+    assert not read["bodied"].bare
+    body = read["bodied"].body
+    assert body is not None
+    assert (body.by, body.text) == (LEAD, "What it is.")
+    assert read["full"].body is None
 
 
 def test_an_earlier_lup_s_root_is_left_out_of_the_review_what_s_under_it_at_the_top(

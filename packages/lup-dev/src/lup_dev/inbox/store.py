@@ -613,6 +613,10 @@ class Letter(Model):
     thread: int | None = None
     """The thread it's written on, by its number, where it shows in order as
     the operator's words; none for a message written under an agent's banner."""
+    quote: Quote | None = None
+    """The lines of the thread's body it's written on, where the operator
+    commented on them, told quoted before their words; none for a message on the
+    thread whole, or under an agent's banner."""
     text: str
 
 

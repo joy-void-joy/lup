@@ -482,7 +482,7 @@ class Reader(Model, arbitrary_types_allowed=True):
         )
 
     def heading_of(self, concerns: Concerns, thread: Thread) -> list[str]:
-        """Say where `thread` stands, the threads right under it, and the items of other threads that name it, a line each."""
+        """Say where `thread` stands, its body where it has one, the threads right under it, and the items of other threads that name it, a line each."""
         above = (
             ""
             if thread.parent is None
@@ -502,11 +502,24 @@ class Reader(Model, arbitrary_types_allowed=True):
             for each in concerns.threads.references(thread.number)
             if (item := self.delivery.inbox.items.get(each.source)) is not None
         ]
+        body = concerns.body(thread)
+        bodied = (
+            []
+            if body is None
+            else [
+                Tag(
+                    name="body",
+                    attributes={"by": self.called(body.by), "at": clocked(body.at)},
+                    parts=[body.text],
+                ).written()
+            ]
+        )
         return [
             (
                 f'Thread @{thread.name} (@{thread.number}), "{thread.title}"{above}, '
                 f"{holder}: {stood(concerns.standing(thread))}."
             ),
+            *bodied,
             *(["Under it:", *under] if under else []),
             *(["Elsewhere, naming it:", *refers] if refers else []),
         ]

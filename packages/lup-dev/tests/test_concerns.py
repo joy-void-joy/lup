@@ -46,6 +46,7 @@ from lup_ledger.parties import Conversation, Lup, Operator
 from lup_ledger.threads import (
     ROOT,
     Answered,
+    Body,
     Check,
     Done,
     In,
@@ -138,7 +139,7 @@ def befell(speaker: Speaker, text: str, title: str) -> Item:
 def kept_check(
     delivery: Delivery, thread: Thread, by: Conversation, text: str
 ) -> Check:
-    """Keep a check in `thread`, by `by`, as an earlier lup's `ask` did with its `checks`: no call makes one any more."""
+    """Keep a check in `thread`, by `by`, as an earlier lup's `ask` did with its `checks`: no call makes one."""
     ledger = delivery.inbox.ledger
     concerns = delivery.concerns()
     check = ledger.kept(
@@ -539,6 +540,114 @@ def test_a_concern_opens_under_the_one_its_agent_works_in_and_its_words_can_go_i
         (True, "Tabs are dropped."),
         (True, "And spaces after them."),
     ]
+
+
+def test_a_concern_s_body_is_rewritten_whole_by_whoever_answers_for_it_each_kept_and_read_with_it(
+    delivery: Delivery,
+) -> None:
+    register = launched(delivery, "dev", "s1")
+    lead = speaker(delivery, register, main("s1"))
+    said(lead.note(ThreadedRemark(remark="Go.")))
+    worker = spawned(delivery, register, main("s1"), "a1", "parser")
+    work = speaker(delivery, register, worker)
+
+    # A subagent opening one with a body: their session holds it, and its body
+    # is theirs to keep too, the work being theirs.
+    opened = said(
+        work.concern(
+            Concerning(
+                text="Tabs are dropped.",
+                title="tabs",
+                body="The lexer reads a tab as a space.",
+            )
+        )
+    )
+    rewritten = said(
+        lead.concern(
+            Concerning(
+                name="tabs",
+                body="The lexer reads a tab as a space.\nIt starts at `read_indent`.",
+            )
+        )
+    )
+    alone = said(lead.concern(Concerning(name="tabs")))
+    concerns = delivery.concerns()
+    tabs = concerns.named(REPOSITORY, "tabs")
+    reader = Reader(delivery=delivery, reader=main("s1"))
+    read = reader.read(delivery.inbox.about(REPOSITORY), Narrowing(thread="tabs"))
+    cleared = said(lead.concern(Concerning(name="tabs", body="")))
+
+    assert tabs.holder == main("s1")
+    words = next(
+        number
+        for number, each in delivery.inbox.items.items()
+        if each.recipient == Operator() and each.sender == worker
+    )
+    assert opened == (
+        "Opened @tabs, held by `dev`.\n"
+        "@tabs's body is rewritten, for the operator to read.\n"
+        f"Thanks: your words are with the operator, @{words}, in @tabs, and your "
+        "parent has them too. You can carry on."
+    )
+    assert rewritten == "@tabs's body is rewritten, for the operator to read."
+    assert alone == (
+        '@tabs, "tabs", held by you: working.\n'
+        "Its body:\n"
+        "The lexer reads a tab as a space.\nIt starts at `read_indent`."
+    )
+    assert read.text.startswith(
+        f'Thread @tabs (@{tabs.number}), "tabs", held by you: working.\n'
+        '<body by="you" at="2026-10-01 12:00">\nThe lexer reads a tab as a space.\n'
+        "It starts at `read_indent`.\n</body>\n\n"
+    )
+    # Each is kept, the latest the body; cleared, there's none.
+    assert cleared == "@tabs's body is cleared."
+    assert concerns.body(tabs) is None
+    assert [
+        (each.by, each.text)
+        for each in delivery.inbox.ledger.drawn_to(tabs.number, Body)
+    ] == [
+        (worker, "The lexer reads a tab as a space."),
+        (main("s1"), "The lexer reads a tab as a space.\nIt starts at `read_indent`."),
+        (main("s1"), ""),
+    ]
+    # Nobody is told of it: the operator reads it where the concern is.
+    assert told(delivery, main("s1")) == []
+    assert told(delivery, worker) == []
+
+
+def test_a_body_another_answers_for_is_refused_before_anything_is_done_and_hold_takes_it(
+    delivery: Delivery,
+) -> None:
+    one = launched(delivery, "dev", "s1")
+    two = launched(delivery, "docs", "s2")
+    lead = speaker(delivery, one, main("s1"))
+    other = speaker(delivery, two, main("s2"))
+    said(lead.concern(Concerning(name="lag", title="The cursor jumps")))
+
+    refused = said(
+        other.concern(
+            Concerning(name="lag", text="It jumps here too.", body="Mine now.")
+        )
+    )
+    under = said(
+        other.concern(Concerning(text="And in docs.", under="lag", body="Mine."))
+    )
+    concerns = delivery.concerns()
+    lag = concerns.named(REPOSITORY, "lag")
+    nothing = (dict(delivery.inbox.items), concerns.threads.of(REPOSITORY))
+    taken = said(other.concern(Concerning(name="lag", hold=True, body="Mine now.")))
+
+    assert refused == "Nothing done: @lag's body is `dev`'s to keep, who answers for it"
+    assert under == refused
+    assert nothing == ({}, [lag])
+    assert taken == (
+        "You hold @lag, and work in it: what you send lands there.\n"
+        "@lag's body is rewritten, for the operator to read."
+    )
+    body = concerns.body(lag)
+    assert body is not None
+    assert (body.by, body.text) == (main("s2"), "Mine now.")
 
 
 def test_the_concern_tool_opens_holds_hands_moves_parks_and_says_done(

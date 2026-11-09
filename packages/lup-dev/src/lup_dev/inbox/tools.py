@@ -212,6 +212,15 @@ class Concerning(Model, title="Concern", extra="forbid"):
             "out, under the one you work in, or at the top where you work in none."
         ),
     )
+    body: str | None = Field(
+        default=None,
+        description=(
+            "Its body, rewritten whole: what you understand of it as you write, "
+            "which the operator reads with it and comments on line by line. Keep "
+            "it current as your understanding changes; empty clears it. It's "
+            "whoever answers for the concern's to keep."
+        ),
+    )
     move: list[str] = Field(
         default=[],
         description=(
@@ -578,6 +587,9 @@ class Speaker(Model, arbitrary_types_allowed=True):
         `name` is a concern there already, and each field you give says one
         thing of it, several in one call:
         - `text` adds your words to it;
+        - `body` rewrites its body whole: what you understand of it, which the
+          operator reads with it and comments on line by line, kept current
+          by whoever answers for it;
         - `move` puts the operator's words in it, a concern made from a
           passage;
         - `join` works in it, where what you send without `thread` lands;
@@ -606,6 +618,14 @@ class Speaker(Model, arbitrary_types_allowed=True):
         if said.join and not said.hold:
             concerns.joined(self.party, thread)
             lines.append(f"You work in @{thread.name}: what you send lands there.")
+        if said.body is not None:
+            concerns.bodied(self.party, thread, said.body)
+            kept = (
+                "rewritten, for the operator to read"
+                if said.body.strip()
+                else "cleared"
+            )
+            lines.append(f"@{thread.name}'s body is {kept}.")
         if planned.to is not None:
             thread = concerns.handed(self.party, thread, planned.to)
             lines.append(
@@ -991,7 +1011,8 @@ class Speaker(Model, arbitrary_types_allowed=True):
         `InboxError` where something can't be: a new one with neither a title
         nor words to name it by, a title for one there already, a holder and a
         hand at once, parked and done at once, a park with nothing it waits
-        for, an agent nobody is.
+        for, an agent nobody is, a body another answers for, which a call taking
+        it with `hold` may rewrite.
         """
         repository = self.party.repository
         if said.hold and said.hand is not None:
@@ -1012,9 +1033,11 @@ class Speaker(Model, arbitrary_types_allowed=True):
             if said.title.strip():
                 message = f"`{said.name}` names @{found.number} already: leave out `title`, or pick another name"
                 raise InboxError(message)
-            return Planned(
-                thread=concerns.named(repository, said.name), to=to, until=until
-            )
+            thread = concerns.named(repository, said.name)
+            if said.body is not None:
+                answering = self.party if said.hold else concerns.answering(thread)
+                concerns.keeps_body(self.party, thread, answering)
+            return Planned(thread=thread, to=to, until=until)
         title = said.title.strip() or cue(said.text or "")
         if not title:
             message = (
@@ -1029,6 +1052,9 @@ class Speaker(Model, arbitrary_types_allowed=True):
             if said.under is None
             else concerns.named(repository, said.under)
         )
+        if said.body is not None and under is not None and not said.hold:
+            # Opened under one someone answers for, it's theirs, its body with it.
+            concerns.keeps_body(self.party, under, concerns.answering(under))
         try:
             opened = concerns.opened(
                 self.party,
@@ -1100,7 +1126,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         concerns.item(self.party.repository, int(number))
 
     def standing(self, concerns: Concerns, thread: Thread) -> str:
-        """Say where `thread` stands, in a line: its title, the thread it's under, who holds it, and where it stands (`stood`)."""
+        """Say where `thread` stands, in a line: its title, the thread it's under, who holds it, and where it stands (`stood`); then its body, where it has one."""
         above = (
             ""
             if thread.parent is None
@@ -1109,9 +1135,13 @@ class Speaker(Model, arbitrary_types_allowed=True):
         holder = (
             "held by nobody"
             if thread.holder is None or not concerns.live(thread.holder)
+            else "held by you"
+            if thread.holder == self.party
             else f"held by {self.called(thread.holder)}"
         )
-        return f'@{thread.name}, "{thread.title}"{above}, {holder}: {stood(concerns.standing(thread))}.'
+        line = f'@{thread.name}, "{thread.title}"{above}, {holder}: {stood(concerns.standing(thread))}.'
+        body = concerns.body(thread)
+        return line if body is None else f"{line}\nIts body:\n{body.text}"
 
     @lup.tool
     async def withdraw(self, withdrawing: Withdrawing) -> Said:

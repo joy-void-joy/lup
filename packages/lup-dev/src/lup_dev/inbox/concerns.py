@@ -69,6 +69,7 @@ from lup_ledger.environment.threads import Threads
 from lup_ledger.errors import LupLedgerError
 from lup_ledger.parties import Conversation, Lup, Operator
 from lup_ledger.threads import (
+    Body,
     BranchLanded,
     CommitLanded,
     ConditionHeld,
@@ -283,9 +284,9 @@ class Concerns(Model, arbitrary_types_allowed=True):
         except LupLedgerError as refused:
             raise InboxError(str(refused)) from refused
 
-    def drawn[E: In | Moved | Refers | Parked | Done | Settled | Declined | Reopened](
-        self, edge: E
-    ) -> E:
+    def drawn[
+        E: In | Moved | Refers | Parked | Done | Settled | Declined | Reopened | Body
+    ](self, edge: E) -> E:
         """Draw `edge` on the ledger; say why where the ledger refuses it."""
         try:
             return self.inbox.ledger.drawn(edge)
@@ -842,6 +843,36 @@ class Concerns(Model, arbitrary_types_allowed=True):
             f"operator to try: {cue(to_try)}"
         )
         return self.stated(thread, status, line, party)
+
+    def keeps_body(
+        self, party: Conversation, thread: Thread, answering: Conversation | None
+    ) -> None:
+        """Say, raising `InboxError`, where `party` can't rewrite the body of `thread`, which `answering` answers for: it's theirs to keep, and a subagent's below them, whose work it is; anyone's where nobody running answers for it."""
+        if (
+            answering is None
+            or answering == party
+            or answering in self.forebears(party)
+        ):
+            return
+        message = f"@{thread.name}'s body is {self.roster.who(answering)}'s to keep, who answers for it"
+        raise InboxError(message)
+
+    def bodied(self, party: Conversation, thread: Thread, text: str) -> Body:
+        """Rewrite `thread`'s body whole as `text`, by `party`, whoever answers for it or a subagent below them (`keeps_body`); an empty `text` clears it. Nobody is told: it's for the operator to read where the thread is."""
+        self.keeps_body(party, thread, self.answering(thread))
+        return self.drawn(
+            Body(
+                target=thread.number,
+                repository=thread.repository,
+                by=party,
+                at=self.now(),
+                text=text,
+            )
+        )
+
+    def body(self, thread: Thread) -> Body | None:
+        """Return `thread`'s body as it stands; none where it has none."""
+        return self.threads.body(thread.number)
 
     def settled(self, thread: Thread) -> Thread:
         """Settle `thread`, as the operator does, telling whoever answers for it."""

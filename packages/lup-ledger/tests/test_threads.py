@@ -18,6 +18,7 @@ from lup_ledger.threads import (
     KINDS,
     ROOT,
     Answered,
+    Body,
     BranchLanded,
     Check,
     Declined,
@@ -30,6 +31,7 @@ from lup_ledger.threads import (
     Reopened,
     Settled,
     Standing,
+    Status,
     Thread,
     TimeCame,
     without_roots,
@@ -513,6 +515,62 @@ def test_a_thread_under_what_isn_t_a_thread_of_its_repository_or_under_itself_is
         with pytest.raises(LupLedgerError, match=says):
             ledger.kept(refused)
     assert ledger.node(sub.number, Thread).parent == main.number
+
+
+def test_a_thread_s_body_is_its_latest_and_an_earlier_lup_reads_each_as_a_plain_edge_taking_none(
+    ledger: Ledger, threads: Threads, tmp_path: Path
+) -> None:
+    lag = opened(ledger, "lag")
+    asking(ledger, lag)
+
+    def bodied(text: str, minutes: int) -> Body:
+        return ledger.drawn(
+            Body(
+                target=lag.number,
+                repository=REPOSITORY,
+                by=WORKER,
+                at=at(minutes),
+                text=text,
+            )
+        )
+
+    bodied("It jumps.", 1)
+    latest = bodied("It jumps when typing fast.", 2)
+    standing = threads.standing(lag.number)
+    members = threads.members(lag.number)
+    assert threads.body(lag.number) == latest
+    on_a_member = Body(
+        target=members[0].node.number,
+        repository=REPOSITORY,
+        by=WORKER,
+        at=at(3),
+        text="x",
+    )
+    with pytest.raises(LupLedgerError, match="drawn to a thread"):
+        ledger.drawn(on_a_member)
+    ledger.close()
+
+    # An earlier lup declares no `Body`: it reads each as a plain `Edge`, its
+    # text kept, and nothing it reads of the thread takes one.
+    earlier = Kinds(
+        nodes=[*KINDS.nodes, Asks],
+        edges=[each for each in KINDS.edges if each is not Body],
+    )
+    old = Ledger.opened(LedgerLayout(home=tmp_path / "ledger"), earlier)
+    read = Threads(ledger=old)
+    plain = [
+        each for each in old.drawn_to(lag.number, Edge) if each.kind == "ledger:body"
+    ]
+    assert [type(each) for each in plain] == [Edge, Edge]
+    assert [each.model_dump()["text"] for each in plain] == [
+        "It jumps.",
+        "It jumps when typing fast.",
+    ]
+    assert read.standing(lag.number) == standing
+    assert read.members(lag.number) == members
+    assert old.drawn_of(Edge) != []
+    assert all(each.kind != "ledger:body" for each in old.drawn_of(Status))
+    old.close()
 
 
 def test_a_thread_is_found_by_its_name_and_nothing_else_is(
