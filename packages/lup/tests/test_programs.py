@@ -17,7 +17,6 @@ from lup.programs import (
     ProgramFailedError,
     ProgramMissingError,
     ProgramOverflowError,
-    answered,
     awaited,
     started,
 )
@@ -203,36 +202,3 @@ def test_started_kills_a_program_still_there_once_its_time_to_end_is_up() -> Non
 def test_started_refuses_a_program_that_isnt_there(tmp_path: Path) -> None:
     with pytest.raises(ProgramMissingError, match="can't be started"):
         asyncio.run(started(tmp_path / "nowhere"))
-
-
-def test_answered_runs_a_program_on_a_terminal_of_its_own_and_answers_what_it_asks() -> (
-    None
-):
-    asking = python(
-        "import os, sys; print('terminal' if os.isatty(0) else 'piped'); "
-        "answer = input('Take it over? [Y/n] '); print(f'took {answer}'); "
-        "sys.exit(4)"
-    )
-    seen: list[str] = []
-
-    def answering(printed: str) -> str | None:
-        seen.append(printed)
-        return "y\n" if "[Y/n]" in printed else None
-
-    ran = answered(*asking, answering=answering)
-
-    assert ran.status == 4
-    printed = ran.output.decode()
-    assert "terminal" in printed
-    assert "took y" in printed
-    assert any("[Y/n]" in each for each in seen)
-
-
-def test_answered_kills_a_program_still_there_past_its_time() -> None:
-    ran = answered(
-        *python("import time; time.sleep(600)"),
-        answering=lambda _: None,
-        within=timedelta(0),
-    )
-
-    assert ran.status == -signal.SIGKILL

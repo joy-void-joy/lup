@@ -56,11 +56,10 @@ if TYPE_CHECKING:
 
 
 class TerminalRun(Model):
-    """A terminal launch's run, as the trial drives it: its status, what it printed, and the questions it asked."""
+    """A terminal launch's run, as the trial drives it: its status, and what it printed."""
 
     status: int
     output: str
-    asked: list[str] = []
 
 
 class Stage(Model, arbitrary_types_allowed=True):
@@ -94,8 +93,8 @@ class Trial(MutableModel, arbitrary_types_allowed=True):
     and returns it once it's up: `lup-dev spawn`'s own path."""
     terminal: Callable[[Path, str], TerminalRun]
     """Runs a terminal launch resuming the session given in the worktree
-    given, answering its question to take a held session over yes, and
-    returns how it ran."""
+    given, taking it over from the held launch running it, asking nothing and
+    answering nothing, and returns how it ran."""
     running: Callable[[str], bool]
     """Says whether the container named runs, as podman says."""
     clock: Clock
@@ -313,10 +312,17 @@ class Trial(MutableModel, arbitrary_types_allowed=True):
         session = self.session()
         held = self.launch()
         run = self.terminal(self.worktree, session)
-        if not any("take it over" in each for each in run.asked):
+        asked = [each for each in ["[y/N]", "[Y/n]"] if each in run.output]
+        if asked:
             message = (
-                "the terminal launch didn't ask to take the held session over; it "
-                f"asked {run.asked or 'nothing'}, and printed:\n{run.output}"
+                "the terminal launch asked something, which the trial answers "
+                f"nothing to; it printed:\n{run.output}"
+            )
+            raise TrialError(message)
+        if "taken over here" not in run.output:
+            message = (
+                "the terminal launch didn't say it took the held session over; it "
+                f"printed:\n{run.output}"
             )
             raise TrialError(message)
         if run.status != 0 or "KIWI" not in run.output:
@@ -496,6 +502,28 @@ def spelled(took: timedelta) -> str:
     seconds = round(took.total_seconds())
     minutes, rest = divmod(seconds, 60)
     return f"{minutes} min {rest} s" if minutes else f"{rest} s"
+
+
+def taking_over(
+    program: list[str], runtime: str, session: str, model: str
+) -> list[str]:
+    """Return the terminal launch the trial runs to take the held session `session` over: `program`, the `lup-dev` it runs, launching `runtime` resuming it, ending the held launch asking nothing (`--take-over`), for a turn of its own on `model`.
+
+    >>> taking_over(["lup-dev"], "probe", "s-1", "haiku")[:5]
+    ['lup-dev', 'launch', 'probe', '--take-over', '--resume']
+    """
+    return [
+        *program,
+        "launch",
+        runtime,
+        "--take-over",
+        "--resume",
+        session,
+        "-p",
+        "Answer with the single word KIWI, and nothing else.",
+        "--model",
+        model,
+    ]
 
 
 def scratch_worktree(beside: Path, git: Git, name: str, commit: str) -> Path:

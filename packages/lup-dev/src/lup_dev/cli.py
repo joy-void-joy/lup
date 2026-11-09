@@ -36,7 +36,7 @@ from typer.core import TyperGroup
 
 from lup.doors import served as methods
 from lup.errors import LupError
-from lup.programs import Apart, answered, detached
+from lup.programs import Apart, Ran, awaited, detached
 from lup.rooms import ContainerError, Mount, Podman, Room
 from lup.rooms.engine import stopped
 from lup.types import JsonObject, Model, MutableModel
@@ -266,7 +266,7 @@ from lup_dev.launch.session import (
     hooked,
     terminal_settings,
 )
-from lup_dev.launch.trial import TerminalRun, Trial, scratch_worktree
+from lup_dev.launch.trial import TerminalRun, Trial, scratch_worktree, taking_over
 from lup_dev.launch.trust import (
     Approving,
     Given,
@@ -2369,6 +2369,7 @@ def launched(
     profile: str | None = None,
     account: str | None = None,
     held: HeldLaunch | None = None,
+    take_over: bool = False,
 ) -> int:
     """Launch `adapter`'s runtime in a room for `worktree`, in this terminal, or held with none where `held` is given, and return its CLI's exit status.
 
@@ -2379,7 +2380,7 @@ def launched(
     starts, a held one's, and a terminal's resuming one by its id, holds the
     lock on that session's writer while its room runs (`Writing`); a terminal
     finding a held launch on it offers to end that launch and take the session
-    over.
+    over, or, with `take_over`, does so asking nothing.
 
     In the order `docs/launch.md` gives (*The command*): trust on launch, its
     report said; replace refs in the repository said, which lup's git ignores
@@ -2622,7 +2623,9 @@ def launched(
         writer = (
             None
             if writing is None
-            else written_by(launcher, writing, launch, held=held is not None)
+            else written_by(
+                launcher, writing, launch, held=held is not None, take_over=take_over
+            )
         )
         try:
             with FileLock(own.lock):
@@ -2733,30 +2736,45 @@ def named_session(
 
 
 def written_by(
-    launcher: Launcher, writing: Writing, launch: str, *, held: bool
+    launcher: Launcher,
+    writing: Writing,
+    launch: str,
+    *,
+    held: bool,
+    take_over: bool = False,
 ) -> FileLock:
     """Take the lock on the session's writer for `launch`, and return it held.
 
-    Where a launch holds it already, a held launch refuses, naming it; so
-    does a terminal's with no terminal to ask in. Asked in one, the operator can
-    have that launch end, its session taken over here once it lets the lock go
-    (`lup_dev.launch.held`).
+    Where a launch holds it already, a held launch refuses, naming it, and so
+    does a terminal's where that launch is another terminal's, which ends it
+    there. Where it's a held one, the terminal's asks the operator whether to
+    end it, its session taken over here once it lets the lock go
+    (`lup_dev.launch.held`); `take_over` ends it asking nothing, and a
+    terminal with no one to ask refuses.
     """
     holder = writing.held_by()
-    if holder is None or held or launcher.ask is None:
+    if holder is None or held:
         return writing.taken(launch)
-    answer = launcher.ask(
-        f"The session {writing.path.stem} is held by launch `{holder}`, with no "
-        "terminal. End it and take it over here? [Y/n] "
+    holding = next(
+        (each for each in launcher.host.launches() if each.launch == holder), None
     )
-    if answer is None or answer.strip().lower() not in ["", "y", "yes"]:
+    if holding is None or not holding.held:
         return writing.taken(launch)
+    if not take_over:
+        if launcher.ask is None:
+            return writing.taken(launch)
+        answer = launcher.ask(
+            f"The session {writing.path.stem} is held by launch `{holding.name}`, "
+            "with no terminal. End it and take it over here? [Y/n] "
+        )
+        if answer is None or answer.strip().lower() not in ["", "y", "yes"]:
+            return writing.taken(launch)
     outstanding = launcher.host.held(End(launch=holder))
     try:
         outstanding.reply(Done)
     finally:
         outstanding.close()
-    launcher.say(f"Launch `{holder}` ended; its session is taken over here.")
+    launcher.say(f"Launch `{holding.name}` ended; its session is taken over here.")
     return writing.taken(launch, within=timedelta(minutes=1))
 
 
@@ -2887,6 +2905,16 @@ def launch(
             ),
         ),
     ] = None,
+    take_over: Annotated[
+        bool,
+        typer.Option(
+            "--take-over",
+            help=(
+                "Where a launch lup holds with no terminal runs the session this "
+                "resumes, end it and take the session over here, asking nothing."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Launch a runtime's session in a room for this worktree, in this terminal.
 
@@ -2925,6 +2953,7 @@ def launch(
         name=name,
         profile=profile,
         account=account,
+        take_over=take_over,
     )
     raise typer.Exit(code=status)
 
@@ -3164,37 +3193,31 @@ def spawn_trial(
             )
 
         def terminal(worktree: Path, session: str) -> TerminalRun:
-            asked: list[str] = []
+            """Run a terminal launch resuming `session`, its input closed, so nothing it asks is answered here, an approval above all; ending a held launch on it asking nothing (`--take-over`); killed past five minutes."""
 
-            def answering(printed: str) -> str | None:
-                """Take the held session over, and leave the sessions from before where they are; answer nothing else, an approval above all, which is the operator's."""
-                for question, answer in [
-                    ("take it over here?", "y\n"),
-                    ("Move them into the rooms' home now?", "n\n"),
-                ]:
-                    if question in printed:
-                        asked.append(question)
-                        return answer
-                return None
+            async def launched_there() -> Ran:
+                return await asyncio.wait_for(
+                    awaited(
+                        *taking_over(own_command(), runtime, session, model),
+                        cwd=worktree,
+                        checked=False,
+                        merged=True,
+                    ),
+                    timeout=timedelta(minutes=5).total_seconds(),
+                )
 
-            ran = answered(
-                *own_command(),
-                "launch",
-                runtime,
-                "--resume",
-                session,
-                "-p",
-                "Answer with the single word KIWI, and nothing else.",
-                "--model",
-                model,
-                answering=answering,
-                cwd=worktree,
-                within=timedelta(minutes=5),
-            )
+            try:
+                ran = asyncio.run(launched_there())
+            except TimeoutError:
+                return TerminalRun(
+                    status=-1,
+                    output=(
+                        "it ran past five minutes, and was killed: it may have "
+                        "asked something nothing answers here"
+                    ),
+                )
             return TerminalRun(
-                status=ran.status,
-                output=ran.output.decode(errors="replace"),
-                asked=asked,
+                status=ran.status, output=ran.output.decode(errors="replace")
             )
 
         def running(container: str) -> bool:

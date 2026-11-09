@@ -1,4 +1,4 @@
-"""Running a program: `run` waits for it and returns how it ended, `answered` does so on a terminal of its own, answering what it asks, `awaited` on an event loop, `started` keeps one running beside it, and `detached` starts one that outlives its caller.
+"""Running a program: `run` waits for it and returns how it ended, `awaited` does so on an event loop, `started` keeps one running beside it, and `detached` starts one that outlives its caller.
 
     ran = run("git", "status", "--porcelain", cwd=root)
     ran.text()                                    # what it printed
@@ -29,20 +29,15 @@ input.
 """
 
 import asyncio
-import os
-import pty
-import select
 
 # lup: ignore("subprocess", why="lup's one runner of programs, which every other module uses")
 import subprocess
-import time
 from typing import TYPE_CHECKING
 
 from lup.errors import LupError
 from lup.types import Model
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from datetime import timedelta
     from pathlib import Path
 
@@ -144,64 +139,6 @@ def run(
     if checked and ran.status not in (ok or [0]):
         raise ProgramFailedError(ran)
     return ran
-
-
-def answered(
-    program: str | Path,
-    *arguments: str,
-    answering: Callable[[str], str | None],
-    cwd: Path | None = None,
-    within: timedelta | None = None,
-) -> Ran:
-    """Run `program` with `arguments` on a terminal of its own, a pseudo-terminal, answering what it asks as `answering` says, and return how it ended, all it printed as its output.
-
-    `answering` is given what the program printed since its last answer, after
-    each time it prints, and returns what to type, a line's end included, or
-    none to wait for more: a program asks only a terminal, as a launch asks
-    before it takes a session over. Past `within`, where it's given, the
-    program is killed. Raise `ProgramMissingError` where it can't be started.
-    """
-    command = [str(program), *arguments]
-    leader, follower = pty.openpty()
-    try:
-        try:
-            process = subprocess.Popen(
-                command,
-                cwd=cwd,
-                stdin=follower,
-                stdout=follower,
-                stderr=follower,
-                start_new_session=True,
-            )
-        except OSError as missing:
-            message = f"`{program}` can't be run: {missing}"
-            raise ProgramMissingError(message) from missing
-        os.close(follower)
-        printed = bytearray()
-        since = bytearray()
-        deadline = None if within is None else time.monotonic() + within.total_seconds()
-        while True:
-            left = None if deadline is None else max(0.0, deadline - time.monotonic())
-            readable, _, _ = select.select([leader], [], [], left)
-            if not readable:
-                process.kill()
-                break
-            try:
-                chunk = os.read(leader, 65536)
-            except OSError:
-                break
-            if not chunk:
-                break
-            printed.extend(chunk)
-            since.extend(chunk)
-            answer = answering(since.decode(errors="replace"))
-            if answer is not None:
-                os.write(leader, answer.encode())
-                since.clear()
-        status = process.wait()
-    finally:
-        os.close(leader)
-    return Ran(command=command, status=status, output=bytes(printed))
 
 
 async def awaited(

@@ -2828,6 +2828,7 @@ def test_a_terminal_resuming_a_held_session_takes_it_over_on_a_yes(
     session = "0f6b1d2e-6a62-4a39-9a8c-1f2d3e4f5a6b"
     writing = Writing.of(machine.layout, "claude", session)
     lock = writing.taken("h9")
+    machine.host.served.append(holding_one(project))
     machine.host.ending.append(Held(writing=writing, lock=lock))
     asked_here: list[str] = []
 
@@ -2842,14 +2843,81 @@ def test_a_terminal_resuming_a_held_session_takes_it_over_on_a_yes(
     assert status == 7
     assert asked_here == [
         (
-            f"The session {session} is held by launch `h9`, with no terminal. End "
-            "it and take it over here? [Y/n] "
+            f"The session {session} is held by launch `held-one`, with no "
+            "terminal. End it and take it over here? [Y/n] "
         )
     ]
     assert End(launch="h9") in machine.host.asked
-    assert "Launch `h9` ended; its session is taken over here." in machine.events.said
+    assert (
+        "Launch `held-one` ended; its session is taken over here."
+        in machine.events.said
+    )
     assert machine.engine.run()[-2:] == ["--resume", session]
     assert writing.held_by() is None
+
+
+def holding_one(project: Path) -> Register:
+    """A held launch, `h9`, as the host serves it."""
+    return dead(project).model_copy(
+        update={"launch": "h9", "name": "held-one", "held": True}
+    )
+
+
+def test_a_terminal_launch_taking_over_by_its_flag_ends_the_held_one_asking_nothing(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock)
+    session = "0f6b1d2e-6a62-4a39-9a8c-1f2d3e4f5a6b"
+    writing = Writing.of(machine.layout, "claude", session)
+    lock = writing.taken("h9")
+    machine.host.served.append(holding_one(project))
+    machine.host.ending.append(Held(writing=writing, lock=lock))
+
+    status = cli.launched(
+        machine.adapter,
+        ["--resume", session],
+        project,
+        machine.launcher,
+        take_over=True,
+    )
+
+    assert status == 7
+    assert End(launch="h9") in machine.host.asked
+    assert machine.engine.run()[-2:] == ["--resume", session]
+
+
+def test_a_session_another_terminal_writes_is_refused_without_a_question(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock)
+    session = "0f6b1d2e-6a62-4a39-9a8c-1f2d3e4f5a6b"
+    writing = Writing.of(machine.layout, "claude", session)
+    lock = writing.taken("t1")
+    machine.host.served.append(
+        dead(project).model_copy(update={"launch": "t1", "name": "a-terminal"})
+    )
+    asked_here: list[str] = []
+
+    def answering(question: str) -> str:
+        asked_here.append(question)
+        return ""
+
+    terminal = machine.launcher.model_copy(update={"ask": answering})
+    try:
+        for taking_over in [False, True]:
+            with pytest.raises(LaunchError, match="written by launch `t1`"):
+                cli.launched(
+                    machine.adapter,
+                    ["--resume", session],
+                    project,
+                    terminal,
+                    take_over=taking_over,
+                )
+    finally:
+        writing.let_go(lock)
+
+    assert asked_here == []
+    assert not any(isinstance(each, End) for each in machine.host.asked)
 
 
 def test_a_terminal_resuming_a_held_session_with_no_terminal_to_ask_is_refused(
@@ -2859,6 +2927,7 @@ def test_a_terminal_resuming_a_held_session_with_no_terminal_to_ask_is_refused(
     session = "0f6b1d2e-6a62-4a39-9a8c-1f2d3e4f5a6b"
     writing = Writing.of(machine.layout, "claude", session)
     lock = writing.taken("h9")
+    machine.host.served.append(holding_one(project))
 
     try:
         with pytest.raises(LaunchError, match="written by launch `h9`"):

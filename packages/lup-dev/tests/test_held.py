@@ -12,7 +12,7 @@ import pytest
 from lup.programs import Apart, detached
 from lup_dev import cli
 from lup_dev.git import Git
-from lup_dev.host.client import Detached, HostClient, Outstanding
+from lup_dev.host.client import Detached, HostClient, Outstanding, own_command
 from lup_dev.host.held import (
     CalledUp,
     CallingUp,
@@ -52,7 +52,7 @@ from lup_dev.inbox.protocol import (
 )
 from lup_dev.inbox.store import Item, Message
 from lup_dev.inbox.texts import written
-from lup_dev.launch.trial import TerminalRun, Trial, scratch_worktree
+from lup_dev.launch.trial import TerminalRun, Trial, scratch_worktree, taking_over
 from lup_dev.layout import HostLayout, Layout
 from lup_ledger.parties import Conversation, Operator, Party
 
@@ -412,10 +412,7 @@ def played(tmp_path: Path, clock: FakeClock) -> tuple[Played, Trial]:
         host.item(conversation, Operator(), "KIWI")
         return TerminalRun(
             status=0,
-            output="KIWI\n",
-            asked=[
-                "The session s-1 is held by launch `h3`. End it and take it over here? [Y/n]"
-            ],
+            output="Launch `trial` ended; its session is taken over here.\nKIWI\n",
         )
 
     trial = Trial(
@@ -547,3 +544,33 @@ def test_the_trial_s_scratch_worktree_is_made_by_git_pinned_where_a_room_redirec
 
     assert (scratch / "file").read_text() == "content\n"
     assert not ran.exists()
+
+
+def test_the_trial_s_terminal_launch_takes_over_by_its_flag_from_nothing_on_its_path() -> (
+    None
+):
+    command = taking_over(own_command(), "claude", "s-1", "haiku")
+
+    assert command[:4] == [sys.executable, "-P", "-m", "lup_dev.cli"]
+    assert command[4:9] == ["launch", "claude", "--take-over", "--resume", "s-1"]
+
+
+def test_a_terminal_launch_that_asks_anything_fails_its_step_unanswered(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    _, trial = played(tmp_path, clock)
+
+    def asking(worktree: Path, session: str) -> TerminalRun:
+        return TerminalRun(
+            status=-1,
+            output="Approve the host zone at the tip of dev? [y/N]: ",
+        )
+
+    trial.terminal = asking
+    steps = trial.run()
+
+    [taking] = [each for each in steps if each.name == "a terminal takes it over"]
+    assert not taking.passed
+    assert taking.seen.startswith(
+        "the terminal launch asked something, which the trial answers nothing to"
+    )
