@@ -36,7 +36,7 @@ from typer.core import TyperGroup
 
 from lup.doors import served as methods
 from lup.errors import LupError
-from lup.programs import Apart, detached
+from lup.programs import Apart, answered, detached
 from lup.rooms import ContainerError, Mount, Podman, Room
 from lup.rooms.engine import stopped
 from lup.types import JsonObject, Model, MutableModel
@@ -266,6 +266,7 @@ from lup_dev.launch.session import (
     hooked,
     terminal_settings,
 )
+from lup_dev.launch.trial import TerminalRun, Trial, scratch_worktree
 from lup_dev.launch.trust import (
     Approving,
     Given,
@@ -2943,12 +2944,13 @@ def spawned(
     runtime: str,
     arguments: list[str],
     *,
-    name: str | None,
-    profile: str | None,
-    account: str | None,
-    resume: str | None,
+    worktree: Path,
+    name: str | None = None,
+    profile: str | None = None,
+    account: str | None = None,
+    resume: str | None = None,
 ) -> HeldUp:
-    """Start a session of `runtime` lup holds with no terminal, in this worktree, and return it once it's up.
+    """Start a session of `runtime` lup holds with no terminal, in the worktree whose root is `worktree`, and return it once it's up.
 
     What the host runs is checked first, here, where an approval can be asked,
     as a launch does; then the host service starts the launch's launcher apart,
@@ -2960,7 +2962,7 @@ def spawned(
     if adapter.holding is None:
         message = f"{runtime} has no session held with no terminal yet"
         raise LaunchError(message)
-    root = toplevel(Path.cwd())
+    root = worktree
     launcher = launching(typer.echo)
     launcher.say(launcher.trust(root).report())
     launcher.say(
@@ -3031,6 +3033,7 @@ def spawning_command(runtime: str) -> Callable[..., None]:
         up = spawned(
             runtime,
             list(context.args),
+            worktree=toplevel(Path.cwd()),
             name=name,
             profile=profile,
             account=account,
@@ -3101,6 +3104,107 @@ def spawn_end(
     finally:
         outstanding.close()
     typer.echo(f"Ended `{launch.name}`.")
+
+
+@spawn.command("trial")
+def spawn_trial(
+    model: Annotated[
+        str,
+        typer.Option(
+            "--model", help="The model the trial's session runs on, by its alias."
+        ),
+    ] = "haiku",
+) -> None:
+    """Try a held session end to end, once, on this machine, and file the report in your inbox.
+
+    Run it yourself, in your own terminal, in a worktree of a repository you
+    approved. In a scratch worktree beside this one, it starts a held session,
+    sends it your words and sees its answer, interrupts a long turn, restarts
+    the host service and sees the session survive, ends it, resumes it held,
+    has a terminal launch take it over, and resumes it held again; then it
+    removes the scratch worktree and files what passed, what failed and what
+    that means (`lup_dev.launch.trial`). It takes a few minutes, a few short
+    turns on your account, and a restart of the host service, which every
+    launch outlives.
+    """
+    refused_inside("the spawn trial")
+    known = [each for each in adapters() if each.holding is not None]
+    if not known:
+        message = "no runtime lup knows has a held session yet"
+        raise LaunchError(message)
+    runtime = known[0].runtime.name()
+    root = toplevel(Path.cwd())
+    git = Git(cwd=root)
+    tree = repository_of(root).tree
+    scratch = scratch_worktree(root, git, f"spawn-trial-{secrets.token_hex(4)}")
+    podman = Podman()
+    try:
+        if repository_of(scratch).tree != tree:
+            message = (
+                f"a worktree at {scratch} would widen what a room of the repository "
+                "mounts: run the trial from a worktree that has siblings, as lup's "
+                "own are laid out"
+            )
+            raise LaunchError(message)
+
+        def spawning(worktree: Path, resume: str | None) -> HeldUp:
+            return spawned(
+                runtime, ["--model", model], worktree=worktree, resume=resume
+            )
+
+        def terminal(worktree: Path, session: str) -> TerminalRun:
+            asked: list[str] = []
+
+            def answering(printed: str) -> str | None:
+                if "take it over here?" in printed:
+                    asked.append(printed.strip().splitlines()[-1])
+                    return "y\n"
+                if "[Y/n]" in printed or "[y/N]" in printed:
+                    asked.append(printed.strip().splitlines()[-1])
+                    return "n\n"
+                return None
+
+            ran = answered(
+                sys.executable,
+                "-m",
+                "lup_dev.cli",
+                "launch",
+                runtime,
+                "--resume",
+                session,
+                "-p",
+                "Answer with the single word KIWI, and nothing else.",
+                "--model",
+                model,
+                answering=answering,
+                cwd=worktree,
+                within=timedelta(minutes=10),
+            )
+            return TerminalRun(
+                status=ran.status,
+                output=ran.output.decode(errors="replace"),
+                asked=asked,
+            )
+
+        def running(container: str) -> bool:
+            return podman.state(container) == "running"
+
+        trial = Trial(
+            host=host_client(),
+            spawn=spawning,
+            terminal=terminal,
+            running=running,
+            clock=SystemClock(),
+            say=typer.echo,
+            worktree=scratch,
+        )
+        trial.run()
+        report = trial.report()
+        typer.echo(report)
+        number = trial.filed(repository_of(root).git, runtime)
+        typer.echo(f"The report is {cited(number)} in your inbox.")
+    finally:
+        git.run("worktree", "remove", "--force", str(scratch))
 
 
 @spawn.command("launcher", hidden=True)

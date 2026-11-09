@@ -1,11 +1,15 @@
 """Sessions held with no terminal, as the host service starts and reaches their launchers: real short-lived programs stand in for a launcher, and a socket served in-process for its own."""
 
 import asyncio
+import socket
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING, override
 
 import pytest
 
 from lup.programs import Apart, detached
+from lup_dev.host.client import Detached, HostClient, Outstanding
 from lup_dev.host.held import (
     CalledUp,
     CallingUp,
@@ -21,10 +25,36 @@ from lup_dev.host.held import (
     launcher_command,
 )
 from lup_dev.host.holders import HeldEnd, HeldInterrupt, Holders
-from lup_dev.host.protocol import Done, HostError, Limits, Refused, Register
+from lup_dev.host.protocol import (
+    Activity,
+    Done,
+    HostError,
+    Limits,
+    Listed,
+    Refused,
+    Register,
+    Reply,
+    Request,
+    Talker,
+)
 from lup_dev.host.service import Dispatcher, Route, unix_server
 from lup_dev.host.watch import Changes
-from lup_dev.layout import Layout
+from lup_dev.inbox.protocol import (
+    FileReport,
+    FinishItem,
+    Items,
+    ListItems,
+    SendItem,
+    Shown,
+)
+from lup_dev.inbox.store import Item, Message
+from lup_dev.inbox.texts import written
+from lup_dev.launch.trial import TerminalRun, Trial
+from lup_dev.layout import HostLayout, Layout
+from lup_ledger.parties import Conversation, Operator, Party
+
+if TYPE_CHECKING:
+    from conftest import FakeClock
 
 
 @pytest.fixture
@@ -213,3 +243,236 @@ def test_a_launcher_s_requests_are_answered_on_its_socket_as_the_service_s_are(
         error="no handler for `held-end`; launch h1's launcher answers no kind"
     )
     assert Route.to(Ending(holders=Holders(layout=layout))).kind == "end"
+
+
+# The operator's one command, against a host that answers as a held session would
+
+
+WORDS = {
+    "single word PAPAYA": "PAPAYA",
+    "single word PEAR": "PEAR",
+    "single word MANGO": "MANGO",
+    "first ask you": "PAPAYA",
+    "List, in order": "PAPAYA PEAR MANGO KIWI",
+}
+"""What the stand-in session answers to each of the trial's questions, by a passage of it."""
+
+
+class Played(HostClient):
+    """The host service as the trial meets it, one held launch at a time, its session answering each question, with no service behind."""
+
+    log: Path
+    conversation: Conversation
+    served: list[Register] = []
+    items: list[Item] = []
+    asked: list[Request] = []
+    calling: list[bool] = []
+    restarts: list[int] = []
+    words: dict[str, str] = WORDS
+    """What the session answers, by a passage of the question."""
+
+    def item(self, sender: Party, recipient: Party, text: str) -> Item:
+        made = Item(
+            number=len(self.items) + 1,
+            reason=Message(kind="note", text=text, ending=sender != Operator()),
+            sender=sender,
+            recipient=recipient,
+            made=datetime(2026, 11, 8, tzinfo=UTC),
+        )
+        self.items.append(made)
+        return made
+
+    @override
+    def ensure(self) -> None:
+        self.restarts.append(len(self.restarts))
+
+    @override
+    def stop(self) -> bool:
+        return True
+
+    @override
+    def launches(self) -> list[Register]:
+        return self.served
+
+    @override
+    def listed(self) -> Listed:
+        talkers = [
+            Talker(
+                path="t",
+                own="t",
+                session=self.conversation.session,
+                activity=Activity(
+                    state="calling", since=datetime(2026, 11, 8, tzinfo=UTC)
+                )
+                if self.calling
+                else None,
+            )
+        ]
+        return Listed(
+            launches=self.served, talkers={each.launch: talkers for each in self.served}
+        )
+
+    @override
+    def ask[R: Reply](self, request: Request, reply: type[R]) -> R:
+        self.asked.append(request)
+        match request:
+            case SendItem(text=text):
+                sent = self.item(Operator(), self.conversation, text)
+                answer = next(
+                    (word for cue, word in self.words.items() if cue in text), None
+                )
+                if "time.sleep" in text:
+                    self.calling.append(True)
+                elif answer is not None:
+                    self.item(self.conversation, Operator(), answer)
+                return reply.model_validate(Shown(item=sent).model_dump())
+            case ListItems():
+                return reply.model_validate(Items(items=self.items).model_dump())
+            case Interrupt():
+                self.log.write_text(
+                    "Session: A turn ended: error_during_execution, aborted_tools, an error.\n"
+                )
+                return reply.model_validate(Done().model_dump())
+            case FileReport(sender=sender, text=text):
+                filed = self.item(sender, Operator(), text)
+                return reply.model_validate(Shown(item=filed).model_dump())
+            case FinishItem(number=number):
+                return reply.model_validate(
+                    Shown(item=self.items[number - 1]).model_dump()
+                )
+            case _:
+                return reply.model_validate(Done().model_dump())
+
+    @override
+    def held(self, request: Request) -> Outstanding:
+        self.asked.append(request)
+        if isinstance(request, End):
+            self.served[:] = [
+                each for each in self.served if each.launch != request.launch
+            ]
+        mine, theirs = socket.socketpair()
+        theirs.sendall(Done().model_dump_json().encode())
+        theirs.close()
+        return Outstanding(connection=mine)
+
+
+def played(tmp_path: Path, clock: FakeClock) -> tuple[Played, Trial]:
+    conversation = Conversation(
+        repository=tmp_path / ".git", runtime="claude", session="s-1"
+    )
+    host = Played(
+        layout=HostLayout(sockets=tmp_path / "run", state=tmp_path / "state"),
+        clock=clock,
+        starter=Detached(),
+        log=tmp_path / "h1.log",
+        conversation=conversation,
+    )
+    host.log.write_text("")
+
+    def spawn(worktree: Path, resume: str | None) -> HeldUp:
+        launch = f"h{len([each for each in host.asked if isinstance(each, End)]) + 1}"
+        host.served[:] = [
+            held(launch).model_copy(update={"container": "lup-trial", "name": "trial"})
+        ]
+        return HeldUp(launch=launch, name="trial", session="s-1", log=host.log)
+
+    def terminal(worktree: Path, session: str) -> TerminalRun:
+        host.served.clear()
+        host.item(conversation, Operator(), "KIWI")
+        return TerminalRun(
+            status=0,
+            output="KIWI\n",
+            asked=[
+                "The session s-1 is held by launch `h3`. End it and take it over here? [Y/n]"
+            ],
+        )
+
+    trial = Trial(
+        host=host,
+        spawn=spawn,
+        terminal=terminal,
+        running=lambda container: bool(host.served),
+        clock=clock,
+        say=lambda _: None,
+        worktree=tmp_path / "spawn-trial-1",
+    )
+    return host, trial
+
+
+def test_the_trial_tries_each_step_and_files_what_it_saw_under_the_session(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    host, trial = played(tmp_path, clock)
+
+    steps = trial.run()
+    number = trial.filed(tmp_path / ".git", "claude")
+
+    assert [(each.name, each.passed) for each in steps] == [
+        ("held", True),
+        ("answers", True),
+        ("interrupts", True),
+        ("survives a restart", True),
+        ("ends", True),
+        ("resumes held", True),
+        ("a terminal takes it over", True),
+        ("back to held", True),
+    ], [each.seen for each in steps]
+    report = written(host.items[number - 1])
+    assert report.startswith(
+        f"**Spawn's trial**, `lup-dev spawn trial`, in {tmp_path / 'spawn-trial-1'}: "
+        "8 of 8 steps passed."
+    )
+    assert "**What it means:** a session lup holds with no terminal works" in report
+    assert host.items[number - 1].sender == host.conversation
+    finished = [each.number for each in host.asked if isinstance(each, FinishItem)]
+    assert finished == [
+        each.number
+        for each in host.items[: number - 1]
+        if each.recipient == Operator() and each.sender == host.conversation
+    ]
+    assert host.restarts == [0]
+
+
+def test_a_trial_whose_session_never_starts_says_so_and_files_it_anyway(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    host, trial = played(tmp_path, clock)
+
+    def refused(worktree: Path, resume: str | None) -> HeldUp:
+        message = "the launcher of launch h1 ended before its session was up"
+        raise HostError(message)
+
+    trial.spawn = refused
+    steps = trial.run()
+    number = trial.filed(tmp_path / ".git", "claude")
+
+    assert [(each.name, each.passed) for each in steps] == [("held", False)]
+    report = written(host.items[number - 1])
+    assert "0 of 8 steps passed." in report
+    assert (
+        "- **held**, failed in 0 s: the launcher of launch h1 ended before its "
+        "session was up"
+    ) in report
+    assert "**held** failing means no session is held on this machine" in report
+    assert (
+        "Not tried, after that: answers, interrupts, survives a restart, ends, "
+        "resumes held, a terminal takes it over, back to held."
+    ) in report
+    sender = host.items[number - 1].sender
+    assert isinstance(sender, Conversation)
+    assert sender.session.startswith("spawn-trial-")
+
+
+def test_a_trial_whose_answer_never_comes_fails_that_step_past_its_patience_and_goes_on(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    host, trial = played(tmp_path, clock)
+    host.words.pop("single word PAPAYA")
+
+    steps = trial.run()
+
+    [answers] = [each for each in steps if each.name == "answers"]
+    assert not answers.passed
+    assert answers.seen == "no answer holding PAPAYA came within 0:04:00"
+    assert answers.took == timedelta(minutes=4)
+    assert [each.name for each in steps][-1] == "back to held"
