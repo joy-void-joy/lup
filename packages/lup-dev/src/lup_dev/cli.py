@@ -3125,7 +3125,8 @@ def spawn_trial(
     removes the scratch worktree and files what passed, what failed and what
     that means (`lup_dev.launch.trial`). It takes a few minutes, a few short
     turns on your account, and a restart of the host service, which every
-    launch outlives.
+    launch outlives. The host service must run a copy of lup that holds
+    sessions, one you approved with them.
     """
     refused_inside("the spawn trial")
     known = [each for each in adapters() if each.holding is not None]
@@ -3156,12 +3157,14 @@ def spawn_trial(
             asked: list[str] = []
 
             def answering(printed: str) -> str | None:
-                if "take it over here?" in printed:
-                    asked.append(printed.strip().splitlines()[-1])
-                    return "y\n"
-                if "[Y/n]" in printed or "[y/N]" in printed:
-                    asked.append(printed.strip().splitlines()[-1])
-                    return "n\n"
+                """Take the held session over, and leave the sessions from before where they are; answer nothing else, an approval above all, which is the operator's."""
+                for question, answer in [
+                    ("take it over here?", "y\n"),
+                    ("Move them into the rooms' home now?", "n\n"),
+                ]:
+                    if question in printed:
+                        asked.append(question)
+                        return answer
                 return None
 
             ran = answered(
@@ -3178,7 +3181,7 @@ def spawn_trial(
                 model,
                 answering=answering,
                 cwd=worktree,
-                within=timedelta(minutes=10),
+                within=timedelta(minutes=5),
             )
             return TerminalRun(
                 status=ran.status,

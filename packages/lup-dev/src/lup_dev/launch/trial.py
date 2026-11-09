@@ -38,7 +38,7 @@ from lup_dev.clock import Clock
 from lup_dev.errors import LupDevError
 from lup_dev.host.client import HostClient
 from lup_dev.host.held import End, HeldUp, Interrupt
-from lup_dev.host.protocol import Done, Listed, Register
+from lup_dev.host.protocol import Done, HostError, Listed, Register
 from lup_dev.inbox.protocol import (
     FileReport,
     FinishItem,
@@ -116,8 +116,10 @@ class Trial(MutableModel, arbitrary_types_allowed=True):
             Stage(
                 name="held",
                 meaning=(
-                    "no session is held on this machine: the launcher's log says "
-                    "why, and nothing after this step was tried"
+                    "no session is held on this machine: what it saw says why, the "
+                    "end of the launcher's log among it, and nothing after this "
+                    "step was tried; a host service on a copy of lup from before "
+                    "held sessions refuses `spawn` outright"
                 ),
                 tried=self.held,
                 stops=True,
@@ -457,7 +459,10 @@ class Trial(MutableModel, arbitrary_types_allowed=True):
             if isinstance(each.recipient, Operator) and isinstance(
                 each.sender, Conversation
             ):
-                self.host.ask(FinishItem(number=each.number), Shown)
+                try:
+                    self.host.ask(FinishItem(number=each.number), Shown)
+                except HostError as kept:
+                    self.say(f"@{each.number} stays on your list: {kept}")
         sender = self.conversation or Conversation(
             repository=repository,
             runtime=runtime,
