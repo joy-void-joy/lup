@@ -225,7 +225,7 @@ def kept_launchers(layout: Layout) -> list[SpawnedLauncher]:
         for each in sorted(layout.launches.glob("*.spawned.json")):
             try:
                 yield SpawnedLauncher.model_validate_json(each.read_text())
-            except (ValidationError, OSError):
+            except ValidationError, OSError:
                 continue
 
     return list(read())

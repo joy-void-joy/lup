@@ -14941,3 +14941,35 @@ def test_a_session_a_spawned_room_s_hook_named_has_no_parent_in_a_launch_of_its_
         after = delivery.parent(named)
     assert within == spawner
     assert after is None
+
+
+def test_a_side_job_s_report_to_a_spawner_cleared_in_their_launch_reaches_who_took_their_place(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """Woken as the cleared session, the launch's push would go to the session that took its place, who'd never take it, and the launch be rung from then on: the report goes to that session instead."""
+    worktree = tmp_path / "w"
+    spawner = Conversation(repository=worktree / ".git", runtime="claude", session="s1")
+    successor = spawner.model_copy(update={"session": "s2"})
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, worktree, "one", "claude")
+        hook = machine.host.launch("one").hook
+        side_job(machine, clock, tmp_path, spawner)
+        child = machine.host.launch("two").hook
+        send(hook, claude("SessionStart", source="startup"))
+        send(child, claude("SessionStart", source="startup", session_id="c1"))
+        clock.sleep(60)
+        send(hook, claude("SessionStart", source="clear", session_id="s2"))
+        send(
+            child,
+            claude(
+                "Stop",
+                stop_hook_active=False,
+                last_assistant_message="Four minutes.",
+                session_id="c1",
+            ),
+        )
+        report = delivery.inbox.item(newest(delivery))
+        stale = delivery.inbox.waiting(spawner)
+    assert report.recipient == successor
+    assert isinstance(report.reason, Ended)
+    assert stale == []

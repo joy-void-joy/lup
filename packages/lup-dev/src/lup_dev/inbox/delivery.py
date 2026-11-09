@@ -1331,11 +1331,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         await self.posted(news, party, spawner, launch.worktree)
 
     def reaching(self, party: Conversation) -> Conversation:
-        """Return whom an item for `party`, an agent who spawned a session through lup, reaches: them, or their session's main conversation where they're a subagent who ended, as what waited for them goes there as they end (`ended`)."""
+        """Return whom an item for `party`, an agent who spawned a session through lup, reaches: them; their session's main conversation where they're a subagent who ended, as what waited for them goes there as they end (`ended`); and where that session was cleared in its launch, the one that took its place there, whom a push or a doorbell of the launch reaches, as `party` it would never be taken."""
         place = self.inbox.whereabouts.get(party.key())
-        if party.agent is None or place is None or place.ended is None:
+        if party.agent is not None and place is not None and place.ended is not None:
+            return self.reaching(party.main())
+        if party.agent is not None or place is None or self.inbox.live(party):
             return party
-        return party.main()
+        successor = self.running(place.launch)
+        return party if successor is None else successor
 
     async def called_up(self, launch: Register, session: str) -> None:
         """Give a held session what waits for them as their first turn, once their launcher calls them up: what an agent's spawn addressed to them, their brief among it, and what came for them while they were away; not told as they started, where no turn would begin on it.
@@ -2649,6 +2652,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         busy = presence.turning or presence.woken or presence.held
         loud = [item for item in waiting if not item.quiet]
         if party.agent is not None or busy or place is None or not loud:
+            return
+        if not self.inbox.live(party):
+            # Cleared in their launch, or ended: a push or a doorbell of the
+            # launch reaches whoever runs there in their place, who'd never take it as
+            # theirs, and the launch would be rung from then on.
             return
         if self.holders is not None and self.holders.holds(place.launch):
             await self.given(party, place, waiting)
