@@ -17,7 +17,9 @@ called up.
 """
 
 import asyncio
+import os
 import secrets
+import signal
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from pathlib import Path
@@ -37,7 +39,7 @@ from lup_dev.host.protocol import (
     Request,
 )
 from lup_dev.host.service import Handler
-from lup_dev.layout import Layout
+from lup_dev.layout import HostPaths, Layout
 
 
 class HeldLaunch(Model):
@@ -71,18 +73,22 @@ class Spawn(Request, reads=False):
 
 
 class Starting(Reply):
-    """A held launch's launcher is started: its launch's id, and where it writes what it says. Its session is up once `AwaitHeld` says so."""
+    """A held launch's launcher is started: its launch's id, its process's, and where it writes what it says. Its session is up once `AwaitHeld` says so."""
 
     kind: Literal["held-starting"] = "held-starting"
     launch: str
+    pid: int
+    """The launcher's process: a service started after this one, as an
+    approval starts one, knows it by this alone."""
     log: Path
 
 
 class AwaitHeld(Request, reads=False):
-    """Wait until a held launch's session is up, answered once it is, or its launcher ended first."""
+    """Wait until a held launch's session is up, answered once it is, or its launcher ended first; a service that didn't start the launcher watches its process."""
 
     kind: Literal["await-held"] = "await-held"
     launch: LaunchId
+    pid: int
 
 
 class Abandon(Request, reads=False):
@@ -90,6 +96,7 @@ class Abandon(Request, reads=False):
 
     kind: Literal["abandon"] = "abandon"
     launch: LaunchId
+    pid: int
 
 
 class HeldUp(Reply):
@@ -146,6 +153,15 @@ class Launchers(MutableModel, arbitrary_types_allowed=True):
         }
 
 
+def launching(paths: HostPaths, pid: int, launch: str) -> bool:
+    """Say whether the process `pid` is still the launcher of `launch`: there, and naming the launch in its command, so a process given its id since is never taken for it. One ended and not yet collected has no command left, so it reads as ended."""
+    try:
+        command = (paths.proc / str(pid) / "cmdline").read_bytes()
+    except OSError:
+        return False
+    return launch.encode() in command
+
+
 def tail(log: Path, lines: int = 20) -> str:
     """Return the last `lines` lines of what a launcher wrote, or say it wrote nothing."""
     try:
@@ -187,7 +203,7 @@ class Spawning(Model, Handler[Spawn], arbitrary_types_allowed=True):
         self.launchers.waiting = {**self.launchers.waiting, launch: up}
         launcher = await asyncio.to_thread(self.start, spec, log)
         self.launchers.started = {**self.launchers.started, launch: launcher}
-        return Starting(launch=launch, log=log)
+        return Starting(launch=launch, pid=launcher.process.pid, log=log)
 
 
 class Awaiting(Model, Handler[AwaitHeld], arbitrary_types_allowed=True):
@@ -195,6 +211,8 @@ class Awaiting(Model, Handler[AwaitHeld], arbitrary_types_allowed=True):
 
     layout: Layout
     launchers: Launchers
+    paths: HostPaths = HostPaths()
+    """Where a launcher another service started is looked for."""
     pause: Callable[[float], Awaitable[None]] = asyncio.sleep
     """Waits the seconds between two looks at whether the launcher ended; a
     test gives its own."""
@@ -207,16 +225,27 @@ class Awaiting(Model, Handler[AwaitHeld], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: AwaitHeld) -> Reply:
-        """Wait until the launcher says its session is up; refuse where it ended first, with the end of what it wrote, or isn't one this service started."""
+        """Wait until the launcher says its session is up; refuse where it ended first, with the end of what it wrote.
+
+        A launcher another service started, as before an approval restarted
+        this one, is watched by its process (`launching`), and its word that
+        it's up is waited for here from then on.
+        """
         launch = request.launch
         up = self.launchers.waiting.get(launch)
+        if up is None:
+            up = asyncio.get_running_loop().create_future()
+            self.launchers.waiting = {**self.launchers.waiting, launch: up}
         launcher = self.launchers.started.get(launch)
-        if up is None or launcher is None:
-            message = f"no launcher this service started waits on launch {launch}"
-            raise HostError(message)
+
+        def ended() -> bool:
+            if launcher is not None:
+                return launcher.ended()
+            return not launching(self.paths, request.pid, launch)
+
         log = self.layout.launch(launch).log
         while not up.done():
-            if launcher.ended() and not up.done():
+            if ended() and not up.done():
                 return Refused(
                     error=(
                         f"the launcher of launch {launch} ended before its session "
@@ -232,6 +261,8 @@ class Abandoning(Model, Handler[Abandon], arbitrary_types_allowed=True):
     """Answers `Abandon`: the launcher ended, its session never called up."""
 
     launchers: Launchers
+    paths: HostPaths = HostPaths()
+    """Where a launcher another service started is looked for."""
     patience: timedelta = timedelta(seconds=10)
     """How long the launcher may take to end once asked, before it's made to."""
 
@@ -249,11 +280,16 @@ class Abandoning(Model, Handler[Abandon], arbitrary_types_allowed=True):
                 "end` ends it"
             )
             raise HostError(message)
+        if up is not None and not up.done():
+            up.cancel()
         launcher = self.launchers.started.get(request.launch)
         if launcher is not None:
             await asyncio.to_thread(launcher.end, self.patience)
-        if up is not None and not up.done():
-            up.cancel()
+            return Done()
+        if launching(self.paths, request.pid, request.launch):
+            # Another service started it: it's asked to end, as its own
+            # `SIGTERM` handling ends a session it holds.
+            os.kill(request.pid, signal.SIGTERM)
         return Done()
 
 
@@ -268,8 +304,12 @@ class CallingUp(Model, Handler[CalledUp], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: CalledUp) -> Reply:
+        """Resolve what an await of the launch waits on, or will: a service started after the spawn, as an approval starts one, hears it before anyone awaits it again."""
         waiting = self.launchers.waiting.get(request.launch)
-        if waiting is not None and not waiting.done():
+        if waiting is None:
+            waiting = asyncio.get_running_loop().create_future()
+            self.launchers.waiting = {**self.launchers.waiting, request.launch: waiting}
+        if not waiting.done():
             waiting.set_result(request)
         return Done()
 

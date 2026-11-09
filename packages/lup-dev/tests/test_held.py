@@ -31,6 +31,7 @@ from lup_dev.host.held import (
     Spawning,
     Starting,
     launcher_command,
+    launching,
 )
 from lup_dev.host.holders import HeldEnd, HeldInterrupt, Holders
 from lup_dev.host.protocol import (
@@ -58,7 +59,7 @@ from lup_dev.inbox.protocol import (
 from lup_dev.inbox.store import Item, Message
 from lup_dev.inbox.texts import written
 from lup_dev.launch.trial import TerminalRun, Trial, scratch_worktree, taking_over
-from lup_dev.layout import HostLayout, Layout
+from lup_dev.layout import HostLayout, HostPaths, Layout
 from lup_ledger.parties import Conversation, Operator, Party
 
 if TYPE_CHECKING:
@@ -107,13 +108,17 @@ def test_a_spawn_starts_its_launcher_and_its_await_answers_once_it_calls_its_ses
         )
         awaited = await Awaiting(
             layout=layout, launchers=launchers, pause=yielded
-        ).answer(AwaitHeld(launch=starting.launch))
+        ).answer(AwaitHeld(launch=starting.launch, pid=starting.pid))
         return starting, awaited
 
     starting, awaited = asyncio.run(spawned())
 
     [spec] = started
-    assert starting == Starting(launch=spec.launch, log=layout.launch(spec.launch).log)
+    assert starting == Starting(
+        launch=spec.launch,
+        pid=launchers.started[spec.launch].process.pid,
+        log=layout.launch(spec.launch).log,
+    )
     assert awaited == HeldUp(
         launch=spec.launch,
         name="dev",
@@ -150,7 +155,7 @@ def test_a_spawn_whose_launcher_ends_first_is_refused_with_what_it_wrote(
         ).answer(asking(tmp_path))
         assert isinstance(starting, Starting)
         return await Awaiting(layout=layout, launchers=launchers, pause=yielded).answer(
-            AwaitHeld(launch=starting.launch)
+            AwaitHeld(launch=starting.launch, pid=starting.pid)
         )
 
     answer = asyncio.run(refused())
@@ -174,12 +179,16 @@ def test_a_spawn_abandoned_before_its_session_is_up_ends_its_launcher_and_one_up
         second = await spawning.answer(asking(tmp_path))
         assert isinstance(first, Starting)
         assert isinstance(second, Starting)
-        await Abandoning(launchers=launchers).answer(Abandon(launch=first.launch))
+        await Abandoning(launchers=launchers).answer(
+            Abandon(launch=first.launch, pid=first.pid)
+        )
         await CallingUp(launchers=launchers).answer(
             CalledUp(launch=second.launch, name="dev", session="s-1")
         )
         try:
-            await Abandoning(launchers=launchers).answer(Abandon(launch=second.launch))
+            await Abandoning(launchers=launchers).answer(
+                Abandon(launch=second.launch, pid=second.pid)
+            )
         except HostError as up:
             return first, second, str(up)
         return first, second, ""
@@ -352,10 +361,17 @@ class Played(HostClient):
     words: dict[str, str] = WORDS
     """What the session answers, by a passage of the question."""
 
-    def item(self, sender: Party, recipient: Party, text: str) -> Item:
+    def item(
+        self, sender: Party, recipient: Party, text: str, *, ending: bool | None = None
+    ) -> Item:
+        """Keep an item, a turn's end where its sender is the session unless `ending` says otherwise."""
         made = Item(
             number=len(self.items) + 1,
-            reason=Message(kind="note", text=text, ending=sender != Operator()),
+            reason=Message(
+                kind="note",
+                text=text,
+                ending=sender != Operator() if ending is None else ending,
+            ),
             sender=sender,
             recipient=recipient,
             made=datetime(2026, 11, 8, tzinfo=UTC),
@@ -453,7 +469,9 @@ def played(tmp_path: Path, clock: FakeClock) -> tuple[Played, Trial]:
     def spawn(worktree: Path, resume: str | None) -> HeldUp:
         launch = f"h{len([each for each in host.asked if isinstance(each, End)]) + 1}"
         host.served[:] = [
-            held(launch).model_copy(update={"container": "lup-trial", "name": "trial"})
+            held(launch).model_copy(
+                update={"container": "lup-trial", "name": "trial", "worktree": worktree}
+            )
         ]
         return HeldUp(launch=launch, name="trial", session="s-1", log=host.log)
 
@@ -486,8 +504,12 @@ def test_the_trial_tries_each_step_and_files_what_it_saw_under_the_session(
     host, trial = played(tmp_path, clock)
 
     steps = trial.run()
+    noted = host.item(host.conversation, Operator(), "A note.", ending=False)
     number = trial.filed(tmp_path / ".git", "claude")
 
+    assert noted.number not in [
+        each.number for each in host.asked if isinstance(each, FinishItem)
+    ]
     assert [(each.name, each.passed) for each in steps] == [
         ("held", True),
         ("answers", True),
@@ -510,7 +532,9 @@ def test_the_trial_tries_each_step_and_files_what_it_saw_under_the_session(
     assert finished == [
         each.number
         for each in host.items[: number - 1]
-        if each.recipient == Operator() and each.sender == host.conversation
+        if each.recipient == Operator()
+        and each.sender == host.conversation
+        and each.number != noted.number
     ]
     assert host.restarts == [0]
 
@@ -693,6 +717,9 @@ def test_a_trial_whose_resume_fails_ends_no_launch_in_its_place(
     assert not resumed.passed
     ends = [each.launch for each in host.asked if isinstance(each, End)]
     assert "someone-else" not in ends
+    # What follows acts on no launch the trial no longer holds.
+    [taking] = [each for each in steps if each.name == "a terminal takes it over"]
+    assert taking.seen == "no held session is up"
 
 
 def test_a_room_whose_kernel_lets_any_process_trace_another_fails_the_trial(
@@ -714,3 +741,70 @@ def test_a_room_whose_kernel_lets_any_process_trace_another_fails_the_trial(
     ]
     assert not forging.passed
     assert "(status 5)" in forging.seen
+
+
+def test_a_service_started_since_awaits_a_launcher_it_didn_t_start_by_its_process(
+    layout: Layout, tmp_path: Path
+) -> None:
+    """An approval the launcher asked restarts the service: the one after hears the launcher call its session up, and the operator's wait asked again finds it; a launcher whose process is gone is said so."""
+    paths = HostPaths(proc=tmp_path / "proc")
+    running = paths.proc / "41"
+    running.mkdir(parents=True)
+    (running / "cmdline").write_bytes(
+        b"python3\0-P\0-m\0lup_dev.cli\0spawn\0launcher\0{a1}"
+    )
+    launchers = Launchers()
+    awaiting = Awaiting(layout=layout, launchers=launchers, paths=paths, pause=yielded)
+
+    async def awaited() -> tuple[Reply, Reply]:
+        await CallingUp(launchers=launchers).answer(
+            CalledUp(launch="a1", name="dev", session="s-1")
+        )
+        up = await awaiting.answer(AwaitHeld(launch="a1", pid=41))
+        gone = await awaiting.answer(AwaitHeld(launch="b2", pid=42))
+        return up, gone
+
+    up, gone = asyncio.run(awaited())
+
+    assert up == HeldUp(
+        launch="a1", name="dev", session="s-1", log=layout.launch("a1").log
+    )
+    assert isinstance(gone, Refused)
+    assert "the launcher of launch b2 ended before its session was up" in gone.error
+
+
+def test_a_launcher_is_never_taken_for_another_process_given_its_id_since(
+    tmp_path: Path,
+) -> None:
+    paths = HostPaths(proc=tmp_path / "proc")
+    other = paths.proc / "41"
+    other.mkdir(parents=True)
+    (other / "cmdline").write_bytes(b"vim\0notes.md")
+
+    assert not launching(paths, 41, "a1")
+    assert not launching(paths, 43, "a1")
+
+
+def test_the_trial_ends_every_held_launch_left_in_its_worktree_before_removing_it(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    """A start whose launcher came up after the trial stopped waiting on it, as through a restart of the service, leaves a launch the trial never knew."""
+    host, trial = played(tmp_path, clock)
+    spawn = trial.spawn
+
+    def lost(worktree: Path, resume: str | None) -> HeldUp:
+        if resume is None:
+            return spawn(worktree, resume)
+        host.served[:] = [
+            held("lost").model_copy(update={"worktree": worktree, "name": "lost"}),
+            held("elsewhere"),
+        ]
+        message = "the host service closed its wait on launch lost 3 times"
+        raise HostError(message)
+
+    trial.spawn = lost
+    trial.run()
+
+    ends = [each.launch for each in host.asked if isinstance(each, End)]
+    assert "lost" in ends
+    assert "elsewhere" not in ends

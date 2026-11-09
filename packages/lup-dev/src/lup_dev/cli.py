@@ -3067,8 +3067,13 @@ def spawned(
     profile: str | None = None,
     account: str | None = None,
     resume: str | None = None,
+    restarts: int = 3,
 ) -> HeldUp:
     """Start a session of `runtime` lup holds with no terminal, in the worktree whose root is `worktree`, and return it once it's up.
+
+    Where the service restarts meanwhile, as answering the launcher's approval
+    restarts it, the wait is asked again of the one that runs next, `restarts`
+    times at most.
 
     What the host runs is checked first, here, where an approval can be asked,
     as a launch does; then the host service starts the launch's launcher apart,
@@ -3100,24 +3105,34 @@ def spawned(
         Starting,
     )
     launcher.say(f"Launch {starting.launch}'s launcher writes to {starting.log}.")
-    outstanding = launcher.host.held(AwaitHeld(launch=starting.launch))
-    try:
-        up = outstanding.reply(HeldUp)
-    except KeyboardInterrupt:
-        # Giving up here gives up the launch: its launcher, which may be
-        # waiting on an approval in the inbox, never calls a session up after.
-        launcher.host.ask(Abandon(launch=starting.launch), Done)
-        launcher.say(f"Launch {starting.launch} abandoned: its launcher is ended.")
-        raise
-    finally:
-        outstanding.close()
-    if up is None:
-        message = (
-            "the host service closed the connection before the held session was "
-            "up; `lup-dev sessions` says whether it runs"
+    awaiting = AwaitHeld(launch=starting.launch, pid=starting.pid)
+    outstanding = launcher.host.held(awaiting)
+    for _ in range(restarts):
+        try:
+            up = outstanding.reply(HeldUp)
+        except KeyboardInterrupt:
+            # Giving up here gives up the launch: its launcher, which may be
+            # waiting on an approval in the inbox, never calls a session up after.
+            launcher.host.ask(Abandon(launch=starting.launch, pid=starting.pid), Done)
+            launcher.say(f"Launch {starting.launch} abandoned: its launcher is ended.")
+            raise
+        finally:
+            outstanding.close()
+        if up is not None:
+            return up
+        # The service closed the wait, as an approval the launcher asked
+        # restarts it: the one that runs next is asked to wait on.
+        launcher.say(
+            "The host service restarted meanwhile; waiting on the launch with the "
+            "one that runs now."
         )
-        raise HostError(message)
-    return up
+        outstanding = launcher.host.rejoined(awaiting)
+    outstanding.close()
+    message = (
+        f"the host service closed its wait on launch {starting.launch} "
+        f"{restarts} times; `lup-dev sessions` says whether it runs"
+    )
+    raise HostError(message)
 
 
 def spawning_command(runtime: str) -> Callable[..., None]:

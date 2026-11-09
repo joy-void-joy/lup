@@ -553,21 +553,27 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
             self.clock.sleep(self.look.total_seconds())
 
     def ended(self) -> None:
-        """End the held launch the trial left running, where one is, saying what fails."""
-        if self.up is None:
-            return
-        up = self.up
+        """End every held launch the host serves in the trial's worktree, which it's about to remove: its last, and any whose start the trial lost, saying what fails."""
         try:
-            served = [each.launch for each in self.host.launches()]
-            if up.launch not in served:
-                return
-            outstanding = self.host.held(End(launch=up.launch))
-            try:
-                outstanding.reply(Done)
-            finally:
-                outstanding.close()
+            left = [
+                each
+                for each in self.host.launches()
+                if each.held and each.worktree == self.worktree
+            ]
         except (LupDevError, LupError, OSError) as failed:
-            self.say(f"The trial's held launch `{up.name}` wasn't ended: {failed}")
+            self.say(f"The trial's held launches weren't looked for: {failed}")
+            return
+        for each in left:
+            try:
+                outstanding = self.host.held(End(launch=each.launch))
+                try:
+                    outstanding.reply(Done)
+                finally:
+                    outstanding.close()
+            except (LupDevError, LupError, OSError) as failed:
+                self.say(
+                    f"The trial's held launch `{each.name}` wasn't ended: {failed}"
+                )
 
     def report(self) -> str:
         """Return the report: each step, whether it passed and what it saw, then what that means."""
