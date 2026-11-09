@@ -116,6 +116,7 @@ from lup_dev.host.held import (
     Abandoning,
     AwaitHeld,
     Awaiting,
+    CalledUp,
     CallingUp,
     End,
     HeldLaunch,
@@ -155,7 +156,14 @@ from lup_dev.host.protocol import (
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Called, Recorded
 from lup_dev.host.rooms import OwnLaunch, OwnLaunches, RoomRoute, ShowOwnLaunch
-from lup_dev.host.service import Answerer, Companion, HostService, Naming, Route
+from lup_dev.host.service import (
+    Answerer,
+    Companion,
+    HostService,
+    Naming,
+    Route,
+    recorded_launches,
+)
 from lup_dev.host.timings import (
     ShowTimings,
     Summary,
@@ -669,21 +677,38 @@ def control_routes(
     ]
 
 
-def held_routes(layout: Layout, holders: Holders, launchers: Launchers) -> list[Route]:
-    """Route what the operator asks of sessions held with no terminal, and their launchers' word that one is up: each launcher started from the `lup-dev` the service runs, in its worktree, what it prints in its launch's log (`lup_dev.host.held`)."""
+def held_routes(
+    layout: Layout,
+    holders: Holders,
+    launchers: Launchers,
+    delivery: Delivery | None = None,
+) -> list[Route]:
+    """Route what the operator asks of sessions held with no terminal, and their launchers' word that one is up, which gives the session what waits for it through `delivery`, where it's given: each launcher started from the `lup-dev` the service runs, in its worktree, what it prints in its launch's log (`lup_dev.host.held`)."""
 
     def start(spec: HeldLaunch, log: Path) -> Apart:
         program, *rest = launcher_command(own_command(), spec)
         return detached(program, *rest, log=log, cwd=spec.worktree)
 
+    async def up(called: CalledUp) -> None:
+        launch = recorded_launch(layout.host, called.launch)
+        if delivery is not None and launch is not None:
+            await delivery.called_up(launch, called.session)
+
     return [
         Route.to(Spawning(layout=layout, launchers=launchers, start=start)),
         Route.to(Awaiting(layout=layout, launchers=launchers)),
         Route.to(Abandoning(launchers=launchers)),
-        Route.to(CallingUp(launchers=launchers)),
+        Route.to(CallingUp(launchers=launchers, up=up)),
         Route.to(HeldInterrupting(holders=holders)),
         Route.to(HeldEnding(holders=holders)),
     ]
+
+
+def recorded_launch(layout: HostLayout, launch: str) -> Register | None:
+    """Return launch `launch` as the service recorded it; none where it isn't served, or its record doesn't read."""
+    return next(
+        (each for each in recorded_launches(layout) if each.launch == launch), None
+    )
 
 
 def trial_routes(
@@ -824,7 +849,7 @@ def host_serve(context: typer.Context) -> None:
                 trying=trying,
                 landing=landing,
             ),
-            *held_routes(layout, holders, launchers),
+            *held_routes(layout, holders, launchers, delivery),
         ],
         tools=room_tools(delivery, layout, workers, landing=landing),
         room_routes=[

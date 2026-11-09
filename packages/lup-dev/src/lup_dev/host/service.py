@@ -51,7 +51,7 @@ import shutil
 import traceback
 from abc import ABC, abstractmethod
 from collections import Counter
-from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Self, override
@@ -173,6 +173,29 @@ class Program(Model):
     """What goes on its standard input: a body for `gh`, or what git reads."""
     directory: Path | None = None
     """Where it runs; none for the service's own directory."""
+
+
+def records(layout: HostLayout) -> list[Path]:
+    """Return where each launch the service serves is recorded, in their ids' order: its record is written as it's served and removed as it ends (`Launches.open`, `close`)."""
+    # Each launch's conversations are kept beside its record, and aren't a record.
+    return [
+        each
+        for each in sorted(layout.launches.glob("*.json"))
+        if each != layout.conversations(each.stem.removesuffix(".conversations"))
+    ]
+
+
+def recorded_launches(layout: HostLayout) -> list[Register]:
+    """Return each launch the service serves as its record stands, one that doesn't read as a launch's left out."""
+
+    def read() -> Iterator[Register]:
+        for record in records(layout):
+            try:
+                yield Register.model_validate_json(record.read_text())
+            except ValidationError, OSError:
+                continue
+
+    return list(read())
 
 
 async def executed(program: Program) -> Ran:
@@ -1673,14 +1696,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         A record that doesn't read as a launch's, or that this service can't serve,
         is said and left in place.
         """
-        # Each launch's conversations are kept beside its record, and aren't a record.
-        records = [
-            each
-            for each in sorted(self.layout.launches.glob("*.json"))
-            if each
-            != self.layout.conversations(each.stem.removesuffix(".conversations"))
-        ]
-        for record in records:
+        for record in records(self.layout):
             try:
                 request = Register.model_validate_json(record.read_text())
                 await self.open(request)

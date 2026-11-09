@@ -1008,15 +1008,16 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 return Posted()
             case SessionStarted():
                 presence.turning = False
-                if (
+                held = (
                     heard.anew
+                    and party.agent is None
                     and self.holders is not None
                     and self.holders.holds(launch.launch)
-                ):
+                )
+                if held:
                     # What was given an earlier process of a held session's and
-                    # never taken went with it: it's told this one as anything
-                    # waiting is. A clear or a compaction keeps the process, and
-                    # its input with it.
+                    # never taken went with it. A clear or a compaction keeps
+                    # the process, and its input with it.
                     presence.pushed = None
                 if party.agent is None and self.starting is not None:
                     task = asyncio.create_task(self.starting(launch))
@@ -1024,6 +1025,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                         *(each for each in self.looks if not each.done()),
                         task,
                     ]
+                if held:
+                    # A held session's new process takes no turn on what it's
+                    # told as it starts: what waits is given it as its first
+                    # turn once its launcher calls it up (`called_up`).
+                    return self.worded(party, Posted())
                 return self.worded(party, self.told(party, room, heard.fits, "start"))
             case TurnStarted():
                 presence.turning = True
@@ -1223,6 +1229,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 thread=starting if place is None else place.thread,
                 started=starting if place is None else place.started,
                 chose_start=place is not None and place.chose_start,
+            )
+        )
+
+    async def called_up(self, launch: Register, session: str) -> None:
+        """Give a held session what waits for them as their first turn, once their launcher calls them up: what came for them while they were away; not told as they started, where no turn would begin on it."""
+        await self.wake(
+            Conversation(
+                repository=launch.repository, runtime=launch.runtime, session=session
             )
         )
 

@@ -64,7 +64,7 @@ from lup_dev.git import GitError
 from lup_dev.host.client import HostClient, RoomClient, Starter
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard, Posted, Spawned, Spawns
-from lup_dev.host.held import Interrupt, Launchers
+from lup_dev.host.held import CalledUp, Interrupt, Launchers
 from lup_dev.host.holders import HeldInterrupt, HeldPrompt, Holders
 from lup_dev.host.names import Names, container_name
 from lup_dev.host.on_trial import AcceptBranch, DropBranch, TrialSaid
@@ -586,7 +586,7 @@ def inboxed(
             *(
                 []
                 if holders is None
-                else cli.held_routes(machine, holders, Launchers())
+                else cli.held_routes(machine, holders, Launchers(), delivery)
             ),
         ],
         tools=cli.room_tools(
@@ -1863,9 +1863,10 @@ def test_a_held_session_s_compaction_keeps_what_it_was_given_for_its_turn(
     assert state == Waiting()
 
 
-def test_what_a_held_session_never_took_is_told_its_next_start(
+def test_what_a_held_session_never_took_is_given_its_next_process_once_called_up(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
+    """Told as the new process starts, it would sit in the session's context with no turn begun on it: it's given as the session's first turn once its launcher calls it up."""
     with inboxed(machine, clock, notices, said, holding=True) as delivery:
         launched(machine, clock, tmp_path, "one", "claude", held=True)
         hook = machine.host.launch("one").hook
@@ -1877,9 +1878,15 @@ def test_what_a_held_session_never_took_is_told_its_next_start(
         launcher.ringing()
         resumed = send(hook, claude("SessionStart", source="resume"))
         state = delivery.inbox.item(number).state
-        launcher.close()
-    assert note(number, "Anyone?") in context(resumed)
-    assert isinstance(state, Told)
+        client(machine.host, clock).ask(
+            CalledUp(launch="one", name="one", session="s1"), Finished
+        )
+        assert until(lambda: len(launcher.frames) == 2)
+        frames = launcher.close()
+    assert note(number, "Anyone?") not in resumed
+    assert state == Waiting()
+    _, given = frames
+    assert note(number, "Anyone?") in HeldPrompt.model_validate_json(given).text
 
 
 def test_a_push_not_taken_in_time_is_put_back_and_its_launch_rung_through_the_socket_from_then_on(

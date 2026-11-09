@@ -294,9 +294,13 @@ class Abandoning(Model, Handler[Abandon], arbitrary_types_allowed=True):
 
 
 class CallingUp(Model, Handler[CalledUp], arbitrary_types_allowed=True):
-    """Answers `CalledUp`: the spawn waiting on it answered."""
+    """Answers `CalledUp`: the spawn waiting on it answered, and the session given what waits for it."""
 
     launchers: Launchers
+    up: Callable[[CalledUp], Awaitable[None]] | None = None
+    """Gives the session what waits for it as its first turn, which it wasn't
+    told as it started (`Delivery.called_up`, which `cli.py` gives); none gives
+    nothing."""
 
     @override
     def request(self) -> type[CalledUp]:
@@ -304,13 +308,15 @@ class CallingUp(Model, Handler[CalledUp], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: CalledUp) -> Reply:
-        """Resolve what an await of the launch waits on, or will: a service started after the spawn, as an approval starts one, hears it before anyone awaits it again."""
+        """Resolve what an await of the launch waits on, or will: a service started after the spawn, as an approval starts one, hears it before anyone awaits it again. Then give the session what waits."""
         waiting = self.launchers.waiting.get(request.launch)
         if waiting is None:
             waiting = asyncio.get_running_loop().create_future()
             self.launchers.waiting = {**self.launchers.waiting, request.launch: waiting}
         if not waiting.done():
             waiting.set_result(request)
+        if self.up is not None:
+            await self.up(request)
         return Done()
 
 
