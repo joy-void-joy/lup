@@ -114,8 +114,8 @@ describe("review marks", () => {
             { kind: "thread", name: "voice-pass", done: "declined" },
         ]);
         expect(markedPart(settled, called, unnamed)).toEqual({ kind: "said", text: "@voice settled" });
-        // A check ticked marks no thread.
-        expect(markedPart(mark("inbox-check-answer", { number: 311 }, "tick it"), called, named)).toEqual({ kind: "said", text: "tick it" });
+        // A mark of another's numbered the same marks no thread.
+        expect(markedPart(mark("module-act", { number: 307 }, "merge it"), called, named)).toEqual({ kind: "said", text: "merge it" });
     });
 });
 

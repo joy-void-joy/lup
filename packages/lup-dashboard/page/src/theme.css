@@ -1462,20 +1462,14 @@ kbd {
     color: var(--muted);
 }
 
-/* A concern's block's own lines: the agent's account of what's done, a check waiting on the operator, one answered, and
-   the passages of the operator's it came from. */
+/* A concern's block's own lines: the agent's account of what's done, and the passages of the operator's it came from. */
 .buffer .cm-line.thread-line {
     padding-left: calc(6px + 2ch);
 }
 
-.buffer .cm-line.aside-to-try,
-.buffer .cm-line.aside-check {
+.buffer .cm-line.aside-to-try {
     color: var(--orange);
     font-weight: 700;
-}
-
-.buffer .cm-line.aside-checked {
-    color: var(--ok);
 }
 
 /* A concern's block: its header slanted in the text's own colour, unlike an agent's banner; barred orange where the
@@ -1509,7 +1503,13 @@ kbd {
     font-style: italic;
 }
 
-.buffer .cm-line.aside-check-text {
+.buffer .cm-line.aside-to-try-text {
+    color: var(--fg);
+}
+
+/* A concern's body, what whoever answers for it understands of it: the text's own colour, set in as the block's lines are,
+   which a message may quote line by line. */
+.buffer .cm-line.concern-body {
     color: var(--fg);
 }
 

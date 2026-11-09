@@ -783,6 +783,10 @@ def test_the_demo_reads_its_threads_as_the_host_does_and_the_operator_settles_on
     }
     reader = read["transcript-reader"]
     assert [each.what for each in reader.asks] == ["a question"]
+    # The parser keeps its body, which the page lays out in its block.
+    assert reader.body is not None
+    assert reader.body.by == reader.answering
+    assert reader.body.text.startswith("It reads a session's record")
     assert read["the-voice"].state == "done to confirm"
     # The parser's question, read, still shows, after the latest three read
     # besides, but the flagged write, the check an earlier lup kept, which asks

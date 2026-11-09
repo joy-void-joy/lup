@@ -38,11 +38,11 @@ describe("what the page says on one row", () => {
             { kind: "said", text: "@notes read" },
             { kind: "thread", name: "The gate", done: "read" },
             { kind: "thread", name: "The lag", done: "read" },
-            { kind: "said", text: "check @1, @2: refused" },
+            { kind: "said", text: "@1, @2: refused" },
             { kind: "items", done: "comments on", numbers: [4, 5], then: " kept: no session's push asked it" },
         ];
-        expect(partsSaid(parts, "; ")).toBe("@notes read; 2 concerns read; check @1, @2: refused; comments on 2 items kept: no session's push asked it");
-        expect(parts.map(partSaid).join("; ")).toBe("@notes read; The gate read; The lag read; check @1, @2: refused; comments on @4, @5 kept: no session's push asked it");
+        expect(partsSaid(parts, "; ")).toBe("@notes read; 2 concerns read; @1, @2: refused; comments on 2 items kept: no session's push asked it");
+        expect(parts.map(partSaid).join("; ")).toBe("@notes read; The gate read; The lag read; @1, @2: refused; comments on @4, @5 kept: no session's push asked it");
     });
 
     it("says a reply not sent in one sentence, the draft kept", () => {

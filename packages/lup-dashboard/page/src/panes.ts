@@ -10,7 +10,6 @@ import type { Merged } from "./looks";
 import { itemStanding } from "./outline";
 import { DRAFTED, GLYPHS } from "./Outline";
 import {
-    checkOwner,
     concernHome,
     concernReads,
     concernsNested,
@@ -32,7 +31,6 @@ import {
     type Item,
     type Laid,
     type Nested,
-    type OwnedCheck,
     type Party,
     type Seeing,
     type Showing,
@@ -69,8 +67,8 @@ export function bufferKey(showing: Showing): string {
 /**
  * How much of what a row stands for waits on the operator, each counted once by what it is to them: what stays stopped
  * until they answer it (an approval, a held change, a question, a problem, a file a landing waits on); what's flagged for
- * their eyes, with nothing stopped (a file with flagged writes, a check, a thread done for them to confirm, a
- * disagreement, a question that waits on no answer); the files to review with nothing holding them; what's news; and, no
+ * their eyes, with nothing stopped (a file with flagged writes, a thread done for them to confirm, a disagreement, a
+ * question that waits on no answer); the files to review with nothing holding them; what's news; and, no
  * status at all, what they've drafted there themselves.
  */
 export interface Tally extends BlocksTally {
@@ -106,7 +104,7 @@ export interface Row {
     says: string;
     /** Whether `o` writes to what it opens: a message to an agent, or on a thread. */
     writes: boolean;
-    /** The item or check it stands for, by number, which going to it lands on. */
+    /** The item it stands for, by number, which going to it lands on. */
     node?: number;
     /** The rows nested under it, folding under it, quiet until opened; what names their fold, and whether it starts closed. */
     under?: { key: string; closed: boolean; kind: string; rows: Row[] };
@@ -172,27 +170,12 @@ export interface ListReading {
     states: ReadonlyMap<string, string | null>;
     threads: Threading | null;
     landings?: Shown["landings"];
-    /** The checks waiting on the operator, by agent (`checkOwner`). */
-    checks?: readonly OwnedCheck[];
     /** What's new to the operator, which an item's row says. */
     seeing?: Seeing;
     /** The buffer on screen: an agent's row keeps their nest open while it's theirs, however little of it waits. */
     showing?: Showing;
     /** The parties listed beside the agents; unsaid, those declared (`PARTIES`). */
     parties?: readonly Party[];
-}
-
-/** Return the number of a check as the draft marks it answered: ticked, or a comment on it its answer in words. */
-function checkAnswered(number: number, draft: Draft): boolean {
-    return (draft.marks ?? []).some((each) => each.block === `check ${number}`) || (draft.comments ?? []).some((each) => each.item === number && each.text.trim() !== "");
-}
-
-/** Return how many checks of the agent named `key` still wait on the operator, as the draft stands. */
-function checksWaiting(key: string, reading: Pick<ListReading, "checks" | "draft">): number {
-    return (reading.checks ?? []).filter((each) => {
-        const owner = checkOwner(each);
-        return owner !== null && whose(owner) === key && !checkAnswered(each.check.check.number, reading.draft);
-    }).length;
 }
 
 /** Return each concern the agent named `key` answers for, as the list shows it under them (`taskOwner`, `taskShown`). */
@@ -216,12 +199,12 @@ function confirmingOf(key: string, reading: Pick<ListReading, "threads">): Threa
     });
 }
 
-/** Return what of the agent `group` is of asks the operator from what's nested under their row: their items, what stays stopped until they're answered apart from what only wants their eyes, their checks and their threads done, for them to confirm, among that. */
+/** Return what of the agent `group` is of asks the operator from what's nested under their row: their items, what stays stopped until they're answered apart from what only wants their eyes, their threads done, for them to confirm, among that. */
 function askedOf(group: Grouping, reading: ListReading): Pick<BlocksTally, "holds" | "flagged"> {
     const parked = reading.draft.parked ?? [];
     const asking = group.items.filter((each) => !parked.includes(each.number) && toAnswer(each, reading.draft));
     const holds = asking.filter((each) => each.holds).length;
-    return { holds, flagged: asking.length - holds + checksWaiting(group.key, reading) + confirmingOf(group.key, reading).length };
+    return { holds, flagged: asking.length - holds + confirmingOf(group.key, reading).length };
 }
 
 /** Return how the agent `group` is of stands: what of theirs waits on the operator, what's asked of them and what their "since you approved" holds, what's news, and what's drafted to them. */
@@ -248,17 +231,12 @@ function agentTally(group: Grouping, reading: ListReading): Tally {
     return { holds: asked.holds + files.holds, flagged: asked.flagged + files.flagged, review: files.review, news: newsCount, written: comments + letters + remarks };
 }
 
-/** Return whoever owns a check waiting on the operator, or a task the list shows (`taskShown`). */
-function ownersIn(reading: Pick<ListReading, "checks" | "threads">): Conversation[] {
-    const ofChecks = (reading.checks ?? []).flatMap((each) => {
-        const owner = checkOwner(each);
-        return owner === null ? [] : [owner];
-    });
-    const ofTasks = (reading.threads?.read.threads ?? []).filter(taskShown).flatMap((each) => {
+/** Return whoever owns a task the list shows (`taskShown`). */
+function ownersIn(reading: Pick<ListReading, "threads">): Conversation[] {
+    return (reading.threads?.read.threads ?? []).filter(taskShown).flatMap((each) => {
         const owner = keptUnder(each);
         return owner === null ? [] : [owner];
     });
-    return [...ofChecks, ...ofTasks];
 }
 
 /** Return whether the list shows a concern under whoever answers for it, or in a party: one not gone, as its two marks read (`concernReads`), but what the host says is nothing to list. */
@@ -267,13 +245,13 @@ function taskShown(read: ThreadRead): boolean {
 }
 
 /** Return the conversation of the agent named `key`, among those the review names; none where it isn't one of them, as lup's approvals. */
-export function conversationNamed(key: string, reading: Pick<ListReading, "agents" | "items" | "checks" | "threads">): Conversation | undefined {
+export function conversationNamed(key: string, reading: Pick<ListReading, "agents" | "items" | "threads">): Conversation | undefined {
     return [...reading.agents, ...ownersIn(reading)].find((each) => whose(each) === key) ?? reading.items.flatMap((each) => (each.sender.party === "conversation" && whose(each.sender) === key ? [each.sender] : []))[0];
 }
 
 /**
  * Return every agent's group the list names, in an order what they hold has no part in: each of `agents`, as the host's
- * tree has them, so those running stay where they are; then whoever else owns a check or a task, or sent an item, and
+ * tree has them, so those running stay where they are; then whoever else owns a task, or sent an item, and
  * lup's approvals, whom the list goes on to order by name (`byName`).
  */
 function groupsOf(reading: ListReading): Grouping[] {
@@ -342,9 +320,9 @@ function agentRow(group: Grouping, depth: number, reading: ListReading, nesting:
 
 /**
  * Return what's nested under the agent `group` is of, `depth` deep: each item of theirs, as the review lays it out, marked
- * as the overview marks it; then each task of theirs, a line each, quiet, but what waits on the operator there, its checks
- * among it. Folded where nothing of it asks them and their buffer isn't on screen, so where the second pane's cursor goes
- * moves no row (`nearestShown`); none where there's nothing.
+ * as the overview marks it; then each task of theirs, a line each, quiet, but what waits on the operator there. Folded
+ * where nothing of it asks them and their buffer isn't on screen, so where the second pane's cursor goes moves no row
+ * (`nearestShown`); none where there's nothing.
  */
 function nestOf(group: Grouping, depth: number, reading: ListReading): Row["under"] {
     const set = "  ".repeat(depth + 1);
@@ -602,7 +580,7 @@ function concernState(read: ThreadRead): { text: string; look: string } {
 function threadTally(read: ThreadRead, threads: Threading, draft: Draft): Tally {
     const written = (draft.letters ?? []).filter((each) => each.thread === read.thread.number && each.text.trim() !== "").length;
     const settled = new Set([...(draft.done ?? []), ...(draft.declined ?? []), ...(draft.parked ?? [])]);
-    const asking = (read.asks ?? []).filter((each) => !settled.has(each.node) && !checkAnswered(each.node, draft));
+    const asking = (read.asks ?? []).filter((each) => !settled.has(each.node));
     const holds = asking.filter((each) => each.holds).length;
     return {
         holds: holds + (threads.landing.get(read.thread.number) ?? 0),
@@ -639,8 +617,8 @@ export interface BufferSpan extends Span {
 }
 
 /**
- * Return what the rows of the list stand for in the buffer `laid`, `showing`: each group, its agent's row; each item and
- * check, its own; and a concern's block, its concern's row, as is a line of one dim or nested naming another.
+ * Return what the rows of the list stand for in the buffer `laid`, `showing`: each group, its agent's row; each item, its
+ * own; and a concern's block, its concern's row, as is a line of one dim or nested naming another.
  */
 export function bufferSpans(laid: Laid, showing: Showing): BufferSpan[] {
     if (showing.kind === "view") {
@@ -759,7 +737,7 @@ export interface Titled {
 }
 
 /** Return what the buffer `showing` says of itself over its pane. */
-export function titled(showing: Showing, reading: Pick<ListReading, "agents" | "called" | "running" | "threads" | "items" | "checks" | "parties">): Titled {
+export function titled(showing: Showing, reading: Pick<ListReading, "agents" | "called" | "running" | "threads" | "items" | "parties">): Titled {
     switch (showing.kind) {
         case "for you":
             return { name: "what's for you", whom: "a comment reaches who sent the item" };
@@ -784,13 +762,12 @@ export function titled(showing: Showing, reading: Pick<ListReading, "agents" | "
 
 /**
  * Return where the cursor goes as a buffer is first opened: on the first item to answer there; else on the line what's
- * written to them is written under, at its end, the latest of what's live and any checks of theirs just above it; else
- * on what's first there.
+ * written to them is written under, at its end, the latest of what's live just above it; else on what's first there.
  */
 export function arrivalIn(laid: Laid, draft: Draft): number {
     const asking = laid.regions.find((each) => toAnswer(each.item, draft))?.header.from;
     const writing = laid.groups.find((each) => each.writing !== undefined)?.writing?.from;
-    return asking ?? writing ?? laid.checks[0]?.from ?? laid.regions[0]?.header.from ?? 0;
+    return asking ?? writing ?? laid.regions[0]?.header.from ?? 0;
 }
 
 /** The folds' kinds the margin leaves out in panes, what the list and each banner say already. */
