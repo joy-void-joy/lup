@@ -64,7 +64,7 @@ from lup_dev.inbox.protocol import (
     SendItem,
     Shown,
 )
-from lup_dev.inbox.store import Message
+from lup_dev.inbox.store import Message, Told
 from lup_dev.inbox.texts import written
 from lup_dev.launch.room import repository
 from lup_ledger.parties import Conversation, Operator
@@ -506,9 +506,11 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
             f"within {self.patience}",
         )
         answer = self.answer(sent, "LIME")
+        party = self.party_of(side)
+        briefed = self.briefed(party)
         theirs = [
             each
-            for each in self.items_of(self.party_of(side))
+            for each in self.items_of(party)
             if isinstance(each.recipient, Operator)
         ]
         if theirs:
@@ -519,9 +521,9 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
             raise TrialError(message)
         number = "" if answer is None else f", @{answer.number}"
         return (
-            f"`{side.name}` started apart, {apart}; its report reached the session, "
-            f"which answered with it{number}, and the side job put nothing before "
-            "you."
+            f"`{side.name}` started apart, {apart}; {briefed}; its report reached "
+            f"the session, which answered with it{number}, and the side job put "
+            "nothing before you."
         )
 
     def handed_over(self) -> str:
@@ -553,6 +555,7 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
             lambda: self.said_by(party, "FIG") is not None,
             f"no turn's end of theirs holding FIG reached you within {self.patience}",
         )
+        briefed = self.briefed(party)
         asked = self.host.ask(
             SendItem(
                 launch=builder.launch,
@@ -576,8 +579,9 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
             )
             raise TrialError(message)
         return (
-            f"`{builder.name}` started apart, {apart}; its turn's end reached you, "
-            "it answered you directly, and the session heard nothing of it."
+            f"`{builder.name}` started apart, {apart}; {briefed}; its turn's end "
+            "reached you, it answered you directly, and the session heard nothing "
+            "of it."
         )
 
     def side_job_ended(self) -> str:
@@ -598,6 +602,36 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
             "The side job ended with its spawner; the one handed a concern ran on "
             "until the trial ended it."
         )
+
+    def briefed(self, party: Conversation) -> str:
+        """Say how the brief the trial's session sent `party` was told; raise where it was never told, or told otherwise than given once as its first turn: told twice, beside a hook too, it reads as `told` some other way."""
+        briefs = [
+            each
+            for each in self.items_of(party)
+            if each.recipient == party
+            and each.sender == self.conversation
+            and isinstance(each.reason, Message)
+        ]
+        if not briefs:
+            message = "no brief from the session reached the one it spawned"
+            raise TrialError(message)
+        brief = briefs[0]
+        match brief.state:
+            case Told(how="wake"):
+                return f"its brief, @{brief.number}, was given once, as its first turn"
+            case Told(how=how):
+                message = (
+                    f"its brief, @{brief.number}, was told {how!r}, where it's given "
+                    "once as the first turn: given and told again, it reached the "
+                    "session twice"
+                )
+                raise TrialError(message)
+            case _:
+                message = (
+                    f"its brief, @{brief.number}, never reached it: it stands "
+                    f"{brief.state.state}"
+                )
+                raise TrialError(message)
 
     def spawned_by(self, launch: str, *, handed: bool) -> Register | None:
         """Return the launch the host serves that `launch`'s session spawned, handed a concern or a side job, as `handed` says; none where none is."""

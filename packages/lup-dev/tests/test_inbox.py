@@ -1895,26 +1895,30 @@ def test_a_held_session_s_compaction_keeps_what_it_was_given_for_its_turn(
 def test_what_a_held_session_never_took_is_given_its_next_process_once_called_up(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    """Told as the new process starts, it would sit in the session's context with no turn begun on it: it's given as the session's first turn once its launcher calls it up."""
+    """A held launch is one process: what its launcher was given and its session never took goes with it. Resumed in a launch of its own, told as the new process starts, it would sit in the session's context with no turn begun on it: it's given as the session's first turn once its launcher calls it up."""
     with inboxed(machine, clock, notices, said, holding=True) as delivery:
         launched(machine, clock, tmp_path, "one", "claude", held=True)
         hook = machine.host.launch("one").hook
-        launcher = Launcher(machine.launch("one").held)
+        first = Launcher(machine.launch("one").held)
         send(hook, claude("SessionStart", source="startup"))
         send(hook, claude("Stop", stop_hook_active=False))
         inbox("send", "one", "Anyone?")
         number = newest(delivery)
-        launcher.ringing()
-        resumed = send(hook, claude("SessionStart", source="resume"))
+        first.ringing()
+        first.close()
+        client(machine.host, clock).unregister("one")
+        launched(machine, clock, tmp_path, "two", "claude", held=True)
+        again = machine.host.launch("two").hook
+        second = Launcher(machine.launch("two").held)
+        resumed = send(again, claude("SessionStart", source="resume"))
         state = delivery.inbox.item(number).state
         client(machine.host, clock).ask(
-            CalledUp(launch="one", name="one", session="s1"), Finished
+            CalledUp(launch="two", name="two", session="s1"), Finished
         )
-        assert until(lambda: len(launcher.frames) == 2)
-        frames = launcher.close()
+        [given] = second.ringing()
+        second.close()
     assert note(number, "Anyone?") not in resumed
     assert state == Waiting()
-    _, given = frames
     assert note(number, "Anyone?") in HeldPrompt.model_validate_json(given).text
 
 
@@ -14754,3 +14758,126 @@ def test_a_repository_s_spawns_count_against_its_own_limit_as_well_as_the_host_s
         "Not spawned: 1 session agents spawned of this repository runs already"
     )
     assert "`ours`" in ours
+
+
+def spawned_and_registered(
+    machine: Layout,
+    clock: FakeClock,
+    mcp: Path,
+    spawned: SpawnsMade,
+    repository: Path,
+) -> tuple[HeldLaunch, Conversation]:
+    """Spawn a side job through the tool, and register its launch as its launcher would, held: what it was started with, and its session's conversation."""
+    answer, _ = call(mcp, "spawn", {"name": "x", "brief": "Time it."})
+    assert answer.startswith("`x` is starting"), answer
+    [spec] = spawned.launches
+    assert spec.session is not None
+    launched(
+        machine,
+        clock,
+        spec.worktree,
+        spec.launch,
+        "claude",
+        repository=repository,
+        held=True,
+        spawner=spec.spawner,
+    )
+    return spec, Conversation(
+        repository=repository, runtime="claude", session=spec.session
+    )
+
+
+@pytest.mark.parametrize("first", ["called up", "heard"])
+def test_a_spawned_session_is_given_its_brief_once_whether_it_s_called_up_before_its_start_is_heard_or_after(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+    *,
+    first: str,
+) -> None:
+    """Its launcher calls it up once its first hook is named, which may be before that hook is answered: the brief is given once, as its first turn, and never told again beside it."""
+    worktree = tmp_path / "w"
+    spawnable(worktree)
+    repository = worktree / ".git"
+    spawned = SpawnsMade()
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        holding=True,
+        spawning=lambda delivery, launchers: spawned.tools(
+            delivery, machine, launchers
+        ),
+    ) as delivery:
+        launched(machine, clock, worktree, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        spec, child = spawned_and_registered(machine, clock, mcp, spawned, repository)
+        brief = next(
+            number
+            for number, each in delivery.inbox.items.items()
+            if each.recipient == child
+        )
+        theirs = machine.host.launch(spec.launch).hook
+        launcher = Launcher(machine.launch(spec.launch).held)
+        up = CalledUp(launch=spec.launch, name="x", session=child.session)
+        if first == "called up":
+            client(machine.host, clock).ask(up, Finished)
+        started = send(
+            theirs, claude("SessionStart", source="startup", session_id=child.session)
+        )
+        if first == "heard":
+            client(machine.host, clock).ask(up, Finished)
+        [given] = launcher.ringing()
+        prompt = HeldPrompt.model_validate_json(given).text
+        turned = send(
+            theirs,
+            claude("UserPromptSubmit", prompt=prompt, session_id=child.session),
+        )
+        state = delivery.inbox.item(brief).state
+        frames = launcher.close()
+    assert len(frames) == 1
+    assert '<message item="' in prompt
+    assert "Time it." in prompt
+    assert "Time it." not in started
+    assert "Time it." not in turned
+    assert state == Told(at=clock.now(), how="wake")
+
+
+def test_a_call_up_whose_give_fails_is_answered_and_what_waits_stays_waiting(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    worktree = tmp_path / "w"
+    spawnable(worktree)
+    repository = worktree / ".git"
+    spawned = SpawnsMade()
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        holding=True,
+        spawning=lambda delivery, launchers: spawned.tools(
+            delivery, machine, launchers
+        ),
+    ) as delivery:
+        launched(machine, clock, worktree, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        spec, child = spawned_and_registered(machine, clock, mcp, spawned, repository)
+        brief = next(
+            number
+            for number, each in delivery.inbox.items.items()
+            if each.recipient == child
+        )
+        # No launcher listens: giving fails.
+        answered = client(machine.host, clock).ask(
+            CalledUp(launch=spec.launch, name="x", session=child.session), Finished
+        )
+        state = delivery.inbox.item(brief).state
+    assert answered == Finished()
+    assert state == Waiting()
+    assert any("wasn't given their held session" in line for line in said)

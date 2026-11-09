@@ -752,6 +752,15 @@ conversation started in the background, a command ending or a Monitor's
 event."""
 
 
+def started_anew(presence: Presence, launch: str) -> None:
+    """Note that a held session's process started anew in `launch`: what was given an earlier process and never taken went with it, and is told this one as anything waiting is; what this launch's own call-up gave it already, come before this hook, its first turn takes, so nothing's told or given again meanwhile. A clear or a compaction keeps the process, and its input with it, so it isn't this."""
+    pushed = presence.pushed
+    if pushed is not None and pushed.launch == launch:
+        presence.woken = True
+        return
+    presence.pushed = None
+
+
 def side_job(launch: Register) -> bool:
     """Say whether `launch` is a side job an agent spawned through lup, whose report goes back to them, rather than a concern handed over to build, whose reports land in it (`Register.spawner`)."""
     return launch.spawner is not None and launch.spawner.concern is None
@@ -871,10 +880,13 @@ class Presence(MutableModel):
 
 
 class Pushed(Model):
-    """What was pushed to an idle session through lup's tool server: the token their turn's prompt carries, and the items it told."""
+    """What was pushed to an idle session through lup's tool server, or given their held session through its launcher: the token their turn's prompt carries, the items it told, and the launch it went through."""
 
     token: str
     numbers: list[int]
+    launch: str | None = None
+    """The held launch whose launcher it was given through, whose process
+    reads it; none for a push, through lup's tool server."""
 
 
 class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
@@ -1022,10 +1034,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     and self.holders.holds(launch.launch)
                 )
                 if held:
-                    # What was given an earlier process of a held session's and
-                    # never taken went with it. A clear or a compaction keeps
-                    # the process, and its input with it.
-                    presence.pushed = None
+                    started_anew(presence, launch.launch)
                 if party.agent is None and self.starting is not None:
                     task = asyncio.create_task(self.starting(launch))
                     self.looks = [
@@ -1337,12 +1346,26 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return party.main()
 
     async def called_up(self, launch: Register, session: str) -> None:
-        """Give a held session what waits for them as their first turn, once their launcher calls them up: what an agent's spawn addressed to them, their brief among it, and what came for them while they were away; not told as they started, where no turn would begin on it."""
-        await self.wake(
-            Conversation(
-                repository=launch.repository, runtime=launch.runtime, session=session
-            )
+        """Give a held session what waits for them as their first turn, once their launcher calls them up: what an agent's spawn addressed to them, their brief among it, and what came for them while they were away; not told as they started, where no turn would begin on it.
+
+        Their launcher calls them up once the host heard their first hook named,
+        which may be before that hook is answered: so they're noted in this
+        launch here too, as their hook notes them (`heard_in`), whichever comes
+        first, and what's given is tagged with this launch, which their start
+        then leaves be (`telling`). Given once, whatever the order.
+        """
+        party = Conversation(
+            repository=launch.repository, runtime=launch.runtime, session=session
         )
+        self.heard_in(party, launch, self.spawner_of(launch, party))
+        await self.wake(party)
+
+    @staticmethod
+    def spawner_of(launch: Register, party: Conversation) -> Conversation | None:
+        """Return the agent who spawned `party`'s session through lup, as the host recorded `launch`, theirs: where they're its own conversation and an agent spawned it; none else."""
+        if party.agent is not None or launch.spawner is None:
+            return None
+        return launch.spawner.conversation
 
     def introduced(self, launch: Register) -> str:
         """Say, in lup's words, what a session an agent spawned through lup is, as their session starts: whose they are, where they work, and where what they say goes, a side job's report back to their spawner, a builder's into the concern handed them, theirs."""
@@ -2667,7 +2690,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             return
         presence = self.presence(party)
         presence.woken = True
-        pushed = Pushed(token=token, numbers=[item.number for item in waiting])
+        pushed = Pushed(
+            token=token,
+            numbers=[item.number for item in waiting],
+            launch=place.launch,
+        )
         presence.pushed = pushed
         who = self.roster().who(party)
         try:

@@ -706,7 +706,7 @@ def held_routes(
         Route.to(Spawning(layout=layout, launchers=launchers, start=launcher_started)),
         Route.to(Awaiting(layout=layout, launchers=launchers)),
         Route.to(Abandoning(launchers=launchers)),
-        Route.to(CallingUp(launchers=launchers, up=up)),
+        Route.to(CallingUp(launchers=launchers, up=up, say=typer.echo)),
         Route.to(HeldInterrupting(holders=holders)),
         Route.to(HeldEnding(holders=holders)),
     ]

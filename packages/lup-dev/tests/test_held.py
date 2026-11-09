@@ -58,7 +58,7 @@ from lup_dev.inbox.protocol import (
     SendItem,
     Shown,
 )
-from lup_dev.inbox.store import Item, Message
+from lup_dev.inbox.store import How, Item, Message, Told
 from lup_dev.inbox.texts import written
 from lup_dev.launch import trial
 from lup_dev.launch.trial import (
@@ -424,6 +424,9 @@ class Played(HostClient):
     sessions: dict[str, Conversation] = {}
     """The conversation of each launch the trial's session spawned, by its id;
     the trial's own launches' is `conversation`."""
+    briefing: list[How] = ["wake"]
+    """How each brief is told, the last: given once as the first turn, or
+    otherwise, as a brief told twice reads."""
     reporting: list[bool] = []
     """Holding anything, the side job puts its report before the operator too,
     as it mustn't."""
@@ -451,6 +454,11 @@ class Played(HostClient):
             repository=launch.repository, runtime="claude", session=f"s-{name}"
         )
         self.sessions[name] = party
+        # Its brief, given once as its first turn, as the host gives it.
+        brief = self.item(self.conversation, party, "The brief.", ending=False)
+        self.items[-1] = brief.model_copy(
+            update={"state": Told(at=brief.made, how=self.briefing[-1])}
+        )
         return party
 
     def item(
@@ -1064,3 +1072,19 @@ def test_the_trial_removes_the_worktree_and_branch_of_each_launch_its_session_sp
         == ""
     )
     assert said == [f"{tmp_path / 'elsewhere'} isn't one a spawn made, so it's left."]
+
+
+def test_a_brief_told_twice_fails_its_spawn_step(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    """Given as the first turn and told again beside a hook, it reads as told some other way than its wake."""
+    host, trial = played(tmp_path, clock)
+    host.briefing.append("turn's start")
+
+    steps = trial.run()
+
+    [side] = [each for each in steps if each.name == "spawns a side job"]
+    assert not side.passed
+    assert "was told \"turn's start\", where it's given once as the first turn" in (
+        side.seen
+    )

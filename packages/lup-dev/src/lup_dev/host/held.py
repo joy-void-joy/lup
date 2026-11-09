@@ -20,6 +20,7 @@ import asyncio
 import os
 import secrets
 import signal
+import traceback
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from pathlib import Path
@@ -344,6 +345,9 @@ class CallingUp(Model, Handler[CalledUp], arbitrary_types_allowed=True):
     """Gives the session what waits for it as its first turn, which it wasn't
     told as it started (`Delivery.called_up`, which `cli.py` gives); none gives
     nothing."""
+    say: Callable[[str], None] = lambda _: None
+    """Where a failure giving it is said, which refuses nothing: the session
+    is up all the same, and what waits stays waiting for its next hook."""
 
     @override
     def request(self) -> type[CalledUp]:
@@ -358,8 +362,16 @@ class CallingUp(Model, Handler[CalledUp], arbitrary_types_allowed=True):
             self.launchers.waiting = {**self.launchers.waiting, request.launch: waiting}
         if not waiting.done():
             waiting.set_result(request)
-        if self.up is not None:
+        if self.up is None:
+            return Done()
+        try:
             await self.up(request)
+        except Exception as failed:
+            told = "".join(traceback.format_exception(failed))
+            self.say(
+                f"{request.launch}: what waits for its held session wasn't given it "
+                f"as it came up, so it waits for the session's next hook:\n{told}"
+            )
         return Done()
 
 
