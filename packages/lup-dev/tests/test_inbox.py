@@ -1762,6 +1762,41 @@ def test_what_a_held_session_is_given_mid_call_is_told_once_as_its_turn_takes_it
     assert frames == []
 
 
+def test_an_interrupt_lets_go_a_wait_inbox_it_cut_and_gives_the_held_session_what_came(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """The cut doesn't reach lup's hold here, as it may not on the real runtime: the hold is taken for ended all the same, so the words that come after reach the session, rather than a call nobody reads."""
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        launcher = Launcher(machine.launch("one").held)
+        send(hook, claude("SessionStart", source="startup"))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            waiting = pool.submit(call, mcp, "wait_inbox", {"within": "PT5M"})
+            assert delivery.holding.wait(timeout=60)
+            client(machine.host, clock).ask(Interrupt(launch="one"), Finished)
+            inbox("send", "one", "After the interrupt.")
+            given = until(lambda: len(launcher.frames) == 2)
+            clock.sleep(300)
+            returned = waiting.result(timeout=60)
+        frames = launcher.close()
+    assert given
+    interrupt, prompt = frames
+    assert interrupt == HeldInterrupt().model_dump_json()
+    assert (
+        first_note("After the interrupt.")
+        in HeldPrompt.model_validate_json(prompt).text
+    )
+    # The call nobody reads any more counted nothing told.
+    assert returned == (
+        (
+            "Your turn ended while this call waited, so what reached your inbox "
+            "reaches you at your next call instead."
+        ),
+        False,
+    )
+
+
 def test_a_held_session_s_compaction_keeps_what_it_was_given_for_its_turn(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
