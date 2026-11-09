@@ -3416,6 +3416,7 @@ def spawn_trial(
 
     scratch = scratched(root, f"spawn-trial-{secrets.token_hex(4)}", approved_commit)
     podman = Podman()
+    trial: Trial | None = None
     try:
 
         def spawning(worktree: Path, resume: str | None) -> HeldUp:
@@ -3449,6 +3450,8 @@ def spawn_trial(
         number = trial.filed(scratch.repository, runtime)
         typer.echo(f"The report is {cited(number)} in your inbox.")
     finally:
+        if trial is not None:
+            scratch.unspawned(trial.spawned, typer.echo)
         scratch.removed()
 
 

@@ -19,16 +19,25 @@ would mean:
    in `wait_inbox`, a call lup holds;
 5. **survives a restart:** the host service stops and starts again, the session
    and its room untouched, and the operator's words still reach it;
-6. **ends:** the host ends the session and its room;
-7. **resumes held:** the session resumes held, its conversation kept;
-8. **a terminal takes it over:** a terminal launch resuming it finds it held,
+6. **spawns a side job:** asked to, the session calls lup's `spawn` with no
+   concern; a held launch starts in a worktree of its own, recorded as the
+   session's, and its report reaches the session, which answers with it, the
+   side job putting nothing before the operator;
+7. **hands a concern over:** asked to, the session spawns one with a concern;
+   its turn's end reaches the operator, who talks with it directly, and the
+   session hears nothing of it;
+8. **ends:** the host ends the session and its room;
+9. **a side job ends with its spawner:** the side job's launch ends with the
+   session's, and the one handed a concern runs on, until the trial ends it;
+10. **resumes held:** the session resumes held, its conversation kept;
+11. **a terminal takes it over:** a terminal launch resuming it finds it held,
    ends it (`--take-over`, asking nothing and answering nothing), and runs a
    turn of its own on it;
-9. **back to held:** held again, it has the terminal's turn in its record.
+12. **back to held:** held again, it has the terminal's turn in its record.
 
 What it doesn't try: the runtime with no held session yet, holds of hours, a
 dashboard's own clicks, a real interactive terminal (its turn runs with `-p`,
-in the terminal's own launch).
+in the terminal's own launch), and a spawn in another repository.
 """
 
 import asyncio
@@ -43,7 +52,7 @@ from lup.programs import Ran, awaited
 from lup.types import Model, MutableModel
 from lup_dev.clock import Clock
 from lup_dev.errors import LupDevError
-from lup_dev.git import Git
+from lup_dev.git import Git, GitError
 from lup_dev.host.client import HostClient, own_command
 from lup_dev.host.held import End, HeldUp, Interrupt
 from lup_dev.host.protocol import Done, HostError, Listed, Register
@@ -182,6 +191,16 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
     held_session: str | None = None
     """The runtime's id for the session the trial tries, once it's held."""
     conversation: Conversation | None = None
+    started: list[str] = []
+    """Each held launch the trial started, by id: what it ends, with whatever
+    they spawned, before removing its worktree."""
+    side: Register | None = None
+    """The side job the session spawned, once it's served."""
+    builder: Register | None = None
+    """The session the trial's session handed a concern, once it's served."""
+    spawned: list[Register] = []
+    """Each launch the trial's session spawned, whose worktree and branch go
+    with the trial's own."""
 
     def stages(self) -> list[Stage]:
         """Return the trial's steps, in the order they're tried, each with what failing it would mean."""
@@ -233,10 +252,38 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
                 tried=self.restarted,
             ),
             Stage(
+                name="spawns a side job",
+                meaning=(
+                    "an agent's `spawn` doesn't start a session apart, recorded as "
+                    "its own, or its side job's report doesn't come back to it: "
+                    "the tool, the worktree its room makes, the brief as the side "
+                    "job's first turn, or its report's way back"
+                ),
+                tried=self.side_job,
+            ),
+            Stage(
+                name="hands a concern over",
+                meaning=(
+                    "a session handed a concern with its spawn doesn't answer the "
+                    "operator directly, or its spawner hears what it says: what "
+                    "it reports doesn't land where the operator reads it"
+                ),
+                tried=self.handed_over,
+            ),
+            Stage(
                 name="ends",
                 meaning="a held session's end leaves its room or its launch behind",
                 tried=self.ends,
                 stops=True,
+            ),
+            Stage(
+                name="a side job ends with its spawner",
+                meaning=(
+                    "a side job outlives the session that spawned it, spending on "
+                    "for nobody, or a session handed a concern ends with its "
+                    "spawner, though it's the operator's to end"
+                ),
+                tried=self.side_job_ended,
             ),
             Stage(
                 name="resumes held",
@@ -309,6 +356,7 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
     def held(self) -> str:
         """Start the session held, and see the host serve it as held."""
         self.up = self.spawn(self.worktree, None)
+        self.started = [*self.started, self.up.launch]
         self.held_session = self.up.session
         launch = self.launch()
         if not launch.held:
@@ -432,6 +480,201 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
         answer = self.answered("Answer with the single word MANGO.", "MANGO")
         return f"The service restarted, the room ran on, and then: {answer}"
 
+    def side_job(self) -> str:
+        """Have the session spawn a side job, see it served apart as the session's, its report reach the session, which answers with it, and nothing of the side job's reach the operator."""
+        launch = self.launch()
+        sent = self.sent(
+            "Call lup's `spawn` tool with `name` `trial side job`, no `concern` and "
+            "no `start`, and the `brief`: Answer with the single word LIME, and "
+            "nothing else. Then call `wait_inbox` until its report reaches you, and "
+            "answer me with the single word its report holds, and nothing else."
+        )
+        self.until(
+            lambda: self.spawned_by(launch.launch, handed=False) is not None,
+            "no launch the session spawned as a side job is served",
+        )
+        side = self.spawned_by(launch.launch, handed=False)
+        if side is None:
+            message = "the side job's launch is gone"
+            raise TrialError(message)
+        self.side = side
+        self.spawned = [*self.spawned, side]
+        apart = self.apart(launch, side)
+        self.until(
+            lambda: self.answer(sent, "LIME") is not None,
+            f"the session's answer holding its side job's report, LIME, didn't come "
+            f"within {self.patience}",
+        )
+        answer = self.answer(sent, "LIME")
+        theirs = [
+            each
+            for each in self.items_of(self.party_of(side))
+            if isinstance(each.recipient, Operator)
+        ]
+        if theirs:
+            message = (
+                f"the side job put @{theirs[0].number} before you, where its report "
+                "is its spawner's alone"
+            )
+            raise TrialError(message)
+        number = "" if answer is None else f", @{answer.number}"
+        return (
+            f"`{side.name}` started apart, {apart}; its report reached the session, "
+            f"which answered with it{number}, and the side job put nothing before "
+            "you."
+        )
+
+    def handed_over(self) -> str:
+        """Have the session spawn one with a concern, see its turn's end reach the operator, who talks with it directly, and the session hear nothing of it."""
+        launch = self.launch()
+        sent = self.sent(
+            "Call lup's `spawn` tool with `name` `trial builder`, `concern` `Spawn's "
+            "trial: a concern handed over`, no `start`, and the `brief`: Answer with "
+            "the single word FIG, and nothing else. Then answer me with the single "
+            "word SENT, and nothing else."
+        )
+        self.until(
+            lambda: self.answer(sent, "SENT") is not None,
+            f"the session didn't say it spawned within {self.patience}",
+        )
+        self.until(
+            lambda: self.spawned_by(launch.launch, handed=True) is not None,
+            "no launch the session handed a concern is served",
+        )
+        builder = self.spawned_by(launch.launch, handed=True)
+        if builder is None:
+            message = "the launch handed a concern is gone"
+            raise TrialError(message)
+        self.builder = builder
+        self.spawned = [*self.spawned, builder]
+        apart = self.apart(launch, builder)
+        party = self.party_of(builder)
+        self.until(
+            lambda: self.said_by(party, "FIG") is not None,
+            f"no turn's end of theirs holding FIG reached you within {self.patience}",
+        )
+        asked = self.host.ask(
+            SendItem(
+                launch=builder.launch,
+                text="Answer with the single word DATE, and nothing else.",
+            ),
+            Shown,
+        ).item
+        self.until(
+            lambda: self.said_by(party, "DATE", after=asked.number) is not None,
+            f"no answer of theirs holding DATE came within {self.patience}",
+        )
+        told = [
+            each
+            for each in self.items()
+            if each.sender == party and each.recipient == self.conversation
+        ]
+        if told:
+            message = (
+                f"the session was sent @{told[0].number} by the one it handed the "
+                "concern, where it let go of it"
+            )
+            raise TrialError(message)
+        return (
+            f"`{builder.name}` started apart, {apart}; its turn's end reached you, "
+            "it answered you directly, and the session heard nothing of it."
+        )
+
+    def side_job_ended(self) -> str:
+        """See the side job's launch end with its spawner's, and the one handed a concern run on, then end that one."""
+        side, builder = self.side, self.builder
+        if side is None or builder is None:
+            message = "the session spawned no side job and no one handed a concern"
+            raise TrialError(message)
+        self.until(
+            lambda: side.launch not in [each.launch for each in self.host.launches()],
+            "the side job is still served after its spawner ended",
+        )
+        if builder.launch not in [each.launch for each in self.host.launches()]:
+            message = "the one handed a concern ended with its spawner"
+            raise TrialError(message)
+        self.end(builder)
+        return (
+            "The side job ended with its spawner; the one handed a concern ran on "
+            "until the trial ended it."
+        )
+
+    def spawned_by(self, launch: str, *, handed: bool) -> Register | None:
+        """Return the launch the host serves that `launch`'s session spawned, handed a concern or a side job, as `handed` says; none where none is."""
+        return next(
+            (
+                each
+                for each in self.host.launches()
+                if each.spawner is not None
+                and each.spawner.launch == launch
+                and (each.spawner.concern is not None) == handed
+            ),
+            None,
+        )
+
+    def apart(self, spawner: Register, spawned: Register) -> str:
+        """Say where `spawned` works, refusing a launch that isn't held, isn't in its spawner's repository, or doesn't work in a worktree of its own."""
+        if not spawned.held:
+            message = f"`{spawned.name}` is served, but not as a held session"
+            raise TrialError(message)
+        own = spawned.worktree.parent == spawner.repository / "tree"
+        if spawned.repository != spawner.repository or not own:
+            message = (
+                f"`{spawned.name}` works in {spawned.worktree} of {spawned.repository}, "
+                f"not in a worktree of its own in {spawner.repository}"
+            )
+            raise TrialError(message)
+        return f"held in {spawned.worktree}"
+
+    def party_of(self, launch: Register) -> Conversation:
+        """Return the inbox's party for the session's own conversation of `launch`, as the host last heard it; raise where none is heard yet."""
+        own = [
+            each
+            for each in self.host.listed().talkers.get(launch.launch, [])
+            if each.agent is None
+        ]
+        if not own:
+            message = f"no hook of `{launch.name}`'s session reached lup"
+            raise TrialError(message)
+        return Conversation(
+            repository=launch.repository,
+            runtime=launch.runtime,
+            session=own[0].session,
+        )
+
+    def items_of(self, conversation: Conversation) -> list[Item]:
+        """Return the items `conversation` sent and was sent."""
+        exchanged = self.host.ask(ListItems(conversation=conversation), Exchanged)
+        return [each.item for each in (*exchanged.sent, *exchanged.received)]
+
+    def said_by(
+        self, conversation: Conversation, word: str, after: int = 0
+    ) -> Item | None:
+        """Return the first item `conversation` put before the operator after item `after` holding `word`; none where none does."""
+        return next(
+            (
+                each
+                for each in self.items_of(conversation)
+                if each.number > after
+                and each.sender == conversation
+                and isinstance(each.recipient, Operator)
+                and word.lower() in written(each).lower()
+            ),
+            None,
+        )
+
+    def end(self, launch: Register) -> None:
+        """End `launch`'s held session through the host, and wait until the host serves it no more."""
+        outstanding = self.host.held(End(launch=launch.launch))
+        try:
+            outstanding.reply(Done)
+        finally:
+            outstanding.close()
+        self.until(
+            lambda: launch.launch not in [each.launch for each in self.host.launches()],
+            f"`{launch.name}` is still served after its end",
+        )
+
     def ends(self) -> str:
         """End the session through the host, and see its launch and its room gone."""
         launch = self.launch()
@@ -454,6 +697,7 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
         session = self.session()
         self.up = None
         self.up = self.spawn(self.worktree, session)
+        self.started = [*self.started, self.up.launch]
         answer = self.answered(
             "Which single word did I first ask you to answer with? Answer with "
             "that word alone.",
@@ -495,6 +739,7 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
         session = self.session()
         self.up = None
         self.up = self.spawn(self.worktree, session)
+        self.started = [*self.started, self.up.launch]
         answer = self.answered(
             "List, in order, each single word I asked you to answer with so far, "
             "separated by spaces, and nothing else.",
@@ -562,7 +807,13 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
             left = [
                 each
                 for each in self.host.launches()
-                if each.held and each.worktree == self.worktree
+                if each.held
+                and (
+                    each.worktree == self.worktree
+                    or (
+                        each.spawner is not None and each.spawner.launch in self.started
+                    )
+                )
             ]
         except (LupDevError, LupError, OSError) as failed:
             self.say(f"The trial's held launches weren't looked for: {failed}")
@@ -603,8 +854,11 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
                 "**What it means:** a session lup holds with no terminal works end "
                 "to end on this machine, on this runtime: it starts held, takes "
                 "your words as its turns, answers into your inbox, stops at an "
-                "interrupt, outlives a restart of the host service, ends, "
-                "resumes, and passes to a terminal and back. A launch's setup "
+                "interrupt, outlives a restart of the host service, spawns a "
+                "side job whose report comes back to it and hands a concern "
+                "over to one you talk with directly, its side job ending with "
+                "it, ends, resumes, and passes to a terminal and back. A "
+                "launch's setup "
                 f"took {spelled(self.steps[0].took)}. Not tried here: the other "
                 "runtime, holds of hours, and an interactive terminal."
             )
@@ -707,6 +961,20 @@ class Scratch(Model):
     def removed(self) -> None:
         """Remove the worktree, whatever is in it."""
         self.git.run("worktree", "remove", "--force", str(self.path))
+
+    def unspawned(self, spawned: list[Register], say: Callable[[str], None]) -> None:
+        """Remove the worktree and the branch of each launch the trial's session spawned, whatever is in them, each under `tree/` of the repository and named for its branch (`made_root`); where git can't, say so, and go on."""
+        for each in spawned:
+            if each.worktree.parent != self.repository / "tree":
+                say(f"{each.worktree} isn't one a spawn made, so it's left.")
+                continue
+            try:
+                self.git.run("worktree", "remove", "--force", str(each.worktree))
+                self.git.run("branch", "-D", "--end-of-options", each.worktree.name)
+            except GitError as failed:
+                say(
+                    f"{each.worktree}, which the trial's session spawned in, stays: {failed}"
+                )
 
 
 def scratched(
