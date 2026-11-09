@@ -229,15 +229,16 @@ def executed(path: Path, name: str) -> ModuleType:
     return module
 
 
-def person_layer(worktree: Path) -> Path:
-    """Return where the person's own layer is for the worktree at `worktree`: beside the declaration in its repository's main worktree.
+def person_layer(worktree: Path, git: Git | None = None) -> Path:
+    """Return where the person's own layer is for the worktree at `worktree`: beside the declaration in its repository's main worktree, as `git` lists it where given, pinned where a launch found the repository already, else as git finds it through the worktree.
 
     The main worktree is the one `git worktree list` gives first: a clone's
     root, or a bare repository's own directory. Every worktree of the
     repository shares it, as trust on launch reads it, whichever worktree is
     asked about.
     """
-    return CheckoutLayout(root=Git(cwd=worktree).main_worktree()).local_declaration
+    listing = Git(cwd=worktree) if git is None else git
+    return CheckoutLayout(root=listing.main_worktree()).local_declaration
 
 
 def load(root: Path, *, local: Path | None = None) -> Declared:

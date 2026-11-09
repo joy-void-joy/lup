@@ -116,7 +116,7 @@ from lup_dev.declaration.requirements import Needed, Requirement
 from lup_dev.declaration.runner import RoomNeeds, RoomPlaces
 from lup_dev.errors import LupDevError
 from lup_dev.forge.github import PROGRAM
-from lup_dev.git import Git, nul_separated
+from lup_dev.git import Git, Worktree, nul_separated
 from lup_dev.launch.hidden import Hidden, removed
 from lup_dev.launch.images import definition
 from lup_dev.layout import (
@@ -241,10 +241,21 @@ class Repository(Model):
     worktree, so a launch trusts it too."""
     tree: Path
     """The nearest directory holding the git directory and every worktree, mounted whole."""
+    worktree: Worktree | None = None
+    """The worktree it was found from, as `Git.listed` gives it, where the
+    repository names it back; none where it doesn't, as one a room led
+    elsewhere."""
 
 
-def repository(worktree: Path) -> Repository:
-    """Return the repository of the worktree at `worktree`, and the tree a room mounts for it.
+def repository(worktree: Path, pinned: Path | None = None) -> Repository:
+    """Return the repository of the worktree at `worktree`, and the tree a room mounts for it: the one whose git directory is `pinned`, where the caller knows it already, else the one git finds through the worktree.
+
+    Found through the worktree, it's what its `.git` file says, which a room
+    writes: a launch finds it so once, its starting point, and carries it
+    from then on, so nothing later is led elsewhere; a spawn's launch never
+    finds it so, the host recording the spawner's. Either way, whether the
+    repository names the worktree back is kept (`Repository.worktree`), which a
+    room can't fake for a repository whose git directory it doesn't write.
 
     Its worktrees are listed by git pinned to its common git directory, each
     linked one kept only where it names the repository back (`Git.listed`):
@@ -253,12 +264,17 @@ def repository(worktree: Path) -> Repository:
     Raise `RoomError` where that tree would hold the operator's home, as its
     path says or with its links resolved, as git gives the worktrees' paths.
     """
-    common = Path(
-        Git(cwd=worktree).text(
-            "rev-parse", "--path-format=absolute", "--git-common-dir"
+    common = (
+        Path(
+            Git(cwd=worktree).text(
+                "rev-parse", "--path-format=absolute", "--git-common-dir"
+            )
         )
+        if pinned is None
+        else pinned
     )
-    roots = Git.pinned(common).worktrees()
+    listed = Git.pinned(common).listed()
+    roots = [each.root for each in listed]
     present = [root for root in roots if root.exists()]
     tree = next(
         each
@@ -277,7 +293,8 @@ def repository(worktree: Path) -> Repository:
         )
         raise RoomError(message)
     [main, *_] = roots
-    return Repository(git=common, worktrees=present, main=main, tree=tree)
+    own = next((each for each in listed if each.root == worktree), None)
+    return Repository(git=common, worktrees=present, main=main, tree=tree, worktree=own)
 
 
 class Described(Model):
@@ -347,15 +364,15 @@ class RelatedRepository(Model):
     launch says once."""
 
 
-def related(named: list[kinds.Repository], worktree: Path) -> list[RelatedRepository]:
-    """Find on the host each other repository `named`, for a launch in the worktree at `worktree`.
+def related(named: list[kinds.Repository], held: Repository) -> list[RelatedRepository]:
+    """Find on the host each other repository `named`, for a launch in a worktree of `held`, the launch's repository as it found it.
 
     A relative path is from the directory holding the project's own repository:
     the parent of a bare repository's git directory, or of a clone's working
     tree. A leading `~` is the operator's home. One is mounted where a
     directory is at its path.
     """
-    holding = repository(worktree).main.parent
+    holding = held.main.parent
 
     def found(declared: kinds.Repository) -> RelatedRepository:
         path = declared.on_host(holding)
@@ -471,8 +488,8 @@ def maintaining_room(
     """
     home = Path.home()
     editor = OperatorsEditor.of(terminal).known
-    held = repository(worktree)
-    git = Git(cwd=worktree)
+    held = environments.held
+    git = Git.pinned(held.git)
     needs = environments.needs
 
     def configured(key: str) -> str | None:
@@ -611,9 +628,10 @@ class RoomEnvironments(Model):
 
     rooms: RoomsLayout
     launch: LaunchLayout
-    repository: Path
-    """The repository's git directory, whose worktrees get environments of the
-    launch's own, and whose worktrees are listed again at the end."""
+    held: Repository
+    """The launch's repository as it found it, whose worktrees get environments
+    of the launch's own, listed again at the end, and whose tree the room
+    mounts."""
     directory: Path
     """The launch's own environments, one per worktree: `rooms.launch(…)`."""
     needs: RoomNeeds
@@ -628,13 +646,13 @@ class RoomEnvironments(Model):
         layout: Layout,
         launch: str,
         tools: Tools,
+        *,
+        held: Repository,
     ) -> RoomEnvironments:
-        """Ask `runner`, through `tools`, what a room needs for the environment of the worktree at `worktree`, and find what it hides, for the launch `launch`.
+        """Ask `runner`, through `tools`, what a room needs for the environment of the worktree at `worktree`, of `held`, the launch's repository as it found it, and find what it hides, for the launch `launch`.
 
-        Raise `RoomError` where the repository's tree would hold the operator's
-        home, and `RunnerError` where the runner can't say.
+        Raise `RunnerError` where the runner can't say.
         """
-        held = repository(worktree)
         rooms = layout.rooms(held.git)
         needs = runner.room(worktree, tools, RoomPlaces(cache=rooms.cache))
         venv = runner.venv()
@@ -642,7 +660,7 @@ class RoomEnvironments(Model):
         return cls(
             rooms=rooms,
             launch=layout.launch(launch),
-            repository=held.git,
+            held=held,
             directory=rooms.launch(launch),
             needs=needs,
             hidden=Hidden.of(held.tree, held.worktrees, hidden),
@@ -667,7 +685,7 @@ class RoomEnvironments(Model):
         return {
             environments.ENVIRONMENTS: str(self.directory),
             environments.VARIABLE: environment.variable,
-            environments.REPOSITORY: str(self.repository),
+            environments.REPOSITORY: str(self.held.git),
         }
 
     @property
@@ -701,7 +719,7 @@ class RoomEnvironments(Model):
         inside its tree are looked in.
         """
         removed(self.rooms.home, self.directory)
-        appeared = self.hidden.appeared(Git.pinned(self.repository).worktrees())
+        appeared = self.hidden.appeared(Git.pinned(self.held.git).worktrees())
         return [
             (
                 f"Removed {each}, an environment that appeared in a worktree while "

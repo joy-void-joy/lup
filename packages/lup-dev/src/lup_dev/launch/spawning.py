@@ -18,10 +18,10 @@ line, a path or git, is held to this:
   launch and that conversation, so the parent link is the host's, not the
   room's word.
 - **The repository** is the one the host recorded for the spawner's launch
-  (`Register.repository`), never a path the call names. The launcher refuses a
-  worktree whose git leads elsewhere (`HeldLaunch.repository`, `spawned_in` in
-  `cli.py`), since a room writes every worktree's `.git` file and could lead
-  one to another repository approved on this machine.
+  (`Register.repository`), never a path the call names. The launcher takes it
+  as given (`HeldLaunch.repository`, `located` in `cli.py`), never finding it
+  through the worktree, whose `.git` file a room writes, and refuses a worktree
+  that repository doesn't name back.
 - **The worktree** is made at `tree/<branch>` in that repository's git
   directory (`made_root`), inside what the spawner's room mounts, by the
   spawner's room's own git through `podman exec` (as `land` removes worktrees),

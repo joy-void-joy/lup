@@ -999,7 +999,7 @@ def scratched(
         repository=found.git,
         git=git,
     )
-    if repository(scratch.path).tree != found.tree:
+    if repository(scratch.path, found.git).tree != found.tree:
         scratch.removed()
         message = (
             f"a worktree at {scratch.path} would widen what a room of the "

@@ -408,10 +408,10 @@ class Recording(Toolchain):
         self.installed: list[Installed] = []
 
     def install(
-        self, tool: Tool, root: Path, commit: str, copy: CopyLayout, *, users: bool
+        self, tool: Tool, git: Git, commit: str, copy: CopyLayout, *, users: bool
     ) -> None:
         self.installed.append(
-            Installed(tool=tool, root=root, commit=commit, into=copy, users=users)
+            Installed(tool=tool, root=git.cwd, commit=commit, into=copy, users=users)
         )
         command = copy.command(tool.name)
         command.parent.mkdir(parents=True, exist_ok=True)
@@ -701,11 +701,11 @@ class Watching(Recording):
         self.linked: list[Path | None] = []
 
     def install(
-        self, tool: Tool, root: Path, commit: str, copy: CopyLayout, *, users: bool
+        self, tool: Tool, git: Git, commit: str, copy: CopyLayout, *, users: bool
     ) -> None:
         assert not copy.home.exists()
         self.linked.append(Copies(layout=self.copies).current())
-        super().install(tool, root, commit, copy, users=users)
+        super().install(tool, git, commit, copy, users=users)
 
 
 def test_an_approval_installs_beside_the_copy_that_judges_and_switches_once_its_whole(
@@ -2103,7 +2103,7 @@ def test_uv_builds_and_installs_the_commits_copy_held_to_its_lock(
     copy = CopyLayout(home=tmp_path / "judges" / "lup" / "copies" / "a1")
     host = Host({"node": "26.7.0", "uv": "0.12.5"})
     UvToolchain(executable=str(fake), tools=host).install(
-        tool, lup, head, copy, users=True
+        tool, Git(cwd=lup), head, copy, users=True
     )
     how, _, source = mark.read_text().partition(": ")
     ran, _, where = how.partition(" in ")
@@ -2180,7 +2180,7 @@ def test_uv_builds_nothing_where_the_host_lacks_what_the_declaration_requires(
         RequirementError,
         match=r"`pnpm`, for `building` \(installs the engine's packages\)",
     ):
-        toolchain.install(tool, lup, head, copy, users=False)
+        toolchain.install(tool, Git(cwd=lup), head, copy, users=False)
     assert not mark.exists()
     assert not log.exists()
 
@@ -2197,7 +2197,7 @@ def test_uv_installs_a_release_from_its_index_held_to_its_pins(
     )
     copy = CopyLayout(home=tmp_path / "judges" / "audiobook" / "copies" / "a1")
     UvToolchain(executable=str(fake)).install(
-        release, tmp_path, "unused", copy, users=False
+        release, Git(cwd=tmp_path), "unused", copy, users=False
     )
     install, *constraints = log.read_text().splitlines()
     assert install.startswith(

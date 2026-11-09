@@ -94,6 +94,7 @@ from lup_dev.gate import (
 )
 from lup_dev.gate import Ran as GateRan
 from lup_dev.git import Git, GitError, nul_separated
+from lup_dev.git import Worktree as Checkout
 from lup_dev.host.client import FromRoom, HostClient, RoomClient, own_command
 from lup_dev.host.copying import Copying
 from lup_dev.host.courier import (
@@ -272,6 +273,7 @@ from lup_dev.launch.room import (
     unlent,
     vacated,
 )
+from lup_dev.launch.room import Repository as Found
 from lup_dev.launch.room import repository as repository_of
 from lup_dev.launch.secrets import RoomSecrets, Search, Tree, git_directory
 from lup_dev.launch.session import (
@@ -578,8 +580,11 @@ def toplevel(directory: Path) -> Path:
     return Path(Git(cwd=directory).text("rev-parse", "--show-toplevel"))
 
 
-def branch_name(worktree: Path) -> str:
-    """Return a launch's name by default: the branch the worktree at `worktree` has checked out, in a name's shape (`feat/x` is `feat-x`), or the worktree's directory's where none is."""
+def branch_name(worktree: Path, listed: Checkout | None = None) -> str:
+    """Return a launch's name by default: the branch the worktree at `worktree` has checked out, as its repository lists it (`listed`) where it's given, in a name's shape (`feat/x` is `feat-x`), or the worktree's directory's where none is."""
+    if listed is not None:
+        branch = (listed.branch or "").removeprefix("refs/heads/")
+        return shaped(branch) or shaped(worktree.name) or "session"
     found = Git(cwd=worktree).run("symbolic-ref", "--short", "-q", "HEAD", ok=[0, 1])
     branch = found.output.decode().strip() if found.status == 0 else ""
     return shaped(branch) or shaped(worktree.name) or "session"
@@ -2243,8 +2248,8 @@ class Launcher(Model, arbitrary_types_allowed=True):
     """What a launch reaches on this machine, each a seam a test stubs."""
 
     layout: Layout
-    trust: Callable[[Path], Outcome]
-    """Checks what the host runs for the repository at a worktree, asking where it changed."""
+    trust: Callable[[Path, Path], Outcome]
+    """Checks what the host runs for the repository of a worktree, whose git directory the launch found already, asking where it changed."""
     host: HostClient
     podman: Podman
     tools: Tools
@@ -2284,14 +2289,15 @@ def host_runtime(adapter: Adapter) -> HostRuntime:
     )
 
 
-def withheld_at_launch(launcher: Launcher, resolved: Resolved, worktree: Path) -> None:
-    """Build the list of values never published from the repository of `worktree`, where the declaration selects `Private`, and keep it where the module reads it; where it doesn't, remove the one kept.
+def withheld_at_launch(
+    launcher: Launcher, resolved: Resolved, repository: Path
+) -> None:
+    """Build the list of values never published from the repository whose git directory is `repository`, as the launch found it, where the declaration selects `Private`, and keep it where the module reads it; where it doesn't, remove the one kept.
 
     What the build couldn't read is said once, in the operator's terminal; no
     value is.
     """
-    project = repository_of(worktree)
-    made = asyncio.run(listed(resolved, project.git, launcher.facts, launcher.layout))
+    made = asyncio.run(listed(resolved, repository, launcher.facts, launcher.layout))
     for note in [] if made is None else made.notes:
         launcher.say(f"Private: {note}.")
 
@@ -2561,10 +2567,9 @@ def launched(
     if traced is not None:
         message = f"no session is held on this machine: {traced}"
         raise LaunchError(message)
-    pinned = None if held is None else held.repository
-    spawned_in(worktree, pinned)
-    launcher.say(launcher.trust(worktree).report())
-    repository = spawned_in(worktree, pinned)
+    found = located(worktree, None if held is None else held.repository)
+    repository = found.git
+    launcher.say(launcher.trust(worktree, repository).report())
     if Git.pinned(repository).text("for-each-ref", "--count=1", "refs/replace/"):
         launcher.say(
             "This repository holds replace refs (`refs/replace/`), which a room "
@@ -2577,7 +2582,7 @@ def launched(
         raise LaunchError(message)
     judge = launcher.layout.judge(repository).command(approval.tool.name)
     with approved_declaration(
-        worktree, approval.commit, local=approval.local
+        repository, approval.commit, local=approval.local
     ) as declared:
         choice = chosen(
             declared_profiles(approval.profiles, launcher.layout.profiles.declared),
@@ -2616,7 +2621,7 @@ def launched(
                 f"{runtime} {cached.version}, kept, runs: its release channel couldn't "
                 f"give the latest. {cached.fallback}"
             )
-        neighbours = related(declared.resolved.repositories, worktree)
+        neighbours = related(declared.resolved.repositories, found)
         for each in neighbours:
             if not each.mounted:
                 launcher.say(
@@ -2624,7 +2629,7 @@ def launched(
                     f"sessions to read isn't at {each.path}, so the room doesn't "
                     "mount it, and its guidance says it's missing."
                 )
-        withheld_at_launch(launcher, declared.resolved, worktree)
+        withheld_at_launch(launcher, declared.resolved, repository)
         editor = OperatorsEditor.of(launcher.terminal)
         if editor.program is not None and editor.known is None:
             launcher.say(
@@ -2665,7 +2670,12 @@ def launched(
             ),
         )
         environments = RoomEnvironments.of(
-            declared.resolved.runner, worktree, launcher.layout, launch, launcher.tools
+            declared.resolved.runner,
+            worktree,
+            launcher.layout,
+            launch,
+            launcher.tools,
+            held=found,
         )
         room = maintaining_room(
             declared.resolved,
@@ -2695,6 +2705,7 @@ def launched(
             shared=shared,
             lent=lending,
             rules=running,
+            main=found.main,
             home=homing.home,
         )
         compiled = (
@@ -2720,7 +2731,7 @@ def launched(
             judge=judge,
             limits=declared.resolved.limits,
             github=github,
-            name=name or branch_name(worktree),
+            name=name or branch_name(worktree, found.worktree),
             exact=name is not None,
             runner=declared.resolved.runner.command([]),
             environments=environments.own,
@@ -2736,7 +2747,7 @@ def launched(
                 patterns=declared.resolved.paths.secret,
                 hidden=[each.path for each in environments.hidden.found],
             ),
-            Tree(path=environments.hidden.tree, git=environments.repository),
+            Tree(path=environments.hidden.tree, git=environments.held.git),
             [
                 Tree(path=each.path, git=git_directory(each.path))
                 for each in neighbours
@@ -2851,24 +2862,27 @@ def launched(
                 writing.let_go(writer)
 
 
-def spawned_in(worktree: Path, pinned: Path | None) -> Path:
-    """Return the repository's git directory `worktree` leads to, as git finds it through the worktree; where an agent spawned the launch, refuse one other than `pinned`, the one the host recorded the spawner's launch in.
+def located(worktree: Path, pinned: Path | None) -> Found:
+    """Return the repository the launch in `worktree` runs for, once, which every step of the launch then takes as given: the one whose git directory is `pinned`, where an agent spawned the launch and the host recorded the spawner's; else the one git finds through the worktree, the operator's starting point.
 
     A room writes every worktree's `.git` file and the git directory's
-    `worktrees/`, so one could lead a spawned launch's worktree to another
-    repository approved on this machine, which the spawner's declaration never
-    named: looked at before trust reads the worktree, and again after.
+    `worktrees/`, so finding the repository again through the worktree at a
+    later step would let a room lead it elsewhere meanwhile, to another
+    repository approved on this machine, whose tree the room would mount
+    read-write. Refuse a worktree the repository doesn't name back
+    (`Git.listed`), which a room can't fake for a repository whose git
+    directory it doesn't write.
     """
-    found = Path(
-        Git(cwd=worktree).text(
-            "rev-parse", "--path-format=absolute", "--git-common-dir"
-        )
-    )
-    if pinned is not None and found != pinned:
+    try:
+        found = repository_of(worktree, pinned)
+    except RoomError as unmountable:
+        raise LaunchError(str(unmountable)) from unmountable
+    if found.worktree is None:
         message = (
-            f"the worktree {worktree} leads to the repository {found}, where it was "
-            f"spawned in {pinned}: something in a room rewrote its git, so nothing "
-            "launches"
+            f"{worktree} isn't one of the worktrees of {found.git}, as that "
+            "repository names them back: its `.git` file names another place, or "
+            "the repository's record of it does. Where the worktree moved, `git "
+            "worktree repair` there mends it; nothing launches until then"
         )
         raise LaunchError(message)
     return found
@@ -3036,10 +3050,12 @@ def launching(say: Callable[[str], None], *, unattended: bool = False) -> Launch
     layout = Layout.of(LupDevSettings())
     clock = SystemClock()
 
-    def trust(root: Path) -> Outcome:
+    def trust(root: Path, found: Path) -> Outcome:
         if unattended:
-            return machine_trust(root, [], asker=Unattended(say_to=say)).ensure()
-        return trusted(root, [])
+            return machine_trust(
+                root, [], asker=Unattended(say_to=say), found=found
+            ).ensure()
+        return trusted(root, [], found=found)
 
     def github(repository: Path) -> GitHubRepository:
         return asyncio.run(named(repository))
@@ -3218,7 +3234,7 @@ def spawned(
         raise LaunchError(message)
     root = worktree
     launcher = launching(typer.echo)
-    launcher.say(launcher.trust(root).report())
+    launcher.say(launcher.trust(root, located(root, None).git).report())
     launcher.say(
         "Starting the held session: the launcher sets its room up as a launch "
         "does, an image build taking minutes where one is missing."
@@ -3891,7 +3907,7 @@ def worktree_files(root: Path) -> list[Sent]:
     ]
 
 
-def withheld_here(root: Path, common: Path) -> Withheld | Read:
+def withheld_here(common: Path) -> Withheld | Read:
     """Return the list of values never published kept for the repository whose git directory is `common`, building it where none is kept, as a launch would; or, where it isn't read, what the gate says.
 
     It's built from the declaration at the commit approved for the repository on
@@ -3908,7 +3924,7 @@ def withheld_here(root: Path, common: Path) -> Withheld | Read:
         return Read(unchecked=UNAPPROVED)
     try:
         with approved_declaration(
-            root, approval.commit, local=approval.local
+            common, approval.commit, local=approval.local
         ) as declared:
             made = asyncio.run(listed(declared.resolved, common, HostFacts(), layout))
     except (LupDevError, OSError) as failed:
@@ -3948,7 +3964,7 @@ def private_check() -> None:
                 "rev-parse", "--path-format=absolute", "--git-common-dir"
             )
         )
-        match withheld_here(root, common):
+        match withheld_here(common):
             case Withheld() as held:
                 scan = read_for_values(files, head, common, held)
             case Read() as said:
@@ -4612,7 +4628,7 @@ def module_commands_said() -> str:
             if approval is None:
                 return "Nothing is approved for this repository, so its modules' commands don't run here."
             with approved_declaration(
-                root, approval.commit, local=approval.local
+                repository, approval.commit, local=approval.local
             ) as declared:
                 served = declared.resolved.served
     except (LupDevError, LupError) as unread:

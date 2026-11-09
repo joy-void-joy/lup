@@ -73,7 +73,7 @@ from lup_dev.host.protocol import (
 from lup_dev.launch.clis import Channel, ChannelError
 from lup_dev.launch.guidance import OPENING
 from lup_dev.launch.held import Writing
-from lup_dev.launch.room import RoomError
+from lup_dev.launch.room import RoomError, repository
 from lup_dev.launch.session import (
     LaunchError,
     SessionParts,
@@ -519,6 +519,8 @@ class Machine:
         sockets: Path | None = None,
     ) -> None:
         self.events = Events()
+        self.trusted: list[Path] = []
+        """The git directory each trust was given, as the launch found it."""
         self.unnamed = unnamed
         self.local = local
         self.profiles = profiles
@@ -601,20 +603,10 @@ class Machine:
             login.parent.mkdir(parents=True, exist_ok=True)
             login.write_text("{}")
 
-    def trust(self, root: Path) -> Outcome:
+    def trust(self, root: Path, common: Path) -> Outcome:
         self.events.record("trust")
+        self.trusted.append(common)
         commit = run("git", "rev-parse", "dev", cwd=root).text().strip()
-        common = Path(
-            run(
-                "git",
-                "rev-parse",
-                "--path-format=absolute",
-                "--git-common-dir",
-                cwd=root,
-            )
-            .text()
-            .strip()
-        )
         approval = Approval(
             commit=commit,
             fingerprint="f",
@@ -866,7 +858,7 @@ def test_a_declaration_whose_blob_isn_t_what_its_id_says_is_never_imported(
     )
     with (
         pytest.raises(GitError, match=f"{blob} isn't that blob"),
-        approved_declaration(project, commit, local=None),
+        approved_declaration(project / ".git", commit, local=None),
     ):
         pass
     assert not ran.exists()
@@ -881,7 +873,7 @@ def test_a_launch_compiles_the_approved_declarations_guidance_and_hooks(
     directory = tmp_path / "launch"
     hooks = hooked(claude.hooks)
 
-    with approved_declaration(project, commit, local=None) as declared:
+    with approved_declaration(project / ".git", commit, local=None) as declared:
         settings = terminal_settings(
             declared,
             project,
@@ -892,6 +884,7 @@ def test_a_launch_compiles_the_approved_declarations_guidance_and_hooks(
             neighbours=[],
             shared={"transcripts": tmp_path / "transcripts"},
             rules=RUNNING,
+            main=project,
         )
         exported = declared.root
         choices = declared.resolved.session
@@ -1347,7 +1340,8 @@ def test_nothing_launches_without_an_approval(
 ) -> None:
     machine = Machine(tmp_path, clock)
 
-    def declined(root: Path) -> Outcome:
+    def declined(root: Path, common: Path) -> Outcome:
+        del root, common
         message = "you declined"
         raise LaunchError(message)
 
@@ -1937,8 +1931,8 @@ def test_a_linked_worktree_trusts_its_repositorys_main_worktree(
     linked = tmp_path / "repos" / "feat"
     shell.git(project, "worktree", "add", "-q", "-b", "feat", str(linked))
 
-    assert trusted(project) == [project]
-    assert trusted(linked) == [linked, project]
+    assert trusted(project, repository(project).main) == [project]
+    assert trusted(linked, repository(linked).main) == [linked, project]
 
 
 def test_the_session_settings_are_cores_in_the_librarys_terms() -> None:
@@ -2826,22 +2820,74 @@ def test_a_launch_an_agent_spawned_registers_its_spawner_and_runs_the_session_th
     assert machine.engine.held_run[-2:] == ["--session-id", minted]
 
 
-def test_a_spawned_launch_whose_worktree_leads_to_another_repository_launches_nothing(
-    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+def a_repository_elsewhere(tmp_path: Path, shell: Shell) -> tuple[Path, Path]:
+    """Another repository, bare, with a worktree of its own: its git directory, and that worktree's own git directory, which names that worktree back and no other."""
+    elsewhere = tmp_path / "other" / "elsewhere.git"
+    elsewhere.parent.mkdir()
+    shell.git(tmp_path, "init", "-q", "--bare", "-b", "dev", str(elsewhere))
+    seed = tmp_path / "seed"
+    shell.git(tmp_path, "clone", "-q", str(elsewhere), str(seed))
+    (seed / "file").write_text("theirs\n")
+    shell.commit(seed, "theirs")
+    shell.git(seed, "push", "-q", "origin", "HEAD:refs/heads/dev")
+    theirs = elsewhere / "tree" / "theirs"
+    shell.git(
+        tmp_path, "--git-dir", str(elsewhere), "worktree", "add", "-q", str(theirs)
+    )
+    return elsewhere, elsewhere / "worktrees" / "theirs"
+
+
+def test_a_spawned_launch_whose_worktree_its_repository_doesn_t_name_back_launches_nothing(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path, shell: Shell
 ) -> None:
+    """The host recorded the spawner's repository: the launch takes that one as given, never what the worktree's `.git` says, and refuses a worktree it doesn't name back."""
     machine = Machine(tmp_path, clock, sockets=sockets)
-    elsewhere = tmp_path / "elsewhere.git"
+    elsewhere, _ = a_repository_elsewhere(tmp_path, shell)
     spawned = holding(project).model_copy(update={"repository": elsewhere})
 
     with pytest.raises(LaunchError) as refused:
         cli.launched(machine.adapter, [], project, machine.launcher, held=spawned)
 
-    assert str(refused.value) == (
-        f"the worktree {project} leads to the repository {project / '.git'}, where "
-        f"it was spawned in {elsewhere}: something in a room rewrote its git, so "
-        "nothing launches"
+    assert str(refused.value).startswith(
+        f"{project} isn't one of the worktrees of {elsewhere}, as that repository "
+        "names them back"
     )
+    assert machine.events.said == []
+    assert machine.trusted == []
     assert machine.host.served == []
+
+
+def test_a_launch_whose_worktree_a_room_led_to_another_repository_launches_nothing(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path, shell: Shell
+) -> None:
+    """A room writes a worktree's `.git` file: led to another repository's worktree, git finds that repository, which names its own worktree back, not this one."""
+    machine = Machine(tmp_path, clock, sockets=sockets)
+    linked = tmp_path / "repos" / "feat"
+    shell.git(project, "worktree", "add", "-q", "-b", "feat", str(linked))
+    elsewhere, theirs = a_repository_elsewhere(tmp_path, shell)
+    (linked / ".git").write_text(f"gitdir: {theirs}\n")
+
+    with pytest.raises(LaunchError) as refused:
+        cli.launched(machine.adapter, [], linked, machine.launcher)
+
+    assert str(refused.value).startswith(
+        f"{linked} isn't one of the worktrees of {elsewhere}"
+    )
+    assert machine.trusted == []
+    assert machine.host.served == []
+
+
+def test_every_step_of_a_launch_takes_the_repository_it_found_first(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    """Found once, from the worktree, the repository is carried to trust and the rest, rather than found through the worktree again at each step, which a room can rewrite meanwhile."""
+    machine = Machine(tmp_path, clock, sockets=sockets)
+
+    cli.launched(machine.adapter, [], project, machine.launcher)
+
+    assert machine.trusted == [project / ".git"]
+    [served] = machine.host.served
+    assert served.repository == project / ".git"
 
 
 def test_a_held_session_whose_first_hook_isn_t_heard_isn_t_called_up(
