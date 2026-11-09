@@ -98,11 +98,11 @@ const MARKS: Part[] = [
         title: "Marks in the margin and the overview",
         keys: [
             { keys: "◆", does: "what stays stopped until you answer it: a question, a problem, a held change, an approval, a file a landing waits on", short: "stopped on you" },
-            { keys: "◇ orange", does: "what's flagged for your eyes, with nothing stopped: a file with flagged writes, a thread done for you to confirm, a disagreement, a question that waits on no answer", short: "flagged" },
+            { keys: "◇ orange", does: "what's flagged for your eyes, with nothing stopped: a file with flagged writes, a concern done for you to clear, a disagreement, a question that waits on no answer", short: "flagged" },
             { keys: "◇ cyan", does: "a file to review as you come to it, with nothing holding it", short: "to review" },
             { keys: "⚑", does: "a file with a line that matters, held or flagged; lup's approvals in the overview", short: "matters" },
             { keys: "·", does: "a file folded whole: automatic, a test, data, a first approval's", short: "folded" },
-            { keys: "•", does: "news, to read rather than answer: a note, a turn's last words, a friction, how it felt, a stop", short: "news" },
+            { keys: "•", does: "news, to read rather than answer: a note, a turn's last words, a concern's words, how it felt, a stop", short: "news" },
             { keys: "‖", does: "an item left for later", short: "parked" },
             { keys: "new", does: "an item that came after you marked its agent seen, Space d on its banner, and that you haven't commented on", short: "new" },
             { keys: "▶ ○ ✕", does: "an agent calling a tool, between calls, ended", short: "agents" },
@@ -133,9 +133,9 @@ const LIST: Part[] = [
  * undone with u and sent with Ctrl+Enter, the key pressed again taking it off. A module's own verb says what it's called.
  */
 const VERBS: Readonly<Record<string, string>> = {
-    done: "mark it done: an item read; an approval or a held change approved, the comments under it going with it; a file of \"since you approved\" reviewed at the version shown, approving its flagged writes where it still stands so; on the drawer's line, every file it shows; a conversation read up to its last step; on a thread's banner, its news read up to the last item shown where there's some, else the thread settled, any thread, its agent going on or ended, but while something in it waits on you; on an agent's banner, the agent seen, their own items and drawers, their subagents' left as they are",
-    decline: "decline an approval or a held change, the comments under it going with it; on a thread's banner, the thread declined, nothing more to be done, but while something in it waits on you; a comment never declines",
-    send: "leave the item for later, folded, in its thread, or at the review's end, what's drafted on it staying drafted as the rest is sent; on one left for later, bring it back; on a message written on a thread, send it to no one, kept there as yours, or back to whoever answers for the thread",
+    done: "mark it done: an item read; an approval or a held change approved, the comments under it going with it; a file of \"since you approved\" reviewed at the version shown, approving its flagged writes where it still stands so; on the drawer's line, every file it shows; a conversation read up to its last step; on a concern, it cleared, any concern, whoever's on it going on or ended, what waits on you in it staying where it is; on an agent's banner, the agent seen, their own items and drawers, their subagents' left as they are",
+    decline: "decline an approval or a held change, the comments under it going with it; on a concern, it declined, nothing more to be done, what waits on you in it staying where it is; a comment never declines",
+    send: "leave the item for later, folded, with what else is left for later, what's drafted on it staying drafted as the rest is sent; on one left for later, bring it back; on a message written on a concern, send it to no one, kept there as yours, or back to whoever answers for it",
     comment: "comment on it whole: an item; on a concern, from its body too, a message on it whole to whoever answers for it; on an agent's banner, a message to them, which their drawers' remarks go with; in a drawer, a remark on the line",
     hold: "from anywhere in an agent's group, hold each flagged write of the agent and their subagents for your answer, or let them land again",
 };
@@ -262,7 +262,7 @@ export function reviewKeys(kinds: readonly Kind[], verbs: readonly Verb[] = [], 
             },
             {
                 keys: "]g [g",
-                does: "next and previous group, a thread's or an agent's, on its banner, its fold's letter a in the margin; the view stays where it's in view, else it comes in a third of the view from the edge",
+                does: "next and previous agent's group, on its banner, its fold's letter a in the margin; the view stays where it's in view, else it comes in a third of the view from the edge",
                 short: "groups",
             },
             {
