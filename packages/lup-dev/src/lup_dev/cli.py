@@ -145,6 +145,7 @@ from lup_dev.host.protocol import (
     ListLaunches,
     Register,
     Talker,
+    segment,
 )
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Called, Recorded
@@ -2743,7 +2744,9 @@ def named_session(
     """
     holding = adapter.holding
     if held is None or holding is None:
-        return NamedSession(session=adapter.resumed(arguments), arguments=arguments)
+        return NamedSession(
+            session=an_id(adapter, adapter.resumed(arguments)), arguments=arguments
+        )
     session = held.resume or holding.minted()
     try:
         naming = (
@@ -2753,6 +2756,36 @@ def named_session(
         message = f"`{session}` can't be a session of {adapter.runtime.name()}'s"
         raise LaunchError(message) from unnamed
     return NamedSession(session=session, arguments=[*naming, *held.arguments])
+
+
+def an_id(adapter: Adapter, resumed: str | None) -> str | None:
+    """Return what a terminal launch's arguments resume where it's one of the runtime's session ids, which its writer's lock is kept by; none for a search term its picker opens on, or for none."""
+    if resumed is None:
+        return None
+    holding = adapter.holding
+    try:
+        if holding is not None:
+            holding.resuming(resumed)
+        segment(resumed)
+    except ValueError:
+        return None
+    return resumed
+
+
+def run_elsewhere(launcher: Launcher, session: str) -> Register | None:
+    """Return the launch the host serves whose session's hooks name `session`, its latest; none where none does."""
+    listed = launcher.host.listed()
+    return next(
+        (
+            each
+            for each in listed.launches
+            if any(
+                talker.session == session
+                for talker in listed.talkers.get(each.launch, [])
+            )
+        ),
+        None,
+    )
 
 
 def written_by(
@@ -2767,13 +2800,26 @@ def written_by(
 
     Where a launch holds it already, a held launch refuses, naming it, and so
     does a terminal's where that launch is another terminal's, which ends it
-    there. Where it's a held one, the terminal's asks the operator whether to
+    there. Where none holds it, but the host heard a served launch's hooks
+    name the session, as a terminal's that started it with no id it knew, one
+    `--continue`d, or one after `/clear`, it refuses too, naming that launch. Where it's a held one, the terminal's asks the operator whether to
     end it, its session taken over here once it lets the lock go
     (`lup_dev.launch.held`); `take_over` ends it asking nothing, and a
     terminal with no one to ask refuses.
     """
     holder = writing.held_by()
-    if holder is None or held:
+    if holder is None:
+        running = run_elsewhere(launcher, writing.path.stem)
+        if running is not None:
+            message = (
+                f"the session {writing.path.stem} is run by launch "
+                f"`{running.name}`, its hooks naming it, though it holds no lock "
+                "on its writer: a runtime lets a second process write one session, "
+                "and its record branches, so end that one first"
+            )
+            raise LaunchError(message)
+        return writing.taken(launch)
+    if held:
         return writing.taken(launch)
     holding = next(
         (each for each in launcher.host.launches() if each.launch == holder), None

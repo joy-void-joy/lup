@@ -3086,3 +3086,41 @@ def test_spawning_refuses_inside_an_agents_session(
         assert isinstance(result.exception, LaunchError)
         assert "inside a claude session" in str(result.exception)
     assert machine.events.said == []
+
+
+def test_a_session_a_served_launch_s_hooks_name_is_refused_though_it_holds_no_lock(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    """A terminal launch that started its session with no id lup knew holds no lock on it, but the host heard its hooks name it."""
+    machine = Machine(tmp_path, clock, sockets=sockets)
+    session = "0f6b1d2e-6a62-4a39-9a8c-1f2d3e4f5a6b"
+    machine.host.served.append(
+        dead(project).model_copy(update={"launch": "t1", "name": "a-terminal"})
+    )
+    machine.host.heard.append(session)
+
+    with pytest.raises(LaunchError, match="run by launch `a-terminal`, its hooks"):
+        cli.launched(
+            machine.adapter,
+            [],
+            project,
+            machine.launcher,
+            held=holding(project, resume=session),
+        )
+
+    assert not any(each.startswith("register") for each in machine.events.said)
+
+
+def test_a_terminal_resuming_by_a_search_term_takes_no_lock(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock)
+
+    status = cli.launched(
+        machine.adapter, ["--resume", "the spawn/trial work"], project, machine.launcher
+    )
+
+    assert status == 7
+    assert not (machine.layout.state / "writers").exists() or not any(
+        (machine.layout.state / "writers").rglob("*.lock")
+    )
