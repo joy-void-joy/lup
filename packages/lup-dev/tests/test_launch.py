@@ -84,7 +84,7 @@ from lup_dev.launch.session import (
     trusted,
 )
 from lup_dev.launch.trust import Outcome, Unchanged
-from lup_dev.layout import Layout, digest
+from lup_dev.layout import HostPaths, Layout, digest
 from lup_dev.migration import sized
 from lup_dev.policy.worktrees import Making
 from lup_dev.private.withheld import Facts, Withheld
@@ -569,12 +569,23 @@ class Machine:
             facts=Here(tmp_path / "home"),
             rules=self.rules,
             pause=paused,
+            host_paths=HostPaths(proc=tmp_path / "proc"),
         )
+        self.traced("1")
         self.adapter = claude.adapter().model_copy(
             update={"channel": Offline(events=self.events)}
         )
         if settled:
             self.settle()
+
+    def traced(self, scope: str | None) -> None:
+        """Set Yama's `ptrace_scope` as the launch reads it; none where Yama isn't there."""
+        place = self.launcher.host_paths.ptrace_scope
+        if scope is None:
+            place.unlink(missing_ok=True)
+            return
+        place.parent.mkdir(parents=True, exist_ok=True)
+        place.write_text(f"{scope}\n")
 
     def settle(self, account: str = "default") -> None:
         """Make each runtime's home of the project's rooms, and sign `account` in to each, as an earlier launch would have."""
@@ -3124,3 +3135,27 @@ def test_a_terminal_resuming_by_a_search_term_takes_no_lock(
     assert not (machine.layout.state / "writers").exists() or not any(
         (machine.layout.state / "writers").rglob("*.lock")
     )
+
+
+@pytest.mark.parametrize("scope", ["0", None])
+def test_a_held_launch_refuses_where_any_process_may_trace_another(
+    scope: str | None, project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock)
+    machine.traced(scope)
+
+    with pytest.raises(LaunchError, match=r"Yama's `ptrace_scope` (is 0|isn't there)"):
+        cli.launched(
+            machine.adapter, [], project, machine.launcher, held=holding(project)
+        )
+
+    assert machine.events.said == []
+
+
+def test_a_terminal_launch_goes_on_whatever_yama_says(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock)
+    machine.traced("0")
+
+    assert cli.launched(machine.adapter, [], project, machine.launcher) == 7

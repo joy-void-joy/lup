@@ -237,7 +237,7 @@ from lup_dev.inbox.threaded import routes as threaded_routes
 from lup_dev.inbox.tools import InboxTools
 from lup_dev.inbox.typed import TypeReader
 from lup_dev.launch.clis import CliCache
-from lup_dev.launch.held import Holder, Writing
+from lup_dev.launch.held import Holder, Writing, untraceable
 from lup_dev.launch.hidden import removed
 from lup_dev.launch.homes import LaunchHome
 from lup_dev.launch.images import build
@@ -287,6 +287,7 @@ from lup_dev.layout import (
     CheckoutLayout,
     GitDirectoryLayout,
     HostLayout,
+    HostPaths,
     InboxLayout,
     LaunchLayout,
     Layout,
@@ -2160,6 +2161,8 @@ class Launcher(Model, arbitrary_types_allowed=True):
     pause: Callable[[float], Awaitable[None]] = asyncio.sleep
     """Waits the seconds between two looks a held launch takes at whether the
     host heard its session's first hook; a test gives its own."""
+    host_paths: HostPaths = HostPaths()
+    """The host's own places a held launch reads; a test gives its own."""
 
 
 def host_runtime(adapter: Adapter) -> HostRuntime:
@@ -2433,6 +2436,10 @@ def launched(
     holding = adapter.holding
     if held is not None and holding is None:
         message = f"{runtime} has no session held with no terminal yet"
+        raise LaunchError(message)
+    traced = None if held is None else untraceable(launcher.host_paths)
+    if traced is not None:
+        message = f"no session is held on this machine: {traced}"
         raise LaunchError(message)
     launcher.say(launcher.trust(worktree).report())
     repository = Path(

@@ -693,3 +693,24 @@ def test_a_trial_whose_resume_fails_ends_no_launch_in_its_place(
     assert not resumed.passed
     ends = [each.launch for each in host.asked if isinstance(each, End)]
     assert "someone-else" not in ends
+
+
+def test_a_room_whose_kernel_lets_any_process_trace_another_fails_the_trial(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    _, trial = played(tmp_path, clock)
+    trial.inside = lambda container, command: TerminalRun(
+        status=5,
+        output=(
+            "opening /proc/7/fd/0 (socket:[1]): [Errno 6]; but yama's ptrace_scope "
+            "is 0, so a process of the room may trace the session"
+        ),
+    )
+
+    steps = trial.run()
+
+    [forging] = [
+        each for each in steps if each.name == "the room can't type as the operator"
+    ]
+    assert not forging.passed
+    assert "(status 5)" in forging.seen

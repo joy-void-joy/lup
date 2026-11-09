@@ -97,6 +97,19 @@ class RoomPaths(Model):
     Arch Linux's image sets, and podman's default for an image setting none."""
 
 
+class HostPaths(Model):
+    """The host's own places lup reads, outside lup's state: the kernel's word on what one process may do to another."""
+
+    proc: Path = Path("/proc")
+    """The host's processes, a directory each by its id, which a room's share
+    the kernel of."""
+
+    @property
+    def ptrace_scope(self) -> Path:
+        """Yama's setting of which processes of a user may trace which others: 0 any, 1 a process's own descendants alone, 2 an administrator alone, 3 none; no file where Yama isn't there, which is as 0."""
+        return self.proc / "sys" / "kernel" / "yama" / "ptrace_scope"
+
+
 class Bundle(Model):
     """The built engine, shipped inside `lup_dev`: its script and the stubs beside it.
 

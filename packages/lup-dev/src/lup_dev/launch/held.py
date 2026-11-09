@@ -45,12 +45,36 @@ from lup_dev.host.protocol import Done, HostError, Reply, segment
 from lup_dev.host.service import Dispatcher, Handler, Route, unix_server
 from lup_dev.host.watch import Changes
 from lup_dev.launch.session import LaunchError
-from lup_dev.layout import LaunchSockets, Layout, RoomPaths
+from lup_dev.layout import HostPaths, LaunchSockets, Layout, RoomPaths
 
 if TYPE_CHECKING:
     from lup.rooms.engine import Piped
     from lup.rooms.room import Room
     from lup.sessions.terminal import TerminalSettings
+
+
+def untraceable(paths: HostPaths) -> str | None:
+    """Say why a held session can't be kept from a process of its room, where it can't: where Yama lets any process of a user trace any other, one in the room could write the session's turns through the runtime's own memory, whatever its input is; none where Yama keeps a process to its own descendants, or stricter.
+
+    Its kernel is the room's, so the host's setting is the room's.
+    """
+    try:
+        scope = paths.ptrace_scope.read_text().strip()
+    except OSError:
+        scope = None
+    if scope not in [None, "0"]:
+        return None
+    said = (
+        f"isn't there ({paths.ptrace_scope})"
+        if scope is None
+        else f"is 0 ({paths.ptrace_scope})"
+    )
+    return (
+        f"Yama's `ptrace_scope` {said}, so any process of a room may trace any "
+        "other of its user, the held session's runtime among them, and write its "
+        "turns as the operator's: a held session needs it at 1 or more "
+        "(`sysctl kernel.yama.ptrace_scope=1`, which most distributions set)"
+    )
 
 
 class Writing(Model, arbitrary_types_allowed=True):
