@@ -1374,20 +1374,23 @@ def test_a_title_makes_a_name_with_a_letter() -> None:
     assert slugged("2025") == "thread-2025"
 
 
-def test_a_fresh_session_hears_what_s_open_without_being_given_any_of_it_whatever_they_re_called(
+def test_a_fresh_session_hears_nothing_of_concerns_and_lists_them_on_asking(
     delivery: Delivery, clock: FakeClock
 ) -> None:
     register = launched(delivery, "dev", "s1")
     lead = speaker(delivery, register, main("s1"))
     said(lead.note(ThreadedRemark(remark="Go.")))
     said(lead.ask(Asking(question="Ship?", thread="Ship it")))
-    said(lead.concern(Concerning(name="done-one", title="Done one")))
+    said(lead.concern(Concerning(text="The gate hangs.")))
+    said(lead.concern(Concerning(name="done-one", title="Done one", body="Done.")))
+    said(lead.concern(Concerning(name="empty", title="Nothing in it")))
     concerns = delivery.concerns()
     concerns.settled(concerns.named(REPOSITORY, "done-one"))
     delivery.layout.record("dev").unlink()
     clock.sleep(60)
     later = launched(delivery, "dev", "s2")
     bearings = RepositoryBearings(delivery=delivery, running=lambda _: "dev")
+    fresh = speaker(delivery, later, main("s2"))
 
     page = bearings.page(
         main("s2"),
@@ -1395,36 +1398,49 @@ def test_a_fresh_session_hears_what_s_open_without_being_given_any_of_it_whateve
         Repository(unlanded=[], landed=[], onto="origin/dev"),
         [],
     )
+    working = delivery.concerns().working(main("s2"))
+    listed = said(fresh.concern(Concerning()))
+    said(fresh.concern(Concerning(name="the-gate-hangs", hold=True)))
+    theirs = said(fresh.concern(Concerning()))
 
-    ship = delivery.concerns().named(REPOSITORY, "ship-it")
+    # Nothing of concerns as they start, whatever they're called.
     assert later.launch == "dev"
-    assert ship.holder == main("s1")
-    assert delivery.concerns().working(main("s2")) is None
-    assert (
-        "Open threads of this repository (`inbox` with `thread` reads one whole; "
-        "the `concern` tool with `hold` takes one):\n"
-        '- @ship-it, "Ship it", held by nobody: waiting on the operator: 1 '
-        "question."
-    ) in page
-    assert "took" not in page
-    assert "done-one" not in page
+    assert working is None
+    assert "concern" not in page
+    assert "ship-it" not in page
+    # Asked, those left with something in them are listed, each with who left
+    # it, and theirs apart; one cleared or empty isn't.
+    assert listed == (
+        "In `No agent`, nobody running answering for them:\n"
+        '- @ship-it, "Ship it", left by `dev` (claude session s1): waiting on the operator: 1 question.\n'
+        '- @the-gate-hangs, "The gate hangs.", left by `dev` (claude session s1): nobody running.'
+    )
+    assert theirs == (
+        "In `No agent`, nobody running answering for them:\n"
+        '- @ship-it, "Ship it", left by `dev` (claude session s1): waiting on the operator: 1 question.\n'
+        "Yours:\n"
+        '- @the-gate-hangs, "The gate hangs.": working.'
+    )
 
 
-def test_a_fresh_session_s_bearings_read_a_root_as_absent(
+def test_a_fresh_session_s_listing_reads_a_root_as_absent(
     delivery: Delivery,
 ) -> None:
     earlier = main("s0")
-    root = plant_root(delivery, earlier, "dev", holder=earlier)
-    under_root(delivery, root, "sshole", earlier)
-    launched(delivery, "dev", "s2")
-    bearings = RepositoryBearings(delivery=delivery, running=lambda _: "dev")
+    register = launched(delivery, "dev", "s0")
+    said(speaker(delivery, register, earlier).note(ThreadedRemark(remark="Here.")))
+    [here] = delivery.inbox.items
+    delivery.layout.record("dev").unlink()
+    root = plant_root(delivery, earlier, "dev-old", holder=earlier)
+    put_in(delivery, here, under_root(delivery, root, "sshole", earlier))
+    later = launched(delivery, "dev", "s2")
 
-    page = bearings.page(
-        main("s2"), None, Repository(unlanded=[], landed=[], onto="origin/dev"), []
+    listed = said(speaker(delivery, later, main("s2")).concern(Concerning()))
+
+    assert listed == (
+        "In `No agent`, nobody running answering for them:\n"
+        '- @sshole, "sshole", left by `dev` (claude session s0): nobody running.'
     )
-
-    assert '- @sshole, "sshole", held by nobody: nobody running.' in page
-    assert "@dev" not in page
     assert delivery.concerns().named(REPOSITORY, "sshole").holder is None
     assert delivery.inbox.ledger.node(root.number, Thread).holder == earlier
 

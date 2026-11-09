@@ -975,6 +975,31 @@ class Concerns(Model, arbitrary_types_allowed=True):
         drawn = self.inbox.ledger.drawn_from(number, In, current=True)
         return None if not drawn else self.at(drawn[-1].target)
 
+    def open_to(self, thread: Thread) -> bool:
+        """Say whether `thread` is open and something's there to read: the operator hasn't cleared it, and something's in it, its body, or what was said of where it stands."""
+        standing = self.standing(thread)
+        return standing.marks.operator is None and (
+            bool(self.threads.members(thread.number))
+            or standing.status is not None
+            or self.body(thread) is not None
+        )
+
+    def unheld(self, repository: Path) -> list[Thread]:
+        """Return `repository`'s concerns in `No agent`, by number: open, with something there (`open_to`), and nobody running answering for them."""
+        return [
+            each
+            for each in self.threads.of(repository)
+            if self.answering(each) is None and self.open_to(each)
+        ]
+
+    def held_by(self, party: Conversation) -> list[Thread]:
+        """Return the concerns `party` holds, open, with something there (`open_to`), by number: a session's own conversation's, what they open or are handed."""
+        return [
+            each
+            for each in self.threads.of(party.repository)
+            if each.holder == party and self.open_to(each)
+        ]
+
     def standing(self, thread: Thread) -> Standing:
         """Return where `thread` stands (`Standing.read`), nobody running where nobody who goes on answers for it."""
         return self.threads.standing(thread.number, live=self.live)

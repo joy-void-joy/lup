@@ -5044,6 +5044,32 @@ def test_a_room_whose_service_runs_an_older_copy_is_told_so(
     )
 
 
+@pytest.mark.parametrize("runtime", ["claude", "codex"])
+def test_lup_never_reminds_an_agent_of_a_concern_they_hold_at_a_call_or_their_turn_s_end(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+    *,
+    runtime: str,
+) -> None:
+    """A concern is never a chore: holding several, open, with bodies, a session's calls and their turn's end are told nothing of them, on either runtime."""
+    start = claude if runtime == "claude" else codex
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", runtime)
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, start("SessionStart", source="startup"))
+        for text in ["The gate hangs.", "The page lags on 40 concerns."]:
+            _, refused = call(mcp, "concern", {"text": text, "body": "Unread yet."})
+            assert not refused
+        clock.sleep(3600)
+        called = send(hook, bash("b1") if runtime == "claude" else codex_bash("b1"))
+        ended = send(hook, start("Stop", stop_hook_active=False))
+        again = send(hook, start("Stop", stop_hook_active=False))
+    assert (called, ended, again) == ("", "", "")
+
+
 def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
     served = specs()
     assert [spec.name for spec in served] == [
@@ -13636,18 +13662,12 @@ def test_a_new_main_session_is_told_where_its_repository_stands_once_as_it_start
     assert resumed == ""
     assert compacted == ""
     s0 = "`w` (claude session s0)"
-    # A session cleared in its launch holds nothing: the next one hears what it
-    # left, none of it given to them.
+    # A session cleared in its launch holds nothing, and the next one hears
+    # nothing of the concern it left, none of it given to them.
     assert second == "\n\n".join(
         [
             opening,
             unlanded,
-            (
-                "Open threads of this repository (`inbox` with `thread` reads one "
-                "whole; the `concern` tool with `hold` takes one):\n"
-                '- @which-parser, "Which parser", held by nobody: waiting on the '
-                "operator: 1 question."
-            ),
             "\n".join(
                 [
                     (

@@ -601,9 +601,12 @@ class Speaker(Model, arbitrary_types_allowed=True):
         Opening, adding, moving, parking and saying done don't move you: you
         work in a concern until you join, hold or are handed another. Clearing
         one is the operator's. With `name` alone, the answer says where it
-        stands.
+        stands; with nothing given, it lists those in `No agent`, nobody running
+        answering for them, and yours.
         """
         concerns = self.concerns
+        if said == Concerning():
+            return Said(text=self.listed(concerns))
         try:
             planned = self.planned(concerns, said)
         except (InboxError, ValueError) as refused:
@@ -1124,6 +1127,41 @@ class Speaker(Model, arbitrary_types_allowed=True):
         bare = said.strip().removeprefix("@")
         number = bare if bare.isdigit() else PartId.parsed(bare).item
         concerns.item(self.party.repository, int(number))
+
+    def listed(self, concerns: Concerns) -> str:
+        """List this repository's concerns in `No agent`, each with who left it, and this conversation's own, a line each, saying where each stands."""
+        unheld = concerns.unheld(self.party.repository)
+        yours = concerns.held_by(self.party)
+        if not unheld and not yours:
+            return "Nothing is in `No agent`, and you hold no concern."
+
+        def line(thread: Thread, left: Conversation | Operator | None) -> str:
+            by = "" if left is None else f", left by {self.called(left)}"
+            standing = stood(concerns.standing(thread))
+            return f'- @{thread.name}, "{thread.title}"{by}: {standing}.'
+
+        def leaver(thread: Thread) -> Conversation | None:
+            match thread.holder, thread.by:
+                case Conversation() as holder, _:
+                    return holder
+                case None, Conversation() as opener:
+                    return opener
+                case _:
+                    return None
+
+        return "\n".join(
+            [
+                *(
+                    [
+                        "In `No agent`, nobody running answering for them:",
+                        *(line(each, leaver(each)) for each in unheld),
+                    ]
+                    if unheld
+                    else []
+                ),
+                *(["Yours:", *(line(each, None) for each in yours)] if yours else []),
+            ]
+        )
 
     def standing(self, concerns: Concerns, thread: Thread) -> str:
         """Say where `thread` stands, in a line: its title, the thread it's under, who holds it, and where it stands (`stood`); then its body, where it has one."""
