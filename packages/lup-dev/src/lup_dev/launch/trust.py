@@ -807,14 +807,20 @@ class Asker(ABC):
         """Ask `question`, no by default, until it's answered here or `elsewhere`: whether the operator answered yes here; none where it was answered elsewhere first."""
 
 
-def line(descriptor: int) -> str:
-    """Read one line from `descriptor` a byte at a time, so nothing past it leaves the stream `select` watches; empty at its end."""
+def line(descriptor: int) -> str | None:
+    """Read one line from `descriptor` a byte at a time, so nothing past it leaves the stream `select` watches; none where its input ended before anything of one was read."""
+    ended = False
 
     def read() -> Iterator[bytes]:
-        while (byte := os.read(descriptor, 1)) not in [b"", b"\n"]:
+        nonlocal ended
+        while (byte := os.read(descriptor, 1)) != b"\n":
+            if byte == b"":
+                ended = True
+                return
             yield byte
 
-    return b"".join(read()).decode(errors="replace")
+    said = b"".join(read())
+    return None if ended and not said else said.decode(errors="replace")
 
 
 def yes(said: str) -> bool | None:
@@ -853,18 +859,30 @@ class Terminal(Model, Asker):
         """Ask until the operator answers y or n, Enter answering no, while watching for an answer given elsewhere.
 
         Where one comes first, the question stops, and what was typed of an
-        answer is dropped, so it reaches nothing after.
+        answer is dropped, so it reaches nothing after. Where the input ends,
+        as a launch's run by a program with nothing to answer does, nobody
+        answers here, rather than its end reading as Enter, a no: the
+        question waits for its answer elsewhere alone.
         """
         typer.echo(f"{question} [y/N]: ", nl=False)
+        watched: list[int | Elsewhere] = [self.stdin, elsewhere]
         while True:
-            readable, _, _ = select.select([self.stdin, elsewhere], [], [])
+            readable, _, _ = select.select(watched, [], [])
             if elsewhere in readable and elsewhere.given() is not None:
                 typer.echo()
                 if os.isatty(self.stdin):
                     termios.tcflush(self.stdin, termios.TCIFLUSH)
                 return None
             if self.stdin in readable:
-                answer = yes(line(self.stdin))
+                said = line(self.stdin)
+                if said is None:
+                    typer.echo(
+                        "\nNothing answers here, its input having ended: it waits "
+                        "for your answer in the inbox."
+                    )
+                    watched = [elsewhere]
+                    continue
+                answer = yes(said)
                 if answer is not None:
                     return answer
                 typer.echo(f"Answer y or n. {question} [y/N]: ", nl=False)

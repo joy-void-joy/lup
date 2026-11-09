@@ -2797,6 +2797,32 @@ def test_the_terminal_stops_asking_where_the_approval_was_answered_elsewhere(
     assert capsys.readouterr().out == "Approve? [y/N]: \n"
 
 
+class Later(Silent):
+    """An approval answered elsewhere after the terminal first looks: readable throughout, its answer none at first, then yes."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.theirs.send(b"answered")
+        self.looks = 0
+
+    def given(self) -> bool | None:
+        self.looks += 1
+        return None if self.looks == 1 else True
+
+
+def test_a_terminal_whose_input_ended_answers_nothing_and_waits_for_the_answer_elsewhere(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    read, write = os.pipe()
+    os.close(write)
+
+    assert Terminal(stdin=read).ask("Approve?", Later()) is None
+    assert capsys.readouterr().out == (
+        "Approve? [y/N]: \nNothing answers here, its input having ended: it waits "
+        "for your answer in the inbox.\n\n"
+    )
+
+
 def test_a_service_that_doesnt_know_approvals_is_said_with_what_to_do(
     audiobook: Path, kit: Kit, machine: Layout, clock: FakeClock
 ) -> None:
