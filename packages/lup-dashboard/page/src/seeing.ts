@@ -215,10 +215,10 @@ const NOWHERE = Number.MAX_SAFE_INTEGER;
 
 /**
  * Return each thing `laidOut` lays out read by being on screen, in the order it's laid out: what each drawer's view says;
- * each item new to the operator, by the mark of what it's in, a thread's where the review reads threads (`threads`) and
- * else its agent's group's. What holds what they wrote holds its mark back, a fold never closing over their words.
+ * each item new to the operator, by the mark of its agent's group. What holds what they wrote holds its mark back, a fold
+ * never closing over their words.
  */
-export function sightsOf(laidOut: Laid, seeing: Seeing, draft: Draft, remote: Remote, threads: readonly ThreadRead[] | null): Sighted[] {
+export function sightsOf(laidOut: Laid, seeing: Seeing, draft: Draft, remote: Remote): Sighted[] {
     const written = new Set((draft.comments ?? []).filter((each) => each.text.trim() !== "").map((each) => each.item));
     const remarked = new Set((draft.remarks ?? []).filter((each) => each.text.trim() !== "").map((each) => each.quote.block ?? ""));
     const holdsRemark = (part: Placed): boolean => remarked.has(part.id) || part.children.some(holdsRemark);
@@ -291,20 +291,10 @@ export function sightsOf(laidOut: Laid, seeing: Seeing, draft: Draft, remote: Re
         ];
     };
 
-    const ofThreads = (threads ?? []).flatMap((read) => {
-        const asked = (read.asks ?? []).map((each) => each.node).filter((each) => regions.has(each));
-        const numbers = [...new Set([...(read.new ?? []), ...asked])].toSorted((a, b) => a - b);
-        return numbers.flatMap((number) =>
-            ofItem(number, { repository: read.thread.repository, module: CORE_MODULE, key: { node: read.thread.number }, up_to: String(number), forward: true, seen: true }),
-        );
+    const ofAgents = laidOut.regions.flatMap((region) => {
+        const sender = region.item.sender;
+        return sender.party === "conversation" && fresh(region.item, seeing) ? ofItem(region.item.number, groupMoves(sender, region.item.number)) : [];
     });
-    const ofAgents =
-        threads !== null
-            ? []
-            : laidOut.regions.flatMap((region) => {
-                  const sender = region.item.sender;
-                  return sender.party === "conversation" && fresh(region.item, seeing) ? ofItem(region.item.number, groupMoves(sender, region.item.number)) : [];
-              });
 
-    return [...ofDrawers, ...ofThreads, ...ofAgents].toSorted((a, b) => a.from - b.from);
+    return [...ofDrawers, ...ofAgents].toSorted((a, b) => a.from - b.from);
 }

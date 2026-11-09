@@ -14,6 +14,7 @@ from lup_dev.host.pushes import Pushes
 from lup_dev.inbox.delivery import Delivery, Unanswerable
 from lup_dev.inbox.marks import CORE, ReviewMark, on_node
 from lup_dev.inbox.notices import Notices
+from lup_dev.inbox.protocol import Exchanged, ItemsListing, ListItems
 from lup_dev.inbox.store import (
     KINDS,
     Approval,
@@ -34,6 +35,7 @@ from lup_dev.inbox.threaded import (
     ListThreads,
     MovedIntoThread,
     MoveIntoThread,
+    Passage,
     ReopenThread,
     SettleThread,
     ShowThread,
@@ -53,6 +55,7 @@ from lup_dev.inbox.threaded import (
 from lup_dev.inbox.tools import (
     Asking,
     Choice,
+    Parking,
     Speaker,
     ThreadedFriction,
     ThreadedRemark,
@@ -61,8 +64,8 @@ from lup_dev.inbox.tools import (
 from lup_dev.layout import Layout
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
-from lup_ledger.parties import Conversation, Operator
-from lup_ledger.threads import Declined, Reopened, Settled, Thread
+from lup_ledger.parties import Conversation, Lup, Operator
+from lup_ledger.threads import ROOT, Declined, In, Reopened, Settled, Thread
 from lup_ledger.threads import Done as ThreadDone
 
 if TYPE_CHECKING:
@@ -100,7 +103,7 @@ def delivery(tmp_path: Path, clock: FakeClock) -> Delivery:
 class Work:
     """A session, `lead`, at work in a repository: four threads, each standing differently.
 
-    - their root: a note, `@1`, and a friction, the pile's;
+    - `home`, which they hold and work in: a note and a friction, the pile's;
     - `lag`: a question with its decision and a check, both asking the operator;
     - `voice`: a note, then done, for the operator to confirm;
     - `docs`: a note, read.
@@ -124,8 +127,9 @@ class Work:
         Names(path=delivery.layout.names).keep("s1", "lead")
         delivery.heard_in(LEAD, register, None)
         self.lead = Speaker(delivery=delivery, launch=register, party=LEAD)
+        self.ran(self.lead.thread(Threading(name="home", title="Home", hold=True)))
         self.note = self.sent(ThreadedRemark(remark="Built."))
-        self.root = self.thread_of(self.note)
+        self.home = self.thread_of(self.note)
         self.friction = self.ran(
             self.lead.friction(ThreadedFriction(text="The gate hung."))
         )
@@ -208,8 +212,8 @@ def test_each_thread_s_section_says_what_asks_the_operator_what_s_new_and_the_pi
 ) -> None:
     read = work.read()
 
-    assert sorted(read) == ["docs", "lag", "lead", "voice"]
-    lag, voice, root, docs = read["lag"], read["voice"], read["lead"], read["docs"]
+    assert sorted(read) == ["docs", "home", "lag", "voice"]
+    lag, voice, home, docs = read["lag"], read["voice"], read["home"], read["docs"]
     assert (lag.section, lag.state) == ("waiting on you", "waiting on the operator")
     assert [(each.node, each.what, each.holds) for each in lag.asks] == [
         (work.question, "a question", True),
@@ -224,12 +228,12 @@ def test_each_thread_s_section_says_what_asks_the_operator_what_s_new_and_the_pi
     assert isinstance(voice.status, ThreadDone)
     assert voice.status.to_try == "Say hello: it answers."
     assert voice.since == voice.status.at
-    # A note unread makes the root new; the friction beside it, the pile's, doesn't.
-    assert (root.section, root.new, root.pile) == ("new", [work.note], [work.friction])
+    # A note unread makes @home new; the friction beside it, the pile's, doesn't.
+    assert (home.section, home.new, home.pile) == ("new", [work.note], [work.friction])
     assert (docs.section, docs.new, docs.pile) == ("every thread", [], [])
-    assert root.answering == LEAD
-    assert work.shown(work.root).on == [LEAD]
-    assert (root.members, root.earlier, root.mark) == (2, 0, None)
+    assert home.answering == LEAD
+    assert work.shown(work.home).on == [LEAD]
+    assert (home.members, home.earlier, home.mark) == (2, 0, None)
 
 
 def test_what_s_new_comes_after_the_thread_s_mark_or_its_settling(
@@ -242,20 +246,20 @@ def test_what_s_new_comes_after_the_thread_s_mark_or_its_settling(
         CORE,
         [
             ReviewMark(
-                key=on_node(work.root.number), up_to=str(work.note), at=clock.now()
+                key=on_node(work.home.number), up_to=str(work.note), at=clock.now()
             )
         ],
     )
-    root = work.read()["lead"]
-    assert root.mark is not None
-    assert (root.section, root.new, root.earlier) == ("every thread", [], 1)
+    home = work.read()["home"]
+    assert home.mark is not None
+    assert (home.section, home.new, home.earlier) == ("every thread", [], 1)
     # A note after it is new; settling the thread later reads what came before.
     clock.sleep(60)
     later = work.sent(ThreadedRemark(remark="More."))
-    assert work.read()["lead"].new == [later]
+    assert work.read()["home"].new == [later]
     clock.sleep(60)
-    work.delivery.concerns().settled(work.root)
-    settled = work.read()["lead"]
+    work.delivery.concerns().settled(work.home)
+    settled = work.read()["home"]
     assert (settled.section, settled.state, settled.new) == (
         "every thread",
         "settled",
@@ -380,6 +384,43 @@ def test_the_operator_settles_declines_and_reopens_a_thread_whoever_answers_for_
         asyncio.run(ThreadStating(reading=reading).answer(SettleThread(number=9999)))
 
 
+def test_the_agent_s_mark_and_the_operator_s_are_read_apart_and_cleared_waits_on_nobody(
+    work: Work,
+) -> None:
+    concerns = work.delivery.concerns()
+    concerns.settled(work.voice)
+    voice = work.read()["voice"]
+    # Cleared, the agent's account of what's done kept beside it.
+    assert (voice.state, voice.section) == ("settled", "every thread")
+    assert isinstance(voice.cleared, Settled)
+    assert voice.done is not None
+    assert voice.done.to_try == "Say hello: it answers."
+    # Cleared while still at work, then said done: still cleared, never back
+    # before the operator.
+    concerns.declined(work.docs, "Not now.")
+    work.ran(work.lead.thread(Threading(name="docs", done="Read the docs.")))
+    docs = work.read()["docs"]
+    assert (docs.state, docs.section) == ("declined", "every thread")
+    assert isinstance(docs.cleared, Declined)
+    assert docs.done is not None
+    assert docs.done.to_try == "Read the docs."
+    # Open to the operator, said done: theirs to clear.
+    work.ran(work.lead.thread(Threading(name="lag", done="Type in a long one.")))
+    lag = work.read()["lag"]
+    assert (lag.state, lag.cleared) == ("done to confirm", None)
+    assert lag.done is not None
+    # How each reads on their dashboard, by both marks: the voice and the docs
+    # said done and cleared, gone; the lag for their eyes; home open to both.
+    concerns.settled(work.home)
+    read = work.read()
+    assert {name: each.reads for name, each in read.items()} == {
+        "docs": "gone",
+        "home": "quiet",
+        "lag": "for your eyes",
+        "voice": "gone",
+    }
+
+
 def test_a_reply_of_the_operator_s_in_a_thread_done_reopens_it_back_to_whoever_held_it(
     work: Work,
 ) -> None:
@@ -436,6 +477,10 @@ def test_a_part_moved_in_stands_open_until_an_item_there_cites_it_never_asking_t
     docs = work.read()["docs"]
     assert docs.unanswered == [part]
     assert (docs.section, docs.asks) == ("every thread", [])
+    # The passage it came from, open.
+    assert docs.passages == [
+        Passage(spot=part, words="And write it up in the docs.", answer=None)
+    ]
     [moved] = [
         each
         for each in work.shown(docs.thread, whole=True).entries
@@ -450,16 +495,46 @@ def test_a_part_moved_in_stands_open_until_an_item_there_cites_it_never_asking_t
     )
     after = work.read()["docs"]
     assert after.unanswered == []
+    # And what became of it: the note that answered it.
+    assert [each.answer for each in after.passages] == [cited]
     entries = {each.spot: each for each in work.shown(after.thread, whole=True).entries}
     assert not entries[part].unanswered
     assert entries[Spot(node=cited)].under == part
+
+
+def test_a_thread_whose_title_reads_as_a_name_says_what_it_s_about_from_what_s_in_it(
+    work: Work,
+) -> None:
+    # As `send`'s `thread=` opens one named after a branch.
+    named = work.sent(
+        ThreadedRemark(
+            remark="The shape I'd want for the list's marks.\n\nMore below.",
+            thread="steady-list",
+        )
+    )
+    read = work.read()
+    assert work.thread_of(named).title == "steady-list"
+    assert read["steady-list"].about == "The shape I'd want for the list's marks."
+    # One with a title says nothing more.
+    assert read["lag"].about is None
+
+
+def test_a_thread_s_checks_are_read_with_it_each_with_the_operator_s_answer(
+    work: Work,
+) -> None:
+    [check] = work.read()["lag"].checks
+    assert (check.check.number, check.answer) == (work.check, None)
+    work.delivery.concerns().checked(work.check, "It held.")
+    [answered] = work.read()["lag"].checks
+    assert answered.answer is not None
+    assert answered.answer.text == "It held."
 
 
 def test_where_each_conversation_works_is_read_with_the_threads(work: Work) -> None:
     listed = asyncio.run(ThreadsListing(reading=work.reading()).answer(ListThreads()))
     assert isinstance(listed, ThreadsRead)
     assert [(each.conversation, each.thread) for each in listed.working] == [
-        (LEAD, work.root.number)
+        (LEAD, work.home.number)
     ]
     work.ran(work.lead.thread(Threading(name="lag", join=True)))
     listed = asyncio.run(ThreadsListing(reading=work.reading()).answer(ListThreads()))
@@ -522,6 +597,54 @@ def test_a_message_written_on_a_thread_reaches_whoever_answers_for_it_and_shows_
     )
     work.delivery.concerns().landed(ending, work.lag)
     assert work.read()["lag"].unanswered == []
+
+
+def test_what_the_operator_and_an_agent_say_in_a_concern_shows_in_that_agent_s_messages(
+    work: Work, clock: FakeClock
+) -> None:
+    """The thread's own buffer goes, its conversation read in each agent's `messages` drawer instead: their exchange, both ways, is there."""
+
+    def drawer(party: Conversation) -> Exchanged:
+        listed = asyncio.run(
+            ItemsListing(delivery=work.delivery).answer(ListItems(conversation=party))
+        )
+        assert isinstance(listed, Exchanged)
+        return listed
+
+    clock.sleep(60)
+    # The operator writes on the concern, to whoever answers for it.
+    work.delivery.inbox.drafted(
+        Draft(
+            letters=[
+                Letter(to=LEAD, thread=work.lag.number, text="Long ones only, please.")
+            ]
+        )
+    )
+    [review] = asyncio.run(work.delivery.reviewed()).reviews
+    [part] = work.read()["lag"].unanswered
+    clock.sleep(60)
+    # The agent answers that passage there, citing it.
+    answer = work.sent(
+        ThreadedRemark(
+            remark=f"Long ones only, as @{part.node}.{part.part} says.", thread="lag"
+        )
+    )
+    assert work.read()["lag"].unanswered == []
+    # The operator answers the agent's question in the concern.
+    clock.sleep(60)
+    ruled = asyncio.run(
+        work.delivery.answer(work.question, [Ruling(decision=1, verdict="leaning")], "")
+    )
+
+    lead = drawer(LEAD)
+    received = {each.item.number: each.words for each in lead.received}
+    sent = {each.item.number: each.words for each in lead.sent}
+    told = received[review.number]
+    assert told is not None
+    assert "Long ones only, please." in told.text
+    assert sent[answer] is not None
+    assert sent[work.question] is not None
+    assert received[ruled.number] is not None
 
 
 def test_a_message_to_no_one_stays_in_its_thread_as_the_operator_s_waking_nobody(
@@ -731,20 +854,20 @@ def test_the_pile_holds_each_friction_still_waiting_wherever_the_thread_s_mark_i
         CORE,
         [
             ReviewMark(
-                key=on_node(work.root.number),
+                key=on_node(work.home.number),
                 up_to=str(work.friction),
                 at=clock.now(),
             )
         ],
     )
-    marked = work.read()["lead"]
+    marked = work.read()["home"]
     work.delivery.done(work.friction)
 
     assert (marked.earlier, marked.new, marked.pile) == (2, [], [work.friction])
-    assert work.read()["lead"].pile == []
+    assert work.read()["home"].pile == []
 
 
-def test_the_operator_moves_frictions_and_how_it_felt_into_a_new_thread_under_the_root_each_read_and_staying_where_it_landed(
+def test_the_operator_moves_frictions_and_how_it_felt_into_a_new_thread_under_the_top_of_where_the_first_landed_each_read_and_staying_where_it_landed(
     work: Work, clock: FakeClock
 ) -> None:
     sub = worker(work)
@@ -771,7 +894,7 @@ def test_the_operator_moves_frictions_and_how_it_felt_into_a_new_thread_under_th
     assert (gate.name, gate.title, gate.parent, gate.holder, gate.by) == (
         "the-gate-hangs-silently",
         "The gate hangs, silently",
-        work.root.number,
+        work.home.number,
         None,
         Operator(),
     )
@@ -782,9 +905,9 @@ def test_the_operator_moves_frictions_and_how_it_felt_into_a_new_thread_under_th
     )
     # Each reads where it landed, saying where it went; and in the thread it went to, as moved there.
     read = work.read()
-    assert read["lead"].pile == []
+    assert read["home"].pile == []
     landed = {
-        each.spot.node: each for each in work.shown(work.root, whole=True).entries
+        each.spot.node: each for each in work.shown(work.home, whole=True).entries
     }
     assert [landed[each].went for each in moved.moved] == [gate.number] * 3
     gathered = work.shown(gate, whole=True)
@@ -829,7 +952,7 @@ def test_frictions_moved_into_a_thread_done_reopen_it_and_one_moved_again_leaves
     ("what", "said"),
     [
         ("note", "only frictions and how it felt"),
-        ("home", "landed in @lead already"),
+        ("home", "landed in @home already"),
         ("settled", "is settled: reopen it"),
         ("both", "one of them"),
     ],
@@ -842,7 +965,7 @@ def test_moving_into_a_thread_is_refused_saying_why(
             case "note":
                 return MoveIntoThread(numbers=[work.note], thread=work.lag.number)
             case "home":
-                return MoveIntoThread(numbers=[work.friction], thread=work.root.number)
+                return MoveIntoThread(numbers=[work.friction], thread=work.home.number)
             case "settled":
                 work.delivery.concerns().settled(work.docs)
                 return MoveIntoThread(numbers=[work.friction], thread=work.docs.number)
@@ -854,3 +977,156 @@ def test_moving_into_a_thread_is_refused_saying_why(
     with pytest.raises((InboxError, ValueError), match=said):
         moving(work, request())
     assert isinstance(work.delivery.inbox.item(work.friction).state, Waiting)
+
+
+def ended(work: Work) -> None:
+    """End the lead's launch, as a session ends."""
+    work.delivery.layout.record("lead").unlink()
+
+
+def test_a_thread_whose_holder_ended_reads_as_nobody_running_saying_who_left_it(
+    work: Work,
+) -> None:
+    before = work.read()["home"]
+    ended(work)
+    after = work.read()
+
+    assert (before.state, before.answering, before.left_by) == ("working", LEAD, None)
+    home = after["home"]
+    assert (home.answering, home.left_by) == (None, LEAD)
+    assert home.state != "working"
+    # Under it, nobody holds what the lead opened, and nobody above answers now.
+    assert (after["docs"].state, after["docs"].left_by) == ("nobody running", LEAD)
+    assert after["lag"].state == "waiting on the operator"
+    assert after["voice"].state == "done to confirm"
+    listed = asyncio.run(ThreadsListing(reading=work.reading()).answer(ListThreads()))
+    assert isinstance(listed, ThreadsRead)
+    assert LEAD in {each.conversation for each in listed.paths}
+
+
+def test_a_nested_thread_whose_holder_ended_is_answered_for_by_who_holds_above_it_and_left_by_nobody(
+    work: Work,
+) -> None:
+    sub = worker(work)
+    work.ran(sub.thread(Threading(name="tabs", title="Tabs", under="home", hold=True)))
+    place = work.delivery.inbox.whereabouts[sub.party.key()]
+    work.delivery.inbox.placed(place.model_copy(update={"ended": work.clock.now()}))
+
+    tabs = work.read()["tabs"]
+
+    assert tabs.thread.holder == sub.party
+    assert (tabs.answering, tabs.left_by, tabs.state) == (LEAD, None, "working")
+
+
+def test_a_thread_opened_by_whom_nobody_running_answers_for_says_its_opener_left_it_and_the_operator_s_nobody(
+    work: Work,
+) -> None:
+    moving(work, MoveIntoThread(numbers=[work.friction], title="The gate"))
+    ended(work)
+
+    read = work.read()
+
+    assert read["docs"].thread.holder is None
+    assert read["docs"].left_by == LEAD
+    gate = read["the-gate"]
+    assert (gate.thread.by, gate.answering, gate.left_by) == (Operator(), None, None)
+
+
+def test_what_s_nothing_to_list_is_empty_nobody_s_on_and_nothing_said_of_it_or_under_it(
+    work: Work,
+) -> None:
+    for name, title, under in [
+        ("empty", "Empty", None),
+        ("parked", "Parked", None),
+        ("worked", "Worked in", None),
+        ("parent", "Parent", None),
+        ("child", "Child", "parent"),
+        ("full", "Full", None),
+        ("holding", "Holding", "full"),
+    ]:
+        work.ran(work.lead.thread(Threading(name=name, title=title, under=under)))
+    work.ran(work.lead.thread(Threading(name="parked", park=Parking(issue=12))))
+    work.sent(ThreadedRemark(remark="Here.", thread="full"))
+    held = work.read()
+    ended(work)
+    # Another session goes on working in one, holding nothing.
+    other = work.lead.launch.model_copy(update={"launch": "other"})
+    record = work.delivery.layout.record("other")
+    record.write_text(other.model_dump_json())
+    party = Conversation(repository=REPOSITORY, runtime="claude", session="s2")
+    work.delivery.heard_in(party, other, None)
+    work.ran(
+        Speaker(delivery=work.delivery, launch=other, party=party).thread(
+            Threading(name="worked", join=True)
+        )
+    )
+
+    read = work.read()
+
+    # While the lead goes on, they hold each, and none is bare.
+    assert not any(each.bare for each in held.values())
+    assert {name for name, each in read.items() if each.bare} == {
+        "empty",
+        "parent",
+        "child",
+        "holding",
+    }
+    assert read["parked"].state == "parked"
+    assert not read["worked"].bare
+    assert not read["full"].bare
+
+
+def test_an_earlier_lup_s_root_is_left_out_of_the_review_what_s_under_it_at_the_top(
+    work: Work,
+) -> None:
+    ledger = work.delivery.inbox.ledger
+    root = ledger.kept(
+        Thread(
+            number=ledger.numbered(),
+            repository=REPOSITORY,
+            by=LEAD,
+            at=work.clock.now(),
+            name="old-lead",
+            title=ROOT,
+            holder=LEAD,
+        )
+    )
+    under = ledger.kept(
+        Thread(
+            number=ledger.numbered(),
+            repository=REPOSITORY,
+            by=LEAD,
+            at=work.clock.now(),
+            name="sshole",
+            title="What a room can't see",
+            parent=root.number,
+        )
+    )
+    ledger.drawn(
+        In(
+            source=work.note,
+            target=root.number,
+            repository=REPOSITORY,
+            by=Lup(),
+            at=work.clock.now(),
+        )
+    )
+
+    read = work.read()
+
+    assert "old-lead" not in read
+    sshole = read["sshole"]
+    assert (sshole.thread.parent, sshole.answering, sshole.left_by) == (
+        None,
+        None,
+        LEAD,
+    )
+    assert sshole.state == "nobody running"
+    assert work.note not in [
+        each.spot.node for each in work.shown(work.home, whole=True).entries
+    ]
+    with pytest.raises(InboxError, match="no thread"):
+        asyncio.run(
+            ThreadShowing(reading=work.reading()).answer(ShowThread(number=root.number))
+        )
+    assert under.number == sshole.thread.number

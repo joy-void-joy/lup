@@ -114,6 +114,7 @@ from lup_dev.inbox.marks import (
     StoredMarks,
     seen,
 )
+from lup_dev.inbox.namesakes import NodeNames
 from lup_dev.inbox.notices import Notices, NotifySend
 from lup_dev.inbox.parts import PartId, blocks
 from lup_dev.inbox.protocol import (
@@ -151,7 +152,6 @@ from lup_dev.inbox.protocol import (
     Talked,
 )
 from lup_dev.inbox.reading import Narrowing, Reader, by_agent
-from lup_dev.inbox.roots import RootNames
 from lup_dev.inbox.roster import Roster
 from lup_dev.inbox.store import (
     KINDS,
@@ -262,7 +262,7 @@ from lup_dev.worker import HostExchanges, HostMarks, RepositoryModules
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
 from lup_ledger.parties import Conversation, Operator
-from lup_ledger.threads import BranchLanded, CommitLanded, Parked
+from lup_ledger.threads import BranchLanded, Check, CommitLanded, Parked, Thread
 from lup_ledger.threads import Reopened as ThreadReopened
 from lup_transcripts.environment.module import Transcripts
 
@@ -572,7 +572,7 @@ def inboxed(
             if bearings
             else None
         ),
-        roots=RootNames(delivery=delivery),
+        namesakes=NodeNames(delivery=delivery),
         routes=[
             *cli.control_routes(
                 delivery,
@@ -705,9 +705,28 @@ def note(number: int, text: str) -> str:
     return f'<message item="{number}" from="operator" kind="note">{text}</message>'
 
 
-def first_note(text: str) -> str:
-    """How the first item, the operator's note of one line, is told."""
-    return note(1, text)
+# An item's number is read from the ledger, as the act that made it left it, and
+# never written as a literal: the ledger numbers every node of every repository
+# from one sequence, so a literal would test how many nodes other work makes.
+
+
+def newest(delivery: Delivery) -> int:
+    """The number of the item the inbox made last: read just after the act that made it, it's that item's."""
+    return max(delivery.inbox.items)
+
+
+def numbers(delivery: Delivery) -> list[int]:
+    """The numbers of the items the inbox holds, in the order made: unpacked where an act makes several, so each is named by what it is."""
+    return sorted(delivery.inbox.items)
+
+
+def answer_to(answer: int, question: int, asked: str, comment: str) -> str:
+    """How item `answer`, the operator's answer in words to question `question`, which asked `asked`, is told."""
+    return (
+        f'<answer item="{answer}" from="operator" question="{question}">\n'
+        f'<asked>{asked}</asked>\n<comment id="{answer}.1">{comment}</comment>\n'
+        "</answer>"
+    )
 
 
 def test_an_item_is_told_at_the_conversations_next_call_and_never_again(
@@ -720,13 +739,13 @@ def test_an_item_is_told_at_the_conversations_next_call_and_never_again(
         assert started["hookSpecificOutput"]["additionalContext"].startswith(
             "lup: you're `"
         )
-        assert inbox("send", "one", "Look at the cache.") == (
-            f"Sent @1 to `{tmp_path.name}`.\n"
-        )
+        sent = inbox("send", "one", "Look at the cache.")
+        number = newest(delivery)
         told = send(hook, bash("b1"))
         again = send(hook, bash("b2"))
-        item = delivery.inbox.item(1)
-    assert context(told) == first_note("Look at the cache.")
+        item = delivery.inbox.item(number)
+    assert sent == f"Sent @{number} to `{tmp_path.name}`.\n"
+    assert context(told) == note(number, "Look at the cache.")
     assert again == ""
     assert item.state == Told(at=clock.now(), how="call")
     assert item.recipient == Conversation(
@@ -737,14 +756,16 @@ def test_an_item_is_told_at_the_conversations_next_call_and_never_again(
 def test_items_waiting_are_told_together_oldest_first_as_a_session_resumes(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         hook = machine.host.launch("one").hook
         send(hook, claude("SessionStart", source="startup"))
         inbox("send", "one", "First.")
+        first = newest(delivery)
         inbox("send", "one", "Second.")
+        second = newest(delivery)
         resumed = send(hook, claude("SessionStart", source="resume"))
-    assert context(resumed) == (f"{first_note('First.')}\n\n{note(2, 'Second.')}")
+    assert context(resumed) == (f"{note(first, 'First.')}\n\n{note(second, 'Second.')}")
 
 
 def test_a_turns_end_holds_once_and_a_later_end_with_nothing_new_ends_at_once(
@@ -755,14 +776,15 @@ def test_a_turns_end_holds_once_and_a_later_end_with_nothing_new_ends_at_once(
         hook = machine.host.launch("one").hook
         send(hook, claude("SessionStart", source="startup"))
         inbox("send", "one", "Before you stop.")
+        number = newest(delivery)
         held = json.loads(send(hook, claude("Stop", stop_hook_active=False)))
         let = send(hook, claude("Stop", stop_hook_active=True))
         later = send(hook, claude("Stop", stop_hook_active=False))
-        item = delivery.inbox.item(1)
+        item = delivery.inbox.item(number)
     assert held == {
         "hookSpecificOutput": {
             "hookEventName": "Stop",
-            "additionalContext": first_note("Before you stop."),
+            "additionalContext": note(number, "Before you stop."),
         }
     }
     assert item.state == Told(at=clock.now(), how="turn's end")
@@ -773,23 +795,24 @@ def test_a_turns_end_holds_once_and_a_later_end_with_nothing_new_ends_at_once(
 def test_an_end_following_a_hold_ends_and_what_came_meanwhile_waits_for_a_call(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         hook = machine.host.launch("one").hook
         send(hook, claude("SessionStart", source="startup"))
         inbox("send", "one", "One.")
-        assert context(send(hook, claude("Stop"))) == first_note("One.")
+        assert context(send(hook, claude("Stop"))) == note(newest(delivery), "One.")
         inbox("send", "one", "Two.")
+        two = newest(delivery)
         let = send(hook, claude("Stop", stop_hook_active=True))
         told = send(hook, bash("b1"))
     assert let == ""
-    assert context(told) == note(2, "Two.")
+    assert context(told) == note(two, "Two.")
 
 
 def test_a_subagents_end_holds_once_on_what_waits_for_it(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         hook = machine.host.launch("one").hook
         send(hook, claude("SessionStart", source="startup"))
@@ -806,7 +829,9 @@ def test_a_subagents_end_holds_once_on_what_waits_for_it(
             )
         )["hookSpecificOutput"]["updatedInput"]
         call(machine.host.launch("one").mcp, "ask", arguments)
-        inbox("answer", "1", "--comment", "Yes.")
+        question = newest(delivery)
+        inbox("answer", str(question), "--comment", "Yes.")
+        answer = newest(delivery)
         ending = {
             "agent_id": "a1",
             "agent_type": "general-purpose",
@@ -815,10 +840,7 @@ def test_a_subagents_end_holds_once_on_what_waits_for_it(
         held = send(hook, claude("SubagentStop", stop_hook_active=False, **ending))
         let = send(hook, claude("SubagentStop", stop_hook_active=True, **ending))
     assert json.loads(held)["hookSpecificOutput"]["hookEventName"] == "SubagentStop"
-    assert context(held) == (
-        '<answer item="3" from="operator" question="1">\n'
-        '<asked>May I?</asked>\n<comment id="3.1">Yes.</comment>\n</answer>'
-    )
+    assert context(held) == answer_to(answer, question, "May I?", "Yes.")
     assert let == ""
 
 
@@ -835,10 +857,11 @@ def test_wait_inbox_holds_until_something_arrives_and_returns_it_whole(
             )
             assert delivery.holding.wait(timeout=60)
             inbox("send", "one", "Here it is.")
+            number = newest(delivery)
             returned = waiting.result(timeout=60)
         after = send(hook, bash("b1"))
-        item = delivery.inbox.item(1)
-    assert returned == (first_note("Here it is."), False)
+        item = delivery.inbox.item(number)
+    assert returned == (note(number, "Here it is."), False)
     assert item.state == Told(at=clock.now(), how="held call")
     assert after == ""
 
@@ -846,11 +869,12 @@ def test_wait_inbox_holds_until_something_arrives_and_returns_it_whole(
 def test_a_call_to_lups_tools_tells_nothing_at_its_start_and_its_result_does(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         hook = machine.host.launch("one").hook
         send(hook, claude("SessionStart", source="startup"))
         inbox("send", "one", "Already here.")
+        number = newest(delivery)
         started = json.loads(send(hook, lup_call("wait_inbox", {}, "w1")))
         returned = call(
             machine.host.launch("one").mcp,
@@ -858,7 +882,7 @@ def test_a_call_to_lups_tools_tells_nothing_at_its_start_and_its_result_does(
             started["hookSpecificOutput"]["updatedInput"],
         )
     assert "additionalContext" not in started["hookSpecificOutput"]
-    assert returned == (first_note("Already here."), False)
+    assert returned == (note(number, "Already here."), False)
 
 
 # What a Claude Code session's runtime holds for each of their conversations, as
@@ -1036,9 +1060,11 @@ def test_wait_inbox_on_the_operator_alone_holds_through_a_subagent_s_message(
             records.lup((hook, mcp), "send", to_parent("Found it."), "a1", "Explore")
             inbox("send", "one", "Here it is.")
             returned = waiting.result(timeout=60)
-        items = [delivery.inbox.item(number) for number in [1, 4]]
+        # The subagent's message, the operator's copy of it, and the operator's note.
+        message, _, sent = numbers(delivery)
+        items = [delivery.inbox.item(number) for number in [message, sent]]
     assert returned == (
-        f"{delivery.said(items[0])}{SEPARATOR}{note(4, 'Here it is.')}",
+        f"{delivery.said(items[0])}{SEPARATOR}{note(sent, 'Here it is.')}",
         False,
     )
     assert [each.state for each in items] == [
@@ -1125,10 +1151,12 @@ def test_ask_with_wait_returns_for_the_operator_s_typed_words_its_question_open(
             assert delivery.holding.wait(timeout=60)
             appended(records.transcript, enqueued("Lark. I'll answer properly later."))
             returned = waiting.result(timeout=60)
-        question = delivery.inbox.item(1)
+        number = newest(delivery)
+        question = delivery.inbox.item(number)
+    assert isinstance(question.reason, Question)
     assert returned == (
         (
-            f"{TYPED_WORDS}\n\nYour question @1 is still open: its answer reaches "
+            f"{TYPED_WORDS}\n\nYour question @{number} is still open: its answer reaches "
             "you at a later call; `wait_inbox` waits for it."
         ),
         False,
@@ -1141,7 +1169,7 @@ def test_a_question_held_for_its_answer_reaches_a_watch_of_the_inbox_at_once(
 ) -> None:
     question: dict[str, JsonValue] = {"question": "Which parser?", "wait": True}
     with (
-        inboxed(machine, clock, notices, said),
+        inboxed(machine, clock, notices, said) as delivery,
         socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as watch,
     ):
         launched(machine, clock, tmp_path, "one", "claude")
@@ -1156,7 +1184,7 @@ def test_a_question_held_for_its_answer_reaches_a_watch_of_the_inbox_at_once(
             empty = Items.model_validate_json(following.readline())
             asking = pool.submit(call, machine.host.launch("one").mcp, "ask", question)
             held = Items.model_validate_json(following.readline())
-            inbox("answer", "1", "--comment", "Lark.")
+            inbox("answer", str(newest(delivery)), "--comment", "Lark.")
             answered = Items.model_validate_json(following.readline())
             asking.result(timeout=60)
     assert empty.items == []
@@ -1181,43 +1209,55 @@ def test_ask_with_wait_holds_until_the_operator_answers_each_decision(
         with ThreadPoolExecutor(max_workers=1) as pool:
             asking = pool.submit(call, machine.host.launch("one").mcp, "ask", question)
             assert notices.arrived.wait(timeout=60)
+            number = newest(delivery)
             listed = inbox()
-            shown = inbox("show", "1")
+            shown = inbox("show", str(number))
             answered = inbox(
-                "answer", "1", "--leaning", "1", "--undecided", "2", "--comment", "Go."
+                "answer",
+                str(number),
+                "--leaning",
+                "1",
+                "--undecided",
+                "2",
+                "--comment",
+                "Go.",
             )
+            answer = newest(delivery)
             returned = asking.result(timeout=60)
-        asked = delivery.inbox.item(1)
+        asked = delivery.inbox.item(number)
     assert listed == (
-        f"   @1  2026-10-01 12:00  a question from `{tmp_path.name}` "
+        f"{cited(number):>5}  2026-10-01 12:00  a question from `{tmp_path.name}` "
         f"in {tmp_path}: "
         "Which parser?\n"
     )
     assert shown == (
-        f"@1, a question from `{tmp_path.name}` in {tmp_path} to the operator, "
+        f"@{number}, a question from `{tmp_path.name}` in {tmp_path} to the operator, "
         "made 2026-10-01 12:00, waiting:\nWhich parser?\n"
         "1. Parse with lark\n   Its lean: yes, it's typed\n"
         "2. Keep the cache\n   Its lean: no\n"
     )
-    assert answered == f"Answered @1: your answer, @3, is for `{tmp_path.name}`.\n"
+    assert answered == (
+        f"Answered @{number}: your answer, @{answer}, is for `{tmp_path.name}`.\n"
+    )
+    # A decision's number is its place in the question, not an item's.
     assert returned == (
         (
-            '<answer item="3" from="operator" question="1">\n'
+            f'<answer item="{answer}" from="operator" question="{number}">\n'
             "<asked>Which parser?</asked>\n"
             '<decision number="1" lean="yes, it\'s typed" verdict="leaning: they go '
-            'with the lean" id="3.1">Parse with lark</decision>\n'
-            '<decision number="2" lean="no" verdict="undecided" id="3.2">Keep the cache'
-            "</decision>\n"
-            '<comment id="3.3">Go.</comment>\n'
+            f'with the lean" id="{answer}.1">Parse with lark</decision>\n'
+            '<decision number="2" lean="no" verdict="undecided" '
+            f'id="{answer}.2">Keep the cache</decision>\n'
+            f'<comment id="{answer}.3">Go.</comment>\n'
             "</answer>"
         ),
         False,
     )
-    assert asked.state == Answered(at=clock.now(), answer=3)
+    assert asked.state == Answered(at=clock.now(), answer=answer)
     assert notices.raised == [
         (
             f"lup: a question from `{tmp_path.name}` in {tmp_path}\n"
-            "Which parser?\nlup-dev inbox show 1"
+            f"Which parser?\nlup-dev inbox show {number}"
         )
     ]
 
@@ -1225,24 +1265,23 @@ def test_ask_with_wait_holds_until_the_operator_answers_each_decision(
 def test_ask_without_wait_returns_at_once_and_the_answer_comes_at_a_call(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         hook = machine.host.launch("one").hook
         send(hook, claude("SessionStart", source="startup"))
         returned = call(machine.host.launch("one").mcp, "ask", {"question": "Why?"})
-        inbox("answer", "1", "--comment", "Because.")
+        question = newest(delivery)
+        inbox("answer", str(question), "--comment", "Because.")
+        answer = newest(delivery)
         told = send(hook, bash("b1"))
     assert returned == (
         (
-            "Your question is with the operator, @1. Their answer reaches you "
-            "at a later call; `wait_inbox` waits for it."
+            f"Your question is with the operator, @{question}. Their answer reaches "
+            "you at a later call; `wait_inbox` waits for it."
         ),
         False,
     )
-    assert context(told) == (
-        '<answer item="3" from="operator" question="1">\n'
-        '<asked>Why?</asked>\n<comment id="3.1">Because.</comment>\n</answer>'
-    )
+    assert context(told) == answer_to(answer, question, "Why?", "Because.")
 
 
 def test_an_ask_sent_again_across_a_restart_finds_its_question_and_asks_no_second(
@@ -1266,43 +1305,34 @@ def test_an_ask_sent_again_across_a_restart_finds_its_question_and_asks_no_secon
         ]
         # Answered while the service was away: the call sent again returns at once.
         dropped(mcp, "ask", asks[0], delivery.holding)
-        inbox("answer", "1", "--comment", "Lark.")
+        parser = newest(delivery)
+        inbox("answer", str(parser), "--comment", "Lark.")
+        lark = newest(delivery)
         answered = call(mcp, "ask", asks[0])
         # Still waiting: the call sent again holds on the same question.
         dropped(mcp, "ask", asks[1], delivery.holding)
+        cache = newest(delivery)
         with ThreadPoolExecutor(max_workers=1) as pool:
             delivery.holding.clear()
             asking = pool.submit(call, mcp, "ask", asks[1])
             assert delivery.holding.wait(timeout=60)
-            inbox("answer", "4", "--comment", "None.")
+            inbox("answer", str(cache), "--comment", "None.")
+            none = newest(delivery)
             held = asking.result(timeout=60)
         # Without `wait`, sent again, it makes no second question either.
         once = call(mcp, "ask", asks[2])
+        why = newest(delivery)
         twice = call(mcp, "ask", asks[2])
         asked = [
             (item.number, item.call)
             for item in delivery.inbox.items.values()
             if isinstance(item.reason, Question)
         ]
-    assert answered == (
-        (
-            '<answer item="3" from="operator" question="1">\n'
-            '<asked>Which parser?</asked>\n<comment id="3.1">Lark.</comment>\n'
-            "</answer>"
-        ),
-        False,
-    )
-    assert held == (
-        (
-            '<answer item="5" from="operator" question="4">\n'
-            '<asked>Which cache?</asked>\n<comment id="5.1">None.</comment>\n'
-            "</answer>"
-        ),
-        False,
-    )
+    assert answered == (answer_to(lark, parser, "Which parser?", "Lark."), False)
+    assert held == (answer_to(none, cache, "Which cache?", "None."), False)
     assert once == twice
-    assert once[0].startswith("Your question is with the operator, @6.")
-    assert asked == [(1, "q1"), (4, "q2"), (6, "q3")]
+    assert once[0].startswith(f"Your question is with the operator, @{why}.")
+    assert asked == [(parser, "q1"), (cache, "q2"), (why, "q3")]
 
 
 class Socket:
@@ -1350,22 +1380,24 @@ def test_an_idle_session_is_woken_once_through_its_messaging_socket(
         send(hook, claude("SessionStart", source="startup"))
         assert send(hook, claude("Stop", stop_hook_active=False)) == ""
         inbox("send", "one", "Wake up.")
+        wake = newest(delivery)
         inbox("send", "one", "And this.")
+        this = newest(delivery)
         told = send(hook, bash("b1"))
-        woken = delivery.inbox.item(1)
+        woken = delivery.inbox.item(wake)
         frames = messages.close()
     assert [json.loads(frame) for frame in frames] == [
         {
             "type": "user",
-            "message": {"role": "user", "content": bell(1)},
+            "message": {"role": "user", "content": bell(wake)},
             "session_id": "s1",
         }
     ]
     assert frames[0].endswith("\n")
     # The doorbell carries no item: they stay waiting, and the next call tells both.
     assert woken.state == Told(at=clock.now(), how="call")
-    assert context(told) == f"{first_note('Wake up.')}\n\n{note(2, 'And this.')}"
-    assert f"one: woke `{tmp_path.name}` for @1" in said
+    assert context(told) == f"{note(wake, 'Wake up.')}\n\n{note(this, 'And this.')}"
+    assert f"one: woke `{tmp_path.name}` for @{wake}" in said
 
 
 def bell(number: int) -> str:
@@ -1389,14 +1421,15 @@ def test_after_the_doorbell_wait_inbox_returns_what_waits_whole(
         send(hook, claude("SessionStart", source="startup"))
         send(hook, claude("Stop", stop_hook_active=False))
         inbox("send", "one", "Read me through lup.")
+        number = newest(delivery)
         stamped = json.loads(send(hook, lup_call("wait_inbox", {}, "w1")))[
             "hookSpecificOutput"
         ]["updatedInput"]
         returned = call(machine.host.launch("one").mcp, "wait_inbox", stamped)
-        item = delivery.inbox.item(1)
+        item = delivery.inbox.item(number)
         frames = messages.close()
-    assert frames_of(frames) == [bell(1)]
-    assert returned == (first_note("Read me through lup."), False)
+    assert frames_of(frames) == [bell(number)]
+    assert returned == (note(number, "Read me through lup."), False)
     assert item.state == Told(at=clock.now(), how="held call")
 
 
@@ -1408,26 +1441,28 @@ def frames_of(written: list[str]) -> list[str]:
 def test_a_session_that_just_started_is_woken(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         hook = machine.host.launch("one").hook
         messages = Socket(machine.host.launch("one").messages)
         send(hook, claude("SessionStart", source="startup"))
         inbox("send", "one", "Before your first turn.")
+        number = newest(delivery)
         frames = messages.close()
-    assert frames_of(frames) == [bell(1)]
+    assert frames_of(frames) == [bell(number)]
 
 
 def test_a_session_in_its_turn_is_told_at_its_hooks_and_never_woken(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         hook = machine.host.launch("one").hook
         messages = Socket(machine.host.launch("one").messages)
         send(hook, claude("SessionStart", source="startup"))
         send(hook, bash("b1"))
         inbox("send", "one", "While you run.")
+        running = newest(delivery)
         finished = send(
             hook,
             claude(
@@ -1439,13 +1474,14 @@ def test_a_session_in_its_turn_is_told_at_its_hooks_and_never_woken(
             ),
         )
         inbox("send", "one", "Between calls.")
+        between = newest(delivery)
         ended = send(hook, claude("Stop", stop_hook_active=False))
         frames = messages.close()
-    assert context(finished) == first_note("While you run.")
+    assert context(finished) == note(running, "While you run.")
     assert json.loads(ended) == {
         "hookSpecificOutput": {
             "hookEventName": "Stop",
-            "additionalContext": note(2, "Between calls."),
+            "additionalContext": note(between, "Between calls."),
         }
     }
     assert frames == []
@@ -1457,17 +1493,18 @@ def test_a_service_started_again_wakes_a_session_it_hasn_t_heard_since(
     with inboxed(machine, clock, notices, said):
         launched(machine, clock, tmp_path, "one", "claude")
         send(machine.host.launch("one").hook, bash("b1"))
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         messages = Socket(machine.host.launch("one").messages)
         inbox("send", "one", "After a restart.")
+        number = newest(delivery)
         frames = messages.close()
-    assert frames_of(frames) == [bell(1)]
+    assert frames_of(frames) == [bell(number)]
 
 
 def test_two_launches_in_one_worktree_each_wake_through_their_own_socket(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         launched(machine, clock, tmp_path, "two", "claude")
         first = Socket(machine.host.launch("one").messages)
@@ -1475,12 +1512,14 @@ def test_two_launches_in_one_worktree_each_wake_through_their_own_socket(
         send(machine.host.launch("one").hook, claude("SessionStart", session_id="s1"))
         send(machine.host.launch("two").hook, claude("SessionStart", session_id="s2"))
         inbox("send", "one", "For one.")
+        for_one = newest(delivery)
         inbox("send", "two", "For two.")
+        for_two = newest(delivery)
         to_first = first.close()
         to_second = second.close()
     assert machine.host.launch("one").messages != machine.host.launch("two").messages
-    assert frames_of(to_first) == [bell(1)]
-    assert frames_of(to_second) == [bell(2)]
+    assert frames_of(to_first) == [bell(for_one)]
+    assert frames_of(to_second) == [bell(for_two)]
     assert [json.loads(each)["session_id"] for each in [*to_first, *to_second]] == [
         "s1",
         "s2",
@@ -1490,14 +1529,15 @@ def test_two_launches_in_one_worktree_each_wake_through_their_own_socket(
 def test_an_idle_session_whose_socket_is_gone_is_told_at_its_next_call(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         hook = machine.host.launch("one").hook
         send(hook, claude("SessionStart", source="startup"))
         send(hook, claude("Stop", stop_hook_active=False))
         inbox("send", "one", "Nobody's there.")
+        number = newest(delivery)
         told = send(hook, bash("b1"))
-    assert context(told) == first_note("Nobody's there.")
+    assert context(told) == note(number, "Nobody's there.")
     assert any(f"`{tmp_path.name}` wasn't woken through" in each for each in said)
 
 
@@ -1587,9 +1627,10 @@ def test_an_idle_claude_session_is_pushed_what_waits_and_takes_it_at_its_turns_s
         _, title = named_at_start(started)
         assert send(hook, claude("Stop", stop_hook_active=False)) == ""
         inbox("send", "one", "Wake up.")
+        number = newest(delivery)
         notice = session.pushed()
         pushed = ChannelMessage.model_validate(notice.params)
-        pending = delivery.inbox.item(1).state
+        pending = delivery.inbox.item(number).state
         # A hook while the push is pending tells nothing of it.
         between = send(
             hook,
@@ -1604,21 +1645,21 @@ def test_an_idle_claude_session_is_pushed_what_waits_and_takes_it_at_its_turns_s
                 session_title=title,
             ),
         )
-        state = delivery.inbox.item(1).state
+        state = delivery.inbox.item(number).state
         after = send(hook, bash("b1"))
         session.close()
         frames = messages.close()
     assert session.introduced.capabilities.experimental == {"claude/channel": {}}
     assert notice.method == "notifications/claude/channel"
     # The items themselves, told once: no `wait_inbox`, and no doorbell.
-    assert pushed.content == first_note("Wake up.")
+    assert pushed.content == note(number, "Wake up.")
     assert pending == Waiting()
     assert between == ""
     assert state == Told(at=clock.now(), how="wake")
     assert taken == ""
     assert after == ""
     assert frames == []
-    assert f"one: pushed @1 to `{tmp_path.name}`" in said
+    assert f"one: pushed @{number} to `{tmp_path.name}`" in said
 
 
 def until(condition: Callable[[], bool]) -> bool:
@@ -1662,27 +1703,28 @@ def test_an_idle_held_session_is_given_what_waits_through_its_launcher_and_takes
         _, title = named_at_start(started)
         assert send(hook, claude("Stop", stop_hook_active=False)) == ""
         inbox("send", "one", "Wake up.")
+        number = newest(delivery)
         [given] = launcher.ringing()
         prompt = HeldPrompt.model_validate_json(given)
-        pending = delivery.inbox.item(1).state
+        pending = delivery.inbox.item(number).state
         taken = send(
             hook,
             claude("UserPromptSubmit", prompt=prompt.text, session_title=title),
         )
-        state = delivery.inbox.item(1).state
+        state = delivery.inbox.item(number).state
         after = send(hook, bash("b1"))
         launcher.close()
         frames = messages.close()
     # The items themselves, wrapped as a channel's message is, told once.
     content, _, rest = prompt.text.partition("\n")
     assert content.startswith('<channel source="lup" wake="')
-    assert rest == f"{first_note('Wake up.')}\n</channel>"
+    assert rest == f"{note(number, 'Wake up.')}\n</channel>"
     assert pending == Waiting()
     assert state == Told(at=clock.now(), how="wake")
     assert taken == ""
     assert after == ""
     assert frames == []
-    assert f"one: gave @1 to `{tmp_path.name}`, held" in said
+    assert f"one: gave @{number} to `{tmp_path.name}`, held" in said
 
 
 def test_a_held_session_whose_launcher_can_t_be_reached_is_told_at_its_next_call(
@@ -1694,10 +1736,11 @@ def test_a_held_session_whose_launcher_can_t_be_reached_is_told_at_its_next_call
         send(hook, claude("SessionStart", source="startup"))
         send(hook, claude("Stop", stop_hook_active=False))
         inbox("send", "one", "Anyone?")
-        state = delivery.inbox.item(1).state
+        number = newest(delivery)
+        state = delivery.inbox.item(number).state
         told = send(hook, bash("b1"))
     assert state == Waiting()
-    assert context(told) == first_note("Anyone?")
+    assert context(told) == note(number, "Anyone?")
     assert any(
         line.startswith(
             f"one: what waits for `{tmp_path.name}` wasn't given their held "
@@ -1710,13 +1753,14 @@ def test_a_held_session_whose_launcher_can_t_be_reached_is_told_at_its_next_call
 def test_an_interrupt_through_lup_takes_the_held_session_for_idle_and_gives_it_what_came(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said, holding=True):
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
         launched(machine, clock, tmp_path, "one", "claude", held=True)
         hook = machine.host.launch("one").hook
         launcher = Launcher(machine.launch("one").held)
         send(hook, claude("SessionStart", source="startup"))
         send(hook, bash("b1"))
         inbox("send", "one", "Stop that.")
+        number = newest(delivery)
         before = list(launcher.frames)
         client(machine.host, clock).ask(Interrupt(launch="one"), Finished)
         until(lambda: len(launcher.frames) == 2)
@@ -1725,7 +1769,7 @@ def test_an_interrupt_through_lup_takes_the_held_session_for_idle_and_gives_it_w
     assert before == []
     interrupt, given = frames
     assert interrupt == HeldInterrupt().model_dump_json()
-    assert first_note("Stop that.") in HeldPrompt.model_validate_json(given).text
+    assert note(number, "Stop that.") in HeldPrompt.model_validate_json(given).text
 
 
 def test_what_a_held_session_is_given_mid_call_is_told_once_as_its_turn_takes_it(
@@ -1742,17 +1786,18 @@ def test_what_a_held_session_is_given_mid_call_is_told_once_as_its_turn_takes_it
         started = send(hook, claude("SessionStart", source="startup"))
         _, title = named_at_start(started)
         inbox("send", "one", "Anyone?")
+        number = newest(delivery)
         [given] = launcher.ringing()
         prompt = HeldPrompt.model_validate_json(given).text
         during = [
             send(hook, bash("b1")),
             send(hook, claude("PostToolUse", tool_name="Bash", tool_use_id="b1")),
         ]
-        pending = delivery.inbox.item(1).state
+        pending = delivery.inbox.item(number).state
         taken = send(
             hook, claude("UserPromptSubmit", prompt=prompt, session_title=title)
         )
-        state = delivery.inbox.item(1).state
+        state = delivery.inbox.item(number).state
         launcher.close()
         frames = messages.close()
     assert during == ["", ""]
@@ -1776,6 +1821,7 @@ def test_an_interrupt_lets_go_a_wait_inbox_it_cut_and_gives_the_held_session_wha
             assert delivery.holding.wait(timeout=60)
             client(machine.host, clock).ask(Interrupt(launch="one"), Finished)
             inbox("send", "one", "After the interrupt.")
+            number = newest(delivery)
             given = until(lambda: len(launcher.frames) == 2)
             clock.sleep(300)
             returned = waiting.result(timeout=60)
@@ -1784,7 +1830,7 @@ def test_an_interrupt_lets_go_a_wait_inbox_it_cut_and_gives_the_held_session_wha
     interrupt, prompt = frames
     assert interrupt == HeldInterrupt().model_dump_json()
     assert (
-        first_note("After the interrupt.")
+        note(number, "After the interrupt.")
         in HeldPrompt.model_validate_json(prompt).text
     )
     # The call nobody reads any more counted nothing told.
@@ -1808,11 +1854,12 @@ def test_a_held_session_s_compaction_keeps_what_it_was_given_for_its_turn(
         send(hook, claude("SessionStart", source="startup"))
         send(hook, claude("Stop", stop_hook_active=False))
         inbox("send", "one", "Anyone?")
+        number = newest(delivery)
         launcher.ringing()
         compacted = send(hook, claude("SessionStart", source="compact"))
-        state = delivery.inbox.item(1).state
+        state = delivery.inbox.item(number).state
         launcher.close()
-    assert first_note("Anyone?") not in compacted
+    assert note(number, "Anyone?") not in compacted
     assert state == Waiting()
 
 
@@ -1826,11 +1873,12 @@ def test_what_a_held_session_never_took_is_told_its_next_start(
         send(hook, claude("SessionStart", source="startup"))
         send(hook, claude("Stop", stop_hook_active=False))
         inbox("send", "one", "Anyone?")
+        number = newest(delivery)
         launcher.ringing()
         resumed = send(hook, claude("SessionStart", source="resume"))
-        state = delivery.inbox.item(1).state
+        state = delivery.inbox.item(number).state
         launcher.close()
-    assert first_note("Anyone?") in context(resumed)
+    assert note(number, "Anyone?") in context(resumed)
     assert isinstance(state, Told)
 
 
@@ -1845,20 +1893,22 @@ def test_a_push_not_taken_in_time_is_put_back_and_its_launch_rung_through_the_so
         send(hook, claude("SessionStart", source="startup"))
         send(hook, claude("Stop", stop_hook_active=False))
         inbox("send", "one", "Anyone?")
+        anyone = newest(delivery)
         session.pushed()
         rung = list(messages.ringing())
-        put_back = delivery.inbox.item(1).state
+        put_back = delivery.inbox.item(anyone).state
         told = send(hook, bash("b1"))
         send(hook, claude("Stop", stop_hook_active=False))
         inbox("send", "one", "Again.")
+        again = newest(delivery)
         quiet = session.quiet()
         session.close()
         frames = messages.close()
-    assert frames_of(rung) == [bell(1)]
+    assert frames_of(rung) == [bell(anyone)]
     assert put_back == Waiting()
-    assert context(told) == first_note("Anyone?")
+    assert context(told) == note(anyone, "Anyone?")
     assert quiet
-    assert frames_of(frames) == [bell(1), bell(2)]
+    assert frames_of(frames) == [bell(anyone), bell(again)]
     assert [line for line in said if "took nothing lup pushed" in line] == [
         (
             f"one: `{tmp_path.name}` took nothing lup pushed within 0 seconds, so "
@@ -1887,11 +1937,12 @@ def test_a_turns_start_tells_what_waits_beside_its_prompt(
         hook = machine.host.launch("one").hook
         send(hook, payload("SessionStart", source="startup"))
         inbox("send", "one", "Read this first.")
+        number = newest(delivery)
         told = send(hook, payload("UserPromptSubmit", prompt="Go on.", **shown))
         again = send(hook, payload("UserPromptSubmit", prompt="And then?", **shown))
-        state = delivery.inbox.item(1).state
+        state = delivery.inbox.item(number).state
     assert json.loads(told)["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
-    assert context(told) == first_note("Read this first.")
+    assert context(told) == note(number, "Read this first.")
     assert again == ""
     assert state == Told(at=clock.now(), how="turn's start")
 
@@ -1899,13 +1950,14 @@ def test_a_turns_start_tells_what_waits_beside_its_prompt(
 def test_a_codex_session_is_never_woken_and_told_at_its_next_call(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "codex")
         hook = machine.host.launch("one").hook
         messages = Socket(machine.host.launch("one").messages)
         send(hook, codex("SessionStart"))
         assert send(hook, codex("Stop", stop_hook_active=False)) == ""
         inbox("send", "one", "Waits.")
+        number = newest(delivery)
         told = send(
             hook,
             codex(
@@ -1917,7 +1969,7 @@ def test_a_codex_session_is_never_woken_and_told_at_its_next_call(
         )
         frames = messages.close()
     assert frames == []
-    assert context(told) == first_note("Waits.")
+    assert context(told) == note(number, "Waits.")
 
 
 def test_a_long_item_is_announced_once_and_returned_whole_by_wait_inbox(
@@ -1929,20 +1981,21 @@ def test_a_long_item_is_announced_once_and_returned_whole_by_wait_inbox(
         hook = machine.host.launch("one").hook
         send(hook, claude("SessionStart", source="startup"))
         inbox("send", "one", long)
+        number = newest(delivery)
         announced = send(hook, bash("b1"))
         again = send(hook, bash("b2"))
         stopped = send(hook, claude("Stop", stop_hook_active=False))
-        waiting = delivery.inbox.item(1).state
+        waiting = delivery.inbox.item(number).state
         whole = call(machine.host.launch("one").mcp, "wait_inbox", {})
-    size = len(first_note(long).encode()) + 2
+    size = len(note(number, long).encode()) + 2
     assert context(announced) == (
-        f'<announced item="1" kind="note" from="operator" bytes="{size:,}">Too long '
-        "to tell here: call `wait_inbox` to read it whole.</announced>"
+        f'<announced item="{number}" kind="note" from="operator" bytes="{size:,}">'
+        "Too long to tell here: call `wait_inbox` to read it whole.</announced>"
     )
     assert again == ""
     assert stopped == ""
     assert waiting == Waiting(announced=clock.now())
-    assert whole == (first_note(long), False)
+    assert whole == (note(number, long), False)
 
 
 def test_a_held_call_whose_turn_ended_leaves_the_item_for_the_next_call(
@@ -1959,6 +2012,7 @@ def test_a_held_call_whose_turn_ended_leaves_the_item_for_the_next_call(
             assert delivery.holding.wait(timeout=60)
             assert send(hook, codex("Stop", stop_hook_active=False)) == ""
             inbox("send", "one", "Late.")
+            number = newest(delivery)
             returned = waiting.result(timeout=60)
         told = send(
             hook,
@@ -1976,7 +2030,7 @@ def test_a_held_call_whose_turn_ended_leaves_the_item_for_the_next_call(
         ),
         False,
     )
-    assert context(told) == first_note("Late.")
+    assert context(told) == note(number, "Late.")
 
 
 def test_an_ended_subagents_answer_goes_to_its_sessions_main_conversation(
@@ -1999,6 +2053,7 @@ def test_an_ended_subagents_answer_goes_to_its_sessions_main_conversation(
             )
         )["hookSpecificOutput"]["updatedInput"]
         call(machine.host.launch("one").mcp, "ask", stamped)
+        question = newest(delivery)
         assert (
             send(
                 hook,
@@ -2006,34 +2061,41 @@ def test_an_ended_subagents_answer_goes_to_its_sessions_main_conversation(
             )
             == ""
         )
-        answered = inbox("answer", "1", "--comment", "Yes.")
+        ended = newest(delivery)
+        answered = inbox("answer", str(question), "--comment", "Yes.")
+        number = newest(delivery)
         told = send(hook, bash("b1"))
-        answer = delivery.inbox.item(4)
-    assert answered == f"Answered @1: your answer, @4, is for `{tmp_path.name}`.\n"
+        answer = delivery.inbox.item(number)
+        threads = delivery.inbox.ledger.every(Thread)
+    assert answered == (
+        f"Answered @{question}: your answer, @{number}, is for `{tmp_path.name}`.\n"
+    )
     assert answer.addressed == Conversation(
         repository=tmp_path / ".git", runtime="claude", session="s1", agent="a1"
     )
     worker = f"{tmp_path.name}/general-purpose·a1"
-    # The question landed in the session's root, which they hold: not told
-    # them, as it's their own subagent's (@2 is the root).
+    # The question landed in no thread: it isn't told them as landed.
+    assert threads == []
     assert context(told) == (
-        f'<ended item="3" from="{worker}" '
+        f'<ended item="{ended}" from="{worker}" '
         'name="general-purpose·a1">They were stopped before they ended their turn.</ended>'
-        f'\n\n<answer item="4" from="operator" for="{worker}, '
-        'whose conversation had ended" question="1">\n'
-        '<asked>Rename it?</asked>\n<comment id="4.1">Yes.</comment>\n</answer>'
+        f'\n\n<answer item="{number}" from="operator" for="{worker}, '
+        f'whose conversation had ended" question="{question}">\n'
+        f'<asked>Rename it?</asked>\n<comment id="{number}.1">Yes.</comment>\n</answer>'
     )
 
 
 def test_items_survive_a_restart_and_reach_a_session_resumed_in_a_launch_of_its_own(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         hook = machine.host.launch("one").hook
         send(hook, claude("SessionStart", source="startup"))
         call(machine.host.launch("one").mcp, "note", {"remark": "A doubt."})
+        doubt = newest(delivery)
         inbox("send", "one", "Kept.")
+        kept = newest(delivery)
     with inboxed(machine, clock, notices, said) as delivery:
         listed = inbox()
         launched(machine, clock, tmp_path, "two", "claude")
@@ -2042,45 +2104,56 @@ def test_items_survive_a_restart_and_reach_a_session_resumed_in_a_launch_of_its_
         )
         where = delivery.inbox.whereabouts
     assert listed == (
-        f"   @1  2026-10-01 12:00  a note from `{tmp_path.name}` "
+        f"{cited(doubt):>5}  2026-10-01 12:00  a note from `{tmp_path.name}` "
         f"in {tmp_path}: A doubt.\n"
     )
-    assert context(resumed) == note(3, "Kept.")
+    assert context(resumed) == note(kept, "Kept.")
     assert [place.launch for place in where.values()] == ["two"]
 
 
 def test_the_operator_replies_to_a_note_the_reply_saying_what_it_answers(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         hook = machine.host.launch("one").hook
         send(hook, claude("SessionStart", source="startup"))
         call(machine.host.launch("one").mcp, "note", {"remark": "A doubt.\nAt length."})
-        wordless = refused("answer", "1", "--comment", " ")
-        ruled = refused("answer", "1", "--leaning", "1", "--comment", "Yes.")
-        replied = inbox("answer", "1", "--comment", "Noted, go on.")
+        doubt = newest(delivery)
+        wordless = refused("answer", str(doubt), "--comment", " ")
+        # The `1` after `--leaning` is a decision's number, not an item's.
+        ruled = refused("answer", str(doubt), "--leaning", "1", "--comment", "Yes.")
+        replied = inbox("answer", str(doubt), "--comment", "Noted, go on.")
+        reply = newest(delivery)
         listed = inbox()
         told = send(hook, bash("b1"))
-        own = refused("answer", "3", "--comment", "Again.")
-        again = inbox("answer", "1", "--comment", "One more thing.")
-    assert wordless == "@1 is a note: give your reply in words"
-    assert ruled == "@1 is a note, which takes a reply in words, not verdicts"
-    assert replied == (f"Replied to @1: your reply, @3, is for `{tmp_path.name}`.\n")
+        own = refused("answer", str(reply), "--comment", "Again.")
+        again = inbox("answer", str(doubt), "--comment", "One more thing.")
+        more = newest(delivery)
+        made = numbers(delivery)
+    assert wordless == f"@{doubt} is a note: give your reply in words"
+    assert ruled == f"@{doubt} is a note, which takes a reply in words, not verdicts"
+    assert replied == (
+        f"Replied to @{doubt}: your reply, @{reply}, is for `{tmp_path.name}`.\n"
+    )
     assert listed == "Nothing waits for you.\n"
     assert context(told) == (
-        '<message item="3" from="operator" kind="note">\n'
-        '<on item="1" kind="note">\n'
+        f'<message item="{reply}" from="operator" kind="note">\n'
+        f'<on item="{doubt}" kind="note">\n'
         "<opening>A doubt.</opening>\n"
-        '<comment id="3.1">Noted, go on.</comment>\n'
+        f'<comment id="{reply}.1">Noted, go on.</comment>\n'
         "</on>\n"
         "</message>"
     )
     assert own == (
-        "@3 is a note from the operator: neither a question waiting for an "
+        f"@{reply} is a note from the operator: neither a question waiting for an "
         "answer nor a conversation's message to reply to"
     )
-    assert again == (f"Replied to @1: your reply, @4, is for `{tmp_path.name}`.\n")
+    assert again == (
+        f"Replied to @{doubt}: your reply, @{more}, is for `{tmp_path.name}`.\n"
+    )
+    # Each refused answer made no item.
+    assert made == [doubt, reply, more]
 
 
 def test_a_sessions_turn_failing_on_an_api_error_is_one_note_whose_reply_wakes_it(
@@ -2101,9 +2174,12 @@ def test_a_sessions_turn_failing_on_an_api_error_is_one_note_whose_reply_wakes_i
                 last_assistant_message="API Error: Request rejected (429)",
             ),
         )
-        noted = delivery.inbox.item(1)
-        replied = inbox("answer", "1", "--comment", "Try again.")
-        numbers = sorted(delivery.inbox.items)
+        failure = newest(delivery)
+        noted = delivery.inbox.item(failure)
+        replied = inbox("answer", str(failure), "--comment", "Try again.")
+        reply = newest(delivery)
+        made = numbers(delivery)
+        threads = delivery.inbox.ledger.every(Thread)
         messages.close()
     assert failed == ""
     assert noted.reason == Message(
@@ -2115,36 +2191,50 @@ def test_a_sessions_turn_failing_on_an_api_error_is_one_note_whose_reply_wakes_i
         ending=True,
     )
     assert noted.recipient == Operator()
-    # The note lands in the session's root, @2.
-    assert numbers == [1, 3]
-    assert replied == f"Replied to @1: your reply, @3, is for `{tmp_path.name}`.\n"
-    assert f"one: woke `{tmp_path.name}` for @3" in said
+    # The note lands in no thread, and the failure made that one item alone.
+    assert threads == []
+    assert made == [failure, reply]
+    assert replied == (
+        f"Replied to @{failure}: your reply, @{reply}, is for `{tmp_path.name}`.\n"
+    )
+    assert f"one: woke `{tmp_path.name}` for @{reply}" in said
 
 
 def test_blocked_note_and_send_reach_the_operator_a_note_raising_no_notice(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
         mcp = machine.host.launch("one").mcp
         reported = call(mcp, "blocked", {"problem": "The build is broken."})
+        problem = newest(delivery)
         noted = call(mcp, "note", {"remark": "I assumed UTF-8."})
+        remark = newest(delivery)
         sent = call(
             mcp,
             "send",
             {"to": "operator", "kind": "disagreement", "text": "Not this way."},
         )
+        disagreement = newest(delivery)
         unknown = call(mcp, "send", {"to": "someone", "kind": "note", "text": "x"})
         invalid = call(mcp, "send", {"to": "operator", "kind": "memo", "text": "x"})
+        made = numbers(delivery)
+        threads = delivery.inbox.ledger.every(Thread)
         listed = inbox()
     assert reported == (
-        "Your problem is with the operator, @1, and they're notified. You can end your turn now.",
+        f"Your problem is with the operator, @{problem}, and they're notified. You can end your turn now.",
         False,
     )
-    # The problem lands in the session's root, @2.
-    assert noted == ("Your note is with the operator, @3. You can carry on.", False)
-    assert sent == ("Your message is with the operator, @4.", False)
+    # The problem lands in no thread.
+    assert threads == []
+    assert noted == (
+        f"Your note is with the operator, @{remark}. You can carry on.",
+        False,
+    )
+    assert sent == (f"Your message is with the operator, @{disagreement}.", False)
+    # Neither refused send made an item.
+    assert made == [problem, remark, disagreement]
     assert unknown == (
         (
             "Not sent: no subagent of yours is `someone`. `to` takes `operator`, or "
@@ -2157,23 +2247,23 @@ def test_blocked_note_and_send_reach_the_operator_a_note_raising_no_notice(
     assert invalid[0].startswith("Refused: 1 validation error for Sending")
     assert listed.splitlines() == [
         (
-            f"   @1  2026-10-01 12:00  a problem from `{tmp_path.name}` "
-            f"in {tmp_path}: "
+            f"{cited(problem):>5}  2026-10-01 12:00  a problem from "
+            f"`{tmp_path.name}` in {tmp_path}: "
             "The build is broken."
         ),
         (
-            f"   @3  2026-10-01 12:00  a note from `{tmp_path.name}` "
+            f"{cited(remark):>5}  2026-10-01 12:00  a note from `{tmp_path.name}` "
             f"in {tmp_path}: "
             "I assumed UTF-8."
         ),
         (
-            f"   @4  2026-10-01 12:00  a disagreement from `{tmp_path.name}` "
-            f"in {tmp_path}: Not this way."
+            f"{cited(disagreement):>5}  2026-10-01 12:00  a disagreement from "
+            f"`{tmp_path.name}` in {tmp_path}: Not this way."
         ),
     ]
     assert notices.raised[0] == (
         f"lup: a problem from `{tmp_path.name}` in {tmp_path}\n"
-        "The build is broken.\nlup-dev inbox show 1"
+        f"The build is broken.\nlup-dev inbox show {problem}"
     )
     # The problem and the disagreement wait on the operator, and are noticed; the note is news, and isn't.
     assert len(notices.raised) == 2
@@ -2251,28 +2341,43 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
             ),
         ]
         labelled = call(mcp, "friction", {"got_in_the_way": "The gate hung."})
+        # One item for each answered call, the subagent's friction a second for
+        # their parent; the refused friction makes none.
+        (
+            claude_friction,
+            copied,
+            claude_felt,
+            claude_stop,
+            codex_friction,
+            codex_felt,
+            codex_stop,
+        ) = numbers(delivery)
+        threads = delivery.inbox.ledger.every(Thread)
         waiting = delivery.inbox.waiting(Operator())
         listed = inbox()
-        shown = inbox("show", "1")
-        replied = inbox("answer", "1", "--comment", "The rebuild is fixed.")
-        reply = delivery.inbox.item(10)
-        done = inbox("done", "4")
-        passed = delivery.inbox.item(3)
+        shown = inbox("show", str(claude_friction))
+        replied = inbox(
+            "answer", str(claude_friction), "--comment", "The rebuild is fixed."
+        )
+        reply = delivery.inbox.item(newest(delivery))
+        done = inbox("done", str(claude_felt))
+        passed = delivery.inbox.item(copied)
         felt = [
             each
             for each in delivery.inbox.items.values()
             if isinstance(each.reason, HowItFelt)
         ]
     # Each subagent has a parent, their session's own conversation, who gets a
-    # copy of their friction (@3); how it felt is told to the operator alone. Each
-    # session's root thread takes a number as their first item lands (@2, @7).
+    # copy of their friction (`copied`); how it felt is told to the operator
+    # alone. Each item lands in no thread.
+    assert threads == []
     assert [text for text, _ in answers] == [
-        "Thanks: your friction is with the operator, @1, and your parent has it too. You can carry on.",
-        "Thank you for telling them. It's with the operator, as you wrote it, @4.",
-        "The operator will read why you stopped, @5. You can end your turn now.",
-        "Thanks: your friction is with the operator, @6. You can carry on.",
-        "Thank you for telling them. It's with the operator, as you wrote it, @8.",
-        "The operator will read why you stopped, @9. You can end your turn now.",
+        f"Thanks: your friction is with the operator, @{claude_friction}, and your parent has it too. You can carry on.",
+        f"Thank you for telling them. It's with the operator, as you wrote it, @{claude_felt}.",
+        f"The operator will read why you stopped, @{claude_stop}. You can end your turn now.",
+        f"Thanks: your friction is with the operator, @{codex_friction}. You can carry on.",
+        f"Thank you for telling them. It's with the operator, as you wrote it, @{codex_felt}.",
+        f"The operator will read why you stopped, @{codex_stop}. You can end your turn now.",
     ]
     assert not any(error for _, error in answers)
     # The parts a friction once had are refused: it's one text.
@@ -2287,12 +2392,27 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
     assert [
         (each.number, each.sender, each.recipient, each.call) for each in waiting
     ] == [
-        (1, claude_session.model_copy(update={"agent": "a1"}), Operator(), "f1"),
-        (4, claude_session, Operator(), "h1"),
-        (5, claude_session, Operator(), "s1"),
-        (6, codex_session, Operator(), "c1"),
-        (8, codex_session.model_copy(update={"agent": "b1"}), Operator(), "c2"),
-        (9, codex_session.model_copy(update={"agent": "b1"}), Operator(), "c3"),
+        (
+            claude_friction,
+            claude_session.model_copy(update={"agent": "a1"}),
+            Operator(),
+            "f1",
+        ),
+        (claude_felt, claude_session, Operator(), "h1"),
+        (claude_stop, claude_session, Operator(), "s1"),
+        (codex_friction, codex_session, Operator(), "c1"),
+        (
+            codex_felt,
+            codex_session.model_copy(update={"agent": "b1"}),
+            Operator(),
+            "c2",
+        ),
+        (
+            codex_stop,
+            codex_session.model_copy(update={"agent": "b1"}),
+            Operator(),
+            "c3",
+        ),
     ]
     friction = Friction.model_validate(jammed)
     assert (passed.reason, passed.recipient, passed.quiet) == (
@@ -2310,7 +2430,9 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
         Stopped.model_validate(stopping),
     ]
     first = listed.splitlines()[0]
-    assert first.startswith("   @1  2026-10-01 12:00  a friction from `")
+    assert first.startswith(
+        f"{cited(claude_friction):>5}  2026-10-01 12:00  a friction from `"
+    )
     assert first.endswith(
         f"`{tmp_path.name}/a1` in {tmp_path}: "
         "`uv run lup-dev check` printed: engine stale"
@@ -2322,10 +2444,15 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
         "`uv run lup-dev check` printed: engine stale\n"
         "I was running the gate; saying the rebuild's time first would help.\n"
     )
-    assert replied == f"Replied to @1: your reply, @10, is for `{tmp_path.name}/a1`.\n"
-    assert reply.reason == Message(kind="note", text="The rebuild is fixed.", of=1)
+    assert replied == (
+        f"Replied to @{claude_friction}: your reply, @{reply.number}, is for "
+        f"`{tmp_path.name}/a1`.\n"
+    )
+    assert reply.reason == Message(
+        kind="note", text="The rebuild is fixed.", of=claude_friction
+    )
     assert reply.recipient == claude_session.model_copy(update={"agent": "a1"})
-    assert done.startswith("@4")
+    assert done.startswith(f"@{claude_felt} ")
     # News, each of them: to read, never raising a notice.
     assert [each.rank.name for each in waiting] == ["news"] * 6
     assert notices.raised == []
@@ -2341,34 +2468,51 @@ def test_numbered_decisions_are_each_answered_once_and_a_message_is_done(
             {"decision": "Second", "lean": "b"},
         ],
     }
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
         mcp = machine.host.launch("one").mcp
         call(mcp, "ask", two)
+        which = newest(delivery)
         call(mcp, "note", {"remark": "Read me."})
+        read_me = newest(delivery)
         call(mcp, "ask", {"question": "In words?"})
-        missing = refused("answer", "1", "--leaning", "1")
+        in_words = newest(delivery)
+        # Each number after `--leaning` or `--undecided` is a decision's, not an item's.
+        missing = refused("answer", str(which), "--leaning", "1")
         twice = refused(
-            "answer", "1", "--leaning", "1", "--leaning", "1", "--undecided", "2"
+            "answer", str(which), "--leaning", "1", "--leaning", "1", "--undecided", "2"
         )
-        wordless = refused("answer", "4", "--comment", "  ")
-        not_done = refused("done", "1")
-        done = inbox("done", "3")
-        replied = inbox("answer", "3", "--comment", "x")
-        nothing = refused("show", "9")
+        wordless = refused("answer", str(in_words), "--comment", "  ")
+        not_done = refused("done", str(which))
+        done = inbox("done", str(read_me))
+        replied = inbox("answer", str(read_me), "--comment", "x")
+        reply = newest(delivery)
+        made = numbers(delivery)
+        # One past every number handed out: a number nothing holds.
+        absent = reply + 100
+        nothing = refused("show", str(absent))
         listed = inbox()
     assert missing == (
-        "@1 asks 2 decisions, each taking one answer (`leaning`, `undecided`, "
+        f"@{which} asks 2 decisions, each taking one answer (`leaning`, `undecided`, "
         "`leave open`, or words); these were given for [1]"
     )
     assert "these were given for [1, 1, 2]" in twice
-    assert wordless == "@4 is a question answered in words: give them"
-    assert not_done == "@1 is a question: answer it, `lup-dev inbox answer 1`"
-    assert done == "@3 is done.\n"
-    assert replied == f"Replied to @3: your reply, @5, is for `{tmp_path.name}`.\n"
-    assert nothing == "the inbox holds no @9"
-    assert [line.split()[0] for line in listed.splitlines()] == ["@1", "@4"]
+    assert wordless == f"@{in_words} is a question answered in words: give them"
+    assert not_done == (
+        f"@{which} is a question: answer it, `lup-dev inbox answer {which}`"
+    )
+    assert done == f"@{read_me} is done.\n"
+    assert replied == (
+        f"Replied to @{read_me}: your reply, @{reply}, is for `{tmp_path.name}`.\n"
+    )
+    # Each refused answer made no item.
+    assert made == [which, read_me, in_words, reply]
+    assert nothing == f"the inbox holds no @{absent}"
+    assert [line.split()[0] for line in listed.splitlines()] == [
+        cited(which),
+        cited(in_words),
+    ]
 
 
 def test_an_items_number_is_cited_with_an_at_and_read_back_cited_or_bare() -> None:
@@ -2383,23 +2527,33 @@ def test_an_items_number_is_cited_with_an_at_and_read_back_cited_or_bare() -> No
 def test_each_command_takes_an_items_number_cited_or_bare(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
         mcp = machine.host.launch("one").mcp
         noted = call(mcp, "note", {"remark": "Read me."})
+        read_me = newest(delivery)
         call(mcp, "ask", {"question": "In words?"})
+        in_words = newest(delivery)
         call(mcp, "note", {"remark": "And me."})
-        shown = inbox("show", "@1")
-        answered = inbox("answer", "@3", "--comment", "Yes.")
-        done = inbox("done", "@4")
-        hashed = runner.invoke(cli.app, ["inbox", "show", "#1"])
-    assert noted == ("Your note is with the operator, @1. You can carry on.", False)
-    assert shown.startswith(f"@1, a note from `{tmp_path.name}` in {tmp_path}")
-    assert answered == f"Answered @3: your answer, @5, is for `{tmp_path.name}`.\n"
-    assert done == "@4 is done.\n"
+        and_me = newest(delivery)
+        # Each typed as the operator types one cited, an `@` before its number.
+        shown = inbox("show", f"@{read_me}")
+        answered = inbox("answer", f"@{in_words}", "--comment", "Yes.")
+        answer = newest(delivery)
+        done = inbox("done", f"@{and_me}")
+        hashed = runner.invoke(cli.app, ["inbox", "show", f"#{read_me}"])
+    assert noted == (
+        f"Your note is with the operator, @{read_me}. You can carry on.",
+        False,
+    )
+    assert shown.startswith(f"@{read_me}, a note from `{tmp_path.name}` in {tmp_path}")
+    assert answered == (
+        f"Answered @{in_words}: your answer, @{answer}, is for `{tmp_path.name}`.\n"
+    )
+    assert done == f"@{and_me} is done.\n"
     assert hashed.exit_code == 2
-    assert "Invalid value for 'number': #1" in hashed.output
+    assert f"Invalid value for 'number': #{read_me}" in hashed.output
 
 
 def test_lup_dev_inbox_answer_asks_each_decision_in_turn_at_a_terminal(
@@ -2416,23 +2570,27 @@ def test_lup_dev_inbox_answer_asks_each_decision_in_turn_at_a_terminal(
         launched(machine, clock, tmp_path, "one", "claude")
         send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
         call(machine.host.launch("one").mcp, "ask", two)
+        question = newest(delivery)
         result = runner.invoke(
             cli.app,
-            ["inbox", "answer", "1"],
+            ["inbox", "answer", str(question)],
             input="\nleaning\nsure\nSure, no strong preference.\nThanks.\n",
         )
-        answer = delivery.inbox.item(3).reason
+        number = newest(delivery)
+        answer = delivery.inbox.item(number).reason
         assert isinstance(answer, Answer)
-        told = delivery.said(delivery.inbox.item(3))
+        told = delivery.said(delivery.inbox.item(number))
     assert result.exit_code == 0, result.output
     # An empty line isn't taken for the lean: it's asked again.
     asked = "1: leaning, undecided, leave open, or your answer in words"
     assert result.output.count(asked) == 2
     # Words that aren't a verdict are the decision's answer, with nothing to add.
     assert "2: a comment" not in result.output
+    # A ruling's `decision`, and a decision's `number`, is its place in the
+    # question, not an item's.
     assert answer.model_dump() == {
         "reason": "answer",
-        "question": 1,
+        "question": question,
         "rulings": [
             {"decision": 1, "verdict": "leaning", "comment": "sure"},
             {"decision": 2, "verdict": None, "comment": "Sure, no strong preference."},
@@ -2440,14 +2598,15 @@ def test_lup_dev_inbox_answer_asks_each_decision_in_turn_at_a_terminal(
         "comment": "Thanks.",
     }
     assert told == (
-        '<answer item="3" from="operator" question="1">\n'
+        f'<answer item="{number}" from="operator" question="{question}">\n'
         "<asked>Which?</asked>\n"
         '<decision number="1" lean="a" verdict="leaning: they go with the lean" '
-        'id="3.1">\n'
+        f'id="{number}.1">\n'
         "First\n<comment>sure</comment>\n</decision>\n"
-        '<decision number="2" lean="b" verdict="answered in words" id="3.2">\n'
+        '<decision number="2" lean="b" verdict="answered in words" '
+        f'id="{number}.2">\n'
         "Second\n<comment>Sure, no strong preference.</comment>\n</decision>\n"
-        '<comment id="3.3">Thanks.</comment>\n'
+        f'<comment id="{number}.3">Thanks.</comment>\n'
         "</answer>"
     )
 
@@ -2717,17 +2876,18 @@ def test_a_codex_session_is_never_given_a_title(
 def test_lup_dev_rename_and_send_name_a_launch_by_its_name(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path / "a", "one", "claude")
         launched(machine, clock, tmp_path / "b", "two", "claude")
         send(machine.host.launch("two").hook, claude("SessionStart", session_id="s2"))
         renamed = runner.invoke(cli.app, ["rename", "b", "reviewer"])
         held = runner.invoke(cli.app, ["rename", "a", "reviewer"])
         sent = inbox("send", "reviewer", "Look.")
+        number = newest(delivery)
     assert renamed.output == "Launch two is `reviewer`.\n"
     assert isinstance(held.exception, HostError)
     assert "`reviewer` is launch two's" in str(held.exception)
-    assert sent == "Sent @1 to `reviewer`.\n"
+    assert sent == f"Sent @{number} to `reviewer`.\n"
 
 
 def introduction() -> str:
@@ -2899,7 +3059,7 @@ def test_a_subagent_is_shown_under_the_conversation_that_spawned_it_nested_ones_
 ) -> None:
     records = Subagents(tmp_path)
     podman_having(monkeypatch, "lup-one")
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path / "w", "one", "claude")
         hook = machine.host.launch("one").hook
         send(hook, claude("SessionStart", source="startup"))
@@ -2914,6 +3074,7 @@ def test_a_subagent_is_shown_under_the_conversation_that_spawned_it_nested_ones_
             sockets, "rename", {"name": "grep-tokens"}, "a2", "general-purpose"
         )
         records.lup(sockets, "note", {"remark": "Found it."}, "a2", "general-purpose")
+        found = newest(delivery)
         shown = named_talkers(machine, clock)
         listing = runner.invoke(cli.app, ["sessions"])
         listed = inbox()
@@ -2936,8 +3097,8 @@ def test_a_subagent_is_shown_under_the_conversation_that_spawned_it_nested_ones_
         "      w/explore-auth/grep-tokens  general-purpose",
     ]
     assert listed == (
-        "   @1  2026-10-01 12:00  a note from `w/explore-auth/grep-tokens` "
-        f"in {tmp_path / 'w'}: Found it.\n"
+        f"{cited(found):>5}  2026-10-01 12:00  a note from "
+        f"`w/explore-auth/grep-tokens` in {tmp_path / 'w'}: Found it.\n"
     )
 
 
@@ -3032,7 +3193,7 @@ def test_a_subagents_name_and_place_outlast_a_restart_of_lups_host(
     assert shown == [("w", None, 0), ("w/parser", "w", 1)]
 
 
-def test_a_session_keeps_the_name_their_root_shares_across_a_restart_of_lups_host(
+def test_a_session_keeps_their_name_across_a_restart_of_lups_host_no_thread_made_of_it(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     with inboxed(machine, clock, notices, said):
@@ -3040,27 +3201,26 @@ def test_a_session_keeps_the_name_their_root_shares_across_a_restart_of_lups_hos
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         _, title = named_at_start(send(hook, claude("SessionStart", source="startup")))
         call(mcp, "rename", {"name": "inbox-scaling"})
-        # Their first note opens their root, named as they are.
+        # Their first note lands in no thread: nothing is opened for them.
         call(mcp, "note", {"remark": "Go."})
         title = given(send(hook, prompt(title)))
-    # The service started again serves the launch's record again: its own
-    # session's root doesn't take its name from it.
+    # The service started again serves the launch's record again, under its name.
     with inboxed(machine, clock, notices, said) as delivery:
         listed = HostClient(
             layout=machine.host, clock=clock, starter=Unstarted()
         ).listed()
         retitled = send(hook, prompt(title))
-        root = delivery.concerns().named(tmp_path / "w" / ".git", "inbox-scaling")
+        named = delivery.concerns().found(tmp_path / "w" / ".git", "inbox-scaling")
+        threads = delivery.inbox.ledger.every(Thread)
     assert {each.launch: each.name for each in listed.launches} == {
         "one": "inbox-scaling"
     }
     assert retitled == ""
-    assert root.holder == Conversation(
-        repository=tmp_path / "w" / ".git", runtime="claude", session="s1"
-    )
+    assert named is None
+    assert threads == []
 
 
-def test_a_session_keeps_their_name_through_the_root_the_service_opens_them_as_it_starts(
+def test_an_item_outside_every_thread_stays_so_as_the_service_starts_and_its_session_keeps_their_name(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     repository = tmp_path / "w" / ".git"
@@ -3070,9 +3230,8 @@ def test_a_session_keeps_their_name_through_the_root_the_service_opens_them_as_i
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         send(hook, claude("SessionStart", source="startup"))
         call(mcp, "rename", {"name": "inbox-scaling"})
-    # An item an earlier lup kept outside every thread, while the session goes
-    # on with no root yet: the service started again opens them one, named as
-    # they are, before it serves their launch again.
+    # An item outside every thread, while the session goes on: the service
+    # started again leaves it so, and serves their launch again under its name.
     ledger = Ledger.opened(LedgerLayout.of(machine), KINDS)
     past = Inbox.opened(ledger).made(
         Message(kind="note", text="Built."),
@@ -3086,12 +3245,14 @@ def test_a_session_keeps_their_name_through_the_root_the_service_opens_them_as_i
         listed = HostClient(
             layout=machine.host, clock=clock, starter=Unstarted()
         ).listed()
-        root = delivery.concerns().containing(past.number)
+        thread = delivery.concerns().containing(past.number)
+        threads = delivery.inbox.ledger.every(Thread)
     assert {each.launch: each.name for each in listed.launches} == {
         "one": "inbox-scaling"
     }
-    assert root is not None
-    assert (root.name, root.holder) == ("inbox-scaling", session)
+    assert session.repository == repository
+    assert thread is None
+    assert threads == []
 
 
 def test_conversations_kept_with_a_field_lup_since_dropped_load_at_a_restart(
@@ -3530,14 +3691,17 @@ def test_wait_inbox_returns_when_its_own_subagent_ends_and_never_for_anothers_on
             # Another launch's subagent, and the subagent's own: neither is the
             # main conversation's, and the call holds through both.
             send(hook2, others.ended("b1", "Explore", "Lexed."))
+            lexer = newest(delivery)
             send(hook, records.ended("a2", "general-purpose", "Found three."))
+            tokens = newest(delivery)
             told = send(hook, records.call("a1", "Explore", "c4"))
             send(hook, records.ended("a1", "Explore", "Parsed."))
+            parser = newest(delivery)
             returned = waiting.result(timeout=60)
         after = send(hook, bash("m1"))
-        elsewhere = delivery.inbox.item(1)
-    assert context(told) == handed(2, "w/parser/tokens", "tokens")
-    assert returned == (handed(3, "w/parser", "parser"), False)
+        elsewhere = delivery.inbox.item(lexer)
+    assert context(told) == handed(tokens, "w/parser/tokens", "tokens")
+    assert returned == (handed(parser, "w/parser", "parser"), False)
     assert after == ""
     assert elsewhere.recipient == Conversation(
         repository=tmp_path / "x" / ".git", runtime="claude", session="s2"
@@ -3561,17 +3725,19 @@ def test_wait_inbox_returns_when_its_own_subagent_fails_on_an_api_error_on_claud
             assert delivery.holding.wait(timeout=60)
             failed = send(hook, records.failed("a1", "Explore", "rate_limit"))
             returned = waiting.result(timeout=60)
+        number = newest(delivery)
         items = list(delivery.inbox.items.values())
     assert failed == ""
     assert returned == (
         (
-            '<ended item="1" from="w/parser" name="parser">'
+            f'<ended item="{number}" from="w/parser" name="parser">'
             "They failed on an error from the model's API (rate_limit). Your "
             "runtime's notice of their end says more.</ended>"
         ),
         False,
     )
-    assert [(each.number, each.quiet) for each in items] == [(1, True)]
+    # Their failure is the one item made.
+    assert [(each.number, each.quiet) for each in items] == [(number, True)]
 
 
 def test_a_subagents_end_waits_for_its_parents_call_never_holding_its_end_nor_waking_it(
@@ -3588,10 +3754,12 @@ def test_a_subagents_end_waits_for_its_parents_call_never_holding_its_end_nor_wa
         send(hook, records.call("a1", "Explore", "c1"))
         send(hook, bash("m1"))
         send(hook, records.ended("a1", "Explore", "Parsed."))
+        parsed = newest(delivery)
         ended = send(hook, claude("Stop", stop_hook_active=False))
         # The session idle: a subagent stopped, first heard at their end, and one
         # of Claude Code's own, a suggestion for the operator's next prompt.
         send(hook, records.ended("a3", "Plan", None))
+        stopped = newest(delivery)
         own = claude(
             "SubagentStop",
             agent_id="x1",
@@ -3606,37 +3774,47 @@ def test_a_subagents_end_waits_for_its_parents_call_never_holding_its_end_nor_wa
     assert ended == ""
     assert not [line for line in said if "woke" in line or "woken" in line]
     assert returned == (
-        handed(1, "w/Explore·a1", "Explore·a1")
+        handed(parsed, "w/Explore·a1", "Explore·a1")
         + "\n\n"
-        + '<ended item="2" from="w/Plan·a3" name="Plan·a3">'
+        + f'<ended item="{stopped}" from="w/Plan·a3" name="Plan·a3">'
         "They were stopped before they ended their turn.</ended>",
         False,
     )
     assert after == ""
-    assert [(each.number, each.quiet) for each in items] == [(1, True), (2, True)]
+    # Claude Code's own subagent makes no item.
+    assert [(each.number, each.quiet) for each in items] == [
+        (parsed, True),
+        (stopped, True),
+    ]
 
 
 def test_a_stopped_subagent_holds_nothing_and_what_waits_for_it_goes_to_its_session(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     records = Subagents(tmp_path)
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path / "w", "one", "claude")
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         send(hook, claude("SessionStart", source="startup"))
         send(hook, records.spawn("t1", name="parser"))
         records.recorded("a1", "Explore", "t1", name="parser")
         records.lup((hook, mcp), "ask", {"question": "May I?"}, "a1", "Explore")
-        inbox("answer", "1", "--comment", "Yes.")
+        question = newest(delivery)
+        inbox("answer", str(question), "--comment", "Yes.")
+        answer = newest(delivery)
         stopped = send(hook, records.ended("a1", "Explore", None))
+        ended = newest(delivery)
         told = send(hook, bash("m1"))
+        threads = delivery.inbox.ledger.every(Thread)
     assert stopped == ""
-    # Their question landed in the session's root, @2, never told the session.
+    # Their question landed in no thread, never told the session.
+    assert threads == []
     assert context(told) == (
-        '<answer item="3" from="operator" for="w/parser, '
-        'whose conversation had ended" question="1">\n'
-        '<asked>May I?</asked>\n<comment id="3.1">Yes.</comment>\n</answer>\n\n'
-        '<ended item="4" from="w/parser" name="parser">'
+        f'<answer item="{answer}" from="operator" for="w/parser, '
+        f'whose conversation had ended" question="{question}">\n'
+        f'<asked>May I?</asked>\n<comment id="{answer}.1">Yes.</comment>\n'
+        "</answer>\n\n"
+        f'<ended item="{ended}" from="w/parser" name="parser">'
         "They were stopped before they ended their turn.</ended>"
     )
 
@@ -3658,23 +3836,26 @@ def test_wait_inbox_returns_when_its_own_subagent_ends_with_its_last_message_on_
             waiting = pool.submit(call, mcp, "wait_inbox", {})
             assert delivery.holding.wait(timeout=60)
             send(hook, rollouts.ended("th2", "th1", "Found three call sites."))
+            found = newest(delivery)
             told = send(hook, rollouts.call("th1", "c3"))
             send(hook, rollouts.ended("th1", "t1", "Parsed: three call sites."))
+            parsed = newest(delivery)
             returned = waiting.result(timeout=60)
         # One the second `spawn_agent` spawned, first heard at their end: Codex
         # hands their last message to their parent itself.
         send(hook, rollouts.ended("th3", "t1", "Lexed."))
+        lexed = newest(delivery)
         at_once = call(mcp, "wait_inbox", {})
         after = send(hook, codex_bash("d1"))
     assert context(told) == (
-        '<ended item="1" from="w/th1/explorer·th2" name="explorer·th2">\n'
+        f'<ended item="{found}" from="w/th1/explorer·th2" name="explorer·th2">\n'
         "They ended their turn. Their last message:\n"
         "<said>Found three call sites.</said>\n"
         "</ended>"
     )
     assert returned == (
         (
-            '<ended item="2" from="w/explorer·th1" name="explorer·th1">\n'
+            f'<ended item="{parsed}" from="w/explorer·th1" name="explorer·th1">\n'
             "They ended their turn. Their last message:\n"
             "<said>Parsed: three call sites.</said>\n"
             "</ended>"
@@ -3683,7 +3864,7 @@ def test_wait_inbox_returns_when_its_own_subagent_ends_with_its_last_message_on_
     )
     assert at_once == (
         (
-            '<ended item="3" from="w/lexer" name="lexer">'
+            f'<ended item="{lexed}" from="w/lexer" name="lexer">'
             "They ended their turn. Their last message reaches you from your runtime."
             "</ended>"
         ),
@@ -3738,10 +3919,13 @@ def test_what_a_subagent_said_at_an_end_held_for_what_waited_reaches_its_parent_
         places = [
             each.held for each in delivery.inbox.whereabouts.values() if each.ended
         ]
+        # On each runtime, what's sent the subagent and the operator's copy of
+        # it, then their end let through: an end held makes no item.
+        _, _, parsed, _, _, lexed = numbers(delivery)
     assert "Count the tests too." in context(held)
     assert let == ""
     assert told == (
-        '<ended item="4" from="w/parser" name="parser">\n'
+        f'<ended item="{parsed}" from="w/parser" name="parser">\n'
         "They ended their turn. Their last message reaches you from your runtime.\n"
         f"{HELD_BEFORE}\n"
         "<said>Parsed: three call sites.</said>\n"
@@ -3750,7 +3934,7 @@ def test_what_a_subagent_said_at_an_end_held_for_what_waited_reaches_its_parent_
     assert "Count the tests too." in held2["reason"]
     assert let2 == ""
     assert told2 == (
-        '<ended item="8" from="v/explorer·th1" name="explorer·th1">\n'
+        f'<ended item="{lexed}" from="v/explorer·th1" name="explorer·th1">\n'
         "They ended their turn. Their last message:\n"
         "<said>And one more.</said>\n"
         f"{HELD_BEFORE}\n"
@@ -3802,19 +3986,22 @@ def test_a_subagents_friction_reaches_its_parent_whole_and_how_it_felt_where_lup
         heard2 = send(hook2, codex_bash("d1"))
         operators = [each.number for each in delivery.inbox.waiting(Operator())]
         items = list(delivery.inbox.items.values())
+        # The friction and their parent's copy of it, then how it felt, with
+        # their parent's copy where lup passes it on.
+        reported, copied, felt, *passed = numbers(delivery)
         described = next(
             each.description for each in specs() if each.name == "how_it_felt"
         )
     friction = Friction.model_validate(jammed)
     how_it_felt = HowItFelt.model_validate(went)
     assert jam == (
-        "Thanks: your friction is with the operator, @1, and your parent has it too. You can carry on.",
+        f"Thanks: your friction is with the operator, @{reported}, and your parent has it too. You can carry on.",
         False,
     )
     assert ended == ""
-    assert told.startswith('<item item="3" from="w/parser" kind="friction">')
+    assert told.startswith(f'<item item="{copied}" from="w/parser" kind="friction">')
     assert friction.text in told
-    assert operators == [1, 4]
+    assert operators == [reported, felt]
     copies = [
         (each.reason, each.quiet) for each in items if each.recipient != Operator()
     ]
@@ -3822,10 +4009,11 @@ def test_a_subagents_friction_reaches_its_parent_whole_and_how_it_felt_where_lup
         # How it felt is told to the operator alone, and its description says so,
         # and that it isn't private, which no reach changes.
         assert how == (
-            "Thank you for telling them. It's with the operator, as you wrote it, @4.",
+            f"Thank you for telling them. It's with the operator, as you wrote it, @{felt}.",
             False,
         )
         assert heard2 == ""
+        assert passed == []
         assert copies == [(friction, True)]
         assert described.endswith(
             "\n\nIt reaches the operator as you wrote it, and nobody else is told. "
@@ -3834,11 +4022,14 @@ def test_a_subagents_friction_reaches_its_parent_whole_and_how_it_felt_where_lup
         )
     else:
         assert how == (
-            "Thank you for telling them. It's with the operator, and your parent has it too, as you wrote it, @4.",
+            f"Thank you for telling them. It's with the operator, and your parent has it too, as you wrote it, @{felt}.",
             False,
         )
         told2 = context(heard2)
-        assert told2.startswith('<item item="6" from="v/lexer" kind="how it felt">')
+        [passed_on] = passed
+        assert told2.startswith(
+            f'<item item="{passed_on}" from="v/lexer" kind="how it felt">'
+        )
         assert how_it_felt.text in told2
         assert copies == [(friction, True), (how_it_felt, True)]
         assert described.endswith(
@@ -3922,27 +4113,31 @@ def test_a_subagent_tells_its_parent_at_its_next_call_and_the_operator_s_copy_wa
         sent = records.lup(
             (hook, mcp), "send", to_parent(found, "problem"), "a1", "Explore"
         )
+        # The message, and the operator's copy of it.
+        message, copy = numbers(delivery)
         told = context(send(hook, bash("m2")))
         listed = inbox()
-        shown = inbox("show", "2")
+        shown = inbox("show", str(copy))
         theirs = records.lup((hook, mcp), "inbox", {"every": True}, "a1", "Explore")
         unwithdrawn = [
             records.lup(
                 (hook, mcp), "withdraw", {"number": number, "why": "x"}, "a1", "Explore"
             )
-            for number in [1, 2]
+            for number in [message, copy]
         ]
-        inbox("answer", "2", "--comment", "Good catch.")
+        inbox("answer", str(copy), "--comment", "Good catch.")
+        reply = newest(delivery)
         replied = context(send(hook, records.call("a1", "Explore", "c2")))
-        items = [delivery.inbox.item(number) for number in [1, 2]]
-    assert sent == (arriving("your parent `w`", 1, WOKEN), False)
+        items = [delivery.inbox.item(number) for number in [message, copy]]
+        made = numbers(delivery)
+    assert sent == (arriving("your parent `w`", message, WOKEN), False)
     assert told == (
-        f'<message item="1" from="w/parser" kind="problem">{found}</message>'
+        f'<message item="{message}" from="w/parser" kind="problem">{found}</message>'
     )
     # What one agent tells another is no item of the operator's: it's in both agents' drawers.
-    assert "@2" not in listed
+    assert f"@{copy}" not in listed
     assert shown == (
-        f"@2, a problem from `w/parser` in {worktree} to `w`, your copy, made "
+        f"@{copy}, a problem from `w/parser` in {worktree} to `w`, your copy, made "
         f"{clocked(clock.now())}, done at {clocked(clock.now())}:\n{found}\n"
     )
     # The subagent's own `inbox` lists their message, and the copy as whom it went to.
@@ -3950,12 +4145,12 @@ def test_a_subagent_tells_its_parent_at_its_next_call_and_the_operator_s_copy_wa
         "\n".join(
             [
                 (
-                    f"@1  {clocked(clock.now())}  a problem from you to `w`, told at "
-                    f"{clocked(clock.now())} (call): {found}"
+                    f"@{message}  {clocked(clock.now())}  a problem from you to "
+                    f"`w`, told at {clocked(clock.now())} (call): {found}"
                 ),
                 (
-                    f"@2  {clocked(clock.now())}  a problem from you to `w`, the "
-                    f"operator's copy, done at {clocked(clock.now())}: {found}"
+                    f"@{copy}  {clocked(clock.now())}  a problem from you to `w`, "
+                    f"the operator's copy, done at {clocked(clock.now())}: {found}"
                 ),
             ]
         ),
@@ -3987,13 +4182,16 @@ def test_a_subagent_tells_its_parent_at_its_next_call_and_the_operator_s_copy_wa
             ),
             False,
         )
-        for number in [1, 2]
+        for number in [message, copy]
     ]
+    # Neither refused withdrawal made an item.
+    assert made == [message, copy, reply]
     # The operator's reply to the copy reaches the subagent that sent it.
     assert replied == (
-        '<message item="4" from="operator" kind="note">\n<on item="2" kind="problem">'
+        f'<message item="{reply}" from="operator" kind="note">\n'
+        f'<on item="{copy}" kind="problem">'
         f"\n<opening>{found}</opening>\n"
-        '<comment id="4.1">Good catch.</comment>\n</on>\n</message>'
+        f'<comment id="{reply}.1">Good catch.</comment>\n</on>\n</message>'
     )
 
 
@@ -4005,7 +4203,7 @@ def test_send_reaches_ones_own_subagents_by_name_path_or_id_and_refuses_whom_not
     def sent(to: str, text: str) -> tuple[str, bool]:
         return call(mcp, "send", {"to": to, "kind": "note", "text": text})
 
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path / "w", "one", "claude")
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         send(hook, claude("SessionStart", source="startup"))
@@ -4048,14 +4246,34 @@ def test_send_reaches_ones_own_subagents_by_name_path_or_id_and_refuses_whom_not
         records.lup((hook, mcp), "rename", {"name": "lexing"}, "a1", "Explore")
         send(hook, records.call("a1", "Explore", "c5"))
         renamed = sent("lexing", "Renamed.")
+        threads = delivery.inbox.ledger.every(Thread)
+        # Each message sent, and the operator's copy of it after it; the
+        # subagent's end, told their parent; and nothing for a send refused.
+        (
+            to_name,
+            _,
+            to_path,
+            _,
+            to_id,
+            _,
+            to_tokens,
+            _,
+            tokens_ended,
+            to_resumed,
+            _,
+            to_renamed,
+            _,
+        ) = numbers(delivery)
+        ending = delivery.inbox.item(tokens_ended).reason
     yours = (
         "`to` takes `operator`, or one of your own subagents by their name, their "
         "path or their runtime's id: `parser`."
     )
-    assert by_name == (arriving("your subagent `w/parser`", 1), False)
-    # The first copy lands in the session's root, @3.
-    assert by_path == (arriving("your subagent `w/parser`", 4), False)
-    assert by_id == (arriving("your subagent `w/parser`", 6), False)
+    assert by_name == (arriving("your subagent `w/parser`", to_name), False)
+    # Each copy lands in no thread.
+    assert threads == []
+    assert by_path == (arriving("your subagent `w/parser`", to_path), False)
+    assert by_id == (arriving("your subagent `w/parser`", to_id), False)
     assert grandchild == (f"Not sent: no subagent of yours is `tokens`. {yours}", False)
     assert orphan == (
         f"Not sent: no conversation spawned you, so you have no parent. {yours}",
@@ -4063,9 +4281,13 @@ def test_send_reaches_ones_own_subagents_by_name_path_or_id_and_refuses_whom_not
     )
     assert told == "\n\n".join(
         f'<message item="{number}" from="w" kind="note">{text}</message>'
-        for number, text in [(1, "By name."), (4, "By path."), (6, "By id.")]
+        for number, text in [
+            (to_name, "By name."),
+            (to_path, "By path."),
+            (to_id, "By id."),
+        ]
     )
-    assert down == (arriving("your subagent `w/parser/tokens`", 8), False)
+    assert down == (arriving("your subagent `w/parser/tokens`", to_tokens), False)
     # The subagent's end is held once to tell what their parent sent them.
     assert "Look at the lexer." in held
     assert gone == (
@@ -4076,10 +4298,11 @@ def test_send_reaches_ones_own_subagents_by_name_path_or_id_and_refuses_whom_not
         ),
         False,
     )
-    # Resumed, they're heard again, and reached; the Ended their parent got is @10.
-    assert resumed == (arriving("your subagent `w/parser/tokens`", 11), False)
+    # Resumed, they're heard again, and reached; their parent was told their end.
+    assert isinstance(ending, Ended)
+    assert resumed == (arriving("your subagent `w/parser/tokens`", to_resumed), False)
     # A subagent who renamed themselves is reached by their new name once they're heard.
-    assert renamed == (arriving("your subagent `w/lexing`", 13), False)
+    assert renamed == (arriving("your subagent `w/lexing`", to_renamed), False)
 
 
 def test_a_subagents_message_wakes_its_idle_claude_session(
@@ -4095,10 +4318,12 @@ def test_a_subagents_message_wakes_its_idle_claude_session(
         send(hook, records.call("a1", "Explore", "c1"))
         assert send(hook, claude("Stop", stop_hook_active=False)) == ""
         sent = records.lup((hook, mcp), "send", to_parent("Found it."), "a1", "Explore")
-        state = delivery.inbox.item(1).state
-    assert sent == (arriving("your parent `w`", 1, WOKEN), False)
+        # The message, and the operator's copy of it.
+        message, _ = numbers(delivery)
+        state = delivery.inbox.item(message).state
+    assert sent == (arriving("your parent `w`", message, WOKEN), False)
     # Pushed to the session, it waits until a turn's start carries the push's token.
-    assert "one: pushed @1 to `w`" in said
+    assert f"one: pushed @{message} to `w`" in said
     assert state == Waiting()
 
 
@@ -4106,7 +4331,7 @@ def test_on_codex_a_subagents_message_holds_its_parents_turns_end_and_waits_for_
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     rollouts = Rollouts(tmp_path)
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path / "v", "two", "codex")
         hook, mcp = machine.host.launch("two").hook, machine.host.launch("two").mcp
         messages = Socket(machine.host.launch("two").messages)
@@ -4122,35 +4347,39 @@ def test_on_codex_a_subagents_message_holds_its_parents_turns_end_and_waits_for_
         second = rollouts.lup((hook, mcp), "send", to_parent("Found it."), "th1")
         started = context(send(hook, codex("UserPromptSubmit", prompt="Go on.")))
         frames = messages.close()
+        # Each message, and the operator's copy of it.
+        disagreement, _, found, _ = numbers(delivery)
     idle = (
         "; idle between turns, it waits for the session's next turn, since their "
         "runtime can't be woken"
     )
-    assert first == (arriving("your parent `v`", 1, idle), False)
+    assert first == (arriving("your parent `v`", disagreement, idle), False)
     assert held["decision"] == "block"
     assert held["reason"] == (
-        '<message item="1" from="v/lexer" kind="disagreement">Not this way.</message>'
+        f'<message item="{disagreement}" from="v/lexer" kind="disagreement">'
+        "Not this way.</message>"
     )
     assert let == ""
-    assert second == (arriving("your parent `v`", 4, idle), False)
+    assert second == (arriving("your parent `v`", found, idle), False)
     assert frames == []
     assert started == (
-        '<message item="4" from="v/lexer" kind="note">Found it.</message>'
+        f'<message item="{found}" from="v/lexer" kind="note">Found it.</message>'
     )
 
 
 def test_lup_dev_inbox_send_names_a_launch_by_its_id_or_its_worktree(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
         by_worktree = inbox("send", str(tmp_path), "By its worktree.")
+        number = newest(delivery)
         nowhere = runner.invoke(cli.app, ["inbox", "send", "nowhere", "x"])
         launched(machine, clock, tmp_path, "two", "claude")
         several = runner.invoke(cli.app, ["inbox", "send", str(tmp_path), "x"])
         unheard = refused("send", "two", "x")
-    assert by_worktree == f"Sent @1 to `{tmp_path.name}`.\n"
+    assert by_worktree == f"Sent @{number} to `{tmp_path.name}`.\n"
     assert isinstance(nowhere.exception, InboxError)
     assert (
         str(nowhere.exception)
@@ -4195,11 +4424,14 @@ def test_lup_dev_mount_lends_a_directory_to_a_running_room_and_tells_its_session
         open_ = runner.invoke(cli.app, ["mount", "--rw", str(atlas), "--launch", "one"])
         module = runner.invoke(cli.app, ["mount", "transcripts", "--launch", "one"])
         nothing = runner.invoke(cli.app, ["mount", "nowhere", "--launch", "one"])
-        texts = [delivery.inbox.item(number).reason for number in [1, 2, 3]]
+        # Each directory lent is told the session in an item of its own; the
+        # mount that failed makes none.
+        lent, _, lent_module = numbers(delivery)
+        texts = [delivery.inbox.item(number).reason for number in [lent, lent_module]]
 
     assert sealed.output == (
         f"Lent {atlas} to launch one, read-only, at /lent/atlas in its room; "
-        "@1 tells its session.\n"
+        f"@{lent} tells its session.\n"
     )
     assert "writable, at /lent/atlas-2 in its room" in open_.output
     assert "read-only, at /lent/transcripts in its room" in module.output
@@ -4224,8 +4456,8 @@ def test_lup_dev_mount_lends_a_directory_to_a_running_room_and_tells_its_session
         f"The operator lent `{atlas}` to this session, read-only, at "
         "`/lent/atlas`: it's there now, until the session ends."
     )
-    assert isinstance(texts[2], Message)
-    assert texts[2].text.startswith(
+    assert isinstance(texts[1], Message)
+    assert texts[1].text.startswith(
         f"The operator lent the `transcripts` module's data (`{data}`) to this "
         "session, read-only, at `/lent/transcripts`"
     )
@@ -4305,7 +4537,7 @@ def test_an_agents_session_on_the_host_lists_the_sessions_and_the_inbox_and_show
     variable: str,
 ) -> None:
     podman_having(monkeypatch, "lup-one")
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path / "w", "one", "claude")
         hook = machine.host.launch("one").hook
         send(hook, claude("SessionStart", source="startup"))
@@ -4313,19 +4545,21 @@ def test_an_agents_session_on_the_host_lists_the_sessions_and_the_inbox_and_show
             "hookSpecificOutput"
         ]["updatedInput"]
         call(machine.host.launch("one").mcp, "note", stamped)
+        number = newest(delivery)
         monkeypatch.setenv(variable, "1")
         listing = runner.invoke(cli.app, ["sessions"])
         listed = inbox()
-        shown = inbox("show", "1")
+        shown = inbox("show", str(number))
     assert listing.exit_code == 0, (listing.output, listing.exception)
     assert listing.output.splitlines()[0] == (
         f"`w`  claude in {tmp_path / 'w'}  (one)  container lup-one, running"
     )
     assert listed == (
-        f"   @1  2026-10-01 12:00  a note from `w` in {tmp_path / 'w'}: Mine.\n"
+        f"{cited(number):>5}  2026-10-01 12:00  a note from `w` in "
+        f"{tmp_path / 'w'}: Mine.\n"
     )
     assert shown == (
-        f"@1, a note from `w` in {tmp_path / 'w'} to the operator, "
+        f"@{number}, a note from `w` in {tmp_path / 'w'} to the operator, "
         "made 2026-10-01 12:00, waiting:\nMine.\n"
     )
 
@@ -4449,7 +4683,9 @@ def test_a_room_lists_and_shows_its_repositorys_sessions_and_items_alone(
     }
     other = tmp_path / "other"
     other.mkdir()
-    with inboxed(machine, clock, notices, said, recorded, podman=podman_of("lup-one")):
+    with inboxed(
+        machine, clock, notices, said, recorded, podman=podman_of("lup-one")
+    ) as delivery:
         launched(machine, clock, repo, "one", "claude")
         launched(machine, clock, other, "two", "codex")
         hook = machine.host.launch("one").hook
@@ -4459,44 +4695,50 @@ def test_a_room_lists_and_shows_its_repositorys_sessions_and_items_alone(
             "hookSpecificOutput"
         ]["updatedInput"]
         call(machine.host.launch("one").mcp, "note", stamped)
+        my_note = newest(delivery)
         call(machine.host.launch("two").mcp, "note", {"remark": "Theirs."})
+        their_note = newest(delivery)
         host = client(machine.host, clock)
-        host.ask(approval(repo / ".git", repo, "Approve mine?"), Shown)
-        host.ask(approval(other / ".git", other, "Approve theirs?"), Shown)
+        my_approval = host.ask(
+            approval(repo / ".git", repo, "Approve mine?"), Shown
+        ).item.number
+        their_approval = host.ask(
+            approval(other / ".git", other, "Approve theirs?"), Shown
+        ).item.number
         everything = runner.invoke(cli.app, ["inbox"])
         in_room(monkeypatch, machine, "one")
         monkeypatch.setenv(variable, "1")
         listing = runner.invoke(cli.app, ["sessions"])
         listed = inbox()
-        shown = inbox("show", "1")
-        diff = inbox("show", "5", "--diff")
-        moment = inbox("show", "1", "--context")
+        shown = inbox("show", str(my_note))
+        diff = inbox("show", str(my_approval), "--diff")
+        moment = inbox("show", str(my_note), "--context")
         theirs = [
-            refused("show", "3"),
-            refused("show", "3", "--context"),
-            refused("show", "6", "--diff"),
+            refused("show", str(their_note)),
+            refused("show", str(their_note), "--context"),
+            refused("show", str(their_approval), "--diff"),
         ]
-        done = runner.invoke(cli.app, ["inbox", "done", "1"])
+        done = runner.invoke(cli.app, ["inbox", "done", str(my_note)])
     assert everything.exit_code == 0, everything.output
     assert [each.split()[0] for each in everything.output.splitlines()] == [
-        "@1",
-        "@3",
-        "@5",
-        "@6",
+        f"@{number}" for number in [my_note, their_note, my_approval, their_approval]
     ]
     assert listing.exit_code == 0, (listing.output, listing.exception)
     assert listing.output == (
         f"`work`  claude in {repo}  (one)  container lup-one, running\n  work\n"
     )
-    assert [each.split()[0] for each in listed.splitlines()] == ["@1", "@5"]
+    assert [each.split()[0] for each in listed.splitlines()] == [
+        f"@{my_note}",
+        f"@{my_approval}",
+    ]
     assert "Theirs." not in listed
     assert shown.endswith(":\nMine.\n")
     assert diff.strip() == "diff for Approve mine?"
     assert "→ called mcp__lup__note: this item" in moment
     assert theirs == [
-        "@3 isn't this repository's",
-        "@3 isn't this repository's",
-        "@6 isn't this repository's",
+        f"@{their_note} isn't this repository's",
+        f"@{their_note} isn't this repository's",
+        f"@{their_approval} isn't this repository's",
     ]
     assert isinstance(done.exception, InboxError)
 
@@ -4641,7 +4883,7 @@ def test_a_room_reads_no_moment_of_a_session_it_claims_from_another_repository(
             reader=ClaudeTranscripts(),
         )
     }
-    with inboxed(machine, clock, notices, said, recorded):
+    with inboxed(machine, clock, notices, said, recorded) as delivery:
         launched(machine, clock, repo, "one", "claude")
         launched(machine, clock, theirs, "two", "claude")
         hook = machine.host.launch("one").hook
@@ -4652,15 +4894,19 @@ def test_a_room_reads_no_moment_of_a_session_it_claims_from_another_repository(
                 send(hook, lup_call("note", {"remark": key}, key, session_id=session))
             )["hookSpecificOutput"]["updatedInput"]
             call(machine.host.launch("one").mcp, "note", stamped)
+        # Each session's note, in turn: s1's, run in the asker's repository;
+        # then those of the sessions it claims, s9's on the host and s8's in
+        # another project's room.
+        own, *claimed = numbers(delivery)
         room = RoomClient(socket=machine.host.launch("one").request)
-        mine = room.ask(ShowContext(number=1), Context)
+        mine = room.ask(ShowContext(number=own), Context)
         refusals: list[str] = []
-        for number in [3, 5]:
+        for number in claimed:
             with pytest.raises(HostError) as refusal:
                 room.ask(ShowContext(number=number), Context)
             refusals.append(str(refusal.value))
         host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
-        operator = [host.ask(ShowContext(number=number), Context) for number in [3, 5]]
+        operator = [host.ask(ShowContext(number=number), Context) for number in claimed]
     assert [each.text for each in mine.entries if isinstance(each, Said)] == [
         "Note it."
     ]
@@ -4668,6 +4914,7 @@ def test_a_room_reads_no_moment_of_a_session_it_claims_from_another_repository(
         "the conversation isn't one of this repository's",
         "the conversation isn't one of this repository's",
     ]
+    # An anchor is the call's place among a moment's entries, not an item's number.
     assert [each.anchor for each in operator] == [1, 1]
 
 
@@ -4682,13 +4929,15 @@ def test_a_room_is_told_how_far_the_operator_has_seen_its_repositorys_groups_alo
 ) -> None:
     other = tmp_path / "other"
     other.mkdir()
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, repo, "one", "claude")
         launched(machine, clock, other, "two", "codex")
         send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
         send(machine.host.launch("two").hook, codex("SessionStart", source="startup"))
         call(machine.host.launch("one").mcp, "note", {"remark": "Ours."})
+        ours = newest(delivery)
         call(machine.host.launch("two").mcp, "note", {"remark": "Theirs."})
+        theirs = newest(delivery)
         host = client(machine.host, clock)
         listed = host.ask(ListInbox(), Items)
         for each in listed.items:
@@ -4705,8 +4954,8 @@ def test_a_room_is_told_how_far_the_operator_has_seen_its_repositorys_groups_alo
         room = RoomClient(socket=machine.host.launch("one").request).ask(
             ListInbox(), Items
         )
-    assert [each.item for each in operator.seen] == [1, 3]
-    assert [each.item for each in room.seen] == [1]
+    assert [each.item for each in operator.seen] == [ours, theirs]
+    assert [each.item for each in room.seen] == [ours]
 
 
 class Unknown(Request, reads=True):
@@ -4902,18 +5151,20 @@ def test_what_doesnt_fit_waits_for_the_next_hook_and_what_a_gone_hook_told_is_pu
         return await delivery.telling(launch, caller, None, heard, room)
 
     asyncio.run(told(10_000))
-    for text in ["a" * 4_000, "b" * 4_000, "c" * 4_000]:
+    a, b, c = [
         delivery.inbox.made(
             Message(kind="note", text=text), Operator(), main, None, clock.now()
-        )
+        ).number
+        for text in ["a" * 4_000, "b" * 4_000, "c" * 4_000]
+    ]
     first = asyncio.run(told(10_000))
-    assert first.numbers == [1, 2]
+    assert first.numbers == [a, b]
     second = asyncio.run(told(10_000))
-    assert second.numbers == [3]
+    assert second.numbers == [c]
     delivery.returned(second)
-    assert delivery.inbox.item(3).state == Waiting()
+    assert delivery.inbox.item(c).state == Waiting()
     assert asyncio.run(told(100)) == Posted()
-    assert asyncio.run(told(10_000)).numbers == [3]
+    assert asyncio.run(told(10_000)).numbers == [c]
 
 
 def test_an_items_kind_ranks_it_where_it_comes_and_whether_it_notifies() -> None:
@@ -5131,19 +5382,6 @@ def test_a_draft_sent_gives_every_agent_it_covers_the_whole_reply_its_own_items_
         ],
         "wait": True,
     }
-    draft = Draft(
-        comments=[
-            Comment(
-                item=1,
-                quote=Quote(text="1. Parse with lark", start=14, end=32),
-                text="Yes.",
-            ),
-            Comment(item=3, text="Fine by me."),
-            Comment(item=6, text="Later."),
-        ],
-        done=[5],
-        parked=[6],
-    )
     with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path / "one", "one", "claude")
         launched(machine, clock, tmp_path / "two", "two", "claude")
@@ -5153,6 +5391,8 @@ def test_a_draft_sent_gives_every_agent_it_covers_the_whole_reply_its_own_items_
         with ThreadPoolExecutor(max_workers=1) as pool:
             asking = pool.submit(call, machine.host.launch("one").mcp, "ask", question)
             assert notices.arrived.wait(timeout=60)
+            asked = newest(delivery)
+            noted: list[int] = []
             for remark in ["I assumed UTF-8.", "Done reading.", "Another thing."]:
                 stamped = json.loads(
                     send(
@@ -5161,48 +5401,82 @@ def test_a_draft_sent_gives_every_agent_it_covers_the_whole_reply_its_own_items_
                     )
                 )["hookSpecificOutput"]["updatedInput"]
                 call(machine.host.launch("two").mcp, "note", stamped)
+                noted.append(newest(delivery))
+            assumed, reading, another = noted
+            # The quote's offsets are in the question's text, and its `1.` is a
+            # decision's number there: neither is an item's.
+            draft = Draft(
+                comments=[
+                    Comment(
+                        item=asked,
+                        quote=Quote(text="1. Parse with lark", start=14, end=32),
+                        text="Yes.",
+                    ),
+                    Comment(item=assumed, text="Fine by me."),
+                    Comment(item=another, text="Later."),
+                ],
+                done=[reading],
+                parked=[another],
+            )
             kept = drafting(machine, clock, draft)
             shown = HostClient(
                 layout=machine.host, clock=clock, starter=Unstarted()
             ).ask(ShowDraft(), Drafted)
             reviews = sending(machine, clock)
+            made = numbers(delivery)
             returned = asking.result(timeout=60)
         told = send(two, bash("b1", session_id="s2"))
-        states = [delivery.inbox.item(each).state for each in [1, 3, 5, 6]]
+        states = [
+            delivery.inbox.item(each).state
+            for each in [asked, assumed, reading, another]
+        ]
         left = delivery.inbox.draft()
+        threads = delivery.inbox.ledger.every(Thread)
+    # The draft sent makes a review for each session, the asker's first, and
+    # nothing else.
+    *_, to_one, to_two = made
+    assert made == [asked, assumed, reading, another, to_one, to_two]
     assert shown.draft == kept == draft
-    # Each session's first item lands in their root: @2, @4.
-    whole = Review(covers=[1, 3, 5], comments=draft.comments[:2])
-    assert [(each.number, each.reason) for each in reviews] == [(7, whole), (8, whole)]
+    # Each session's items land in no thread.
+    assert threads == []
+    whole = Review(covers=[asked, assumed, reading], comments=draft.comments[:2])
+    assert [(each.number, each.reason) for each in reviews] == [
+        (to_one, whole),
+        (to_two, whole),
+    ]
     assert isinstance(states[0], Answered)
-    assert states[0].answer == 7
+    assert states[0].answer == to_one
     assert [type(each) for each in states[1:]] == [Done, Done, Waiting]
-    assert left == Draft(comments=[draft.comments[2]], parked=[6])
+    assert left == Draft(comments=[draft.comments[2]], parked=[another])
     assert returned[0] == (
-        '<review item="7" from="operator" covers="1 3 5">\n'
-        '<on item="1" kind="question">\n'
-        '<quote part="1.2">1. Parse with lark</quote>\n'
-        '<reply id="7.1">Yes.</reply>\n'
+        f'<review item="{to_one}" from="operator" '
+        f'covers="{asked} {assumed} {reading}">\n'
+        f'<on item="{asked}" kind="question">\n'
+        f'<quote part="{asked}.2">1. Parse with lark</quote>\n'
+        f'<reply id="{to_one}.1">Yes.</reply>\n'
         "</on>\n"
         "<context>\n"
         f"{CONTEXT_LINE}\n"
-        f'<on item="3" kind="note" from="two" worktree="{tmp_path / "two"}">\n'
+        f'<on item="{assumed}" kind="note" from="two" '
+        f'worktree="{tmp_path / "two"}">\n'
         "<comment>Fine by me.</comment>\n"
         "</on>\n"
         "</context>\n"
         "</review>"
     )
     assert context(told) == (
-        '<review item="8" from="operator" covers="1 3 5">\n'
-        '<on item="3" kind="note">\n'
+        f'<review item="{to_two}" from="operator" '
+        f'covers="{asked} {assumed} {reading}">\n'
+        f'<on item="{assumed}" kind="note">\n'
         "<opening>I assumed UTF-8.</opening>\n"
-        '<comment id="8.2">Fine by me.</comment>\n'
+        f'<comment id="{to_two}.2">Fine by me.</comment>\n'
         "</on>\n"
-        '<read items="5"/>\n'
+        f'<read items="{reading}"/>\n'
         "<context>\n"
         f"{CONTEXT_LINE}\n"
-        f'<on item="1" kind="question" from="one" worktree="{tmp_path / "one"}">\n'
-        '<quote part="1.2">1. Parse with lark</quote>\n'
+        f'<on item="{asked}" kind="question" from="one" '
+        f'worktree="{tmp_path / "one"}">\n'
+        f'<quote part="{asked}.2">1. Parse with lark</quote>\n'
         "<reply>Yes.</reply>\n"
         "</on>\n"
         "</context>\n"
@@ -5229,11 +5503,12 @@ def test_a_message_only_marked_read_tells_its_sender_nothing_nor_wakes_it(
             "hookSpecificOutput"
         ]["updatedInput"]
         call(machine.host.launch("one").mcp, "note", stamped)
+        number = newest(delivery)
         send(hook, claude("Stop", stop_hook_active=False))
-        drafting(machine, clock, Draft(done=[1]))
+        drafting(machine, clock, Draft(done=[number]))
         reviews = sending(machine, clock)
-        state = delivery.inbox.item(1).state
-        waiting = delivery.inbox.waiting(delivery.inbox.item(1).sender)
+        state = delivery.inbox.item(number).state
+        waiting = delivery.inbox.waiting(delivery.inbox.item(number).sender)
         frames = messages.close()
     assert reviews == []
     assert isinstance(state, Done)
@@ -5250,14 +5525,6 @@ def test_a_message_written_in_the_review_goes_with_the_reply_its_agent_reading_i
     two = Conversation(
         repository=tmp_path / "two" / ".git", runtime="claude", session="s2"
     )
-    draft = Draft(
-        comments=[Comment(item=1, text="Fine.")],
-        letters=[
-            Letter(to=one, text="Also rename the module."),
-            Letter(to=two, text="Pick up the parser next."),
-            Letter(to=one, text="  "),
-        ],
-    )
     with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path / "one", "one", "claude")
         launched(machine, clock, tmp_path / "two", "two", "claude")
@@ -5269,23 +5536,36 @@ def test_a_message_written_in_the_review_goes_with_the_reply_its_agent_reading_i
             send(first, lup_call("note", {"remark": "I assumed UTF-8."}, "n1"))
         )["hookSpecificOutput"]["updatedInput"]
         call(machine.host.launch("one").mcp, "note", stamped)
+        noted = newest(delivery)
+        draft = Draft(
+            comments=[Comment(item=noted, text="Fine.")],
+            letters=[
+                Letter(to=one, text="Also rename the module."),
+                Letter(to=two, text="Pick up the parser next."),
+                Letter(to=one, text="  "),
+            ],
+        )
         drafting(machine, clock, draft)
         reviews = sending(machine, clock)
+        made = numbers(delivery)
         told_one = send(first, bash("b1"))
         told_two = send(second, bash("b2", session_id="s2"))
         left = delivery.inbox.draft()
-    whole = Review(covers=[1], comments=draft.comments, letters=draft.letters[:2])
+    # The draft sent makes a review for each agent, and nothing else.
+    *_, to_one, to_two = made
+    assert made == [noted, to_one, to_two]
+    whole = Review(covers=[noted], comments=draft.comments, letters=draft.letters[:2])
     assert [(each.number, each.recipient, each.reason) for each in reviews] == [
-        (3, one, whole),
-        (4, two, whole),
+        (to_one, one, whole),
+        (to_two, two, whole),
     ]
     assert left == Draft()
     assert context(told_one) == (
-        '<review item="3" from="operator" covers="1">\n'
-        '<message id="3.2">Also rename the module.</message>\n'
-        '<on item="1" kind="note">\n'
+        f'<review item="{to_one}" from="operator" covers="{noted}">\n'
+        f'<message id="{to_one}.2">Also rename the module.</message>\n'
+        f'<on item="{noted}" kind="note">\n'
         "<opening>I assumed UTF-8.</opening>\n"
-        '<comment id="3.1">Fine.</comment>\n'
+        f'<comment id="{to_one}.1">Fine.</comment>\n'
         "</on>\n"
         "<context>\n"
         f"{CONTEXT_LINE}\n"
@@ -5295,11 +5575,12 @@ def test_a_message_written_in_the_review_goes_with_the_reply_its_agent_reading_i
         "</review>"
     )
     assert context(told_two) == (
-        '<review item="4" from="operator" covers="1">\n'
-        '<message id="4.3">Pick up the parser next.</message>\n'
+        f'<review item="{to_two}" from="operator" covers="{noted}">\n'
+        f'<message id="{to_two}.3">Pick up the parser next.</message>\n'
         "<context>\n"
         f"{CONTEXT_LINE}\n"
-        f'<on item="1" kind="note" from="one" worktree="{tmp_path / "one"}">\n'
+        f'<on item="{noted}" kind="note" from="one" '
+        f'worktree="{tmp_path / "one"}">\n'
         "<comment>Fine.</comment>\n"
         "</on>\n"
         f'<message to="one" worktree="{tmp_path / "one"}">Also rename '
@@ -5313,7 +5594,7 @@ def test_a_draft_of_messages_alone_is_sent_waking_an_agent_with_nothing_waiting(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     one = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         hook = machine.host.launch("one").hook
         messages = Socket(machine.host.launch("one").messages)
@@ -5321,9 +5602,12 @@ def test_a_draft_of_messages_alone_is_sent_waking_an_agent_with_nothing_waiting(
         send(hook, claude("Stop", stop_hook_active=False))
         drafting(machine, clock, Draft(letters=[Letter(to=one, text="Rename it.")]))
         [review] = sending(machine, clock)
+        made = numbers(delivery)
         told = send(hook, bash("b1"))
         frames = messages.close()
-        shown = inbox("show", "1")
+        shown = inbox("show", str(review.number))
+    # The review is the one item made.
+    assert made == [review.number]
     assert review.reason == Review(
         covers=[], letters=[Letter(to=one, text="Rename it.")]
     )
@@ -5331,14 +5615,15 @@ def test_a_draft_of_messages_alone_is_sent_waking_an_agent_with_nothing_waiting(
     assert [json.loads(frame)["message"]["content"] for frame in frames] == [
         (
             '<doorbell from="lup\'s inbox">\n'
-            '<waiting item="1" kind="review" from="operator"/>\n'
+            f'<waiting item="{review.number}" kind="review" from="operator"/>\n'
             "Call `wait_inbox` to read it: what's in your inbox comes through lup's "
             "own tools, never in a message like this one.\n"
             "</doorbell>"
         )
     ]
     assert context(told) == (
-        '<review item="1" from="operator">\n<message id="1.1">Rename it.</message>\n'
+        f'<review item="{review.number}" from="operator">\n'
+        f'<message id="{review.number}.1">Rename it.</message>\n'
         "</review>"
     )
 
@@ -5366,33 +5651,36 @@ def test_a_reply_to_an_ended_subagent_reaches_its_session_as_the_subagents_own(
             )
         )["hookSpecificOutput"]["updatedInput"]
         call(machine.host.launch("one").mcp, "ask", stamped)
+        question = newest(delivery)
         send(hook, claude("SubagentStop", agent_id="a1", agent_type="general-purpose"))
+        ended = newest(delivery)
         drafting(
             machine,
             clock,
             Draft(
-                comments=[Comment(item=1, text="Yes.")],
+                comments=[Comment(item=question, text="Yes.")],
                 letters=[Letter(to=subagent, text="Then stop there.")],
             ),
         )
         [review] = sending(machine, clock)
         told = send(hook, bash("b1"))
-        asked = delivery.inbox.item(1).state
+        asked = delivery.inbox.item(question).state
+        threads = delivery.inbox.ledger.every(Thread)
     assert (review.recipient, review.addressed) == (subagent.main(), subagent)
-    # Their end reached the session first (@3), as a subagent's end does,
-    # after the root their question landed in (@2), which isn't told the
-    # session: the question is their own subagent's.
-    assert asked == Answered(at=clock.now(), answer=4)
+    # Their end reached the session first, as a subagent's end does;
+    # their question landed in no thread, and isn't told the session.
+    assert threads == []
+    assert asked == Answered(at=clock.now(), answer=review.number)
     worker = f"{tmp_path.name}/general-purpose·a1"
     assert context(told) == (
-        f'<ended item="3" from="{worker}" '
+        f'<ended item="{ended}" from="{worker}" '
         'name="general-purpose·a1">They were stopped before they ended their turn.</ended>'
-        f'\n\n<review item="4" from="operator" for="{worker}, '
-        'whose conversation had ended" covers="1">\n'
-        '<message id="4.2">Then stop there.</message>\n'
-        '<on item="1" kind="question">\n'
+        f'\n\n<review item="{review.number}" from="operator" for="{worker}, '
+        f'whose conversation had ended" covers="{question}">\n'
+        f'<message id="{review.number}.2">Then stop there.</message>\n'
+        f'<on item="{question}" kind="question">\n'
         "<opening>Rename it?</opening>\n"
-        '<comment id="4.1">Yes.</comment>\n'
+        f'<comment id="{review.number}.1">Yes.</comment>\n'
         "</on>\n"
         "</review>"
     )
@@ -5430,6 +5718,8 @@ def test_an_items_parts_are_its_markdown_blocks_each_with_an_id_read_alone(
         "- one\n  more\n- two\n  - nested\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n"
         "```py\nx = 1\n```\n"
     )
+    # `blocks` and `PartId` run outside any inbox, on whatever number they're
+    # given: 7 is no ledger's, and how a part's id is made and read is the point.
     parts = blocks(text, 7)
     assert [(each.id.said(), each.text) for each in parts] == [
         ("7.1", "# Reader"),
@@ -5448,30 +5738,31 @@ def test_an_items_parts_are_its_markdown_blocks_each_with_an_id_read_alone(
     for typed in ["7", "7.2.1", "a.b", "7.", "-7.2"]:
         with pytest.raises(ValueError, match="isn't a part's id"):
             PartId.parsed(typed)
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         mcp = machine.host.launch("one").mcp
         send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
         call(mcp, "note", {"remark": "First.\n\nSecond, with\ntwo lines.\n\n- a\n- b"})
+        number = newest(delivery)
 
         def reading(**arguments: JsonValue) -> str:
             text, error = call(mcp, "inbox", arguments)
             assert not error, text
             return text
 
-        whole = reading(number=1)
-        third = reading(part="1.3")
-        missing = reading(part="1.9")
+        whole = reading(number=number)
+        third = reading(part=f"{number}.3")
+        missing = reading(part=f"{number}.9")
         unread = reading(part="one.three")
     assert whole == (
-        "@1, a note you sent to the operator at 2026-10-01 12:00, waiting:\n"
-        '<part id="1.1">First.</part>\n'
-        '<part id="1.2">\nSecond, with\ntwo lines.\n</part>\n'
-        '<part id="1.3">- a</part>\n'
-        '<part id="1.4">- b</part>'
+        f"@{number}, a note you sent to the operator at 2026-10-01 12:00, waiting:\n"
+        f'<part id="{number}.1">First.</part>\n'
+        f'<part id="{number}.2">\nSecond, with\ntwo lines.\n</part>\n'
+        f'<part id="{number}.3">- a</part>\n'
+        f'<part id="{number}.4">- b</part>'
     )
-    assert third == '<part id="1.3">- a</part>'
-    assert missing == "@1 has no part @1.9."
+    assert third == f'<part id="{number}.3">- a</part>'
+    assert missing == f"@{number} has no part @{number}.9."
     assert unread == (
         "Not read: `one.three` isn't a part's id: an item's number, a dot and the "
         "part's place in it, as `414.3`"
@@ -5484,27 +5775,6 @@ def test_a_review_quotes_by_part_and_first_line_reads_in_one_line_and_names_othe
     other = tmp_path / "other"
     other.mkdir()
     body = "First.\n\nSecond line one.\nSecond line two.\n\nThird."
-    draft = Draft(
-        comments=[
-            # Found by its offsets: the part it starts in, cut to its first line.
-            Comment(
-                item=1,
-                quote=Quote(text="Second line one.\nSecond line two.", start=8, end=41),
-                text="Both lines?",
-            ),
-            # Offsets that don't read the quote, as a changed file's lines: by its first line, in one part alone.
-            Comment(item=1, quote=Quote(text="Third.", start=0, end=6), text="Last."),
-            # Held by no part: quoted whole.
-            Comment(
-                item=1, quote=Quote(text="a.py:7\n+L7", start=0, end=0), text="Why?"
-            ),
-            Comment(item=3, text="Fine."),
-            Comment(
-                item=5, quote=Quote(text="Gate hung.", start=0, end=10), text="Again?"
-            ),
-        ],
-        done=[4],
-    )
     with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         launched(machine, clock, other, "two", "codex")
@@ -5513,11 +5783,47 @@ def test_a_review_quotes_by_part_and_first_line_reads_in_one_line_and_names_othe
         send(hook, claude("SessionStart", source="startup"))
         send(hook2, codex("SessionStart", source="startup"))
         call(mcp, "note", {"remark": body})
+        noted = newest(delivery)
         call(mcp, "note", {"remark": "A doubt."})
+        doubt = newest(delivery)
         call(mcp, "note", {"remark": "Done reading."})
+        reading = newest(delivery)
         call(mcp2, "friction", {"text": "Gate hung."})
+        hung = newest(delivery)
+        draft = Draft(
+            comments=[
+                # Found by its offsets: the part it starts in, cut to its first line.
+                Comment(
+                    item=noted,
+                    quote=Quote(
+                        text="Second line one.\nSecond line two.", start=8, end=41
+                    ),
+                    text="Both lines?",
+                ),
+                # Offsets that don't read the quote, as a changed file's lines: by its first line, in one part alone.
+                Comment(
+                    item=noted,
+                    quote=Quote(text="Third.", start=0, end=6),
+                    text="Last.",
+                ),
+                # Held by no part: quoted whole.
+                Comment(
+                    item=noted,
+                    quote=Quote(text="a.py:7\n+L7", start=0, end=0),
+                    text="Why?",
+                ),
+                Comment(item=doubt, text="Fine."),
+                Comment(
+                    item=hung,
+                    quote=Quote(text="Gate hung.", start=0, end=10),
+                    text="Again?",
+                ),
+            ],
+            done=[reading],
+        )
         drafting(machine, clock, draft)
         reviews = sending(machine, clock)
+        made = numbers(delivery)
         told = context(send(hook, bash("b1")))
         told2 = context(
             send(
@@ -5530,50 +5836,58 @@ def test_a_review_quotes_by_part_and_first_line_reads_in_one_line_and_names_othe
                 ),
             )
         )
-        states = [delivery.inbox.item(each).state for each in [1, 3, 4, 5]]
-    assert [each.number for each in reviews] == [7, 8]
+        states = [
+            delivery.inbox.item(each).state for each in [noted, doubt, reading, hung]
+        ]
+    # The draft sent makes a review for each agent, and nothing else.
+    *_, to_one, to_two = made
+    assert made == [noted, doubt, reading, hung, to_one, to_two]
+    assert [each.number for each in reviews] == [to_one, to_two]
     assert [type(each) for each in states] == [Done, Done, Done, Done]
+    covers = f"{noted} {doubt} {reading} {hung}"
     assert told == (
-        '<review item="7" from="operator" covers="1 3 4 5">\n'
-        '<on item="1" kind="note">\n'
-        '<quote part="1.2">Second line one.</quote>\n'
-        '<reply id="7.1">Both lines?</reply>\n'
-        '<quote part="1.3">Third.</quote>\n'
-        '<reply id="7.2">Last.</reply>\n'
+        f'<review item="{to_one}" from="operator" covers="{covers}">\n'
+        f'<on item="{noted}" kind="note">\n'
+        f'<quote part="{noted}.2">Second line one.</quote>\n'
+        f'<reply id="{to_one}.1">Both lines?</reply>\n'
+        f'<quote part="{noted}.3">Third.</quote>\n'
+        f'<reply id="{to_one}.2">Last.</reply>\n'
         "<quote>\na.py:7\n+L7\n</quote>\n"
-        '<reply id="7.3">Why?</reply>\n'
+        f'<reply id="{to_one}.3">Why?</reply>\n'
         "</on>\n"
-        '<on item="3" kind="note">\n'
+        f'<on item="{doubt}" kind="note">\n'
         "<opening>A doubt.</opening>\n"
-        '<comment id="7.4">Fine.</comment>\n'
+        f'<comment id="{to_one}.4">Fine.</comment>\n'
         "</on>\n"
-        '<read items="4"/>\n'
+        f'<read items="{reading}"/>\n'
         "<context>\n"
         f"{CONTEXT_LINE}\n"
-        f'<on item="5" kind="friction" from="other" worktree="{other}">\n'
-        '<quote part="5.1">Gate hung.</quote>\n'
+        f'<on item="{hung}" kind="friction" from="other" worktree="{other}">\n'
+        f'<quote part="{hung}.1">Gate hung.</quote>\n'
         "<reply>Again?</reply>\n"
         "</on>\n"
         "</context>\n"
         "</review>"
     )
     assert told2 == (
-        '<review item="8" from="operator" covers="1 3 4 5">\n'
-        '<on item="5" kind="friction">\n'
-        '<quote part="5.1">Gate hung.</quote>\n'
-        '<reply id="8.5">Again?</reply>\n'
+        f'<review item="{to_two}" from="operator" covers="{covers}">\n'
+        f'<on item="{hung}" kind="friction">\n'
+        f'<quote part="{hung}.1">Gate hung.</quote>\n'
+        f'<reply id="{to_two}.5">Again?</reply>\n'
         "</on>\n"
         "<context>\n"
         f"{CONTEXT_LINE}\n"
-        f'<on item="1" kind="note" from="{tmp_path.name}" worktree="{tmp_path}">\n'
-        '<quote part="1.2">Second line one.</quote>\n'
+        f'<on item="{noted}" kind="note" from="{tmp_path.name}" '
+        f'worktree="{tmp_path}">\n'
+        f'<quote part="{noted}.2">Second line one.</quote>\n'
         "<reply>Both lines?</reply>\n"
-        '<quote part="1.3">Third.</quote>\n'
+        f'<quote part="{noted}.3">Third.</quote>\n'
         "<reply>Last.</reply>\n"
         "<quote>\na.py:7\n+L7\n</quote>\n"
         "<reply>Why?</reply>\n"
         "</on>\n"
-        f'<on item="3" kind="note" from="{tmp_path.name}" worktree="{tmp_path}">\n'
+        f'<on item="{doubt}" kind="note" from="{tmp_path.name}" '
+        f'worktree="{tmp_path}">\n'
         "<comment>Fine.</comment>\n"
         "</on>\n"
         "</context>\n"
@@ -5597,26 +5911,23 @@ def test_a_turns_end_answers_the_operators_words_told_citing_them_held_once_wher
     session = {"claude": "s1", "codex": "t1"}[runtime]
     party = Conversation(repository=tmp_path / ".git", runtime=runtime, session=session)
     host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
-    answer = (
-        "Every one I read, @3.1[Even a stray byte?]: it's replaced. Splitting "
-        "@3[the reader … parser] next, as @3.2[a stray byte] and @3[the] said."
-    )
     with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", runtime)
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         send(hook, payload("SessionStart", source="startup"))
         call(mcp, "note", {"remark": "I assumed UTF-8.\n\nAlso the cache is off."})
+        noted = newest(delivery)
         drafting(
             machine,
             clock,
             Draft(
                 comments=[
                     Comment(
-                        item=1,
+                        item=noted,
                         quote=Quote(text="I assumed UTF-8.", start=0, end=16),
                         text="Every one? Even a stray byte?",
                     ),
-                    Comment(item=1, text="Fine otherwise."),
+                    Comment(item=noted, text="Fine otherwise."),
                 ],
                 letters=[
                     Letter(to=party, text="Then split the reader out of the parser.")
@@ -5624,6 +5935,14 @@ def test_a_turns_end_answers_the_operators_words_told_citing_them_held_once_wher
             ),
         )
         [review] = sending(machine, clock)
+        reviewed = newest(delivery)
+        # The agent's answer cites the review they were told, by its number.
+        old = f"as @{reviewed}.2[a stray byte] and @{reviewed}[the] said"
+        new = f"as @{reviewed}.1[a stray byte] said"
+        answer = (
+            f"Every one I read, @{reviewed}.1[Even a stray byte?]: it's replaced. "
+            f"Splitting @{reviewed}[the reader … parser] next, {old}."
+        )
         send(hook, calling("c1"))
         held = json.loads(
             send(
@@ -5631,62 +5950,62 @@ def test_a_turns_end_answers_the_operators_words_told_citing_them_held_once_wher
                 payload("Stop", stop_hook_active=False, last_assistant_message=answer),
             )
         )
+        # The turn's end, and lup's word on what it cites.
+        *_, ending, unfound = numbers(delivery)
         listed = host.ask(ListInbox(), Items)
         exchange = host.ask(ListItems(conversation=party), Exchanged)
-        fixed, error = call(
-            mcp,
-            "edit",
-            {
-                "number": 4,
-                "old": "as @3.2[a stray byte] and @3[the] said",
-                "new": "as @3.1[a stray byte] said",
-            },
-        )
+        fixed, error = call(mcp, "edit", {"number": ending, "old": old, "new": new})
         ended = send(
             hook,
             payload("Stop", stop_hook_active=True, last_assistant_message="Fixed."),
         )
-        turn, word, after = [delivery.inbox.item(each) for each in [4, 5, 6]]
+        next_end = newest(delivery)
+        made = numbers(delivery)
+        turn, word, after = [
+            delivery.inbox.item(each) for each in [ending, unfound, next_end]
+        ]
     holding = {
         "claude": held.get("hookSpecificOutput", {}).get("additionalContext"),
         "codex": held.get("reason") if held.get("decision") == "block" else None,
     }[runtime]
+    # "2 citations" and "2 places" are counts.
     unresolved = (
-        "2 citations in @4 don't name one passage of the operator's words to you: "
-        "it reached them as you wrote it, shown as written and marked as not found.\n"
-        '<citation said="@3.2[a stray byte]">Nothing in @3.2 reads it; it reads '
-        "@3.1: “a stray byte”.</citation>\n"
-        '<citation said="@3[the]">It reads 2 places in @3, in @3.3 twice: give more '
-        "of the words, so they read one.</citation>\n"
-        "`edit` @4 to name the place you meant, or to drop the citation: the edit's "
-        "answer says what still doesn't resolve."
+        f"2 citations in @{ending} don't name one passage of the operator's words to "
+        "you: it reached them as you wrote it, shown as written and marked as not "
+        "found.\n"
+        f'<citation said="@{reviewed}.2[a stray byte]">Nothing in @{reviewed}.2 '
+        f"reads it; it reads @{reviewed}.1: “a stray byte”.</citation>\n"
+        f'<citation said="@{reviewed}[the]">It reads 2 places in @{reviewed}, in '
+        f"@{reviewed}.3 twice: give more of the words, so they read one.</citation>\n"
+        f"`edit` @{ending} to name the place you meant, or to drop the citation: the "
+        "edit's answer says what still doesn't resolve."
     )
-    assert review.number == 3
-    assert (
-        holding
-        == f'<unresolved item="5" from="lup" of="4">\n{unresolved}\n</unresolved>'
+    # An edit makes no item.
+    assert made == [noted, reviewed, ending, unfound, next_end]
+    assert review.number == reviewed
+    assert holding == (
+        f'<unresolved item="{unfound}" from="lup" of="{ending}">\n{unresolved}\n'
+        "</unresolved>"
     )
     assert isinstance(word.reason, Unresolved)
-    assert (word.reason.of, word.sender, word.recipient) == (4, party, party)
+    assert (word.reason.of, word.sender, word.recipient) == (ending, party, party)
     assert [each.said for each in word.reason.citations] == [
-        "@3.2[a stray byte]",
-        "@3[the]",
+        f"@{reviewed}.2[a stray byte]",
+        f"@{reviewed}[the]",
     ]
-    assert [each.number for each in listed.answers] == [3]
-    assert [each.number for each in listed.commented] == [1]
+    assert [each.number for each in listed.answers] == [reviewed]
+    assert [each.number for each in listed.commented] == [noted]
     # lup's word is listed among what the conversation was sent, as it was told, though it's the conversation's own item.
-    assert [each.item.number for each in exchange.sent] == [1, 4]
-    assert [each.item.number for each in exchange.received] == [3, 5]
+    assert [each.item.number for each in exchange.sent] == [noted, ending]
+    assert [each.item.number for each in exchange.received] == [reviewed, unfound]
     assert exchange.received[1].text == unresolved
-    assert (fixed, error) == ("@4 is edited, and before the operator.", False)
+    assert (fixed, error) == (f"@{ending} is edited, and before the operator.", False)
     assert ended == ""
     assert turn.reason == Message(
         kind="note",
-        text=answer.replace(
-            "as @3.2[a stray byte] and @3[the] said", "as @3.1[a stray byte] said"
-        ),
+        text=answer.replace(old, new),
         ending=True,
-        answers=[3],
+        answers=[reviewed],
     )
     assert turn.edits == [Edit(at=clock.now(), before=answer)]
     assert [
@@ -5696,9 +6015,15 @@ def test_a_turns_end_answers_the_operators_words_told_citing_them_held_once_wher
         )
         for each in turn.citations
     ] == [
-        ("@3.1[Even a stray byte?]", ("3.1", "Even a stray byte?")),
-        ("@3[the reader … parser]", ("3.3", "the reader out of the parser")),
-        ("@3.1[a stray byte]", ("3.1", "a stray byte")),
+        (
+            f"@{reviewed}.1[Even a stray byte?]",
+            (f"{reviewed}.1", "Even a stray byte?"),
+        ),
+        (
+            f"@{reviewed}[the reader … parser]",
+            (f"{reviewed}.3", "the reader out of the parser"),
+        ),
+        (f"@{reviewed}.1[a stray byte]", (f"{reviewed}.1", "a stray byte")),
     ]
     assert after.reason == Message(kind="note", text="Fixed.", ending=True)
     assert notices.raised == []
@@ -5713,33 +6038,33 @@ def test_a_tools_answer_says_which_citations_name_no_passage_and_each_is_kept_on
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         send(hook, claude("SessionStart", source="startup"))
         inbox("send", "one", "Keep the cache.")
+        cache = newest(delivery)
         send(hook, bash("b1"))
-        sent, _ = call(
-            mcp,
-            "send",
-            {
-                "to": "operator",
-                "kind": "note",
-                "text": "On @1, @1.1: kept, @1[the cache]. Not @1[the parser], nor `@1[x]`.",
-            },
+        text = (
+            f"On @{cache}, @{cache}.1: kept, @{cache}[the cache]. "
+            f"Not @{cache}[the parser], nor `@{cache}[x]`."
         )
-        kept = delivery.inbox.item(2)
+        sent, _ = call(mcp, "send", {"to": "operator", "kind": "note", "text": text})
+        number = newest(delivery)
+        kept = delivery.inbox.item(number)
     assert sent == (
-        "Your message is with the operator, @2.\n\n"
-        "A citation in @2 doesn't name one passage of the operator's words to you: "
-        "it reached them as you wrote it, shown as written and marked as not found.\n"
-        '<citation said="@1[the parser]">Nothing of the operator\'s words to you '
-        "reads it.</citation>\n"
-        "`edit` @2 to name the place you meant, or to drop the citation: the edit's "
-        "answer says what still doesn't resolve."
+        f"Your message is with the operator, @{number}.\n\n"
+        f"A citation in @{number} doesn't name one passage of the operator's words "
+        "to you: it reached them as you wrote it, shown as written and marked as not "
+        "found.\n"
+        f'<citation said="@{cache}[the parser]">Nothing of the operator\'s words to '
+        "you reads it.</citation>\n"
+        f"`edit` @{number} to name the place you meant, or to drop the citation: the "
+        "edit's answer says what still doesn't resolve."
     )
+    # Where each citation starts in the text sent, which the number's width moves.
     assert [
         (each.said, each.start, None if each.found is None else each.found.text)
         for each in kept.citations
     ] == [
-        ("@1.1", 7, "Keep the cache."),
-        ("@1[the cache]", 19, "the cache"),
-        ("@1[the parser]", 38, None),
+        (f"@{cache}.1", text.index(f"@{cache}.1"), "Keep the cache."),
+        (f"@{cache}[the cache]", text.index(f"@{cache}[the cache]"), "the cache"),
+        (f"@{cache}[the parser]", text.index(f"@{cache}[the parser]"), None),
     ]
 
 
@@ -5767,8 +6092,14 @@ def test_a_subagents_last_words_after_the_operators_reach_them_as_its_turns_end_
         hook = machine.host.launch("one").hook
         send(hook, payload("SessionStart", source="startup"))
         send(hook, calling("c0"))
-        host.ask(SendItem(launch="one", text="Which three kinds?", agent="a1"), Shown)
+        asked = host.ask(
+            SendItem(launch="one", text="Which three kinds?", agent="a1"), Shown
+        ).item.number
         send(hook, calling("c1"))
+        last = (
+            f"Strings, numbers and lists: @{asked}[which three]. @{asked}[Why] not "
+            "more?"
+        )
         held = json.loads(
             send(
                 hook,
@@ -5777,12 +6108,13 @@ def test_a_subagents_last_words_after_the_operators_reach_them_as_its_turns_end_
                     agent_id="a1",
                     agent_type="general-purpose",
                     stop_hook_active=False,
-                    last_assistant_message=(
-                        "Strings, numbers and lists: @1[which three]. @1[Why] not more?"
-                    ),
+                    last_assistant_message=last,
                 ),
             )
         )
+        # The operator's message, the subagent's last words answering it, and lup's
+        # word to the subagent on what they cite.
+        _, answered, unresolved = numbers(delivery)
         again = send(
             hook,
             payload(
@@ -5807,7 +6139,7 @@ def test_a_subagents_last_words_after_the_operators_reach_them_as_its_turns_end_
             (each.sender, each.reason, [c.found is not None for c in each.citations])
             for each in delivery.inbox.waiting(Operator())
         ]
-        word = delivery.inbox.item(4)
+        word = delivery.inbox.item(unresolved)
     subagent = Conversation(
         repository=tmp_path / ".git",
         runtime=runtime,
@@ -5821,17 +6153,14 @@ def test_a_subagents_last_words_after_the_operators_reach_them_as_its_turns_end_
     assert notes == [
         (
             subagent,
-            Message(
-                kind="note",
-                text="Strings, numbers and lists: @1[which three]. @1[Why] not more?",
-                ending=True,
-                answers=[1],
-            ),
+            Message(kind="note", text=last, ending=True, answers=[asked]),
             [True, False],
         )
     ]
     assert holding is not None
-    assert holding.startswith('<unresolved item="4" from="lup" of="2">')
+    assert holding.startswith(
+        f'<unresolved item="{unresolved}" from="lup" of="{answered}">'
+    )
     assert again == ""
     assert (word.recipient, word.state) == (
         subagent,
@@ -5853,45 +6182,57 @@ def test_edit_changes_what_an_agent_sent_the_operator_alone_and_puts_it_back_bef
         send(hook, claude("SessionStart", source="startup"))
         send(hook2, codex("SessionStart", source="startup"))
         call(mcp, "blocked", {"problem": "The gate hangs, and the gate hangs again."})
+        problem = newest(delivery)
         call(mcp, "ask", {"question": "Split it?"})
+        question = newest(delivery)
         call(mcp2, "note", {"remark": "Theirs."})
-        inbox("done", "1")
-        inbox("answer", "3", "--comment", "Yes.")
+        theirs = newest(delivery)
+        inbox("done", str(problem))
+        inbox("answer", str(question), "--comment", "Yes.")
+        answer = newest(delivery)
 
         def editing(**arguments: JsonValue) -> str:
             text, _ = call(mcp, "edit", arguments)
             return text
 
         refusals = [
-            editing(number=4, new="Mine now."),
-            editing(number=3, new="Split it later?"),
-            editing(number=6, new="No."),
-            editing(number=1, old="gate hangs", new="cache"),
-            editing(number=1, old="nowhere", new="cache"),
-            editing(number=1, new="  "),
-            editing(number=1, old="again", new="again"),
+            editing(number=theirs, new="Mine now."),
+            editing(number=question, new="Split it later?"),
+            editing(number=answer, new="No."),
+            editing(number=problem, old="gate hangs", new="cache"),
+            editing(number=problem, old="nowhere", new="cache"),
+            editing(number=problem, new="  "),
+            editing(number=problem, old="again", new="again"),
         ]
         raised = len(notices.raised)
-        edited = editing(number=1, old="and the gate hangs again", new="on the cache")
-        whole = editing(number=1, new="The gate hangs on the cache.")
-        kept = delivery.inbox.item(1)
+        edited = editing(
+            number=problem, old="and the gate hangs again", new="on the cache"
+        )
+        whole = editing(number=problem, new="The gate hangs on the cache.")
+        kept = delivery.inbox.item(problem)
     assert refusals == [
-        "Not edited: @4 is a note from `other`: only its sender edits it",
-        "Not edited: @3 is a question the operator answered: `send` what changed",
-        "Not edited: @6 is an answer from the operator: only its sender edits it",
+        f"Not edited: @{theirs} is a note from `other`: only its sender edits it",
         (
-            "Not edited: `old` is in @1's text 2 times: give more of it, so it's "
-            "found once"
+            f"Not edited: @{question} is a question the operator answered: `send` "
+            "what changed"
         ),
         (
-            "Not edited: @1's text doesn't hold `old` as written: give a passage of "
-            "it exactly as it stands"
+            f"Not edited: @{answer} is an answer from the operator: only its sender "
+            "edits it"
         ),
-        "Not edited: the edit leaves @1 empty: `withdraw` it instead",
-        "Not edited: the edit leaves @1 as it was",
+        (
+            f"Not edited: `old` is in @{problem}'s text 2 times: give more of it, so "
+            "it's found once"
+        ),
+        (
+            f"Not edited: @{problem}'s text doesn't hold `old` as written: give a "
+            "passage of it exactly as it stands"
+        ),
+        f"Not edited: the edit leaves @{problem} empty: `withdraw` it instead",
+        f"Not edited: the edit leaves @{problem} as it was",
     ]
-    assert edited == "@1 is edited, and before the operator."
-    assert whole == "@1 is edited, and before the operator."
+    assert edited == f"@{problem} is edited, and before the operator."
+    assert whole == f"@{problem} is edited, and before the operator."
     assert kept.reason == Message(kind="problem", text="The gate hangs on the cache.")
     assert kept.edits == [
         Edit(at=clock.now(), before="The gate hangs, and the gate hangs again."),
@@ -5900,8 +6241,8 @@ def test_edit_changes_what_an_agent_sent_the_operator_alone_and_puts_it_back_bef
     assert kept.state == Waiting()
     assert notices.raised[raised:] == [
         (
-            f"lup: `{tmp_path.name}` edited @1, a problem\nThe gate hangs, on the "
-            "cache.\nlup-dev inbox show 1"
+            f"lup: `{tmp_path.name}` edited @{problem}, a problem\nThe gate hangs, on "
+            f"the cache.\nlup-dev inbox show {problem}"
         )
     ]
 
@@ -6793,25 +7134,28 @@ def test_a_flagged_write_is_an_item_gathering_its_file_a_comment_reaching_its_ag
         [item] = delivery.inbox.waiting(Operator())
         host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
         files = host.ask(ShowFiles(number=item.number), Files).files
-        shown = inbox("show", "1")
-        diff = inbox("show", "1", "--diff")
+        shown = inbox("show", str(item.number))
+        diff = inbox("show", str(item.number), "--diff")
         # Commented on in the draft, it's read: the next flagged write is an item of its own.
         drafting(
             machine,
             clock,
-            Draft(comments=[Comment(item=1, text="Yes, but call it Chamber.")]),
+            Draft(
+                comments=[Comment(item=item.number, text="Yes, but call it Chamber.")]
+            ),
         )
         kept = first + room
         landed(
             Replacement(call="e2", tool="Edit", path=rooms, old=kept, new=kept + hall)
         )
+        flagged = newest(delivery)
         reviews = sending(machine, clock)
         reviewed = send(hook, bash("b1"))
-        drafting(machine, clock, Draft(done=[3]))
+        drafting(machine, clock, Draft(done=[flagged]))
         marked = sending(machine, clock)
         quiet = send(hook, bash("b2"))
-        states = [delivery.inbox.item(each).state for each in [1, 3]]
-        second = delivery.inbox.item(3)
+        states = [delivery.inbox.item(each).state for each in [item.number, flagged]]
+        second = delivery.inbox.item(flagged)
     assert told == ["", ""]
     assert notices.raised == []
     assert item.sender == sender
@@ -6839,11 +7183,11 @@ def test_a_flagged_write_is_an_item_gathering_its_file_a_comment_reaching_its_ag
     [review] = reviews
     assert review.recipient == sender
     assert context(reviewed) == (
-        '<review item="4" from="operator" covers="1">\n'
-        '<on item="1" kind="flagged write">\n'
+        f'<review item="{review.number}" from="operator" covers="{item.number}">\n'
+        f'<on item="{item.number}" kind="flagged write">\n'
         "<opening>src/pkg/rooms.py landed, flagged for the operator's review. It "
         "holds at landing: `main` lands once they approve it.</opening>\n"
-        '<comment id="4.1">Yes, but call it Chamber.</comment>\n'
+        f'<comment id="{review.number}.1">Yes, but call it Chamber.</comment>\n'
         "</on>\n"
         "</review>"
     )
@@ -6852,7 +7196,7 @@ def test_a_flagged_write_is_an_item_gathering_its_file_a_comment_reaching_its_ag
     assert "<review" not in quiet
     assert states == [Done(at=clock.now()), Decided(at=clock.now(), approved=True)]
     with pytest.raises(InboxError, match="it isn't withdrawn"):
-        delivery.withdrawn(3, sender, "never mind")
+        delivery.withdrawn(flagged, sender, "never mind")
 
 
 def test_an_edit_flagging_nothing_refreshes_the_open_item_and_makes_none_once_its_read(
@@ -6908,7 +7252,7 @@ def test_an_edit_flagging_nothing_refreshes_the_open_item_and_makes_none_once_it
         [item] = delivery.inbox.waiting(Operator())
         host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
         [file] = host.ask(ShowFiles(number=item.number), Files).files
-        drafting(machine, clock, Draft(done=[1]))
+        drafting(machine, clock, Draft(done=[item.number]))
         sending(machine, clock)
         landed(plain("e2", "LIMIT = 4"))
         # A refresh reaching the inbox after the operator read its item, as a race would have it, makes none.
@@ -6919,12 +7263,12 @@ def test_an_edit_flagging_nothing_refreshes_the_open_item_and_makes_none_once_it
                 sender=sender,
                 diff="",
                 file=file,
-                joining=1,
+                joining=item.number,
                 refreshing=True,
             ),
             Shown,
         )
-        items = sorted(delivery.inbox.items)
+        items = numbers(delivery)
     # The edit flags nothing of its own: the item shows the file as it stands, its whole change judged again.
     assert item.reason == Flagged(
         text=(
@@ -6940,8 +7284,8 @@ def test_an_edit_flagging_nothing_refreshes_the_open_item_and_makes_none_once_it
     assert (file.before, file.after) == (None, Text(text=f"{first}LIMIT = 3\n"))
     assert notices.raised == []
     # Read, the item gathers no more: an edit flagging nothing makes no item.
-    assert items == [1]
-    assert (late.item.number, type(late.item.state)) == (1, Decided)
+    assert items == [item.number]
+    assert (late.item.number, type(late.item.state)) == (item.number, Decided)
 
 
 def test_with_no_host_service_nothing_is_held_for_the_operators_switch(
@@ -7124,12 +7468,15 @@ def test_an_approval_left_with_its_first_reading_is_read_by_the_next_service(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     kept = inbox_opened(machine)
+    made: list[int] = []
     for fingerprint in ["zone", "decided"]:
         approval = asking_approval(tmp_path, fingerprint, typing=True).approval()
         item = kept.made(approval, Operator(), Operator(), tmp_path, clock.now())
         kept.attached(item.number, "", PARSED)
+        made.append(item.number)
+    zone, decided = made
     kept.kept(
-        kept.item(2).model_copy(
+        kept.item(decided).model_copy(
             update={"state": Decided(at=clock.now(), approved=False)}
         )
     )
@@ -7139,7 +7486,7 @@ def test_an_approval_left_with_its_first_reading_is_read_by_the_next_service(
     with inboxed(machine, clock, notices, said, typed=typing, told=told):
         host = client(machine.host, clock)
         assert read.wait(timeout=60)
-        files = host.ask(ShowFiles(number=1), Files).files
+        files = host.ask(ShowFiles(number=zone), Files).files
     assert files == TYPED
     assert typing.asked == [("zone", tmp_path, PARSED)]
 
@@ -7167,6 +7514,7 @@ def test_a_comment_on_an_approval_a_push_asked_reaches_the_session_that_pushed(
             ),
             Settled,
         )
+        declined = newest(delivery)
         told = send(hook, bash("b1"))
         quiet = host.ask(asking_approval(tmp_path, "quiet", pusher), Shown).item
         inbox("answer", str(quiet.number), "--decline")
@@ -7175,11 +7523,12 @@ def test_a_comment_on_an_approval_a_push_asked_reaches_the_session_that_pushed(
         nothing = send(hook, bash("b2"))
         typed = host.ask(asking_approval(tmp_path, "typed", pusher), Shown).item
         inbox("answer", str(typed.number), "--decline", "--comment", "Not yet.")
+        not_yet = newest(delivery)
         later = send(hook, bash("b3"))
         waiting = delivery.inbox.waiting(pusher)
     assert settled.here
     assert context(told) == (
-        '<message item="2" from="operator" kind="note">\n'
+        f'<message item="{declined}" from="operator" kind="note">\n'
         f"The operator declined @{asked.number}, the approval your push asked "
         '("Approve the host zone at abc?"), and commented:\n'
         "Split the reader out first.\n"
@@ -7187,7 +7536,7 @@ def test_a_comment_on_an_approval_a_push_asked_reaches_the_session_that_pushed(
     )
     assert nothing == ""
     assert context(later) == (
-        f'<message item="{typed.number + 1}" from="operator" kind="note">\n'
+        f'<message item="{not_yet}" from="operator" kind="note">\n'
         f"The operator declined @{typed.number}, the approval your push asked "
         '("Approve the host zone at abc?"), and commented:\nNot yet.\n'
         "</message>"
@@ -7323,6 +7672,7 @@ def test_a_turns_end_held_to_tell_an_item_still_puts_its_message_before_the_oper
         hook = machine.host.launch("one").hook
         send(hook, payload("SessionStart", source="startup"))
         inbox("send", "one", "One more thing.")
+        sent = newest(delivery)
         held = json.loads(
             send(
                 hook,
@@ -7333,11 +7683,13 @@ def test_a_turns_end_held_to_tell_an_item_still_puts_its_message_before_the_oper
                 ),
             )
         )
+        decisions = newest(delivery)
         ended = send(
             hook,
             payload("Stop", stop_hook_active=True, last_assistant_message="Done now."),
         )
-        told = delivery.inbox.item(1).state
+        done = newest(delivery)
+        told = delivery.inbox.item(sent).state
         notes = [
             (each.number, each.reason)
             for each in delivery.inbox.waiting(Operator())
@@ -7347,12 +7699,12 @@ def test_a_turns_end_held_to_tell_an_item_still_puts_its_message_before_the_oper
         "claude": held.get("hookSpecificOutput", {}).get("additionalContext"),
         "codex": held.get("reason") if held.get("decision") == "block" else None,
     }[runtime]
-    assert holding == first_note("One more thing.")
+    assert holding == note(sent, "One more thing.")
     assert told == Told(at=clock.now(), how="turn's end")
     assert ended == ""
     assert notes == [
-        (2, Message(kind="note", text="Two decisions for you.", ending=True)),
-        (4, Message(kind="note", text="Done now.", ending=True, answers=[1])),
+        (decisions, Message(kind="note", text="Two decisions for you.", ending=True)),
+        (done, Message(kind="note", text="Done now.", ending=True, answers=[sent])),
     ]
 
 
@@ -7364,8 +7716,9 @@ def test_a_draft_that_answers_nothing_is_refused_and_a_mark_on_the_operator_s_ow
         send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
         call(machine.host.launch("one").mcp, "ask", {"question": "In words?"})
         inbox("send", "one", "Mine.")
+        mine = newest(delivery)
         empty = refused_draft(machine, clock, Draft())
-        drafting(machine, clock, Draft(done=[3]))
+        drafting(machine, clock, Draft(done=[mine]))
         own = client(machine.host, clock).ask(SendDraft(), Reviewed)
         left = delivery.inbox.draft()
     assert empty == (
@@ -7375,8 +7728,8 @@ def test_a_draft_that_answers_nothing_is_refused_and_a_mark_on_the_operator_s_ow
     # A mark on the operator's own message is dropped, said, never refusing the reply.
     [dropped] = own.unanswerable
     assert dropped.said == (
-        "@3 not marked done: it's a note from the operator, which a reply doesn't "
-        "answer"
+        f"@{mine} not marked done: it's a note from the operator, which a reply "
+        "doesn't answer"
     )
     assert left == Draft()
 
@@ -7428,16 +7781,17 @@ def test_a_message_sent_from_reading_a_conversation_quotes_each_passage_it_repli
         )
 
     assert told == (
-        '<message item="1" from="operator" kind="note">\n'
-        f"{quoted(1)}\n"
+        f'<message item="{sent.number}" from="operator" kind="note">\n'
+        f"{quoted(sent.number)}\n"
         "<quote>JSONL <\\/quote></quote>\n"
-        '<reply id="1.2">Even with a closing tag?</reply>\n'
+        f'<reply id="{sent.number}.2">Even with a closing tag?</reply>\n'
         "Carry on after.\n"
         "</message>\n\n"
-        f'<message item="2" from="operator" kind="note">\n{quoted(2)}\n</message>'
+        f'<message item="{bare.number}" from="operator" kind="note">\n'
+        f"{quoted(bare.number)}\n</message>"
     )
     # What the dashboard shows is what's inside each tag.
-    assert listed.received[1].text == quoted(2)
+    assert listed.received[1].text == quoted(bare.number)
     # A message with no words of its own opens with its first reply.
     assert opening(bare) == "Which four?"
 
@@ -7446,7 +7800,7 @@ def test_lup_dev_inbox_send_reaches_a_subagent_by_its_path(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     records = Subagents(tmp_path)
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path / "w", "one", "claude")
         hook = machine.host.launch("one").hook
         send(hook, claude("SessionStart", source="startup"))
@@ -7454,10 +7808,11 @@ def test_lup_dev_inbox_send_reaches_a_subagent_by_its_path(
         records.recorded("a1", "Explore", "t1", name="explore-auth")
         send(hook, records.call("a1", "Explore", "c1"))
         sent = inbox("send", "w/explore-auth", "Look at the tests too.")
+        number = newest(delivery)
         told = context(send(hook, records.call("a1", "Explore", "c2")))
         main = send(hook, bash("b1"))
-    assert sent == "Sent @1 to `w/explore-auth`.\n"
-    assert told == first_note("Look at the tests too.")
+    assert sent == f"Sent @{number} to `w/explore-auth`.\n"
+    assert told == note(number, "Look at the tests too.")
     assert main == ""
 
 
@@ -7516,13 +7871,15 @@ def test_an_items_moment_is_read_from_its_senders_record_around_its_call(
             "hookSpecificOutput"
         ]["updatedInput"]
         call(machine.host.launch("one").mcp, "note", stamped)
+        noted = newest(delivery)
         inbox("send", "one", "Mine.")
+        mine = newest(delivery)
         host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
-        found = host.ask(ShowContext(number=1), Context)
+        found = host.ask(ShowContext(number=noted), Context)
         with pytest.raises(HostError) as unanchored:
-            host.ask(ShowContext(number=3), Context)
-        shown = runner.invoke(cli.app, ["inbox", "show", "1", "--context"])
-        item = delivery.inbox.item(1)
+            host.ask(ShowContext(number=mine), Context)
+        shown = runner.invoke(cli.app, ["inbox", "show", str(noted), "--context"])
+        item = delivery.inbox.item(noted)
     assert item.call == "n1"
     when = datetime(2026, 10, 17, 12, tzinfo=UTC)
     assert found.entries == [
@@ -7533,7 +7890,7 @@ def test_an_items_moment_is_read_from_its_senders_record_around_its_call(
         Said(by="agent", text="Carrying on.", at=when),
     ]
     assert found.anchor == 3
-    assert str(unanchored.value) == "@3 was made by no agent's call"
+    assert str(unanchored.value) == f"@{mine} was made by no agent's call"
     assert shown.exit_code == 0, shown.output
     assert "· called Bash\n\n→ called mcp__lup__note: this item\n\n" in shown.output
 
@@ -7543,7 +7900,7 @@ def test_inbox_lists_this_repositorys_items_and_reads_any_of_them_whole(
 ) -> None:
     other = tmp_path / "other"
     other.mkdir()
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         launched(machine, clock, other, "two", "codex")
         hook = machine.host.launch("one").hook
@@ -7551,6 +7908,7 @@ def test_inbox_lists_this_repositorys_items_and_reads_any_of_them_whole(
         send(hook, claude("SessionStart", source="startup"))
         send(machine.host.launch("two").hook, codex("SessionStart", source="startup"))
         call(mcp, "ask", {"question": "Which parser?\nTwenty kinds of line."})
+        question = newest(delivery)
         noting = lup_call(
             "note",
             {"remark": "I assumed UTF-8."},
@@ -7563,8 +7921,13 @@ def test_inbox_lists_this_repositorys_items_and_reads_any_of_them_whole(
             "note",
             json.loads(send(hook, noting))["hookSpecificOutput"]["updatedInput"],
         )
+        noted = newest(delivery)
         call(machine.host.launch("two").mcp, "note", {"remark": "Elsewhere."})
-        inbox("answer", "1", "--comment", "A model per kind.")
+        another = newest(delivery)
+        inbox("answer", str(question), "--comment", "A model per kind.")
+        answered = newest(delivery)
+        # A number nothing holds, well past every number handed out.
+        nothing = newest(delivery) + 100
 
         def reading(**arguments: JsonValue) -> str:
             text, error = call(mcp, "inbox", arguments)
@@ -7573,17 +7936,17 @@ def test_inbox_lists_this_repositorys_items_and_reads_any_of_them_whole(
 
         waiting = reading()
         every = reading(every=True)
-        asked = reading(number=1)
-        answer = reading(number=6)
-        theirs = reading(number=3)
-        elsewhere = reading(number=4)
-        missing = reading(number=9)
+        asked = reading(number=question)
+        answer = reading(number=answered)
+        theirs = reading(number=noted)
+        elsewhere = reading(number=another)
+        missing = reading(number=nothing)
         reads = json.loads(
             send(
                 hook,
                 lup_call(
                     "inbox",
-                    {"number": 3},
+                    {"number": noted},
                     "r1",
                     agent_id="a1",
                     agent_type="general-purpose",
@@ -7595,56 +7958,69 @@ def test_inbox_lists_this_repositorys_items_and_reads_any_of_them_whole(
     at = "2026-10-01 12:00"
     sub = f"`{tmp_path.name}/a1`"
     assert waiting.splitlines() == [
-        f"@3  {at}  a note from {sub} to the operator, waiting: I assumed UTF-8.",
-        f"@6  {at}  an answer from the operator to you, waiting: A model per kind.",
+        f"@{noted}  {at}  a note from {sub} to the operator, waiting: I assumed UTF-8.",
+        (
+            f"@{answered}  {at}  an answer from the operator to you, waiting: A model "
+            "per kind."
+        ),
         "Not listed: 1 item no longer waiting, which `every` lists.",
     ]
     assert every.splitlines() == [
         (
-            f"@1  {at}  a question from you to the operator, answered at {at}, "
-            "@6: Which parser?"
+            f"@{question}  {at}  a question from you to the operator, answered at "
+            f"{at}, @{answered}: Which parser?"
         ),
         *waiting.splitlines()[:-1],
     ]
     assert asked == (
-        f"@1, a question you sent to the operator at {at}, answered at {at}, "
-        '@6:\n<part id="1.1">\nWhich parser?\nTwenty kinds of line.\n</part>'
+        f"@{question}, a question you sent to the operator at {at}, answered at "
+        f'{at}, @{answered}:\n<part id="{question}.1">\nWhich parser?\nTwenty kinds '
+        "of line.\n</part>"
     )
     assert answer == (
-        '<answer item="6" from="operator" question="1">\n'
+        f'<answer item="{answered}" from="operator" question="{question}">\n'
         "<asked>\nWhich parser?\nTwenty kinds of line.\n</asked>\n"
-        '<comment id="6.1">A model per kind.</comment>\n'
+        f'<comment id="{answered}.1">A model per kind.</comment>\n'
         "</answer>\n\nIt's waiting."
     )
     assert theirs == (
-        f"@3, a note from {sub} to the operator at {at}, waiting:\n"
-        '<part id="3.1">I assumed UTF-8.</part>'
+        f"@{noted}, a note from {sub} to the operator at {at}, waiting:\n"
+        f'<part id="{noted}.1">I assumed UTF-8.</part>'
     )
-    assert elsewhere == missing.replace("9", "4")
-    assert missing == (
-        "@9 isn't among this repository's: `inbox` reads this repository's items alone."
+    # Another repository's item is refused as one nothing holds is.
+    assert (elsewhere, missing) == tuple(
+        f"@{each} isn't among this repository's: `inbox` reads this repository's "
+        "items alone."
+        for each in [another, nothing]
     )
     assert own == (
         (
-            f"@3, a note you sent to the operator at {at}, waiting:\n"
-            '<part id="3.1">I assumed UTF-8.</part>'
+            f"@{noted}, a note you sent to the operator at {at}, waiting:\n"
+            f'<part id="{noted}.1">I assumed UTF-8.</part>'
         ),
         False,
     )
-    assert "   @6  " not in listed
-    assert [line.split()[0] for line in listed.splitlines()] == ["@3", "@4"]
+    assert f"{cited(answered):>5}  " not in listed
+    assert [line.split()[0] for line in listed.splitlines()] == [
+        f"@{noted}",
+        f"@{another}",
+    ]
 
 
 def test_inbox_and_lup_dev_inbox_list_the_latest_within_a_time_saying_what_they_left_out(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
         mcp = machine.host.launch("one").mcp
+        # The note of each hour, by its hour: `made[0]` is Note 1's number.
+        made: list[int] = []
         for hour in range(5):
             call(mcp, "note", {"remark": f"Note {hour + 1}."})
+            made.append(newest(delivery))
             clock.sleep(3600)
+        threads = delivery.inbox.ledger.every(Thread)
 
         def reading(**arguments: JsonValue) -> str:
             text, error = call(mcp, "inbox", arguments)
@@ -7663,11 +8039,12 @@ def test_inbox_and_lup_dev_inbox_list_the_latest_within_a_time_saying_what_they_
         operators_quiet = inbox("--since", "PT10M")
         unread = runner.invoke(cli.app, ["inbox", "--since", "yesterday"])
 
+    # Each note lands in no thread.
+    assert threads == []
+
     def note(hour: int) -> str:
-        # The first note lands in the session's root, which takes the next number.
-        number = hour if hour == 1 else hour + 1
         return (
-            f"@{number}  2026-10-01 {11 + hour}:00  a note from you to the "
+            f"@{made[hour - 1]}  2026-10-01 {11 + hour}:00  a note from you to the "
             f"operator, waiting: Note {hour}."
         )
 
@@ -7692,18 +8069,19 @@ def test_inbox_and_lup_dev_inbox_list_the_latest_within_a_time_saying_what_they_
     assert quiet == (
         "Nothing about this repository waits in the inbox since 2026-10-01 16:50."
     )
-    assert every.splitlines() == [note(number) for number in range(1, 6)]
+    assert every.splitlines() == [note(hour) for hour in range(1, 6)]
     assert refused
     assert "limit" in nothing
     listed = operators.splitlines()
-    assert [line.split()[0] for line in listed[:-1]] == ["@5", "@6"]
+    assert [line.split()[0] for line in listed[:-1]] == [
+        cited(each) for each in made[3:]
+    ]
     assert listed[-1] == (
         'Not listed: 3 earlier items, which `--until` "2026-10-01T15:00:00+00:00" '
         "reads; a `--limit` of 5 lists them all."
     )
     assert [line.split()[0] for line in operators_between.splitlines()] == [
-        "@3",
-        "@4",
+        cited(each) for each in made[1:3]
     ]
     assert operators_quiet == "Nothing made in that time waits for you.\n"
     assert unread.exit_code != 0
@@ -7713,13 +8091,15 @@ def test_inbox_and_lup_dev_inbox_list_the_latest_within_a_time_saying_what_they_
 def test_an_agent_withdraws_its_own_waiting_item_and_nothing_else(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         hook = machine.host.launch("one").hook
         mcp = machine.host.launch("one").mcp
         send(hook, claude("SessionStart", source="startup"))
         call(mcp, "note", {"remark": "Is the build red for you too?"})
+        red = newest(delivery)
         call(mcp, "ask", {"question": "Which parser?"})
+        question = newest(delivery)
         noting = lup_call(
             "note",
             {"remark": "I assumed UTF-8."},
@@ -7732,7 +8112,9 @@ def test_an_agent_withdraws_its_own_waiting_item_and_nothing_else(
             "note",
             json.loads(send(hook, noting))["hookSpecificOutput"]["updatedInput"],
         )
-        inbox("answer", "3", "--comment", "A model per kind.")
+        subagents = newest(delivery)
+        inbox("answer", str(question), "--comment", "A model per kind.")
+        answer = newest(delivery)
 
         def withdrawing(number: int) -> str:
             text, error = call(
@@ -7741,28 +8123,28 @@ def test_an_agent_withdraws_its_own_waiting_item_and_nothing_else(
             assert not error, text
             return text
 
-        taken = withdrawing(1)
-        again = withdrawing(1)
-        answered = withdrawing(3)
-        theirs = withdrawing(4)
+        taken = withdrawing(red)
+        again = withdrawing(red)
+        answered = withdrawing(question)
+        theirs = withdrawing(subagents)
         listed = inbox()
-        shown = inbox("show", "1")
-    assert taken == "@1 is withdrawn, off the operator's list."
+        shown = inbox("show", str(red))
+    assert taken == f"@{red} is withdrawn, off the operator's list."
     assert again == (
-        "Not withdrawn: @1 no longer waits for the operator: it's withdrawn at "
+        f"Not withdrawn: @{red} no longer waits for the operator: it's withdrawn at "
         "2026-10-01 12:00 by its sender: It's green now."
     )
     assert answered == (
-        "Not withdrawn: @3 no longer waits for the operator: it's answered at "
-        "2026-10-01 12:00, @5"
+        f"Not withdrawn: @{question} no longer waits for the operator: it's answered "
+        f"at 2026-10-01 12:00, @{answer}"
     )
     assert theirs == (
-        f"Not withdrawn: @4 is a note from `{tmp_path.name}/a1`: "
+        f"Not withdrawn: @{subagents} is a note from `{tmp_path.name}/a1`: "
         "only its sender withdraws it"
     )
-    assert [line.split()[0] for line in listed.splitlines()] == ["@4"]
+    assert [line.split()[0] for line in listed.splitlines()] == [f"@{subagents}"]
     assert "withdrawn at 2026-10-01 12:00 by its sender: It's green now." in shown
-    assert "@1, a note, was withdrawn by its sender" in said
+    assert f"@{red}, a note, was withdrawn by its sender" in said
 
 
 def test_judged_reads_a_sessions_verdicts_and_its_repositorys_holds_changing_nothing(
@@ -8357,7 +8739,7 @@ def test_an_agents_group_is_seen_up_to_the_operators_own_words_to_them_a_mark_fu
 def test_the_operators_list_says_how_far_they_have_seen_each_group_by_its_review_mark(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
         mcp = machine.host.launch("one").mcp
@@ -8371,17 +8753,18 @@ def test_the_operators_list_says_how_far_they_have_seen_each_group_by_its_review
             MoveMarks(
                 repository=first.sender.repository,
                 module=CORE,
-                marks=[Moving(key=seen(first.sender), up_to="1")],
+                marks=[Moving(key=seen(first.sender), up_to=str(first.number))],
             ),
             MarksMoved,
         )
         call(mcp, "note", {"remark": "Second."})
+        second = newest(delivery)
         after = host.ask(ListInbox(), Items)
     assert before.seen == []
-    # The core's first mark in the repository made the node its marks are drawn
-    # to, @3.
-    assert [item.number for item in after.items] == [1, 4]
-    assert after.seen == [Seen(conversation=first.sender, item=1, at=clock.now())]
+    assert [item.number for item in after.items] == [first.number, second]
+    assert after.seen == [
+        Seen(conversation=first.sender, item=first.number, at=clock.now())
+    ]
 
 
 def test_what_the_operator_writes_on_a_conversation_is_kept_on_the_host_for_it_alone(
@@ -8433,7 +8816,7 @@ def test_a_conversations_items_are_listed_in_every_state_as_it_wrote_and_was_tol
                 return found
 
     with (
-        inboxed(machine, clock, notices, said),
+        inboxed(machine, clock, notices, said) as delivery,
         socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as watch,
     ):
         launched(machine, clock, tmp_path, "one", "claude")
@@ -8445,6 +8828,7 @@ def test_a_conversations_items_are_listed_in_every_state_as_it_wrote_and_was_tol
             "decisions": decisions,
         }
         call(mcp, "ask", stamped(lup_call("ask", asking, "q1")))
+        question = newest(delivery)
         noting = lup_call(
             "note",
             {"remark": "I assumed UTF-8."},
@@ -8453,18 +8837,22 @@ def test_a_conversations_items_are_listed_in_every_state_as_it_wrote_and_was_tol
             agent_type="general-purpose",
         )
         call(mcp, "note", stamped(noting))
+        noted = newest(delivery)
         watch.settimeout(60)
         watch.connect(str(machine.host.watch))
         watch.sendall(f"{ListItems(conversation=session).model_dump_json()}\n".encode())
         with watch.makefile("rb") as replies:
             asked = Exchanged.model_validate_json(replies.readline())
-            inbox("answer", "1", "--leaning", "1", "--comment", "Go.")
+            inbox("answer", str(question), "--leaning", "1", "--comment", "Go.")
+            answer = newest(delivery)
             answered = following(
                 replies.readline,
                 lambda found: isinstance(found.sent[0].item.state, Answered),
             )
         send(hook, claude("SubagentStop", agent_id="a1", agent_type="general-purpose"))
-        inbox("answer", "3", "--comment", "UTF-8 it is.")
+        ended = newest(delivery)
+        inbox("answer", str(noted), "--comment", "UTF-8 it is.")
+        reply = newest(delivery)
         send(hook, bash("b1"))
         host = client(machine.host, clock)
         mains = host.ask(ListItems(conversation=session), Exchanged)
@@ -8474,33 +8862,34 @@ def test_a_conversations_items_are_listed_in_every_state_as_it_wrote_and_was_tol
     ]
     assert asked.sent[0].item.call == "q1"
     assert asked.received == []
-    assert answered.sent[0].item.state == Answered(at=clock.now(), answer=4)
+    assert answered.sent[0].item.state == Answered(at=clock.now(), answer=answer)
+    # A decision's number is its place in the question, not an item's.
     assert [each.text for each in answered.received] == [
         (
             "<asked>Which parser?</asked>\n"
             '<decision number="1" lean="it\'s typed" verdict="leaning: they go with '
-            'the lean" id="4.1">Parse with lark</decision>\n'
-            '<comment id="4.2">Go.</comment>'
+            f'the lean" id="{answer}.1">Parse with lark</decision>\n'
+            f'<comment id="{answer}.2">Go.</comment>'
         )
     ]
-    # The subagent's end reaches the session (@5); the reply to their note,
-    # passed on to the session once they ended, is in both: told to the session,
-    # and for the subagent.
-    assert [each.item.number for each in mains.sent] == [1]
-    assert [each.item.number for each in mains.received] == [4, 5, 6]
+    # The subagent's end reaches the session; the reply to their note, passed on
+    # to the session once they ended, is in both: told to the session, and for
+    # the subagent.
+    assert [each.item.number for each in mains.sent] == [question]
+    assert [each.item.number for each in mains.received] == [answer, ended, reply]
     assert [each.item.state for each in mains.received] == [
         Told(at=clock.now(), how="call")
     ] * 3
     assert mains.received[2].item.addressed == subagent
     assert mains.received[2].text == (
-        '<on item="3" kind="note">\n'
+        f'<on item="{noted}" kind="note">\n'
         "<opening>I assumed UTF-8.</opening>\n"
-        '<comment id="6.1">UTF-8 it is.</comment>\n'
+        f'<comment id="{reply}.1">UTF-8 it is.</comment>\n'
         "</on>"
     )
     assert [(each.item.number, each.text) for each in theirs.sent] == [
-        (3, "I assumed UTF-8."),
-        (5, "They were stopped before they ended their turn."),
+        (noted, "I assumed UTF-8."),
+        (ended, "They were stopped before they ended their turn."),
     ]
     assert theirs.sent[0].item.state == Done(at=clock.now())
     passed = [(each.item, each.text) for each in mains.received[2:]]
@@ -8624,6 +9013,7 @@ def test_a_sent_draft_answers_what_it_marks_done_or_declined_with_the_comments_u
             "hookSpecificOutput"
         ]["updatedInput"]
         call(machine.host.launch("one").mcp, "note", stamped)
+        fyi = newest(delivery)
         host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
         yes = host.ask(asking_approval(tmp_path / "y", "zone", pusher), Shown).item
         no = host.ask(asking_approval(tmp_path / "n", "zone", pusher), Shown).item
@@ -8635,7 +9025,7 @@ def test_a_sent_draft_answers_what_it_marks_done_or_declined_with_the_comments_u
                     Comment(item=yes.number, text="Keep it small."),
                     Comment(item=no.number, text="Not this zone."),
                 ],
-                done=[1, yes.number],
+                done=[fyi, yes.number],
                 declined=[no.number],
                 marks=[mark],
             ),
@@ -8647,7 +9037,7 @@ def test_a_sent_draft_answers_what_it_marks_done_or_declined_with_the_comments_u
         left = delivery.inbox.draft()
     # Marked done, an approval commented on is approved with the comment, where
     # unmarked it would stay unanswered; marked declined, declined with it.
-    assert sent.read == [1]
+    assert sent.read == [fyi]
     assert [each.number for each in sent.approved] == [yes.number]
     assert [each.number for each in sent.declined] == [no.number]
     assert approved == Decided(at=clock.now(), approved=True, comment="Keep it small.")
@@ -8667,10 +9057,11 @@ def test_a_draft_declining_what_isnt_an_approval_or_a_held_change_is_refused(
             "hookSpecificOutput"
         ]["updatedInput"]
         call(machine.host.launch("one").mcp, "note", stamped)
-        drafting(machine, clock, Draft(declined=[1]))
+        fyi = newest(delivery)
+        drafting(machine, clock, Draft(declined=[fyi]))
         with pytest.raises(HostError) as refusal:
             sending(machine, clock)
-        state = delivery.inbox.item(1).state
+        state = delivery.inbox.item(fyi).state
     assert "only an approval or a held change is declined" in str(refusal.value)
     assert isinstance(state, Waiting | Told)
 
@@ -10690,10 +11081,12 @@ def test_land_wakes_each_thread_parked_until_the_branch_it_lands_or_a_commit_its
         send(machine.host.launch("one").hook, started("claude"))
         party = lander(landings, "claude")
         concerns = delivery.concerns()
-        root = concerns.root(party)
         for name, trigger in waiting.items():
             concerns.parked(
-                party, concerns.opened(party, name, root, name=name), [trigger], ""
+                party,
+                concerns.opened(party, name, landings.repository, name=name),
+                [trigger],
+                "",
             )
         merging(landings, machine.host.launch("one").mcp)
         stands = {
@@ -11175,8 +11568,9 @@ def test_accepting_a_branch_merges_it_onto_dev_cleans_up_after_it_and_wakes_what
         send(machine.host.launch("one").hook, started("claude"))
         party = lander(landings, "claude")
         concerns = delivery.concerns()
-        root = concerns.root(party)
-        parked = concerns.opened(party, "after-feat", root, name="after-feat")
+        parked = concerns.opened(
+            party, "after-feat", landings.repository, name="after-feat"
+        )
         concerns.parked(party, parked, [BranchLanded(branch="feat")], "")
         merging(landings, machine.host.launch("one").mcp)
         on_trial = concerns.standing(
@@ -12515,9 +12909,13 @@ def test_the_github_module_s_tools_answer_through_the_server_with_and_without_ar
 
 
 def exchanged(
-    machine: Layout, clock: FakeClock, tmp_path: Path, records: Subagents
+    machine: Layout,
+    clock: FakeClock,
+    tmp_path: Path,
+    records: Subagents,
+    delivery: Delivery,
 ) -> Path:
-    """Make an exchange in a launch named `w`, and return its tool socket: session `s0`'s note at 12:00, landing in their root thread, @2, which `s1` takes; then at 13:00 session `s1`'s note, their question, and their subagent `explore-auth`'s note; at 14:00 the operator's answer, their review commenting on a passage of the note with a message, both told to `s1` at a call, its turn's end answering them, citing the comment, and the operator's reply to it, and the subagent's end."""
+    """Make an exchange in a launch named `w`, through `delivery`, and return its tool socket: session `s0`'s note at 12:00, landing in no thread; then at 13:00 session `s1`'s note, their question, and their subagent `explore-auth`'s note; at 14:00 the operator's answer, their review commenting on a passage of the note with a message, both told to `s1` at a call, its turn's end answering them, citing the comment, and the operator's reply to it, and the subagent's end: nine items, in that order."""
     launched(machine, clock, tmp_path / "w", "one", "claude")
     hook = machine.host.launch("one").hook
     mcp = machine.host.launch("one").mcp
@@ -12526,20 +12924,22 @@ def exchanged(
     clock.sleep(3600)
     send(hook, claude("SessionStart", source="startup"))
     call(mcp, "note", {"remark": "I assumed UTF-8.\n\nThe parser reads twenty kinds."})
+    noted = newest(delivery)
     asking: dict[str, JsonValue] = {
         "decision": "One model per kind?",
         "lean": "Yes, each validates.",
     }
     call(mcp, "ask", {"question": "Which parser?", "decisions": [asking]})
+    question = newest(delivery)
     send(hook, records.spawn("t1", name="explore-auth"))
     records.recorded("a1", "Explore", "t1", name="explore-auth")
     send(hook, records.call("a1", "Explore", "c1"))
     records.lup((hook, mcp), "note", {"remark": "Found the token."}, "a1", "Explore")
     clock.sleep(3600)
-    inbox("answer", "4", "--leaning", "1", "--comment", "Go.")
+    inbox("answer", str(question), "--leaning", "1", "--comment", "Go.")
     passage = "The parser reads twenty kinds."
     comment = Comment(
-        item=3,
+        item=noted,
         quote=Quote(text=passage, start=18, end=18 + len(passage)),
         text="Why twenty?",
     )
@@ -12551,15 +12951,18 @@ def exchanged(
         clock,
         Draft(comments=[comment], letters=[Letter(to=own, text="Carry on.")]),
     )
-    sending(machine, clock)
+    [review] = sending(machine, clock)
     send(hook, bash("b1"))
     ending = claude(
         "Stop",
         stop_hook_active=False,
-        last_assistant_message="The grammar has twenty, @7.1[Why twenty]. Done for now.",
+        last_assistant_message=(
+            f"The grammar has twenty, @{review.number}.1[Why twenty]. Done for now."
+        ),
     )
     send(hook, ending)
-    inbox("answer", "8", "--comment", "Thanks, rest.")
+    end = newest(delivery)
+    inbox("answer", str(end), "--comment", "Thanks, rest.")
     send(hook, records.ended("a1", "Explore", "The token is in auth.py."))
     return mcp
 
@@ -12567,8 +12970,12 @@ def exchanged(
 def test_inbox_reads_one_conversations_exchange_by_its_name_or_its_id_a_line_each(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
-        mcp = exchanged(machine, clock, tmp_path, Subagents(tmp_path))
+    with inboxed(machine, clock, notices, said) as delivery:
+        mcp = exchanged(machine, clock, tmp_path, Subagents(tmp_path), delivery)
+        # The items `exchanged` makes, in the order its docstring tells them.
+        made = numbers(delivery)
+        s0, noted, question, found, answer, review, end, reply, ended = made
+        threads = delivery.inbox.ledger.every(Thread)
 
         def reading(**arguments: JsonValue) -> str:
             text, error = call(mcp, "inbox", arguments)
@@ -12582,6 +12989,8 @@ def test_inbox_reads_one_conversations_exchange_by_its_name_or_its_id_a_line_eac
         earlier = reading(conversation="s0", every=True)
         path = reading(conversation="w/explore-auth", every=True)
         nobody = reading(conversation="nobody")
+    # Session `s0`'s note lands in no thread, nor does anything after it.
+    assert threads == []
     several = (
         "`w` names 2 conversations; this reads the one last heard, claude session "
         "s1, at 2026-10-01 14:00. The others, which `conversation` reads by id: "
@@ -12590,38 +12999,45 @@ def test_inbox_reads_one_conversations_exchange_by_its_name_or_its_id_a_line_eac
     at, then = "2026-10-01 13:00", "2026-10-01 14:00"
     told = f"told at {then} (call)"
     lines = {
-        2: f"@3  {at}  a note from you to the operator, done at {then}: I assumed UTF-8.",
-        3: (
-            f"@4  {at}  a question from you to the operator, answered at {then}, "
-            "@6: Which parser?"
+        noted: (
+            f"@{noted}  {at}  a note from you to the operator, done at {then}: I "
+            "assumed UTF-8."
         ),
-        4: (
-            f"@5  {at}  a note from `w/explore-auth` to the operator, waiting: "
+        question: (
+            f"@{question}  {at}  a question from you to the operator, answered at "
+            f"{then}, @{answer}: Which parser?"
+        ),
+        found: (
+            f"@{found}  {at}  a note from `w/explore-auth` to the operator, waiting: "
             "Found the token."
         ),
-        5: f"@6  {then}  an answer from the operator to you, {told}: Go.",
-        6: f"@7  {then}  a review from the operator to you, {told}: Carry on.",
-        7: (
-            f"@8  {then}  the end of a turn from you to the operator, done at "
-            f"{then}: The grammar has twenty, @7.1[Why twenty]. Done for now."
+        answer: f"@{answer}  {then}  an answer from the operator to you, {told}: Go.",
+        review: (
+            f"@{review}  {then}  a review from the operator to you, {told}: Carry on."
         ),
-        8: f"@9  {then}  a note from the operator to you, waiting: Thanks, rest.",
-        9: (
-            f"@10  {then}  the end of a subagent's turn from `w/explore-auth` to "
-            "you, waiting: They ended their turn. Their last message reaches you from "
-            "your runtime."
+        end: (
+            f"@{end}  {then}  the end of a turn from you to the operator, done at "
+            f"{then}: The grammar has twenty, @{review}.1[Why twenty]. Done for now."
+        ),
+        reply: (
+            f"@{reply}  {then}  a note from the operator to you, waiting: Thanks, rest."
+        ),
+        ended: (
+            f"@{ended}  {then}  the end of a subagent's turn from `w/explore-auth` "
+            "to you, waiting: They ended their turn. Their last message reaches you "
+            "from your runtime."
         ),
     }
     assert every.splitlines() == [
         several,
         "The exchange of `w` (claude session s1): every item, oldest first.",
-        *(lines[number] for number in [2, 3, 5, 6, 7, 8, 9]),
+        *(lines[each] for each in [noted, question, answer, review, end, reply, ended]),
     ]
     assert waiting.splitlines() == [
         several,
         "The exchange of `w` (claude session s1): what still waits, oldest first.",
-        lines[8],
-        lines[9],
+        lines[reply],
+        lines[ended],
         "Not listed: 5 items no longer waiting, which `every` lists.",
     ]
     assert below.splitlines() == [
@@ -12629,13 +13045,16 @@ def test_inbox_reads_one_conversations_exchange_by_its_name_or_its_id_a_line_eac
             "The exchange of `w` (claude session s1) and their 1 subagent: every "
             "item, oldest first."
         ),
-        *(lines[number] for number in range(2, 10)),
+        *(
+            lines[each]
+            for each in [noted, question, found, answer, review, end, reply, ended]
+        ),
     ]
-    assert kinds.splitlines()[1:] == [lines[3], lines[5]]
+    assert kinds.splitlines()[1:] == [lines[question], lines[answer]]
     assert earlier.splitlines() == [
         "The exchange of `w` (claude session s0): every item, oldest first.",
         (
-            "@1  2026-10-01 12:00  a note from `w` (claude session s0) to the "
+            f"@{s0}  2026-10-01 12:00  a note from `w` (claude session s0) to the "
             "operator, waiting: An earlier session's note."
         ),
     ]
@@ -12644,8 +13063,8 @@ def test_inbox_reads_one_conversations_exchange_by_its_name_or_its_id_a_line_eac
             "The exchange of `w/explore-auth` (subagent a1 of claude session s1): "
             "every item, oldest first."
         ),
-        lines[4],
-        lines[9],
+        lines[found],
+        lines[ended],
     ]
     assert nobody == (
         "No conversation about this repository is `nobody`: `conversation` takes "
@@ -12657,8 +13076,10 @@ def test_inbox_reads_one_conversations_exchange_by_its_name_or_its_id_a_line_eac
 def test_inbox_reads_an_exchange_whole_the_operators_words_under_what_they_answer(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
-        mcp = exchanged(machine, clock, tmp_path, Subagents(tmp_path))
+    with inboxed(machine, clock, notices, said) as delivery:
+        mcp = exchanged(machine, clock, tmp_path, Subagents(tmp_path), delivery)
+        # The items `exchanged` makes, in the order its docstring tells them.
+        _, noted, question, _, answer, review, end, reply, ended = numbers(delivery)
 
         def reading(**arguments: JsonValue) -> str:
             text, error = call(mcp, "inbox", arguments)
@@ -12672,64 +13093,74 @@ def test_inbox_reads_an_exchange_whole_the_operators_words_under_what_they_answe
     assert whole == "\n".join(
         [
             "The exchange of `w` (claude session s1): every item, oldest first.",
-            f"@3  {at}  a note from you to the operator, done at {then}:",
-            '<item item="3" kind="note" from="w (claude session s1)">',
+            f"@{noted}  {at}  a note from you to the operator, done at {then}:",
+            f'<item item="{noted}" kind="note" from="w (claude session s1)">',
             "I assumed UTF-8.",
             "",
             "The parser reads twenty kinds.",
-            f'<review item="7" from="operator" made="{then}">',
-            '<quote part="3.2">The parser reads twenty kinds.</quote>',
-            '<reply id="7.1">Why twenty?</reply>',
+            f'<review item="{review}" from="operator" made="{then}">',
+            f'<quote part="{noted}.2">The parser reads twenty kinds.</quote>',
+            f'<reply id="{review}.1">Why twenty?</reply>',
             "</review>",
             "</item>",
             "",
-            f"@4  {at}  a question from you to the operator, answered at {then}, @6:",
-            '<item item="4" kind="question" from="w (claude session s1)">',
+            (
+                f"@{question}  {at}  a question from you to the operator, answered "
+                f"at {then}, @{answer}:"
+            ),
+            f'<item item="{question}" kind="question" from="w (claude session s1)">',
             "Which parser?",
             "1. One model per kind?",
             "   lean: Yes, each validates.",
-            f'<answer item="6" from="operator" made="{then}">',
+            f'<answer item="{answer}" from="operator" made="{then}">',
             (
                 '<decision number="1" lean="Yes, each validates." verdict="leaning: '
-                'they go with the lean" id="6.1">One model per kind?</decision>'
+                f'they go with the lean" id="{answer}.1">One model per kind?'
+                "</decision>"
             ),
-            '<comment id="6.2">Go.</comment>',
+            f'<comment id="{answer}.2">Go.</comment>',
             "</answer>",
             "</item>",
             "",
-            f"@6  {then}  an answer from the operator to you, {told}:",
+            f"@{answer}  {then}  an answer from the operator to you, {told}:",
             (
-                '<answer item="6" from="operator" question="4">What it says on @4 '
-                "is told under it.</answer>"
+                f'<answer item="{answer}" from="operator" question="{question}">What '
+                f"it says on @{question} is told under it.</answer>"
             ),
             "",
-            f"@7  {then}  a review from the operator to you, {told}:",
-            '<review item="7" from="operator" covers="3">',
-            '<message id="7.2">Carry on.</message>',
-            "What it says on @3 is told under it.",
+            f"@{review}  {then}  a review from the operator to you, {told}:",
+            f'<review item="{review}" from="operator" covers="{noted}">',
+            f'<message id="{review}.2">Carry on.</message>',
+            f"What it says on @{noted} is told under it.",
             "</review>",
             "",
-            f"@8  {then}  the end of a turn from you to the operator, done at {then}:",
-            '<item item="8" kind="turn\'s end" from="w (claude session s1)" answers="6 7">',
-            "The grammar has twenty, @7.1[Why twenty]. Done for now.",
-            f'<message item="9" from="operator" made="{then}">',
-            '<comment id="9.1">Thanks, rest.</comment>',
+            (
+                f"@{end}  {then}  the end of a turn from you to the operator, done at "
+                f"{then}:"
+            ),
+            (
+                f'<item item="{end}" kind="turn\'s end" from="w (claude session s1)" '
+                f'answers="{answer} {review}">'
+            ),
+            f"The grammar has twenty, @{review}.1[Why twenty]. Done for now.",
+            f'<message item="{reply}" from="operator" made="{then}">',
+            f'<comment id="{reply}.1">Thanks, rest.</comment>',
             "</message>",
             "</item>",
             "",
-            f"@9  {then}  a note from the operator to you, waiting:",
+            f"@{reply}  {then}  a note from the operator to you, waiting:",
             (
-                '<message item="9" from="operator" kind="note">What it says on @8 '
-                "is told under it.</message>"
+                f'<message item="{reply}" from="operator" kind="note">What it says '
+                f"on @{end} is told under it.</message>"
             ),
             "",
             (
-                f"@10  {then}  the end of a subagent's turn from `w/explore-auth` to "
-                "you, waiting:"
+                f"@{ended}  {then}  the end of a subagent's turn from "
+                "`w/explore-auth` to you, waiting:"
             ),
             (
-                '<item item="10" kind="ended" from="w/explore-auth">They ended their '
-                "turn. Their last message reaches you from your runtime.</item>"
+                f'<item item="{ended}" kind="ended" from="w/explore-auth">They ended '
+                "their turn. Their last message reaches you from your runtime.</item>"
             ),
         ]
     )
@@ -12737,22 +13168,27 @@ def test_inbox_reads_an_exchange_whole_the_operators_words_under_what_they_answe
         'Not listed: 2 earlier items, which `until` "2026-10-01T14:00:00+00:00" '
         "reads; a `limit` of 7 lists them all."
     )
-    assert '<review item="7" from="operator" covers="3">' in latest
-    assert '<on item="3" kind="note">' in latest
+    assert f'<review item="{review}" from="operator" covers="{noted}">' in latest
+    assert f'<on item="{noted}" kind="note">' in latest
 
 
 def test_lup_dev_inbox_narrows_the_operators_own_exchange_as_the_tool_reads(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
-        exchanged(machine, clock, tmp_path, Subagents(tmp_path))
+    with inboxed(machine, clock, notices, said) as delivery:
+        exchanged(machine, clock, tmp_path, Subagents(tmp_path), delivery)
+        # The items `exchanged` makes, in the order its docstring tells them.
+        s0, _, question, found, answer, review, end, _, _ = numbers(delivery)
         plain = inbox()
         waiting = inbox("--conversation", "w")
         every = inbox("--every")
         questions = inbox("--kind", "question", "--every")
         whole = inbox("--conversation", "s1", "--whole", "--every", "--limit", "2")
         unknown = runner.invoke(cli.app, ["inbox", "--kind", "nonsense"])
-    assert [line.split()[0] for line in plain.splitlines()] == ["@1", "@5"]
+    assert [line.split()[0] for line in plain.splitlines()] == [
+        cited(s0),
+        cited(found),
+    ]
     assert waiting.splitlines() == [
         (
             "`w` names 2 conversations; this reads the one last heard, claude "
@@ -12770,7 +13206,7 @@ def test_lup_dev_inbox_narrows_the_operators_own_exchange_as_the_tool_reads(
         f"13:00  a note from {s1} to you, done at 2026-10-01 14:00: I assumed UTF-8.",
         (
             f"13:00  a question from {s1} to you, answered at 2026-10-01 14:00, "
-            "@6: Which parser?"
+            f"@{answer}: Which parser?"
         ),
         f"13:00  a note from {sub} to you, waiting: Found the token.",
         (f"14:00  an answer from you to {s1}, told at 2026-10-01 14:00 (call): Go."),
@@ -12780,15 +13216,17 @@ def test_lup_dev_inbox_narrows_the_operators_own_exchange_as_the_tool_reads(
         ),
         (
             f"14:00  the end of a turn from {s1} to you, done at 2026-10-01 14:00: "
-            "The grammar has twenty, @7.1[Why twenty]. Done for now."
+            f"The grammar has twenty, @{review}.1[Why twenty]. Done for now."
         ),
         f"14:00  a note from you to {s1}, waiting: Thanks, rest.",
     ]
-    assert [line.split()[0] for line in questions.splitlines() if line] == ["@4"]
+    assert [line.split()[0] for line in questions.splitlines() if line] == [
+        cited(question)
+    ]
     assert (
-        '<item item="8" kind="turn\'s end" from="w (claude session s1)" answers="6 7">'
-        in whole
-    )
+        f'<item item="{end}" kind="turn\'s end" from="w (claude session s1)" '
+        f'answers="{answer} {review}">'
+    ) in whole
     assert "a `--limit` of 6 lists them all." in whole
     assert unknown.exit_code == 2
     assert "--kind takes one of turn's end, note, problem" in unknown.output
@@ -12828,8 +13266,8 @@ def test_lup_dev_transcripts_show_says_how_much_of_the_exchange_lups_inbox_holds
     app = commanding.commands(
         "transcripts", modules.resolved.served, modules.made, OperatorAsker
     )
-    with inboxed(machine, clock, notices, said):
-        exchanged(machine, clock, tmp_path, Subagents(tmp_path))
+    with inboxed(machine, clock, notices, said) as delivery:
+        exchanged(machine, clock, tmp_path, Subagents(tmp_path), delivery)
         shown = runner.invoke(app, ["show", "s1"])
         unheard = runner.invoke(app, ["show", "s7"])
     unserved = runner.invoke(app, ["show", "s1"])
@@ -12910,14 +13348,16 @@ def test_the_listing_names_an_agent_no_launch_names_by_its_path(
                 ended=clock.now() if each == earlier else None,
             )
         )
-    for sender in [earlier, parser]:
+    earlier_note, parser_note = (
         inbox.made(
             Message(kind="note", text="Seen."),
             sender,
             Operator(),
             tmp_path,
             clock.now(),
-        )
+        ).number
+        for sender in [earlier, parser]
+    )
     delivery = Delivery.model_construct(inbox=inbox, clock=clock, layout=layout.host)
     listed = asyncio.run(Listing(delivery=delivery).answer(ListInbox()))
     assert isinstance(listed, Items)
@@ -12930,8 +13370,8 @@ def test_the_listing_names_an_agent_no_launch_names_by_its_path(
         "w/parser",
     ]
     assert [cli.line(each, listed.paths).split(" in ")[0] for each in listed.items] == [
-        "   @1  2026-10-01 12:00  a note from `w` (claude session s1)",
-        "   @2  2026-10-01 12:00  a note from `w/parser`",
+        f"{cited(earlier_note):>5}  2026-10-01 12:00  a note from `w` (claude session s1)",
+        f"{cited(parser_note):>5}  2026-10-01 12:00  a note from `w/parser`",
     ]
 
 
@@ -12955,7 +13395,9 @@ def test_a_subagent_is_named_as_its_end_was_told_where_its_whereabouts_keep_no_n
                 parent=parent,
             )
         )
-    inbox.made(Message(kind="note", text="Lexing."), lexer, Operator(), tmp_path, at)
+    noted = inbox.made(
+        Message(kind="note", text="Lexing."), lexer, Operator(), tmp_path, at
+    )
     inbox.made(Ended(name="parser", said="Parsed."), parser, main, tmp_path, at)
     reader = Reader(
         delivery=Delivery.model_construct(inbox=inbox, clock=clock, layout=layout.host),
@@ -12971,7 +13413,10 @@ def test_a_subagent_is_named_as_its_end_was_told_where_its_whereabouts_keep_no_n
             "The exchange of `w/parser/a2` (subagent a2 of claude session s1): every "
             "item, oldest first."
         ),
-        "@1  2026-10-01 12:00  a note from `w/parser/a2` to you, waiting: Lexing.",
+        (
+            f"@{noted.number}  2026-10-01 12:00  a note from `w/parser/a2` to you, "
+            "waiting: Lexing."
+        ),
     ]
     assert parsing.found == 2
     assert parsing.text.splitlines()[0] == (
@@ -13003,19 +13448,21 @@ def test_each_conversations_flagged_writes_are_one_entry_wherever_the_inbox_is_l
         )
 
     start = clock.now()
-    for minutes, (reason, sender) in enumerate(
-        [
-            (flag("src/parser.py", "feat"), parser),
-            (Message(kind="note", text="Header first."), main),
-            (flag("src/lexer.py", "feat"), parser),
-            (flag("src/clock.py", None), main),
-            (flag("src/tokens.py", "feat"), parser),
-        ]
-    ):
+    parser_py, header, lexer_py, clock_py, tokens_py = (
         inbox.made(
             reason, sender, Operator(), tmp_path, start + timedelta(minutes=minutes)
+        ).number
+        for minutes, (reason, sender) in enumerate(
+            [
+                (flag("src/parser.py", "feat"), parser),
+                (Message(kind="note", text="Header first."), main),
+                (flag("src/lexer.py", "feat"), parser),
+                (flag("src/clock.py", None), main),
+                (flag("src/tokens.py", "feat"), parser),
+            ]
         )
-    approved = inbox.item(5).model_copy(
+    )
+    approved = inbox.item(tokens_py).model_copy(
         update={"state": Decided(at=clock.now(), approved=True)}
     )
     inbox.kept(approved)
@@ -13027,15 +13474,17 @@ def test_each_conversations_flagged_writes_are_one_entry_wherever_the_inbox_is_l
     )
     items = inbox.about(tmp_path / ".git")
     listed = reader.read(items, Narrowing())
+    # The subagent's two flagged writes waiting, cited as their entry cites them.
+    both = f"@{parser_py} @{lexer_py}"
     assert listed.found == 4
     assert listed.text.splitlines() == [
-        ("@2  2026-10-01 12:01  a note from `w` to you, waiting: Header first."),
+        f"@{header}  2026-10-01 12:01  a note from `w` to you, waiting: Header first.",
         (
-            "@1 @3  2026-10-01 12:02  2 flagged writes from `w/a1` to you, "
+            f"{both}  2026-10-01 12:02  2 flagged writes from `w/a1` to you, "
             "waiting: 2 files on `feat`"
         ),
         (
-            "@4  2026-10-01 12:03  1 flagged write from `w` to "
+            f"@{clock_py}  2026-10-01 12:03  1 flagged write from `w` to "
             "you, waiting: 1 file on no branch"
         ),
         "Not listed: 1 item not waiting for you, which `every` lists.",
@@ -13044,8 +13493,8 @@ def test_each_conversations_flagged_writes_are_one_entry_wherever_the_inbox_is_l
     latest = reader.read(items, Narrowing(limit=1, every=True))
     assert latest.text.splitlines() == [
         (
-            "@1 @3 @5  2026-10-01 12:04  3 flagged writes from `w/a1` to you, 2 "
-            "waiting, 1 approved: 3 files on `feat`"
+            f"{both} @{tokens_py}  2026-10-01 12:04  3 flagged writes from `w/a1` to "
+            "you, 2 waiting, 1 approved: 3 files on `feat`"
         ),
         (
             "Not listed: 2 earlier items, which `until` "
@@ -13056,20 +13505,20 @@ def test_each_conversations_flagged_writes_are_one_entry_wherever_the_inbox_is_l
     # Read whole, each is under the entry's heading, naming its file.
     whole = reader.read(items, Narrowing(whole=True, kinds=["flagged write"]))
     assert whole.text.split("\n\n")[0].splitlines()[:3] == [
-        ("@1 @3  2026-10-01 12:02  2 flagged writes from `w/a1` to you, waiting:"),
-        '<item item="1" kind="flagged write" from="w/a1">',
+        f"{both}  2026-10-01 12:02  2 flagged writes from `w/a1` to you, waiting:",
+        f'<item item="{parser_py}" kind="flagged write" from="w/a1">',
         "src/parser.py landed, flagged for the operator's review.",
     ]
     # `lup-dev inbox` lists them so too.
     entries = by_agent([each for each in items if isinstance(each.state, Waiting)])
     assert [cli.line(each) for each in entries][1:] == [
         (
-            "@1 @3  2026-10-01 12:02  2 flagged writes from subagent a1 of claude "
-            f"session s1 in {tmp_path}: 2 files on `feat`"
+            f"{both:>5}  2026-10-01 12:02  2 flagged writes from subagent a1 of "
+            f"claude session s1 in {tmp_path}: 2 files on `feat`"
         ),
         (
-            f"   @4  2026-10-01 12:03  1 flagged write from claude session s1 in "
-            f"{tmp_path}: 1 file on no branch"
+            f"{cited(clock_py):>5}  2026-10-01 12:03  1 flagged write from claude "
+            f"session s1 in {tmp_path}: 1 file on no branch"
         ),
     ]
 
@@ -13116,7 +13565,7 @@ def test_a_new_main_session_is_told_where_its_repository_stands_once_as_it_start
             return send(hook, claude("SessionStart", source=source, session_id=session))
 
         first = context(started("startup", "s0"))
-        call(mcp, "ask", {"question": "Which parser?"})
+        call(mcp, "ask", {"question": "Which parser?", "thread": "Which parser"})
         call(mcp, "note", {"remark": "The header comes first."})
         (repository / "lexer.py").write_text("tokens = []\n")
         lexed = dated(repository, "Land the lexer.", "2026-10-01T12:30:00+00:00")
@@ -13160,18 +13609,17 @@ def test_a_new_main_session_is_told_where_its_repository_stands_once_as_it_start
     assert resumed == ""
     assert compacted == ""
     s0 = "`w` (claude session s0)"
-    # A session cleared in its launch holds nothing: the next one takes its root.
+    # A session cleared in its launch holds nothing: the next one hears what it
+    # left, none of it given to them.
     assert second == "\n\n".join(
         [
             opening,
             unlanded,
             (
-                "You took over the root @w, which nobody held: 1 thing waiting on "
-                "the operator.\n"
                 "Open threads of this repository (`inbox` with `thread` reads one "
                 "whole; the `thread` tool with `hold` takes one):\n"
-                '- @w, "a main session\'s root thread", held by you: waiting on '
-                "the operator: 1 question."
+                '- @which-parser, "Which parser", held by nobody: waiting on the '
+                "operator: 1 question."
             ),
             "\n".join(
                 [
@@ -13338,7 +13786,7 @@ def test_agents_open_and_hold_threads_and_are_told_what_lands_there_on_each_runt
     *,
     runtime: str,
 ) -> None:
-    """A session opens a thread, their subagent holds it and is told what the session sends there; the session is told nothing their own subagent sends, which their runtime tells them, on either runtime."""
+    """A session opens a thread, theirs as nobody above answers for it, their subagent takes it and is told what the session sends there; the session is told they took it, and nothing their own subagent sends, which their runtime tells them, on either runtime."""
     records = Subagents(tmp_path)
     rollouts = Rollouts(tmp_path)
     worktree = tmp_path / "w"
@@ -13390,8 +13838,7 @@ def test_agents_open_and_hold_threads_and_are_told_what_lands_there_on_each_runt
         read = inbox("--thread", "lag")
         concerns = delivery.concerns()
         lag = concerns.named(worktree / ".git", "lag")
-        root = concerns.thread(lag.parent or 0)
-    assert opened == ("Opened @lag, under @w.", False)
+    assert opened == ("Opened @lag, held by you.", False)
     assert held == (
         "You hold @lag, and work in it: what you send lands there.",
         False,
@@ -13405,8 +13852,19 @@ def test_agents_open_and_hold_threads_and_are_told_what_lands_there_on_each_runt
     # unnamed; neither it nor how they felt reaches the session above them.
     assert theirs[0].endswith(". You can carry on.")
     assert not felt[1]
-    assert spared == ""
-    assert (root.name, root.parent) == ("w", None)
+    # The session is told their subagent took what they held, and nothing that subagent sends.
+    taken = context(spared)
+    assert taken.startswith("lup: `w/")
+    assert taken.endswith("` took @lag, which you held.")
+    lead = Conversation(
+        repository=worktree / ".git",
+        runtime=runtime,
+        session="s1" if runtime == "claude" else "t1",
+    )
+    # At the top, held by the session as they opened it, then by the subagent who took it.
+    assert lag.parent is None
+    assert lag.holder is not None
+    assert (lag.holder.main(), lag.holder.agent is not None) == (lead, True)
     assert read.startswith("Thread @lag (@")
     assert "Typing fast moves it." in read
     assert "Found it: the debounce." in read
@@ -13423,7 +13881,7 @@ def test_a_subagent_hears_only_what_s_addressed_to_them_in_their_parent_s_thread
     *,
     runtime: str,
 ) -> None:
-    """Two subagents start on their session's root: neither is told the operator's words to the session there, nor the other's note; one who opened a sub-thread is told what lands there, and one who joins the root is told what lands there from then on, on either runtime."""
+    """Two subagents start on the concern their session works in: neither is told the operator's words to the session there, nor the other's note; one who opened a sub-thread is told what lands there, and one who joins the concern is told what lands there from then on, on either runtime."""
     records = Subagents(tmp_path)
     rollouts = Rollouts(tmp_path)
     worktree = tmp_path / "w"
@@ -13455,11 +13913,12 @@ def test_a_subagent_hears_only_what_s_addressed_to_them_in_their_parent_s_thread
         launched(machine, clock, worktree, "one", runtime)
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         send(hook, start("SessionStart", source="startup"))
-        for call, name in [("t1", "parser"), ("t2", "lexer")]:
+        call(mcp, "thread", {"name": "home", "title": "Home", "hold": True})
+        for spawned_by, name in [("t1", "parser"), ("t2", "lexer")]:
             agent, thread = agents[name]
             if runtime == "claude":
-                send(hook, records.spawn(call, name=name))
-                records.recorded(agent, "Explore", call, name=name)
+                send(hook, records.spawn(spawned_by, name=name))
+                records.recorded(agent, "Explore", spawned_by, name=name)
             else:
                 rollouts.recorded(thread, "t1", f"/root/{name}")
         subagent("parser", "note", {"remark": "On the parser."})
@@ -13467,13 +13926,13 @@ def test_a_subagent_hears_only_what_s_addressed_to_them_in_their_parent_s_thread
             "parser", "note", {"remark": "Tabs vanish.", "thread": "Tabs vanish"}
         )
         subagent("lexer", "note", {"remark": "The lexer is done."})
-        root = delivery.concerns().named(worktree / ".git", "w")
+        home = delivery.concerns().named(worktree / ".git", "home")
         drafting(
             machine,
             clock,
             Draft(
                 letters=[
-                    Letter(to=lead, thread=root.number, text="Ship the parser first.")
+                    Letter(to=lead, thread=home.number, text="Ship the parser first.")
                 ]
             ),
         )
@@ -13481,11 +13940,11 @@ def test_a_subagent_hears_only_what_s_addressed_to_them_in_their_parent_s_thread
         spared = subagent_calls("parser", "c1")
         subagent("lexer", "note", {"remark": "Tabs here too.", "thread": "tabs-vanish"})
         under = subagent_calls("parser", "c2")
-        joined = subagent("lexer", "thread", {"name": "w", "join": True})
+        joined = subagent("lexer", "thread", {"name": "home", "join": True})
         subagent("parser", "note", {"remark": "The parser is done."})
         heard = subagent_calls("lexer", "c3")
     assert opened[0].endswith(", in @tabs-vanish. You can carry on.")
-    # On the root by working there and by what they sent landing there, the
+    # On @home by working there and by what they sent landing there, the
     # parser is told neither the operator's words to the session nor the
     # lexer's note: nothing beside their next calls.
     assert spared == ""
@@ -13493,15 +13952,15 @@ def test_a_subagent_hears_only_what_s_addressed_to_them_in_their_parent_s_thread
     assert under.startswith("lup: in @tabs-vanish, a note from `w/lexer`, @")
     assert under.endswith(": Tabs here too.")
     # Joining the thread they started on, the lexer chose it, and hears what lands there.
-    assert joined == ("You work in @w: what you send lands there.", False)
-    assert heard.startswith("lup: in @w, a note from `w/parser`, @")
+    assert joined == ("You work in @home: what you send lands there.", False)
+    assert heard.startswith("lup: in @home, a note from `w/parser`, @")
     assert heard.endswith(": The parser is done.")
 
 
 def test_lup_dev_inbox_answer_answers_a_check_and_whoever_asked_it_is_told(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    with inboxed(machine, clock, notices, said):
+    with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         send(hook, claude("SessionStart", source="startup"))
@@ -13513,20 +13972,25 @@ def test_lup_dev_inbox_answer_answers_a_check_and_whoever_asked_it_is_told(
                 "checks": ["Launch a fresh room: it starts within 5 s."],
             },
         )
-        answered = inbox("answer", "3", "--comment", "It took 9 s.")
-        again = refused("answer", "3", "--comment", "Again.")
+        question = newest(delivery)
+        [check] = [each.number for each in delivery.inbox.ledger.every(Check)]
+        answered = inbox("answer", str(check), "--comment", "It took 9 s.")
+        again = refused("answer", str(check), "--comment", "Again.")
         told = context(send(hook, bash("b1")))
     assert asked == (
         (
-            "Your question is with the operator, @1, and its check @3 waits on "
-            "them. Their answer reaches you at a later call; `wait_inbox` waits "
-            "for it."
+            f"Your question is with the operator, @{question}, in "
+            f"@does-a-fresh-room-start-fast, and its check @{check} waits on them. "
+            "Their answer reaches you at a later call; `wait_inbox` waits for it."
         ),
         False,
     )
-    assert answered == "Answered @3: whoever asked it is told.\n"
-    assert again == "@3 is answered already"
+    assert answered == f"Answered @{check}: whoever asked it is told.\n"
+    assert again == f"@{check} is answered already"
+    # Working in no thread, the asker had one opened for the question, as a check is a thread's.
     assert told == (
-        f"lup: the operator answered your check @3 in @{tmp_path.name}:\n"
-        f'<checked item="3" thread="{tmp_path.name}">It took 9 s.</checked>'
+        f"lup: the operator answered your check @{check} in "
+        "@does-a-fresh-room-start-fast:\n"
+        f'<checked item="{check}" thread="does-a-fresh-room-start-fast">It took 9 s.'
+        "</checked>"
     )

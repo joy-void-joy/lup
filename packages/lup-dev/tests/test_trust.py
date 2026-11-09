@@ -507,16 +507,18 @@ def answering(trust: Trust) -> Answering:
     return trust.asker
 
 
-INBOXED = (
-    "It's @1 in your inbox too: `lup-dev inbox answer 1` answers it from any terminal."
-)
-"""What the launching terminal says after the summary, of the approval's item."""
+def inboxed_as(number: int) -> str:
+    """What the launching terminal says after the summary, of the approval's item, `number`."""
+    return (
+        f"It's @{number} in your inbox too: `lup-dev inbox answer {number}` answers "
+        "it from any terminal."
+    )
 
 
-def summarised(trust: Trust) -> list[str]:
-    """The summary the terminal printed first, by its lines, without the line naming the approval's item."""
+def summarised(trust: Trust, number: int = 1) -> list[str]:
+    """The summary the terminal printed first, by its lines, without the line naming the approval's item: `number`, 1 where `Here` stands in for the inbox."""
     said = answering(trust).said[0].splitlines()
-    assert said[-2:] == ["", INBOXED]
+    assert said[-2:] == ["", inboxed_as(number)]
     return said[:-2]
 
 
@@ -2443,6 +2445,22 @@ def inbox(*arguments: str) -> str:
     return result.output
 
 
+# An approval's item number is read from the service's inbox, never written as a
+# literal: the ledger numbers every node of every repository from one sequence.
+
+
+def newest(delivery: Delivery) -> int:
+    """The number of the item the inbox made last: read while a launch asks, or just after, it's the approval's."""
+    return max(delivery.inbox.items)
+
+
+def declined_elsewhere(running: Background) -> Meanwhile:
+    """At another terminal, `lup-dev inbox answer --decline` the approval the launch asks meanwhile: the item the running service's inbox made last."""
+    return Meanwhile(
+        act=lambda: inbox("answer", str(newest(running.delivery)), "--decline")
+    )
+
+
 def test_the_approval_is_an_inbox_item_the_launching_terminal_answers(
     audiobook: Path, kit: Kit, machine: Layout, clock: FakeClock
 ) -> None:
@@ -2451,16 +2469,17 @@ def test_the_approval_is_an_inbox_item_the_launching_terminal_answers(
             audiobook, kit, yes(), approvals=inboxed(machine, clock), layout=machine
         )
         outcome = trust.ensure()
-        item = running.delivery.inbox.item(1)
-        shown = inbox("show", "1")
-        whole = inbox("show", "1", "--diff")
-        late = inbox("answer", "1", "--decline")
+        number = newest(running.delivery)
+        item = running.delivery.inbox.item(number)
+        shown = inbox("show", str(number))
+        whole = inbox("show", str(number), "--diff")
+        late = inbox("answer", str(number), "--decline")
         listed = inbox()
         raised = running.notices.raised
     assert isinstance(outcome, Trusted)
     assert isinstance(item.reason, store.Approval)
     assert item.state == Decided(at=clock.now(), approved=True)
-    summary = "\n".join(summarised(trust))
+    summary = "\n".join(summarised(trust, number))
     assert Text.from_ansi(item.reason.summary).plain == summary
     assert item.reason.text == answering(trust).asked[-1]
     assert item.worktree == audiobook
@@ -2468,37 +2487,42 @@ def test_the_approval_is_an_inbox_item_the_launching_terminal_answers(
         *summary.splitlines(),
         "",
         item.reason.text,
-        "The whole diff: `lup-dev inbox show 1 --diff`.",
+        f"The whole diff: `lup-dev inbox show {number} --diff`.",
     ]
-    assert shown.startswith(f"@1, an approval from the operator in {audiobook}")
+    assert shown.startswith(f"@{number}, an approval from the operator in {audiobook}")
     assert "approved at" in shown.splitlines()[0]
     assert '+"""Its conditions."""' in whole
-    assert late == "@1 was approved already, elsewhere: your answer changes nothing.\n"
+    assert late == (
+        f"@{number} was approved already, elsewhere: your answer changes nothing.\n"
+    )
     assert listed == "Nothing waits for you.\n"
     [notice] = raised
     assert notice.startswith(f"lup: an approval from the operator in {audiobook}")
-    assert notice.endswith("lup-dev inbox show 1")
+    assert notice.endswith(f"lup-dev inbox show {number}")
 
 
 def test_lup_dev_inbox_answer_answers_it_and_the_terminal_stops_asking(
     audiobook: Path, kit: Kit, machine: Layout, clock: FakeClock, acting: list[Acted]
 ) -> None:
     elsewhere: list[str] = []
-    with served(machine, clock):
+    with served(machine, clock) as running:
         asker = Answering(
             [],
             whole=Meanwhile(
-                act=lambda: elsewhere.append(inbox("answer", "1", "--approve"))
+                act=lambda: elsewhere.append(
+                    inbox("answer", str(newest(running.delivery)), "--approve")
+                )
             ),
         )
         trust = trusting(
             audiobook, kit, asker, approvals=inboxed(machine, clock), layout=machine
         )
         outcome = trust.ensure()
+        number = newest(running.delivery)
     assert isinstance(outcome, Trusted)
     assert asker.asked == [WHOLE]
-    assert asker.said[-1] == "@1 was approved elsewhere."
-    assert elsewhere == ["@1 is approved: each launch waiting on it goes on.\n"]
+    assert asker.said[-1] == f"@{number} was approved elsewhere."
+    assert elsewhere == [f"@{number} is approved: each launch waiting on it goes on.\n"]
     assert [each.commit for each in recording(trust).installed] == [
         outcome.approval.commit
     ]
@@ -2508,7 +2532,7 @@ def test_lup_dev_inbox_answer_answers_it_and_the_terminal_stops_asking(
 def test_declined_from_the_inbox_keeps_the_copy_approved_before(
     audiobook: Path, kit: Kit, machine: Layout, clock: FakeClock, shell: Shell
 ) -> None:
-    with served(machine, clock):
+    with served(machine, clock) as running:
         first = trusting(
             audiobook, kit, yes(), approvals=inboxed(machine, clock), layout=machine
         ).ensure()
@@ -2516,13 +2540,15 @@ def test_declined_from_the_inbox_keeps_the_copy_approved_before(
         head = changed(
             audiobook, {"audiobook/conditions.py": '"""Changed."""\n'}, shell
         )
-        asker = Answering([Meanwhile(act=lambda: inbox("answer", "2", "--decline"))])
+        asker = Answering([declined_elsewhere(running)])
         trust = trusting(
             audiobook, kit, asker, approvals=inboxed(machine, clock), layout=machine
         )
         outcome = trust.ensure()
+        # The first approval's item, then the one the change asked.
+        _, declined = sorted(running.delivery.inbox.items)
     assert outcome == Kept(commit=head, approval=first.approval)
-    assert asker.said[-1] == "@2 was declined elsewhere."
+    assert asker.said[-1] == f"@{declined} was declined elsewhere."
     assert recording(trust).installed == []
 
 
@@ -2533,13 +2559,13 @@ def test_declined_with_nothing_approved_before_launches_nothing(
         trust = trusting(
             audiobook,
             kit,
-            Answering([Meanwhile(act=lambda: inbox("answer", "1", "--decline"))]),
+            Answering([declined_elsewhere(running)]),
             approvals=inboxed(machine, clock),
             layout=machine,
         )
         with pytest.raises(TrustError, match="you declined the host zone"):
             trust.ensure()
-        item = running.delivery.inbox.item(1)
+        item = running.delivery.inbox.item(newest(running.delivery))
     assert item.state == Decided(at=clock.now(), approved=False)
     assert read_model(machine.approved(audiobook / ".git"), Approval) is None
 
@@ -2570,8 +2596,9 @@ def test_two_launches_wait_on_one_approval_and_one_installs(
         waiting.join(PATIENCE)
         items = list(running.delivery.inbox.items)
     assert not waiting.is_alive()
-    assert items == [1]
-    assert answering(second).said[-1] == "@1 was approved elsewhere."
+    # One approval's item, both launches waiting on it.
+    [approval] = items
+    assert answering(second).said[-1] == f"@{approval} was approved elsewhere."
     # Whichever takes the approval's lock first installs; the other reads it.
     [trusted] = [each for each in outcomes if isinstance(each, Trusted)]
     [unchanged] = [each for each in outcomes if isinstance(each, Unchanged)]
@@ -2600,9 +2627,8 @@ def test_with_no_host_service_the_approval_starts_one(
             each.stop()
     assert isinstance(outcome, Trusted)
     [started] = starting.started
-    assert started.delivery.inbox.item(1).state == Decided(
-        at=clock.now(), approved=True
-    )
+    approval = started.delivery.inbox.item(newest(started.delivery))
+    assert approval.state == Decided(at=clock.now(), approved=True)
 
 
 def test_a_wait_outlives_a_service_restart_and_hears_the_next_ones_answer(

@@ -9,12 +9,16 @@ conversation holding it, or none. What's in it are edges drawn to it:
   as a friction the operator gathers there: each counts as a member too;
 - **a reference** from an item of another thread that touches it (`Refers`),
   which is no member;
-- **its status,** the latest of the edges saying where it stands (`Status`):
-  parked until something comes, done to confirm, settled, declined, or
-  reopened.
+- **its status,** the edges saying where it stands (`Status`): parked until
+  something comes, done to confirm, settled, declined, or reopened.
 
 How it stands is read from those edges at each read, never stored
-(`Standing.read`): its status, what in it waits on the operator, and who's on it.
+(`Standing.read`): its two marks, read apart (`Marks`), what in it waits on the
+operator, and who's on it.
+
+A root an earlier lup kept for a session stays on the ledger, and is read as
+absent (`Thread.root`, `without_roots`): what's under it reads as at the top,
+and what's in it as in no thread.
 """
 
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, Self, override
@@ -26,20 +30,27 @@ from lup_ledger.parties import Conversation, Lup, Operator
 from lup_ledger.records import Edge, Kinds, Name, Node
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
 type State = Literal[
     "working",
+    "nobody running",
     "waiting on the operator",
     "parked",
     "done to confirm",
     "settled",
     "declined",
 ]
-"""Where a thread stands: worked on; waiting on the operator, for a check or
-an item of theirs to answer; parked until something comes; done in an agent's
-word, for the operator to confirm; settled, by the operator, or by lup on a
-thread it made of what came before threads; or declined."""
+"""Where a thread stands: worked on; nobody running to work on it, its holder
+ended or never there and nobody above it answering, which is read at each read
+and never drawn; waiting on the operator, for a check or an item of theirs to
+answer; parked until something comes; done in an agent's word, for the operator
+to confirm; settled, by the operator, or by lup on a thread it made of what came
+before threads; or declined."""
+
+ROOT = "a main session's root thread"
+"""What an earlier lup titled the thread it kept for each session, which is read
+as absent (`Thread.root`)."""
 
 
 def thread_only(edge: Edge, target: Node) -> str | None:
@@ -70,6 +81,18 @@ class Thread(Node):
     holder: Conversation | None = None
     """The conversation leading it; none where nobody does."""
 
+    @property
+    def root(self) -> bool:
+        """Whether it's a root an earlier lup kept for a session, which is read as absent: its title says so, as it opened each.
+
+        >>> from datetime import UTC, datetime
+        >>> from pathlib import Path
+        >>> made = {"number": 4, "repository": Path("/r"), "by": Operator(), "at": datetime(2026, 1, 1, tzinfo=UTC), "name": "dev"}
+        >>> Thread(title=ROOT, **made).root, Thread(title="Lag", **made).root
+        (True, False)
+        """
+        return self.parent is None and self.title == ROOT
+
     @override
     def refused(self, found: Callable[[int], Node | None]) -> str | None:
         """Refuse a parent that isn't a thread of the same repository, or that is under this thread, which would make a loop."""
@@ -88,6 +111,16 @@ class Thread(Node):
                 case _:
                     return f"its parent, @{number}, is a `{parent.kind}`, not a thread"
         return None
+
+
+def without_roots(threads: list[Thread]) -> list[Thread]:
+    """Return `threads`, a repository's or every one's, as they're read: each root gone (`Thread.root`), and each thread right under one at the top."""
+    roots = [each.number for each in threads if each.root]
+    return [
+        each.model_copy(update={"parent": None}) if each.parent in roots else each
+        for each in threads
+        if each.number not in roots
+    ]
 
 
 class Check(Node):
@@ -253,7 +286,7 @@ type Trigger = Annotated[
 
 
 class Status(Edge):
-    """An edge saying where its thread stands: the latest drawn is its status.
+    """An edge saying where its thread stands: the latest drawn is its status, and each moves one of its two marks (`Marks`).
 
     Its source, where there is one, is the item that said it.
     """
@@ -311,8 +344,8 @@ class Declined(Status):
 class Reopened(Status):
     """A thread reopened: back to whoever was on it, after it was parked, done, settled or declined.
 
-    The operator reopens one, and lup does where what a parked one waits for
-    comes; an agent never does.
+    The operator reopens one, opening both its marks, and lup does where what a
+    parked one waits for comes, opening the agent's alone; an agent never does.
     """
 
     kind: Literal["ledger:reopened"] = "ledger:reopened"
@@ -328,14 +361,78 @@ KINDS = Kinds(
 """The kinds the ledger declares itself."""
 
 
-def stood(status: Status | None, *, waiting: bool) -> State:
-    """Say where a thread stands given its latest `status`, none where nothing said one, and whether something in it `waiting` on the operator: as its status says, but for a thread working or reopened, which waits on the operator where something in it does.
+class Marks(Model):
+    """A thread's two marks, each its own, read apart from the edges saying where it stands: the agent's, done, parked or open, and the operator's, cleared or open.
 
-    >>> stood(None, waiting=True), stood(None, waiting=False)
-    ('waiting on the operator', 'working')
+    Neither moves the other: an agent saying a thread is done after the
+    operator cleared it leaves it cleared, and the operator clearing one an
+    agent said is done keeps their account. A sub-thread has marks of its own,
+    whatever its parent's. The operator reopening it opens both; lup reopening
+    one parked, as what it waited for came, opens the agent's alone. Nothing new
+    is stored: they're the `Status` edges an earlier lup read as one, its latest.
     """
-    stands = "working" if status is None else status.stands
-    return "waiting on the operator" if stands == "working" and waiting else stands
+
+    agent: Annotated[Done | Parked, Field(discriminator="kind")] | None = None
+    """The agent's mark: the latest `Done` or `Parked`, where nothing reopened
+    it since; none where it's open."""
+    operator: Annotated[Settled | Declined, Field(discriminator="kind")] | None = None
+    """The operator's mark, cleared: the latest `Settled` or `Declined`, where
+    they didn't reopen it since; none where it's open."""
+
+    @classmethod
+    def read(cls, statuses: Sequence[Status]) -> Self:
+        """Read both marks from `statuses`, the edges saying where a thread stands, oldest first.
+
+        >>> from datetime import UTC, datetime
+        >>> from pathlib import Path
+        >>> worker = Conversation(repository=Path("/r"), runtime="r", session="s")
+        >>> drawn = {"target": 4, "repository": Path("/r"), "at": datetime(2026, 1, 1, tzinfo=UTC)}
+        >>> done = Done(by=worker, to_try="Type.", **drawn)
+        >>> settled = Settled(by=Operator(), **drawn)
+        >>> Marks.read([done, settled]) == Marks.read([settled, done]) == Marks(agent=done, operator=settled)
+        True
+        >>> Marks.read([done, settled, Reopened(by=Operator(), **drawn)])
+        Marks(agent=None, operator=None)
+        >>> Marks.read([settled, Reopened(by=Lup(), **drawn)]) == Marks(operator=settled)
+        True
+        """
+        agent: Done | Parked | None = None
+        operator: Settled | Declined | None = None
+        for each in statuses:
+            match each:
+                case Done() | Parked():
+                    agent = each
+                case Settled() | Declined():
+                    operator = each
+                case Reopened(by=Operator()):
+                    agent, operator = None, None
+                case Reopened():
+                    agent = None
+                case _:
+                    pass
+        return cls(agent=agent, operator=operator)
+
+    @property
+    def done(self) -> Done | None:
+        """The agent's account of what's done, where their mark says it is; none else."""
+        return self.agent if isinstance(self.agent, Done) else None
+
+
+def stood(marks: Marks, *, waiting: bool, running: bool = True) -> State:
+    """Say where a thread stands in a word, given its `marks`, whether something in it `waiting` on the operator, and whether anyone `running` answers for it: cleared, as the operator's mark says; else as the agent's says, done or parked; else waiting on the operator where something in it does, and else worked on only where someone answers for it.
+
+    >>> stood(Marks(), waiting=True), stood(Marks(), waiting=False)
+    ('waiting on the operator', 'working')
+    >>> stood(Marks(), waiting=False, running=False), stood(Marks(), waiting=True, running=False)
+    ('nobody running', 'waiting on the operator')
+    """
+    if marks.operator is not None:
+        return marks.operator.stands
+    if marks.agent is not None:
+        return marks.agent.stands
+    if waiting:
+        return "waiting on the operator"
+    return "working" if running else "nobody running"
 
 
 class Member(Model):
@@ -361,11 +458,21 @@ def answered(member: Member, members: list[Member]) -> bool:
     parent handed them answers there. A node itself in the thread, never a
     part, nor an item moved in whole from another, is what answers.
     """
+    return answering(member, members) is not None
+
+
+def answering(member: Member, members: list[Member]) -> int | None:
+    """Return the node in a thread whose members are `members` that answers `member`, a part of the operator's words moved in, the first drawn, by its number; none where nothing in it does, or `member` is no part (`answered`)."""
     if member.part is None:
-        return False
+        return None
     inside = [each.node.number for each in members if not each.moved]
-    return any(
-        each.answers(member.part) and each.source in inside for each in member.drawn
+    return next(
+        (
+            each.source
+            for each in member.drawn
+            if each.answers(member.part) and each.source in inside
+        ),
+        None,
     )
 
 
@@ -376,6 +483,8 @@ class Standing(Model):
     status: SerializeAsAny[Status] | None = None
     """The latest edge saying where it stands, which carries what it says (what
     a parked thread waits for, what to try); none where nothing has."""
+    marks: Marks = Marks()
+    """Its two marks, the agent's and the operator's, each read apart."""
     waiting: list[Member] = []
     """What in it waits on the operator, oldest first, whatever its status."""
     unanswered: list[Member] = []
@@ -386,16 +495,25 @@ class Standing(Model):
     in it, but an item moved in whole from another, whose writer wrote it there."""
 
     @classmethod
-    def read(cls, thread: Thread, drawn: list[Edge], members: list[Member]) -> Self:
-        """Read where `thread` stands from `drawn`, the edges drawn to it, oldest first, and `members`, what's in it.
+    def read(
+        cls,
+        thread: Thread,
+        drawn: list[Edge],
+        members: list[Member],
+        *,
+        running: bool = True,
+    ) -> Self:
+        """Read where `thread` stands from `drawn`, the edges drawn to it, oldest first, `members`, what's in it, and whether anyone `running` answers for it.
 
-        Its latest status says it, but for a thread working or reopened, which
-        waits on the operator where a member does.
+        Its marks say it, each read apart (`Marks`), but for a thread open by
+        both, which waits on the operator where a member does, and else is
+        worked on only where someone answers for it (`stood`).
         """
         statuses = [each for each in drawn if isinstance(each, Status)]
         status = statuses[-1] if statuses else None
+        marks = Marks.read(statuses)
         waiting = [each for each in members if each.node.waiting(each.drawn)]
-        state = stood(status, waiting=bool(waiting))
+        state = stood(marks, waiting=bool(waiting), running=running)
         holder = [] if thread.holder is None else [thread.holder]
         writers = [
             each.node.by
@@ -410,6 +528,7 @@ class Standing(Model):
         return cls(
             state=state,
             status=status,
+            marks=marks,
             waiting=waiting,
             unanswered=unanswered,
             on=list(dict.fromkeys([*holder, *writers])),

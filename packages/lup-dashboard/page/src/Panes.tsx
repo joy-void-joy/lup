@@ -7,7 +7,7 @@ import { RangeSet, StateEffect, type EditorState, type Range } from "@codemirror
 import { Decoration, EditorView, highlightActiveLine } from "@codemirror/view";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
-import { hiddenAt, rebuilt, refold, useEditor } from "./editor";
+import { hiddenAt, reaching, rebuilt, refold, useEditor } from "./editor";
 import type { Here } from "./keys";
 import { listLaid, nearestShown, rowAt, type PlacedRow, type Row, type Showing, bufferKey } from "./panes";
 import { owned, owning, ownersOf, reconcile } from "./reconcile";
@@ -67,6 +67,7 @@ export function Listing({ rows, showing, viewed, open, send, say, escaped, windo
             on: row.says,
             reached: [
                 ...(row.opens === null ? [] : [{ keys: "⏎", says: row.node === undefined ? "open it, and go in" : "go to it", on: null }]),
+                ...(row.goes === undefined ? [] : [{ keys: "⏎", says: "to its own row", on: null }]),
                 ...(row.writes ? [{ keys: "o", says: "write to them", on: null }] : []),
                 ...(row.under === undefined ? [] : [{ keys: "za", says: "open or fold what's under it", on: null }]),
                 { keys: "␣ww", says: "to the buffer, as Ctrl+W w", on: null },
@@ -122,7 +123,18 @@ export function Listing({ rows, showing, viewed, open, send, say, escaped, windo
         const row = rowAt(laid, at);
         if (row?.opens != null) {
             open(row.opens, how, row.node ?? null);
+            return;
         }
+        // A concern dim as context above one nested under it goes to its own row, its nests opened to show it.
+        const target = row?.goes === undefined ? undefined : laid.rows.find((each) => each.row.id === row.goes);
+        const current = view.current;
+        if (target === undefined || current === null) {
+            if (row?.goes !== undefined) {
+                say("Its own row isn't in the list: it's gone, cleared and done, or nothing to list.");
+            }
+            return;
+        }
+        current.dispatch({ effects: reaching(current.state, target.from), selection: { anchor: target.from }, scrollIntoView: true });
     };
     // A click on a row opens it, the keyboard staying in the list.
     useEffect(() => {

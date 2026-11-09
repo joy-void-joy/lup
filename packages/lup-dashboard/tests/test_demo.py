@@ -95,10 +95,12 @@ def test_the_demo_lists_its_launches_as_the_host_lists_those_it_serves() -> None
         "main/render_frames",
     ]
     assert listed.talkers["d4c3"] == []
+    # The docs session's name outlives their launch, as the host keeps it.
     assert listed.sessions == {
         "s1": "lup-impl",
         "s2": "guidance-voice",
         "s3": "main",
+        "s4": "docs-pass",
     }
 
 

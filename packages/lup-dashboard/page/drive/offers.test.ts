@@ -90,12 +90,12 @@ describe("what's offered, in headless Chromium", () => {
         await says(dashboard, "@55");
         await asked(dashboard, { kind: "inbox-answer-approval", number: 55, approved: false });
         await review.holds("decided");
-        await says(dashboard, "the comment on @55 sent on @lup-impl");
+        await says(dashboard, "the comment on @55 sent on @the-build");
         await review.goTo("── @55 held change");
         await offers(dashboard, "comment on it");
         expect(await dashboard.page.locator(".keys").first().innerText()).not.toContain("approve");
         await dashboard.keys.press(["Control+Enter"]);
-        await said(dashboard, "the comment on @55 sent on @lup-impl");
+        await said(dashboard, "the comment on @55 sent on @the-build");
         expect(await dashboard.page.locator(".bar .said").first().innerText()).not.toContain("approved");
         await review.until("lay it out no more once it's sent", (view) => !view.state.doc.toString().includes("── @55 held change"));
     });
@@ -108,39 +108,5 @@ describe("what's offered, in headless Chromium", () => {
         await says(dashboard, "@54 not approved: it's declined at");
         await dashboard.keys.press(["Control+Enter"]);
         await said(dashboard, "@54 not approved: it's declined at");
-    });
-});
-
-describe("what's offered in a thread's own buffer, in headless Chromium", () => {
-    let served: Demo;
-    let dashboard: Dashboard;
-    let review: Review;
-
-    beforeAll(async () => {
-        served = await demo({ size: 0 });
-        dashboard = await open(served.url);
-        review = await dashboard.review();
-        await review.holds(DEMO_ITEM);
-        await review.settled(1500);
-    });
-
-    afterEach(() => {
-        expect(dashboard.thrown).toEqual([]);
-    });
-
-    afterAll(async () => {
-        await dashboard?.close();
-        await served?.close();
-    });
-
-    it("offers only a comment on what's past waiting, Space d going on to the thread it's in", async () => {
-        // Read as its buffer opens, in the thread's history.
-        await dashboard.openRow("@transcript-reader");
-        await review.holds("── @47 note");
-        await review.goTo("── @47 note");
-        await offers(dashboard, "comment on it");
-        const keys = await dashboard.page.locator(".keys").first().innerText();
-        expect(keys).not.toContain("leave it for later");
-        expect(keys).toContain("@transcript-reader");
     });
 });

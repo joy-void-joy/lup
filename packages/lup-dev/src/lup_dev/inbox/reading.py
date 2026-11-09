@@ -866,10 +866,10 @@ def stood(standing: Standing) -> str:
             case _:
                 return "part of the operator's words"
 
-    match standing.status:
-        case Parked(until=until):
+    match standing.marks:
+        case ledger.Marks(operator=None, agent=Parked(until=until)):
             state = f"parked until {triggers(until)}"
-        case ledger.Done(to_try=to_try):
+        case ledger.Marks(operator=None, agent=ledger.Done(to_try=to_try)):
             state = f"done to confirm, to try: {cue(to_try)}"
         case _:
             state = standing.state

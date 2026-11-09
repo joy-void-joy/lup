@@ -133,6 +133,7 @@ from lup_dev.switching import CopiesListed, ListCopies
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
 from lup_ledger.parties import Conversation, Operator
+from lup_ledger.threads import In, Thread
 
 if TYPE_CHECKING:
     from lup_dev.inbox.store import Item
@@ -396,6 +397,27 @@ def held_by_host(tmp_path: Path) -> tuple[Host, Standing]:
         call="toolu_q",
     )
     note = made(Message(kind="note", text="done"), MAIN, worktree)
+    # A concern of the session's, the note in it, as the host keeps one.
+    concern = ledger.kept(
+        Thread(
+            number=ledger.numbered(),
+            repository=REPOSITORY,
+            by=MAIN,
+            at=AT,
+            name="parse",
+            title="The parser",
+            holder=MAIN,
+        )
+    )
+    ledger.drawn(
+        In(
+            source=note.number,
+            target=concern.number,
+            repository=REPOSITORY,
+            by=MAIN,
+            at=AT,
+        )
+    )
     theirs = made(Message(kind="note", text="theirs"), THEIRS, elsewhere)
     approval = made(
         Approval(
@@ -663,7 +685,7 @@ def test_every_request_the_page_may_send_acts_on_the_copy_alone(tmp_path: Path) 
                 argument=of.model_dump(mode="json"),
             )
             assert ask(viewing, Viewed).blocks.blocks
-        # The copy's past conversations are threads, as the host would make them.
+        # The copy's threads read as the host reads them.
         threads = ask(ListThreads(), ThreadsRead).threads
         assert threads
         first = threads[0].thread.number

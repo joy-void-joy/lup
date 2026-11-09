@@ -184,6 +184,12 @@ def test_a_parked_thread_woken_is_reopened_by_lup_and_whoever_answers_for_it_is_
 def test_a_thread_whose_holder_ended_is_told_to_the_holder_above_as_it_comes_due(
     world: World,
 ) -> None:
+    # The session holds the concern it's under, and works there.
+    asyncio.run(
+        world.speaker(world.main("s1")).thread(
+            Threading(name="home", title="Home", hold=True)
+        )
+    )
     worker = world.spawned("a1", "fixer")
     world.parked("release", Parking(branch="build-x"), worker)
     world.delivery.inbox.placed(

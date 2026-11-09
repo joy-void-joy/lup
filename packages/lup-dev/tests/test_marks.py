@@ -61,7 +61,7 @@ def layout(tmp_path: Path) -> Layout:
 
 
 def thread(store: MarkStore, repository: Path, at: datetime) -> Thread:
-    """Open a thread on the store's ledger, as a session's root is."""
+    """Open a thread on the store's ledger, held by a session."""
     main = Conversation(repository=repository, runtime="claude", session="s1")
     return store.ledger.kept(
         Thread(
@@ -69,8 +69,8 @@ def thread(store: MarkStore, repository: Path, at: datetime) -> Thread:
             repository=repository,
             by=main,
             at=at,
-            name="root",
-            title="a root",
+            name="home",
+            title="Home",
             holder=main,
         )
     )
