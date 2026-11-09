@@ -397,7 +397,10 @@ class SpawnTools(Model, RoomTools, arbitrary_types_allowed=True):
             f"{tail(log)}"
         )
         await self.delivery.posted(
-            Message(kind="problem", text=text), child, spawner.conversation, None
+            Message(kind="problem", text=text),
+            child,
+            self.delivery.reaching(spawner.conversation),
+            None,
         )
 
 

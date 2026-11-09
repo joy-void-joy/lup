@@ -1319,6 +1319,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         if place is None or place.parent is None:
             return
         self.inbox.placed(place.model_copy(update={"held": []}))
+        spawner = self.reaching(place.parent)
         news = Ended(
             name=launch.name or launch.launch,
             stopped=heard.stopped,
@@ -1326,7 +1327,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             said=heard.said,
             held=place.held,
         )
-        await self.posted(news, party, place.parent, launch.worktree)
+        await self.posted(news, party, spawner, launch.worktree)
+
+    def reaching(self, party: Conversation) -> Conversation:
+        """Return whom an item for `party`, an agent who spawned a session through lup, reaches: them, or their session's main conversation where they're a subagent who ended, as what waited for them goes there as they end (`ended`)."""
+        place = self.inbox.whereabouts.get(party.key())
+        if party.agent is None or place is None or place.ended is None:
+            return party
+        return party.main()
 
     async def called_up(self, launch: Register, session: str) -> None:
         """Give a held session what waits for them as their first turn, once their launcher calls them up: what an agent's spawn addressed to them, their brief among it, and what came for them while they were away; not told as they started, where no turn would begin on it."""
@@ -1377,7 +1385,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         handed = None if spawner.concern is None else concerns.at(spawner.concern)
         where = "" if handed is None else f": its reports are in @{handed.name}"
         self.left(
-            spawner.conversation,
+            self.reaching(spawner.conversation),
             f"lup: `{launch.name or launch.launch}`, whom you spawned, ended{where}.",
         )
 

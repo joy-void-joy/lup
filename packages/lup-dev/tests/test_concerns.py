@@ -6,8 +6,10 @@ from typing import TYPE_CHECKING, override
 
 import pytest
 
+from lup.events import TurnEnded
 from lup.sessions import results
 from lup_dev import cli
+from lup_dev.host.courier import Heard
 from lup_dev.host.held import HeldLaunch
 from lup_dev.host.names import Names
 from lup_dev.host.protocol import Limits, Register, Spawner
@@ -22,6 +24,7 @@ from lup_dev.inbox.reading import Narrowing, Reader
 from lup_dev.inbox.store import (
     KINDS,
     Comment,
+    Ended,
     Inbox,
     InboxError,
     Letter,
@@ -1338,3 +1341,34 @@ def test_a_spawn_whose_session_never_came_up_reaches_its_spawner_as_a_problem(
         "build."
     )
     assert not item.quiet
+
+
+def test_a_side_job_s_report_to_a_subagent_who_ended_reaches_their_session(
+    delivery: Delivery, clock: FakeClock
+) -> None:
+    """What waited for a subagent goes to their session's own conversation as they end, and so does what comes for them after: a side job they spawned outlives them."""
+    register = launched(delivery, "dev", "s1")
+    worker = spawned(delivery, register, main("s1"), "a1", "fixer")
+    job = launched(
+        delivery, "measure", "c1", Spawner(launch="dev", conversation=worker)
+    )
+    place = delivery.inbox.whereabouts[worker.key()]
+    delivery.inbox.placed(place.model_copy(update={"ended": clock.now()}))
+
+    asyncio.run(
+        delivery.reported(
+            main("c1"),
+            job,
+            Heard(
+                event=TurnEnded(),
+                session="c1",
+                judged=False,
+                fits=10_000,
+                said="It takes four minutes.",
+            ),
+        )
+    )
+    item = delivery.inbox.item(newest(delivery))
+
+    assert item.recipient == main("s1")
+    assert item.reason == Ended(name="measure", said="It takes four minutes.")
