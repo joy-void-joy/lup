@@ -252,16 +252,23 @@ class ClaudeHeld(MutableModel, HeldSession, arbitrary_types_allowed=True):
                 each.set_exception(HeldError("the session ended before answering"))
 
     async def heard(self, line: bytes) -> None:
-        """Take in one line Claude Code wrote: a turn's start or end, an answer, or a request of its own, refused; any other line is the turn's, and passed over."""
+        """Take in one line Claude Code wrote: a turn's start or end, an answer, or a request of its own, refused; any other line is the turn's, and passed over.
+
+        A line that doesn't read as what its type says is said and passed
+        over, so reading goes on: a reader that stopped would leave the
+        session blocked once its output filled.
+        """
         try:
             raw = TypeAdapter[JsonValue](JsonValue).validate_json(line)
-            kind = Kind.model_validate(raw)
-        except ValidationError:
+            await self.taken(Kind.model_validate(raw), raw)
+        except ValidationError as unread:
             self.said(
-                f"The session wrote a line of {len(line):,} bytes that isn't one of "
-                "its messages."
+                f"The session wrote a line of {len(line):,} bytes that doesn't read "
+                f"as one of its messages: {unread.error_count()} errors."
             )
-            return
+
+    async def taken(self, kind: Kind, raw: JsonValue) -> None:
+        """Act on one line of Claude Code's, of the kind `kind`, raising `ValidationError` where it isn't what its kind says."""
         match kind:
             case Kind(type="system", subtype="init"):
                 self.turning = True

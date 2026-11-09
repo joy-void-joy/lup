@@ -106,6 +106,7 @@ def test_a_request_waiting_as_the_session_ends_fails_and_one_of_its_own_is_refus
         interrupting = asyncio.create_task(held.interrupt())
         asked = json.loads(await heard.readline())
         saying.write(b"not json\n")
+        saying.write(b'{"type": "result", "subtype": 7}\n')
         saying.write(
             json.dumps(
                 {
@@ -147,7 +148,14 @@ def test_a_request_waiting_as_the_session_ends_fails_and_one_of_its_own_is_refus
     assert isinstance(failure, HeldError)
     assert "ended before answering" in str(failure)
     assert said == [
-        "The session wrote a line of 9 bytes that isn't one of its messages.",
+        (
+            "The session wrote a line of 9 bytes that doesn't read as one of its "
+            "messages: 1 errors."
+        ),
+        (
+            "The session wrote a line of 33 bytes that doesn't read as one of its "
+            "messages: 1 errors."
+        ),
         (
             'The session asked the launcher {"subtype": "can_use_tool"}, which it '
             "doesn't answer: refused."
