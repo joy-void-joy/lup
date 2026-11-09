@@ -1,8 +1,13 @@
 """Claude Code held over its stream-json wire, against the in-process stand-in that answers as the CLI was measured to: no process, no model."""
 
 import asyncio
+import errno
+import inspect
 import json
+import os
 import socket
+import subprocess
+import sys
 from datetime import timedelta
 from pathlib import Path
 
@@ -12,6 +17,7 @@ from lup.adapters.claude import Claude
 from lup.adapters.claude.held import ClaudeHeld, HeldError
 from lup.adapters.claude.standin import StandIn
 from lup.rooms.engine import Pipes, ended
+from lup.sessions import connected
 from lup.sessions.terminal import Cli, TerminalSettings
 
 
@@ -19,13 +25,14 @@ def test_a_message_starts_a_turn_whose_start_and_end_are_said() -> None:
     said: list[str] = []
 
     async def talking() -> tuple[StandIn, ClaudeHeld, int]:
-        standin = await StandIn.started(session="s-1", arguments=[])
-        held = ClaudeHeld(pipes=standin.pipes, said=said.append)
+        piped = await StandIn.paired(session="s-1")
+        assert isinstance(piped.run, StandIn)
+        held = ClaudeHeld(pipes=piped.pipes, said=said.append)
         reading = asyncio.create_task(held.served())
         await held.send('<channel source="lup" wake="t0k3n">hello</channel>')
-        status = await ended(standin, timedelta(seconds=5))
+        status = await ended(piped, timedelta(seconds=5))
         await reading
-        return standin, held, status
+        return piped.run, held, status
 
     standin, held, status = asyncio.run(talking())
 
@@ -40,13 +47,15 @@ def test_an_interrupt_is_answered_and_ends_the_turn_under_way() -> None:
     said: list[str] = []
 
     async def interrupting() -> tuple[StandIn, bool]:
-        standin = await StandIn.started(session="s-1", arguments=[], lingering=True)
-        held = ClaudeHeld(pipes=standin.pipes, said=said.append)
+        piped = await StandIn.paired(session="s-1", lingering=True)
+        assert isinstance(piped.run, StandIn)
+        standin = piped.run
+        held = ClaudeHeld(pipes=piped.pipes, said=said.append)
         reading = asyncio.create_task(held.served())
         await held.send("run something long")
         await held.interrupt()
         turning = held.turning
-        await ended(standin, timedelta(seconds=5))
+        await ended(piped, timedelta(seconds=5))
         await reading
         return standin, turning
 
@@ -167,3 +176,43 @@ def test_the_held_command_is_the_terminal_s_on_stream_json_with_nothing_pushed()
         "--input-format",
         "stream-json",
     ]
+
+
+def test_a_held_room_s_first_program_puts_its_socket_on_the_runtime_s_input_and_output_which_proc_cant_open_again(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """The wrapper run for real, the runtime a Python echoing a line: what it reads and writes is the socket, and opening its input again through `/proc`, as another process of the room would, is refused."""
+    wrapper = tmp_path / "connected.py"
+    wrapper.write_text(inspect.getsource(connected))
+    place = tmp_path_factory.mktemp("s") / "session.sock"
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(place))
+    listener.listen(1)
+    echoing = (
+        "import sys\nfor line in sys.stdin:\n"
+        "    sys.stdout.write(line.upper())\n    sys.stdout.flush()"
+    )
+    with subprocess.Popen(  # noqa: S603
+        [sys.executable, "-I", str(wrapper), str(place), sys.executable, "-c", echoing],
+        stdin=subprocess.DEVNULL,
+    ) as runtime:
+        connection, _ = listener.accept()
+        with connection, connection.makefile("rb") as answers:
+            connection.sendall(b"hello\n")
+            # Its answer means the runtime runs, in the wrapper's place, on the socket.
+            echoed = answers.readline()
+            reopened: OSError | None = None
+            try:
+                os.open(f"/proc/{runtime.pid}/fd/0", os.O_WRONLY)
+            except OSError as refused:
+                reopened = refused
+            connection.shutdown(socket.SHUT_WR)
+            rest = answers.read()
+        status = runtime.wait(timeout=30)
+    listener.close()
+
+    assert echoed == b"HELLO\n"
+    assert rest == b""
+    assert status == 0
+    assert isinstance(reopened, OSError)
+    assert reopened.errno == errno.ENXIO

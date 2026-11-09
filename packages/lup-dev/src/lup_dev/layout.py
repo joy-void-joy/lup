@@ -475,6 +475,11 @@ class LaunchSockets(Model):
         """Where the session's own messaging socket is put, through which the host service starts a turn of an idle session, where their runtime has one."""
         return self.directory / "messages.sock"
 
+    @property
+    def session(self) -> Path:
+        """Where a held session's launcher listens for its room's first program, whose connection is the session's input and output: once, as the room starts, then it's gone (`lup.rooms.room.Room.hold`)."""
+        return self.directory / "session.sock"
+
 
 class InboxLayout(Model):
     """Where an earlier lup's inbox kept its items and its parties, one JSON file each (`docs/inbox.md`, *Kept on the ledger*).

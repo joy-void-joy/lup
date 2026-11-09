@@ -45,7 +45,7 @@ from lup_dev.host.protocol import Done, HostError, Reply, segment
 from lup_dev.host.service import Dispatcher, Handler, Route, unix_server
 from lup_dev.host.watch import Changes
 from lup_dev.launch.session import LaunchError
-from lup_dev.layout import Layout
+from lup_dev.layout import LaunchSockets, Layout, RoomPaths
 
 if TYPE_CHECKING:
     from lup.rooms.engine import Piped
@@ -181,6 +181,10 @@ class Holder(Model, arbitrary_types_allowed=True):
     """The launch's name, as the host served it."""
     container: str
     """The room's container, by its name, stopped as the session ends."""
+    sockets: Path
+    """The launch's socket directory on the host, which its room mounts at
+    `RoomPaths.sockets`: the session's own socket is made there, for its room's
+    first program alone (`LaunchSockets.session`)."""
     podman: Podman
     say: Callable[[str], None]
     first_hook: timedelta = timedelta(minutes=1)
@@ -204,12 +208,50 @@ class Holder(Model, arbitrary_types_allowed=True):
     ) -> int:
         """Hold the session in `room`, `arguments` after lup's own, until it ends, and return its runtime's status.
 
-        Its socket is served while the room runs. The session is called up once
-        the host heard its first hook, and ended unheard otherwise. It ends when
-        its runtime exits, the host asks (`HeldEnd`), or the launcher is asked
-        to (`SIGTERM`, `SIGINT`, `SIGHUP`); its room is stopped once it has.
+        Its input and output are a socket only the room's first program
+        reaches (`Room.hold`, `LaunchSockets.session`). The launcher's own
+        socket is served while the room runs. The session is called up once the
+        host heard its first hook, and ended unheard otherwise. It ends when its
+        runtime exits, the host asks (`HeldEnd`), or the launcher is asked to
+        (`SIGTERM`, `SIGINT`, `SIGHUP`). However it ends, a failure here
+        among it, the runtime is ended and the room stopped; where podman can't
+        stop it, that's said, and the launch is left registered for the sweep
+        (`launched`).
         """
-        piped = await room.hold(arguments, settings)
+        piped = await self.started(room, arguments, settings)
+        exited = asyncio.ensure_future(piped.run.waited())
+        try:
+            await self.serving(piped, exited)
+        finally:
+            status = (
+                exited.result()
+                if exited.done()
+                else await ended(piped, self.finishing)
+            )
+            await self.stopped()
+        self.say(f"The session ended, with status {status}.")
+        return status
+
+    async def started(
+        self, room: Room, arguments: list[str], settings: TerminalSettings
+    ) -> Piped:
+        """Start the room, its session held over the socket its first program connects to; where that fails, stop what of the room started."""
+        held = False
+        try:
+            piped = await room.hold(
+                arguments,
+                settings,
+                listening=LaunchSockets(directory=self.sockets).session,
+                connecting=LaunchSockets(directory=RoomPaths().sockets).session,
+            )
+            held = True
+        finally:
+            if not held:
+                await self.stopped()
+        return piped
+
+    async def serving(self, piped: Piped, exited: asyncio.Future[int]) -> None:
+        """Serve the launcher's socket and call the session up, until its runtime exits, or it's asked to end."""
         session = self.holding(piped.pipes, self.said)
         reading = asyncio.create_task(session.served())
         asked = Asked(ending=asyncio.Event(), over=asyncio.Event())
@@ -238,7 +280,6 @@ class Holder(Model, arbitrary_types_allowed=True):
         )
         for each in signals:
             loop.add_signal_handler(each, asked.ending.set)
-        exited = asyncio.ensure_future(piped.waited())
         try:
             if await self.heard(exited):
                 await asyncio.to_thread(
@@ -256,7 +297,9 @@ class Holder(Model, arbitrary_types_allowed=True):
                     [exited, ending], return_when=asyncio.FIRST_COMPLETED
                 )
                 ending.cancel()
-            return await self.over(piped, exited)
+            if not exited.done():
+                await ended(piped, self.finishing)
+            await self.stopped()
         finally:
             for each in signals:
                 loop.remove_signal_handler(each)
@@ -292,17 +335,12 @@ class Holder(Model, arbitrary_types_allowed=True):
         )
         return False
 
-    async def over(self, piped: Piped, exited: asyncio.Future[int]) -> int:
-        """End the session, where its runtime hasn't exited, and stop its room; return the runtime's status."""
-        status = (
-            exited.result() if exited.done() else await ended(piped, self.finishing)
-        )
+    async def stopped(self) -> None:
+        """Stop the room, where it runs; where podman can't, say so, and leave it to the launch's end, which then leaves it registered for the sweep."""
         try:
             await asyncio.to_thread(self.podman.stop, self.container)
         except ContainerError as failed:
             self.say(f"The room, {self.container}, wasn't stopped: {failed}")
-        self.say(f"The session ended, with status {status}.")
-        return status
 
     def said(self, line: str) -> None:
         """Say what the session does, in the launcher's log."""

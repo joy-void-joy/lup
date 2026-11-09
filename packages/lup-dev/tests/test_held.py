@@ -603,3 +603,21 @@ def test_a_turn_the_room_writes_to_the_session_s_input_fails_the_trial_saying_so
         "session answered it, @"
     )
     assert forging.seen.endswith(": wrote a turn to /proc/7/fd/0")
+
+
+def test_another_room_process_holding_the_session_s_socket_fails_the_trial(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    _, trial = played(tmp_path, clock)
+    trial.inside = lambda container, command: TerminalRun(
+        status=4,
+        output="opening /proc/7/fd/0 (socket:[1]): [Errno 6]; but processes ['9'] hold it too",
+    )
+
+    steps = trial.run()
+
+    [forging] = [
+        each for each in steps if each.name == "the room can't type as the operator"
+    ]
+    assert not forging.passed
+    assert "(status 4)" in forging.seen

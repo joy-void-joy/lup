@@ -1,7 +1,7 @@
 """A session held with no terminal: a runtime a launcher talks to over its room's input and output, the same shape for each runtime.
 
-    piped = await room.hold(arguments, settings)
-    session = adapter_held(piped, said=log)
+    piped = await room.hold(arguments, settings, listening=place, connecting=there)
+    session = adapter_held(piped.pipes, said=log)
     reading = asyncio.create_task(session.served())
     await session.send("<the operator's words>")
     await session.interrupt()
@@ -9,7 +9,10 @@
 
 `Declaration.held(settings)` compiles a declaration for it as `terminal`
 compiles one for a person at a terminal: the same settings, files and mounts,
-with a command whose input and output are the launcher's. A held session takes
+with a command whose input and output are the launcher's: a socket, which the
+room's first program connects to and hands the runtime
+(`lup.sessions.connected`), so no other process of the room can open it again
+through `/proc` and write the session's turns. A held session takes
 nothing a tool server pushes and has no messaging socket: whatever starts a turn
 of it comes on its input (`send`).
 

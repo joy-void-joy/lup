@@ -1,31 +1,35 @@
 """A stand-in for Claude Code held over its stream-json input and output, answered in-process, for tests: no process, no model.
 
-    standin = await StandIn.started(session="s-1", arguments=command)
-    piped: Piped = standin     # what a held run of the engine returns
+    standin = await StandIn.connected(session="s-1", arguments=command, place=socket)
+    contained: Contained = standin     # what a held run of the engine returns
+    piped = await StandIn.paired(session="s-1")   # or held over a socket pair
 
 It speaks the wire `lup.adapters.claude.held` does, as Claude Code 2.1.319 was
-measured to (`docs/field-notes.md`, *A session held with no terminal*): each user
-turn starts a turn, `system` `init` with the session's id, its text kept in
-`prompts`, and ends it with a `result` at once, or, with `lingering`, once an
-interrupt ends it, answered by its request's id and ended `aborted_tools`. Its
-input's end ends it, a turn under way finished first. Its input and output are
-two socket pairs, so closing its input leaves what it writes after readable, as
-a process's pipes do.
+measured to (`docs/field-notes.md`, *A session held with no terminal*), on one
+socket for its input and output, as a held room's first program gives it
+(`lup.sessions.connected`): each user turn starts a turn, `system` `init` with
+the session's id, its text kept in `prompts`, and ends it with a `result` at
+once, or, with `lingering`, once an interrupt ends it, answered by its request's
+id and ended `aborted_tools`. Its input's end ends it, a turn under way finished
+first, what it writes after still read.
 """
 
 import asyncio
 import json
 import socket
-from typing import Self, override
+from typing import TYPE_CHECKING, Self, override
 
 from pydantic import Field, JsonValue, TypeAdapter
 
 from lup.adapters.claude.held import Asking, Kind, UserTurn
-from lup.rooms.engine import Ending, Piped, Pipes
+from lup.rooms.engine import Contained, Ending, Piped, Pipes
 from lup.types import MutableModel
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-class StandIn(MutableModel, Piped, arbitrary_types_allowed=True):
+
+class StandIn(MutableModel, Contained, arbitrary_types_allowed=True):
     """Claude Code's held wire, answered in-process."""
 
     session: str
@@ -40,43 +44,29 @@ class StandIn(MutableModel, Piped, arbitrary_types_allowed=True):
     """How many interrupts it answered."""
     status: int | None = None
     """How it ended; none while it runs."""
-    own: Pipes | None = None
-    """The launcher's side of its input and output."""
     task: asyncio.Task[None] | None = None
     turning: bool = False
     ended: asyncio.Event = Field(default_factory=asyncio.Event)
-    kept: list[asyncio.StreamWriter] = []
-    """The far side of each socket pair, kept so it isn't closed as it's
-    collected: asyncio closes a writer's transport when the writer goes."""
 
     @classmethod
-    async def started(
-        cls, session: str, arguments: list[str], *, lingering: bool = False
+    async def connected(
+        cls, session: str, arguments: list[str], place: Path, *, lingering: bool = False
     ) -> Self:
-        """Start it on the running event loop, its pipes made, as `arguments` were run."""
-        launcher_in, runtime_in = socket.socketpair()
-        launcher_out, runtime_out = socket.socketpair()
-        _, writing = await asyncio.open_unix_connection(sock=launcher_in)
-        reading, unread = await asyncio.open_unix_connection(sock=launcher_out)
-        heard, unsaid = await asyncio.open_unix_connection(sock=runtime_in)
-        _, saying = await asyncio.open_unix_connection(sock=runtime_out)
-        standin = cls(
-            session=session,
-            arguments=arguments,
-            lingering=lingering,
-            own=Pipes(input=writing, output=reading),
-            kept=[unread, unsaid],
-        )
+        """Start it on the running event loop, as `arguments` were run, connected to the socket at `place` as a held room's first program connects."""
+        heard, saying = await asyncio.open_unix_connection(str(place))
+        standin = cls(session=session, arguments=arguments, lingering=lingering)
         standin.task = asyncio.create_task(standin.answering(heard, saying))
         return standin
 
-    @property
-    @override
-    def pipes(self) -> Pipes:
-        if self.own is None:
-            message = "the stand-in wasn't started"
-            raise RuntimeError(message)
-        return self.own
+    @classmethod
+    async def paired(cls, session: str, *, lingering: bool = False) -> Piped:
+        """Start it on the running event loop over one end of a socket pair, and return it held over the other, as a room's held session is."""
+        ours, theirs = socket.socketpair()
+        reading, writing = await asyncio.open_unix_connection(sock=ours)
+        heard, saying = await asyncio.open_unix_connection(sock=theirs)
+        standin = cls(session=session, lingering=lingering)
+        standin.task = asyncio.create_task(standin.answering(heard, saying))
+        return Piped(run=standin, pipes=Pipes(input=writing, output=reading))
 
     @override
     async def waited(self) -> int:

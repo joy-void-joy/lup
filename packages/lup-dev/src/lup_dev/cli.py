@@ -2683,6 +2683,7 @@ def launched(
                         session=session,
                         name=served.name,
                         container=served.container,
+                        sockets=sockets,
                         podman=launcher.podman,
                         say=launcher.say,
                         pause=launcher.pause,
@@ -2695,11 +2696,21 @@ def launched(
                         *([] if before is None else homing.ended(before)),
                     ]:
                         launcher.say(line)
-                    ended(launcher, launch)
-                    for line in [*environments.end(), *hiding.end()]:
-                        launcher.say(line)
-                    if held is not None:
-                        own.log.unlink(missing_ok=True)
+                    if held is not None and still_running(
+                        launcher.podman, served.container
+                    ):
+                        launcher.say(
+                            f"Launch `{served.name}`'s room, {served.container}, "
+                            "may still run: the launch stays registered, for the "
+                            "host's sweep to stop it and end it once this launcher "
+                            "is gone."
+                        )
+                    else:
+                        ended(launcher, launch)
+                        for line in [*environments.end(), *hiding.end()]:
+                            launcher.say(line)
+                        if held is not None:
+                            own.log.unlink(missing_ok=True)
         finally:
             own.lock.unlink(missing_ok=True)
             if writing is not None and writer is not None:
@@ -2711,6 +2722,15 @@ class NamedSession(Model):
 
     session: str | None
     arguments: list[str]
+
+
+def still_running(podman: Podman, container: str) -> bool:
+    """Say whether the container named `container` may still run: podman says it does, or can't say."""
+    try:
+        state = podman.state(container)
+    except ContainerError:
+        return True
+    return state is not None and not stopped(state)
 
 
 def named_session(
