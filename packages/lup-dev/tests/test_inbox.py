@@ -270,7 +270,7 @@ from lup_ledger.threads import Reopened as ThreadReopened
 from lup_transcripts.environment.module import Transcripts
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Awaitable, Callable, Generator
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Iterator
 
     from conftest import FakeClock, FakeParser, InProcess, JudgingInProcess, Kit, Shell
     from mcp.client._transport import TransportStreams
@@ -493,6 +493,20 @@ def said() -> list[str]:
     return []
 
 
+OPENED: list[Ledger] = []
+"""The ledger each test's service opened, closed as the test ends: each holds
+its database's files open, and a test holding this process to few open files
+(`test_secrets.py`) may share it."""
+
+
+@pytest.fixture(autouse=True)
+def ledgers_closed() -> Iterator[None]:
+    """Close each ledger the test's service opened, once the test is done reading it."""
+    yield
+    while OPENED:
+        OPENED.pop().close()
+
+
 @contextmanager
 def inboxed(
     machine: Layout,
@@ -540,6 +554,7 @@ def inboxed(
         queues=queues or {},
         glance=timedelta(milliseconds=5),
     )
+    OPENED.append(delivery.inbox.ledger)
     waits = Waits(changes=changes)
     delivery.landing = waits.holding
     if holders is not None:
