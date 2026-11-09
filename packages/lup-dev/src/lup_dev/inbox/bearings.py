@@ -89,13 +89,23 @@ class Repository(Model):
 def read_repository(
     repository: Path, running: str, remote: str, since: datetime | None
 ) -> Repository:
-    """Read `repository`'s branches not landed, and what `running`, `remote`'s copy where there's one, landed from `since` on; nothing landed where `since` is none."""
+    """Read `repository`'s branches not landed, and what `running`, `remote`'s copy where there's one, landed from `since` on; nothing landed where `since` is none.
+
+    Each worktree's branch is the listing's, and its changes are read by git
+    pinned to it (`Git.within`): run there alone, git would follow its `.git`
+    file or `commondir`, which the room writes, to a git directory of the
+    room's own, and `git status` runs the clean filter that one's `config`
+    names, in the host service. What the room writes still counts among the
+    changes said.
+    """
     git = Git.pinned(repository)
     branches = git.text("for-each-ref", "--format=%(refname:short)", "refs/heads/")
     checked = {
-        branch: worktree
-        for worktree in git.worktrees()
-        if worktree != repository and (branch := Git(cwd=worktree).branch()) is not None
+        each.branch.removeprefix("refs/heads/"): each
+        for each in git.listed()
+        if each.root != repository
+        and each.branch is not None
+        and each.branch.startswith("refs/heads/")
     }
 
     def unlanded(branch: str) -> Unlanded:
@@ -103,7 +113,11 @@ def read_repository(
         changed = (
             0
             if worktree is None
-            else len(Git(cwd=worktree).text("status", "--porcelain").splitlines())
+            else len(
+                Git.within(repository, worktree)
+                .text("status", "--porcelain")
+                .splitlines()
+            )
         )
         commits = git.text("rev-list", "--count", branch, "--not", "--remotes")
         short, at, subject = [
@@ -114,7 +128,7 @@ def read_repository(
         ]
         return Unlanded(
             branch=branch,
-            worktree=worktree,
+            worktree=None if worktree is None else worktree.root,
             commits=int(commits),
             changed=changed,
             last=f'{short} "{subject}"',

@@ -89,7 +89,6 @@ from lup_dev.policy.landing import (
     approved,
     changed_files,
     short,
-    worktrees,
 )
 from lup_dev.policy.reviewed import Mark, Reviews
 from lup_dev.policy.roles import Roles
@@ -465,7 +464,7 @@ class Reader(Model, arbitrary_types_allowed=True):
         held = SessionIndex(layout=self.layout).read(party.session)
         wrote = [] if held is None else held.works(party.agent or "")
         git = Git.pinned(party.repository)
-        listed = worktrees(git)
+        listed = git.listed()
         checked = {
             each.root: None if each.branch is None else short(each.branch)
             for each in listed

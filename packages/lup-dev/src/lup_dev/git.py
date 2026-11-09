@@ -22,7 +22,18 @@ one. Named any other way (`--git-dir`, `-C`, `GIT_DIR` alone, or run inside it),
 git follows a `commondir` file at its top, which a common git directory never
 has and a room can write, to the git directory that file names, and reads that
 one's `config` (`docs/field-notes.md`, *Host-side git in a repository the room
-writes*).
+writes*). git run in one of its worktrees is pinned there the same way, the
+worktree's own git directory and its root named too (`Git.within`), so the
+`config` it reads is the common git directory's own, whatever the worktree's
+`.git` file and `commondir`, both the room's to write, say.
+
+A repository's worktrees are those `git worktree list` gives that name each
+other with it (`Git.listed`): the main one, which git derives from the common
+git directory's own path, and each linked one whose `.git` file names its entry
+under `worktrees/` back. git lists a linked worktree from that entry's `gitdir`
+alone, a file the room writes, so a room could have it list any directory, the
+one holding the repository among them, as a worktree; the worktree's `.git`
+file, outside the room's mounts, is the half it can't write.
 
 A commit's files are written out from git's own objects (`Git.export`): each file
 `git ls-tree` lists, written from its blob as `git cat-file` gives it. Never
@@ -42,6 +53,7 @@ in a repository the room writes*).
 import hashlib
 import io
 import os
+import stat
 from itertools import batched
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal
@@ -184,17 +196,115 @@ def graphless() -> list[str]:
     return ["-c", "core.commitGraph=false", "-c", "advice.graftFileDeprecated=false"]
 
 
-def pinning(common: Path) -> list[str]:
-    """Return the words before a program that hold the git it is, or runs, to the repository whose common git directory is `common`.
+def pinning(common: Path, worktree: Worktree | None = None) -> list[str]:
+    """Return the words before a program that hold the git it is, or runs, to the repository whose common git directory is `common`, and to `worktree` of it where one is given.
 
     `env` setting `GIT_DIR` and `GIT_COMMON_DIR` both to `common`, the rest of
     the environment as it is: with both set, git reads no `commondir` there, so
-    the only `config` of the repository's it reads is `common`'s own.
+    the only `config` of the repository's it reads is `common`'s own. In a
+    worktree, `GIT_DIR` is its own git directory, a linked one's under
+    `worktrees/`, and `GIT_WORK_TREE` its root, so git doesn't follow its
+    `.git` file, and reads `common`'s `config` whatever its `commondir` says.
+    git's ref store still reads a `commondir` itself, for refs, which the room
+    writes anyway.
 
     >>> pinning(Path("/r.git"))
     ['env', 'GIT_DIR=/r.git', 'GIT_COMMON_DIR=/r.git']
+    >>> pinning(Path("/r.git"), Worktree(root=Path("/r.git/tree/a"), own=Path("/r.git/worktrees/a")))[1:]
+    ['GIT_DIR=/r.git/worktrees/a', 'GIT_COMMON_DIR=/r.git', 'GIT_WORK_TREE=/r.git/tree/a']
     """
-    return ["env", f"GIT_DIR={common}", f"GIT_COMMON_DIR={common}"]
+    if worktree is None:
+        return ["env", f"GIT_DIR={common}", f"GIT_COMMON_DIR={common}"]
+    return [
+        "env",
+        f"GIT_DIR={worktree.own or common}",
+        f"GIT_COMMON_DIR={common}",
+        f"GIT_WORK_TREE={worktree.root}",
+    ]
+
+
+class Worktree(Model):
+    """One of a repository's worktrees, as `git worktree list` gives it, where it names the repository back (`linked`)."""
+
+    root: Path
+    own: Path | None = None
+    """A linked worktree's own git directory, `<common>/worktrees/<id>`, which
+    its `.git` file names; none for the main one, whose git directory is the
+    common one."""
+    branch: str | None = None
+    """The branch it has checked out, by its ref's full name; none on a detached
+    `HEAD`, and for a bare repository's own directory."""
+    head: str | None = None
+    """The commit its `HEAD` names; none before the repository's first."""
+
+
+def link_file(path: Path, largest: int = 4096) -> str | None:
+    """Return what the regular file at `path` holds, never following a link at its name or waiting on a pipe; none where it isn't one, or holds more than `largest` bytes, or what isn't text.
+
+    A worktree's `.git` file and its entry's `gitdir` each hold one path, so
+    a larger one names no worktree.
+    """
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+    try:
+        reading = os.open(path, flags)
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(reading).st_mode):
+            return None
+        content = os.read(reading, largest + 1)
+    finally:
+        os.close(reading)
+    if len(content) > largest:
+        return None
+    try:
+        return content.decode()
+    except UnicodeDecodeError:
+        return None
+
+
+def lexical(path: Path) -> Path:
+    """Return `path` with each `..` taken with the part before it, as its text says, following no link.
+
+    >>> lexical(Path("/r.git/tree/a/../../worktrees/a"))
+    PosixPath('/r.git/worktrees/a')
+    """
+    # lup: ignore("os-path", why="pathlib has no lexical `..`, and `Path.resolve` would follow a link the room makes in the paths it writes")
+    return Path(os.path.normpath(path))
+
+
+def linked(common: Path, root: Path) -> Path | None:
+    """Return the own git directory of the linked worktree git lists at `root`, in the repository whose common git directory is `common`, where the two name each other; none where they don't.
+
+    git lists a linked worktree from `<common>/worktrees/<id>/gitdir` alone,
+    which the room writes, so a room could have it list any directory. Kept
+    only where, as `git worktree add` writes them:
+    - `root` is the directory's own path, with no link or `..` in it, so
+      neither a link outside the tree leading into it nor a path out of it
+      through `..` is read as a worktree;
+    - its `.git` is a regular file reading `gitdir: <common>/worktrees/<id>`,
+      `<common>` with its links resolved, as git writes it, or that path
+      relative to `root`;
+    - and `<common>/worktrees/<id>/gitdir` names `root`'s `.git` back,
+      absolute or relative to that entry.
+
+    The room writes the entry; the `.git` file is the half it can't write
+    where it isn't mounted. The main worktree has no `.git` file to check: git
+    derives it from `common`'s own path, pinned there, never from a file the
+    room writes.
+    """
+    if not root.is_absolute() or root.resolve() != root:
+        return None
+    gitfile = link_file(root / ".git")
+    if gitfile is None or not gitfile.startswith("gitdir: "):
+        return None
+    own = lexical(root / gitfile.removeprefix("gitdir: ").strip())
+    if own.parent != common.resolve() / "worktrees":
+        return None
+    back = link_file(own / "gitdir")
+    if back is None or lexical(own / back.strip()) != root / ".git":
+        return None
+    return own
 
 
 def stray(objects: Path) -> list[Path]:
@@ -257,6 +367,9 @@ class Git(Model):
     common: Path | None = None
     """The repository's common git directory, where git is pinned to it
     (`pinning`); none where git finds its own from `cwd` or `arguments`."""
+    worktree: Worktree | None = None
+    """The worktree of the repository git is pinned to, as `Git.listed` gives
+    it; none for the common git directory alone."""
     index: Path | None = None
     """An index git stages in, in place of the worktree's own (`GIT_INDEX_FILE`);
     none for the worktree's."""
@@ -265,6 +378,11 @@ class Git(Model):
     def pinned(cls, common: Path) -> Git:
         """Return git run in the repository whose common git directory is `common`, pinned there (`pinning`)."""
         return cls(cwd=common, common=common)
+
+    @classmethod
+    def within(cls, common: Path, worktree: Worktree) -> Git:
+        """Return git run in `worktree`, one of the repository's whose common git directory is `common` as `Git.listed` gives them, pinned to both (`pinning`): neither its `.git` file nor its `commondir`, which the room writes, leads git to another `config`."""
+        return cls(cwd=worktree.root, common=common, worktree=worktree)
 
     def run(
         self, *arguments: str, stdin: bytes | None = None, ok: list[int] | None = None
@@ -282,7 +400,7 @@ class Git(Model):
             "-c",
             "core.autocrlf=false",
         ]
-        pinned = [] if self.common is None else pinning(self.common)
+        pinned = [] if self.common is None else pinning(self.common, self.worktree)
         staged = [] if self.index is None else ["env", f"GIT_INDEX_FILE={self.index}"]
         program, *words = [
             *ungrafted(),
@@ -303,14 +421,50 @@ class Git(Model):
         """Run git and return what it printed, without the trailing newline."""
         return self.run(*arguments).output.decode().strip()
 
-    def worktrees(self) -> list[Path]:
-        """Return the repository's worktrees, as `git worktree list` gives them: its main one first, a clone's root or a bare repository's own directory."""
-        listed = self.run("worktree", "list", "--porcelain", "-z").output
-        return [
-            Path(field.removeprefix("worktree "))
-            for field in nul_separated(listed)
-            if field.startswith("worktree ")
+    def listed(self) -> list[Worktree]:
+        """Return the repository's worktrees, as `git worktree list` gives them, each with the branch it has checked out and the commit its `HEAD` names: its main one first, a clone's root or a bare repository's own directory, whether or not it's on disk; then each linked one that names the repository back (`linked`), which one gone from disk doesn't."""
+        fields = nul_separated(self.run("worktree", "list", "--porcelain", "-z").output)
+        starts = [
+            at for at, field in enumerate(fields) if field.startswith("worktree ")
         ]
+        records = [
+            fields[start:end]
+            for start, end in zip(starts, [*starts[1:], len(fields)], strict=True)
+        ]
+
+        def labelled(record: list[str], label: str) -> str | None:
+            return next(
+                (
+                    field.removeprefix(f"{label} ")
+                    for field in record
+                    if field.startswith(f"{label} ")
+                ),
+                None,
+            )
+
+        [main, *others] = [
+            Worktree(
+                root=Path(record[0].removeprefix("worktree ")),
+                branch=labelled(record, "branch"),
+                head=labelled(record, "HEAD"),
+            )
+            for record in records
+        ]
+        common = self.common or Path(
+            self.text("rev-parse", "--path-format=absolute", "--git-common-dir")
+        )
+        return [
+            main,
+            *(
+                each.model_copy(update={"own": own})
+                for each in others
+                if (own := linked(common, each.root)) is not None
+            ),
+        ]
+
+    def worktrees(self) -> list[Path]:
+        """Return the root of each of the repository's worktrees, as `Git.listed` gives them: its main one first, a clone's root or a bare repository's own directory."""
+        return [each.root for each in self.listed()]
 
     def main_worktree(self) -> Path:
         """Return the repository's main worktree, which `git worktree list` gives first: a clone's root, or a bare repository's own directory."""
@@ -318,15 +472,16 @@ class Git(Model):
         return main
 
     def checkout(self, branch: str) -> Path | None:
-        """Return the worktree that has `branch` checked out, as `git worktree list` gives it; none where none does, or the one that did is gone."""
-        listed = self.run("worktree", "list", "--porcelain", "-z").output
-        found: Path | None = None
-        for field in nul_separated(listed):
-            if field.startswith("worktree "):
-                found = Path(field.removeprefix("worktree "))
-            if field == f"branch refs/heads/{branch}" and found is not None:
-                return found if found.is_dir() else None
-        return None
+        """Return the worktree that has `branch` checked out, as `Git.listed` gives it; none where none does, or the one that did is gone."""
+        found = next(
+            (
+                each.root
+                for each in self.listed()
+                if each.branch == f"refs/heads/{branch}"
+            ),
+            None,
+        )
+        return found if found is not None and found.is_dir() else None
 
     def branch(self) -> str | None:
         """Return the branch the work tree has checked out, by its short name; none on a detached `HEAD`."""

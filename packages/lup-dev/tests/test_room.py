@@ -211,6 +211,50 @@ def test_worktrees_meeting_above_the_home_are_refused(
         repository(linked)
 
 
+def test_a_directory_a_room_names_as_a_worktree_isnt_mounted(
+    repo: Path, home: Path
+) -> None:
+    # As the operator keeps them: the repository under ~/job/onit, another
+    # beside it under ~/job.
+    job = home / "job"
+    common = job / "onit" / "proj.git"
+    common.parent.mkdir(parents=True)
+    git(repo, "clone", "-q", "--bare", str(repo), str(common))
+    git(common, "worktree", "add", "-q", "tree/main", "main")
+    git(job, "init", "-q", "other")
+    # The room's entry, under the git directory it writes, naming ~/job as a
+    # worktree: git lists it, and today's tree would hold all of ~/job.
+    planted = common / "worktrees" / "planted"
+    planted.mkdir()
+    (planted / "gitdir").write_text(f"{job / '.git'}\n")
+    (planted / "HEAD").write_text("ref: refs/heads/main\n")
+    assert (
+        f"worktree {job}\n"
+        in run("git", "worktree", "list", "--porcelain", cwd=common).text()
+    )
+
+    held = repository(common / "tree" / "main")
+
+    assert held.tree == common
+    assert held.worktrees == [common, common / "tree" / "main"]
+
+
+def test_a_tree_holding_the_home_by_its_links_is_refused(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The home named through a link outside the tree, as some systems keep
+    # `/home`, where git gives the worktrees' paths with their links resolved.
+    disk = tmp_path / "disk"
+    git(tmp_path, "clone", "-q", str(repo), str(disk / "work"))
+    git(disk / "work", "worktree", "add", "-q", "-b", "feat", str(disk / "feat"))
+    (disk / "home").mkdir()
+    through = tmp_path / "home"
+    through.symlink_to(disk / "home")
+    monkeypatch.setenv("HOME", str(through))
+    with pytest.raises(RoomError, match=r"meet only at .*, which holds your home"):
+        repository(disk / "feat")
+
+
 # The room whole
 
 
@@ -598,6 +642,28 @@ def test_a_launch_s_environments_are_its_own_and_go_with_it(
             "made: where it was your own, make it again."
         )
     ]
+
+
+def test_the_end_removes_no_environment_a_room_names_outside_the_tree(
+    bare: Path, repo: Path, tmp_path: Path, home: Path
+) -> None:
+    worktree = bare / "tree" / "main"
+    machine = Machine(tmp_path, worktree)
+    theirs = repo / ".venv"
+    (theirs / "bin").mkdir(parents=True)
+    made = RoomEnvironments.of(
+        resolve(Project()).runner, worktree, machine.layout, LAUNCH, machine.tools()
+    )
+    made.write()
+    # While the room runs, an entry naming another repository's directory as a
+    # worktree, through a path inside the tree by its text alone.
+    planted = bare / "worktrees" / "planted"
+    planted.mkdir()
+    (planted / "gitdir").write_text(f"{bare}/tree/../../{repo.name}/.git\n")
+    (planted / "HEAD").write_text("ref: refs/heads/main\n")
+
+    assert made.end() == []
+    assert (theirs / "bin").is_dir()
 
 
 def test_a_plain_runner_s_room_has_no_environments_of_its_own(

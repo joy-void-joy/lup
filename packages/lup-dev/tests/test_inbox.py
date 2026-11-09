@@ -4897,6 +4897,41 @@ def test_a_room_reads_its_repositorys_conversations_alone_and_never_the_operator
     ]
 
 
+def test_a_room_reads_no_conversation_of_a_repository_it_names_as_a_worktree(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    repo: Path,
+    *,
+    shell: Shell,
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "claude"
+    other = tmp_path / "other"
+    shell.git(tmp_path, "init", "-q", str(other))
+    recording(home, "s9", other, "n9")
+    recorded = {
+        "claude": Recorded(
+            records=ClaudeRecords(directory=home), reader=ClaudeTranscripts()
+        )
+    }
+    # The room's entry under the git directory it writes, naming the other
+    # repository as one of its worktrees, which git lists.
+    planted = repo / ".git" / "worktrees" / "planted"
+    planted.mkdir(parents=True)
+    (planted / "gitdir").write_text(f"{other / '.git'}\n")
+    (planted / "HEAD").write_text("ref: refs/heads/main\n")
+    assert f"worktree {other}\n" in shell.git(repo, "worktree", "list", "--porcelain")
+    with inboxed(machine, clock, notices, said, recorded):
+        launched(machine, clock, repo, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        room = RoomClient(socket=machine.host.launch("one").request)
+        with pytest.raises(HostError) as refusal:
+            room.ask(ShowConversation(runtime="claude", session="s9"), Conversed)
+    assert str(refusal.value) == "the conversation isn't one of this repository's"
+
+
 def test_a_room_reads_no_moment_of_a_session_it_claims_from_another_repository(
     machine: Layout,
     clock: FakeClock,
@@ -11939,6 +11974,31 @@ def test_the_bearings_read_what_landed_on_the_running_branch(
     declared_branches(machine, repository, Branches(integration="dev", running="live"))
     assert cli.running_branch(machine, repository) == "live"
     assert read_repository(repository, "live", "origin", None).onto == "origin/live"
+
+
+def test_the_bearings_read_a_worktree_through_no_link_the_room_writes(
+    bare: Path, shell: Shell, tmp_path: Path
+) -> None:
+    worktree = bare / "tree" / "main"
+    ran = tmp_path / "ran"
+    # A git directory of the room's own, whose `config` names a clean filter
+    # the worktree's files go through, and the worktree's `commondir` aimed at
+    # it: `git status` found from the worktree would run it in the service.
+    own = worktree / "own.git"
+    shell.git(tmp_path, "init", "-q", "--bare", str(own))
+    shell.git(own, "config", "filter.probe.clean", f"sh -c 'touch {ran}; cat'")
+    (worktree / ".gitattributes").write_text("* filter=probe\n")
+    (worktree / "probe.txt").write_text("probe\n")
+    shell.git(worktree, "add", ".gitattributes", "probe.txt")
+    os.utime(worktree / "probe.txt", (0, 0))
+    (bare / "worktrees" / "main" / "commondir").write_text(f"{own}\n")
+
+    found = read_repository(bare, "main", "origin", None)
+
+    assert not ran.exists()
+    [main] = found.unlanded
+    assert (main.branch, main.worktree) == ("main", worktree)
+    assert main.changed
 
 
 def test_land_of_a_branch_leaves_alone_one_made_from_its_tip_worktree_and_all(
