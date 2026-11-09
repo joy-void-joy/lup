@@ -1055,6 +1055,7 @@ Behind #117. **Claude Code** on Haiku 5.5, on a subscription login: `claude -p -
 - **An interrupt on an idle session** (`control_request` of subtype `interrupt`) was answered `{"subtype":"success","request_id":…,"response":{"still_queued":[]}}`.
 - **The input's end** ended the process; with its last turn failed, its status was 1.
 - **`--resume` of a session that never took a turn** answered "No conversation found with session ID …" on its standard error, a `result` of `error_during_execution`, and status 1: an id started but never sent a message has no record to resume.
+- **Another process of the same user writes its turns through `/proc`.** With the CLI's input a pipe, as a shell pipeline gives it, a separate process opened `/proc/<pid>/fd/0` for writing and wrote a user turn: the CLI started a turn on it, `UserPromptSubmit` firing with its text. With its input and output a socket instead, the same open failed, "No such device or address" (`ENXIO`), and the CLI ran on it as on the pipe. Not measured in a room, where podman gives the CLI its input: whether a room's processes reach it so is what `lup-dev spawn trial` tries.
 
 **Claude Code, a message or an interrupt during a turn:**
 - **No `priority`:** read in the same turn, once the running call ended: sent during a 15 s command, it came right after that call's result, `UserPromptSubmit` firing then with its text, one `result` covering both.

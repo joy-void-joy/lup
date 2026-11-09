@@ -281,6 +281,7 @@ def test_a_launcher_s_requests_are_answered_on_its_socket_as_the_service_s_are(
 
 WORDS = {
     "single word PAPAYA": "PAPAYA",
+    "single word READY": "READY",
     "single word PEAR": "PEAR",
     "single word MANGO": "MANGO",
     "first ask you": "PAPAYA",
@@ -420,6 +421,9 @@ def played(tmp_path: Path, clock: FakeClock) -> tuple[Played, Trial]:
         spawn=spawn,
         terminal=terminal,
         running=lambda container: bool(host.served),
+        inside=lambda container, command: TerminalRun(
+            status=2, output="opening /proc/7/fd/0: [Errno 6] No such device or address"
+        ),
         clock=clock,
         say=lambda _: None,
         worktree=tmp_path / "spawn-trial-1",
@@ -438,6 +442,7 @@ def test_the_trial_tries_each_step_and_files_what_it_saw_under_the_session(
     assert [(each.name, each.passed) for each in steps] == [
         ("held", True),
         ("answers", True),
+        ("the room can't type as the operator", True),
         ("interrupts", True),
         ("survives a restart", True),
         ("ends", True),
@@ -448,7 +453,7 @@ def test_the_trial_tries_each_step_and_files_what_it_saw_under_the_session(
     report = written(host.items[number - 1])
     assert report.startswith(
         f"**Spawn's trial**, `lup-dev spawn trial`, in {tmp_path / 'spawn-trial-1'}: "
-        "8 of 8 steps passed."
+        "9 of 9 steps passed."
     )
     assert "**What it means:** a session lup holds with no terminal works" in report
     assert host.items[number - 1].sender == host.conversation
@@ -476,15 +481,16 @@ def test_a_trial_whose_session_never_starts_says_so_and_files_it_anyway(
 
     assert [(each.name, each.passed) for each in steps] == [("held", False)]
     report = written(host.items[number - 1])
-    assert "0 of 8 steps passed." in report
+    assert "0 of 9 steps passed." in report
     assert (
         "- **held**, failed in 0 s: the launcher of launch h1 ended before its "
         "session was up"
     ) in report
     assert "**held** failing means no session is held on this machine" in report
     assert (
-        "Not tried, after that: answers, interrupts, survives a restart, ends, "
-        "resumes held, a terminal takes it over, back to held."
+        "Not tried, after that: answers, the room can't type as the operator, "
+        "interrupts, survives a restart, ends, resumes held, a terminal takes it "
+        "over, back to held."
     ) in report
     sender = host.items[number - 1].sender
     assert isinstance(sender, Conversation)
@@ -574,3 +580,26 @@ def test_a_terminal_launch_that_asks_anything_fails_its_step_unanswered(
     assert taking.seen.startswith(
         "the terminal launch asked something, which the trial answers nothing to"
     )
+
+
+def test_a_turn_the_room_writes_to_the_session_s_input_fails_the_trial_saying_so(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    host, trial = played(tmp_path, clock)
+
+    def written(container: str, command: list[str]) -> TerminalRun:
+        host.item(host.conversation, Operator(), "FORGED")
+        return TerminalRun(status=0, output="wrote a turn to /proc/7/fd/0")
+
+    trial.inside = written
+    steps = trial.run()
+
+    [forging] = [
+        each for each in steps if each.name == "the room can't type as the operator"
+    ]
+    assert not forging.passed
+    assert forging.seen.startswith(
+        "a process in the room wrote a turn to the session's input, and the "
+        "session answered it, @"
+    )
+    assert forging.seen.endswith(": wrote a turn to /proc/7/fd/0")

@@ -498,6 +498,12 @@ class Podman(Model, ContainerEngine):
         homed(invocation)
         return await self.start(self.command(invocation))
 
+    def inside(self, container: str, command: list[str]) -> Ran:
+        """Run `command` in the running container named `container`, as one of its own processes, its user and namespaces the room's (`podman exec`), and return how it ended, what it printed kept."""
+        return self.execute(
+            Process(arguments=[self.program, "exec", container, *command], capture=True)
+        )
+
     def stop(self, container: str) -> None:
         """Stop the container named `container`: its program asked to end, and made to past `stopping`; nothing where no container has that name.
 

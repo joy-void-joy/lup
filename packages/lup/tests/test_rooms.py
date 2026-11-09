@@ -306,6 +306,18 @@ def test_a_program_that_doesn_t_end_at_its_input_s_end_is_asked_then_made_to() -
     assert asyncio.run(ending()) == (137, ["asked", "made"], True)
 
 
+def test_a_command_runs_inside_a_running_container_as_its_own_processes_do() -> None:
+    engine, asked = podman(exited(3, "refused"))
+
+    ran = engine.inside("lup-lup-dev", ["python3", "-c", "print(1)"])
+
+    assert (ran.status, ran.output) == (3, b"refused")
+    assert asked.processes[-1] == Process(
+        arguments=["podman", "exec", "lup-lup-dev", "python3", "-c", "print(1)"],
+        capture=True,
+    )
+
+
 def test_a_container_is_stopped_by_its_name_and_a_stop_podman_refuses_raises() -> None:
     engine, asked = podman(exited(0))
 

@@ -3223,11 +3223,16 @@ def spawn_trial(
         def running(container: str) -> bool:
             return podman.state(container) == "running"
 
+        def inside(container: str, command: list[str]) -> TerminalRun:
+            ran = podman.inside(container, command)
+            return TerminalRun(status=ran.status, output=ran.text())
+
         trial = Trial(
             host=host_client(),
             spawn=spawning,
             terminal=terminal,
             running=running,
+            inside=inside,
             clock=SystemClock(),
             say=typer.echo,
             worktree=scratch,
