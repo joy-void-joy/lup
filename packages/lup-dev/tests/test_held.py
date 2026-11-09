@@ -670,3 +670,26 @@ def test_another_room_process_holding_the_session_s_socket_fails_the_trial(
     ]
     assert not forging.passed
     assert "(status 4)" in forging.seen
+
+
+def test_a_trial_whose_resume_fails_ends_no_launch_in_its_place(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    """The held launch the trial ended stays the last it knew of; a start that failed after must not have the trial end some launch in its place."""
+    host, trial = played(tmp_path, clock)
+    spawn = trial.spawn
+
+    def failing(worktree: Path, resume: str | None) -> HeldUp:
+        if resume is not None:
+            host.served[:] = [held("someone-else")]
+            message = "the launcher ended before its session was up"
+            raise HostError(message)
+        return spawn(worktree, resume)
+
+    trial.spawn = failing
+    steps = trial.run()
+
+    [resumed] = [each for each in steps if each.name == "resumes held"]
+    assert not resumed.passed
+    ends = [each.launch for each in host.asked if isinstance(each, End)]
+    assert "someone-else" not in ends

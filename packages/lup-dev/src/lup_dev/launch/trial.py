@@ -52,6 +52,7 @@ from lup_dev.inbox.protocol import (
     SendItem,
     Shown,
 )
+from lup_dev.inbox.store import Message
 from lup_dev.inbox.texts import written
 from lup_ledger.parties import Conversation, Operator
 
@@ -167,6 +168,10 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
     """How long apart the trial looks for what it waits on."""
     steps: list[Step] = []
     up: HeldUp | None = None
+    """The held launch the trial started last, while it may run: none once a
+    start of one failed, so the trial never ends another in its place."""
+    held_session: str | None = None
+    """The runtime's id for the session the trial tries, once it's held."""
     conversation: Conversation | None = None
 
     def stages(self) -> list[Stage]:
@@ -295,6 +300,7 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
     def held(self) -> str:
         """Start the session held, and see the host serve it as held."""
         self.up = self.spawn(self.worktree, None)
+        self.held_session = self.up.session
         launch = self.launch()
         if not launch.held:
             message = f"`{launch.name}` is served, but not as a held session"
@@ -437,6 +443,7 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
     def resumed(self) -> str:
         """Resume the session held, and see it remember its first word."""
         session = self.session()
+        self.up = None
         self.up = self.spawn(self.worktree, session)
         answer = self.answered(
             "Which single word did I first ask you to answer with? Answer with "
@@ -477,6 +484,7 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
     def back(self) -> str:
         """Resume the session held again, and see the terminal's turn in its record."""
         session = self.session()
+        self.up = None
         self.up = self.spawn(self.worktree, session)
         answer = self.answered(
             "List, in order, each single word I asked you to answer with so far, "
@@ -486,11 +494,11 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
         return f"Held again after the terminal, its record had the terminal's turn: {answer}"
 
     def session(self) -> str:
-        """Return the runtime's id for the session held last."""
-        if self.up is None:
+        """Return the runtime's id for the session the trial held."""
+        if self.held_session is None:
             message = "no session was held to resume"
             raise TrialError(message)
-        return self.up.session
+        return self.held_session
 
     def sent(self, text: str) -> Item:
         """Send the operator's words to the held session, as the dashboard does, and return the item."""
@@ -593,10 +601,10 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
         return "\n".join(lines)
 
     def filed(self, repository: Path, runtime: str) -> int:
-        """File the report in the operator's inbox, as a note from the session it tried, or one named after the trial where none started, and take that session's answers off the operator's list; return the report's number."""
+        """File the report in the operator's inbox, as a note from the session it tried, or one named after the trial where none started, and take that session's answers, its turns' ends, off the operator's list, leaving what else it sent; return the report's number."""
         for each in self.items():
-            if isinstance(each.recipient, Operator) and isinstance(
-                each.sender, Conversation
+            if isinstance(each.recipient, Operator) and (
+                isinstance(each.reason, Message) and each.reason.ending
             ):
                 try:
                     self.host.ask(FinishItem(number=each.number), Shown)
