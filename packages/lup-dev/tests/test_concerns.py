@@ -1,4 +1,4 @@
-"""Threads as agents work in them: where each works, what lands where, who's told, the `thread` tool, checks, a thread read whole, names, and an earlier lup's roots read as absent."""
+"""Threads as agents work in them: where each works, what lands where, who's told, the `concern` tool, checks an earlier lup kept, a thread read whole, names, and an earlier lup's roots read as absent."""
 
 import asyncio
 from pathlib import Path
@@ -22,8 +22,10 @@ from lup_dev.inbox.reading import Narrowing, Reader
 from lup_dev.inbox.store import (
     KINDS,
     Comment,
+    Friction,
     Inbox,
     InboxError,
+    Item,
     Letter,
     Review,
     Whereabouts,
@@ -31,12 +33,11 @@ from lup_dev.inbox.store import (
 )
 from lup_dev.inbox.tools import (
     Asking,
+    Concerning,
     Parking,
     Sending,
     Speaker,
-    ThreadedFriction,
     ThreadedRemark,
-    Threading,
 )
 from lup_dev.layout import Layout
 from lup_ledger.environment.layout import LedgerLayout
@@ -127,6 +128,11 @@ def said(coroutine: object) -> str:
     """Run a tool's call, and return what it says."""
     assert asyncio.iscoroutine(coroutine)
     return asyncio.run(coroutine).text
+
+
+def befell(speaker: Speaker, text: str, title: str) -> Item:
+    """Put a friction in the operator's inbox from `speaker`, landing where they work, as an earlier lup's `friction` did: `concern` opens a concern of its own for its words."""
+    return asyncio.run(speaker.said(Friction(text=text, title=title)))
 
 
 def kept_check(
@@ -221,7 +227,7 @@ def test_a_subagent_starts_on_the_concern_their_parent_works_on_and_lands_there(
 ) -> None:
     register = launched(delivery, "dev", "s1")
     lead = speaker(delivery, register, main("s1"))
-    said(lead.thread(Threading(name="lag", title="Lag", hold=True)))
+    said(lead.concern(Concerning(name="lag", title="Lag", hold=True)))
     worker = spawned(delivery, register, main("s1"), "a1", "parser")
 
     said(speaker(delivery, register, worker).note(ThreadedRemark(remark="Tabs.")))
@@ -240,9 +246,9 @@ def test_a_concern_an_agent_opens_with_nobody_above_to_answer_is_their_session_s
     worker = spawned(delivery, register, main("s1"), "a1", "parser")
     work = speaker(delivery, register, worker)
 
-    opening = said(lead.thread(Threading(name="lag", title="Lag")))
+    opening = said(lead.concern(Concerning(name="lag", title="Lag")))
     said(work.note(ThreadedRemark(remark="Tabs.", thread="Tabs vanish")))
-    theirs = said(work.thread(Threading(name="gate", title="The gate")))
+    theirs = said(work.concern(Concerning(name="gate", title="The gate")))
     concerns = delivery.concerns()
 
     assert opening == "Opened @lag, held by you."
@@ -259,17 +265,17 @@ def test_a_concern_opened_under_one_someone_answers_for_is_held_by_nobody_and_un
 ) -> None:
     gone = launched(delivery, "gone", "s0")
     said(
-        speaker(delivery, gone, main("s0")).thread(
-            Threading(name="left", title="Left behind")
+        speaker(delivery, gone, main("s0")).concern(
+            Concerning(name="left", title="Left behind")
         )
     )
     delivery.layout.record("gone").unlink()
     register = launched(delivery, "dev", "s1")
     lead = speaker(delivery, register, main("s1"))
-    said(lead.thread(Threading(name="lag", title="Lag", hold=True)))
+    said(lead.concern(Concerning(name="lag", title="Lag", hold=True)))
 
-    said(lead.thread(Threading(name="tabs", title="Tabs")))
-    said(lead.thread(Threading(name="found", title="Found", under="left")))
+    said(lead.concern(Concerning(name="tabs", title="Tabs")))
+    said(lead.concern(Concerning(name="found", title="Found", under="left")))
     concerns = delivery.concerns()
 
     tabs = concerns.named(REPOSITORY, "tabs")
@@ -375,8 +381,8 @@ def test_whoever_holds_a_thread_is_told_each_item_whole_and_others_on_it_a_line(
     holder = spawned(delivery, register, main("s1"), "a1", "fixer")
     reviewer = spawned(delivery, register, main("s1"), "a2", "reviewer")
     said(
-        speaker(delivery, register, holder).thread(
-            Threading(name="lag", title="The cursor jumps", hold=True)
+        speaker(delivery, register, holder).concern(
+            Concerning(name="lag", title="The cursor jumps", hold=True)
         )
     )
     said(
@@ -412,7 +418,7 @@ def test_whoever_holds_a_thread_is_told_each_item_whole_and_others_on_it_a_line(
     assert told(delivery, main("s1")) == []
 
 
-def test_a_friction_isn_t_told_to_the_parent_holding_the_thread_who_has_its_copy(
+def test_a_subagent_s_concern_isn_t_told_to_their_parent_holding_it_who_has_its_copy(
     delivery: Delivery,
 ) -> None:
     register = launched(delivery, "dev", "s1")
@@ -420,16 +426,17 @@ def test_a_friction_isn_t_told_to_the_parent_holding_the_thread_who_has_its_copy
     worker = spawned(delivery, register, main("s1"), "a1", "parser")
 
     answer = said(
-        speaker(delivery, register, worker).friction(
-            ThreadedFriction(text="The gate hung.", title="gate hangs")
+        speaker(delivery, register, worker).concern(
+            Concerning(text="The gate hung.", title="gate hangs")
         )
     )
     # The lead's note, the friction, and their parent's copy of it.
     _, friction, _ = numbers(delivery)
 
     assert answer == (
-        f"Thanks: your friction is with the operator, @{friction}, and your parent "
-        "has it too. You can carry on."
+        "Opened @gate-hangs, held by `dev`.\n"
+        f"Thanks: your words are with the operator, @{friction}, in @gate-hangs, and "
+        "your parent has them too. You can carry on."
     )
     assert delivery.inbox.item(friction).reason.model_dump()["title"] == "gate hangs"
     assert told(delivery, main("s1")) == []
@@ -440,7 +447,7 @@ def test_an_at_name_of_another_thread_draws_a_reference_to_it(
 ) -> None:
     register = launched(delivery, "dev", "s1")
     one = speaker(delivery, register, main("s1"))
-    said(one.thread(Threading(name="lag", title="Lag")))
+    said(one.concern(Concerning(name="lag", title="Lag")))
 
     said(one.note(ThreadedRemark(remark="This touches @lag, not `@dev`, and @dev.")))
     note = newest(delivery)
@@ -452,7 +459,89 @@ def test_an_at_name_of_another_thread_draws_a_reference_to_it(
     assert mentioned("@lag and @2 but not @lag.3 or @2.1[x]") == ["lag", "2", "lag.3"]
 
 
-def test_the_thread_tool_opens_holds_hands_moves_parks_and_says_done(
+def test_a_concern_s_words_open_one_named_after_them_that_the_session_holds_and_wait_on_no_one(
+    delivery: Delivery,
+) -> None:
+    register = launched(delivery, "dev", "s1")
+    lead = Speaker(delivery=delivery, launch=register, party=main("s1"), call="c1")
+    jammed = "The gate hangs on a fresh worktree.\n`uv run lup-dev check` waits on the engine."
+
+    answer = said(lead.concern(Concerning(text=jammed)))
+    words = newest(delivery)
+    concerns = delivery.concerns()
+    [opened] = concerns.threads.of(REPOSITORY)
+    item = delivery.inbox.item(words)
+
+    assert (opened.title, opened.name, opened.holder, opened.parent) == (
+        "The gate hangs on a fresh worktree.",
+        "the-gate-hangs-on-a-fresh-worktree",
+        main("s1"),
+        None,
+    )
+    assert answer == (
+        "Opened @the-gate-hangs-on-a-fresh-worktree, held by you.\n"
+        f"Thanks: your words are with the operator, @{words}, in "
+        "@the-gate-hangs-on-a-fresh-worktree. You can carry on."
+    )
+    # Its words reach the operator at once, as written, anchored to the call,
+    # news that asks nothing of them; the session isn't moved to it.
+    assert thread_of(delivery, words) == opened
+    assert (item.recipient, item.reason.model_dump()["text"], item.call) == (
+        Operator(),
+        jammed,
+        "c1",
+    )
+    assert not item.asks
+    assert concerns.standing(opened).state == "working"
+    assert concerns.working(main("s1")) is None
+    assert told(delivery, main("s1")) == []
+
+
+def test_a_concern_opens_under_the_one_its_agent_works_in_and_its_words_can_go_into_one_there(
+    delivery: Delivery,
+) -> None:
+    register = launched(delivery, "dev", "s1")
+    lead = speaker(delivery, register, main("s1"))
+    said(lead.concern(Concerning(name="lag", title="The cursor jumps", join=True)))
+    worker = spawned(delivery, register, main("s1"), "a1", "parser")
+    work = speaker(delivery, register, worker)
+
+    opened = said(work.concern(Concerning(text="Tabs are dropped.", title="tabs")))
+    *_, tabs = [
+        number
+        for number, each in delivery.inbox.items.items()
+        if each.recipient == Operator()
+    ]
+    added = said(work.concern(Concerning(name="tabs", text="And spaces after them.")))
+    *_, spaces = [
+        number
+        for number, each in delivery.inbox.items.items()
+        if each.recipient == Operator()
+    ]
+    concerns = delivery.concerns()
+    lag = concerns.named(REPOSITORY, "lag")
+    under = concerns.named(REPOSITORY, "tabs")
+
+    # Under the lead's concern, which they answer for from above: nobody holds it.
+    assert (under.parent, under.holder) == (lag.number, None)
+    assert concerns.answering(under) == main("s1")
+    assert opened.startswith("Opened @tabs, under @lag.\n")
+    assert added == (
+        f"Thanks: your words are with the operator, @{spaces}, in @tabs, and your "
+        "parent has them too. You can carry on."
+    )
+    assert [thread_of(delivery, each) for each in (tabs, spaces)] == [under, under]
+    # Each reached the lead as their quiet copy, never as a line of the concern.
+    copies = [
+        each for each in delivery.inbox.items.values() if each.recipient == main("s1")
+    ]
+    assert [(each.quiet, each.reason.model_dump()["text"]) for each in copies] == [
+        (True, "Tabs are dropped."),
+        (True, "And spaces after them."),
+    ]
+
+
+def test_the_concern_tool_opens_holds_hands_moves_parks_and_says_done(
     delivery: Delivery, clock: FakeClock
 ) -> None:
     register = launched(delivery, "dev", "s1")
@@ -474,8 +563,8 @@ def test_the_thread_tool_opens_holds_hands_moves_parks_and_says_done(
     )
 
     opened = said(
-        lead.thread(
-            Threading(
+        lead.concern(
+            Concerning(
                 name="lag",
                 title="The cursor jumps",
                 move=[f"{review.number}.1"],
@@ -483,16 +572,16 @@ def test_the_thread_tool_opens_holds_hands_moves_parks_and_says_done(
             )
         )
     )
-    standing = said(lead.thread(Threading(name="lag")))
+    standing = said(lead.concern(Concerning(name="lag")))
     clock.sleep(60)
     parked = said(
-        lead.thread(
-            Threading(name="voice", title="The voice branch", park=Parking(issue=12))
+        lead.concern(
+            Concerning(name="voice", title="The voice branch", park=Parking(issue=12))
         )
     )
     done = said(
-        speaker(delivery, register, worker).thread(
-            Threading(name="lag", done="Type fast in a long comment: it stays put.")
+        speaker(delivery, register, worker).concern(
+            Concerning(name="lag", done="Type fast in a long comment: it stays put.")
         )
     )
 
@@ -523,7 +612,7 @@ def test_the_thread_tool_opens_holds_hands_moves_parks_and_says_done(
     status = delivery.concerns().standing(voice).status
     assert isinstance(status, Parked)
     assert status.until == [IssueClosed(issue=12)]
-    assert done == "@lag is done, for the operator to confirm."
+    assert done == "@lag is done, for the operator to clear."
     assert isinstance(delivery.concerns().standing(lag).status, Done)
     assert told(delivery, main("s1")) == []
 
@@ -550,8 +639,8 @@ def test_a_part_moved_into_a_thread_is_answered_by_an_item_in_that_thread_citing
         )
     )
     said(
-        lead.thread(
-            Threading(
+        lead.concern(
+            Concerning(
                 name="lag",
                 title="The cursor jumps",
                 move=[f"{review.number}.1"],
@@ -560,8 +649,8 @@ def test_a_part_moved_into_a_thread_is_answered_by_an_item_in_that_thread_citing
         )
     )
     said(
-        lead.thread(
-            Threading(name="voice", title="The voice", move=[f"{review.number}.2"])
+        lead.concern(
+            Concerning(name="voice", title="The voice", move=[f"{review.number}.2"])
         )
     )
     concerns = delivery.concerns()
@@ -600,33 +689,33 @@ def test_a_part_moved_into_a_thread_is_answered_by_an_item_in_that_thread_citing
     assert concerns.standing(voice).unanswered == []
 
 
-def test_the_thread_tool_refuses_before_doing_anything(delivery: Delivery) -> None:
+def test_the_concern_tool_refuses_before_doing_anything(delivery: Delivery) -> None:
     register = launched(delivery, "dev", "s1")
     lead = speaker(delivery, register, main("s1"))
-    said(lead.thread(Threading(name="lag", title="Lag")))
+    said(lead.concern(Concerning(name="lag", title="Lag")))
     lag = delivery.concerns().named(REPOSITORY, "lag").number
     # Past every number given out, so nothing holds it.
     nothing = lag + 100
 
     refusals = [
-        said(lead.thread(Threading(name="lagg", join=True))),
-        said(lead.thread(Threading(name="lag", title="Again"))),
-        said(lead.thread(Threading(name="lag", hold=True, hand="nobody"))),
-        said(lead.thread(Threading(name="lag", park=Parking(), done="x"))),
-        said(lead.thread(Threading(name="lag", park=Parking(why="later")))),
-        said(lead.thread(Threading(name="lag", hand="nobody"))),
-        said(lead.thread(Threading(name="2025", title="Digits"))),
-        said(lead.thread(Threading(name="lag", move=[str(nothing)]))),
+        said(lead.concern(Concerning(name="lagg", join=True))),
+        said(lead.concern(Concerning(name="lag", title="Again"))),
+        said(lead.concern(Concerning(name="lag", hold=True, hand="nobody"))),
+        said(lead.concern(Concerning(name="lag", park=Parking(), done="x"))),
+        said(lead.concern(Concerning(name="lag", park=Parking(why="later")))),
+        said(lead.concern(Concerning(name="lag", hand="nobody"))),
+        said(lead.concern(Concerning(name="2025", title="Digits"))),
+        said(lead.concern(Concerning(name="lag", move=[str(nothing)]))),
     ]
 
     assert refusals == [
-        "Nothing done: no thread of this repository is `lagg`: give `title` to open it",
+        "Nothing done: no concern of this repository is `lagg`: give `text` or `title` to open it",
         f"Nothing done: `lag` names @{lag} already: leave out `title`, or pick another name",
-        "Nothing done: `hold` takes it and `hand` gives it away: say one",
-        "Nothing done: a thread is parked or done, not both: say one",
+        "Nothing done: `hold` takes it and `hand` passes it on: say one",
+        "Nothing done: a concern is parked or done, not both: say one",
         "Nothing done: `park` takes what it waits for: an issue, a branch, a commit, a conversation, a time or a condition",
         "Nothing done: no conversation of this repository is `nobody`",
-        "Nothing done: `2025` can't be a thread's name: letters, digits, `-`, `_` and `.`, a letter among them",
+        "Nothing done: `2025` can't be a concern's name: letters, digits, `-`, `_` and `.`, a letter among them",
         f"Nothing done: @{nothing} isn't an item of this repository",
     ]
     assert delivery.inbox.whereabouts[main("s1").key()].thread is None
@@ -638,15 +727,15 @@ def test_join_moves_where_an_agent_works_and_hold_takes_it_from_whoever_held_it(
     register = launched(delivery, "dev", "s1")
     lead = speaker(delivery, register, main("s1"))
     worker = spawned(delivery, register, main("s1"), "a1", "fixer")
-    said(lead.thread(Threading(name="lag", title="Lag", hold=True)))
+    said(lead.concern(Concerning(name="lag", title="Lag", hold=True)))
 
     joined = said(
-        speaker(delivery, register, worker).thread(Threading(name="lag", join=True))
+        speaker(delivery, register, worker).concern(Concerning(name="lag", join=True))
     )
     said(speaker(delivery, register, worker).note(ThreadedRemark(remark="On it.")))
     on_it = newest(delivery)
     took = said(
-        speaker(delivery, register, worker).thread(Threading(name="lag", hold=True))
+        speaker(delivery, register, worker).concern(Concerning(name="lag", hold=True))
     )
 
     lag = delivery.concerns().named(REPOSITORY, "lag")
@@ -665,13 +754,13 @@ def test_a_subagent_stays_quiet_in_the_thread_they_started_on_wherever_they_go_a
 ) -> None:
     register = launched(delivery, "dev", "s1")
     lead = speaker(delivery, register, main("s1"))
-    said(lead.thread(Threading(name="home", title="Home", hold=True)))
+    said(lead.concern(Concerning(name="home", title="Home", hold=True)))
     said(lead.note(ThreadedRemark(remark="Go.")))
     go = newest(delivery)
     worker = spawned(delivery, register, main("s1"), "a1", "fixer")
     work = speaker(delivery, register, worker)
     said(work.note(ThreadedRemark(remark="Starting.")))
-    said(work.thread(Threading(name="lag", title="Lag", join=True)))
+    said(work.concern(Concerning(name="lag", title="Lag", join=True)))
     helper = spawned(delivery, register, worker, "a2", "helper")
     said(speaker(delivery, register, helper).note(ThreadedRemark(remark="Looking.")))
     review = asyncio.run(
@@ -686,7 +775,7 @@ def test_a_subagent_stays_quiet_in_the_thread_they_started_on_wherever_they_go_a
         )
     )
 
-    said(lead.thread(Threading(name="home", move=[f"{review.number}.1"])))
+    said(lead.concern(Concerning(name="home", move=[f"{review.number}.1"])))
     said(lead.note(ThreadedRemark(remark="Typing fast moves it.", thread="lag")))
     typing = newest(delivery)
 
@@ -707,11 +796,11 @@ def test_a_holder_that_ended_holds_nothing_and_the_thread_above_answers(
 ) -> None:
     register = launched(delivery, "dev", "s1")
     lead = speaker(delivery, register, main("s1"))
-    said(lead.thread(Threading(name="home", title="Home", hold=True)))
+    said(lead.concern(Concerning(name="home", title="Home", hold=True)))
     worker = spawned(delivery, register, main("s1"), "a1", "fixer")
     said(
-        speaker(delivery, register, worker).thread(
-            Threading(name="lag", title="Lag", hold=True)
+        speaker(delivery, register, worker).concern(
+            Concerning(name="lag", title="Lag", hold=True)
         )
     )
     place = delivery.inbox.whereabouts[worker.key()]
@@ -751,7 +840,7 @@ def test_a_check_an_earlier_lup_kept_waits_on_nobody_and_reads_with_its_answer(
 ) -> None:
     register = launched(delivery, "dev", "s1")
     lead = speaker(delivery, register, main("s1"))
-    said(lead.thread(Threading(name="room-start", title="Room start", hold=True)))
+    said(lead.concern(Concerning(name="room-start", title="Room start", hold=True)))
     said(lead.note(ThreadedRemark(remark="It starts slowly.")))
     concerns = delivery.concerns()
     room = concerns.named(REPOSITORY, "room-start")
@@ -789,8 +878,8 @@ def test_the_operator_settles_declines_and_reopens_telling_whoever_answers(
     register = launched(delivery, "dev", "s1")
     worker = spawned(delivery, register, main("s1"), "a1", "fixer")
     said(
-        speaker(delivery, register, worker).thread(
-            Threading(name="lag", title="Lag", hold=True)
+        speaker(delivery, register, worker).concern(
+            Concerning(name="lag", title="Lag", hold=True)
         )
     )
     concerns = delivery.concerns()
@@ -820,8 +909,8 @@ def test_a_thread_reads_whole_with_where_it_stands_what_s_under_and_what_names_i
 ) -> None:
     register = launched(delivery, "dev", "s1")
     lead = speaker(delivery, register, main("s1"))
-    said(lead.thread(Threading(name="lag", title="The cursor jumps", hold=True)))
-    said(lead.thread(Threading(name="fix", title="Fix it", under="lag")))
+    said(lead.concern(Concerning(name="lag", title="The cursor jumps", hold=True)))
+    said(lead.concern(Concerning(name="fix", title="Fix it", under="lag")))
     said(lead.note(ThreadedRemark(remark="Typing fast moves it.")))
     typing = newest(delivery)
     said(lead.ask(Asking(question="Long comments only?")))
@@ -863,8 +952,8 @@ def test_a_friction_the_operator_moved_reads_whole_in_the_thread_it_went_to_sayi
 ) -> None:
     register = launched(delivery, "dev", "s1")
     lead = speaker(delivery, register, main("s1"))
-    said(lead.friction(ThreadedFriction(text="It hung.", title="the gate hangs")))
-    said(lead.thread(Threading(name="gate", title="The gate")))
+    befell(lead, "It hung.", "the gate hangs")
+    said(lead.concern(Concerning(name="gate", title="The gate")))
     concerns = delivery.concerns()
     [friction] = delivery.inbox.items
     concerns.gathered([friction], concerns.named(REPOSITORY, "gate"), None)
@@ -874,8 +963,8 @@ def test_a_friction_the_operator_moved_reads_whole_in_the_thread_it_went_to_sayi
 
     assert read.text.endswith(
         "Moved here by the operator, from where it landed:\n"
-        f"@{friction}  2026-10-01 12:00  a friction from you to the operator, waiting:\n"
-        f'<item item="{friction}" kind="friction" from="dev">It hung.</item>'
+        f"@{friction}  2026-10-01 12:00  a concern from you to the operator, waiting:\n"
+        f'<item item="{friction}" kind="concern" from="dev">It hung.</item>'
     )
 
 
@@ -884,8 +973,8 @@ def test_a_name_a_thread_has_is_no_agent_s_and_a_new_session_inherits_nothing_by
 ) -> None:
     earlier = launched(delivery, "dev", "s1")
     said(
-        speaker(delivery, earlier, main("s1")).thread(
-            Threading(name="lag", title="Lag", hold=True)
+        speaker(delivery, earlier, main("s1")).concern(
+            Concerning(name="lag", title="Lag", hold=True)
         )
     )
     delivery.layout.record("dev").unlink()
@@ -1008,8 +1097,8 @@ def test_a_root_reads_as_absent_by_its_name_its_number_and_where_someone_worked_
     assert concerns.found(REPOSITORY, str(root.number)) is None
     assert concerns.working(main("s1")) is None
     assert concerns.started_on(main("s1")) is None
-    assert said(lead.thread(Threading(name="old-dev"))) == (
-        "Nothing done: no thread of this repository is `old-dev`: give `title` to open it"
+    assert said(lead.concern(Concerning(name="old-dev"))) == (
+        "Nothing done: no concern of this repository is `old-dev`: give `text` or `title` to open it"
     )
     with pytest.raises(InboxError):
         concerns.thread(root.number)
@@ -1031,7 +1120,7 @@ def test_a_root_s_name_refuses_nobody_and_a_new_thread_is_given_the_next_free_on
     register = launched(delivery, "dev", "s1")
     lead = speaker(delivery, register, main("s1"))
     plant_root(delivery, earlier, "old", holder=earlier)
-    said(lead.thread(Threading(name="old", title="An old one")))
+    said(lead.concern(Concerning(name="old", title="An old one")))
     concerns = delivery.concerns()
 
     assert concerns.working(main("s1")) is None
@@ -1064,7 +1153,7 @@ def test_a_frictions_in_no_thread_are_gathered_into_a_concern_nobody_holds_at_th
 ) -> None:
     register = launched(delivery, "dev", "s1")
     lead = speaker(delivery, register, main("s1"))
-    said(lead.friction(ThreadedFriction(text="It hung.", title="the gate hangs")))
+    befell(lead, "It hung.", "the gate hangs")
     concerns = delivery.concerns()
     [friction] = delivery.inbox.items
 
@@ -1079,9 +1168,9 @@ def test_gathering_opens_under_the_top_of_where_the_first_landed_whoever_holds_i
 ) -> None:
     register = launched(delivery, "dev", "s1")
     lead = speaker(delivery, register, main("s1"))
-    said(lead.thread(Threading(name="lag", title="Lag", hold=True)))
-    said(lead.thread(Threading(name="tabs", title="Tabs", join=True)))
-    said(lead.friction(ThreadedFriction(text="It hung.", title="the gate hangs")))
+    said(lead.concern(Concerning(name="lag", title="Lag", hold=True)))
+    said(lead.concern(Concerning(name="tabs", title="Tabs", join=True)))
+    befell(lead, "It hung.", "the gate hangs")
     concerns = delivery.concerns()
     friction = next(
         number
@@ -1100,7 +1189,7 @@ def test_a_settled_concern_stays_settled_whatever_its_holder_sends_into_it_runni
 ) -> None:
     register = launched(delivery, "dev", "s1")
     lead = speaker(delivery, register, main("s1"))
-    said(lead.thread(Threading(name="lag", title="Lag", hold=True)))
+    said(lead.concern(Concerning(name="lag", title="Lag", hold=True)))
     concerns = delivery.concerns()
     lag = concerns.named(REPOSITORY, "lag")
     # The operator settled it while they worked; they go on in it.
@@ -1128,8 +1217,8 @@ def test_a_concern_a_holder_left_goes_nobody_running_and_back_to_working_as_they
 ) -> None:
     register = launched(delivery, "dev", "s1")
     said(
-        speaker(delivery, register, main("s1")).thread(
-            Threading(name="lag", title="Lag", hold=True)
+        speaker(delivery, register, main("s1")).concern(
+            Concerning(name="lag", title="Lag", hold=True)
         )
     )
     lag = delivery.concerns().named(REPOSITORY, "lag")
@@ -1149,11 +1238,11 @@ def test_a_nested_concern_whose_holder_ended_is_answered_for_by_who_holds_above_
 ) -> None:
     register = launched(delivery, "dev", "s1")
     lead = speaker(delivery, register, main("s1"))
-    said(lead.thread(Threading(name="lag", title="Lag", hold=True)))
+    said(lead.concern(Concerning(name="lag", title="Lag", hold=True)))
     worker = spawned(delivery, register, main("s1"), "a1", "parser")
     said(
-        speaker(delivery, register, worker).thread(
-            Threading(name="tabs", title="Tabs", hold=True)
+        speaker(delivery, register, worker).concern(
+            Concerning(name="tabs", title="Tabs", hold=True)
         )
     )
     place = delivery.inbox.whereabouts[worker.key()]
@@ -1167,7 +1256,7 @@ def test_a_nested_concern_whose_holder_ended_is_answered_for_by_who_holds_above_
 
 
 def test_no_tool_an_agent_calls_settles_or_declines_a_thread() -> None:
-    fields = set(Threading.model_fields)
+    fields = set(Concerning.model_fields)
     assert not fields & {"settle", "settled", "decline", "declined", "reopen"}
 
 
@@ -1183,7 +1272,7 @@ def test_a_fresh_session_hears_what_s_open_without_being_given_any_of_it_whateve
     lead = speaker(delivery, register, main("s1"))
     said(lead.note(ThreadedRemark(remark="Go.")))
     said(lead.ask(Asking(question="Ship?", thread="Ship it")))
-    said(lead.thread(Threading(name="done-one", title="Done one")))
+    said(lead.concern(Concerning(name="done-one", title="Done one")))
     concerns = delivery.concerns()
     concerns.settled(concerns.named(REPOSITORY, "done-one"))
     delivery.layout.record("dev").unlink()
@@ -1204,7 +1293,7 @@ def test_a_fresh_session_hears_what_s_open_without_being_given_any_of_it_whateve
     assert delivery.concerns().working(main("s2")) is None
     assert (
         "Open threads of this repository (`inbox` with `thread` reads one whole; "
-        "the `thread` tool with `hold` takes one):\n"
+        "the `concern` tool with `hold` takes one):\n"
         '- @ship-it, "Ship it", held by nobody: waiting on the operator: 1 '
         "question."
     ) in page

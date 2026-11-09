@@ -9,7 +9,7 @@ resumed in a launch of their own finds what waited for them there.
 An item has a number, one sequence per user, cited `@12` wherever it's named
 (`cited`), so the operator answers `@12`, or `12`; a reason (a message with its
 kind, a question with its numbered decisions, an answer, an approval asked yes
-or no; a friction, how it felt, or a stop by choice, each as the
+or no; a concern's words, how it felt, or a stop by choice, each as the
 agent's tool took it; a change held, or a write that landed flagged, as the
 judge put it), whose kind ranks it (`ranked`); a sender and a recipient; when
 it was made; and its state: waiting, told (when, and how), answered, done, or
@@ -182,7 +182,11 @@ class Labelled(Model):
 
 
 class Friction(results.Concern):
-    """What got in a conversation's way, which they told the operator at the moment it did (`friction`), in their own words: news to read, never a question."""
+    """What a conversation found worth keeping an eye on, what got in their way among it, in their own words, as they told the operator in a concern at the moment it came up (`concern`): news to read, never a question.
+
+    Named `friction` as `concern` was before it, and kept so, which an earlier
+    lup reads: what lup names a kind (`kind`, `what`) says `concern`.
+    """
 
     reason: Literal["friction"] = "friction"
 

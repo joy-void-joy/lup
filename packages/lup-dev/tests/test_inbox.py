@@ -2270,7 +2270,7 @@ def test_blocked_note_and_send_reach_the_operator_a_note_raising_no_notice(
     assert notices.raised[1].startswith(f"lup: a disagreement from `{tmp_path.name}`")
 
 
-def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_subagent(
+def test_a_concern_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_subagent(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     other = tmp_path / "other"
@@ -2366,14 +2366,32 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
             if isinstance(each.reason, HowItFelt)
         ]
     # Each subagent has a parent, their session's own conversation, who gets a
-    # copy of their friction (`copied`); how it felt is told to the operator
-    # alone. Each item lands in no thread.
-    assert threads == []
+    # copy of their concern's words (`copied`); how it felt is told to the
+    # operator alone. Each concern opens at the top, its words in it, held by
+    # the session whose agent opened it, working in none; the rest lands in none.
+    claude_session = Conversation(
+        repository=tmp_path / ".git", runtime="claude", session="s1"
+    )
+    codex_session = Conversation(
+        repository=other / ".git", runtime="codex", session="t1"
+    )
+    title = "`uv run lup-dev check` printed: engine stale"
+    assert [(each.title, each.holder, each.parent) for each in threads] == [
+        (title, claude_session, None),
+        (title, codex_session, None),
+    ]
+    stale = threads[0].name
     assert [text for text, _ in answers] == [
-        f"Thanks: your friction is with the operator, @{claude_friction}, and your parent has it too. You can carry on.",
+        (
+            f"Opened @{stale}, held by `{tmp_path.name}`.\n"
+            f"Thanks: your words are with the operator, @{claude_friction}, in @{stale}, and your parent has them too. You can carry on."
+        ),
         f"Thank you for telling them. It's with the operator, as you wrote it, @{claude_felt}.",
         f"The operator will read why you stopped, @{claude_stop}. You can end your turn now.",
-        f"Thanks: your friction is with the operator, @{codex_friction}. You can carry on.",
+        (
+            f"Opened @{stale}, held by you.\n"
+            f"Thanks: your words are with the operator, @{codex_friction}, in @{stale}. You can carry on."
+        ),
         f"Thank you for telling them. It's with the operator, as you wrote it, @{codex_felt}.",
         f"The operator will read why you stopped, @{codex_stop}. You can end your turn now.",
     ]
@@ -2381,12 +2399,6 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
     # The parts a friction once had are refused: it's one text.
     assert labelled[1]
     assert labelled[0].startswith("Refused: 1 validation error for Concern")
-    claude_session = Conversation(
-        repository=tmp_path / ".git", runtime="claude", session="s1"
-    )
-    codex_session = Conversation(
-        repository=other / ".git", runtime="codex", session="t1"
-    )
     assert [
         (each.number, each.sender, each.recipient, each.call) for each in waiting
     ] == [
@@ -2429,7 +2441,7 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
     ]
     first = listed.splitlines()[0]
     assert first.startswith(
-        f"{cited(claude_friction):>5}  2026-10-01 12:00  a friction from `"
+        f"{cited(claude_friction):>5}  2026-10-01 12:00  a concern from `"
     )
     assert first.endswith(
         f"`{tmp_path.name}/a1` in {tmp_path}: "
@@ -3944,7 +3956,7 @@ def test_what_a_subagent_said_at_an_end_held_for_what_waited_reaches_its_parent_
 
 
 @pytest.mark.parametrize("reach", ["operator", "operator and parent"])
-def test_a_subagents_friction_reaches_its_parent_whole_and_how_it_felt_where_lup_passes_it_on(
+def test_a_subagents_concern_reaches_its_parent_whole_and_how_it_felt_where_lup_passes_it_on(
     machine: Layout,
     clock: FakeClock,
     notices: Raised,
@@ -3990,14 +4002,18 @@ def test_a_subagents_friction_reaches_its_parent_whole_and_how_it_felt_where_lup
         described = next(
             each.description for each in specs() if each.name == "how_it_felt"
         )
+        [stale] = [each.name for each in delivery.inbox.ledger.every(Thread)]
     friction = Friction.model_validate(jammed)
     how_it_felt = HowItFelt.model_validate(went)
     assert jam == (
-        f"Thanks: your friction is with the operator, @{reported}, and your parent has it too. You can carry on.",
+        (
+            f"Opened @{stale}, held by `w`.\n"
+            f"Thanks: your words are with the operator, @{reported}, in @{stale}, and your parent has them too. You can carry on."
+        ),
         False,
     )
     assert ended == ""
-    assert told.startswith(f'<item item="{copied}" from="w/parser" kind="friction">')
+    assert told.startswith(f'<item item="{copied}" from="w/parser" kind="concern">')
     assert friction.text in told
     assert operators == [reported, felt]
     copies = [
@@ -5040,12 +5056,12 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
         "send",
         "wait_inbox",
         "inbox",
-        "thread",
         "withdraw",
         "edit",
     ]
-    # Each takes the library's input, and those that send a `thread` beside it;
-    # how it felt lands where its sender started, and takes none.
+    # Each takes the library's input first: `blocked`, `stop` and `note` with
+    # a `thread` beside it, `concern` with what's said of one there already;
+    # how it felt lands where its sender started, and takes nothing more.
     library = [tool.spec().input_schema for tool in SPEAKING]
 
     def properties(schema: dict[str, JsonValue]) -> list[str]:
@@ -5053,22 +5069,34 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
         assert isinstance(found, dict)
         return list(found)
 
+    concerning = [
+        "name",
+        "under",
+        "move",
+        "join",
+        "hold",
+        "hand",
+        "park",
+        "done",
+    ]
     assert [properties(spec.input_schema) for spec in served[:5]] == [
-        [*properties(each), *(["thread"] if at < 4 else [])]
-        for at, each in enumerate(library)
+        [*properties(library[0]), "thread"],
+        [*properties(library[1]), "thread"],
+        [*properties(library[2]), "thread"],
+        [*properties(library[3]), *concerning],
+        properties(library[4]),
     ]
     assert served[4].input_schema == library[4]
     assert [spec.summary for spec in served] == [
         "Say the work can't go on, and what's wrong.",
         "End your work by your own choice, saying why.",
         "Tell the operator a doubt, and carry on.",
-        "Say what got in your way, and carry on.",
+        "Say what's worth keeping an eye on, and carry on.",
         "Tell the operator how it is for you.",
         "Ask the operator, with numbered decisions.",
         "Send a message to a party's inbox.",
         "Wait until something reaches you.",
         "Read this repository's inbox, changing nothing.",
-        "Open, join, hold or park a thread; say it's done.",
         "Take back an item the operator needn't see.",
         "Edit what you sent the operator.",
     ]
@@ -5860,7 +5888,7 @@ def test_a_review_quotes_by_part_and_first_line_reads_in_one_line_and_names_othe
         f'<read items="{reading}"/>\n'
         "<context>\n"
         f"{CONTEXT_LINE}\n"
-        f'<on item="{hung}" kind="friction" from="other" worktree="{other}">\n'
+        f'<on item="{hung}" kind="concern" from="other" worktree="{other}">\n'
         f'<quote part="{hung}.1">Gate hung.</quote>\n'
         "<reply>Again?</reply>\n"
         "</on>\n"
@@ -5869,7 +5897,7 @@ def test_a_review_quotes_by_part_and_first_line_reads_in_one_line_and_names_othe
     )
     assert told2 == (
         f'<review item="{to_two}" from="operator" covers="{covers}">\n'
-        f'<on item="{hung}" kind="friction">\n'
+        f'<on item="{hung}" kind="concern">\n'
         f'<quote part="{hung}.1">Gate hung.</quote>\n'
         f'<reply id="{to_two}.5">Again?</reply>\n'
         "</on>\n"
@@ -13615,7 +13643,7 @@ def test_a_new_main_session_is_told_where_its_repository_stands_once_as_it_start
             unlanded,
             (
                 "Open threads of this repository (`inbox` with `thread` reads one "
-                "whole; the `thread` tool with `hold` takes one):\n"
+                "whole; the `concern` tool with `hold` takes one):\n"
                 '- @which-parser, "Which parser", held by nobody: waiting on the '
                 "operator: 1 question."
             ),
@@ -13821,13 +13849,13 @@ def test_agents_open_and_hold_threads_and_are_told_what_lands_there_on_each_runt
         launched(machine, clock, worktree, "one", runtime)
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         send(hook, start("SessionStart", source="startup"))
-        opened = own("thread", {"name": "lag", "title": "The cursor jumps"}, "m1")
+        opened = own("concern", {"name": "lag", "title": "The cursor jumps"}, "m1")
         if runtime == "claude":
             send(hook, records.spawn("t1", name="parser"))
             records.recorded("a1", "Explore", "t1", name="parser")
         else:
             rollouts.recorded("th1", "t1", "/root/lexer")
-        held = subagent("thread", {"name": "lag", "hold": True})
+        held = subagent("concern", {"name": "lag", "hold": True})
         noted = own("note", {"remark": "Typing fast moves it.", "thread": "lag"}, "m2")
         told = context(subagent_calls("c1"))
         theirs = subagent("note", {"remark": "Found it: the debounce."})
@@ -13911,7 +13939,7 @@ def test_a_subagent_hears_only_what_s_addressed_to_them_in_their_parent_s_thread
         launched(machine, clock, worktree, "one", runtime)
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         send(hook, start("SessionStart", source="startup"))
-        call(mcp, "thread", {"name": "home", "title": "Home", "hold": True})
+        call(mcp, "concern", {"name": "home", "title": "Home", "hold": True})
         for spawned_by, name in [("t1", "parser"), ("t2", "lexer")]:
             agent, thread = agents[name]
             if runtime == "claude":
@@ -13938,7 +13966,7 @@ def test_a_subagent_hears_only_what_s_addressed_to_them_in_their_parent_s_thread
         spared = subagent_calls("parser", "c1")
         subagent("lexer", "note", {"remark": "Tabs here too.", "thread": "tabs-vanish"})
         under = subagent_calls("parser", "c2")
-        joined = subagent("lexer", "thread", {"name": "home", "join": True})
+        joined = subagent("lexer", "concern", {"name": "home", "join": True})
         subagent("parser", "note", {"remark": "The parser is done."})
         heard = subagent_calls("lexer", "c3")
     assert opened[0].endswith(", in @tabs-vanish. You can carry on.")

@@ -34,8 +34,8 @@
   what they send into it after, running or resumed, being news there, since
   what the operator settled never comes back on its own.
 
-What an agent says of a thread besides sending into it is the `thread` tool's
-(`inbox/tools.py`): open, join, hold, hand, move into, park, say done. Settling,
+What an agent says of a thread is the `concern` tool's (`inbox/tools.py`):
+open it, add to it, join, hold, hand, move into, park, say done. Settling,
 declining and reopening are the operator's (`settled`, `declined`,
 `reopened`).
 """
@@ -138,15 +138,17 @@ def told(item: Item) -> Reach:
 
 
 def slugged(title: str, longest: int = 40) -> str:
-    """Return a thread's name made from its `title`: shortened to `longest` characters at a word's end, lowercase, each run of what a name can't hold a `-`; `thread` where that leaves no letter.
+    """Return a thread's name made from its `title`: shortened to `longest` characters at a word's end, lowercase, each run of what a name can't hold a `-`, and no `.` at its end, as a sentence's stop is; `thread` where that leaves no letter.
 
     >>> slugged("The cursor jumps when typing fast in a long comment")
     'the-cursor-jumps-when-typing-fast-in-a'
+    >>> slugged("The gate hangs.")
+    'the-gate-hangs'
     >>> slugged("#316")
     'thread-316'
     """
     short = textwrap.shorten(title, width=longest, placeholder="")
-    made = shaped(short) or ""
+    made = (shaped(short) or "").removesuffix(".")
     lettered = any(each.isalpha() for each in made)
     return made if lettered else "-".join(each for each in ["thread", made] if each)
 
@@ -281,16 +283,9 @@ class Concerns(Model, arbitrary_types_allowed=True):
         except LupLedgerError as refused:
             raise InboxError(str(refused)) from refused
 
-    def drawn[
-        E: In
-        | Moved
-        | Refers
-        | Parked
-        | Done
-        | Settled
-        | Declined
-        | Reopened
-    ](self, edge: E) -> E:
+    def drawn[E: In | Moved | Refers | Parked | Done | Settled | Declined | Reopened](
+        self, edge: E
+    ) -> E:
         """Draw `edge` on the ledger; say why where the ledger refuses it."""
         try:
             return self.inbox.ledger.drawn(edge)

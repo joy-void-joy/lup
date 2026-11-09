@@ -55,11 +55,10 @@ from lup_dev.inbox.threaded import (
 from lup_dev.inbox.tools import (
     Asking,
     Choice,
+    Concerning,
     Parking,
     Speaker,
-    ThreadedFriction,
     ThreadedRemark,
-    Threading,
 )
 from lup_dev.layout import Layout
 from lup_ledger.environment.layout import LedgerLayout
@@ -137,18 +136,18 @@ class Work:
         Names(path=delivery.layout.names).keep("s1", "lead")
         delivery.heard_in(LEAD, register, None)
         self.lead = Speaker(delivery=delivery, launch=register, party=LEAD)
-        self.ran(self.lead.thread(Threading(name="home", title="Home", hold=True)))
+        self.ran(self.lead.concern(Concerning(name="home", title="Home", hold=True)))
         self.note = self.sent(ThreadedRemark(remark="Built."))
         self.home = self.thread_of(self.note)
         self.friction = self.ran(
-            self.lead.friction(ThreadedFriction(text="The gate hung."))
+            self.lead.concern(Concerning(text="The gate hung.", name="home"))
         )
         for name, title in [
             ("lag", "The cursor jumps"),
             ("voice", "Voice"),
             ("docs", "Docs"),
         ]:
-            self.ran(self.lead.thread(Threading(name=name, title=title)))
+            self.ran(self.lead.concern(Concerning(name=name, title=title)))
         self.question = self.ran(
             self.lead.ask(
                 Asking(
@@ -163,7 +162,7 @@ class Work:
         self.voiced = self.sent(ThreadedRemark(remark="Voice works.", thread="voice"))
         self.voice = self.thread_of(self.voiced)
         self.ran(
-            self.lead.thread(Threading(name="voice", done="Say hello: it answers."))
+            self.lead.concern(Concerning(name="voice", done="Say hello: it answers."))
         )
         self.documented = self.sent(ThreadedRemark(remark="Docs.", thread="docs"))
         self.docs = self.thread_of(self.documented)
@@ -426,14 +425,14 @@ def test_the_agent_s_mark_and_the_operator_s_are_read_apart_and_cleared_waits_on
     # Cleared while still at work, then said done: still cleared, never back
     # before the operator.
     concerns.declined(work.docs, "Not now.")
-    work.ran(work.lead.thread(Threading(name="docs", done="Read the docs.")))
+    work.ran(work.lead.concern(Concerning(name="docs", done="Read the docs.")))
     docs = work.read()["docs"]
     assert (docs.state, docs.section) == ("declined", "every thread")
     assert isinstance(docs.cleared, Declined)
     assert docs.done is not None
     assert docs.done.to_try == "Read the docs."
     # Open to the operator, said done: theirs to clear.
-    work.ran(work.lead.thread(Threading(name="lag", done="Type in a long one.")))
+    work.ran(work.lead.concern(Concerning(name="lag", done="Type in a long one.")))
     lag = work.read()["lag"]
     assert (lag.state, lag.cleared) == ("done to confirm", None)
     assert lag.done is not None
@@ -457,7 +456,7 @@ def test_a_reply_of_the_operator_s_in_a_thread_done_reopens_it_back_to_whoever_h
     assert isinstance(voice.status, Reopened)
     assert voice.status.why == "the operator replied there"
     # Commented on in a review, a thread done is reopened the same way.
-    work.ran(work.lead.thread(Threading(name="voice", done="Say hello again.")))
+    work.ran(work.lead.concern(Concerning(name="voice", done="Say hello again.")))
     work.delivery.inbox.drafted(
         Draft(comments=[Comment(item=work.voiced, text="Still lags.")])
     )
@@ -500,7 +499,7 @@ def test_a_part_moved_in_stands_open_until_an_item_there_cites_it_never_asking_t
     )
     part = Spot(node=answer.number, part=2)
     clock.sleep(60)
-    work.ran(work.lead.thread(Threading(name="docs", move=[f"{answer.number}.2"])))
+    work.ran(work.lead.concern(Concerning(name="docs", move=[f"{answer.number}.2"])))
 
     docs = work.read()["docs"]
     assert docs.unanswered == [part]
@@ -574,7 +573,7 @@ def test_where_each_conversation_works_is_read_with_the_threads(work: Work) -> N
     assert [(each.conversation, each.thread) for each in listed.working] == [
         (LEAD, work.home.number)
     ]
-    work.ran(work.lead.thread(Threading(name="lag", join=True)))
+    work.ran(work.lead.concern(Concerning(name="lag", join=True)))
     listed = asyncio.run(ThreadsListing(reading=work.reading()).answer(ListThreads()))
     assert isinstance(listed, ThreadsRead)
     assert [(each.conversation, each.thread) for each in listed.working] == [
@@ -910,10 +909,10 @@ def test_the_operator_moves_frictions_and_how_it_felt_into_a_new_thread_under_th
 ) -> None:
     sub = worker(work)
     rebuilt = work.ran(
-        sub.friction(
-            ThreadedFriction(
+        sub.concern(
+            Concerning(
                 text="The engine rebuilt for four minutes, saying nothing.",
-                title="the engine rebuilds silently",
+                name="home",
             )
         )
     )
@@ -961,7 +960,7 @@ def test_the_operator_moves_frictions_and_how_it_felt_into_a_new_thread_under_th
         in each
         for each in words
     )
-    assert any(f'item="{rebuilt}" kind="friction"' in each for each in words)
+    assert any(f'item="{rebuilt}" kind="concern"' in each for each in words)
 
 
 def test_frictions_moved_into_a_thread_done_reopen_it_and_one_moved_again_leaves_the_last(
@@ -1046,7 +1045,9 @@ def test_a_nested_thread_whose_holder_ended_is_answered_for_by_who_holds_above_i
     work: Work,
 ) -> None:
     sub = worker(work)
-    work.ran(sub.thread(Threading(name="tabs", title="Tabs", under="home", hold=True)))
+    work.ran(
+        sub.concern(Concerning(name="tabs", title="Tabs", under="home", hold=True))
+    )
     place = work.delivery.inbox.whereabouts[sub.party.key()]
     work.delivery.inbox.placed(place.model_copy(update={"ended": work.clock.now()}))
 
@@ -1082,8 +1083,8 @@ def test_what_s_nothing_to_list_is_empty_nobody_s_on_and_nothing_said_of_it_or_u
         ("full", "Full", None),
         ("holding", "Holding", "full"),
     ]:
-        work.ran(work.lead.thread(Threading(name=name, title=title, under=under)))
-    work.ran(work.lead.thread(Threading(name="parked", park=Parking(issue=12))))
+        work.ran(work.lead.concern(Concerning(name=name, title=title, under=under)))
+    work.ran(work.lead.concern(Concerning(name="parked", park=Parking(issue=12))))
     work.sent(ThreadedRemark(remark="Here.", thread="full"))
     held = work.read()
     ended(work)
@@ -1094,8 +1095,8 @@ def test_what_s_nothing_to_list_is_empty_nobody_s_on_and_nothing_said_of_it_or_u
     party = Conversation(repository=REPOSITORY, runtime="claude", session="s2")
     work.delivery.heard_in(party, other, None)
     work.ran(
-        Speaker(delivery=work.delivery, launch=other, party=party).thread(
-            Threading(name="worked", join=True)
+        Speaker(delivery=work.delivery, launch=other, party=party).concern(
+            Concerning(name="worked", join=True)
         )
     )
 

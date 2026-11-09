@@ -322,7 +322,7 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
         return [
             (
                 "Open threads of this repository (`inbox` with `thread` reads one "
-                "whole; the `thread` tool with `hold` takes one):"
+                "whole; the `concern` tool with `hold` takes one):"
             ),
             *(each for top in tops for each in said(top, 0)),
         ]

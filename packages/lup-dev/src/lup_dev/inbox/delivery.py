@@ -273,12 +273,12 @@ def readable(parts: list[Tag | str]) -> str:
     > The gate hung.
     <BLANKLINE>
     Fix it.
-    >>> print(readable([Tag(name="on", attributes={"item": "7", "kind": "note"}, parts=["Yes."]), Tag(name="on", attributes={"item": "9", "kind": "friction"}, parts=["No."])]))
+    >>> print(readable([Tag(name="on", attributes={"item": "7", "kind": "note"}, parts=["Yes."]), Tag(name="on", attributes={"item": "9", "kind": "concern"}, parts=["No."])]))
     On @7, note:
     <BLANKLINE>
     Yes.
     <BLANKLINE>
-    On @9, friction:
+    On @9, concern:
     <BLANKLINE>
     No.
     """
