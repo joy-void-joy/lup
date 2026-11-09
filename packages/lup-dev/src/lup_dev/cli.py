@@ -3135,9 +3135,19 @@ def spawn_trial(
         raise LaunchError(message)
     runtime = known[0].runtime.name()
     root = toplevel(Path.cwd())
-    git = Git(cwd=root)
-    tree = repository_of(root).tree
-    scratch = scratch_worktree(root, git, f"spawn-trial-{secrets.token_hex(4)}")
+    found = repository_of(root)
+    approval = approved(Layout.of(LupDevSettings()), found.git)
+    if approval is None:
+        message = f"nothing is approved for {found.git}, so nothing is held to try"
+        raise LaunchError(message)
+    # A worktree's own git directory is the room's to write, its `commondir`
+    # among it, which could lead git to a `config` whose filters a checkout
+    # runs: git runs pinned to the repository's common git directory.
+    git = Git.pinned(found.git)
+    tree = found.tree
+    scratch = scratch_worktree(
+        root.parent, git, f"spawn-trial-{secrets.token_hex(4)}", approval.commit
+    )
     podman = Podman()
     try:
         if repository_of(scratch).tree != tree:

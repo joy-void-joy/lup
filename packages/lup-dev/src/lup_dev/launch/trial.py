@@ -498,8 +498,15 @@ def spelled(took: timedelta) -> str:
     return f"{minutes} min {rest} s" if minutes else f"{rest} s"
 
 
-def scratch_worktree(root: Path, git: Git, name: str) -> Path:
-    """Make a scratch worktree beside the worktree at `root`, detached at its `HEAD`, for the trial, and return it."""
-    scratch = root.parent / name
-    git.run("worktree", "add", "--detach", str(scratch), "HEAD")
+def scratch_worktree(beside: Path, git: Git, name: str, commit: str) -> Path:
+    """Make a scratch worktree named `name` in the directory `beside`, detached at `commit`, for the trial, and return it.
+
+    `git` is pinned to the repository's common git directory (`Git.pinned`):
+    run in a worktree, git would follow the worktree's git directory, which a
+    room writes, its `commondir` among it, to a `config` whose filters the
+    checkout would run on the host (`docs/field-notes.md`, *Host-side git in a
+    repository the room writes*).
+    """
+    scratch = beside / name
+    git.run("worktree", "add", "--detach", str(scratch), commit)
     return scratch

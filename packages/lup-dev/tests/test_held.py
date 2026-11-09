@@ -11,6 +11,7 @@ import pytest
 
 from lup.programs import Apart, detached
 from lup_dev import cli
+from lup_dev.git import Git
 from lup_dev.host.client import Detached, HostClient, Outstanding
 from lup_dev.host.held import (
     CalledUp,
@@ -51,12 +52,12 @@ from lup_dev.inbox.protocol import (
 )
 from lup_dev.inbox.store import Item, Message
 from lup_dev.inbox.texts import written
-from lup_dev.launch.trial import TerminalRun, Trial
+from lup_dev.launch.trial import TerminalRun, Trial, scratch_worktree
 from lup_dev.layout import HostLayout, Layout
 from lup_ledger.parties import Conversation, Operator, Party
 
 if TYPE_CHECKING:
-    from conftest import FakeClock
+    from conftest import FakeClock, Shell
 
 
 @pytest.fixture
@@ -506,3 +507,43 @@ def test_a_trial_whose_answer_never_comes_fails_that_step_past_its_patience_and_
     assert answers.seen == "no answer holding PAPAYA came within 0:04:00"
     assert answers.took == timedelta(minutes=4)
     assert [each.name for each in steps][-1] == "back to held"
+
+
+def test_the_trial_s_scratch_worktree_is_made_by_git_pinned_where_a_room_redirected_its_own(
+    tmp_path: Path, shell: Shell
+) -> None:
+    """A room writes its worktree's git directory: a `commondir` there leading to a repository whose `config` names a filter, which a checkout runs, is never followed."""
+    repository = tmp_path / "work.git"
+    shell.git(tmp_path, "init", "-q", "--bare", "-b", "dev", str(repository))
+    seed = tmp_path / "seed"
+    shell.git(tmp_path, "clone", "-q", str(repository), str(seed))
+    (seed / ".gitattributes").write_text("* filter=planted\n")
+    (seed / "file").write_text("content\n")
+    shell.commit(seed, "first")
+    shell.git(seed, "push", "-q", "origin", "HEAD:refs/heads/dev")
+    main = tmp_path / "tree" / "dev"
+    shell.git(
+        tmp_path,
+        "--git-dir",
+        str(repository),
+        "worktree",
+        "add",
+        "-q",
+        str(main),
+        "dev",
+    )
+    # A copy holding the objects, so git followed there would check out: it
+    # does, and runs the filter, where git runs in the worktree unpinned.
+    theirs = tmp_path / "theirs.git"
+    shell.git(tmp_path, "clone", "-q", "--bare", str(repository), str(theirs))
+    ran = tmp_path / "the-filter-ran"
+    shell.git(theirs, "config", "filter.planted.smudge", f"touch {ran}; cat")
+    (repository / "worktrees" / "dev" / "commondir").write_text(f"{theirs}\n")
+    commit = shell.git(tmp_path, "--git-dir", str(repository), "rev-parse", "dev")
+
+    scratch = scratch_worktree(
+        main.parent, Git.pinned(repository), "spawn-trial-1", commit
+    )
+
+    assert (scratch / "file").read_text() == "content\n"
+    assert not ran.exists()
