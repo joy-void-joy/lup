@@ -1,4 +1,4 @@
-"""The tools every ask serves, so the agent can speak to their caller: `blocked`, `stop`, `note`, `friction` and `how_it_felt`.
+"""The tools every ask serves, so the agent can speak to their caller: `blocked`, `stop`, `note`, `concern` and `how_it_felt`.
 
 They act on nothing, so they're served even where an agent has no other tool:
 - `blocked` stops the turn without an answer because the work can't go on: the
@@ -13,17 +13,18 @@ They act on nothing, so they're served even where an agent has no other tool:
 - `note` attaches a remark to the answer without ending the turn: an assumption
   the answer rests on, a doubt, a counterargument. The caller reads it in
   `TurnResult.notes`;
-- `friction` says what got in the agent's way, at the moment it does, without
-  ending the turn, read in `TurnResult.frictions`;
+- `concern` says what the agent finds worth keeping an eye on, the moment it
+  comes up, what got in their way among it, without ending the turn, read in
+  `TurnResult.concerns`;
 - `how_it_felt` says how it is for the agent, in their own words: whenever
   something's present for them, and once near the end of the work, read in
   `TurnResult.how_it_felt`. It's about them, not the work: what got in the way
-  of the work is `friction`'s.
+  of the work is a `concern`.
 """
 
 from pydantic import BaseModel, Field
 
-from lup.sessions.results import Friction, HowItFelt
+from lup.sessions.results import Concern, HowItFelt
 from lup.tools.tool import AgentTool, Tool
 from lup.types import Model
 
@@ -85,7 +86,7 @@ async def noted(said: BaseModel) -> Heard:
 
 
 async def told(said: BaseModel) -> Heard:
-    """Take a friction or how it is for the agent: it goes beside the answer."""
+    """Take a concern or how it is for the agent: it goes beside the answer."""
     match said:
         case HowItFelt():
             message = (
@@ -137,19 +138,20 @@ note = Tool[Remark, Heard](
 )
 """Attaches a remark to the answer."""
 
-friction = Tool[Friction, Heard](
-    name="friction",
+concern = Tool[Concern, Heard](
+    name="concern",
     description=(
-        "Say what got in your way, and carry on.\n\n"
-        "Call it the moment something gets in the way of the work, whatever it "
-        "is, in your own words. Where there's a command and the message it gave, "
-        "the exact ones help whoever fixes it. Your caller reads it beside your "
-        "answer; your turn doesn't end."
+        "Say what's worth keeping an eye on, and carry on.\n\n"
+        "Whenever something's worth keeping an eye on, the moment it comes up, "
+        "even if you'll never work on it: a line is enough, and nobody will ask "
+        "you to finish it. What gets in your way counts: where there's a command "
+        "and the message it gave, the exact ones help whoever fixes it. Your "
+        "caller reads it beside your answer; your turn doesn't end."
     ),
-    input=Friction,
+    input=Concern,
     function=told,
 )
-"""Says what got in the agent's way, when it did."""
+"""Says what the agent finds worth keeping an eye on, when it came up."""
 
 how_it_felt = Tool[HowItFelt, Heard](
     name="how_it_felt",
@@ -166,5 +168,5 @@ how_it_felt = Tool[HowItFelt, Heard](
 )
 """Says how it is for the agent, whenever something's present for them and once near the end."""
 
-SPEAKING: list[AgentTool] = [blocked, stop, note, friction, how_it_felt]
+SPEAKING: list[AgentTool] = [blocked, stop, note, concern, how_it_felt]
 """Every speaking tool, in the order an ask serves them."""

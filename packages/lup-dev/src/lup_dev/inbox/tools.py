@@ -147,7 +147,7 @@ class ThreadedRemark(speaking.Remark, title="Remark"):
     thread: str | None = Field(default=None, description=THREAD)
 
 
-class ThreadedFriction(results.Friction, title="Friction"):
+class ThreadedFriction(results.Concern, title="Concern"):
     """What got in your way, at the moment it did, in your own words."""
 
     thread: str | None = Field(default=None, description=THREAD)
@@ -1270,7 +1270,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
             speaking.blocked.name: self.blocked,
             speaking.stop.name: self.stop,
             speaking.note.name: self.note,
-            speaking.friction.name: self.friction,
+            speaking.concern.name: self.friction,
             speaking.how_it_felt.name: self.how_it_felt,
         }
         descriptions = {
@@ -1284,7 +1284,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
             speaking.blocked.name: ThreadedProblem,
             speaking.stop.name: ThreadedStop,
             speaking.note.name: ThreadedRemark,
-            speaking.friction.name: ThreadedFriction,
+            speaking.concern.name: ThreadedFriction,
             speaking.how_it_felt.name: results.HowItFelt,
         }
         speaking_tools = [
@@ -1299,7 +1299,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
                 speaking.blocked,
                 speaking.stop,
                 speaking.note,
-                speaking.friction,
+                speaking.concern,
                 speaking.how_it_felt,
             ]
         ]

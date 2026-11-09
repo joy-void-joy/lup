@@ -95,7 +95,7 @@ from lup.sessions.errors import (
     UsageLimitReachedError,
 )
 from lup.sessions.layers import Recovery, SessionLayers, Submission
-from lup.sessions.results import Friction, HowItFelt, Rejection, TurnResult, Usage
+from lup.sessions.results import Concern, HowItFelt, Rejection, TurnResult, Usage
 from lup.sessions.surface import Agent
 
 __all__ = [
@@ -111,6 +111,7 @@ __all__ = [
     "Claude",
     "Code",
     "Codex",
+    "Concern",
     "ConversationEnded",
     "Diff",
     "Drawer",
@@ -119,7 +120,6 @@ __all__ = [
     "FileText",
     "Fold",
     "FoldKind",
-    "Friction",
     "Gauge",
     "HowItFelt",
     "Kept",

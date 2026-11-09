@@ -12,7 +12,7 @@ from tenacity import stop_after_attempt, wait_none
 from lup import (
     AgentUnavailableError,
     BlockedError,
-    Friction,
+    Concern,
     HowItFelt,
     OutputMissingError,
     Recovery,
@@ -153,19 +153,19 @@ def test_notes_come_back_beside_the_answer(fake_agents: FakeAgents) -> None:
 def test_frictions_and_how_it_felt_come_back_beside_the_answer(
     fake_agents: FakeAgents,
 ) -> None:
-    jammed = Friction(text="The forecast feed timed out as I read it.")
+    jammed = Concern(text="The forecast feed timed out as I read it.")
     felt = [HowItFelt(text="The feed's silence unsettled me."), HowItFelt(text="Calm.")]
     fake_agents.answer(
-        Forecast, Forecast(probability=0.6), frictions=[jammed], how_it_felt=felt
+        Forecast, Forecast(probability=0.6), concerns=[jammed], how_it_felt=felt
     )
     fake_agents.answer_text("Bonjour", how_it_felt=[HowItFelt(text="Nothing notable.")])
     fake_agents.answer_text("Salut")
     result = asyncio.run(probe().ask("Will it rain?", Forecast))
     text = asyncio.run(probe().ask("Hello"))
     quiet = asyncio.run(probe().ask("Hi"))
-    assert result.frictions == [jammed]
+    assert result.concerns == [jammed]
     assert result.how_it_felt == felt
-    assert text.frictions == []
+    assert text.concerns == []
     assert text.how_it_felt == [HowItFelt(text="Nothing notable.")]
     assert quiet.how_it_felt == []
 
@@ -204,13 +204,13 @@ def test_a_turn_without_an_answer_keeps_what_the_agent_said_and_usage_in_the_tra
 ) -> None:
     trace = tmp_path / "calls.jsonl"
     layers = FAST.model_copy(update={"trace": trace})
-    jammed = Friction(text="No units given.")
+    jammed = Concern(text="No units given.")
     fake_agents.queue(
         Forecast,
         Submitting(
             submissions=[{"probability": "x"}] * 3,
             notes=["Unsure of units."],
-            frictions=[jammed],
+            concerns=[jammed],
         ),
     )
     fake_agents.blocked(None, "Nothing to translate.", notes=["The input was empty."])
@@ -220,7 +220,7 @@ def test_a_turn_without_an_answer_keeps_what_the_agent_said_and_usage_in_the_tra
     with pytest.raises(OutputMissingError) as missing:
         asyncio.run(probe(layers).ask("Will it rain?", Forecast))
     assert missing.value.notes == ["Unsure of units."]
-    assert missing.value.frictions == [jammed]
+    assert missing.value.concerns == [jammed]
     with pytest.raises(BlockedError):
         asyncio.run(probe(layers).ask(""))
     with pytest.raises(StoppedError):
@@ -229,7 +229,7 @@ def test_a_turn_without_an_answer_keeps_what_the_agent_said_and_usage_in_the_tra
         json.loads(line) for line in trace.read_text().splitlines()
     ]
     assert unanswered["notes"] == ["Unsure of units."]
-    assert unanswered["frictions"] == [jammed.model_dump(mode="json")]
+    assert unanswered["concerns"] == [jammed.model_dump(mode="json")]
     assert len(unanswered["rejected"]) == 3
     assert unanswered["usage"] is not None
     assert blocked["notes"] == ["The input was empty."]
@@ -243,16 +243,16 @@ def test_an_answered_asks_trace_keeps_its_frictions_and_how_it_felt(
     fake_agents: FakeAgents, tmp_path: Path
 ) -> None:
     trace = tmp_path / "calls.jsonl"
-    jammed = Friction(text="Slow; a cache would help.")
+    jammed = Concern(text="Slow; a cache would help.")
     fake_agents.answer(
         Forecast,
         Forecast(probability=0.2),
-        frictions=[jammed],
+        concerns=[jammed],
         how_it_felt=[HowItFelt(text="Smooth, all of it.")],
     )
     asyncio.run(probe(FAST.model_copy(update={"trace": trace})).ask("Rain?", Forecast))
     [record] = [json.loads(line) for line in trace.read_text().splitlines()]
-    assert record["frictions"] == [jammed.model_dump(mode="json")]
+    assert record["concerns"] == [jammed.model_dump(mode="json")]
     assert record["how_it_felt"] == [{"text": "Smooth, all of it."}]
 
 

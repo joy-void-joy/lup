@@ -25,7 +25,7 @@ from lup import (
     AgentUnavailableError,
     AuthMissingError,
     BlockedError,
-    Friction,
+    Concern,
     HowItFelt,
     OutputMissingError,
     Recovery,
@@ -510,7 +510,7 @@ def test_a_friction_and_how_it_felt_reach_the_toolbox_and_end_nothing(
 ) -> None:
     jammed: JsonObject = {"text": "The feed timed out as I read it."}
     turn: list[Step] = [
-        calling("friction", jammed, call="call-1"),
+        calling("concern", jammed, call="call-1"),
         calling("how_it_felt", {"text": "The question was clear."}, call="call-2"),
         *ANSWERED,
     ]
@@ -520,7 +520,7 @@ def test_a_friction_and_how_it_felt_reach_the_toolbox_and_end_nothing(
     taken, went, _ = rig.client.answers
     assert taken["success"] is True
     assert went["success"] is True
-    assert tools.frictions() == [Friction(text="The feed timed out as I read it.")]
+    assert tools.concerns() == [Concern(text="The feed timed out as I read it.")]
     assert tools.how_it_felt() == [HowItFelt(text="The question was clear.")]
     assert len(rig.client.sent["turn/start"]) == 1
 

@@ -2310,11 +2310,11 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
         answers = [
             call(
                 mcp,
-                "friction",
+                "concern",
                 stamped(
                     hook,
                     lup_call(
-                        "friction",
+                        "concern",
                         jammed,
                         "f1",
                         agent_id="a1",
@@ -2327,7 +2327,7 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
             ),
             call(mcp, "stop", stamped(hook, lup_call("stop", stopping, "s1"))),
             call(
-                mcp2, "friction", stamped(hook2, codex_call("friction", jammed, "c1"))
+                mcp2, "concern", stamped(hook2, codex_call("concern", jammed, "c1"))
             ),
             call(
                 mcp2,
@@ -2340,7 +2340,7 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
                 stamped(hook2, codex_call("stop", stopping, "c3", agent_id="b1")),
             ),
         ]
-        labelled = call(mcp, "friction", {"got_in_the_way": "The gate hung."})
+        labelled = call(mcp, "concern", {"got_in_the_way": "The gate hung."})
         # One item for each answered call, the subagent's friction a second for
         # their parent; the refused friction makes none.
         (
@@ -2382,7 +2382,7 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
     assert not any(error for _, error in answers)
     # The parts a friction once had are refused: it's one text.
     assert labelled[1]
-    assert labelled[0].startswith("Refused: 1 validation error for Friction")
+    assert labelled[0].startswith("Refused: 1 validation error for Concern")
     claude_session = Conversation(
         repository=tmp_path / ".git", runtime="claude", session="s1"
     )
@@ -3317,7 +3317,7 @@ def test_claude_codes_own_agents_are_answered_with_nothing_judged_by_no_one_and_
         befriended = send(
             hook,
             lup_call(
-                "friction",
+                "concern",
                 {"text": "stuck"},
                 "c3",
                 agent_id="f2",
@@ -3979,7 +3979,7 @@ def test_a_subagents_friction_reaches_its_parent_whole_and_how_it_felt_where_lup
         send(hook, records.spawn("t1", name="parser"))
         records.recorded("a1", "Explore", "t1", name="parser")
         rollouts.recorded("th1", "t1", "/root/lexer")
-        jam = records.lup((hook, mcp), "friction", jammed, "a1", "Explore")
+        jam = records.lup((hook, mcp), "concern", jammed, "a1", "Explore")
         how = rollouts.lup((hook2, mcp2), "how_it_felt", went, "th1")
         ended = send(hook, claude("Stop", stop_hook_active=False))
         told = context(send(hook, bash("m1")))
@@ -4074,7 +4074,7 @@ def test_what_a_subagent_tells_their_parent_is_no_item_of_the_operator_s_and_wha
         called("send", to="parent", kind="problem", text="To my parent.")
         called("send", to="operator", kind="note", text="To the operator.")
         called("note", remark="A doubt.")
-        called("friction", text="The gate hung.")
+        called("concern", text="The gate hung.")
         called("how_it_felt", text="Calm.")
         waiting = delivery.inbox.waiting(Operator())
         every = list(delivery.inbox.items.values())
@@ -5036,7 +5036,7 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
         "blocked",
         "stop",
         "note",
-        "friction",
+        "concern",
         "how_it_felt",
         "ask",
         "send",
@@ -5788,7 +5788,7 @@ def test_a_review_quotes_by_part_and_first_line_reads_in_one_line_and_names_othe
         doubt = newest(delivery)
         call(mcp, "note", {"remark": "Done reading."})
         reading = newest(delivery)
-        call(mcp2, "friction", {"text": "Gate hung."})
+        call(mcp2, "concern", {"text": "Gate hung."})
         hung = newest(delivery)
         draft = Draft(
             comments=[

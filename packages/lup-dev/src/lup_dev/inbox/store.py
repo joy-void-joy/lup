@@ -181,7 +181,7 @@ class Labelled(Model):
         return labelled("", parts) or "Nothing notable."
 
 
-class Friction(results.Friction):
+class Friction(results.Concern):
     """What got in a conversation's way, which they told the operator at the moment it did (`friction`), in their own words: news to read, never a question."""
 
     reason: Literal["friction"] = "friction"

@@ -37,7 +37,7 @@ from lup import (
     AgentUnavailableError,
     AuthMissingError,
     BlockedError,
-    Friction,
+    Concern,
     HowItFelt,
     OutputMissingError,
     Recovery,
@@ -402,7 +402,7 @@ def test_the_server_lists_each_tool_with_its_schema() -> None:
         "blocked",
         "stop",
         "note",
-        "friction",
+        "concern",
         "how_it_felt",
         "submit",
     ]
@@ -452,7 +452,7 @@ def test_a_friction_and_how_it_felt_are_taken_through_the_server() -> None:
     clients = Clients(
         [
             init(tools=UNTYPED_TOOLS),
-            Call(name="friction", arguments=jammed),
+            Call(name="concern", arguments=jammed),
             Call(name="how_it_felt", arguments={"text": "Calm."}),
             result(),
         ]
@@ -462,8 +462,8 @@ def test_a_friction_and_how_it_felt_are_taken_through_the_server() -> None:
     taken, went = clients.only().answers
     assert not taken.is_error
     assert not went.is_error
-    assert turn.toolbox.frictions() == [
-        Friction(text="The feed timed out; a retry would have saved it.")
+    assert turn.toolbox.concerns() == [
+        Concern(text="The feed timed out; a retry would have saved it.")
     ]
     assert turn.toolbox.how_it_felt() == [HowItFelt(text="Calm.")]
 
@@ -522,7 +522,7 @@ def test_the_stop_hook_lets_a_turn_end_once_the_agent_stops_and_the_ask_raises()
     clients = Clients(
         [
             init(),
-            Call(name="friction", arguments={"text": "No date given."}),
+            Call(name="concern", arguments={"text": "No date given."}),
             Call(name="stop", arguments={"why": "I'd rather not guess."}),
             Stop(),
             result("Stopped."),
@@ -532,7 +532,7 @@ def test_the_stop_hook_lets_a_turn_end_once_the_agent_stops_and_the_ask_raises()
         asyncio.run(asking(clients).ask("Will it rain?", Forecast))
     assert clients.only().stops == [{}]
     assert raised.value.why == "I'd rather not guess."
-    assert raised.value.frictions == [Friction(text="No date given.")]
+    assert raised.value.concerns == [Concern(text="No date given.")]
 
 
 @pytest.mark.usefixtures("unseamed")

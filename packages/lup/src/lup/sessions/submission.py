@@ -5,7 +5,7 @@ routes each call the model makes to `Toolbox.call`, and asks `Toolbox.end` when
 the model tries to end their turn. The calls recorded are the one source of what
 the turn said: the last accepted call to the output tool is the answer, the
 refused ones are the rejections, the last `blocked` or `stop` call is why the
-turn ended without one, and the `note`, `friction` and `how_it_felt` calls are
+turn ended without one, and the `note`, `concern` and `how_it_felt` calls are
 what the agent said beside it. A typed turn can't end until an answer is
 accepted, or the agent is blocked or stops, which is lup's own guard, the same
 on every runtime.
@@ -13,14 +13,14 @@ on every runtime.
 
 from typing import TYPE_CHECKING
 
-from lup.sessions.results import Friction, HowItFelt
+from lup.sessions.results import Concern, HowItFelt
 from lup.tools.serving import Answer, Toolset
 from lup.tools.speaking import (
     Problem,
     Remark,
     Stop,
     blocked,
-    friction,
+    concern,
     how_it_felt,
     note,
     stop,
@@ -127,10 +127,10 @@ class Toolbox(MutableModel, Toolset, arbitrary_types_allowed=True):
             taken.remark for taken in self.taken(note.name) if isinstance(taken, Remark)
         ]
 
-    def frictions(self) -> list[Friction]:
+    def concerns(self) -> list[Concern]:
         """Return what got in the agent's way, oldest first."""
         return [
-            taken for taken in self.taken(friction.name) if isinstance(taken, Friction)
+            taken for taken in self.taken(concern.name) if isinstance(taken, Concern)
         ]
 
     def how_it_felt(self) -> list[HowItFelt]:
