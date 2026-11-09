@@ -1,6 +1,6 @@
 """The launches whose session a launcher holds with no terminal, and the requests the host service makes of each launcher, on the socket beside its lock (`lup_dev.host.held`)."""
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Literal
 
 from lup.types import MutableModel
@@ -39,6 +39,10 @@ class Holders(MutableModel, arbitrary_types_allowed=True):
     held session (`cli.py`'s adapters)."""
     held: list[str] = []
     """By launch id, as each was served."""
+    interrupted: Callable[[str], Awaitable[None]] | None = None
+    """What follows an interrupt that went through, by launch id: its session
+    taken for idle, since an interrupted turn runs no turn's end, and woken for
+    what waits (`Delivery.interrupted`); none does nothing."""
 
     def opened(self, launch: Register) -> None:
         """Keep `launch` where it's held, once it's served."""

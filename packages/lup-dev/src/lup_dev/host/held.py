@@ -210,7 +210,11 @@ class Interrupting(Model, Handler[Interrupt], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: Interrupt) -> Reply:
-        return await self.holders.asked(request.launch, HeldInterrupt())
+        """Interrupt the turn, then take the session for idle and give it what waits (`Holders.interrupted`)."""
+        done = await self.holders.asked(request.launch, HeldInterrupt())
+        if self.holders.interrupted is not None:
+            await self.holders.interrupted(request.launch)
+        return done
 
 
 class Ending(Model, Handler[End], arbitrary_types_allowed=True):

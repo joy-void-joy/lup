@@ -64,7 +64,8 @@ from lup_dev.git import GitError
 from lup_dev.host.client import HostClient, RoomClient, Starter
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard, Posted, Spawned, Spawns
-from lup_dev.host.holders import HeldPrompt, Holders
+from lup_dev.host.held import Interrupt, Launchers
+from lup_dev.host.holders import HeldInterrupt, HeldPrompt, Holders
 from lup_dev.host.names import Names, container_name
 from lup_dev.host.on_trial import AcceptBranch, DropBranch, TrialSaid
 from lup_dev.host.protocol import (
@@ -78,6 +79,7 @@ from lup_dev.host.protocol import (
     ShowHolding,
     Stop,
 )
+from lup_dev.host.protocol import Done as Finished
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Called, Queues, Recorded, Said
 from lup_dev.host.service import UNDECIDED, HostService, Naming, Program, executed
@@ -536,6 +538,8 @@ def inboxed(
     )
     waits = Waits(changes=changes)
     delivery.landing = waits.holding
+    if holders is not None:
+        holders.interrupted = delivery.interrupted
 
     def saying(line: str) -> None:
         said.append(line)
@@ -569,15 +573,22 @@ def inboxed(
             else None
         ),
         roots=RootNames(delivery=delivery),
-        routes=cli.control_routes(
-            delivery,
-            recorded or {},
-            None,
-            judging or machine,
-            waits=waits,
-            trying=None if trying is None else trying(turns),
-            landing=landing,
-        ),
+        routes=[
+            *cli.control_routes(
+                delivery,
+                recorded or {},
+                None,
+                judging or machine,
+                waits=waits,
+                trying=None if trying is None else trying(turns),
+                landing=landing,
+            ),
+            *(
+                []
+                if holders is None
+                else cli.held_routes(machine, holders, Launchers())
+            ),
+        ],
         tools=cli.room_tools(
             delivery,
             judging or machine,
@@ -1694,6 +1705,27 @@ def test_a_held_session_whose_launcher_can_t_be_reached_is_told_at_its_next_call
         )
         for line in said
     )
+
+
+def test_an_interrupt_through_lup_takes_the_held_session_for_idle_and_gives_it_what_came(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said, holding=True):
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        launcher = Launcher(machine.launch("one").held)
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, bash("b1"))
+        inbox("send", "one", "Stop that.")
+        before = list(launcher.frames)
+        client(machine.host, clock).ask(Interrupt(launch="one"), Finished)
+        until(lambda: len(launcher.frames) == 2)
+        frames = launcher.close()
+    # Busy, nothing was given; interrupted, what came during the turn is.
+    assert before == []
+    interrupt, given = frames
+    assert interrupt == HeldInterrupt().model_dump_json()
+    assert first_note("Stop that.") in HeldPrompt.model_validate_json(given).text
 
 
 def test_a_held_session_starting_no_turn_in_time_is_told_at_its_next_call_and_never_rung(

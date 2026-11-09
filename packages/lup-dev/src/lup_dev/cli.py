@@ -747,6 +747,7 @@ def host_serve(context: typer.Context) -> None:
             if adapter.queues is not None
         },
     )
+    holders.interrupted = delivery.interrupted
     types = TypeReader(delivery=delivery, read=typed_reading, say=typer.echo)
     podman = Podman()
     workers = Workers(

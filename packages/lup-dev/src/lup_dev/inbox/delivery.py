@@ -2528,6 +2528,16 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         numbers = ", ".join(cited(number) for number in pushed.numbers)
         self.say(f"{place.launch}: gave {numbers} to {who}, held")
 
+    async def interrupted(self, launch: str) -> None:
+        """Take `launch`'s session for idle once lup interrupted its held session's turn, which runs no turn's end, and start a turn on what waits for them, the operator's words that came during it among it."""
+        party = self.running(launch)
+        if party is None:
+            return
+        presence = self.presence(party)
+        presence.turning = False
+        presence.woken = False
+        await self.wake(party)
+
     async def unless_given(
         self, party: Conversation, place: Whereabouts, pushed: Pushed
     ) -> None:
