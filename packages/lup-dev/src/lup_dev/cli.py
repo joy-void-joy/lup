@@ -112,6 +112,10 @@ from lup_dev.host.dashboard import (
     plain_page,
 )
 from lup_dev.host.held import (
+    Abandon,
+    Abandoning,
+    AwaitHeld,
+    Awaiting,
     CallingUp,
     End,
     HeldLaunch,
@@ -120,6 +124,7 @@ from lup_dev.host.held import (
     Launchers,
     Spawn,
     Spawning,
+    Starting,
     launcher_command,
 )
 from lup_dev.host.held import Ending as HeldEnding
@@ -672,6 +677,8 @@ def held_routes(layout: Layout, holders: Holders, launchers: Launchers) -> list[
 
     return [
         Route.to(Spawning(layout=layout, launchers=launchers, start=start)),
+        Route.to(Awaiting(layout=layout, launchers=launchers)),
+        Route.to(Abandoning(launchers=launchers)),
         Route.to(CallingUp(launchers=launchers)),
         Route.to(HeldInterrupting(holders=holders)),
         Route.to(HeldEnding(holders=holders)),
@@ -3064,7 +3071,7 @@ def spawned(
         "Starting the held session: the launcher sets its room up as a launch "
         "does, an image build taking minutes where one is missing."
     )
-    outstanding = launcher.host.held(
+    starting = launcher.host.ask(
         Spawn(
             runtime=runtime,
             worktree=root,
@@ -3073,10 +3080,19 @@ def spawned(
             account=account,
             resume=resume,
             arguments=arguments,
-        )
+        ),
+        Starting,
     )
+    launcher.say(f"Launch {starting.launch}'s launcher writes to {starting.log}.")
+    outstanding = launcher.host.held(AwaitHeld(launch=starting.launch))
     try:
         up = outstanding.reply(HeldUp)
+    except KeyboardInterrupt:
+        # Giving up here gives up the launch: its launcher, which may be
+        # waiting on an approval in the inbox, never calls a session up after.
+        launcher.host.ask(Abandon(launch=starting.launch), Done)
+        launcher.say(f"Launch {starting.launch} abandoned: its launcher is ended.")
+        raise
     finally:
         outstanding.close()
     if up is None:

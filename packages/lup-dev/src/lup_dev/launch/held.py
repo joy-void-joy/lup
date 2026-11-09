@@ -224,9 +224,7 @@ class Holder(Model, arbitrary_types_allowed=True):
             await self.serving(piped, exited)
         finally:
             status = (
-                exited.result()
-                if exited.done()
-                else await ended(piped, self.finishing)
+                exited.result() if exited.done() else await ended(piped, self.finishing)
             )
             await self.stopped()
         self.say(f"The session ended, with status {status}.")

@@ -14,6 +14,10 @@ from lup_dev import cli
 from lup_dev.git import Git
 from lup_dev.host.client import Detached, HostClient, Outstanding, own_command
 from lup_dev.host.held import (
+    Abandon,
+    Abandoning,
+    AwaitHeld,
+    Awaiting,
     CalledUp,
     CallingUp,
     End,
@@ -25,6 +29,7 @@ from lup_dev.host.held import (
     Launchers,
     Spawn,
     Spawning,
+    Starting,
     launcher_command,
 )
 from lup_dev.host.holders import HeldEnd, HeldInterrupt, Holders
@@ -81,34 +86,35 @@ def asking(worktree: Path) -> Spawn:
     return Spawn(runtime="claude", worktree=worktree, arguments=["--model", "haiku"])
 
 
-def test_a_spawn_starts_its_launcher_and_answers_once_it_calls_its_session_up(
+def test_a_spawn_starts_its_launcher_and_its_await_answers_once_it_calls_its_session_up(
     layout: Layout, tmp_path: Path
 ) -> None:
     started: list[HeldLaunch] = []
     launchers = Launchers()
-    loops: list[asyncio.AbstractEventLoop] = []
 
     def start(spec: HeldLaunch, log: Path) -> Apart:
-        """Start a program that waits, and have the launch called up, as its launcher would once its session's first hook was heard."""
         started.append(spec)
-        calling = CallingUp(launchers=launchers).answer(
-            CalledUp(launch=spec.launch, name="dev", session="s-1")
-        )
-        asyncio.run_coroutine_threadsafe(calling, loops[0])
         return detached("sleep", "60", log=log)
 
-    spawning = Spawning(layout=layout, launchers=launchers, start=start, pause=yielded)
+    async def spawned() -> tuple[Starting, Reply]:
+        starting = await Spawning(
+            layout=layout, launchers=launchers, start=start
+        ).answer(asking(tmp_path))
+        assert isinstance(starting, Starting)
+        # Called up before anyone awaits it, as a launcher may be.
+        await CallingUp(launchers=launchers).answer(
+            CalledUp(launch=starting.launch, name="dev", session="s-1")
+        )
+        awaited = await Awaiting(
+            layout=layout, launchers=launchers, pause=yielded
+        ).answer(AwaitHeld(launch=starting.launch))
+        return starting, awaited
 
-    async def spawned() -> HeldUp | Refused:
-        loops.append(asyncio.get_running_loop())
-        answer = await spawning.answer(asking(tmp_path))
-        assert isinstance(answer, HeldUp | Refused)
-        return answer
-
-    answer = asyncio.run(spawned())
+    starting, awaited = asyncio.run(spawned())
 
     [spec] = started
-    assert answer == HeldUp(
+    assert starting == Starting(launch=spec.launch, log=layout.launch(spec.launch).log)
+    assert awaited == HeldUp(
         launch=spec.launch,
         name="dev",
         session="s-1",
@@ -120,31 +126,73 @@ def test_a_spawn_starts_its_launcher_and_answers_once_it_calls_its_session_up(
         worktree=tmp_path,
         arguments=["--model", "haiku"],
     )
-    assert launchers.waiting == {}
-    [launcher] = launchers.started
+    launcher = launchers.started[spec.launch]
     launcher.process.kill()
     launcher.process.wait()
     launchers.reaped()
-    assert launchers.started == []
+    assert launchers.started == {}
+    assert launchers.waiting == {}
 
 
 def test_a_spawn_whose_launcher_ends_first_is_refused_with_what_it_wrote(
     layout: Layout, tmp_path: Path
 ) -> None:
+    launchers = Launchers()
+
     def start(spec: HeldLaunch, log: Path) -> Apart:
         return detached(
             "sh", "-c", f"echo 'the room never started: {spec.launch}'", log=log
         )
 
-    spawning = Spawning(
-        layout=layout, launchers=Launchers(), start=start, pause=yielded
-    )
+    async def refused() -> Reply:
+        starting = await Spawning(
+            layout=layout, launchers=launchers, start=start
+        ).answer(asking(tmp_path))
+        assert isinstance(starting, Starting)
+        return await Awaiting(layout=layout, launchers=launchers, pause=yielded).answer(
+            AwaitHeld(launch=starting.launch)
+        )
 
-    answer = asyncio.run(spawning.answer(asking(tmp_path)))
+    answer = asyncio.run(refused())
 
     assert isinstance(answer, Refused)
     assert "ended before its session was up" in answer.error
     assert "\nthe room never started: " in answer.error
+
+
+def test_a_spawn_abandoned_before_its_session_is_up_ends_its_launcher_and_one_up_is_refused(
+    layout: Layout, tmp_path: Path
+) -> None:
+    launchers = Launchers()
+
+    def start(spec: HeldLaunch, log: Path) -> Apart:
+        return detached("sleep", "60", log=log)
+
+    async def abandoned() -> tuple[Starting, Starting, str]:
+        spawning = Spawning(layout=layout, launchers=launchers, start=start)
+        first = await spawning.answer(asking(tmp_path))
+        second = await spawning.answer(asking(tmp_path))
+        assert isinstance(first, Starting)
+        assert isinstance(second, Starting)
+        await Abandoning(launchers=launchers).answer(Abandon(launch=first.launch))
+        await CallingUp(launchers=launchers).answer(
+            CalledUp(launch=second.launch, name="dev", session="s-1")
+        )
+        try:
+            await Abandoning(launchers=launchers).answer(Abandon(launch=second.launch))
+        except HostError as up:
+            return first, second, str(up)
+        return first, second, ""
+
+    first, second, refusal = asyncio.run(abandoned())
+
+    assert launchers.started[first.launch].ended()
+    assert refusal == (
+        f"launch {second.launch}'s session is up already: `lup-dev spawn end` ends it"
+    )
+    still = launchers.started[second.launch]
+    still.process.kill()
+    still.process.wait()
 
 
 def test_a_launcher_is_started_from_its_worktree_with_nothing_there_on_its_path(

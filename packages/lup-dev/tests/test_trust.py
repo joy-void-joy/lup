@@ -89,6 +89,7 @@ from lup_dev.launch.trust import (
     Trusted,
     TrustError,
     Unanswered,
+    Unattended,
     Unchanged,
     UvToolchain,
     building,
@@ -3434,3 +3435,19 @@ def test_lup_dev_trust_keeps_the_first_copy_and_says_so(
             "the dashboard answer."
         )
     ]
+
+
+def test_a_launcher_with_no_terminal_gives_up_an_approval_no_answer_comes_to(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    said: list[str] = []
+
+    with pytest.raises(TrustError, match="no answer to the approval came within"):
+        Unattended(say_to=said.append, within=timedelta(0)).ask("Approve?", Silent())
+
+    assert said == ["Approve? It waits for your answer in the inbox."]
+    assert capsys.readouterr().out == ""
+
+
+def test_a_launcher_with_no_terminal_takes_the_answer_given_in_the_inbox() -> None:
+    assert Unattended(say_to=lambda _: None).ask("Approve?", Arrived()) is None

@@ -92,10 +92,12 @@ import os
 import select
 import tempfile
 import termios
+import time
 import tomllib
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from contextlib import contextmanager
+from datetime import timedelta
 from importlib.machinery import SOURCE_SUFFIXES, FileFinder, SourceFileLoader
 from importlib.util import resolve_name
 from pathlib import Path, PurePosixPath
@@ -893,6 +895,9 @@ class Unattended(Model, Asker):
 
     say_to: Callable[[str], None]
     """Where it says what it would print."""
+    within: timedelta = timedelta(hours=1)
+    """How long a question waits for its answer before nothing waits on it any
+    more: a launch with no one waiting on it isn't started by a late answer."""
 
     @override
     def say(self, text: str) -> None:
@@ -904,10 +909,18 @@ class Unattended(Model, Asker):
 
     @override
     def ask(self, question: str, elsewhere: Elsewhere) -> bool | None:
-        """Wait for the question's answer in the inbox, and return none: it's answered elsewhere."""
+        """Wait for the question's answer in the inbox, and return none: it's answered elsewhere; raise `TrustError` where none comes within `within`."""
         self.say_to(f"{question} It waits for your answer in the inbox.")
+        deadline = time.monotonic() + self.within.total_seconds()
         while elsewhere.given() is None:
-            select.select([elsewhere], [], [])
+            left = deadline - time.monotonic()
+            if left <= 0:
+                message = (
+                    f"no answer to the approval came within {self.within}, so the "
+                    "launch that asked it doesn't start"
+                )
+                raise TrustError(message)
+            select.select([elsewhere], [], [], left)
         return None
 
 
