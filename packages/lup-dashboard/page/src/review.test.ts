@@ -1172,6 +1172,21 @@ describe("every agent's group, and the messages under its banner", () => {
         expect(isLetter(comment)).toBe(false);
         expect(whose(from("s1", "a1"))).not.toBe(whose(from("s1")));
     });
+
+    it("tells a message from a remark by its thread, whether the host says its quote is none or it quotes lines of a thread's body", () => {
+        const quote: Quote = { text: "It lags.", block: "concern 307 body", version: AT, line: 0, lines: ["It lags."], start: 0, end: 8 };
+        // As the host keeps them: every field said, none where there's none.
+        const kept = { id: "m1", to: S3, thread: null, quote: null, text: "Hi." };
+        const onBody = { id: "m2", to: S3, thread: 307, quote, text: "Still?" };
+        const remark: Remark = { id: "r1", to: S3, quote: { ...quote, block: "step 4" }, text: "Why?", step: null, code: null };
+        expect([kept, onBody, remark].map((each) => [isLetter(each), isRemark(each)])).toEqual([
+            [true, false],
+            [true, false],
+            [false, true],
+        ]);
+        const draft = withWritten(EMPTY, [kept, onBody, remark]);
+        expect([draft.letters, draft.remarks]).toEqual([[kept, onBody], [remark]]);
+    });
 });
 
 describe("replies kept from before", () => {

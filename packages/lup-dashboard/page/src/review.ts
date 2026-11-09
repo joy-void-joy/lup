@@ -91,8 +91,12 @@ export { body, calls, plain, sinceSummary, UNREAD, whose, type AgentDrawers, typ
 export type Item = components["schemas"]["Item"];
 export type Draft = components["schemas"]["Draft"];
 export type Comment = components["schemas"]["Comment"];
-/** The operator's message: to a conversation, under their agent's banner; or on a thread, to whoever answers for it as they write, or to no one (`to` none). Never on an item, nor quoting anything, which a comment and a remark are. */
-export type Letter = components["schemas"]["Letter"] & { item?: never; quote?: never };
+/**
+ * The operator's message: to a conversation, under their agent's banner; or on a thread, to whoever answers for it as
+ * they write, or to no one (`to` none), on the thread whole or on lines of its body (`quote`). Never on an item, which a
+ * comment is; told from a remark by its thread, which a remark never has (`isRemark`).
+ */
+export type Letter = components["schemas"]["Letter"] & { item?: never };
 export type Remark = components["schemas"]["Remark"];
 export type Conversation = components["schemas"]["Conversation"];
 export type PartId = components["schemas"]["PartId"];
@@ -796,9 +800,9 @@ export function withWrittenDuring(before: Draft, during: Draft, left: Draft): Dr
     };
 }
 
-/** Return whether what's written is a message, to an agent or on a thread, rather than a comment on an item or a remark in a drawer. */
+/** Return whether what's written is a message, to an agent or on a thread, lines of its body quoted or not, rather than a comment on an item or a remark in a drawer. */
 export function isLetter(each: Written): each is Letter {
-    return !("item" in each) && !("quote" in each);
+    return !("item" in each) && !isRemark(each);
 }
 
 /**
@@ -817,9 +821,13 @@ export function holderOf(remark: Remark): Conversation {
     return argument.runtime === undefined || argument.session === undefined ? remark.to : conversationOf(repository, { runtime: argument.runtime, session: argument.session, agent: argument.agent ?? null });
 }
 
-/** Return whether what's written is a remark in one of an agent's drawers. */
+/**
+ * Return whether what's written is a remark in one of an agent's drawers: it quotes what it's on, and is on no thread,
+ * which tells it from a message on lines of a thread's body. A message the host keeps says its quote and its thread,
+ * none, whether or not it has any.
+ */
 export function isRemark(each: Written): each is Remark {
-    return !("item" in each) && "quote" in each;
+    return !("item" in each) && each.quote != null && !("thread" in each && each.thread != null);
 }
 
 function isComment(each: Written): each is Comment {
