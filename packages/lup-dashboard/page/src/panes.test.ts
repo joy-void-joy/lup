@@ -9,7 +9,7 @@ import { adopted } from "./looks";
 import { instanceOf, type Blocks, type Fold, type Line } from "./views";
 import type { Merged } from "./looks";
 import { arrivalIn, bufferKey, bufferSpans, listLaid, listedByAgent, nearestShown, panesAsked, pathTo, rowAt, spanAt, titled, type ListReading, type Row } from "./panes";
-import { withWrittenDuring, EMPTY, NO_AGENT, PARTIES, aboutAt, followedFrom, groupAt, laid, opened, whose as whoseOf, type Around, type Conversation, type Draft, type Drawers, type Item, type Laid, type Party, type Showing, type ThreadRead, type Threading } from "./review";
+import { withWrittenDuring, EMPTY, NO_AGENT, PARTIES, aboutAt, followedFrom, groupAt, laid, letterOn, opened, quoted, quotedAt, whose as whoseOf, type Around, type Conversation, type Draft, type Drawers, type Item, type Laid, type Letter, type Party, type Showing, type ThreadRead, type Threading } from "./review";
 import { partyNamed } from "./Review";
 
 const AT = "2026-10-30T12:00:00Z";
@@ -866,6 +866,98 @@ describe("the tasks", () => {
             expect(written.text.slice(block?.from, block?.to)).toBe("Go on.");
             const send = reachOf(written, block?.from ?? -1, verb("send"), { called });
             expect(send.on === null ? null : send.acts).toEqual([{ kind: "readdress", id: "m1", to: null }]);
+        });
+
+        describe("its body, which the operator comments on line by line", () => {
+            const WRITTEN = "2026-10-30T12:10:00Z";
+            const BODY = "It jumps on a long comment.\n\nNot a *short* one.";
+            /** The lead's concern with `text` for its body, written `at`. */
+            const bodied = (text: string, at: string = WRITTEN, read: Partial<ThreadRead> = {}) =>
+                held(370, "lag", { body: { kind: "ledger:body", target: 370, repository: REPOSITORY, by: LEAD, at, text }, ...read } as Partial<ThreadRead>);
+            const lag = bodied(BODY);
+            const QUOTE = { text: "Not a *short* one.", block: "concern 370 body", version: WRITTEN, line: 2, lines: ["Not a *short* one."], start: 0, end: 18 };
+
+            it("lays it out under the header and the agent's account, set in, its words the block's own lines, a blank one blank", () => {
+                const done = bodied(BODY, WRITTEN, { state: "done to confirm", reads: "for your eyes", done: SAID_DONE });
+                const out = laidIn(OWN, [done]);
+                expect(out.text).toContain("§ The lag · done, for you to clear\n  done, they say: Read the voice section.\n  It jumps on a long comment.\n\n  Not a *short* one.\n");
+                const [block] = out.concerns;
+                expect(block?.lines.map((each) => [out.text.slice(each.from, each.to), each.block, each.line, each.own])).toEqual([
+                    ["It jumps on a long comment.", "concern 370 body", 0, 0],
+                    ["", "concern 370 body", 1, 28],
+                    ["Not a *short* one.", "concern 370 body", 2, 29],
+                ]);
+                // Nested under another, as deep as its block's own lines.
+                const under = { ...lag, thread: { ...lag.thread, parent: 360 } } as ThreadRead;
+                expect(laidIn(OWN, [redesign, under]).text).toContain("  § The lag · working\n    It jumps on a long comment.\n");
+                // None where it has none, or it was cleared.
+                expect(laidIn(OWN, [redesign]).concerns[0]?.lines).toEqual([]);
+                expect(laidIn(OWN, [bodied("")]).concerns[0]?.lines).toEqual([]);
+            });
+
+            it("writes on a line of it to whoever answers for the concern, quoting the line at the body's version, its time; on it whole from a blank line, the header or Space c", () => {
+                const out = laidIn(OWN, [lag]);
+                const [block] = out.concerns;
+                // From where the line is set in too.
+                const line = out.text.indexOf("  Not a *short* one.");
+                expect(opened(out, line)).toEqual({ id: "", to: LEAD, thread: 370, quote: QUOTE, text: "" });
+                expect(opened(out, line + 9)).toEqual({ id: "", to: LEAD, thread: 370, quote: QUOTE, text: "" });
+                const whole = { id: "", to: LEAD, thread: 370, text: "" };
+                expect(opened(out, out.text.indexOf("comment.\n") + "comment.\n".length)).toEqual(whole);
+                expect(opened(out, block?.header.from ?? -1)).toEqual(whole);
+                expect(block === undefined ? null : letterOn(block)).toEqual(whole);
+                // Nobody answering for it, a note to themselves.
+                const nobody = laidIn({ kind: "party", name: "no agent" }, [bodied(BODY, WRITTEN, { answering: null, left_by: null, state: "nobody running" } as Partial<ThreadRead>)]);
+                expect(opened(nobody, nobody.text.indexOf("Not a"))).toMatchObject({ to: null, thread: 370, quote: QUOTE });
+            });
+
+            it("quotes a passage selected on its lines, across them, and writes on the concern whole for one reaching past them", () => {
+                const out = laidIn(OWN, [lag]);
+                const from = out.text.indexOf("long comment.");
+                const to = out.text.indexOf("Not a") + "Not a".length;
+                expect(quoted(out, from, to)).toEqual({
+                    id: "",
+                    to: LEAD,
+                    thread: 370,
+                    quote: { text: "long comment.\n\nNot a", block: "concern 370 body", version: WRITTEN, line: 0, lines: ["It jumps on a long comment.", "", "Not a *short* one."], start: 14, end: 34 },
+                    text: "",
+                });
+                const header = out.concerns[0]?.header.from ?? -1;
+                expect(quoted(out, header, to)).toEqual({ id: "", to: LEAD, thread: 370, text: "" });
+            });
+
+            it("lays a message out under the last line it quotes, the passage marked, the rest after the block, and goes back to it", () => {
+                const draft = { ...EMPTY, letters: [{ id: "m1", to: LEAD, thread: 370, quote: QUOTE, text: "It does too." }, { id: "m2", to: LEAD, thread: 370, text: "Go on." }] };
+                const out = laidIn(OWN, [lag], draft);
+                expect(out.text).toContain("  Not a *short* one.\nIt does too.\nGo on.\n");
+                const [concern] = out.concerns;
+                const [onLines, whole] = concern?.blocks ?? [];
+                expect(out.seated.get("m1")).toMatchObject({ block: "concern 370 body", first: 2, last: 2, outdated: false });
+                const span = concern === undefined ? null : quotedAt(out, concern, draft.letters[0] as Letter);
+                expect(span === null ? null : out.text.slice(span.from, span.to)).toBe("Not a *short* one.");
+                expect(onLines === undefined ? null : aboutAt(out, draft.letters[0] as Letter, onLines)).toBe(out.text.indexOf("one.\nIt does") + "one".length);
+                expect(whole === undefined ? null : aboutAt(out, draft.letters[1] as Letter, whole)).toBe(concern?.header.from);
+            });
+
+            it("follows its lines as the body's rewritten, and says it's outdated where they changed, or went with the body", () => {
+                const draft = { ...EMPTY, letters: [{ id: "m1", to: LEAD, thread: 370, quote: QUOTE, text: "It does too." }] };
+                const first = laidIn(OWN, [lag], draft);
+                const later = "2026-10-30T12:20:00Z";
+                const relaid = (text: string, previous: Laid = first) =>
+                    laid(ITEMS, [LEAD, WORKER], banner, header, draft, NOTHING, [], new Map(), called, { showing: OWN, running: running(LEAD, WORKER), looks: adopted(), concerns: [bodied(text, later)], previous });
+                // A line put in above it: it stays under its line.
+                const above = relaid(`It lags.\n${BODY}`);
+                expect(above.text).toContain("  Not a *short* one.\nIt does too.");
+                expect(above.seated.get("m1")).toMatchObject({ first: 3, last: 3, outdated: false });
+                // Its line rewritten: under what took its place, outdated.
+                const rewritten = relaid("It jumps on a long comment.\n\nNor a short one, since the fix.");
+                expect(rewritten.text).toContain("  Nor a short one, since the fix.\nIt does too.");
+                expect(rewritten.seated.get("m1")?.outdated).toBe(true);
+                // The body cleared: after the block, outdated, kept as written.
+                const cleared = relaid("");
+                expect(cleared.text).toContain("§ The lag · working\nIt does too.\n");
+                expect(cleared.seated.get("m1")?.outdated).toBe(true);
+            });
         });
 
         it("is where its row goes: its holder's own buffer, its party's, or what's settled, on its block", () => {

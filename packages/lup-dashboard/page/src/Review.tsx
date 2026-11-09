@@ -100,6 +100,7 @@ import {
     fresh,
     type Seeing,
     concernAt,
+    letterOn,
     concernHome,
     concernNamedAt,
     concernWords,
@@ -379,6 +380,13 @@ function sourcesOf(laidOut: Laid): Source[] {
             add(source("comment", [block]));
         }
     }
+    // A concern's body, its words alone, past where each line's set in; and what's written on the concern.
+    for (const concern of laidOut.concerns) {
+        add(source("text", concern.lines.map(whole)));
+        for (const block of concern.blocks) {
+            add(source("comment", [block]));
+        }
+    }
     return found;
 }
 
@@ -487,10 +495,28 @@ function decorations(
         marks.push(...group.blocks.flatMap((block) => remarks(laidOut, block)));
         group.blocks.forEach(reaching);
     }
-    // What's written on each concern laid out as a block.
+    // Each concern laid out as a block: its body's lines; what's written on it, a message on lines of its body said to be
+    // outdated where they aren't what it quotes any more, the passage it quotes marked.
     for (const concern of laidOut.concerns) {
+        for (const line of concern.lines) {
+            const start = laidOut.text.lastIndexOf("\n", line.from - 1) + 1;
+            marks.push({ from: start, to: start, value: Decoration.line({ class: "concern-body thread-line" }) });
+        }
         marks.push(...concern.blocks.flatMap((block) => remarks(laidOut, block)));
         concern.blocks.forEach(reaching);
+        for (const block of concern.blocks) {
+            const comment = comments.get(block.comment);
+            if (comment === undefined || comment.quote == null) {
+                continue;
+            }
+            if (laidOut.seated.get(block.comment)?.outdated === true) {
+                marks.push({ from: block.from, to: block.from, value: Decoration.line({ class: "outdated", attributes: { "data-said": "outdated: the lines it quotes changed" } }) });
+            }
+            const span = quotedAt(laidOut, concern, comment);
+            if (span !== null && span.to > span.from) {
+                marks.push({ from: span.from, to: span.to, value: Decoration.mark({ class: "commented" }) });
+            }
+        }
     }
     // Each line of a concern's block, no item's nor drawer's: its header, the passages it came from, what's done.
     for (const aside of laidOut.asides) {
@@ -2030,7 +2056,12 @@ export function Review({
 
     editor.bind({
         whole: (position) => {
-            // On a group, a message to its agent; on an item, a comment on it whole; in a drawer, a remark on its line.
+            // On a concern, a message on it whole, from a line of its body too; on a group, a message to its agent; on an
+            // item, a comment on it whole; in a drawer, a remark on its line.
+            const concern = concernAt(laidOut, position);
+            if (concern !== undefined) {
+                return letterOn(concern);
+            }
             if (groupAt(laidOut, position) !== undefined || drawerAt(laidOut, position) !== undefined) {
                 return opened(laidOut, position);
             }

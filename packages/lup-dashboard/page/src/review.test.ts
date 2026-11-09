@@ -1388,6 +1388,12 @@ describe("an answer in a turn's last words", () => {
         ]);
     });
 
+    it("says the lines of a concern's body a message to them quoted, above its words", () => {
+        const quote: Quote = { text: "It jumps on a long comment.", block: "concern 307 body", version: AT, line: 0, lines: ["It jumps on a long comment."], start: 0, end: 27 };
+        const onBody: Item = hosted({ ...REVIEW, reason: { ...REVIEW.reason, comments: [], letters: [{ id: "", to: SESSION, thread: 307, quote, text: "Only there?" }] } as Item["reason"] });
+        expect(above(END, [onBody], [NOTE, OTHERS]).map((each) => each.text)).toEqual(["you · @70, your review", "  on the concern's body: “It jumps on a long comment.”", "  Only there?"]);
+    });
+
     it("says a comment outdated where an edit changed the passage it quotes", () => {
         const edited: Item = hosted({ ...NOTE, reason: { ...NOTE.reason, text: "I assumed ASCII." } as Item["reason"], edits: [{ at: AT, before: "I assumed UTF-8." }] });
         expect([outdated(NOTE, { text: "UTF-8", start: 10, end: 15 }), outdated(edited, { text: "UTF-8", start: 10, end: 15 }), outdated(edited, { text: "I assumed", start: 0, end: 9 })]).toEqual([

@@ -136,7 +136,7 @@ const VERBS: Readonly<Record<string, string>> = {
     done: "mark it done: an item read; an approval or a held change approved, the comments under it going with it; a file of \"since you approved\" reviewed at the version shown, approving its flagged writes where it still stands so; on the drawer's line, every file it shows; a conversation read up to its last step; on a thread's banner, its news read up to the last item shown where there's some, else the thread settled, any thread, its agent going on or ended, but while something in it waits on you; on an agent's banner, the agent seen, their own items and drawers, their subagents' left as they are",
     decline: "decline an approval or a held change, the comments under it going with it; on a thread's banner, the thread declined, nothing more to be done, but while something in it waits on you; a comment never declines",
     send: "leave the item for later, folded, in its thread, or at the review's end, what's drafted on it staying drafted as the rest is sent; on one left for later, bring it back; on a message written on a thread, send it to no one, kept there as yours, or back to whoever answers for the thread",
-    comment: "comment on it whole: an item; on a thread's banner, a message on the thread to whoever answers for it; on an agent's banner, a message to them, which their drawers' remarks go with; in a drawer, a remark on the line",
+    comment: "comment on it whole: an item; on a concern, from its body too, a message on it whole to whoever answers for it; on an agent's banner, a message to them, which their drawers' remarks go with; in a drawer, a remark on the line",
     hold: "from anywhere in an agent's group, hold each flagged write of the agent and their subagents for your answer, or let them land again",
 };
 
@@ -188,7 +188,7 @@ export function reviewKeys(kinds: readonly Kind[], verbs: readonly Verb[] = [], 
     {
         title: "Commenting",
         keys: [
-            { keys: "o", does: "comment on the line: an item's, a file's, or the agent's words in their conversation, a remark; on a thread's banner, a message on the thread to whoever answers for it, ␣s sending it to no one; on an agent's banner, a message to them, which their drawers' remarks go with", short: "comment" },
+            { keys: "o", does: "comment on the line: an item's, a file's, or the agent's words in their conversation, a remark; a concern's body's, a message on the concern quoting it, to whoever answers for it; on a concern's header, a message on it whole; ␣s on either sending it to no one; on an agent's banner, a message to them, which their drawers' remarks go with", short: "comment" },
             {
                 keys: "c…",
                 does: "comment on the passage a motion covers: ct. ciw cip, cc the line",

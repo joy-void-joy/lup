@@ -1507,6 +1507,12 @@ kbd {
     color: var(--fg);
 }
 
+/* A concern's body, what whoever answers for it understands of it: the text's own colour, set in as the block's lines are,
+   which a message may quote line by line. */
+.buffer .cm-line.concern-body {
+    color: var(--fg);
+}
+
 /* Where each item ends, a faint rule; where a group does, a line saying whose, set in as its banner is. */
 .buffer .cm-line.item-end {
     background: linear-gradient(to bottom, transparent 8px, rgb(255 153 51 / 0.45) 8px, rgb(255 153 51 / 0.45) 9px, transparent 9px) no-repeat;
