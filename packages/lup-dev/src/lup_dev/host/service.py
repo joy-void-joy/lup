@@ -90,7 +90,7 @@ from lup_dev.host.courier import (
     Telling,
     Waker,
 )
-from lup_dev.host.holders import Holders
+from lup_dev.host.holders import HeldEnd, Holders
 from lup_dev.host.homes import kept
 from lup_dev.host.names import (
     Names,
@@ -867,6 +867,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     """Told once each hook is answered, and each room's request."""
     clock: Clock
     """When each conversation's activity began."""
+    ended: Callable[[Register], None] | None = None
+    """Told each launch as it ends (`HostService.ended`); none tells nobody."""
     served: dict[str, Served] = {}
     opening: dict[str, Register] = {}
     """The launches whose registration is under way, by id, each named."""
@@ -1457,7 +1459,10 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
 
         A hook of its the judge is still answering is marked ended
         (`judgement`), so a hold its call waits on gives up as an interrupted
-        call's. The directory goes with whatever the room left in it.
+        call's. The directory goes with whatever the room left in it. Each
+        side job its session spawned through lup ends with it, as a native
+        subagent ends with its session, its launcher asked to end it; and
+        whoever spawned it hears it ended (`ended`).
         """
         served = self.served.pop(launch, None)
         if served is None:
@@ -1466,6 +1471,10 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         served.ending.set()
         if self.holders is not None:
             self.holders.closed(launch)
+        for each in self.side_jobs(launch):
+            self.background(self.side_job_ended(each))
+        if self.ended is not None:
+            self.ended(served.launch)
         for server in served.servers:
             await closed(server)
         if Stopped.named() in served.offered.events:
@@ -1477,6 +1486,33 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         self.layout.conversations(launch).unlink(missing_ok=True)
         shutil.rmtree(self.layout.launch(launch).directory)
         self.say(f"{launch}: ended")
+
+    def side_jobs(self, launch: str) -> list[Register]:
+        """Return each launch served whose session `launch`'s spawned through lup as a side job, held by its launcher: what ends with it."""
+        holders = self.holders
+        return [
+            each.launch
+            for each in self.served.values()
+            if each.launch.spawner is not None
+            and each.launch.spawner.launch == launch
+            and each.launch.spawner.concern is None
+            and holders is not None
+            and holders.holds(each.launch.launch)
+        ]
+
+    async def side_job_ended(self, launch: Register) -> None:
+        """Ask the launcher of `launch`, a side job whose spawner's launch ended, to end its session; where it can't be reached or refuses, say so, for the operator to end it."""
+        if self.holders is None:
+            return
+        try:
+            await self.holders.asked(launch.launch, HeldEnd())
+        except HostError as failed:
+            self.say(
+                f"{launch.launch}: a side job whose spawner's launch ended wasn't "
+                f"ended with it, `lup-dev spawn end {launch.name}` ends it: {failed}"
+            )
+            return
+        self.say(f"{launch.launch}: ended with the launch that spawned it")
 
     def spawning(
         self,
@@ -2052,6 +2088,10 @@ class HostService(Model, arbitrary_types_allowed=True):
     the inbox's store, given the same (`cli.py`)."""
     clock: Clock = Field(default_factory=SystemClock)
     """When each conversation's activity began; a test gives its own."""
+    ended: Callable[[Register], None] | None = None
+    """Told each launch the service stops serving as it ends: the inbox tells
+    the agent who spawned it through lup (`Delivery.closed`, which `cli.py`
+    gives); none tells nobody."""
     companions: list[Companion] = []
     """The programs it runs beside it, the dashboard's server among them
     (`host/dashboard.py`): each begun once it listens, a failure said, and ended
@@ -2136,6 +2176,7 @@ class HostService(Model, arbitrary_types_allowed=True):
             podman=self.podman,
             changes=self.changes,
             clock=self.clock,
+            ended=self.ended,
         )
         stopped = asyncio.Event()
         own = [

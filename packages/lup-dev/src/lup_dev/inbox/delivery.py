@@ -752,6 +752,11 @@ conversation started in the background, a command ending or a Monitor's
 event."""
 
 
+def side_job(launch: Register) -> bool:
+    """Say whether `launch` is a side job an agent spawned through lup, whose report goes back to them, rather than a concern handed over to build, whose reports land in it (`Register.spawner`)."""
+    return launch.spawner is not None and launch.spawner.concern is None
+
+
 def whose(item: Item) -> Waking:
     """Say whose news `item` is, for what ends a held call: another agent's, where a conversation other than the one it's for sent it; else the operator's, lup's own word to the conversation among it.
 
@@ -978,7 +983,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         self.heard_in(
             party,
             launch,
-            None if parent is None else self.party(launch, parent),
+            self.parent_of(launch, conversation, parent),
             conversation.name,
         )
         presence = self.presence(party)
@@ -999,12 +1004,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 if not unread and holding(fresh, [], after_block=heard.after_block):
                     posted = self.told(party, room, heard.fits, "turn's end")
                     if posted.items:
-                        if ended:
+                        if ended or (side_job(launch) and party.agent is None):
                             self.held_saying(party, heard.said)
                         return posted
                 presence.turning = False
                 if ended and party.agent is not None:
                     await self.ended(party, launch, conversation, heard)
+                if not ended and side_job(launch) and party.agent is None:
+                    await self.reported(party, launch, heard)
                 return Posted()
             case SessionStarted():
                 presence.turning = False
@@ -1025,12 +1032,30 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                         *(each for each in self.looks if not each.done()),
                         task,
                     ]
-                if held:
-                    # A held session's new process takes no turn on what it's
-                    # told as it starts: what waits is given it as its first
-                    # turn once its launcher calls it up (`called_up`).
-                    return self.worded(party, Posted())
-                return self.worded(party, self.told(party, room, heard.fits, "start"))
+                spawned = (
+                    [self.introduced(launch)]
+                    if heard.fresh
+                    and party.agent is None
+                    and launch.spawner is not None
+                    else []
+                )
+                # A held session's new process takes no turn on what it's told
+                # as it starts: what waits is given it as its first turn once
+                # its launcher calls it up (`called_up`), an agent's brief
+                # among it.
+                told = (
+                    Posted()
+                    if held
+                    else self.told(
+                        party,
+                        room - sum(len(each.encode()) for each in spawned),
+                        heard.fits,
+                        "start",
+                    )
+                )
+                return self.worded(
+                    party, told.model_copy(update={"items": [*spawned, *told.items]})
+                )
             case TurnStarted():
                 presence.turning = True
                 taken = presence.pushed
@@ -1068,7 +1093,13 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 text = said
             case _:
                 return
-        await self.ended_saying(self.party(launch, conversation), text, launch.worktree)
+        party = self.party(launch, conversation)
+        if side_job(launch) and not self.answering(party):
+            # A side job's report is its spawner's (`reported`), as a
+            # subagent's last words are their parent's: before the operator only
+            # where it answers words of theirs.
+            return
+        await self.ended_saying(party, text, launch.worktree)
 
     async def ended_saying(
         self,
@@ -1202,10 +1233,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
         Heard again in another launch, or after they ended, as a session
         resumed, they keep the threads they work in and started on, and whether
-        they chose the one they started on. A subagent
-        heard the first time starts on the thread their parent works in
-        (`Whereabouts.thread`), hearing only what's addressed to them there
-        until they choose it (`Whereabouts.chose_start`).
+        they chose the one they started on. A subagent, or a session an agent
+        spawned as a side job, heard the first time starts on the thread their
+        parent works in (`Whereabouts.thread`), hearing only what's addressed to
+        them there until they choose it (`Whereabouts.chose_start`); a session
+        handed a concern with their spawn starts in it, theirs
+        (`Spawner.concern`).
         """
         place = self.inbox.whereabouts.get(party.key())
         if place is not None and place.launch == launch.launch and place.ended is None:
@@ -1215,7 +1248,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 )
             return
         above = None if parent is None else self.inbox.whereabouts.get(parent.key())
-        starting = None if above is None else above.thread
+        handed = (
+            None
+            if party.agent is not None or launch.spawner is None
+            else launch.spawner.concern
+        )
+        starting = handed or (None if above is None else above.thread)
         self.inbox.placed(
             Whereabouts(
                 conversation=party,
@@ -1228,34 +1266,120 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 felt_asked=place is not None and place.felt_asked,
                 thread=starting if place is None else place.thread,
                 started=starting if place is None else place.started,
-                chose_start=place is not None and place.chose_start,
-            )
-        )
-
-    async def called_up(self, launch: Register, session: str) -> None:
-        """Give a held session what waits for them as their first turn, once their launcher calls them up: what came for them while they were away; not told as they started, where no turn would begin on it."""
-        await self.wake(
-            Conversation(
-                repository=launch.repository, runtime=launch.runtime, session=session
+                chose_start=handed is not None
+                or (place is not None and place.chose_start),
             )
         )
 
     def parent(self, party: Conversation) -> Conversation | None:
-        """Return the conversation that spawned `party`, where they're a subagent a conversation spawned; none else."""
+        """Return the conversation that spawned `party`, where they're a subagent a conversation spawned, or a session an agent spawned through lup; none else."""
         place = self.inbox.whereabouts.get(party.key())
         return None if place is None else place.parent
 
+    def parent_of(
+        self, launch: Register, conversation: Caller, spawner: Caller | None
+    ) -> Conversation | None:
+        """Return the conversation that spawned `conversation` of `launch`: for a subagent, `spawner`, as their runtime recorded the spawn; for a session's own, the agent who spawned their launch through lup, as the host recorded it (`Register.spawner`), never as the room says.
+
+        A session an agent spawned keeps them as their parent when resumed in
+        a launch of the operator's, which records no spawner: what they say to
+        `parent` still reaches whoever handed them the work.
+        """
+        if conversation.agent is not None:
+            return None if spawner is None else self.party(launch, spawner)
+        if launch.spawner is not None:
+            return launch.spawner.conversation
+        place = self.inbox.whereabouts.get(self.party(launch, conversation).key())
+        return None if place is None else place.parent
+
     def subagents(self, party: Conversation) -> list[Whereabouts]:
-        """Return where each subagent `party` spawned was last heard, those heard in the launch `party` was last heard in alone, in the order each was first heard there: those that ended among them."""
+        """Return where each subagent `party` spawned was last heard, those heard in the launch `party` was last heard in alone, and each session they spawned through lup, whatever launch it runs in, in the order each was first heard: those that ended among them."""
         place = self.inbox.whereabouts.get(party.key())
         if place is None:
             return []
         spawned = [
             each
             for each in self.inbox.whereabouts.values()
-            if each.parent == party and each.launch == place.launch
+            if each.parent == party
+            and (each.launch == place.launch or each.conversation.agent is None)
         ]
         return sorted(spawned, key=lambda each: each.since)
+
+    async def reported(
+        self, party: Conversation, launch: Register, heard: Heard
+    ) -> None:
+        """Hand a side job's report to the agent who spawned it, as a subagent's end is handed (`Ended`): its turn's last words, or how it was stopped or failed, with what it said at each end lup held, which nothing else hands on.
+
+        Not quiet, as a subagent's end is: no runtime wakes the spawner for
+        it, so it holds their turn's end once, wakes them idle, and returns
+        their `wait_inbox`. The side job stays held, idle, so what they `send`
+        it next is its next turn, its context kept.
+        """
+        place = self.inbox.whereabouts.get(party.key())
+        if place is None or place.parent is None:
+            return
+        self.inbox.placed(place.model_copy(update={"held": []}))
+        news = Ended(
+            name=launch.name or launch.launch,
+            stopped=heard.stopped,
+            failed=None if heard.failed is None else heard.failed.kind,
+            said=heard.said,
+            held=place.held,
+        )
+        await self.posted(news, party, place.parent, launch.worktree)
+
+    async def called_up(self, launch: Register, session: str) -> None:
+        """Give a held session what waits for them as their first turn, once their launcher calls them up: what an agent's spawn addressed to them, their brief among it, and what came for them while they were away; not told as they started, where no turn would begin on it."""
+        await self.wake(
+            Conversation(
+                repository=launch.repository, runtime=launch.runtime, session=session
+            )
+        )
+
+    def introduced(self, launch: Register) -> str:
+        """Say, in lup's words, what a session an agent spawned through lup is, as their session starts: whose they are, where they work, and where what they say goes, a side job's report back to their spawner, a builder's into the concern handed them, theirs."""
+        spawner = launch.spawner
+        if spawner is None:
+            return ""
+        who = self.roster().who(spawner.conversation)
+        where = (
+            f"in a room and a worktree of your own, {launch.worktree}, on its "
+            "own branch"
+        )
+        handed = (
+            None if spawner.concern is None else self.concerns().at(spawner.concern)
+        )
+        if handed is None:
+            return (
+                f"lup: {who} spawned you through lup's `spawn`, as a side job for "
+                f"them, {where}. Their brief comes as your first turn. What you end "
+                "your turn saying is your report, handed to them whole, so end it "
+                "with what they asked for. `send` to `parent` reaches them "
+                "meanwhile, and what they send you after is your next turn, with "
+                "all you know so far."
+            )
+        return (
+            f"lup: {who} spawned you through lup's `spawn` and handed you "
+            f'@{handed.name}, "{handed.title}": it\'s yours, {where}. What you '
+            "send lands there, the operator reads it and talks with you directly, "
+            "so ask them what's theirs to decide, and land your own branch. "
+            f"{who} hears when you end, not what you report; `send` to `parent` "
+            "reaches them where their brief is wrong on what matters. Their brief "
+            "comes as your first turn."
+        )
+
+    def closed(self, launch: Register) -> None:
+        """Tell the agent who spawned `launch` through lup, in a line, that it ended, beside their next call: where a concern was handed with it, where its reports are."""
+        spawner = launch.spawner
+        if spawner is None:
+            return
+        concerns = self.concerns()
+        handed = None if spawner.concern is None else concerns.at(spawner.concern)
+        where = "" if handed is None else f": its reports are in @{handed.name}"
+        self.left(
+            spawner.conversation,
+            f"lup: `{launch.name or launch.launch}`, whom you spawned, ended{where}.",
+        )
 
     async def ended(
         self, party: Conversation, launch: Register, conversation: Caller, heard: Heard

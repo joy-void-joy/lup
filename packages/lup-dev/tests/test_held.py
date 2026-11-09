@@ -44,6 +44,7 @@ from lup_dev.host.protocol import (
     Register,
     Reply,
     Request,
+    Spawner,
     Talker,
 )
 from lup_dev.host.service import Dispatcher, Route, unix_server
@@ -173,6 +174,54 @@ def test_a_spawn_whose_launcher_ends_first_is_refused_with_what_it_wrote(
     assert isinstance(answer, Refused)
     assert "ended before its session was up" in answer.error
     assert "\nthe room never started: " in answer.error
+
+
+def test_a_launcher_an_agent_s_spawn_started_is_counted_until_it_ends_and_one_never_up_is_handed_back(
+    layout: Layout, tmp_path: Path
+) -> None:
+    """The limit counts a spawn from its launcher's start, before its launch registers; one whose session never came up is returned as it's collected, for its spawner to hear of, and one that came up isn't."""
+    launchers = Launchers()
+    ending: list[str] = []
+    spawner = Spawner(
+        launch="s0",
+        conversation=Conversation(
+            repository=tmp_path / ".git", runtime="claude", session="p1"
+        ),
+    )
+
+    def start(spec: HeldLaunch, log: Path) -> Apart:
+        return detached("sleep", "60", log=log)
+
+    async def spawned() -> tuple[list[HeldLaunch], list[HeldLaunch]]:
+        starting = Spawning(layout=layout, launchers=launchers, start=start)
+        never = await starting.started(
+            lambda launch: HeldLaunch(
+                launch=launch, runtime="claude", worktree=tmp_path, spawner=spawner
+            )
+        )
+        up = await starting.started(
+            lambda launch: HeldLaunch(
+                launch=launch, runtime="claude", worktree=tmp_path, spawner=spawner
+            )
+        )
+        await CallingUp(launchers=launchers).answer(
+            CalledUp(launch=up.launch, name="two", session="s-2")
+        )
+        counted = launchers.spawning()
+        for each in [never, up]:
+            ending.append(each.launch)
+            launcher = launchers.started[each.launch]
+            launcher.process.kill()
+            launcher.process.wait()
+        return counted, launchers.reaped()
+
+    counted, lost = asyncio.run(spawned())
+
+    never, _ = ending
+    assert len(counted) == 2
+    assert [each.launch for each in lost] == [never]
+    assert launchers.spawning() == []
+    assert launchers.specs == {}
 
 
 def test_a_spawn_abandoned_before_its_session_is_up_ends_its_launcher_and_one_up_is_refused(

@@ -38,7 +38,8 @@ from typer.testing import CliRunner
 
 from lup import events
 from lup.github.serving import GitHubServing
-from lup.programs import Ran, run
+from lup.programs import Apart, Ran, run
+from lup.programs import detached as started_apart
 from lup.rooms import Podman
 from lup.tools.serving import Answer as ToolAnswer
 from lup.tools.speaking import SPEAKING
@@ -64,8 +65,8 @@ from lup_dev.git import GitError
 from lup_dev.host.client import HostClient, RoomClient, Starter
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard, Posted, Spawned, Spawns
-from lup_dev.host.held import CalledUp, Interrupt, Launchers
-from lup_dev.host.holders import HeldInterrupt, HeldPrompt, Holders
+from lup_dev.host.held import CalledUp, HeldLaunch, Interrupt, Launchers, Spawning
+from lup_dev.host.holders import HeldEnd, HeldInterrupt, HeldPrompt, Holders
 from lup_dev.host.names import Names, container_name
 from lup_dev.host.on_trial import AcceptBranch, DropBranch, TrialSaid
 from lup_dev.host.protocol import (
@@ -77,6 +78,7 @@ from lup_dev.host.protocol import (
     Reply,
     Request,
     ShowHolding,
+    Spawner,
     Stop,
 )
 from lup_dev.host.protocol import Done as Finished
@@ -212,6 +214,7 @@ from lup_dev.inbox.threads import spoken
 from lup_dev.inbox.tools import Reach, Speaker, specs
 from lup_dev.inbox.typed import TypeReader
 from lup_dev.launch.room import RoomError
+from lup_dev.launch.spawning import SpawnTools
 from lup_dev.layout import CopyLayout, GitDirectoryLayout, InboxLayout, Layout
 from lup_dev.merging import Merging, gated_commit, merged
 from lup_dev.policy import landing as landing_module
@@ -515,8 +518,9 @@ def inboxed(
     coming: Callable[[Delivery], Coming] | None = None,
     trying: Callable[[Turns], Trying] | None = None,
     holding: bool = False,
+    spawning: Callable[[Delivery, Launchers], SpawnTools] | None = None,
 ) -> Generator[Watched]:
-    """A host service with lup's inbox and the dashboard's kind, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter; containers asked of `podman`, where given; each hook answered by `judge`, else with nothing, and each launch's modules served by `modules`, where given; `land` pushing through the remotes `remotes` makes over the delivery, where given, else through remotes telling no one, running in a launch's room through `rooms`, reading a file's parse through `parser`, and waking parked threads through what `coming` makes over the delivery, where given; what's on trial moved through what `trying` makes over the landings' turns, where given; a new main session told its bearings where `bearings` asks, its integration branch `dev`; what each runtime holds for a conversation read by `queues`, where given, a held call looking at it, and at its time limit, every few milliseconds."""
+    """A host service with lup's inbox and the dashboard's kind, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter; containers asked of `podman`, where given; each hook answered by `judge`, else with nothing, and each launch's modules served by `modules`, where given; `land` pushing through the remotes `remotes` makes over the delivery, where given, else through remotes telling no one, running in a launch's room through `rooms`, reading a file's parse through `parser`, and waking parked threads through what `coming` makes over the delivery, where given; what's on trial moved through what `trying` makes over the landings' turns, where given; a new main session told its bearings where `bearings` asks, its integration branch `dev`; what each runtime holds for a conversation read by `queues`, where given, a held call looking at it, and at its time limit, every few milliseconds; `spawn` served by what `spawning` makes over the delivery and the launchers, where given, else by one that starts no launcher."""
     known = cli.Adapters(known=cli.adapters())
     couriers = cli.Couriers(adapters=known)
     wakers = cli.Wakers(adapters=known)
@@ -547,6 +551,12 @@ def inboxed(
             told(line)
 
     turns = Turns()
+    launchers = Launchers()
+    spawner = (
+        unstarting(delivery, machine, launchers)
+        if spawning is None
+        else spawning(delivery, launchers)
+    )
     landing = LandingTools(
         delivery=delivery,
         layout=judging or machine,
@@ -586,7 +596,7 @@ def inboxed(
             *(
                 []
                 if holders is None
-                else cli.held_routes(machine, holders, Launchers(), delivery)
+                else cli.held_routes(machine, holders, launchers, delivery)
             ),
         ],
         tools=cli.room_tools(
@@ -594,6 +604,7 @@ def inboxed(
             judging or machine,
             Predating() if modules is None else modules,
             landing=landing,
+            spawning=spawner,
         ),
         judge=judge or Quiet(),
         modules=modules,
@@ -603,6 +614,7 @@ def inboxed(
         pushes=pushes,
         holders=holders,
         podman=podman,
+        ended=delivery.closed,
         companions=(
             []
             if typed is None
@@ -611,6 +623,21 @@ def inboxed(
     )
     with served(service):
         yield delivery
+
+
+def unstarting(delivery: Delivery, machine: Layout, launchers: Launchers) -> SpawnTools:
+    """`spawn` as the service serves it, but for a launcher, which no test starts unless it gives its own."""
+
+    def start(spec: HeldLaunch, log: Path) -> Apart:
+        message = f"a test started a launcher for {spec.worktree}, logging to {log}"
+        raise AssertionError(message)
+
+    tools = cli.spawn_tools(
+        delivery, machine, launchers, cli.Adapters(known=cli.adapters())
+    )
+    return tools.model_copy(
+        update={"spawning": Spawning(layout=machine, launchers=launchers, start=start)}
+    )
 
 
 def launched(
@@ -622,8 +649,9 @@ def launched(
     *,
     repository: Path | None = None,
     held: bool = False,
+    spawner: Spawner | None = None,
 ) -> Register:
-    """Register a launch of `runtime` in `tmp_path` with the running service, its repository `tmp_path`'s `.git` unless `repository` names another."""
+    """Register a launch of `runtime` in `tmp_path` with the running service, its repository `tmp_path`'s `.git` unless `repository` names another, spawned by `spawner` where it's given."""
     judge = tmp_path / "judges" / "bin" / "lup-dev"
     judge.parent.mkdir(parents=True, exist_ok=True)
     judge.touch()
@@ -641,6 +669,7 @@ def launched(
         home=tmp_path.parent,
         own=tmp_path.parent,
         held=held,
+        spawner=spawner,
     )
     client(machine.host, clock).register(registered)
     return registered
@@ -2898,11 +2927,12 @@ def test_lup_dev_rename_and_send_name_a_launch_by_its_name(
 
 
 def introduction() -> str:
-    """What a subagent is told of lup's tools at their first hook, as the tests' service serves them: the inbox's, `judged`, `land` and `rename`, each by its docstring's first line."""
+    """What a subagent is told of lup's tools at their first hook, as the tests' service serves them: the inbox's, `judged`, `land`, `spawn` and `rename`, each by its docstring's first line."""
     served = [
         *specs(),
         *JudgeTools.model_construct().specs(),
         *LandingTools.model_construct().specs(),
+        *SpawnTools.model_construct().specs(),
         *Naming.model_construct().specs(),
     ]
     opening = (
@@ -5092,9 +5122,13 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
     assert [(spec.name, spec.summary) for spec in landing] == [
         ("land", "Land a branch on the running branch.")
     ]
+    spawning = SpawnTools.model_construct().specs()
+    assert [(spec.name, spec.summary) for spec in spawning] == [
+        ("spawn", "Start an agent in a room and worktree of its own.")
+    ]
     naming = Naming.model_construct().specs()
     assert [spec.name for spec in naming] == ["rename"]
-    core = [*served, *judging, *landing, *naming]
+    core = [*served, *judging, *landing, *spawning, *naming]
     assert cli.served_tools(resolve(Project())) == [*core, *github]
     dropped = Project(modules=Modules.default().drop("github"))
     assert cli.served_tools(resolve(dropped)) == core
@@ -14001,3 +14035,521 @@ def test_lup_dev_inbox_answer_answers_a_check_and_whoever_asked_it_is_told(
         f'<checked item="{check}" thread="does-a-fresh-room-start-fast">It took 9 s.'
         "</checked>"
     )
+
+
+# An agent's spawn (`docs/launch.md`, *An agent's spawn*): the tool as a session
+# calls it through the service, its launcher a short-lived program and the
+# spawner's room's git a recorded command; and what the inbox does with the
+# session spawned, its launch registered with its spawner as a launcher
+# registers it.
+
+
+def spawnable(root: Path) -> str:
+    """Make `root` a repository on `dev` with one commit, as a launch there finds it, and return the commit."""
+    run("git", "init", "-q", "-b", "dev", str(root))
+    (root / "a").write_text("a\n")
+    run("git", "add", "-A", cwd=root)
+    run(
+        "git",
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.com",
+        "commit",
+        "-q",
+        "-m",
+        "a",
+        cwd=root,
+    )
+    return run("git", "rev-parse", "HEAD", cwd=root).text().strip()
+
+
+def started_on_dev(repository: Path) -> str:
+    """The branch work starts from in every test's repository."""
+    del repository
+    return "dev"
+
+
+class SpawnsMade:
+    """What a test's `spawn` did: each program it ran on the host, and each launch whose launcher it started."""
+
+    def __init__(self, *, limit: int = 32, status: int = 0) -> None:
+        self.limit = limit
+        self.status = status
+        self.programs: list[Program] = []
+        self.launches: list[HeldLaunch] = []
+
+    def tools(
+        self, delivery: Delivery, machine: Layout, launchers: Launchers
+    ) -> SpawnTools:
+        """`spawn` as the service serves it, its programs recorded and answered with `status`, each launcher a program that ends at once, and work starting from `dev`."""
+
+        async def ran(program: Program) -> Ran:
+            self.programs.append(program)
+            failed = b"fatal: a branch named that exists" if self.status else b""
+            return Ran(command=program.command, status=self.status, error=failed)
+
+        def start(spec: HeldLaunch, log: Path) -> Apart:
+            self.launches.append(spec)
+            return started_apart("true", log=log)
+
+        served = cli.spawn_tools(
+            delivery, machine, launchers, cli.Adapters(known=cli.adapters())
+        )
+        return served.model_copy(
+            update={
+                "spawning": Spawning(layout=machine, launchers=launchers, start=start),
+                "run": ran,
+                "starting": started_on_dev,
+                "limit": self.limit,
+            }
+        )
+
+
+def test_a_side_job_is_spawned_in_a_worktree_its_spawner_s_room_makes_its_brief_addressed_to_it(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    worktree = tmp_path / "w"
+    commit = spawnable(worktree)
+    repository = worktree / ".git"
+    spawned = SpawnsMade()
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        spawning=lambda delivery, launchers: spawned.tools(
+            delivery, machine, launchers
+        ),
+    ) as delivery:
+        launched(machine, clock, worktree, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        answer, error = call(
+            mcp,
+            "spawn",
+            {"name": "Measure the gate", "brief": "Time `lup-dev check`."},
+        )
+        brief, copy = numbers(delivery)[-2:]
+    root = repository / "tree" / "measure-the-gate"
+    spawner = Conversation(repository=repository, runtime="claude", session="s1")
+    [program] = spawned.programs
+    [launch] = spawned.launches
+    assert launch.session is not None
+    child = Conversation(
+        repository=repository, runtime="claude", session=launch.session
+    )
+    assert not error
+    # The room's own git makes it, from the git directory the host recorded.
+    assert program.command == [
+        "podman",
+        "exec",
+        "--workdir",
+        str(repository),
+        "lup-one",
+        "git",
+        "--git-dir",
+        str(repository),
+        "worktree",
+        "add",
+        "--quiet",
+        "-b",
+        "measure-the-gate",
+        str(root),
+        commit,
+    ]
+    assert launch.model_dump(exclude={"launch", "session"}) == HeldLaunch(
+        launch=launch.launch,
+        runtime="claude",
+        worktree=root,
+        repository=repository,
+        spawner=Spawner(launch="one", conversation=spawner),
+    ).model_dump(exclude={"launch", "session"})
+    item = delivery.inbox.item(brief)
+    assert (item.sender, item.recipient, item.reason) == (
+        spawner,
+        child,
+        Message(kind="note", text="Time `lup-dev check`."),
+    )
+    assert item.state == Waiting()
+    assert delivery.inbox.item(copy).recipient == Operator()
+    assert answer.startswith(
+        f"`measure-the-gate` is starting, in {root} on its branch `measure-the-gate`, "
+        f"from `dev`, at {commit}; its brief is @{brief}"
+    )
+    assert "A side job for you" in answer
+
+
+def test_a_concern_handed_with_a_spawn_is_the_spawned_session_s_and_holds_its_brief(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    worktree = tmp_path / "w"
+    spawnable(worktree)
+    repository = worktree / ".git"
+    spawned = SpawnsMade()
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        spawning=lambda delivery, launchers: spawned.tools(
+            delivery, machine, launchers
+        ),
+    ) as delivery:
+        launched(machine, clock, worktree, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        answer, _ = call(
+            mcp,
+            "spawn",
+            {
+                "name": "revamp",
+                "brief": "Revamp the dashboard's tree.",
+                "concern": "Revamp the dashboard",
+            },
+        )
+        _, copy = numbers(delivery)[-2:]
+        concerns = delivery.concerns()
+        thread = concerns.named(repository, "revamp-the-dashboard")
+        holding = concerns.containing(copy)
+    [launch] = spawned.launches
+    assert launch.spawner is not None
+    assert launch.spawner.concern == thread.number
+    assert thread.holder == Conversation(
+        repository=repository, runtime="claude", session=launch.session or ""
+    )
+    assert holding is not None
+    assert holding.number == thread.number
+    assert "@revamp-the-dashboard is theirs now" in answer
+
+
+def test_a_spawn_that_can_t_be_is_refused_saying_why_and_makes_nothing(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    worktree = tmp_path / "w"
+    spawnable(worktree)
+    repository = worktree / ".git"
+    spawned = SpawnsMade(limit=1)
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        spawning=lambda delivery, launchers: spawned.tools(
+            delivery, machine, launchers
+        ),
+    ) as delivery:
+        launched(machine, clock, worktree, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        before = numbers(delivery)
+
+        def asked(**given: JsonValue) -> str:
+            answer, _ = call(mcp, "spawn", {"name": "x", "brief": "Do it.", **given})
+            return answer
+
+        answers = [
+            asked(start="nope"),
+            asked(start="-x"),
+            asked(start="refs/heads/dev"),
+            asked(name="…"),
+            asked(name="a " * 30),
+            asked(brief=" "),
+            asked(concern="999999999"),
+        ]
+        spawner = Conversation(repository=repository, runtime="claude", session="s1")
+        launched(
+            machine,
+            clock,
+            tmp_path / "other",
+            "busy",
+            "claude",
+            repository=repository,
+            spawner=Spawner(launch="one", conversation=spawner),
+        )
+        limited = asked()
+        after = numbers(delivery)
+    assert answers == [
+        "Not spawned: no local branch `nope` is there to start from",
+        "Not spawned: `-x` isn't a branch's short name",
+        "Not spawned: `refs/heads/dev` isn't a branch's short name",
+        "Not spawned: `…` holds no letter or digit to name it by",
+        "Not spawned: `"
+        + "a " * 30
+        + "` is long for a name: a few words, its branch `"
+        + "-".join(["a"] * 30)
+        + "` 48 characters at most",
+        "Not spawned: its brief is empty: it would start with nothing to do",
+        "Not spawned: `999999999` names no thread of this repository",
+    ]
+    assert limited.startswith(
+        "Not spawned: 1 session agents spawned runs already, the most that may at "
+        "once, against loops of spawns: `other`."
+    )
+    assert spawned.programs == []
+    assert spawned.launches == []
+    assert after == before
+
+
+def test_a_spawn_whose_worktree_the_room_can_t_make_starts_nothing(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    worktree = tmp_path / "w"
+    spawnable(worktree)
+    spawned = SpawnsMade(status=128)
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        spawning=lambda delivery, launchers: spawned.tools(
+            delivery, machine, launchers
+        ),
+    ):
+        launched(machine, clock, worktree, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        answer, _ = call(mcp, "spawn", {"name": "x", "brief": "Do it."})
+    root = worktree / ".git" / "tree" / "x"
+    assert answer == (
+        f"Not spawned: its worktree, {root}, wasn't made in your room: fatal: a "
+        "branch named that exists"
+    )
+    assert spawned.launches == []
+
+
+def test_a_spawn_s_branch_takes_the_next_number_where_its_name_is_a_branch_already(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    worktree = tmp_path / "w"
+    spawnable(worktree)
+    run("git", "branch", "x", cwd=worktree)
+    (worktree / ".git" / "tree" / "x-2").mkdir(parents=True)
+    spawned = SpawnsMade()
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        spawning=lambda delivery, launchers: spawned.tools(
+            delivery, machine, launchers
+        ),
+    ):
+        launched(machine, clock, worktree, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        call(mcp, "spawn", {"name": "x", "brief": "Do it."})
+    [launch] = spawned.launches
+    assert launch.worktree == worktree / ".git" / "tree" / "x-3"
+
+
+def test_a_session_on_a_runtime_with_no_held_session_spawns_none(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    worktree = tmp_path / "w"
+    spawnable(worktree)
+    spawned = SpawnsMade()
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        spawning=lambda delivery, launchers: spawned.tools(
+            delivery, machine, launchers
+        ),
+    ):
+        launched(machine, clock, worktree, "one", "codex")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, codex("SessionStart", source="startup"))
+        answer, _ = call(mcp, "spawn", {"name": "x", "brief": "Do it."})
+    assert answer == (
+        "Not spawned: codex has no session lup holds with no terminal yet, so a "
+        "session of yours spawns none"
+    )
+    assert spawned.programs == []
+
+
+def side_job(
+    machine: Layout,
+    clock: FakeClock,
+    tmp_path: Path,
+    spawner: Conversation,
+    *,
+    name: str = "two",
+    concern: int | None = None,
+) -> Register:
+    """Register a held launch an agent of launch `one`, `spawner`, spawned, in a worktree of its own, as its launcher registers it: a side job, or a concern handed over where `concern` names one."""
+    return launched(
+        machine,
+        clock,
+        tmp_path / name,
+        name,
+        "claude",
+        repository=spawner.repository,
+        held=True,
+        spawner=Spawner(launch="one", conversation=spawner, concern=concern),
+    )
+
+
+def test_a_side_job_s_report_reaches_its_spawner_whole_waking_them_and_never_the_operator(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    worktree = tmp_path / "w"
+    spawner = Conversation(repository=worktree / ".git", runtime="claude", session="s1")
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, worktree, "one", "claude", held=True)
+        side_job(machine, clock, tmp_path, spawner)
+        hook, child = machine.host.launch("one").hook, machine.host.launch("two").hook
+        launcher = Launcher(machine.launch("one").held)
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        started = send(child, claude("SessionStart", source="startup", session_id="c1"))
+        send(
+            child,
+            claude(
+                "Stop",
+                stop_hook_active=False,
+                last_assistant_message="It takes four minutes.",
+                session_id="c1",
+            ),
+        )
+        report = newest(delivery)
+        [given] = launcher.ringing()
+        waiting = delivery.inbox.waiting(Operator())
+        launcher.close()
+    item = delivery.inbox.item(report)
+    assert item.reason == Ended(name="two", said="It takes four minutes.")
+    assert item.recipient == spawner
+    assert not item.quiet
+    assert (
+        f'<ended item="{report}" from="two"'
+        in HeldPrompt.model_validate_json(given).text
+    )
+    assert waiting == []
+    assert "spawned you through lup's `spawn`, as a side job for them" in context(
+        started
+    )
+
+
+def test_a_side_job_and_its_spawner_send_to_each_other_by_parent_and_by_its_name(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    worktree = tmp_path / "w"
+    spawner = Conversation(repository=worktree / ".git", runtime="claude", session="s1")
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, worktree, "one", "claude")
+        side_job(machine, clock, tmp_path, spawner)
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        child, theirs = machine.host.launch("two").hook, machine.host.launch("two").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        send(child, claude("SessionStart", source="startup", session_id="c1"))
+        up, _ = call(theirs, "send", to_parent("Which branch?"))
+        asked = newest(delivery) - 1
+        down, _ = call(mcp, "send", {"to": "two", "kind": "note", "text": "`dev`."})
+        answered = newest(delivery) - 1
+    child_party = spawner.model_copy(update={"session": "c1"})
+    assert delivery.inbox.item(asked).recipient == spawner
+    assert delivery.inbox.item(answered).recipient == child_party
+    assert up.startswith("Your message is in the inbox of your parent `w`")
+    assert down.startswith("Your message is in the inbox of your subagent `two`")
+
+
+def test_a_builder_s_reports_land_in_its_concern_for_the_operator_and_its_spawner_hears_only_its_end(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    worktree = tmp_path / "w"
+    repository = worktree / ".git"
+    spawner = Conversation(repository=repository, runtime="claude", session="s1")
+    builder = spawner.model_copy(update={"session": "c1"})
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, worktree, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        concerns = delivery.concerns()
+        thread = concerns.opened(spawner, "Revamp the dashboard", repository)
+        concerns.handed(spawner, thread, builder)
+        side_job(machine, clock, tmp_path, spawner, concern=thread.number)
+        child = machine.host.launch("two").hook
+        started = send(child, claude("SessionStart", source="startup", session_id="c1"))
+        send(
+            child,
+            claude(
+                "Stop",
+                stop_hook_active=False,
+                last_assistant_message="The first piece is built.",
+                session_id="c1",
+            ),
+        )
+        report = newest(delivery)
+        meanwhile = send(hook, bash("b1"))
+        client(machine.host, clock).unregister("two")
+        after = context(send(hook, bash("b2")))
+        landed = delivery.concerns().containing(report)
+    item = delivery.inbox.item(report)
+    assert item.recipient == Operator()
+    assert item.reason == Message(
+        kind="note", text="The first piece is built.", ending=True
+    )
+    assert landed is not None
+    assert landed.number == thread.number
+    assert meanwhile == ""
+    assert after == (
+        "lup: `two`, whom you spawned, ended: its reports are in @revamp-the-dashboard."
+    )
+    assert "handed you @revamp-the-dashboard" in context(started)
+
+
+def test_a_side_job_ends_with_its_spawner_s_launch_and_a_builder_doesn_t(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    worktree = tmp_path / "w"
+    spawner = Conversation(repository=worktree / ".git", runtime="claude", session="s1")
+    with inboxed(machine, clock, notices, said, holding=True):
+        launched(machine, clock, worktree, "one", "claude")
+        side_job(machine, clock, tmp_path, spawner)
+        side_job(machine, clock, tmp_path, spawner, name="three", concern=1)
+        job = Launcher(machine.launch("two").held)
+        built = Launcher(machine.launch("three").held)
+        client(machine.host, clock).unregister("one")
+        ended = job.ringing()
+        frames = built.close()
+        job.close()
+    assert ended == [HeldEnd().model_dump_json()]
+    assert frames == []
+
+
+def test_sessions_lists_a_launch_an_agent_spawned_under_its_spawner_saying_how(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+    *,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    podman_having(monkeypatch, "lup-one", "lup-two", "lup-three")
+    worktree = tmp_path / "w"
+    spawner = Conversation(repository=worktree / ".git", runtime="claude", session="s1")
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, worktree, "one", "claude")
+        side_job(machine, clock, tmp_path, spawner)
+        side_job(machine, clock, tmp_path, spawner, name="three", concern=1)
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        send(
+            machine.host.launch("two").hook,
+            claude("SessionStart", source="startup", session_id="c1"),
+        )
+        listing = runner.invoke(cli.app, ["sessions"])
+    assert listing.output.splitlines() == [
+        f"`w`  claude in {worktree}  (one)  container lup-one, running",
+        "  w",
+        (
+            f"    `two`  claude in {tmp_path / 'two'}  (two)  container lup-two, "
+            "running  spawned by `w`, a side job"
+        ),
+        "      two",
+        (
+            f"    `three`  claude in {tmp_path / 'three'}  (three)  container "
+            "lup-three, running  spawned by `w`, handed a concern"
+        ),
+    ]

@@ -22,7 +22,7 @@ import shutil
 import sys
 import traceback
 import webbrowser
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
@@ -280,6 +280,7 @@ from lup_dev.launch.session import (
     hooked,
     terminal_settings,
 )
+from lup_dev.launch.spawning import SpawnTools
 from lup_dev.launch.trial import TerminalRun, Trial, scratched, taken_over_there
 from lup_dev.launch.trust import (
     Approving,
@@ -677,17 +678,19 @@ def control_routes(
     ]
 
 
+def launcher_started(spec: HeldLaunch, log: Path) -> Apart:
+    """Start a held launch's launcher from the `lup-dev` the service runs, in its worktree, what it prints in its launch's log, apart from the service."""
+    program, *rest = launcher_command(own_command(), spec)
+    return detached(program, *rest, log=log, cwd=spec.worktree)
+
+
 def held_routes(
     layout: Layout,
     holders: Holders,
     launchers: Launchers,
     delivery: Delivery | None = None,
 ) -> list[Route]:
-    """Route what the operator asks of sessions held with no terminal, and their launchers' word that one is up, which gives the session what waits for it through `delivery`, where it's given: each launcher started from the `lup-dev` the service runs, in its worktree, what it prints in its launch's log (`lup_dev.host.held`)."""
-
-    def start(spec: HeldLaunch, log: Path) -> Apart:
-        program, *rest = launcher_command(own_command(), spec)
-        return detached(program, *rest, log=log, cwd=spec.worktree)
+    """Route what the operator asks of sessions held with no terminal, and their launchers' word that one is up, which gives the session what waits for it through `delivery`, where it's given (`lup_dev.host.held`)."""
 
     async def up(called: CalledUp) -> None:
         launch = recorded_launch(layout.host, called.launch)
@@ -695,7 +698,7 @@ def held_routes(
             await delivery.called_up(launch, called.session)
 
     return [
-        Route.to(Spawning(layout=layout, launchers=launchers, start=start)),
+        Route.to(Spawning(layout=layout, launchers=launchers, start=launcher_started)),
         Route.to(Awaiting(layout=layout, launchers=launchers)),
         Route.to(Abandoning(launchers=launchers)),
         Route.to(CallingUp(launchers=launchers, up=up)),
@@ -794,6 +797,12 @@ def host_serve(context: typer.Context) -> None:
     asking = WorkersAsking(workers=workers)
     coming = Coming(delivery=delivery, layout=layout, say=typer.echo)
     delivery.starting = coming.started
+    spawning = spawn_tools(delivery, layout, launchers, known)
+
+    async def reap() -> None:
+        for each in launchers.reaped():
+            await spawning.lost(each)
+
     sweeping = Sweeping(
         layout=layout,
         host=host_client(),
@@ -801,7 +810,7 @@ def host_serve(context: typer.Context) -> None:
         say=typer.echo,
         running=workers.commands,
         coming=None if rehearsing else coming,
-        reap=launchers.reaped,
+        reap=reap,
     )
     turns = Turns()
     trying = Trying(
@@ -851,7 +860,7 @@ def host_serve(context: typer.Context) -> None:
             ),
             *held_routes(layout, holders, launchers, delivery),
         ],
-        tools=room_tools(delivery, layout, workers, landing=landing),
+        tools=room_tools(delivery, layout, workers, landing=landing, spawning=spawning),
         room_routes=[
             *remote_routes(remotes),
             *clipboard_routes(Desktop.of(settings)),
@@ -872,6 +881,7 @@ def host_serve(context: typer.Context) -> None:
         waker=wakers,
         pushes=pushes,
         holders=holders,
+        ended=delivery.closed,
         companions=[
             *(
                 []
@@ -1042,13 +1052,42 @@ def room_tools(
     modules: LaunchModules,
     *,
     landing: LandingTools,
+    spawning: SpawnTools,
 ) -> list[RoomTools]:
-    """List the core's tools the host service serves each launched session: the inbox's; the judge's, reading lup's state at `layout` by the delivery's clock, and running `quiet` in each launch's repository's process (`modules`); and `landing`'s, `land`."""
+    """List the core's tools the host service serves each launched session: the inbox's; the judge's, reading lup's state at `layout` by the delivery's clock, and running `quiet` in each launch's repository's process (`modules`); `landing`'s, `land`; and `spawning`'s, `spawn`."""
     return [
         InboxTools(delivery=delivery),
         JudgeTools(layout=layout, clock=delivery.clock, modules=modules),
         landing,
+        spawning,
     ]
+
+
+def spawn_tools(
+    delivery: Delivery, layout: Layout, launchers: Launchers, known: Adapters
+) -> SpawnTools:
+    """Return the `spawn` tool as the service serves it: launchers started as `lup-dev spawn`'s are, among `launchers`; the launches served read from their records; a session's id minted by its runtime's adapter, where it has a held session; and a worktree started from the integration branch the declaration approved for its repository names."""
+
+    def mint(runtime: str) -> str | None:
+        held = next(
+            (
+                each.holding
+                for each in known.known
+                if each.runtime.name() == runtime and each.holding is not None
+            ),
+            None,
+        )
+        return None if held is None else held.minted()
+
+    return SpawnTools(
+        delivery=delivery,
+        layout=layout,
+        spawning=Spawning(layout=layout, launchers=launchers, start=launcher_started),
+        launchers=launchers,
+        served=lambda: recorded_launches(layout.host),
+        mint=mint,
+        starting=lambda repository: approved_branches(layout, repository).integration,
+    )
 
 
 def served_tools(resolved: Resolved) -> list[ToolSpec]:
@@ -1068,6 +1107,7 @@ def served_tools(resolved: Resolved) -> list[ToolSpec]:
             Layout.model_construct(),
             Workers.model_construct(),
             landing=LandingTools.model_construct(),
+            spawning=SpawnTools.model_construct(),
         )
         for spec in tools.specs()
     ]
@@ -1375,20 +1415,63 @@ def sessions(
         typer.echo("No session runs.")
         return
     podman = Podman()
-    for launch in listed.launches:
+
+    def running(launch: Register) -> bool:
         container = launch.container
-        running = (
+        return (
             listed.running.get(launch.launch, False)
             if listed.running is not None
             else container is not None and podman.exists(container)
         )
-        typer.echo(
-            f"`{launch.name}`  {launch.runtime} in {launch.worktree}  "
-            f"({launch.launch})  container {container}, "
-            f"{'running' if running else 'not running'}"
+
+    for line in served_lines(listed, running, every=every):
+        typer.echo(line)
+
+
+def served_lines(
+    listed: Listed, running: Callable[[Register], bool], *, every: bool
+) -> Iterator[str]:
+    """Yield `lup-dev sessions`' lines: each launch, its conversations under it (`conversations`), and each launch an agent of it spawned through lup under those, set in, saying who spawned it and how; a launch whose spawner's launch isn't served where it would be at the top."""
+    served = {each.launch: each for each in listed.launches}
+
+    def above(launch: Register) -> str | None:
+        spawner = launch.spawner
+        return (
+            None if spawner is None or spawner.launch not in served else spawner.launch
         )
-        for line in conversations(listed.talkers.get(launch.launch, []), every=every):
-            typer.echo(line)
+
+    def spawned(launch: Register) -> str:
+        spawner = launch.spawner
+        if spawner is None:
+            return ""
+        by = spawner.conversation
+        path = next(
+            (
+                each.path
+                for each in listed.talkers.get(spawner.launch, [])
+                if each.session == by.session and each.agent == by.agent
+            ),
+            by.session,
+        )
+        kind = "a side job" if spawner.concern is None else "handed a concern"
+        return f"  spawned by `{path}`, {kind}"
+
+    def shown(launch: Register, depth: int) -> Iterator[str]:
+        set_in = "    " * depth
+        yield (
+            f"{set_in}`{launch.name}`  {launch.runtime} in {launch.worktree}  "
+            f"({launch.launch})  container {launch.container}, "
+            f"{'running' if running(launch) else 'not running'}{spawned(launch)}"
+        )
+        talkers = listed.talkers.get(launch.launch, [])
+        yield from (f"{set_in}{line}" for line in conversations(talkers, every=every))
+        for each in listed.launches:
+            if above(each) == launch.launch:
+                yield from shown(each, depth + 1)
+
+    for each in listed.launches:
+        if above(each) is None:
+            yield from shown(each, 0)
 
 
 def conversations(talkers: list[Talker], *, every: bool) -> list[str]:
@@ -2326,9 +2409,11 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
     coming: Coming | None = None
     """What wakes the threads parked until what the sweep sees come; none wakes
     none."""
-    reap: Callable[[], None] | None = None
+    reap: Callable[[], Awaitable[None]] | None = None
     """Collects each held launch's launcher the service started that has
-    ended, so none is left a zombie (`Spawns.reaped`); none collects none."""
+    ended, so none is left a zombie, and tells the agent who spawned one whose
+    session never came up (`Launchers.reaped`, `SpawnTools.lost`); none
+    collects none."""
     pause: Callable[[float], Awaitable[None]] = asyncio.sleep
     """Waits the seconds between two sweeps; a test gives its own."""
     stopping: asyncio.Event = Field(default_factory=asyncio.Event)
@@ -2370,7 +2455,7 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
             self.say(f"{failing}:\n{told}")
         await self.pruned()
         if self.reap is not None:
-            self.reap()
+            await self.reap()
         self.woken()
 
     def woken(self) -> None:
@@ -2476,12 +2561,10 @@ def launched(
     if traced is not None:
         message = f"no session is held on this machine: {traced}"
         raise LaunchError(message)
+    pinned = None if held is None else held.repository
+    spawned_in(worktree, pinned)
     launcher.say(launcher.trust(worktree).report())
-    repository = Path(
-        Git(cwd=worktree).text(
-            "rev-parse", "--path-format=absolute", "--git-common-dir"
-        )
-    )
+    repository = spawned_in(worktree, pinned)
     if Git.pinned(repository).text("for-each-ref", "--count=1", "refs/replace/"):
         launcher.say(
             "This repository holds replace refs (`refs/replace/`), which a room "
@@ -2644,6 +2727,7 @@ def launched(
             home=homing.home.shared,
             own=homing.home.directory,
             held=held is not None,
+            spawner=None if held is None else held.spawner,
         )
         naming = named_session(adapter, arguments, held)
         session, arguments = naming.session, naming.arguments
@@ -2767,6 +2851,29 @@ def launched(
                 writing.let_go(writer)
 
 
+def spawned_in(worktree: Path, pinned: Path | None) -> Path:
+    """Return the repository's git directory `worktree` leads to, as git finds it through the worktree; where an agent spawned the launch, refuse one other than `pinned`, the one the host recorded the spawner's launch in.
+
+    A room writes every worktree's `.git` file and the git directory's
+    `worktrees/`, so one could lead a spawned launch's worktree to another
+    repository approved on this machine, which the spawner's declaration never
+    named: looked at before trust reads the worktree, and again after.
+    """
+    found = Path(
+        Git(cwd=worktree).text(
+            "rev-parse", "--path-format=absolute", "--git-common-dir"
+        )
+    )
+    if pinned is not None and found != pinned:
+        message = (
+            f"the worktree {worktree} leads to the repository {found}, where it was "
+            f"spawned in {pinned}: something in a room rewrote its git, so nothing "
+            "launches"
+        )
+        raise LaunchError(message)
+    return found
+
+
 class NamedSession(Model):
     """The session a launch runs, where its id is known before its room starts, and the runtime's arguments naming it."""
 
@@ -2796,10 +2903,9 @@ def named_session(
         return NamedSession(
             session=an_id(adapter, adapter.resumed(arguments)), arguments=arguments
         )
+    fresh = held.session or holding.minted()
     try:
-        session = (
-            holding.minted() if held.resume is None else holding.normal(held.resume)
-        )
+        session = fresh if held.resume is None else holding.normal(held.resume)
         naming = (
             holding.fresh(session) if held.resume is None else holding.resuming(session)
         )

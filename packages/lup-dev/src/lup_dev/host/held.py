@@ -37,6 +37,7 @@ from lup_dev.host.protocol import (
     Refused,
     Reply,
     Request,
+    Spawner,
 )
 from lup_dev.host.service import Handler
 from lup_dev.layout import HostPaths, Layout
@@ -57,6 +58,17 @@ class HeldLaunch(Model):
     """The runtime's id for the session it resumes; none starts a new one."""
     arguments: list[str] = []
     """The runtime's own arguments, after lup's."""
+    session: str | None = None
+    """The runtime's id for the session it starts, minted by the host where an
+    agent spawned it, so its brief is addressed to it before it's up; none has
+    the launcher mint one, or resume `resume`."""
+    repository: AbsolutePath | None = None
+    """The repository's git directory as the host recorded the spawner's
+    launch, where an agent spawned it: the launcher refuses a worktree whose
+    git leads elsewhere, which a room can write. None for the operator's own,
+    whose worktree says it, as a launch's does."""
+    spawner: Spawner | None = None
+    """Who spawned it, where an agent did (`Register.spawner`)."""
 
 
 class Spawn(Request, reads=False):
@@ -141,16 +153,40 @@ class Launchers(MutableModel, arbitrary_types_allowed=True):
     started: dict[str, Apart] = {}
     """Each launcher started, by launch id, until it's seen to end, so none is
     left a zombie."""
+    specs: dict[str, HeldLaunch] = {}
+    """What each launcher in `started` was started with, by launch id: an
+    agent's spawn counts against the limit from its start, before its launch
+    registers."""
 
-    def reaped(self) -> None:
-        """Forget each launcher that has ended, its status collected so the OS frees it, and what it was waiting on; the sweep looks."""
+    def reaped(self) -> list[HeldLaunch]:
+        """Forget each launcher that has ended, its status collected so the OS frees it, and what it was waiting on; the sweep looks. Return what each whose session was never up was started with, so its spawner hears of it."""
         ended = [launch for launch, each in self.started.items() if each.ended()]
+        lost = [
+            self.specs[launch]
+            for launch in ended
+            if launch in self.specs
+            and not (launch in self.waiting and self.waiting[launch].done())
+        ]
         self.started = {
             launch: each for launch, each in self.started.items() if launch not in ended
+        }
+        self.specs = {
+            launch: each for launch, each in self.specs.items() if launch not in ended
         }
         self.waiting = {
             launch: up for launch, up in self.waiting.items() if launch not in ended
         }
+        return lost
+
+    def spawning(self) -> list[HeldLaunch]:
+        """Return each launch an agent spawned whose launcher this service started and that hasn't been seen to end: counted against the limit before its launch registers."""
+        return [
+            spec
+            for launch, spec in self.specs.items()
+            if spec.spawner is not None
+            and launch in self.started
+            and not self.started[launch].ended()
+        ]
 
 
 def launching(paths: HostPaths, pid: int, launch: str) -> bool:
@@ -186,23 +222,30 @@ class Spawning(Model, Handler[Spawn], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: Spawn) -> Reply:
-        """Mint the launch's id and start its launcher, what its word that its session is up resolves made first."""
-        launch = secrets.token_hex(8)
-        spec = HeldLaunch(
-            launch=launch,
-            runtime=request.runtime,
-            worktree=request.worktree,
-            name=request.name,
-            profile=request.profile,
-            account=request.account,
-            resume=request.resume,
-            arguments=request.arguments,
+        """Start the launcher of the launch the operator asks for."""
+        return await self.started(
+            lambda launch: HeldLaunch(
+                launch=launch,
+                runtime=request.runtime,
+                worktree=request.worktree,
+                name=request.name,
+                profile=request.profile,
+                account=request.account,
+                resume=request.resume,
+                arguments=request.arguments,
+            )
         )
+
+    async def started(self, launching: Callable[[str], HeldLaunch]) -> Starting:
+        """Mint a launch's id, and start the launcher of the launch `launching` makes of it, what its word that its session is up resolves made first: the operator's `spawn`, and an agent's."""
+        launch = secrets.token_hex(8)
+        spec = launching(launch)
         log = self.layout.launch(launch).log
         up: asyncio.Future[CalledUp] = asyncio.get_running_loop().create_future()
         self.launchers.waiting = {**self.launchers.waiting, launch: up}
         launcher = await asyncio.to_thread(self.start, spec, log)
         self.launchers.started = {**self.launchers.started, launch: launcher}
+        self.launchers.specs = {**self.launchers.specs, launch: spec}
         return Starting(launch=launch, pid=launcher.process.pid, log=log)
 
 

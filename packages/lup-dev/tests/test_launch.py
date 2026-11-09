@@ -67,6 +67,7 @@ from lup_dev.host.protocol import (
     Registered,
     Reply,
     Request,
+    Spawner,
     Talker,
 )
 from lup_dev.launch.clis import Channel, ChannelError
@@ -92,6 +93,7 @@ from lup_dev.private.withheld import Machine as PrivateMachine
 from lup_dev.private.withheld import kept as withheld_kept
 from lup_dev.settings import TerminalVariables
 from lup_dev.stored import read_model, write_model
+from lup_ledger.parties import Conversation
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -2787,6 +2789,59 @@ def test_a_held_launch_holds_its_session_over_stream_json_until_it_s_ended(
     assert not socket_path.exists()
     assert not machine.layout.launch("h1").directory.exists()
     assert Writing.of(machine.layout, "claude", session).held_by() is None
+
+
+def test_a_launch_an_agent_spawned_registers_its_spawner_and_runs_the_session_the_host_minted(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    machine = Machine(tmp_path, clock, sockets=sockets)
+    spawner = Spawner(
+        launch="s0",
+        conversation=Conversation(
+            repository=project / ".git", runtime="claude", session="p1"
+        ),
+        concern=7,
+    )
+    minted = "4f1e0c58-6d1d-4c35-9d0a-3b1c5a0f2e11"
+    spawned = holding(project).model_copy(
+        update={"spawner": spawner, "session": minted, "repository": project / ".git"}
+    )
+    machine.engine.lingering = True
+
+    def heard() -> None:
+        machine.engine.started.wait(10)
+        machine.host.heard.append(minted)
+
+    hearing = threading.Thread(target=heard)
+    hearing.start()
+    thread, statuses = in_background(machine, spawned)
+    assert machine.host.up.wait(10)
+    hearing.join()
+    asked(machine.layout.launch("h1").held, HeldEnd(), Done, timedelta(seconds=10))
+    thread.join(10)
+
+    assert statuses == [0]
+    [held] = [each for each in machine.host.served if each.launch == "h1"]
+    assert held.spawner == spawner
+    assert machine.engine.held_run[-2:] == ["--session-id", minted]
+
+
+def test_a_spawned_launch_whose_worktree_leads_to_another_repository_launches_nothing(
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+) -> None:
+    machine = Machine(tmp_path, clock, sockets=sockets)
+    elsewhere = tmp_path / "elsewhere.git"
+    spawned = holding(project).model_copy(update={"repository": elsewhere})
+
+    with pytest.raises(LaunchError) as refused:
+        cli.launched(machine.adapter, [], project, machine.launcher, held=spawned)
+
+    assert str(refused.value) == (
+        f"the worktree {project} leads to the repository {project / '.git'}, where "
+        f"it was spawned in {elsewhere}: something in a room rewrote its git, so "
+        "nothing launches"
+    )
+    assert machine.host.served == []
 
 
 def test_a_held_session_whose_first_hook_isn_t_heard_isn_t_called_up(
