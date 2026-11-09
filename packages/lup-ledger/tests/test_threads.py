@@ -23,6 +23,7 @@ from lup_ledger.threads import (
     Declined,
     Done,
     In,
+    Marks,
     Moved,
     Parked,
     Refers,
@@ -720,3 +721,109 @@ def test_a_thread_nobody_running_answers_for_stands_nobody_running_never_working
         Done(target=lag.number, repository=REPOSITORY, by=WORKER, at=at(2), to_try="x")
     )
     assert threads.standing(lag.number, live=ended).state == "done to confirm"
+
+
+def done(thread: Thread, minutes: int, to_try: str = "Type fast.") -> Done:
+    return Done(
+        target=thread.number,
+        repository=thread.repository,
+        by=WORKER,
+        at=at(minutes),
+        to_try=to_try,
+    )
+
+
+def settled(thread: Thread, minutes: int) -> Settled:
+    return Settled(
+        target=thread.number,
+        repository=thread.repository,
+        by=Operator(),
+        at=at(minutes),
+    )
+
+
+def test_the_agent_s_mark_and_the_operator_s_are_read_apart_neither_moving_the_other(
+    ledger: Ledger, threads: Threads
+) -> None:
+    # Said done, then cleared: cleared, the agent's account kept.
+    lag = opened(ledger, "lag")
+    said = ledger.drawn(done(lag, 1))
+    cleared = ledger.drawn(settled(lag, 2))
+    # Cleared while the agent is still on it, then said done: still cleared, never
+    # back before the operator, as an earlier lup read its latest status.
+    page = opened(ledger, "page")
+    page_cleared = ledger.drawn(settled(page, 1))
+    page_said = ledger.drawn(done(page, 2, "Scroll."))
+
+    for thread, account, clearing in [
+        (lag, said, cleared),
+        (page, page_said, page_cleared),
+    ]:
+        standing = threads.standing(thread.number)
+        assert standing.state == "settled"
+        assert standing.marks == Marks(agent=account, operator=clearing)
+        assert standing.marks.done == account
+
+
+def test_the_operator_reopening_opens_both_marks_and_lup_reopening_the_agent_s_alone(
+    ledger: Ledger, threads: Threads
+) -> None:
+    lag = opened(ledger, "lag")
+    ledger.drawn(done(lag, 1))
+    ledger.drawn(settled(lag, 2))
+    ledger.drawn(
+        Reopened(target=lag.number, repository=REPOSITORY, by=Operator(), at=at(3))
+    )
+    page = opened(ledger, "page")
+    clearing = ledger.drawn(settled(page, 1))
+    ledger.drawn(
+        Parked(
+            target=page.number,
+            repository=REPOSITORY,
+            by=WORKER,
+            at=at(2),
+            until=[TimeCame(at=at(60))],
+        )
+    )
+    ledger.drawn(
+        Reopened(target=page.number, repository=REPOSITORY, by=Lup(), at=at(3), why="x")
+    )
+
+    assert threads.marks(lag.number) == Marks()
+    assert threads.standing(lag.number).state == "working"
+    assert threads.marks(page.number) == Marks(operator=clearing)
+    assert threads.standing(page.number).state == "settled"
+
+
+def test_a_sub_thread_is_cleared_apart_from_its_parent_and_its_parent_apart_from_it(
+    ledger: Ledger, threads: Threads
+) -> None:
+    lag = opened(ledger, "lag")
+    under = opened(ledger, "under", parent=lag.number)
+    other = opened(ledger, "other")
+    beneath = opened(ledger, "beneath", parent=other.number)
+    ledger.drawn(settled(lag, 1))
+    said = ledger.drawn(done(beneath, 1))
+
+    assert threads.standing(lag.number).state == "settled"
+    assert threads.standing(under.number).state == "working"
+    assert threads.standing(other.number).marks == Marks()
+    assert threads.standing(beneath.number).marks == Marks(agent=said)
+
+
+def test_a_thread_the_operator_cleared_is_none_of_the_threads_parked_however_late_it_was_parked(
+    ledger: Ledger, threads: Threads
+) -> None:
+    lag = opened(ledger, "lag")
+    ledger.drawn(settled(lag, 1))
+    ledger.drawn(
+        Parked(
+            target=lag.number,
+            repository=REPOSITORY,
+            by=WORKER,
+            at=at(2),
+            until=[BranchLanded(branch="feat")],
+        )
+    )
+
+    assert threads.parked(REPOSITORY) == []

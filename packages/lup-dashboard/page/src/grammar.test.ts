@@ -102,7 +102,7 @@ describe("review marks", () => {
         expect(markedPart(other, called, unnamed)).toEqual({ kind: "said", text: "mark it read" });
     });
 
-    it("says a thread read, settled or declined by its number, named as the page knows it, as it was marked where it doesn't", () => {
+    it("says a concern read, cleared or declined by its number, named as the page knows it, as it was marked where it doesn't", () => {
         const mark = (action: string, argument: Marked["argument"], says: string): Marked => ({ id: action, action, argument, verb: "done", says, block: "group 1", version: null });
         const read = mark("review-mark", { repository: "/r/.git", module: "core", key: { node: 307 }, up_to: "60" }, "@voice read");
         const settled = mark("inbox-settle-thread", { number: 307 }, "@voice settled");
@@ -110,7 +110,7 @@ describe("review marks", () => {
         const named = (number: number) => (number === 307 ? "voice-pass" : null);
         expect([read, settled, declined].map((each) => markedPart(each, called, named))).toEqual([
             { kind: "thread", name: "voice-pass", done: "read" },
-            { kind: "thread", name: "voice-pass", done: "settled" },
+            { kind: "thread", name: "voice-pass", done: "cleared" },
             { kind: "thread", name: "voice-pass", done: "declined" },
         ]);
         expect(markedPart(settled, called, unnamed)).toEqual({ kind: "said", text: "@voice settled" });

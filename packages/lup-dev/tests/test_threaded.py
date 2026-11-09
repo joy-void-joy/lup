@@ -14,6 +14,7 @@ from lup_dev.host.pushes import Pushes
 from lup_dev.inbox.delivery import Delivery, Unanswerable
 from lup_dev.inbox.marks import CORE, ReviewMark, on_node
 from lup_dev.inbox.notices import Notices
+from lup_dev.inbox.protocol import Exchanged, ItemsListing, ListItems
 from lup_dev.inbox.store import (
     KINDS,
     Approval,
@@ -34,6 +35,7 @@ from lup_dev.inbox.threaded import (
     ListThreads,
     MovedIntoThread,
     MoveIntoThread,
+    Passage,
     ReopenThread,
     SettleThread,
     ShowThread,
@@ -382,6 +384,43 @@ def test_the_operator_settles_declines_and_reopens_a_thread_whoever_answers_for_
         asyncio.run(ThreadStating(reading=reading).answer(SettleThread(number=9999)))
 
 
+def test_the_agent_s_mark_and_the_operator_s_are_read_apart_and_cleared_waits_on_nobody(
+    work: Work,
+) -> None:
+    concerns = work.delivery.concerns()
+    concerns.settled(work.voice)
+    voice = work.read()["voice"]
+    # Cleared, the agent's account of what's done kept beside it.
+    assert (voice.state, voice.section) == ("settled", "every thread")
+    assert isinstance(voice.cleared, Settled)
+    assert voice.done is not None
+    assert voice.done.to_try == "Say hello: it answers."
+    # Cleared while still at work, then said done: still cleared, never back
+    # before the operator.
+    concerns.declined(work.docs, "Not now.")
+    work.ran(work.lead.thread(Threading(name="docs", done="Read the docs.")))
+    docs = work.read()["docs"]
+    assert (docs.state, docs.section) == ("declined", "every thread")
+    assert isinstance(docs.cleared, Declined)
+    assert docs.done is not None
+    assert docs.done.to_try == "Read the docs."
+    # Open to the operator, said done: theirs to clear.
+    work.ran(work.lead.thread(Threading(name="lag", done="Type in a long one.")))
+    lag = work.read()["lag"]
+    assert (lag.state, lag.cleared) == ("done to confirm", None)
+    assert lag.done is not None
+    # How each reads on their dashboard, by both marks: the voice and the docs
+    # said done and cleared, gone; the lag for their eyes; home open to both.
+    concerns.settled(work.home)
+    read = work.read()
+    assert {name: each.reads for name, each in read.items()} == {
+        "docs": "gone",
+        "home": "quiet",
+        "lag": "for your eyes",
+        "voice": "gone",
+    }
+
+
 def test_a_reply_of_the_operator_s_in_a_thread_done_reopens_it_back_to_whoever_held_it(
     work: Work,
 ) -> None:
@@ -438,6 +477,10 @@ def test_a_part_moved_in_stands_open_until_an_item_there_cites_it_never_asking_t
     docs = work.read()["docs"]
     assert docs.unanswered == [part]
     assert (docs.section, docs.asks) == ("every thread", [])
+    # The passage it came from, open.
+    assert docs.passages == [
+        Passage(spot=part, words="And write it up in the docs.", answer=None)
+    ]
     [moved] = [
         each
         for each in work.shown(docs.thread, whole=True).entries
@@ -452,9 +495,39 @@ def test_a_part_moved_in_stands_open_until_an_item_there_cites_it_never_asking_t
     )
     after = work.read()["docs"]
     assert after.unanswered == []
+    # And what became of it: the note that answered it.
+    assert [each.answer for each in after.passages] == [cited]
     entries = {each.spot: each for each in work.shown(after.thread, whole=True).entries}
     assert not entries[part].unanswered
     assert entries[Spot(node=cited)].under == part
+
+
+def test_a_thread_whose_title_reads_as_a_name_says_what_it_s_about_from_what_s_in_it(
+    work: Work,
+) -> None:
+    # As `send`'s `thread=` opens one named after a branch.
+    named = work.sent(
+        ThreadedRemark(
+            remark="The shape I'd want for the list's marks.\n\nMore below.",
+            thread="steady-list",
+        )
+    )
+    read = work.read()
+    assert work.thread_of(named).title == "steady-list"
+    assert read["steady-list"].about == "The shape I'd want for the list's marks."
+    # One with a title says nothing more.
+    assert read["lag"].about is None
+
+
+def test_a_thread_s_checks_are_read_with_it_each_with_the_operator_s_answer(
+    work: Work,
+) -> None:
+    [check] = work.read()["lag"].checks
+    assert (check.check.number, check.answer) == (work.check, None)
+    work.delivery.concerns().checked(work.check, "It held.")
+    [answered] = work.read()["lag"].checks
+    assert answered.answer is not None
+    assert answered.answer.text == "It held."
 
 
 def test_where_each_conversation_works_is_read_with_the_threads(work: Work) -> None:
@@ -524,6 +597,54 @@ def test_a_message_written_on_a_thread_reaches_whoever_answers_for_it_and_shows_
     )
     work.delivery.concerns().landed(ending, work.lag)
     assert work.read()["lag"].unanswered == []
+
+
+def test_what_the_operator_and_an_agent_say_in_a_concern_shows_in_that_agent_s_messages(
+    work: Work, clock: FakeClock
+) -> None:
+    """The thread's own buffer goes, its conversation read in each agent's `messages` drawer instead: their exchange, both ways, is there."""
+
+    def drawer(party: Conversation) -> Exchanged:
+        listed = asyncio.run(
+            ItemsListing(delivery=work.delivery).answer(ListItems(conversation=party))
+        )
+        assert isinstance(listed, Exchanged)
+        return listed
+
+    clock.sleep(60)
+    # The operator writes on the concern, to whoever answers for it.
+    work.delivery.inbox.drafted(
+        Draft(
+            letters=[
+                Letter(to=LEAD, thread=work.lag.number, text="Long ones only, please.")
+            ]
+        )
+    )
+    [review] = asyncio.run(work.delivery.reviewed()).reviews
+    [part] = work.read()["lag"].unanswered
+    clock.sleep(60)
+    # The agent answers that passage there, citing it.
+    answer = work.sent(
+        ThreadedRemark(
+            remark=f"Long ones only, as @{part.node}.{part.part} says.", thread="lag"
+        )
+    )
+    assert work.read()["lag"].unanswered == []
+    # The operator answers the agent's question in the concern.
+    clock.sleep(60)
+    ruled = asyncio.run(
+        work.delivery.answer(work.question, [Ruling(decision=1, verdict="leaning")], "")
+    )
+
+    lead = drawer(LEAD)
+    received = {each.item.number: each.words for each in lead.received}
+    sent = {each.item.number: each.words for each in lead.sent}
+    told = received[review.number]
+    assert told is not None
+    assert "Long ones only, please." in told.text
+    assert sent[answer] is not None
+    assert sent[work.question] is not None
+    assert received[ruled.number] is not None
 
 
 def test_a_message_to_no_one_stays_in_its_thread_as_the_operator_s_waking_nobody(
