@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, override
 
 import pytest
 
-from lup.programs import Apart, detached
+from lup.programs import Apart, Ran, detached
 from lup_dev import cli
 from lup_dev.git import Git
 from lup_dev.host.client import Detached, HostClient, Outstanding, own_command
@@ -58,7 +58,16 @@ from lup_dev.inbox.protocol import (
 )
 from lup_dev.inbox.store import Item, Message
 from lup_dev.inbox.texts import written
-from lup_dev.launch.trial import TerminalRun, Trial, scratch_worktree, taking_over
+from lup_dev.launch import trial
+from lup_dev.launch.trial import (
+    TerminalRun,
+    Trial,
+    TrialError,
+    scratch_worktree,
+    scratched,
+    taken_over_there,
+    taking_over,
+)
 from lup_dev.layout import HostLayout, HostPaths, Layout
 from lup_ledger.parties import Conversation, Operator, Party
 
@@ -585,10 +594,8 @@ def test_a_trial_whose_answer_never_comes_fails_that_step_past_its_patience_and_
     assert [each.name for each in steps][-1] == "back to held"
 
 
-def test_the_trial_s_scratch_worktree_is_made_by_git_pinned_where_a_room_redirected_its_own(
-    tmp_path: Path, shell: Shell
-) -> None:
-    """A room writes its worktree's git directory: a `commondir` there leading to a repository whose `config` names a filter, which a checkout runs, is never followed."""
+def repository_with_a_worktree(tmp_path: Path, shell: Shell) -> tuple[Path, Path, str]:
+    """A bare repository laid out as lup's, a worktree of it under `tree/`, and its one commit, whose `.gitattributes` names a filter its `config` doesn't."""
     repository = tmp_path / "work.git"
     shell.git(tmp_path, "init", "-q", "--bare", "-b", "dev", str(repository))
     seed = tmp_path / "seed"
@@ -608,6 +615,15 @@ def test_the_trial_s_scratch_worktree_is_made_by_git_pinned_where_a_room_redirec
         str(main),
         "dev",
     )
+    commit = shell.git(tmp_path, "--git-dir", str(repository), "rev-parse", "dev")
+    return repository, main, commit
+
+
+def test_the_trial_s_scratch_worktree_is_made_by_git_pinned_where_a_room_redirected_its_own(
+    tmp_path: Path, shell: Shell
+) -> None:
+    """A room writes its worktree's git directory: a `commondir` there leading to a repository whose `config` names a filter, which a checkout runs, is never followed."""
+    repository, main, commit = repository_with_a_worktree(tmp_path, shell)
     # A copy holding the objects, so git followed there would check out: it
     # does, and runs the filter, where git runs in the worktree unpinned.
     theirs = tmp_path / "theirs.git"
@@ -615,7 +631,6 @@ def test_the_trial_s_scratch_worktree_is_made_by_git_pinned_where_a_room_redirec
     ran = tmp_path / "the-filter-ran"
     shell.git(theirs, "config", "filter.planted.smudge", f"touch {ran}; cat")
     (repository / "worktrees" / "dev" / "commondir").write_text(f"{theirs}\n")
-    commit = shell.git(tmp_path, "--git-dir", str(repository), "rev-parse", "dev")
 
     scratch = scratch_worktree(
         main.parent, Git.pinned(repository), "spawn-trial-1", commit
@@ -623,6 +638,65 @@ def test_the_trial_s_scratch_worktree_is_made_by_git_pinned_where_a_room_redirec
 
     assert (scratch / "file").read_text() == "content\n"
     assert not ran.exists()
+
+
+def test_the_trial_makes_its_worktree_pinned_at_the_approved_commit(
+    tmp_path: Path, shell: Shell
+) -> None:
+    repository, main, commit = repository_with_a_worktree(tmp_path, shell)
+
+    scratch = scratched(
+        main, "spawn-trial-1", lambda found: commit if found == repository else None
+    )
+
+    assert scratch.path == main.parent / "spawn-trial-1"
+    assert scratch.git == Git.pinned(repository)
+    assert shell.git(scratch.path, "rev-parse", "HEAD") == commit
+    scratch.removed()
+    assert not scratch.path.exists()
+
+
+def test_the_trial_refuses_a_worktree_a_room_led_to_a_repository_not_approved(
+    tmp_path: Path, shell: Shell
+) -> None:
+    """A `commondir` a room planted leads the worktree's repository elsewhere: that one isn't approved, so nothing is checked out there, and its filter never runs."""
+    repository, main, commit = repository_with_a_worktree(tmp_path, shell)
+    theirs = tmp_path / "theirs.git"
+    shell.git(tmp_path, "clone", "-q", "--bare", str(repository), str(theirs))
+    ran = tmp_path / "the-filter-ran"
+    shell.git(theirs, "config", "filter.planted.smudge", f"touch {ran}; cat")
+    (repository / "worktrees" / "dev" / "commondir").write_text(f"{theirs}\n")
+
+    with pytest.raises(TrialError, match="nothing is approved for"):
+        scratched(
+            main, "spawn-trial-1", lambda found: commit if found == repository else None
+        )
+
+    assert not ran.exists()
+    assert not (main.parent / "spawn-trial-1").exists()
+
+
+def test_the_service_and_the_trial_s_terminal_launch_start_with_nothing_of_where_they_run_on_their_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert own_command() == [sys.executable, "-P", "-m", "lup_dev.cli"]
+    assert Detached().command == [*own_command(), "host"]
+    started: list[tuple[list[str], Path | None]] = []
+
+    async def recorded(
+        program: str, *arguments: str, cwd: Path | None = None, **_: object
+    ) -> Ran:
+        started.append(([program, *arguments], cwd))
+        return Ran(command=[program, *arguments], status=0, output=b"KIWI\n")
+
+    monkeypatch.setattr(trial, "awaited", recorded)
+
+    ran = taken_over_there(tmp_path, "s-1", "claude", "haiku")
+
+    [(command, cwd)] = started
+    assert command == taking_over(own_command(), "claude", "s-1", "haiku")
+    assert cwd == tmp_path
+    assert ran == TerminalRun(status=0, output="KIWI\n")
 
 
 def test_the_trial_s_terminal_launch_takes_over_by_its_flag_from_nothing_on_its_path() -> (

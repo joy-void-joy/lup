@@ -36,7 +36,7 @@ from typer.core import TyperGroup
 
 from lup.doors import served as methods
 from lup.errors import LupError
-from lup.programs import Apart, Ran, awaited, detached
+from lup.programs import Apart, detached
 from lup.rooms import ContainerError, Mount, Podman, Room
 from lup.rooms.engine import stopped
 from lup.types import JsonObject, Model, MutableModel
@@ -272,7 +272,7 @@ from lup_dev.launch.session import (
     hooked,
     terminal_settings,
 )
-from lup_dev.launch.trial import TerminalRun, Trial, scratch_worktree, taking_over
+from lup_dev.launch.trial import TerminalRun, Trial, scratched, taken_over_there
 from lup_dev.launch.trust import (
     Approving,
     Given,
@@ -3277,28 +3277,15 @@ def spawn_trial(
         raise LaunchError(message)
     runtime = known[0].runtime.name()
     root = toplevel(Path.cwd())
-    found = repository_of(root)
-    approval = approved(Layout.of(LupDevSettings()), found.git)
-    if approval is None:
-        message = f"nothing is approved for {found.git}, so nothing is held to try"
-        raise LaunchError(message)
-    # A worktree's own git directory is the room's to write, its `commondir`
-    # among it, which could lead git to a `config` whose filters a checkout
-    # runs: git runs pinned to the repository's common git directory.
-    git = Git.pinned(found.git)
-    tree = found.tree
-    scratch = scratch_worktree(
-        root.parent, git, f"spawn-trial-{secrets.token_hex(4)}", approval.commit
-    )
+    layout = Layout.of(LupDevSettings())
+
+    def approved_commit(repository: Path) -> str | None:
+        approval = approved(layout, repository)
+        return None if approval is None else approval.commit
+
+    scratch = scratched(root, f"spawn-trial-{secrets.token_hex(4)}", approved_commit)
     podman = Podman()
     try:
-        if repository_of(scratch).tree != tree:
-            message = (
-                f"a worktree at {scratch} would widen what a room of the repository "
-                "mounts: run the trial from a worktree that has siblings, as lup's "
-                "own are laid out"
-            )
-            raise LaunchError(message)
 
         def spawning(worktree: Path, resume: str | None) -> HeldUp:
             return spawned(
@@ -3306,32 +3293,7 @@ def spawn_trial(
             )
 
         def terminal(worktree: Path, session: str) -> TerminalRun:
-            """Run a terminal launch resuming `session`, its input closed, so nothing it asks is answered here, an approval above all; ending a held launch on it asking nothing (`--take-over`); killed past five minutes."""
-
-            async def launched_there() -> Ran:
-                return await asyncio.wait_for(
-                    awaited(
-                        *taking_over(own_command(), runtime, session, model),
-                        cwd=worktree,
-                        checked=False,
-                        merged=True,
-                    ),
-                    timeout=timedelta(minutes=5).total_seconds(),
-                )
-
-            try:
-                ran = asyncio.run(launched_there())
-            except TimeoutError:
-                return TerminalRun(
-                    status=-1,
-                    output=(
-                        "it ran past five minutes, and was killed: it may have "
-                        "asked something nothing answers here"
-                    ),
-                )
-            return TerminalRun(
-                status=ran.status, output=ran.output.decode(errors="replace")
-            )
+            return taken_over_there(worktree, session, runtime, model)
 
         def running(container: str) -> bool:
             return podman.state(container) == "running"
@@ -3348,15 +3310,15 @@ def spawn_trial(
             inside=inside,
             clock=SystemClock(),
             say=typer.echo,
-            worktree=scratch,
+            worktree=scratch.path,
         )
         trial.run()
         report = trial.report()
         typer.echo(report)
-        number = trial.filed(repository_of(root).git, runtime)
+        number = trial.filed(scratch.repository, runtime)
         typer.echo(f"The report is {cited(number)} in your inbox.")
     finally:
-        git.run("worktree", "remove", "--force", str(scratch))
+        scratch.removed()
 
 
 @spawn.command("launcher", hidden=True)

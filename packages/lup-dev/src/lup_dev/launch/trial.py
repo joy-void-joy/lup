@@ -31,6 +31,7 @@ dashboard's own clicks, a real interactive terminal (its turn runs with `-p`,
 in the terminal's own launch).
 """
 
+import asyncio
 import uuid
 from collections.abc import Callable
 from datetime import timedelta
@@ -38,10 +39,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lup.errors import LupError
+from lup.programs import Ran, awaited
 from lup.types import Model, MutableModel
 from lup_dev.clock import Clock
 from lup_dev.errors import LupDevError
-from lup_dev.host.client import HostClient
+from lup_dev.git import Git
+from lup_dev.host.client import HostClient, own_command
 from lup_dev.host.held import End, HeldUp, Interrupt
 from lup_dev.host.protocol import Done, HostError, Listed, Register
 from lup_dev.inbox.protocol import (
@@ -54,10 +57,10 @@ from lup_dev.inbox.protocol import (
 )
 from lup_dev.inbox.store import Message
 from lup_dev.inbox.texts import written
+from lup_dev.launch.room import repository
 from lup_ledger.parties import Conversation, Operator
 
 if TYPE_CHECKING:
-    from lup_dev.git import Git
     from lup_dev.inbox.store import Item
 
 
@@ -691,3 +694,77 @@ def scratch_worktree(beside: Path, git: Git, name: str, commit: str) -> Path:
     scratch = beside / name
     git.run("worktree", "add", "--detach", str(scratch), commit)
     return scratch
+
+
+class Scratch(Model):
+    """The trial's scratch worktree: where it is, the repository's common git directory, and git pinned there, which made it and removes it."""
+
+    path: Path
+    repository: Path
+    git: Git
+
+    def removed(self) -> None:
+        """Remove the worktree, whatever is in it."""
+        self.git.run("worktree", "remove", "--force", str(self.path))
+
+
+def scratched(
+    root: Path, name: str, approved_commit: Callable[[Path], str | None]
+) -> Scratch:
+    """Make the trial's scratch worktree named `name` beside the worktree at `root`, at the commit approved for its repository, with git pinned to the repository's common directory (`scratch_worktree`).
+
+    The common directory is found as a launch finds it, through the worktree,
+    which a room can redirect: only to a repository approved, since one that
+    isn't is refused here, and a checkout runs filters only an approved
+    repository's `config` names. Refused too where the worktree would widen
+    what a room of the repository mounts. Raise `TrialError` saying why.
+    """
+    found = repository(root)
+    commit = approved_commit(found.git)
+    if commit is None:
+        message = f"nothing is approved for {found.git}, so nothing is held to try"
+        raise TrialError(message)
+    git = Git.pinned(found.git)
+    scratch = Scratch(
+        path=scratch_worktree(root.parent, git, name, commit),
+        repository=found.git,
+        git=git,
+    )
+    if repository(scratch.path).tree != found.tree:
+        scratch.removed()
+        message = (
+            f"a worktree at {scratch.path} would widen what a room of the "
+            "repository mounts: run the trial from a worktree that has siblings, "
+            "as lup's own are laid out"
+        )
+        raise TrialError(message)
+    return scratch
+
+
+def taken_over_there(
+    worktree: Path, session: str, runtime: str, model: str
+) -> TerminalRun:
+    """Run a terminal launch resuming `session` in `worktree`, from the `lup-dev` this process runs with nothing of the worktree on its path (`own_command`), its input closed, so nothing it asks is answered here, an approval above all; ending a held launch on it asking nothing (`taking_over`); killed past five minutes."""
+
+    async def launched_there() -> Ran:
+        return await asyncio.wait_for(
+            awaited(
+                *taking_over(own_command(), runtime, session, model),
+                cwd=worktree,
+                checked=False,
+                merged=True,
+            ),
+            timeout=timedelta(minutes=5).total_seconds(),
+        )
+
+    try:
+        ran = asyncio.run(launched_there())
+    except TimeoutError:
+        return TerminalRun(
+            status=-1,
+            output=(
+                "it ran past five minutes, and was killed: it may have asked "
+                "something nothing answers here"
+            ),
+        )
+    return TerminalRun(status=ran.status, output=ran.output.decode(errors="replace"))
