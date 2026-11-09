@@ -48,9 +48,9 @@ from lup_dev.host.client import HostClient, own_command
 from lup_dev.host.held import End, HeldUp, Interrupt
 from lup_dev.host.protocol import Done, HostError, Listed, Register
 from lup_dev.inbox.protocol import (
+    Exchanged,
     FileReport,
     FinishItem,
-    Items,
     ListItems,
     SendItem,
     Shown,
@@ -535,7 +535,8 @@ print(f"wrote a turn to {place} ({session}); {ptrace}")
         """Return the items the session sent and was sent."""
         if self.conversation is None:
             return []
-        return self.host.ask(ListItems(conversation=self.conversation), Items).items
+        exchanged = self.host.ask(ListItems(conversation=self.conversation), Exchanged)
+        return [each.item for each in (*exchanged.sent, *exchanged.received)]
 
     def calling(self, launch: str) -> bool:
         """Say whether the session's own conversation is running a call, as the host last heard."""

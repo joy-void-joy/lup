@@ -49,9 +49,10 @@ from lup_dev.host.protocol import (
 from lup_dev.host.service import Dispatcher, Route, unix_server
 from lup_dev.host.watch import Changes
 from lup_dev.inbox.protocol import (
+    Exchange,
+    Exchanged,
     FileReport,
     FinishItem,
-    Items,
     ListItems,
     SendItem,
     Shown,
@@ -433,7 +434,25 @@ class Played(HostClient):
                     self.item(self.conversation, Operator(), answer)
                 return reply.model_validate(Shown(item=sent).model_dump())
             case ListItems():
-                return reply.model_validate(Items(items=self.items).model_dump())
+                # As the host answers it: what the conversation sent, and what they were sent.
+                def exchange(each: Item) -> Exchange:
+                    return Exchange(
+                        item=each, text=written(each), line=[], at=each.made
+                    )
+
+                exchanged = Exchanged(
+                    sent=[
+                        exchange(each)
+                        for each in self.items
+                        if each.sender == self.conversation
+                    ],
+                    received=[
+                        exchange(each)
+                        for each in self.items
+                        if each.recipient == self.conversation
+                    ],
+                )
+                return reply.model_validate(exchanged.model_dump())
             case Interrupt():
                 self.log.write_text(
                     "Session: A turn ended: error_during_execution, aborted_tools, an error.\n"
