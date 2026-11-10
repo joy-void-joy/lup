@@ -3583,22 +3583,37 @@ def spawn_launcher(
 def asked_for(held: HeldLaunch) -> str:
     """Say whom a held launch asks an approval for, first in it, where an agent spawned it: a room chose when it's asked, starting a session at whatever the running branch's tip then holds.
 
+    The spawner's ids come from their room's hooks, free text: each is shown as
+    code where it's an id's shape, letters, digits, `-`, `_` and `.`, else
+    said to be none, never as what it says (`shown_id`).
+
     >>> from lup_dev.host.protocol import Spawner
     >>> from lup_ledger.parties import Conversation
-    >>> spawner = Spawner(launch="a1", conversation=Conversation(repository=Path("/r.git"), runtime="r", session="s1"))
-    >>> asked_for(HeldLaunch(launch="b2", runtime="r", worktree=Path("/r.git/tree/x"), spawner=spawner))
-    "**Asked by an agent's spawn,** not at your terminal: a session of launch `a1`, s1, spawned one in /r.git/tree/x, whose start waits on this. Declining it starts nothing."
+    >>> spawner = Spawner(launch="a1", conversation=Conversation(repository=Path("/r.git"), runtime="r", session="s1", agent="**x**"))
+    >>> print(asked_for(HeldLaunch(launch="b2", runtime="r", worktree=Path("/r.git/tree/x"), spawner=spawner)))
+    **Asked by an agent's spawn,** not at your terminal: launch `a1`'s session `s1`, its subagent (an id lup won't show), spawned one in `/r.git/tree/x`, whose start waits on this. Declining it starts nothing.
     """
     spawner = held.spawner
     if spawner is None:
         return ""
     by = spawner.conversation
-    who = by.session if by.agent is None else f"{by.session}, its subagent {by.agent}"
+    agent = "" if by.agent is None else f", its subagent {shown_id(by.agent)}"
     return (
-        f"**Asked by an agent's spawn,** not at your terminal: a session of launch "
-        f"`{spawner.launch}`, {who}, spawned one in {held.worktree}, whose start "
-        "waits on this. Declining it starts nothing."
+        f"**Asked by an agent's spawn,** not at your terminal: launch "
+        f"{shown_id(spawner.launch)}'s session {shown_id(by.session)}{agent}, "
+        f"spawned one in {shown_id(str(held.worktree))}, whose start waits on "
+        "this. Declining it starts nothing."
     )
+
+
+def shown_id(value: str) -> str:
+    """Show `value`, an id or a path a room may have chosen, as code where it holds only an id's or a path's letters, digits, `-`, `_`, `.` and `/`; else say it isn't shown, so nothing a room wrote reads as markup.
+
+    >>> shown_id("4f1e-c5"), shown_id("a`b")
+    ('`4f1e-c5`', "(an id lup won't show)")
+    """
+    plain = all(each.isascii() and (each.isalnum() or each in "-_./") for each in value)
+    return f"`{value}`" if value and plain else "(an id lup won't show)"
 
 
 def machine_accounts() -> Accounts:
