@@ -3443,8 +3443,9 @@ def test_lup_dev_trust_keeps_the_first_copy_and_says_so(
     head = shell.git(lup, "rev-parse", "dev")
     trust = trusting(lup, kit, unasked())
 
-    def stood_in(root: Path, inside: list[str]) -> Trust:
+    def stood_in(root: Path, inside: list[str], *, found: Path) -> Trust:
         del root, inside
+        assert found == lup / ".git"
         return trust
 
     monkeypatch.setattr(cli, "machine_trust", stood_in)

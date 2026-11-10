@@ -4388,9 +4388,12 @@ def trust() -> None:
     Approved, it installs the tip's `lup-dev` as the host's, restarts the host
     service on it where one runs, and records the approval; declined, the copy you
     approved before keeps running. Where nothing changed, it says so and stops.
+    Its repository is found once, from this worktree, as a launch finds it,
+    refusing a worktree it doesn't name back (`located`).
     """
     inside = [runtime.name() for runtime in runtimes() if runtime.inside()]
-    trust = machine_trust(toplevel(Path.cwd()), inside)
+    root = toplevel(Path.cwd())
+    trust = machine_trust(root, inside, found=located(root, None).git)
     typer.echo(trust.ensure().report())
     kept = trust.kept_first()
     if kept is not None:
