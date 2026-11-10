@@ -15185,3 +15185,26 @@ def test_a_room_git_whose_stopped_wait_never_ends_is_given_up_on_and_its_worktre
         ["branch", "-D", "x"],
     ]
     assert spawned.launches == []
+
+
+def test_a_session_cleared_in_their_launch_is_never_woken_for_what_comes_for_them(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """Their launch's launcher holds the session that took their place, who'd never take what's given as theirs."""
+    cleared = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        clock.sleep(60)
+        send(hook, claude("SessionStart", source="clear", session_id="s2"))
+        send(hook, claude("Stop", stop_hook_active=False, session_id="s2"))
+        launcher = Launcher(machine.launch("one").held)
+        asyncio.run(
+            delivery.posted(
+                Message(kind="note", text="For s1."), Operator(), cleared, None
+            )
+        )
+        frames = launcher.close()
+    assert frames == []

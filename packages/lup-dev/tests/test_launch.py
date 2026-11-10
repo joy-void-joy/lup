@@ -2879,16 +2879,28 @@ def test_a_launch_whose_worktree_a_room_led_to_another_repository_launches_nothi
 
 
 def test_every_step_of_a_launch_takes_the_repository_it_found_first(
-    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path
+    project: Path, tmp_path: Path, clock: FakeClock, sockets: Path, shell: Shell
 ) -> None:
-    """Found once, from the worktree, the repository is carried to trust and the rest, rather than found through the worktree again at each step, which a room can rewrite meanwhile."""
+    """Found once, from the worktree, the repository is carried to every step: a room rewriting the worktree's `.git` as trust runs leads no later step elsewhere."""
     machine = Machine(tmp_path, clock, sockets=sockets)
+    linked = tmp_path / "repos" / "feat"
+    shell.git(project, "worktree", "add", "-q", "-b", "feat", str(linked))
+    elsewhere, theirs = a_repository_elsewhere(tmp_path, shell)
 
-    cli.launched(machine.adapter, [], project, machine.launcher)
+    def rewriting(root: Path, common: Path) -> Outcome:
+        outcome = machine.trust(root, common)
+        (linked / ".git").write_text(f"gitdir: {theirs}\n")
+        return outcome
+
+    launcher = machine.launcher.model_copy(update={"trust": rewriting})
+    cli.launched(machine.adapter, [], linked, launcher)
 
     assert machine.trusted == [project / ".git"]
     [served] = machine.host.served
     assert served.repository == project / ".git"
+    run = " ".join(machine.engine.run())
+    assert str(project / ".git") in run
+    assert str(elsewhere) not in run
 
 
 def test_a_held_session_whose_first_hook_isn_t_heard_isn_t_called_up(

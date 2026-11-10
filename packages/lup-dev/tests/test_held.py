@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, override
 import pytest
 
 from lup.programs import Apart, Ran, detached
+from lup.rooms.engine import Podman
 from lup_dev import cli
 from lup_dev.git import Git
 from lup_dev.host.client import Detached, HostClient, Outstanding, own_command
@@ -1159,3 +1160,33 @@ def test_a_side_job_whose_spawner_s_launch_isn_t_served_is_orphaned_and_a_builde
     )
 
     assert cli.orphaned([side, built, kept, held("here")]) == [side]
+
+
+def test_the_sweep_ends_each_side_job_whose_spawner_s_launch_isn_t_served(
+    layout: Layout, tmp_path: Path, clock: FakeClock
+) -> None:
+    """One handed a concern runs on: it's the operator's to end."""
+    host, _ = played(tmp_path, clock)
+    spawner = Spawner(launch="gone", conversation=host.conversation)
+    host.served[:] = [
+        held("side").model_copy(update={"spawner": spawner, "name": "side"}),
+        held("built").model_copy(
+            update={"spawner": spawner.model_copy(update={"concern": 3})}
+        ),
+    ]
+    said: list[str] = []
+    sweeping = cli.Sweeping(
+        layout=layout, host=host, podman=Podman(), say=said.append, running=list
+    )
+
+    async def swept() -> None:
+        await sweeping.orphans_ended()
+        await asyncio.gather(*sweeping.ending.values())
+
+    asyncio.run(swept())
+
+    assert [each.launch for each in host.asked if isinstance(each, End)] == ["side"]
+    assert [each.launch for each in host.served] == ["built"]
+    assert (
+        "side: a side job whose spawner's launch gone ended, so it's ended too"
+    ) in said
