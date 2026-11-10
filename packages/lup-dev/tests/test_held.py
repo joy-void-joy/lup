@@ -434,6 +434,9 @@ class Played(HostClient):
     reporting: list[bool] = []
     """Holding anything, the side job puts its report before the operator too,
     as it mustn't."""
+    fleeting: list[str] = []
+    """Each launch served until the trial's next look at the launches after
+    the one that found it: a side job, which ends at its report."""
 
     def party(self, launch: str) -> Conversation:
         """The conversation of `launch`'s session."""
@@ -446,6 +449,7 @@ class Played(HostClient):
             update={
                 "name": name,
                 "worktree": Path("/w/.git/tree") / name,
+                "session": f"s-{name}",
                 "spawner": Spawner(
                     launch=spawner.launch,
                     conversation=self.conversation,
@@ -454,6 +458,8 @@ class Played(HostClient):
             }
         )
         self.served.append(launch)
+        if concern is None:
+            self.fleeting.append(name)
         party = Conversation(
             repository=launch.repository, runtime="claude", session=f"s-{name}"
         )
@@ -493,7 +499,12 @@ class Played(HostClient):
 
     @override
     def launches(self) -> list[Register]:
-        return self.served
+        looked = list(self.served)
+        self.served[:] = [
+            each for each in self.served if each.launch not in self.fleeting
+        ]
+        self.fleeting.clear()
+        return looked
 
     @override
     def listed(self) -> Listed:
@@ -511,9 +522,11 @@ class Played(HostClient):
                 )
             ]
 
+        # What the host heard of a launch's session stays once it ended.
+        heard = [*(each.launch for each in self.served), *self.sessions]
         return Listed(
             launches=self.served,
-            talkers={each.launch: talkers(each.launch) for each in self.served},
+            talkers={launch: talkers(launch) for launch in heard},
         )
 
     @override
@@ -526,7 +539,20 @@ class Played(HostClient):
                 answer = next(
                     (word for cue, word in self.words.items() if cue in text), None
                 )
-                if "`trial side job`" in text:
+                if "`send` with `to` `trial-side-job`" in text:
+                    # Resumed by the send, it answers, and ends again.
+                    [side] = [
+                        each for each in self.served if each.launch == "trial-side-job"
+                    ] or [
+                        held("trial-side-job").model_copy(
+                            update={"session": "s-trial-side-job"}
+                        )
+                    ]
+                    again = side.model_copy(update={"launch": "trial-side-job-2"})
+                    self.served.append(again)
+                    self.fleeting.append(again.launch)
+                    self.item(self.conversation, Operator(), "LIME")
+                elif "`trial side job`" in text:
                     side = self.spawned("trial-side-job", None)
                     self.item(side, self.conversation, "LIME", ending=False)
                     if any(self.reporting):
@@ -664,9 +690,10 @@ def test_the_trial_tries_each_step_and_files_what_it_saw_under_the_session(
         ("interrupts", True),
         ("survives a restart", True),
         ("spawns a side job", True),
+        ("resumes its side job", True),
         ("hands a concern over", True),
         ("ends", True),
-        ("a side job ends with its spawner", True),
+        ("a builder outlives its spawner", True),
         ("resumes held", True),
         ("a terminal takes it over", True),
         ("back to held", True),
@@ -674,7 +701,7 @@ def test_the_trial_tries_each_step_and_files_what_it_saw_under_the_session(
     report = written(host.items[number - 1])
     assert report.startswith(
         f"**Spawn's trial**, `lup-dev spawn trial`, in {tmp_path / 'spawn-trial-1'}: "
-        "12 of 12 steps passed."
+        "13 of 13 steps passed."
     )
     assert "**What it means:** a session lup holds with no terminal works" in report
     assert host.items[number - 1].sender == host.conversation
@@ -704,7 +731,7 @@ def test_a_trial_whose_session_never_starts_says_so_and_files_it_anyway(
 
     assert [(each.name, each.passed) for each in steps] == [("held", False)]
     report = written(host.items[number - 1])
-    assert "0 of 12 steps passed." in report
+    assert "0 of 13 steps passed." in report
     assert (
         "- **held**, failed in 0 s: the launcher of launch h1 ended before its "
         "session was up"
@@ -712,9 +739,9 @@ def test_a_trial_whose_session_never_starts_says_so_and_files_it_anyway(
     assert "**held** failing means no session is held on this machine" in report
     assert (
         "Not tried, after that: answers, the room can't type as the operator, "
-        "interrupts, survives a restart, spawns a side job, hands a concern over, "
-        "ends, a side job ends with its spawner, resumes held, a terminal takes it "
-        "over, back to held."
+        "interrupts, survives a restart, spawns a side job, resumes its side job, "
+        "hands a concern over, ends, a builder outlives its spawner, resumes held, "
+        "a terminal takes it over, back to held."
     ) in report
     sender = host.items[number - 1].sender
     assert isinstance(sender, Conversation)

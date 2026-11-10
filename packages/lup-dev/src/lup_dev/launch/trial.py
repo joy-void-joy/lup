@@ -21,19 +21,23 @@ would mean:
    and its room untouched, and the operator's words still reach it;
 6. **spawns a side job:** asked to, the session calls lup's `spawn` with no
    concern; a held launch starts in a worktree of its own, recorded as the
-   session's, and its report reaches the session, which answers with it, the
-   side job putting nothing before the operator;
-7. **hands a concern over:** asked to, the session spawns one with a concern;
+   session's, its brief given once as its first turn, and its report reaches
+   the session, which answers with it, the side job putting nothing before the
+   operator, and ending there;
+7. **resumes its side job:** asked to, the session `send`s the side job a
+   question; it's resumed held with what it knew, its answer reaches the
+   session, which answers with it, and it ends again;
+8. **hands a concern over:** asked to, the session spawns one with a concern;
    its turn's end reaches the operator, who talks with it directly, and the
    session hears nothing of it;
-8. **ends:** the host ends the session and its room;
-9. **a side job ends with its spawner:** the side job's launch ends with the
-   session's, and the one handed a concern runs on, until the trial ends it;
-10. **resumes held:** the session resumes held, its conversation kept;
-11. **a terminal takes it over:** a terminal launch resuming it finds it held,
+9. **ends:** the host ends the session and its room;
+10. **a builder outlives its spawner:** the one handed a concern runs on once
+   the session ended, until the trial ends it;
+11. **resumes held:** the session resumes held, its conversation kept;
+12. **a terminal takes it over:** a terminal launch resuming it finds it held,
    ends it (`--take-over`, asking nothing and answering nothing), and runs a
    turn of its own on it;
-12. **back to held:** held again, it has the terminal's turn in its record.
+13. **back to held:** held again, it has the terminal's turn in its record.
 
 What it doesn't try: the runtime with no held session yet, holds of hours, a
 dashboard's own clicks, a real interactive terminal (its turn runs with `-p`,
@@ -300,6 +304,15 @@ sys.exit(0 if wrote else 2)
                 tried=self.side_job,
             ),
             Stage(
+                name="resumes its side job",
+                meaning=(
+                    "a side job that ended at its report isn't resumed by its "
+                    "spawner's `send`, or forgot what it knew, or its answer "
+                    "doesn't reach its spawner"
+                ),
+                tried=self.side_job_resumed,
+            ),
+            Stage(
                 name="hands a concern over",
                 meaning=(
                     "a session handed a concern with its spawn doesn't answer the "
@@ -315,13 +328,12 @@ sys.exit(0 if wrote else 2)
                 stops=True,
             ),
             Stage(
-                name="a side job ends with its spawner",
+                name="a builder outlives its spawner",
                 meaning=(
-                    "a side job outlives the session that spawned it, spending on "
-                    "for nobody, or a session handed a concern ends with its "
-                    "spawner, though it's the operator's to end"
+                    "a session handed a concern ends with its spawner, though it's "
+                    "the operator's to end"
                 ),
-                tried=self.side_job_ended,
+                tried=self.builder_outlived,
             ),
             Stage(
                 name="resumes held",
@@ -525,14 +537,10 @@ sys.exit(0 if wrote else 2)
             "nothing else. Then call `wait_inbox` until its report reaches you, and "
             "answer me with the single word its report holds, and nothing else."
         )
-        self.until(
-            lambda: self.spawned_by(launch.launch, handed=False) is not None,
+        side = self.found(
+            lambda: self.spawned_by(launch.launch, handed=False),
             "no launch the session spawned as a side job is served",
         )
-        side = self.spawned_by(launch.launch, handed=False)
-        if side is None:
-            message = "the side job's launch is gone"
-            raise TrialError(message)
         self.side = side
         self.spawned = [*self.spawned, side]
         apart = self.apart(launch, side)
@@ -556,11 +564,64 @@ sys.exit(0 if wrote else 2)
             )
             raise TrialError(message)
         number = "" if answer is None else f", @{answer.number}"
+        self.until(
+            lambda: not self.serves(side.launch),
+            "the side job runs on after its report, where it ends",
+        )
         return (
             f"`{side.name}` started apart, {apart}; {briefed}; its report reached "
-            f"the session, which answered with it{number}, and the side job put "
-            "nothing before you."
+            f"the session, which answered with it{number}; the side job put "
+            "nothing before you, and ended at its report."
         )
+
+    def side_job_resumed(self) -> str:
+        """Have the session `send` its side job a question, see it resumed held with what it knew, its answer reach the session, which answers with it, and it end again."""
+        side = self.side
+        if side is None:
+            message = "the session spawned no side job to resume"
+            raise TrialError(message)
+        sent = self.sent(
+            "Call lup's `send` with `to` `trial-side-job` and `kind` `question`, "
+            "asking which single word it reported. Then call `wait_inbox` until its "
+            "answer reaches you, and answer me with the single word its answer "
+            "holds, and nothing else."
+        )
+        resumed = self.found(
+            lambda: self.resumed_of(side),
+            "your session's `send` resumed no launch of the side job's session",
+        )
+        self.spawned = [*self.spawned, resumed]
+        self.until(
+            lambda: self.answer(sent, "LIME") is not None,
+            f"the session's answer holding what the side job said, LIME, didn't "
+            f"come within {self.patience}",
+        )
+        self.until(
+            lambda: not self.serves(resumed.launch),
+            "the resumed side job runs on after its report, where it ends",
+        )
+        return (
+            f"`send` resumed `{side.name}` held, as launch {resumed.launch}; it "
+            "answered with the word it had reported, which reached the session, "
+            "and ended again."
+        )
+
+    def resumed_of(self, side: Register) -> Register | None:
+        """Return the launch the host serves holding `side`'s session again, another than `side`; none where none does."""
+        return next(
+            (
+                each
+                for each in self.host.launches()
+                if each.session is not None
+                and each.session == side.session
+                and each.launch != side.launch
+            ),
+            None,
+        )
+
+    def serves(self, launch: str) -> bool:
+        """Say whether the host serves the launch `launch`."""
+        return launch in [each.launch for each in self.host.launches()]
 
     def handed_over(self) -> str:
         """Have the session spawn one with a concern, see its turn's end reach the operator, who talks with it directly, and the session hear nothing of it."""
@@ -575,14 +636,10 @@ sys.exit(0 if wrote else 2)
             lambda: self.answer(sent, "SENT") is not None,
             f"the session didn't say it spawned within {self.patience}",
         )
-        self.until(
-            lambda: self.spawned_by(launch.launch, handed=True) is not None,
+        builder = self.found(
+            lambda: self.spawned_by(launch.launch, handed=True),
             "no launch the session handed a concern is served",
         )
-        builder = self.spawned_by(launch.launch, handed=True)
-        if builder is None:
-            message = "the launch handed a concern is gone"
-            raise TrialError(message)
         self.builder = builder
         self.spawned = [*self.spawned, builder]
         apart = self.apart(launch, builder)
@@ -620,24 +677,17 @@ sys.exit(0 if wrote else 2)
             "of it."
         )
 
-    def side_job_ended(self) -> str:
-        """See the side job's launch end with its spawner's, and the one handed a concern run on, then end that one."""
-        side, builder = self.side, self.builder
-        if side is None or builder is None:
-            message = "the session spawned no side job and no one handed a concern"
+    def builder_outlived(self) -> str:
+        """See the one handed a concern run on once its spawner ended, then end it."""
+        builder = self.builder
+        if builder is None:
+            message = "the session handed no one a concern"
             raise TrialError(message)
-        self.until(
-            lambda: side.launch not in [each.launch for each in self.host.launches()],
-            "the side job is still served after its spawner ended",
-        )
-        if builder.launch not in [each.launch for each in self.host.launches()]:
+        if not self.serves(builder.launch):
             message = "the one handed a concern ended with its spawner"
             raise TrialError(message)
         self.end(builder)
-        return (
-            "The side job ended with its spawner; the one handed a concern ran on "
-            "until the trial ended it."
-        )
+        return "The one handed a concern ran on until the trial ended it."
 
     def briefed(self, party: Conversation) -> str:
         """Say how the brief the trial's session sent `party` was told; raise where it was never told, or told otherwise than given once as its first turn: told twice, beside a hook too, it reads as `told` some other way."""
@@ -863,6 +913,19 @@ sys.exit(0 if wrote else 2)
             for each in listed.talkers.get(launch, [])
         )
 
+    def found(self, finding: Callable[[], Register | None], failure: str) -> Register:
+        """Wait, looking every `look`, until `finding()` finds a launch, and return the one it found then, which may end just after, as a side job does at its report; raise `TrialError` saying `failure` past `patience`."""
+        seen: list[Register] = []
+
+        def looked() -> bool:
+            each = finding()
+            if each is not None:
+                seen.append(each)
+            return each is not None
+
+        self.until(looked, failure)
+        return seen[-1]
+
     def until(self, done: Callable[[], bool], failure: str) -> None:
         """Wait, looking every `look`, until `done()`; raise `TrialError` saying `failure` past `patience`."""
         began = self.clock.now()
@@ -925,10 +988,10 @@ sys.exit(0 if wrote else 2)
                 "to end on this machine, on this runtime: it starts held, takes "
                 "your words as its turns, answers into your inbox, stops at an "
                 "interrupt, outlives a restart of the host service, spawns a "
-                "side job whose report comes back to it and hands a concern "
-                "over to one you talk with directly, its side job ending with "
-                "it, ends, resumes, and passes to a terminal and back. A "
-                "launch's setup "
+                "side job whose report comes back to it, ending there, and "
+                "resumes it with a `send`, hands a concern over to one you "
+                "talk with directly, which outlives it, ends, resumes, and "
+                "passes to a terminal and back. A launch's setup "
                 f"took {spelled(self.steps[0].took)}. Not tried here: the other "
                 "runtime, holds of hours, and an interactive terminal."
             )
@@ -1034,7 +1097,8 @@ class Scratch(Model):
 
     def unspawned(self, spawned: list[Register], say: Callable[[str], None]) -> None:
         """Remove the worktree and the branch of each launch the trial's session spawned, whatever is in them, each under `tree/` of the repository and named for its branch (`made_root`); where git can't, say so, and go on."""
-        for each in spawned:
+        # A side job resumed holds the worktree it was spawned in: each once.
+        for each in {launch.worktree: launch for launch in spawned}.values():
             if each.worktree.parent != self.repository / "tree":
                 say(f"{each.worktree} isn't one a spawn made, so it's left.")
                 continue
