@@ -14162,12 +14162,16 @@ class SpawnsMade:
         limit: int = 32,
         status: int = 0,
         hung: bool = False,
+        stuck: bool = False,
         missing: bool = False,
         **fields: object,
     ) -> None:
         self.limit = limit
         self.status = status
         self.hung = hung
+        self.stuck = stuck
+        """Whether the room's `git worktree add` never ends, and its cancelled
+        wait doesn't either, as on a pipe a process left behind holds open."""
         self.missing = missing
         """Whether each launcher can't be started, as where `lup-dev` is gone."""
         """Whether the room's git never ends, as one the room stopped wouldn't."""
@@ -14188,6 +14192,11 @@ class SpawnsMade:
             self.running.set()
             if self.hung:
                 await asyncio.Event().wait()
+            if self.stuck and "add" in program.command:
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    await asyncio.Event().wait()
             failed = b"fatal: a branch named that exists" if self.status else b""
             return Ran(command=program.command, status=self.status, error=failed)
 
@@ -14727,9 +14736,11 @@ def test_a_room_git_that_never_ends_stops_its_spawn_and_holds_no_other(
         "Not spawned: 1 session agents spawned runs already, the most that may at "
         "once, against loops of spawns: `x`."
     )
+    # The room's git ends nothing: what would remove the worktree waits too.
     assert stopped == (
         f"Not spawned: its worktree, {root / 'x'}, wasn't made in your room within "
-        "0:00:02, so its git was stopped"
+        f"0:00:02, so its git was stopped; its worktree, {root / 'x'}, and branch "
+        "`x` stay"
     )
     assert third.startswith(f"Not spawned: its worktree, {root / 'z'}")
     assert spawned.launches == []
@@ -15140,3 +15151,37 @@ def test_a_held_launch_s_hook_naming_another_session_is_answered_with_nothing(
         "a hook named the session 's1', where the launch holds c1" in line
         for line in said
     )
+
+
+def test_a_room_git_whose_stopped_wait_never_ends_is_given_up_on_and_its_worktree_removed(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """Stopping `podman exec` may leave the room's git running, holding a pipe the wait drains: the spawn gives that wait up, and removes what that git may make all the same."""
+    worktree = tmp_path / "w"
+    spawnable(worktree)
+    spawned = SpawnsMade(
+        stuck=True, making=timedelta(seconds=1), letting=timedelta(seconds=1)
+    )
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        spawning=lambda delivery, launchers: spawned.tools(
+            delivery, machine, launchers
+        ),
+    ):
+        launched(machine, clock, worktree, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        answer, _ = call(mcp, "spawn", {"name": "x", "brief": "Do it."})
+    root = worktree / ".git" / "tree" / "x"
+    assert answer == (
+        f"Not spawned: its worktree, {root}, wasn't made in your room within "
+        "0:00:01, so its git was stopped; its worktree and branch were removed"
+    )
+    assert [each.command[-3:] for each in spawned.programs[1:]] == [
+        ["remove", "--force", str(root)],
+        ["branch", "-D", "x"],
+    ]
+    assert spawned.launches == []

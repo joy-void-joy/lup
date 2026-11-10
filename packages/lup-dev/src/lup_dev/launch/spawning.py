@@ -227,6 +227,12 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
     making: timedelta = timedelta(minutes=2)
     """How long the spawner's room's git may take to make the worktree, a
     checkout of the whole tree, before it's stopped and the spawn refused."""
+    letting: timedelta = timedelta(seconds=10)
+    """How long a program's cancelled wait may take to end, before it's given
+    up on and left to end behind."""
+    behind: list[asyncio.Future[Ran]] = []
+    """The programs' waits given up on and still ending, kept so none is
+    collected mid-wait."""
     reserved: list[Reserved] = []
     """Each spawn under way, from its count against the limits to its
     launcher's start, with the branch it took once it took one: counted, so
@@ -409,13 +415,8 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
                 payload="",
                 directory=launch.repository,
             )
-            try:
-                ran = await asyncio.wait_for(
-                    self.run(program), self.making.total_seconds()
-                )
-            except TimeoutError:
-                return f"; its worktree, {made.root}, and branch `{made.branch}` stay"
-            if ran.status != 0:
+            ran = await self.within(program, self.making)
+            if ran is None or ran.status != 0:
                 return f"; its worktree, {made.root}, and branch `{made.branch}` stay"
         return "; its worktree and branch were removed"
 
@@ -532,19 +533,34 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
             payload="",
             directory=repository,
         )
-        try:
-            ran = await asyncio.wait_for(self.run(program), self.making.total_seconds())
-        except TimeoutError as slow:
+        made = Made(root=root, branch=branch, commit=commit)
+        ran = await self.within(program, self.making)
+        if ran is None:
+            # Stopping `podman exec` may leave the room's git running, which
+            # can make the worktree after all: it's removed all the same.
             message = (
-                f"its worktree, {root}, wasn't made in your room within {self.making}, "
-                "so its git was stopped"
+                f"its worktree, {root}, wasn't made in your room within "
+                f"{self.making}, so its git was stopped"
+                f"{await self.unmade(launch, made)}"
             )
-            raise SpawnError(message) from slow
+            raise SpawnError(message)
         if ran.status != 0:
             said = ran.said() or f"it ended with status {ran.status}"
             message = f"its worktree, {root}, wasn't made in your room: {said}"
             raise SpawnError(message)
-        return Made(root=root, branch=branch, commit=commit)
+        return made
+
+    async def within(self, program: Program, longest: timedelta) -> Ran | None:
+        """Run `program`, waiting `longest` at most; none where it runs past it, its wait cancelled, and given up on past `letting` where the cancel itself waits, as on a pipe a process left behind holds open: kept running behind (`behind`), so it's never collected mid-wait."""
+        running = asyncio.ensure_future(self.run(program))
+        await asyncio.wait([running], timeout=longest.total_seconds())
+        if running.done():
+            return running.result()
+        running.cancel()
+        await asyncio.wait([running], timeout=self.letting.total_seconds())
+        if not running.done():
+            self.behind = [*(each for each in self.behind if not each.done()), running]
+        return None
 
     async def lost(self, spec: HeldLaunch) -> None:
         """Tell the agent who spawned `spec`'s launch that its session never came up, with the end of what its launcher wrote, as a problem from it: loud, so a spawner waiting on its report hears instead."""
