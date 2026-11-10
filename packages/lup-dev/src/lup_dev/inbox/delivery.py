@@ -1382,7 +1382,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         """Return the agent who spawned `party`'s session through lup, as the host recorded `launch`, theirs: where they're its own conversation and an agent spawned it; none else."""
         if party.agent is not None or launch.spawner is None:
             return None
-        return launch.spawner.conversation
+        spawner = launch.spawner.conversation
+        return None if spawner == party else spawner
 
     def introduced(self, launch: Register) -> str:
         """Say, in lup's words, what a session an agent spawned through lup is, as their session starts: whose they are, where they work, and where what they say goes, a side job's report back to their spawner, a builder's into the concern handed them, theirs."""

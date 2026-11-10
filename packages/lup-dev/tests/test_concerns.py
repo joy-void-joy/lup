@@ -1372,3 +1372,13 @@ def test_a_side_job_s_report_to_a_subagent_who_ended_reaches_their_session(
 
     assert item.recipient == main("s1")
     assert item.reason == Ended(name="measure", said="It takes four minutes.")
+
+
+def test_parents_that_loop_are_walked_once(delivery: Delivery) -> None:
+    """A room's hook naming another session can make a session's parents loop: walking up stops where it comes round."""
+    register = launched(delivery, "dev", "s1")
+    worker = spawned(delivery, register, main("s1"), "a1", "fixer")
+    place = delivery.inbox.whereabouts[main("s1").key()]
+    delivery.inbox.placed(place.model_copy(update={"parent": worker}))
+
+    assert delivery.concerns().forebears(worker) == [main("s1")]

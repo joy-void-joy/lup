@@ -41,7 +41,7 @@ declining and reopening are the operator's (`settled`, `declined`,
 """
 
 import textwrap
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Literal
 
 from lup.types import Model
@@ -464,17 +464,21 @@ class Concerns(Model, arbitrary_types_allowed=True):
         what lands of it isn't told them either, not even in a line.
         """
 
-        def above(each: Conversation, depth: int) -> list[Conversation]:
-            place = self.inbox.whereabouts.get(each.key())
+        def above() -> Iterator[Conversation]:
+            # Each once: a room's hook naming another session can make the
+            # parents loop.
+            passed = [party]
+            place = self.inbox.whereabouts.get(party.key())
             parent = None if place is None else place.parent
-            if parent is None or depth > len(self.inbox.whereabouts):
-                return []
-            return [parent, parent.main(), *above(parent, depth + 1)]
+            while parent is not None and parent not in passed:
+                passed.append(parent)
+                yield parent
+                yield parent.main()
+                place = self.inbox.whereabouts.get(parent.key())
+                parent = None if place is None else place.parent
 
         return [
-            each
-            for each in dict.fromkeys([*above(party, 0), party.main()])
-            if each != party
+            each for each in dict.fromkeys([*above(), party.main()]) if each != party
         ]
 
     def referred(

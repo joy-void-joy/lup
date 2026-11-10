@@ -2817,6 +2817,7 @@ def test_a_launch_an_agent_spawned_registers_its_spawner_and_runs_the_session_th
     assert statuses == [0]
     [held] = [each for each in machine.host.served if each.launch == "h1"]
     assert held.spawner == spawner
+    assert held.session == minted
     assert machine.engine.held_run[-2:] == ["--session-id", minted]
 
 

@@ -365,6 +365,11 @@ class Register(Request, reads=False):
     """The model its runtime's arguments named (`--model`), as its launcher was
     given them, never the room: what the sessions it spawns run on. None where
     they named none, the profile's then choosing."""
+    session: str | None = None
+    """The runtime's id for a held launch's session, which its launcher named
+    up front: the one session its hooks may name, so a room's hook can't speak
+    as another session of the repository's, a spawner among them. None for a
+    terminal's, whose session the operator may clear and the runtime names."""
 
 
 class Rename(Request, reads=False):

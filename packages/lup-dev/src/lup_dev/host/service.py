@@ -1265,6 +1265,15 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                 f"is: {unread}"
             )
             return Spoken(answer=await self.judgement(request, payload, writer))
+        if request.session is not None and heard.session != request.session:
+            # A held launch runs the one session its launcher named: a hook
+            # naming another is a process of its room's speaking as another
+            # session of the repository, its spawner's among them.
+            self.say(
+                f"{request.launch}: a hook named the session {heard.session!r}, where "
+                f"the launch holds {request.session}, so it's answered with nothing"
+            )
+            return Spoken(answer="")
         if request.home is not None:
             kept(
                 self.layout,

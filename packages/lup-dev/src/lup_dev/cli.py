@@ -2755,6 +2755,7 @@ def launched(
             [*room.mounts, *ages.mounts, *compiled.mounts],
             gating,
         )
+        naming = named_session(adapter, arguments, held)
         registered = Register(
             launch=launch,
             runtime=runtime,
@@ -2772,8 +2773,8 @@ def launched(
             held=held is not None,
             spawner=None if held is None else held.spawner,
             model=model_named([*arguments, *([] if held is None else held.arguments)]),
+            session=None if held is None else naming.session,
         )
-        naming = named_session(adapter, arguments, held)
         session, arguments = naming.session, naming.arguments
         hiding = RoomSecrets.of(
             Search(

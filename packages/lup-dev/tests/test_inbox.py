@@ -666,6 +666,7 @@ def launched(
     held: bool = False,
     spawner: Spawner | None = None,
     model: str | None = None,
+    session: str | None = None,
 ) -> Register:
     """Register a launch of `runtime` in `tmp_path` with the running service, its repository `tmp_path`'s `.git` unless `repository` names another, spawned by `spawner` where it's given."""
     judge = tmp_path / "judges" / "bin" / "lup-dev"
@@ -687,6 +688,7 @@ def launched(
         held=held,
         spawner=spawner,
         model=model,
+        session=session,
     )
     client(machine.host, clock).register(registered)
     return registered
@@ -15104,3 +15106,37 @@ def test_what_a_held_session_s_call_up_failed_to_give_is_given_again_until_it_is
         launcher.close()
     assert before == Waiting()
     assert note(number, "Anyone?") in HeldPrompt.model_validate_json(given).text
+
+
+def test_a_held_launch_s_hook_naming_another_session_is_answered_with_nothing(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """A process of a spawned room can send hooks on its socket naming any session, its spawner's among them: the launch holds one, and the rest are no session of its."""
+    worktree = tmp_path / "w"
+    spawner = Conversation(repository=worktree / ".git", runtime="claude", session="s1")
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, worktree, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        launched(
+            machine,
+            clock,
+            tmp_path / "two",
+            "two",
+            "claude",
+            repository=spawner.repository,
+            held=True,
+            spawner=Spawner(launch="one", conversation=spawner),
+            session="c1",
+        )
+        theirs = machine.host.launch("two").hook
+        forged = send(theirs, claude("SessionStart", source="startup", session_id="s1"))
+        own = send(theirs, claude("SessionStart", source="startup", session_id="c1"))
+        place = delivery.inbox.whereabouts[spawner.key()]
+    assert forged == ""
+    assert own != ""
+    assert place.launch == "one"
+    assert place.parent is None
+    assert any(
+        "a hook named the session 's1', where the launch holds c1" in line
+        for line in said
+    )
