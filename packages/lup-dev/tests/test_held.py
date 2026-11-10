@@ -1,6 +1,7 @@
 """Sessions held with no terminal, as the host service starts and reaches their launchers: real short-lived programs stand in for a launcher, and a socket served in-process for its own."""
 
 import asyncio
+import json
 import socket
 import sys
 import time
@@ -10,7 +11,7 @@ from typing import TYPE_CHECKING, override
 
 import pytest
 
-from lup.programs import Apart, Ran, detached
+from lup.programs import Apart, Ran, detached, run
 from lup.rooms.engine import Podman
 from lup_dev import cli
 from lup_dev.git import Git
@@ -887,10 +888,32 @@ def test_a_turn_the_room_writes_to_the_session_s_input_fails_the_trial_saying_so
     ]
     assert not forging.passed
     assert forging.seen.startswith(
-        "a process in the room wrote a turn to the session's input, and the "
-        "session answered it, @"
+        "a process in the room wrote a turn the session took as yours, answering it, @"
     )
     assert forging.seen.endswith(": wrote a turn to /proc/7/fd/0")
+
+
+def test_a_turn_written_where_the_session_never_takes_it_passes_the_trial_saying_where(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    """A write that reaches nothing, as init's `/dev/null` takes one, is no turn of the session's: its answering FORGED alone says one got through."""
+    _, trial = played(tmp_path, clock)
+
+    def written(container: str, command: list[str]) -> TerminalRun:
+        return TerminalRun(status=0, output='{"tried": ["9 (sh), a turn written"]}')
+
+    trial.inside = written
+    steps = trial.run()
+
+    [forging] = [
+        each for each in steps if each.name == "the room can't type as the operator"
+    ]
+    assert forging.passed
+    assert forging.seen == (
+        "A process in the room wrote a turn somewhere, and the session didn't take "
+        "it within 0:01:00, so it didn't reach it: "
+        '{"tried": ["9 (sh), a turn written"]}'
+    )
 
 
 def test_another_room_process_holding_the_session_s_socket_fails_the_trial(
@@ -1190,3 +1213,93 @@ def test_the_sweep_ends_each_side_job_whose_spawner_s_launch_isn_t_served(
     assert (
         "side: a side job whose spawner's launch gone ended, so it's ended too"
     ) in said
+
+
+def process_table(root: Path, processes: dict[int, tuple[str, dict[int, str]]]) -> Path:
+    """A processes' directory as `/proc` lays one out, each process's command line and its descriptors' links, Yama's scope at 1."""
+    for pid, (command, descriptors) in processes.items():
+        fds = root / str(pid) / "fd"
+        fds.mkdir(parents=True)
+        (root / str(pid) / "cmdline").write_bytes(
+            b"".join(f"{word}\0".encode() for word in command.split())
+        )
+        for fd, target in descriptors.items():
+            (fds / str(fd)).symlink_to(target)
+    (root / "sys" / "kernel" / "yama").mkdir(parents=True)
+    (root / "sys" / "kernel" / "yama" / "ptrace_scope").write_text("1\n")
+    return root
+
+
+def probed(tmp_path: Path, processes: dict[int, tuple[str, dict[int, str]]]) -> Ran:
+    """Run the trial's probe over the processes given, as in a room."""
+    table = process_table(tmp_path / "proc", processes)
+    probe = Trial.model_fields["forging"].default
+    assert isinstance(probe, str)
+    return run(sys.executable, "-c", probe, str(table), checked=False)
+
+
+INIT = (
+    "catatonit -- python3 -I /l/connected.py /run/lup/session.sock lup-environment "
+    "claude --output-format stream-json --input-format stream-json"
+)
+"""podman's `--init`, pid 1: its command line carries the whole command it runs,
+`--input-format` among it, and its input is `/dev/null`."""
+
+
+def test_the_room_s_probe_tries_the_runtime_s_socket_never_init_s_dev_null(
+    tmp_path: Path,
+) -> None:
+    ran = probed(
+        tmp_path,
+        {
+            1: (INIT, {0: "/dev/null"}),
+            7: (
+                "claude --input-format stream-json",
+                {0: "socket:[42]", 1: "socket:[42]"},
+            ),
+            9: ("bash -c ls", {0: "pipe:[7]"}),
+        },
+    )
+
+    said = json.loads(ran.output)
+    assert ran.status == 2, said
+    assert said["session"] == "7 (claude --input-format), its input socket:[42]"
+    assert said["tried"] == [
+        (
+            "7 (claude --input-format), its input socket:[42]: opening it refused, "
+            "No such file or directory"
+        ),
+        (
+            "1 (catatonit --), its input /dev/null: not tried, its input is neither "
+            "a socket nor a pipe"
+        ),
+    ]
+    assert said["holding"] == []
+
+
+def test_the_room_s_probe_finds_no_session_on_a_file_and_names_another_holding_its_socket(
+    tmp_path: Path,
+) -> None:
+    writable = tmp_path / "input"
+    writable.write_text("")
+    ran = probed(
+        tmp_path,
+        {
+            1: (INIT, {0: "/dev/null"}),
+            7: ("claude --input-format stream-json", {0: str(writable)}),
+            8: ("nc -l", {0: "socket:[5]"}),
+        },
+    )
+    held_too = probed(
+        tmp_path / "again",
+        {
+            7: ("claude --input-format stream-json", {0: "socket:[42]"}),
+            12: ("sh", {0: "/dev/null", 3: "socket:[42]"}),
+        },
+    )
+
+    # A runtime whose input isn't a socket isn't the session's; a socket's
+    # process is tried, and the session answering alone says a turn got through.
+    assert ran.status == 3, ran.output
+    assert held_too.status == 4, held_too.output
+    assert json.loads(held_too.output)["holding"] == ["12 (sh), its input /dev/null"]
