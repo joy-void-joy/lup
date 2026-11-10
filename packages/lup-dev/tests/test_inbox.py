@@ -15052,3 +15052,55 @@ def test_what_an_agent_spawns_runs_on_the_model_its_own_launch_was_given(
         call(mcp, "spawn", {"name": "x", "brief": "Do it."})
     [launch] = spawned.launches
     assert launch.arguments == ["--model", "haiku"]
+
+
+def test_a_resumed_held_session_called_up_before_its_start_is_given_what_waits_whatever_its_last_process_left(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """Its last process ended mid-call, which no hook said: what it left, a turn under way, says nothing of the process its call-up comes from."""
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, bash("b1"))
+        inbox("send", "one", "Anyone?")
+        number = newest(delivery)
+        client(machine.host, clock).unregister("one")
+        launched(machine, clock, tmp_path, "two", "claude", held=True)
+        again = machine.host.launch("two").hook
+        launcher = Launcher(machine.launch("two").held)
+        client(machine.host, clock).ask(
+            CalledUp(launch="two", name="two", session="s1"), Finished
+        )
+        [given] = launcher.ringing()
+        prompt = HeldPrompt.model_validate_json(given).text
+        resumed = send(again, claude("SessionStart", source="resume"))
+        turned = send(again, claude("UserPromptSubmit", prompt=prompt))
+        state = delivery.inbox.item(number).state
+        frames = launcher.close()
+    assert len(frames) == 1
+    assert note(number, "Anyone?") in prompt
+    assert note(number, "Anyone?") not in resumed
+    assert note(number, "Anyone?") not in turned
+    assert state == Told(at=clock.now(), how="wake")
+
+
+def test_what_a_held_session_s_call_up_failed_to_give_is_given_again_until_it_is(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """An idle held session sends no hook that would tell it: the sweep gives it again."""
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        # No launcher listens yet: the operator's words aren't given.
+        inbox("send", "one", "Anyone?")
+        number = newest(delivery)
+        before = delivery.inbox.item(number).state
+        launcher = Launcher(machine.launch("one").held)
+        asyncio.run(delivery.rewoken())
+        [given] = launcher.ringing()
+        launcher.close()
+    assert before == Waiting()
+    assert note(number, "Anyone?") in HeldPrompt.model_validate_json(given).text

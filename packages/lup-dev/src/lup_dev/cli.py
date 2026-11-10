@@ -817,6 +817,7 @@ def host_serve(context: typer.Context) -> None:
         running=workers.commands,
         coming=None if rehearsing else coming,
         reap=reap,
+        rewake=delivery.rewoken,
     )
     turns = Turns()
     trying = Trying(
@@ -2416,6 +2417,9 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
     coming: Coming | None = None
     """What wakes the threads parked until what the sweep sees come; none wakes
     none."""
+    rewake: Callable[[], Awaitable[None]] | None = None
+    """Gives each idle held session what waits for them that no hook would tell,
+    giving it having failed (`Delivery.rewoken`); none gives nothing."""
     reap: Callable[[], Awaitable[None]] | None = None
     """Collects each held launch's launcher the service started that has
     ended, so none is left a zombie, and tells the agent who spawned one whose
@@ -2467,6 +2471,8 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
         if self.reap is not None:
             await self.reap()
         await self.orphans_ended()
+        if self.rewake is not None:
+            await self.rewake()
         self.woken()
 
     async def orphans_ended(self) -> None:

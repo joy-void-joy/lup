@@ -877,6 +877,10 @@ class Presence(MutableModel):
     pushed: Pushed | None = None
     """What was last pushed to their session, until a turn's start carries its
     token, or its wait runs out."""
+    launch: str | None = None
+    """The launch whose hooks last set what this says: what an earlier launch's
+    process left, a turn under way or a wake, says nothing of a process started
+    since in another."""
 
 
 class Pushed(Model):
@@ -999,6 +1003,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             conversation.name,
         )
         presence = self.presence(party)
+        presence.launch = launch.launch
         presence.woken = False
         match heard.event:
             case TurnEnded() | ConversationEnded():
@@ -1353,7 +1358,24 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             repository=launch.repository, runtime=launch.runtime, session=session
         )
         self.heard_in(party, launch, self.spawner_of(launch, party))
+        presence = self.presence(party)
+        if presence.launch != launch.launch:
+            # What an earlier launch's process left says nothing of this one,
+            # which no hook of its own has set yet: idle, given nothing.
+            presence.launch = launch.launch
+            presence.turning = False
+            presence.woken = False
+            presence.pushed = None
         await self.wake(party)
+
+    async def rewoken(self) -> None:
+        """Give each idle held session what waits for them that nothing would tell, at the sweep: where giving it failed, as at their call-up, an idle held session sends no hook that would tell it, so it's given again until it's given (`wake`)."""
+        if self.holders is None:
+            return
+        for launch in self.holders.held:
+            party = self.running(launch)
+            if party is not None:
+                await self.wake(party)
 
     @staticmethod
     def spawner_of(launch: Register, party: Conversation) -> Conversation | None:
