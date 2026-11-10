@@ -94,7 +94,7 @@ from lup_dev.gate import (
     report,
 )
 from lup_dev.gate import Ran as GateRan
-from lup_dev.git import Git, GitError, nul_separated
+from lup_dev.git import Git, GitError, link_file, nul_separated
 from lup_dev.git import Worktree as Checkout
 from lup_dev.host.client import FromRoom, HostClient, RoomClient, own_command
 from lup_dev.host.copying import Copying
@@ -2913,14 +2913,36 @@ def located(worktree: Path, pinned: Path | None) -> Found:
     except RoomError as unmountable:
         raise LaunchError(str(unmountable)) from unmountable
     if found.worktree is None:
-        message = (
-            f"{worktree} isn't one of the worktrees of {found.git}, as that "
-            "repository names them back: its `.git` file names another place, or "
-            "the repository's record of it does. Where the worktree moved, `git "
-            "worktree repair` there mends it; nothing launches until then"
-        )
-        raise LaunchError(message)
+        raise LaunchError(unnamed(worktree, found.git))
     return found
+
+
+def unnamed(worktree: Path, common: Path) -> str:
+    """Say why `worktree` isn't one of the repository's at `common` as it names them back, by what its `.git` file names: a submodule's checkout, a checkout whose git directory sits apart, or a linked worktree the repository's record of doesn't match, as one moved or recorded through a link."""
+    named = link_file(worktree / ".git")
+    gitdir = None if named is None else Path(named.strip().removeprefix("gitdir: "))
+    place = None if gitdir is None else worktree / gitdir
+    refused = "nothing launches in it"
+    if place is not None and "modules" in place.parts:
+        return (
+            f"{worktree} is a submodule's checkout, its git directory {place}: lup "
+            f"launches in a repository's own worktrees, not a submodule's, so "
+            f"{refused}"
+        )
+    if place is not None and not place.is_relative_to(common / "worktrees"):
+        return (
+            f"{worktree}'s git directory sits apart from it, at {place} "
+            "(`git init --separate-git-dir`), and isn't one a linked worktree "
+            f"names: lup launches in a repository whose worktrees its git "
+            f"directory names, so {refused}"
+        )
+    return (
+        f"{worktree} isn't one of the worktrees of {common}, as that repository "
+        "names them back: its `.git` file names another place, or the "
+        "repository's record of it does, as where it moved, or was recorded "
+        f"through a link. `git worktree repair` there mends it; {refused} until "
+        "then"
+    )
 
 
 def model_named(arguments: list[str]) -> str | None:

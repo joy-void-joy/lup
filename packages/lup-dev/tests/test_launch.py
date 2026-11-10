@@ -3344,3 +3344,43 @@ def test_a_session_typed_in_another_form_of_its_id_is_the_same_session(
                 machine.launcher,
                 held=holding(project, resume=typed),
             )
+
+
+def test_a_submodule_s_checkout_and_one_whose_git_directory_sits_apart_are_refused_saying_what_they_are(
+    tmp_path: Path, shell: Shell
+) -> None:
+    apart = tmp_path / "apart"
+    shell.git(
+        tmp_path,
+        "init",
+        "-q",
+        "-b",
+        "dev",
+        "--separate-git-dir",
+        str(tmp_path / "apart.git"),
+        str(apart),
+    )
+    (apart / "file").write_text("apart\n")
+    shell.commit(apart, "first")
+    inner = tmp_path / "inner"
+    shell.git(tmp_path, "init", "-q", "-b", "dev", str(inner))
+    (inner / "file").write_text("inner\n")
+    shell.commit(inner, "inner")
+    outer = tmp_path / "outer"
+    shell.git(tmp_path, "init", "-q", "-b", "dev", str(outer))
+    shell.git(
+        outer, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(inner)
+    )
+
+    with pytest.raises(LaunchError) as separate:
+        cli.located(apart, None)
+    with pytest.raises(LaunchError) as submodule:
+        cli.located(outer / "inner", None)
+
+    assert str(separate.value).startswith(
+        f"{apart}'s git directory sits apart from it, at "
+    )
+    assert "(`git init --separate-git-dir`)" in str(separate.value)
+    assert str(submodule.value).startswith(
+        f"{outer / 'inner'} is a submodule's checkout"
+    )
