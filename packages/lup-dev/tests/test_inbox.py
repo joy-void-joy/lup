@@ -572,6 +572,7 @@ def inboxed(
         if spawning is None
         else spawning(delivery, launchers)
     )
+    delivery.resumer = spawner.resumed
     landing = LandingTools(
         delivery=delivery,
         layout=judging or machine,
@@ -14598,7 +14599,9 @@ def test_a_builder_s_reports_land_in_its_concern_for_the_operator_and_its_spawne
         report = newest(delivery)
         meanwhile = send(hook, bash("b1"))
         client(machine.host, clock).unregister("two")
+        line = newest(delivery)
         after = context(send(hook, bash("b2")))
+        quiet = delivery.inbox.item(line).quiet
         landed = delivery.concerns().containing(report)
     item = delivery.inbox.item(report)
     assert item.recipient == Operator()
@@ -14608,9 +14611,12 @@ def test_a_builder_s_reports_land_in_its_concern_for_the_operator_and_its_spawne
     assert landed is not None
     assert landed.number == thread.number
     assert meanwhile == ""
+    # A line, quiet: no wake, but `wait_inbox` returns on it.
     assert after == (
-        "lup: `two`, whom you spawned, ended: its reports are in @revamp-the-dashboard."
+        f'<message item="{line}" from="two" kind="note">lup: `two`, whom you '
+        "spawned, ended: its reports are in @revamp-the-dashboard.</message>"
     )
+    assert quiet
     assert "handed you @revamp-the-dashboard" in context(started)
 
 
@@ -15208,3 +15214,96 @@ def test_a_session_cleared_in_their_launch_is_never_woken_for_what_comes_for_the
         )
         frames = launcher.close()
     assert frames == []
+
+
+def test_a_builder_saying_its_concern_done_tells_its_spawner_a_line_and_nothing_of_its_account(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    worktree = tmp_path / "w"
+    repository = worktree / ".git"
+    spawner = Conversation(repository=repository, runtime="claude", session="s1")
+    builder = spawner.model_copy(update={"session": "c1"})
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, worktree, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        concerns = delivery.concerns()
+        thread = concerns.opened(spawner, "Revamp the dashboard", repository)
+        concerns.handed(spawner, thread, builder)
+        side_job(machine, clock, tmp_path, spawner, concern=thread.number)
+        child = machine.host.launch("two")
+        send(child.hook, claude("SessionStart", source="startup", session_id="c1"))
+        call(
+            child.mcp,
+            "thread",
+            {
+                "name": "revamp-the-dashboard",
+                "done": "The tree is rebuilt; the keys aren't.",
+            },
+        )
+        line = delivery.inbox.item(newest(delivery))
+    assert line.recipient == spawner
+    assert line.quiet
+    assert isinstance(line.reason, Message)
+    assert line.reason.text == (
+        "lup: `two`, whom you spawned, says @revamp-the-dashboard is done, for the "
+        "operator to confirm."
+    )
+
+
+def test_a_side_job_ends_at_its_report_and_its_spawner_s_send_resumes_it(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """Ended at its report, it counts against no limit; what its spawner sends it after resumes it held, its context kept, as `spawn --resume` holds one."""
+    worktree = tmp_path / "w"
+    spawnable(worktree)
+    repository = worktree / ".git"
+    spawned = SpawnsMade()
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        holding=True,
+        spawning=lambda delivery, launchers: spawned.tools(
+            delivery, machine, launchers
+        ),
+    ):
+        launched(machine, clock, worktree, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        spec, child = spawned_and_registered(machine, clock, mcp, spawned, repository)
+        made = spec.worktree
+        made.mkdir(parents=True, exist_ok=True)
+        theirs = machine.host.launch(spec.launch).hook
+        launcher = Launcher(machine.launch(spec.launch).held)
+        send(theirs, claude("SessionStart", source="startup", session_id=child.session))
+        # Its brief, told as its turn starts.
+        send(
+            theirs,
+            claude("UserPromptSubmit", prompt="Go.", session_id=child.session),
+        )
+        send(
+            theirs,
+            claude(
+                "Stop",
+                stop_hook_active=False,
+                last_assistant_message="Four minutes.",
+                session_id=child.session,
+            ),
+        )
+        [ended] = launcher.ringing()
+        launcher.close()
+        client(machine.host, clock).unregister(spec.launch)
+        answer, _ = call(
+            mcp, "send", {"to": "x", "kind": "question", "text": "And the gate?"}
+        )
+    assert ended == HeldEnd().model_dump_json()
+    [_, resumed] = spawned.launches
+    assert resumed.resume == child.session
+    assert resumed.worktree == made
+    assert resumed.spawner == spec.spawner
+    assert answer.endswith(
+        f"It ended at its report: it's resumed held in {made}, with all it knew, "
+        "your message its first turn once it's up; its launcher writes to "
+        f"{machine.launch(resumed.launch).log}."
+    )

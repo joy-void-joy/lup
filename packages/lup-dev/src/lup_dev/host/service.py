@@ -867,7 +867,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     """Told once each hook is answered, and each room's request."""
     clock: Clock
     """When each conversation's activity began."""
-    ended: Callable[[Register], None] | None = None
+    ended: Callable[[Register], Awaitable[None]] | None = None
     """Told each launch as it ends (`HostService.ended`); none tells nobody."""
     served: dict[str, Served] = {}
     opening: dict[str, Register] = {}
@@ -1483,7 +1483,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         for each in self.side_jobs(launch):
             self.background(self.side_job_ended(each))
         if self.ended is not None:
-            self.ended(served.launch)
+            await self.ended(served.launch)
         for server in served.servers:
             await closed(server)
         if Stopped.named() in served.offered.events:
@@ -2097,7 +2097,7 @@ class HostService(Model, arbitrary_types_allowed=True):
     the inbox's store, given the same (`cli.py`)."""
     clock: Clock = Field(default_factory=SystemClock)
     """When each conversation's activity began; a test gives its own."""
-    ended: Callable[[Register], None] | None = None
+    ended: Callable[[Register], Awaitable[None]] | None = None
     """Told each launch the service stops serving as it ends: the inbox tells
     the agent who spawned it through lup (`Delivery.closed`, which `cli.py`
     gives); none tells nobody."""

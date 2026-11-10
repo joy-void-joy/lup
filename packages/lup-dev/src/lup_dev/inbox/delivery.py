@@ -126,7 +126,7 @@ import asyncio
 import difflib
 import secrets
 import textwrap
-from collections.abc import Callable, Coroutine, Generator, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Generator, Sequence
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Literal, override
 
@@ -144,7 +144,7 @@ from lup.events import (
 from lup.types import Model, MutableModel
 from lup_dev.clock import Clock
 from lup_dev.host.courier import Failure, Heard, Post, Posted, Waker
-from lup_dev.host.holders import HeldPrompt, Holders
+from lup_dev.host.holders import HeldEnd, HeldPrompt, Holders
 from lup_dev.host.names import Names
 from lup_dev.host.protocol import HostError, Register
 from lup_dev.host.pushes import Pushes
@@ -953,6 +953,17 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     (`lup_dev.policy.coming`); none looks at nothing."""
     looks: list[asyncio.Task[None]] = []
     """Each look `starting` began, kept until it's done."""
+    resumer: Callable[[Conversation, Conversation, Register], Awaitable[str]] | None = (
+        None
+    )
+    """Resumes a side job that ended, its session held again with its context,
+    where its spawner sends it a message: the side job, the spawner, and their
+    launch in; what to add to `send`'s answer out, empty where it's none of the
+    spawner's to resume (`SpawnTools.resumed`, which `cli.py` gives). None
+    resumes nothing."""
+    ending: list[asyncio.Task[None]] = []
+    """Each side job's end asked of its launcher at its report, kept until it's
+    answered."""
 
     def presence(self, conversation: Conversation) -> Presence:
         """Return what the service knows of `conversation` while it serves."""
@@ -1318,8 +1329,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
         Not quiet, as a subagent's end is: no runtime wakes the spawner for
         it, so it holds their turn's end once, wakes them idle, and returns
-        their `wait_inbox`. The side job stays held, idle, so what they `send`
-        it next is its next turn, its context kept.
+        their `wait_inbox`. Then the side job ends, its launcher asked to end
+        it once this hook is answered, so none waits idle, counted against the
+        limits; what its spawner sends it after resumes it, its context kept
+        (`resumer`).
         """
         place = self.inbox.whereabouts.get(party.key())
         if place is None or place.parent is None:
@@ -1334,6 +1347,48 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             held=place.held,
         )
         await self.posted(news, party, spawner, launch.worktree)
+        holders = self.holders
+        if holders is not None and holders.holds(launch.launch):
+            # Asked apart: its end comes once this turn's end is answered.
+            self.ending = [
+                *(each for each in self.ending if not each.done()),
+                asyncio.create_task(self.side_job_ended(launch)),
+            ]
+
+    async def side_job_ended(self, launch: Register) -> None:
+        """Ask the launcher of `launch`, a side job that reported, to end it; where it can't, say so."""
+        if self.holders is None:
+            return
+        try:
+            await self.holders.asked(launch.launch, HeldEnd())
+        except HostError as failed:
+            self.say(
+                f"{launch.launch}: the side job didn't end at its report: {failed}"
+            )
+
+    async def told_spawner(self, launch: Register, text: str) -> None:
+        """Tell the agent who spawned `launch` through lup `text`, lup's line of it, as a quiet message from its session: no wake, no turn's end held, but their `wait_inbox` returns on it. Nothing where no agent spawned it, or no session of it was heard."""
+        spawner = launch.spawner
+        if spawner is None:
+            return
+        party = self.inbox.running(launch.launch) or (
+            None
+            if launch.session is None
+            else Conversation(
+                repository=launch.repository,
+                runtime=launch.runtime,
+                session=launch.session,
+            )
+        )
+        if party is None:
+            return
+        await self.posted(
+            Message(kind="note", text=text),
+            party,
+            self.reaching(spawner.conversation),
+            launch.worktree,
+            quiet=True,
+        )
 
     def reaching(self, party: Conversation) -> Conversation:
         """Return whom an item for `party`, an agent who spawned a session through lup, reaches: them; their session's main conversation where they're a subagent who ended, as what waited for them goes there as they end (`ended`); and where that session was cleared in its launch, the one that took its place there, whom a push or a doorbell of the launch reaches, as `party` it would never be taken."""
@@ -1402,10 +1457,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             return (
                 f"lup: {who} spawned you through lup's `spawn`, as a side job for "
                 f"them, {where}. Their brief comes as your first turn. What you end "
-                "your turn saying is your report, handed to them whole, so end it "
-                "with what they asked for. `send` to `parent` reaches them "
-                "meanwhile, and what they send you after is your next turn, with "
-                "all you know so far."
+                "your turn saying is your report, handed to them whole, and you end "
+                "there, so end it with what they asked for. `send` to `parent` "
+                "reaches them meanwhile, and what they send you after resumes you, "
+                "with all you know so far."
             )
         return (
             f"lup: {who} spawned you through lup's `spawn` and handed you "
@@ -1417,16 +1472,15 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             "comes as your first turn."
         )
 
-    def closed(self, launch: Register) -> None:
-        """Tell the agent who spawned `launch` through lup, in a line, that it ended, beside their next call: where a concern was handed with it, where its reports are."""
+    async def closed(self, launch: Register) -> None:
+        """Tell the agent who spawned `launch` through lup, handing a concern with it, in a line, that it ended, and where its reports are (`told_spawner`). A side job's end isn't told: it ends at each report, which says it."""
         spawner = launch.spawner
-        if spawner is None:
+        if spawner is None or spawner.concern is None:
             return
-        concerns = self.concerns()
-        handed = None if spawner.concern is None else concerns.at(spawner.concern)
+        handed = self.concerns().at(spawner.concern)
         where = "" if handed is None else f": its reports are in @{handed.name}"
-        self.left(
-            self.reaching(spawner.conversation),
+        await self.told_spawner(
+            launch,
             f"lup: `{launch.name or launch.launch}`, whom you spawned, ended{where}.",
         )
 

@@ -776,9 +776,19 @@ class Speaker(Model, arbitrary_types_allowed=True):
                     call=self.call,
                     thread=thread,
                 )
+                resumed = await self.resumed(recipient)
                 return self.answered(
-                    self.arriving(recipient, item.number, thread), copy
+                    f"{self.arriving(recipient, item.number, thread)}{resumed}", copy
                 )
+
+    async def resumed(self, recipient: Conversation) -> str:
+        """Resume `recipient`, a side job of this conversation's that ended, its session held again with its context, the message just sent its first turn (`Delivery.resumer`); say how, or nothing where it runs, or is no ended side job of theirs."""
+        resumer = self.delivery.resumer
+        if resumer is None or recipient.agent is not None:
+            return ""
+        if self.concerns.live(recipient):
+            return ""
+        return await resumer(recipient, self.party, self.launch)
 
     def addressed(self, to: str) -> Party:
         """Return the party `to` names for this conversation: the operator, their parent, or one of their own subagents, by their name, their path or their runtime's id.
@@ -1021,9 +1031,21 @@ class Speaker(Model, arbitrary_types_allowed=True):
         if threading.done is not None:
             concerns.done(self.party, thread, threading.done)
             said.append(f"@{thread.name} is done, for the operator to confirm.")
+            await self.handed_done(thread)
         if not said:
             said.append(self.standing(concerns, thread))
         return Said(text="\n".join(said))
+
+    async def handed_done(self, thread: Thread) -> None:
+        """Tell whoever spawned this session through lup, handing it `thread`, in a line, that it's said done, nothing of the account: they let go of it, and `send` is there for more."""
+        spawner = self.launch.spawner
+        if spawner is None or spawner.concern != thread.number:
+            return
+        await self.delivery.told_spawner(
+            self.launch,
+            f"lup: `{self.launch.name or self.launch.launch}`, whom you spawned, says "
+            f"@{thread.name} is done, for the operator to confirm.",
+        )
 
     def planned(self, concerns: Concerns, threading: Threading) -> Planned:
         """Read what `threading` asks before any of it is done, so a call refused does nothing: the thread, opened where `title` says, whom it's handed to, and what parks it.

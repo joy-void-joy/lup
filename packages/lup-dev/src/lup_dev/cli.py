@@ -804,6 +804,7 @@ def host_serve(context: typer.Context) -> None:
     coming = Coming(delivery=delivery, layout=layout, say=typer.echo)
     delivery.starting = coming.started
     spawning = spawn_tools(delivery, layout, launchers, known)
+    delivery.resumer = spawning.resumed
 
     async def reap() -> None:
         for each in launchers.reaped():

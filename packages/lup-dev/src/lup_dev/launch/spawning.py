@@ -81,7 +81,7 @@ from lup.tools.tool import Refused as Rejected
 from lup.types import Model, MutableModel
 from lup_dev.git import Git, GitError
 from lup_dev.host.held import HeldLaunch, Launchers, Spawning
-from lup_dev.host.protocol import Register, Spawner, branch_name
+from lup_dev.host.protocol import Register, Spawner, branch_name, segment
 from lup_dev.host.rooms import RoomTools
 from lup_dev.host.service import Program, executed
 from lup_dev.inbox.delivery import Delivery
@@ -161,13 +161,14 @@ class SpawnCall(Model, arbitrary_types_allowed=True):
         Two kinds, by whether you hand it a concern:
         - **A side job for you** (no `concern`), such as a search or a
           measurement: its report, what it ends its turn saying, reaches you
-          whole, wakes you, and returns your `wait_inbox`. `send` reaches it
-          by its name, and its answer comes back the same way, with all it
-          knew. It ends when your session does.
+          whole, wakes you, and returns your `wait_inbox`, and it ends there.
+          `send` reaches it by its name, resuming it with all it knew, its
+          answer coming back the same way.
         - **A concern handed over** (`concern`): it holds it and works in it,
           what it says lands there, the operator talks with it directly, and
-          it lands its own branch. You hear when it ends, in a line, not its
-          reports, which you read in the concern. Once handed, it's theirs.
+          it lands its own branch. You hear, in a line, when it says the
+          concern is done and when it ends, not its reports, which you read in
+          the concern. Once handed, it's theirs.
 
         The runtime is yours. How many run at once has a high limit, against
         loops of spawns.
@@ -388,7 +389,66 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
                 f"{await self.unmade(launch, made)}{opened(thread)}"
             )
             raise SpawnError(message) from unsent
+        if handed is None:
+            kept = self.layout.side_job(session)
+            kept.parent.mkdir(parents=True, exist_ok=True)
+            kept.write_text(self.launchers.specs[starting.launch].model_dump_json())
         return said(made, start, sent.number, starting.log, handed)
+
+    async def resumed(
+        self, side: Conversation, spawner: Conversation, launch: Register
+    ) -> str:
+        """Resume `side`, a side job `spawner`, of `launch`, spawned, that ended at its report, its session held again in its worktree with its context, as `lup-dev spawn --resume` holds one, the message they just sent it waiting for its call-up; say how it went, after `send`'s answer, or nothing where it's no ended side job of theirs.
+
+        What it was started with is kept by the host as it's spawned
+        (`Layout.side_job`), by the session's id lup minted, so nothing a room
+        says names its worktree; its spawner is recorded again as the
+        conversation that sent, of the launch they send from. It counts
+        against the limits as a spawn does.
+        """
+        try:
+            kept = self.layout.side_job(segment(side.session))
+            spec = HeldLaunch.model_validate_json(kept.read_text())
+        except ValueError, OSError:
+            return ""
+        if spec.spawner is None or spec.spawner.conversation != spawner:
+            return ""
+        if any(each.session == side.session for each in self.served()):
+            return ""
+        if not spec.worktree.is_dir():
+            return (
+                f" It ended at its report, and its worktree, {spec.worktree}, is "
+                "gone, so it isn't resumed."
+            )
+        try:
+            reserved = self.limited(spec.repository or launch.repository)
+        except SpawnError as limited:
+            return f" It ended at its report, and isn't resumed: {limited}"
+        try:
+            starting = await self.spawning.started(
+                lambda minted: spec.model_copy(
+                    update={
+                        "launch": minted,
+                        "session": None,
+                        "resume": side.session,
+                        "spawner": Spawner(launch=launch.launch, conversation=spawner),
+                        "arguments": modelled(launch.model),
+                    }
+                )
+            )
+        except (ProgramError, OSError) as unstarted:
+            return (
+                f" It ended at its report, and its launcher didn't start: {unstarted}"
+            )
+        finally:
+            self.reserved = [
+                each for each in self.reserved if each.token != reserved.token
+            ]
+        return (
+            f" It ended at its report: it's resumed held in {spec.worktree}, with "
+            "all it knew, your message its first turn once it's up; its launcher "
+            f"writes to {starting.log}."
+        )
 
     async def unmade(self, launch: Register, made: Made) -> str:
         """Remove a spawn's worktree and branch, which nothing ran in yet, by the spawner's room's own git, stopped past `making`, and say how it went, to follow a refusal's reason."""
@@ -655,11 +715,11 @@ def said(made: Made, start: str, brief: int, log: Path, handed: Thread | None) -
     if handed is None:
         return (
             f"{where} A side job for you: what it ends its turn saying reaches you "
-            "whole, wakes you, and returns your `wait_inbox`. `send` reaches it by "
-            f"`{made.branch}`, and it ends when your session does."
+            "whole, wakes you, and returns your `wait_inbox`, and it ends there. "
+            f"`send` to `{made.branch}` resumes it, with all it knew."
         )
     return (
         f"{where} @{handed.name} is theirs now: what it says lands there, where you "
         "can read it, and the operator talks with it directly. You'll hear in a "
-        "line when it ends."
+        "line when it says it's done, and when it ends."
     )
