@@ -1,7 +1,8 @@
-"""Running programs on an event loop: `awaited` to its end, `started` beside it.
+"""Running programs: `run` and, on an event loop, `awaited` to its end, `started` beside it.
 
 Each program is a tiny one that ends as told or never ends by itself, so no
-test waits on a clock: one that runs forever ends only where lup kills it.
+test waits on a clock but where a time limit is what's tried: one that runs
+forever ends only where lup kills it.
 """
 
 import asyncio
@@ -9,20 +10,19 @@ import os
 import signal
 import sys
 from datetime import timedelta
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
 from lup.programs import (
     ProgramFailedError,
     ProgramMissingError,
+    ProgramOverdueError,
     ProgramOverflowError,
     awaited,
+    run,
     started,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 PYTHON = sys.executable
 
@@ -167,6 +167,44 @@ def test_awaited_reads_a_program_killed_where_the_wait_is_cancelled_to_its_end(
     pid = asyncio.run(cancelled())
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
+
+
+def gone(pid: int) -> bool:
+    """Say whether the process `pid` has ended: it's no longer there, or it's a zombie its new parent hasn't reaped yet."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except FileNotFoundError:
+        return True
+    # Its state follows its name, which is in parentheses and may hold spaces.
+    _, after = stat.rsplit(")", 1)
+    return after.split()[0] == "Z"
+
+
+def test_run_kills_a_program_past_its_time_limit() -> None:
+    with pytest.raises(ProgramOverdueError) as late:
+        run("sleep", "1000", within=timedelta(milliseconds=100))
+    assert late.value.command == ["sleep", "1000"]
+    assert late.value.within == timedelta(milliseconds=100)
+    assert str(late.value) == "`sleep 1000` ran past 0.1 s, and was killed"
+
+
+def test_awaited_kills_a_program_past_its_time_limit_with_what_it_started(
+    tmp_path: Path,
+) -> None:
+    # The child it leaves holds its pipes open, as `ssh` does for a git push:
+    # killing the program alone, the wait would last as long as the child.
+    left = tmp_path / "left"
+    leaving = f'sleep 1000 & echo $! > "{left}"; exec sleep 1000'
+    with pytest.raises(ProgramOverdueError, match=r"ran past 0\.5 s"):
+        asyncio.run(awaited("sh", "-c", leaving, within=timedelta(milliseconds=500)))
+    assert gone(int(left.read_text()))
+
+
+def test_awaited_within_its_time_limit_ends_as_it_would() -> None:
+    ran = asyncio.run(
+        awaited(*ECHOING, stdin="hi", ok=[3], within=timedelta(minutes=1))
+    )
+    assert ran.output == b"HI"
 
 
 def test_started_talks_over_its_input_and_output_and_ends_when_its_input_closes() -> (

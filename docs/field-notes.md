@@ -310,6 +310,12 @@ Found since, on the room's git 2.55.0 (2026-10-16), on scratch repositories laid
 - **A `gitdir` file there alone** (`<git dir>/gitdir` reading `<theirs>`) redirected neither `--git-dir` nor git run inside `<git dir>`.
 - **The host's git 2.56.0 answers the same** (checked 2026-10-21): `--git-dir`, `-C` and `GIT_DIR` alone each follow a planted `commondir`, and `GIT_DIR` with `GIT_COMMON_DIR` resists it.
 
+A FIFO the room makes of a ref, on git 2.55.0 and Python 3.14.7 (2026-11-10), on scratch repositories, each git run with a 3-second `timeout`:
+- **`packed-refs` a FIFO nothing writes, its refs packed:** `for-each-ref`, `worktree list`, `rev-parse --verify refs/heads/other`, `rev-parse HEAD` and `status` each waited until killed, in `open`, which `SIGKILL` ends at once. Through `Git.run` before it had a limit, `for-each-ref` there was still waiting at 20 seconds. With every ref loose, `worktree list` resolved `HEAD` without reading it, and `rev-parse --verify refs/heads/main` still waited.
+- **A loose ref a FIFO:** `rev-parse --verify` of it waited; `for-each-ref` passed over it, and `rev-parse HEAD` of another branch was unaffected.
+- **A wait asyncio holds on a program outlives the program:** `sh -c 'sleep 8 & sleep 100'` awaited and cancelled at 1 second, `sh` alone killed, was still waited on at 30 seconds, its child holding its pipes, as `ssh` holds git's for a push; started as a process group's leader and the group killed, the wait ended at 1.0 seconds, nothing left running.
+- **In the host service,** 40 room requests at once for a record (`ShowConversation`, whose `ran_in` runs `git worktree list`) on a repository whose `packed-refs` was a FIFO, its git on asyncio's default pool, left 32 gits waiting, the pool's every thread on 32 cores, and a hook whose judge waited on that pool unanswered past 30 seconds; in the repository's own threads, 8 waited and the hook was answered at once (`test_the_service_answers_hooks_while_git_on_a_rooms_repository_waits_on_a_fifo`).
+
 ## What git reads a commit's parents from (git 2.56.0, 2026-10-21)
 
 Behind `docs/credentials.md`, *Deleting a branch that has landed*. On scratch repositories laid out as lup's (a bare `project.git` cloned from a bare `forge.git`, `origin` its URL), the forge's `dev` at D, the fourth of A, B, C, D, and `feat` at F, a child of A, so `git merge-base --is-ancestor F D` in the project answered 1. Then, acting as a room writing the git directory, the same question again. Scripts in the session scratchpad.

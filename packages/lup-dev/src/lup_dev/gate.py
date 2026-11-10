@@ -192,7 +192,7 @@ def standing(root: Path) -> Standing:
         if own.is_file():
             shutil.copyfile(own, index)
         staging = git.model_copy(update={"index": index})
-        staging.run("add", "--all")
+        staging.run("add", "--all", within=git.whole)
         tree = staging.text("write-tree")
     return Standing(tree=tree, layer=layer(root))
 
@@ -666,7 +666,15 @@ def at_commit(
     made = Path(tempfile.mkdtemp(prefix=MADE))
     with FileLock(locks / f"{made.name}.lock"):
         try:
-            git.run("worktree", "add", "--detach", "--quiet", str(made), commit)
+            git.run(
+                "worktree",
+                "add",
+                "--detach",
+                "--quiet",
+                str(made),
+                commit,
+                within=git.whole,
+            )
         except GitError:
             made.rmdir()
             raise
@@ -682,7 +690,7 @@ def at_commit(
             amended = fixed(made, files) if fix and ran.code == 0 else None
         finally:
             stop(made)
-            git.run("worktree", "remove", "--force", str(made))
+            git.run("worktree", "remove", "--force", str(made), within=git.whole)
     (locks / f"{made.name}.lock").unlink(missing_ok=True)
     passed = (
         files
@@ -707,8 +715,15 @@ def fixed(made: Path, files: Standing) -> str | None:
     if standing(made).tree == files.tree:
         return None
     git = Git(cwd=made)
-    git.run("add", "--all")
-    git.run("commit", "--amend", "--no-edit", "--cleanup=verbatim", "--quiet")
+    git.run("add", "--all", within=git.whole)
+    git.run(
+        "commit",
+        "--amend",
+        "--no-edit",
+        "--cleanup=verbatim",
+        "--quiet",
+        within=git.whole,
+    )
     return git.text("rev-parse", "--verify", "HEAD")
 
 
@@ -732,7 +747,7 @@ def leftovers(git: Git, locks: Path) -> list[Path]:
     ]
     gone = [each for each in made if not running(locks / f"{each.name}.lock")]
     for each in gone:
-        git.run("worktree", "remove", "--force", str(each))
+        git.run("worktree", "remove", "--force", str(each), within=git.whole)
         (locks / f"{each.name}.lock").unlink(missing_ok=True)
     git.run("worktree", "prune")
     return gone

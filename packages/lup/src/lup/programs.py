@@ -21,24 +21,37 @@ them back, which Python warns of, and which `filelock` refuses outright.
 
 On an event loop that goes on serving while a program runs, as the host
 service's does, `awaited` waits for one without holding a thread, and kills it
-where the wait is cancelled, as by a timeout around it, so nothing runs on past
-the caller's interest in it. `started` starts one the caller talks to over its
-input and output for as long as it runs, as the service does with each
-repository's process and the dashboard, and `Running.ended` ends it by closing its
-input.
+where the wait is cancelled, so nothing runs on past the caller's interest in
+it. `started` starts one the caller talks to over its input and output for as
+long as it runs, as the service does with each repository's process and the
+dashboard, and `Running.ended` ends it by closing its input.
+
+`run` and `awaited` each take `within`, the longest the program may run: past
+it, it's killed and `ProgramOverdueError` raised. A program reading what
+someone else writes can wait for good: git reading a ref a room made a FIFO
+nothing writes waits in `open` until it's killed (`docs/field-notes.md`,
+*Host-side git in a repository the room writes*). `awaited` starts each
+program as the leader of a process group of its own, and kills the group:
+asyncio's wait for a program returns only once every pipe it was given has
+closed, so a child it left holding one, as git leaves `ssh` for a push, would
+hold the wait past the program's own end. `run` kills the program alone, and
+returns at once: `subprocess` waits for it, not for its pipes.
 """
 
 import asyncio
+import os
+import shlex
+import signal
 
 # lup: ignore("subprocess", why="lup's one runner of programs, which every other module uses")
 import subprocess
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from lup.errors import LupError
 from lup.types import Model
 
 if TYPE_CHECKING:
-    from datetime import timedelta
     from pathlib import Path
 
 
@@ -86,6 +99,20 @@ class ProgramOverflowError(ProgramError):
     """A program printed more than its caller takes, and was killed for it."""
 
 
+class ProgramOverdueError(ProgramError):
+    """A program ran past the time its caller gave it, and was killed for it."""
+
+    def __init__(self, command: list[str], within: timedelta) -> None:
+        """Keep the command and the time it had, and say both."""
+        self.command = command
+        self.within = within
+        message = (
+            f"`{shlex.join(command)}` ran past {within.total_seconds():g} s, and "
+            "was killed"
+        )
+        super().__init__(message)
+
+
 def run(
     program: str | Path,
     *arguments: str,
@@ -96,6 +123,7 @@ def run(
     checked: bool = True,
     merged: bool = False,
     shown: bool = False,
+    within: timedelta | None = None,
 ) -> Ran:
     """Run `program` with `arguments` to its end, and return how it ended.
 
@@ -107,9 +135,12 @@ def run(
       takes any.
     - `merged`: its standard error joins its output, in the order written.
     - `shown`: it prints to the caller's terminal, and nothing is captured.
+    - `within`: the longest it may run; past it, it's killed. As long as it
+      takes by default.
 
-    Raise `ProgramMissingError` where it can't be started, and `ProgramFailedError` where
-    it ends with a status not accepted.
+    Raise `ProgramMissingError` where it can't be started, `ProgramOverdueError`
+    where it runs past `within`, and `ProgramFailedError` where it ends with a
+    status not accepted.
     """
     command = [str(program), *arguments]
     captured = None if shown else subprocess.PIPE
@@ -126,10 +157,13 @@ def run(
             stdout=captured,
             stderr=apart,
             check=False,
+            timeout=None if within is None else within.total_seconds(),
         )
     except OSError as missing:
         message = f"`{program}` can't be run: {missing}"
         raise ProgramMissingError(message) from missing
+    except subprocess.TimeoutExpired as late:
+        raise ProgramOverdueError(command, timedelta(seconds=late.timeout)) from late
     ran = Ran(
         command=command,
         status=finished.returncode,
@@ -152,21 +186,24 @@ async def awaited(
     merged: bool = False,
     discarded: bool = False,
     limit: int | None = None,
+    within: timedelta | None = None,
 ) -> Ran:
     """Run `program` with `arguments` to its end on the event loop, which goes on meanwhile, and return how it ended.
 
-    `cwd`, `stdin`, `env`, `ok`, `checked` and `merged` are `run`'s, its input
-    never the caller's own. Beside them:
+    `cwd`, `stdin`, `env`, `ok`, `checked`, `merged` and `within` are `run`'s,
+    its input never the caller's own. Beside them:
     - `discarded`: what it prints goes nowhere, and nothing is captured, as for
       a program leaving a process behind that would hold a pipe open, such as
       a clipboard's program serving what was copied.
     - `limit`: the most it may print on its standard output, in bytes; past
       it, it's killed.
 
-    Where the wait is cancelled, as by a timeout around it, the program is
-    killed before the cancellation goes on. Raise `ProgramMissingError` where it
-    can't be started, `ProgramOverflowError` where it prints past `limit`, and
-    `ProgramFailedError` where it ends with a status not accepted.
+    It runs as the leader of a process group of its own, and where it's killed,
+    past `within` or `limit` or as the wait is cancelled, the whole group is,
+    before anything goes on. Raise `ProgramMissingError` where it can't be
+    started, `ProgramOverdueError` where it runs past `within`,
+    `ProgramOverflowError` where it prints past `limit`, and `ProgramFailedError`
+    where it ends with a status not accepted.
     """
     command = [str(program), *arguments]
     given = stdin.encode() if isinstance(stdin, str) else stdin
@@ -182,10 +219,18 @@ async def awaited(
             stdin=feeding,
             stdout=printing,
             stderr=saying,
+            process_group=0,
         )
     except OSError as missing:
         message = f"`{program}` can't be run: {missing}"
         raise ProgramMissingError(message) from missing
+
+    def kill() -> None:
+        """Kill it, and what it started that's still in its process group: one whose group has gone is left as it is."""
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            return
 
     async def fed() -> None:
         """Write what it's given on its input, then close it.
@@ -227,21 +272,31 @@ async def awaited(
         while chunk := await reader.read(64 * 1024):
             kept += chunk
             if most is not None and len(kept) > most:
-                process.kill()
+                kill()
                 await emptied(reader)
                 return None
         return bytes(kept)
 
+    async def ended() -> None:
+        """Kill it and its group, and wait for them, their pipes read to their end."""
+        kill()
+        await asyncio.gather(emptied(process.stdout), emptied(process.stderr))
+        await process.wait()
+
     try:
-        output, error, _ = await asyncio.gather(
-            drained(process.stdout, limit), drained(process.stderr, None), fed()
-        )
-        status = await process.wait()
+        async with asyncio.timeout(None if within is None else within.total_seconds()):
+            output, error, _ = await asyncio.gather(
+                drained(process.stdout, limit), drained(process.stderr, None), fed()
+            )
+            status = await process.wait()
+    except TimeoutError as late:
+        await ended()
+        if within is None:
+            raise
+        raise ProgramOverdueError(command, within) from late
     finally:
         if process.returncode is None:
-            process.kill()
-            await asyncio.gather(emptied(process.stdout), emptied(process.stderr))
-            await process.wait()
+            await ended()
     if output is None:
         message = f"`{program}` printed more than {limit} bytes"
         raise ProgramOverflowError(message)

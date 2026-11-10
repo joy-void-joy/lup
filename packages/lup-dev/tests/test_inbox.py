@@ -60,7 +60,7 @@ from lup_dev.declaration.serving import Operator as OperatorAsker
 from lup_dev.declaration.serving import tools as module_tools
 from lup_dev.gate import Passed, Passes, Processes, Standing
 from lup_dev.gate import Ran as GateRan
-from lup_dev.git import GitError
+from lup_dev.git import THREADS, GitError
 from lup_dev.host.client import HostClient, RoomClient, Starter
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard, Posted, Spawned, Spawns
@@ -4387,6 +4387,102 @@ def test_a_room_reads_its_repositorys_conversations_alone_and_never_the_operator
     ]
 
 
+class Resolving(LaunchJudge):
+    """A launch's judge that answers every hook with nothing, keeping each payload, once a thread of asyncio's default pool has run for it, as the host's own follows the approved copy's link in one before it puts a hook to the repository's process (`Workers.current`)."""
+
+    def __init__(self) -> None:
+        self.payloads: list[str] = []
+
+    @override
+    async def judged(self, launch: Register, payload: str) -> str:
+        await asyncio.to_thread(self.payloads.append, payload)
+        return ""
+
+
+def waiting_on(common: Path) -> int:
+    """Count the `git worktree list` running pinned to the repository whose git directory is `common`."""
+
+    def pinned(process: Path) -> bool:
+        try:
+            words = (process / "cmdline").read_bytes()
+            environment = (process / "environ").read_bytes().split(b"\0")
+        except OSError:
+            return False
+        return (
+            b"worktree\0list" in words and f"GIT_DIR={common}".encode() in environment
+        )
+
+    return sum(
+        1 for each in Path("/proc").iterdir() if each.name.isdigit() and pinned(each)
+    )
+
+
+def released(fifo: Path, content: bytes) -> None:
+    """Let each git waiting on `fifo` go on, and each after: a writer opened on it wakes each reader, a file holding `content` takes its place, and the writer closed, each waiting reads it empty."""
+    writer = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
+    try:
+        kept = fifo.with_name(f"{fifo.name}.kept")
+        kept.write_bytes(content)
+        kept.replace(fifo)
+    finally:
+        os.close(writer)
+
+
+def test_the_service_answers_hooks_while_git_on_a_rooms_repository_waits_on_a_fifo(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    repo: Path,
+    *,
+    tmp_path: Path,
+) -> None:
+    """A room makes its repository's `packed-refs`, its refs packed, a FIFO nothing writes, in which git reading refs waits until it's killed, then asks the host, more often at once than asyncio's default pool has threads, for what runs git there: its conversation's record, read only where it ran in one of the repository's worktrees (`ran_in`). Each such git waits in a thread of the repository's own, never the default pool, which a hook's judge waits on as the host's does: so the hook is answered meanwhile, and the room's requests once the FIFO is written."""
+    home = tmp_path / "claude"
+    recording(home, "s1", repo, "n1")
+    recorded = {
+        "claude": Recorded(
+            records=ClaudeRecords(directory=home), reader=ClaudeTranscripts()
+        )
+    }
+    common = repo / ".git"
+    # asyncio's default pool has min(32, cores + 4) threads.
+    asked = 40
+    judge = Resolving()
+    with inboxed(machine, clock, notices, said, recorded, judge=judge):
+        launched(machine, clock, repo, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        # Its refs packed, as `git gc` leaves them: git resolving `HEAD` reads
+        # `packed-refs` where no loose ref answers.
+        run("git", "pack-refs", "--all", cwd=repo)
+        packed = (common / "packed-refs").read_bytes()
+        (common / "packed-refs").unlink()
+        os.mkfifo(common / "packed-refs")
+        room = RoomClient(socket=machine.host.launch("one").request)
+        with ThreadPoolExecutor(max_workers=asked) as rooms:
+            reads = [
+                rooms.submit(
+                    room.ask,
+                    ShowConversation(runtime="claude", session="s1"),
+                    Conversed,
+                )
+                for _ in range(asked)
+            ]
+            # Until the repository's threads all wait on the FIFO: as many gits
+            # wait as threads it has, and the rest of the room's asks queue.
+            while waiting_on(common) < THREADS.each:
+                time.sleep(0.01)
+            answer = send(hook, bash("c1"))
+            stuck = waiting_on(common)
+            released(common / "packed-refs", packed)
+            totals = [each.result(timeout=30).total for each in reads]
+    assert answer == ""
+    assert bash("c1") in judge.payloads
+    assert stuck == THREADS.each
+    assert totals == [2] * asked
+
+
 def test_a_room_reads_no_moment_of_a_session_it_claims_from_another_repository(
     machine: Layout,
     clock: FakeClock,
@@ -5741,8 +5837,10 @@ def test_a_hold_is_an_inbox_item_and_its_answer_reaches_the_hold(
     )
     whole = ChangedFile(path=Path("src/new.py"), before=None, after=Text(text="new\n"))
     with inboxed(machine, clock, notices, said) as delivery:
-        delivery.settle_hold = lambda change, approved, comment: cli.hold_answered(
-            machine, change, approved=approved, comment=comment
+        delivery.settle_hold = lambda change, repository, approved, comment: (
+            cli.hold_answered(
+                machine, change, repository, approved=approved, comment=comment
+            )
         )
         InboxAnnouncing(layout=machine.host, clock=clock).announced(
             hold.model_copy(update={"call": "t7", "agent": "sub"}),
@@ -5828,8 +5926,10 @@ def judged_in_its_process(
         judge=WorkerJudge(modules=workers),
         modules=workers,
     ) as delivery:
-        delivery.settle_hold = lambda change, approved, comment: cli.hold_answered(
-            machine, change, approved=approved, comment=comment
+        delivery.settle_hold = lambda change, repository, approved, comment: (
+            cli.hold_answered(
+                machine, change, repository, approved=approved, comment=comment
+            )
         )
         launch = Register(
             launch="one",
@@ -6341,8 +6441,10 @@ def noted_hold(
 
 def answering_holds(machine: Layout, delivery: Watched) -> None:
     """Have `delivery` write each held change's answer to its hold, and say what nothing told, as `lup-dev host`'s does."""
-    delivery.settle_hold = lambda change, approved, comment: cli.hold_answered(
-        machine, change, approved=approved, comment=comment
+    delivery.settle_hold = lambda change, repository, approved, comment: (
+        cli.hold_answered(
+            machine, change, repository, approved=approved, comment=comment
+        )
     )
     delivery.hold_unheard = lambda change: cli.hold_unheard(machine, change)
 
@@ -8311,8 +8413,10 @@ def test_a_sent_draft_approves_what_it_marks_read_and_held_changes_commented_on(
         )
     )
     with inboxed(machine, clock, notices, said) as delivery:
-        delivery.settle_hold = lambda change, approved, comment: cli.hold_answered(
-            machine, change, approved=approved, comment=comment
+        delivery.settle_hold = lambda change, repository, approved, comment: (
+            cli.hold_answered(
+                machine, change, repository, approved=approved, comment=comment
+            )
         )
         host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
         read = host.ask(asking_approval(tmp_path / "r", "zone"), Shown).item
@@ -9546,7 +9650,7 @@ def serving_landings(
     ):
         landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
-        delivery.settle_hold = lambda _change, _approved, _comment: None
+        delivery.settle_hold = lambda _change, _repository, _approved, _comment: None
         yield delivery, pool
 
 
@@ -9949,7 +10053,7 @@ def test_an_ignore_approved_at_that_version_isn_t_asked_again_at_its_landing(
     ) as delivery:
         landings.launched("claude")
         send(machine.host.launch("one").hook, started("claude"))
-        delivery.settle_hold = lambda _change, _approved, _comment: None
+        delivery.settle_hold = lambda _change, _repository, _approved, _comment: None
         number = hold_on(landings, machine, clock, path, IGNORING)
         inbox("answer", str(number), "--approve", "--comment", "")
         answer, error = call(machine.host.launch("one").mcp, "land", {})

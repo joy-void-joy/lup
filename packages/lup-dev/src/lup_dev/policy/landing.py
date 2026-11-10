@@ -175,7 +175,7 @@ import hashlib
 import uuid
 from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable
-from datetime import datetime
+from datetime import datetime, timedelta
 from itertools import batched
 from pathlib import Path, PurePath
 from typing import override
@@ -202,7 +202,15 @@ from lup_dev.declaration.project import Project
 from lup_dev.declaration.resolve import Declaration
 from lup_dev.errors import LupDevError
 from lup_dev.gate import Passed, Standing
-from lup_dev.git import LISTED, Git, GitError, Tracked, nul_separated, refs_astray
+from lup_dev.git import (
+    LISTED,
+    Git,
+    GitError,
+    Tracked,
+    nul_separated,
+    refs_astray,
+    threaded,
+)
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Conversations
 from lup_dev.host.protocol import Branches as Approved
@@ -700,8 +708,8 @@ async def hosted_files(
 ) -> list[Path]:
     """Return each file putting `tip` on the integration branch, at `old` on the remote, changes that the host runs (`hosted`): what a room's push there can't do, in a project computing its running branch (`Remotes.hosted`). Raise what git raises."""
     repository = launch.repository
-    return await asyncio.to_thread(
-        hosted, layout, repository, Git.pinned(repository), old, tip
+    return await threaded(
+        repository, hosted, layout, repository, Git.pinned(repository), old, tip
     )
 
 
@@ -1376,6 +1384,17 @@ class Lander(Model, arbitrary_types_allowed=True):
     """The runtime's id for the call, which each hold it makes keeps."""
     run: Callable[[Program], Awaitable[Ran]] = executed
     """Runs one program on the host: `podman exec` into the launch's room."""
+    gating: timedelta = timedelta(minutes=30)
+    """The longest the room's gate may take, on the merge or on a tip, past
+    which it's killed and nothing lands: the project's whole gate, which takes
+    lup's own two minutes, longer for a larger project. The room runs it, and
+    could make it wait for good while the merge holds the repository's lock
+    (`turns`)."""
+    in_room: timedelta = timedelta(minutes=2)
+    """The longest each other command in the launch's room may take, and
+    podman's asking whether the room is there: git moving a branch, or
+    removing a worktree, with what git ignores in it, and `findmnt`. podman
+    waits on its own locks while containers start."""
     turns: Turns
     """The lock a merge holds until its local branch moved, the service's."""
     parser: Parser = Field(default_factory=EngineParser)
@@ -1538,7 +1557,9 @@ class Lander(Model, arbitrary_types_allowed=True):
         source = landing.branch or self.running
         remote = landing.remote
         git = Git.pinned(self.launch.repository)
-        tip = at or await asyncio.to_thread(git.commit, f"refs/heads/{source}")
+        tip = at or await threaded(
+            self.launch.repository, git.commit, f"refs/heads/{source}"
+        )
         if tip is None:
             message = f"this repository has no local branch `{source}`"
             raise HostError(message)
@@ -1586,8 +1607,10 @@ class Lander(Model, arbitrary_types_allowed=True):
         # The branches given to the landing: the one landed, at its tip as
         # given, and the gated one a merge moved onto what lands.
         given = {f"refs/heads/{source}": tip, f"refs/heads/{named}": lands}
-        branches = await asyncio.to_thread(landed_branches, git, lands, old, given)
-        changed = await asyncio.to_thread(changed_files, git, old, lands)
+        branches = await threaded(
+            self.launch.repository, landed_branches, git, lands, old, given
+        )
+        changed = await threaded(self.launch.repository, changed_files, git, old, lands)
         asks = await self.asks(
             git,
             Merge(onto=onto, remote=remote, old=old, branch=named, tip=lands),
@@ -1617,7 +1640,9 @@ class Lander(Model, arbitrary_types_allowed=True):
             refusals = f"\n{reply.said}" if reply.said else ""
             moved = [] if made.moved is None else [made.moved]
             return "\n".join([f"Not landed: {update.error}.{kept}{refusals}", *moved])
-        untracked = await asyncio.to_thread(tracked, git, remote, onto, lands)
+        untracked = await threaded(
+            self.launch.repository, tracked, git, remote, onto, lands
+        )
         if self.coming is not None:
             await self.coming.landed(
                 self.launch, short(onto), [short(each) for each in branches.landed]
@@ -1652,8 +1677,14 @@ class Lander(Model, arbitrary_types_allowed=True):
         self, git: Git, old: str | None, tip: str, onto: str, source: str
     ) -> str | None:
         """Say why `tip` doesn't go straight to `onto`, the integration branch, at `old` on the remote, where it changes what the host runs (`hosted`); none where it doesn't."""
-        found = await asyncio.to_thread(
-            hosted, self.layout, self.launch.repository, git, old, tip
+        found = await threaded(
+            self.launch.repository,
+            hosted,
+            self.layout,
+            self.launch.repository,
+            git,
+            old,
+            tip,
         )
         if not found:
             return None
@@ -1683,7 +1714,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         repository = self.launch.repository
         remote = landing.remote
         git = Git.pinned(repository)
-        tip = await asyncio.to_thread(git.commit, f"refs/heads/{name}")
+        tip = await threaded(self.launch.repository, git.commit, f"refs/heads/{name}")
         if tip is None:
             message = f"this repository has no local branch `{name}`"
             raise HostError(message)
@@ -1699,8 +1730,15 @@ class Lander(Model, arbitrary_types_allowed=True):
         if numbers:
             return numbers_refused(numbers)
         at = self.delivery.clock.now()
-        own = await asyncio.to_thread(
-            self.own_version, git, dev, name, tip, message=landing.message or "", at=at
+        own = await threaded(
+            self.launch.repository,
+            self.own_version,
+            git,
+            dev,
+            name,
+            tip,
+            message=landing.message or "",
+            at=at,
         )
         match own:
             case Unmerged(files=files):
@@ -1711,8 +1749,8 @@ class Lander(Model, arbitrary_types_allowed=True):
                 )
             case str():
                 pass
-        changing = await asyncio.to_thread(
-            hosted, self.layout, repository, git, dev, own
+        changing = await threaded(
+            self.launch.repository, hosted, self.layout, repository, git, dev, own
         )
         if not changing:
             return await self.on_gated(
@@ -1723,14 +1761,15 @@ class Lander(Model, arbitrary_types_allowed=True):
         if landing.onto == branches.integration:
             refused = await self.hosting(git, dev, own, branches.integration, name)
             return refused or ""
-        on = self.of_landing(landing, tip, at)
+        on = await threaded(self.launch.repository, self.of_landing, landing, tip, at)
         before = await asyncio.to_thread(Trials.of(self.layout, repository).read)
         kept = before.on(name)
         if kept is not None and kept.tip == tip:
             return f"Nothing to land: `{name}` is on trial at {tip} already."
         turn = self.turns.of(repository)
         async with turn:
-            found = await asyncio.to_thread(
+            found = await threaded(
+                self.launch.repository,
                 self.candidate,
                 git,
                 before,
@@ -1746,7 +1785,9 @@ class Lander(Model, arbitrary_types_allowed=True):
         onto = branches.running_ref
         asked = Merge(onto=onto, remote=remote, old=dev, branch=name, tip=found.commit)
         holding = [f"refs/heads/{name}"]
-        changed = await asyncio.to_thread(changed_files, git, dev, found.commit)
+        changed = await threaded(
+            self.launch.repository, changed_files, git, dev, found.commit
+        )
         asks = await self.asks(git, asked, holding)
         holds = self.holds(
             onto,
@@ -1858,6 +1899,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                 ],
                 payload="",
                 directory=self.launch.repository,
+                within=self.gating,
             )
         )
         match room_merged(
@@ -1881,7 +1923,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                 )
             case Conflicted() | Merged():
                 pass
-        return await asyncio.to_thread(self.unpassed, git, commit, name)
+        return await threaded(self.launch.repository, self.unpassed, git, commit, name)
 
     async def joined(
         self,
@@ -1915,7 +1957,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                     before=before, trial=trial, plan=found_now, commit=commit
                 )
 
-        now = await asyncio.to_thread(computed)
+        now = await threaded(self.launch.repository, computed)
         if now.plan.tree != found.tree and now.commit is not None:
             refused = await self.gated_in_room(git, on.branch, now.commit, branches)
             if refused is not None:
@@ -1946,8 +1988,12 @@ class Lander(Model, arbitrary_types_allowed=True):
                 f"Not landed: {failed[0].error}. What the operator approved stays "
                 f"approved.{refusals}"
             )
-        unmoved = await asyncio.to_thread(move_ref, git, branches, commit)
-        untracked = await asyncio.to_thread(tracked, git, remote, onto, commit)
+        unmoved = await threaded(
+            self.launch.repository, move_ref, git, branches, commit
+        )
+        untracked = await threaded(
+            self.launch.repository, tracked, git, remote, onto, commit
+        )
         await asyncio.to_thread(self.pinned_copies, stands)
         return Joining(
             commit=commit,
@@ -1986,8 +2032,10 @@ class Lander(Model, arbitrary_types_allowed=True):
         if held is None or not held.numbers:
             return []
         has = [ref.object for ref in refs]
-        commits = await asyncio.to_thread(git.walked, [tip], has)
-        return await asyncio.to_thread(item_numbers, git, commits, message)
+        commits = await threaded(self.launch.repository, git.walked, [tip], has)
+        return await threaded(
+            self.launch.repository, item_numbers, git, commits, message
+        )
 
     async def fetched(self, remote: str, onto: str, old: str | None) -> None:
         """Fetch `old`, `onto`'s tip on `remote`, into the store, writing no ref, so git can tell what holds it; nothing where `onto` isn't there yet.
@@ -2010,7 +2058,9 @@ class Lander(Model, arbitrary_types_allowed=True):
         )
         if refused is not None:
             return refused
-        return await asyncio.to_thread(self.unpassed, git, landing.tip, landing.branch)
+        return await threaded(
+            self.launch.repository, self.unpassed, git, landing.tip, landing.branch
+        )
 
     async def merge(self, git: Git, asked: Merge, message: str) -> Made | str:
         """Merge `asked`'s branch onto the branch it lands on in the launch's room, with `message`, check the merge as a landing is checked, and fast-forward the local branch to it, one landing at a time; return what lands, or say why nothing does.
@@ -2024,7 +2074,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         """
         onto, branch = short(asked.onto), asked.branch
         async with self.turns.of(self.launch.repository):
-            local = await asyncio.to_thread(git.commit, asked.onto)
+            local = await threaded(self.launch.repository, git.commit, asked.onto)
             base = await self.base(asked, local)
             if await self.remotes.descends(self.launch, base, asked.tip):
                 return Made(
@@ -2063,6 +2113,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                     ],
                     payload=message,
                     directory=self.launch.repository,
+                    within=self.gating,
                 )
             )
             match room_merged(ran):
@@ -2161,7 +2212,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         """
         if local is None:
             return None
-        trees = await asyncio.to_thread(worktrees, git)
+        trees = await threaded(self.launch.repository, worktrees, git)
         checkout = next((each.root for each in trees if each.branch == onto), None)
         how = "git update-ref" if checkout is None else "git merge --ff-only"
         moving = (
@@ -2181,6 +2232,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                 ],
                 payload="",
                 directory=self.launch.repository,
+                within=self.in_room,
             )
         )
         if ran.status == 0:
@@ -2201,7 +2253,7 @@ class Lander(Model, arbitrary_types_allowed=True):
     async def conflicted(self, git: Git, asked: Merge, files: list[Path]) -> str:
         """Say that merging `asked`'s branch conflicts in `files`, and how it lands: merged the other way in its worktree, by whoever works there."""
         branch = f"refs/heads/{asked.branch}"
-        trees = await asyncio.to_thread(worktrees, git)
+        trees = await threaded(self.launch.repository, worktrees, git)
         places = list(self.delivery.inbox.whereabouts.values())
         working = await asyncio.to_thread(self.working, places)
         roots = [each.root for each in trees if each.branch == branch]
@@ -2240,7 +2292,8 @@ class Lander(Model, arbitrary_types_allowed=True):
             and place.parent is not None
             and place.ended is None
         ]
-        listed = await asyncio.to_thread(
+        listed = await threaded(
+            self.launch.repository,
             git.run,
             "for-each-ref",
             "--format=%(refname)",
@@ -2252,7 +2305,7 @@ class Lander(Model, arbitrary_types_allowed=True):
             for ref in listed.output.decode().splitlines()
             if not matching(ref, limits.gated) and not matching(ref, limits.protected)
         ]
-        trees = await asyncio.to_thread(worktrees, git)
+        trees = await threaded(self.launch.repository, worktrees, git)
         working = await asyncio.to_thread(self.working, places)
         host = self.layout.host
         lines = [
@@ -2299,7 +2352,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         ]
         if not refs:
             return
-        trees = await asyncio.to_thread(worktrees, git)
+        trees = await threaded(self.launch.repository, worktrees, git)
         built = {
             each.root: short(each.branch)
             for each in trees
@@ -2351,13 +2404,25 @@ class Lander(Model, arbitrary_types_allowed=True):
         root = self.launch.worktree
         try:
             each = {
-                ref: await asyncio.to_thread(
-                    deferred, git, self.parser, root, joined.onto, joined.commit
+                ref: await threaded(
+                    self.launch.repository,
+                    deferred,
+                    git,
+                    self.parser,
+                    root,
+                    joined.onto,
+                    joined.commit,
                 )
                 for ref, joined in merged.items()
             }
-            whole = await asyncio.to_thread(
-                deferred, git, self.parser, root, landing.old, landing.tip
+            whole = await threaded(
+                self.launch.repository,
+                deferred,
+                git,
+                self.parser,
+                root,
+                landing.old,
+                landing.tip,
             )
         except (EngineError, GitError) as unread:
             return [f"lup couldn't read the `# lup: defer` comments it lands: {unread}"]
@@ -2433,8 +2498,14 @@ class Lander(Model, arbitrary_types_allowed=True):
         roles = await asyncio.to_thread(
             approved_roles, self.layout, self.launch.repository
         )
-        files = await asyncio.to_thread(
-            asked_files, git, roles, landing.old, landing.tip, parser=self.parser
+        files = await threaded(
+            self.launch.repository,
+            asked_files,
+            git,
+            roles,
+            landing.old,
+            landing.tip,
+            parser=self.parser,
         )
         baseline = self.baseline
         names = [short(each) for each in [*branches, landing.onto]]
@@ -2480,7 +2551,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                 before=None if landing.old is None else blob(git, landing.old, path),
             )
 
-        brought = await asyncio.to_thread(placed)
+        brought = await threaded(self.launch.repository, placed)
         branch, before = brought.branch, brought.before
         judgement = file.judgement
         summary = "\n".join(each.reason for each in [*judgement.asks, *judgement.flags])
@@ -2631,7 +2702,10 @@ class Lander(Model, arbitrary_types_allowed=True):
             branch
             for branch in dict.fromkeys(each.flagged.branch for each in waiting)
             if branch is not None
-            and await asyncio.to_thread(git.commit, f"refs/heads/{branch}") is None
+            and await threaded(
+                self.launch.repository, git.commit, f"refs/heads/{branch}"
+            )
+            is None
         ]
         name = short(onto)
 
@@ -2648,7 +2722,7 @@ class Lander(Model, arbitrary_types_allowed=True):
             except InboxError:
                 return None
             kept = next((each for each in files if each.path == path), None)
-            landed = await asyncio.to_thread(blob, git, tip, path)
+            landed = await threaded(self.launch.repository, blob, git, tip, path)
             if kept is None or not stands(kept, landed):
                 return None
             return (
@@ -2720,7 +2794,7 @@ class Lander(Model, arbitrary_types_allowed=True):
             and not matching(ref, limits.protected)
         }
         listed = [ref.name for ref in refs]
-        trees = await asyncio.to_thread(worktrees, git)
+        trees = await threaded(self.launch.repository, worktrees, git)
         places = list(self.delivery.inbox.whereabouts.values())
         working = await asyncio.to_thread(self.working, places)
         main = trees[0].root if trees else None
@@ -2729,7 +2803,9 @@ class Lander(Model, arbitrary_types_allowed=True):
             **working,
         }
         resumable = await asyncio.to_thread(self.resumable, places)
-        lapsed = await asyncio.to_thread(self.lapsed, git, places, trees[1:], left, tip)
+        lapsed = await threaded(
+            self.launch.repository, self.lapsed, git, places, trees[1:], left, tip
+        )
         if not landed and not lapsed:
             return Cleaned()
         roots = {
@@ -2812,6 +2888,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                 command=["podman", "container", "exists", container],
                 payload="",
                 directory=self.launch.repository,
+                within=self.in_room,
             )
         )
         match ran.status:
@@ -2857,6 +2934,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                 ],
                 payload="",
                 directory=self.launch.repository,
+                within=self.in_room,
             )
         )
         if ran.status != 0:
@@ -2899,7 +2977,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         ]
         kept = [root for root, each in zip(roots, trees, strict=True) if each.left]
         branch = (
-            await asyncio.to_thread(local_deleted, git, ref, commit)
+            await threaded(self.launch.repository, local_deleted, git, ref, commit)
             if not kept
             else Cleaned(
                 left=[f"the local branch `{short(ref)}`, checked out in {kept[0]}"]
@@ -2950,6 +3028,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                 ],
                 payload="",
                 directory=self.launch.repository,
+                within=self.in_room,
             )
         )
         if ran.status != 0:
@@ -2989,6 +3068,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                 ],
                 payload="",
                 directory=self.launch.repository,
+                within=self.in_room,
             )
         )
         if ran.status != 0:
@@ -3493,7 +3573,7 @@ async def unapproved_files(
         files = asked_files(git, roles, old, tip, parser=parser)
         return [each.path for each in files if not baseline.approves(each)]
 
-    return await asyncio.to_thread(read)
+    return await threaded(repository, read)
 
 
 class LandingTools(Model, RoomTools, arbitrary_types_allowed=True):

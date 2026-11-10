@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Literal, override
 
 from lup import blocks
 from lup.types import Model
-from lup_dev.git import Git
+from lup_dev.git import Git, threaded
 from lup_dev.host.protocol import LaunchId, Reply, Request
 from lup_dev.host.records import (
     Entry,
@@ -753,9 +753,7 @@ async def ran_in(transcript: Transcript, repository: Path) -> None:
     ran: the record found under that session's id is read only where it ran
     in the asker's repository.
     """
-    under = await asyncio.to_thread(
-        lambda: [repository, *Git.pinned(repository).worktrees()]
-    )
+    under = [repository, *await threaded(repository, Git.pinned(repository).worktrees)]
     ran = transcript.directory
     if ran is None or not within(ran, under):
         message = "the conversation isn't one of this repository's"

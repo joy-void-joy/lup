@@ -436,9 +436,12 @@ class Origin(Model):
         )
 
     def quiet(self) -> Git:
-        """Return git on the repository with its own upkeep off, as the host's pushes and fetches run it."""
+        """Return git on the repository with its own upkeep off, as the host's pushes and fetches run it, given as long as git crossing the network is (`Git.crossing`)."""
         return self.git.model_copy(
-            update={"arguments": ["-c", "gc.auto=0", "-c", "maintenance.auto=false"]}
+            update={
+                "arguments": ["-c", "gc.auto=0", "-c", "maintenance.auto=false"],
+                "within": self.git.crossing,
+            }
         )
 
 

@@ -33,7 +33,6 @@ wake its own repository's thread parked on a condition, which steers and
 guards nothing.
 """
 
-import asyncio
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Literal
 
@@ -44,7 +43,7 @@ from lup_dev.codescan.contract import Due
 from lup_dev.codescan.directives import IssueRef
 from lup_dev.errors import LupDevError
 from lup_dev.forge.github import GitHub, GitHubError
-from lup_dev.git import Git
+from lup_dev.git import Git, threaded
 from lup_dev.host.protocol import Register
 from lup_dev.inbox.delivery import Delivery
 from lup_dev.layout import GitDirectoryLayout, Layout
@@ -221,8 +220,12 @@ class Coming(Model, arbitrary_types_allowed=True):
         if tip is None or not waited:
             return []
         try:
-            landed = await asyncio.to_thread(
-                in_history, launch.repository, list(dict.fromkeys(waited)), tip
+            landed = await threaded(
+                launch.repository,
+                in_history,
+                launch.repository,
+                list(dict.fromkeys(waited)),
+                tip,
             )
         except LupDevError as failed:
             self.say(

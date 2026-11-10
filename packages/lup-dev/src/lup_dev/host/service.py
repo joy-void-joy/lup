@@ -53,6 +53,7 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from contextlib import AsyncExitStack, asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Self, override
 
@@ -71,7 +72,7 @@ from lup.events import (
     TurnStarted,
     WorktreeAsked,
 )
-from lup.programs import ProgramMissingError, Ran, awaited
+from lup.programs import ProgramMissingError, ProgramOverdueError, Ran, awaited
 from lup.rooms.engine import ContainerError, Podman
 from lup.tools import speaking
 from lup.tools.serving import Answer, Outbox, serve
@@ -165,13 +166,19 @@ class Answerer(ABC):
 
 
 class Program(Model):
-    """One program the service runs: `gh` for a launch, or git for its room; its command, what goes on its input, and where it runs."""
+    """One program the service runs: `gh` for a launch, git for its room, or a command in the room; its command, what goes on its input, where it runs, and the longest it may."""
 
     command: list[str]
     payload: str
     """What goes on its standard input: a body for `gh`, or what git reads."""
     directory: Path | None = None
     """Where it runs; none for the service's own directory."""
+    within: timedelta = timedelta(seconds=30)
+    """The longest it may run, past which it's killed, with whatever it
+    started. git reading a repository's refs takes milliseconds, and a room can
+    make a ref a FIFO in which it waits for good (`docs/credentials.md`,
+    *Running git on the host*); what crosses the network, or runs the room's
+    gate, is given longer where it's made, saying why."""
 
 
 async def executed(program: Program) -> Ran:
@@ -179,9 +186,10 @@ async def executed(program: Program) -> Ran:
 
     Awaited (`lup.programs`, `awaited`), so it holds no thread for as long as it
     runs, `gh` waiting on GitHub's answer or git on a room's push
-    (`remote/protocol.py`), and it's killed where the wait is cancelled. One
-    that can't be started ends with status 127, as a shell says it, why on its
-    standard error.
+    (`remote/protocol.py`), and it's killed, with what it started, past its
+    `within` or where the wait is cancelled. One that can't be started ends
+    with status 127, as a shell says it, and one killed past its `within` with
+    status 124, as `timeout` says it, why on its standard error.
     """
     name, *arguments = program.command
     try:
@@ -191,9 +199,12 @@ async def executed(program: Program) -> Ran:
             cwd=program.directory,
             stdin=program.payload,
             checked=False,
+            within=program.within,
         )
     except ProgramMissingError as missing:
         return Ran(command=program.command, status=127, error=str(missing).encode())
+    except ProgramOverdueError as late:
+        return Ran(command=program.command, status=124, error=str(late).encode())
 
 
 class Handler[R: Request](ABC):

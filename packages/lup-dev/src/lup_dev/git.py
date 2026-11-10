@@ -37,17 +37,29 @@ the store and git reads an object by its id without hashing it: what's read
 decides what the operator is asked and what the host runs, and the ids alone say
 what a commit holds, as a forge reads them (`docs/field-notes.md`, *Host-side git
 in a repository the room writes*).
+
+Every git `Git` runs is killed past a time limit (`Git.within`), since a room
+can make a ref a FIFO in which git waits for good. A service running git off
+its event loop runs it in threads of the repository's own (`threaded`), never
+asyncio's default pool: a room slowing git on its repository then holds that
+repository's threads alone, never those the rest of the service waits on.
 """
 
+import asyncio
+import contextvars
+import functools
 import hashlib
 import io
 import os
+import shlex
+from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from itertools import batched
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal
 
-from lup.programs import ProgramError, Ran, run
-from lup.types import Model
+from lup.programs import ProgramError, ProgramOverdueError, Ran, run
+from lup.types import Model, MutableModel
 from lup_dev.errors import LupDevError
 
 if TYPE_CHECKING:
@@ -260,6 +272,22 @@ class Git(Model):
     index: Path | None = None
     """An index git stages in, in place of the worktree's own (`GIT_INDEX_FILE`);
     none for the worktree's."""
+    within: timedelta = timedelta(seconds=30)
+    """The longest each git it runs may take, where a call gives none: past it,
+    git is killed (`run`). Every git has a limit, since a room writes the
+    repository's refs and can make one a FIFO nothing writes, in which git
+    reading it waits for good (`docs/credentials.md`, *Running git on the
+    host*). 30 seconds is hundreds of times what a read of refs or objects
+    takes."""
+    whole: timedelta = timedelta(minutes=10)
+    """The longest git reading or writing a whole worktree may take, which a
+    caller gives it (`within=git.whole`): `git add --all` hashing each file it
+    hasn't yet, `git worktree add` checking each out."""
+    crossing: timedelta = timedelta(minutes=10)
+    """The longest git crossing the network may take, which a caller gives it
+    (`within=git.crossing`): listing, fetching or pushing, where a large fetch
+    or a first push moves a whole history, and the remote answers at its own
+    pace."""
 
     @classmethod
     def pinned(cls, common: Path) -> Git:
@@ -267,9 +295,14 @@ class Git(Model):
         return cls(cwd=common, common=common)
 
     def run(
-        self, *arguments: str, stdin: bytes | None = None, ok: list[int] | None = None
+        self,
+        *arguments: str,
+        stdin: bytes | None = None,
+        ok: list[int] | None = None,
+        within: timedelta | None = None,
     ) -> Ran:
-        """Run git with `arguments`; raise `GitError` on an exit status not in `ok`, or where git can't run."""
+        """Run git with `arguments`, killed past `within`, or this git's own limit where that's none (`Git.within`); raise `GitError` on an exit status not in `ok`, where git can't run, or where it runs past its limit, naming the command and the repository."""
+        limit = within or self.within
         safe = [
             "--no-replace-objects",
             *graphless(),
@@ -294,10 +327,22 @@ class Git(Model):
             *arguments,
         ]
         try:
-            return run(program, *words, cwd=self.cwd, stdin=stdin, ok=ok)
+            return run(program, *words, cwd=self.cwd, stdin=stdin, ok=ok, within=limit)
+        except ProgramOverdueError as late:
+            message = (
+                f"git {shlex.join([*self.arguments, *arguments])} ran past "
+                f"{limit.total_seconds():g} s in {self.where()}, and was "
+                "stopped: something it reads there may be a FIFO or a file nothing "
+                "finishes writing, which a room can make of the repository's refs"
+            )
+            raise GitError(message) from late
         except ProgramError as failed:
             message = f"git {' '.join(arguments)} failed: {failed}"
             raise GitError(message) from failed
+
+    def where(self) -> Path:
+        """Return where this git runs: the repository's common git directory where it's pinned, else its working directory."""
+        return self.common or self.cwd
 
     def text(self, *arguments: str) -> str:
         """Run git and return what it printed, without the trailing newline."""
@@ -581,3 +626,52 @@ class Git(Model):
             read = self.contents([each.object for each in chunk])
             for entry, content in zip(chunk, read, strict=True):
                 written(entry, content)
+
+
+class Threads(MutableModel, arbitrary_types_allowed=True):
+    """The threads git runs in off an event loop, `each` at most for each repository, made as they're first needed: `threaded`.
+
+    Not asyncio's default pool, which the host service's hooks wait on
+    (`Workers.current`, `host/workers.py`): a room can make git on its
+    repository wait the whole of its limit (`Git.within`), and trigger such
+    git as often as it calls `land` or starts a session, so on a shared pool
+    it could hold every thread, and every hook would wait behind them. A
+    pool of its own for git alone would still let one room's repository
+    hold every other repository's git; a FIFO in a repository slows every
+    git on it alike whoever asks, so each repository's threads are its own,
+    and what a room slows is its repository alone.
+    """
+
+    each: int = 8
+    pools: dict[Path, ThreadPoolExecutor] = {}
+
+    def of(self, repository: Path) -> ThreadPoolExecutor:
+        """Return the threads of the repository whose git directory is `repository`, made where it has none yet.
+
+        Kept with `setdefault`, so two event loops asking at once from two
+        threads keep one: a pool starts no thread until it's given work, so
+        the other made is dropped as it is.
+        """
+        found = self.pools.get(repository)
+        if found is not None:
+            return found
+        made = ThreadPoolExecutor(
+            max_workers=self.each, thread_name_prefix=f"git {repository}"
+        )
+        return self.pools.setdefault(repository, made)
+
+
+THREADS = Threads()
+"""Each repository's threads, for the process."""
+
+
+async def threaded[**P, R](
+    repository: Path, call: Callable[P, R], /, *args: P.args, **kwargs: P.kwargs
+) -> R:
+    """Run `call` with `args` and `kwargs`, which runs git on the repository whose git directory is `repository`, in a thread of that repository's own (`Threads`), and return what it returns, as `asyncio.to_thread` does on the default pool."""
+    pool = THREADS.of(repository)
+    context = contextvars.copy_context()
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        pool, functools.partial(context.run, call, *args, **kwargs)
+    )
