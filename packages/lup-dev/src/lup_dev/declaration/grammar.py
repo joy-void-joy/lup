@@ -22,10 +22,12 @@ beneath it, and the default's operations, which the selection's begin with, run
 once, as the engine resolves a rule selection (`checker/src/catalog.ts`).
 
 Each operation keeps the layer that wrote it (`Operation.layer`), so `.add` tells
-a name a layer below gave from one its own layer gave. The first it puts on what
-was there, as `.edit` would, since the layer below may come to give a name after
-the one above was written: a project adopting a module that a person's layer
-adds. The second it refuses, adding a name twice in one layer being a slip.
+a name from below from one its own layer gave. From below is what a layer below
+gave, and what the defaults gave to `Kind.default()` and `Kind.all()`: either may
+come to give a name after the add was written, a project adopting a module that
+a person's layer adds, a release adding to the defaults a module a project adds.
+So `.add` puts the entry on that one, as `.edit` would, and refuses a name its own
+layer gave, by `Kind.only(…)`, `Kind.of(…)` or an operation: that's a slip.
 """
 
 from functools import reduce
@@ -210,9 +212,10 @@ class Placed[E](Anchor):
     then one for each operation."""
     why: str | None = None
     """The reason given with what put it there."""
-    layer: int = 0
+    layer: int | None = 0
     """The layer of the chain that last gave or changed it, by its start or an
-    operation (`Operation.layer`)."""
+    operation (`Operation.layer`); none where the defaults gave it, to
+    `Kind.default()` or `Kind.all()`, which are below every layer."""
 
 
 class Selection[E](Model):
@@ -249,8 +252,9 @@ class Selection[E](Model):
     ) -> Self:
         """Add `entries` beside the ones there.
 
-        An entry of a name a layer below gave goes on that one, as `.edit` puts
-        one (`taken`); one of a name this layer already gave is an error.
+        An entry of a name from below, a layer below's or the defaults', goes
+        on that one, as `.edit` puts one (`taken`); one of a name this layer
+        already gave is an error.
         """
         return self.then(Add(entries=list(entries), before=before, after=after))
 
@@ -345,15 +349,17 @@ class Selection[E](Model):
         composed over the one below it, the defaults beneath them all (a
         module's own, as `Modules.placed` puts it; lup's modules, under a
         project's), so a start still from below is the defaults' own, and its
-        operations already hold theirs.
+        operations already hold theirs. What the defaults give, by
+        `Kind.default()` or `Kind.all()`, is below every layer: a later release
+        may add to it a name the selection adds.
         """
         match self.start:
             case Below():
                 chosen: list[Placed[E]] = []
             case Default():
-                chosen = [Placed(entry=entry) for entry in defaults]
+                chosen = [Placed(entry=entry, layer=None) for entry in defaults]
             case All():
-                chosen = [Placed(entry=entry) for entry in known]
+                chosen = [Placed(entry=entry, layer=None) for entry in known]
             case Only(names=names):
                 by_name = {self.named(entry): entry for entry in known}
                 self.present("only", names, list(by_name))
@@ -464,9 +470,10 @@ class Selection[E](Model):
         return layer.model_copy(update=below.anchored())
 
     def taken(self, below: Placed[E], added: Placed[E]) -> Placed[E]:
-        """Return the entry `below`, which a layer below gave, with `added`, an entry of its name a layer above adds, on it.
+        """Return the entry `below`, from below, with `added`, an entry of its name a layer above adds, on it.
 
-        As an edit puts it (`edited`), the later layer's word winning. It goes
+        From below is what a layer below gave, or the defaults. As an edit puts
+        it (`edited`), the later layer's word winning. It goes
         where the add places it, `before=` or `after=`, else where `below` was.
         """
         anchored = added.before is not None or added.after is not None
