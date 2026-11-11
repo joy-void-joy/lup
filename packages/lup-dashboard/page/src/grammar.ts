@@ -13,7 +13,7 @@ import { newId } from "./anchors";
 import { partSaid, type ReplyPart } from "./brief";
 import type { components } from "./generated/api";
 import { cited } from "./comments";
-import { cutAt, EMPTY, isLetter, isNobody, news, toAnswer, waits, writtenId, type Conversation, type Draft, type Group, type Item, type Laid, type Placed, type Region, type ThreadRead } from "./review";
+import { concernReads, concernWords, cutAt, EMPTY, isLetter, isNobody, news, toAnswer, waits, writtenId, type Conversation, type Draft, type Group, type Item, type Laid, type Placed, type Region, type ThreadRead } from "./review";
 import type { Block as ViewBlock, Offer } from "./views";
 
 export type Verb = components["schemas"]["Verb"];
@@ -127,10 +127,10 @@ function writtenReach(laidOut: Laid, node: Placed, verb: Verb, naming: Naming): 
     if (letter === undefined || !isLetter(letter) || letter.thread == null) {
         return null;
     }
-    const group = laidOut.groups.find((each) => each.thread?.thread.number === letter.thread);
-    const answering = group?.conversation ?? null;
+    const concern = laidOut.concerns.find((each) => !each.dim && each.read.thread.number === letter.thread)?.read;
+    const answering = concern?.answering ?? null;
     if (letter.to != null) {
-        return { on: "your message", node, says: "send it to no one: it stays on the thread, waking nobody", acts: [{ kind: "readdress", id: writtenId(letter), to: null }] };
+        return { on: "your message", node, says: "send it to no one: it stays on the concern, waking nobody", acts: [{ kind: "readdress", id: writtenId(letter), to: null }] };
     }
     return answering === null ? null : { on: "your message", node, says: `send it to ${naming.called(answering)}`, acts: [{ kind: "readdress", id: writtenId(letter), to: answering }] };
 }
@@ -271,7 +271,7 @@ function actsOf(blocks: readonly Placed[], verb: Verb, conversation: Conversatio
  * - **An agent's group,** on its banner or anywhere in it nothing nearer takes the verb: what its banner's parts offer,
  *   as hold; done marking it seen and reaching its own news and drawers, its subagents' left as they are, and an item
  *   asking something, which marking done would answer, left too; comment a message to it.
- * - **A thread,** on its banner: done reading its news, then settling it, decline declining it (`threadReach`).
+ * - **A concern,** on its block: done clearing it, decline declining it, comment writing on it (`concernReach`).
  */
 export function reachOf(laidOut: Laid, at: number, verb: Verb, naming: Naming): Reach {
     const chain = chainAt(laidOut.nodes, at);
@@ -335,6 +335,16 @@ export function reachOf(laidOut: Laid, at: number, verb: Verb, naming: Naming): 
                 }
                 break;
             }
+            case "frame": {
+                const concern = laidOut.concerns.find((each) => !each.dim && `concern ${each.read.thread.number}` === node.id);
+                if (concern !== undefined) {
+                    const found = concernReach(concern.read, node, verb, naming);
+                    if (found !== null) {
+                        return found;
+                    }
+                }
+                break;
+            }
             case "group": {
                 const made = group(node);
                 if (made === undefined) {
@@ -377,9 +387,6 @@ function itemReach(region: Region, node: Placed, verb: Verb): Reach | null {
  * nothing of it takes the verb, as on lup's approvals, which no agent is.
  */
 function groupReach(laidOut: Laid, node: Placed, group: Group, verb: Verb, naming: Naming): Reach | null {
-    if (group.thread !== null) {
-        return threadReach(laidOut, node, group, group.thread, verb, naming);
-    }
     const conversation = group.conversation;
     const on = conversation === null ? "lup's approvals" : naming.called(conversation);
     for (const part of group.parts) {
@@ -432,6 +439,36 @@ function groupReach(laidOut: Laid, node: Placed, group: Group, verb: Verb, namin
     }
 }
 
+/**
+ * Return where `verb` lands on a concern laid out as a block at `node`, the host reading it as `read`: done clears it,
+ * settling it, and decline declines it, each the operator's mark, which leaves the agent's as it is and the concerns
+ * nested under it as they stand, whatever waits on them in it, each still waiting where it's laid out; one cleared already
+ * says so and does nothing. Comment writes on it, to whoever answers for it, or to no one where nobody does. None for
+ * what else.
+ */
+function concernReach(read: ThreadRead, node: Placed, verb: Verb, naming: Naming): Reach | null {
+    const on = concernWords(read);
+    const cleared = (read.cleared ?? null) !== null;
+    switch (verb.name) {
+        case CORE.done:
+            if (cleared) {
+                return { on, node, says: "cleared already", acts: [] };
+            }
+            return { on, node, says: concernReads(read) === "for your eyes" ? "clear it: it's done" : "clear it", acts: [threadAct(read, node.id, SETTLE)] };
+        case CORE.decline:
+            if (cleared) {
+                return { on, node, says: "cleared already", acts: [] };
+            }
+            return { on, node, says: "decline it: nothing more will be done", acts: [threadAct(read, node.id, DECLINE)] };
+        case CORE.comment: {
+            const answering = read.answering ?? null;
+            return { on, node, says: answering === null ? "write on it, to no one" : `write on it, to ${naming.called(answering)}`, acts: [{ kind: "comment" }] };
+        }
+        default:
+            return null;
+    }
+}
+
 /** The host's requests settling and declining a thread, the operator's (`docs/inbox.md`, *Threads in the review*). */
 export const SETTLE = "inbox-settle-thread";
 export const DECLINE = "inbox-decline-thread";
@@ -440,109 +477,13 @@ export const DECLINE = "inbox-decline-thread";
  * What a mark on a thread does to it, by its action, as the reply says it after the thread's name, `@auth settled`:
  * the host's requests settling and declining it, and the core's review mark on its node, reading it.
  */
-const THREAD_DONE = { [SETTLE]: "settled", [DECLINE]: "declined", "review-mark": "read" } as const;
-
-/**
- * Return how many things in thread `read` still wait on the operator, as the host reads them (`ThreadRead.asks`): a
- * question, an approval, a held change, a problem, a check; but those `draft` answers, each marked done or declined, or
- * commented on, a check ticked, which the reply settles.
- */
-export function asking(read: ThreadRead, draft: Draft): number {
-    const answered = new Set([
-        ...(draft.done ?? []),
-        ...(draft.declined ?? []),
-        ...(draft.comments ?? []).filter((each) => each.text.trim() !== "").map((each) => each.item),
-        ...(draft.marks ?? []).filter((each) => each.action === "inbox-check-answer").map((each) => Number((each.argument as { number?: number }).number ?? 0)),
-    ]);
-    return (read.asks ?? []).filter((each) => !answered.has(each.node)).length;
-}
-
-/** Say how many things wait on the operator, as a thread's banner key says why it isn't settled: `1 waits on you`. */
-function waitingSaid(count: number): string {
-    return count === 1 ? "1 waits on you" : `${count} wait on you`;
-}
+const THREAD_DONE = { [SETTLE]: "cleared", [DECLINE]: "declined", "review-mark": "read" } as const;
 
 /** Return an act on thread `read`, shown on its banner, `block`: `action`, the host's, settling or declining it, saying so, `@auth settled`. */
 function threadAct(read: ThreadRead, block: string, action: typeof SETTLE | typeof DECLINE): Act {
-    const says = partSaid({ kind: "thread", name: read.thread.name, done: THREAD_DONE[action] });
+    const says = partSaid({ kind: "thread", name: cutAt(concernWords(read), 40), done: THREAD_DONE[action] });
     const offer: Offer = { action, argument: { number: read.thread.number }, verb: null, chord: null, runs: "send", commented: false, says };
     return { kind: "mark", offer, block, version: null };
-}
-
-/**
- * Return marking thread `read` read up to item `upTo`, shown on its banner, `block`: the core's review mark on its node,
- * moved as the reply is sent (`review-mark`; `docs/inbox.md`, *Threads in the review*), so what came after is new.
- */
-export function readAct(read: ThreadRead, block: string, upTo: number): Act {
-    const offer: Offer = {
-        action: "review-mark",
-        argument: { repository: read.thread.repository, module: CORE_MODULE, key: { node: read.thread.number }, up_to: String(upTo) },
-        verb: CORE.done,
-        chord: null,
-        runs: "send",
-        commented: false,
-        says: partSaid({ kind: "thread", name: read.thread.name, done: THREAD_DONE["review-mark"] }),
-    };
-    return { kind: "mark", offer, block, version: null };
-}
-
-/**
- * Return where `verb` lands on a thread's group, `group`, laid out at `node`, the host reading it as `read`. Settling is
- * the operator's, on any thread, its holder going on or ended: done marks its news read where there's some the draft
- * doesn't mark yet, up to the last item shown, each news item read with it, what asks the operator left and counted;
- * otherwise it settles it, and decline declines it, each never where something in it still waits on the operator,
- * saying how many, nor on one settled or declined already, nor on the threads under it. Comment writes on it, to whoever
- * answers for it, or to no one where nobody does. None for what else.
- */
-function threadReach(laidOut: Laid, node: Placed, group: Group, read: ThreadRead, verb: Verb, naming: Naming): Reach | null {
-    const on = `@${read.thread.name}`;
-    const confirming = read.state === "done to confirm";
-    const closed = read.state === "settled" || read.state === "declined";
-    const draft = naming.draft ?? EMPTY;
-    const waiting = asking(read, draft);
-    switch (verb.name) {
-        case CORE.done: {
-            const regions = laidOut.regions.filter((each) => each.header.from > node.from && each.header.from <= node.to);
-            // Its news that still waits, each read: what's read already is the thread's history.
-            const items = regions.flatMap((region) => {
-                if (!news(region.item) || !waits(region.item)) {
-                    return [];
-                }
-                const child = chainAt(node.children, region.header.from).findLast((each) => each.kind === "item");
-                const reached = child === undefined ? null : itemReach(region, child, verb);
-                return reached === null || reached.on === null ? [] : reached.acts;
-            });
-            // What asks the operator and still waits is left: a question answered, a held change decided, is the thread's history.
-            const left = leaving(regions.filter((each) => toAnswer(each.item, EMPTY)).map((each) => each.item.number));
-            // And what the host says is new in it, read as far as the newest, though its conversation isn't read yet.
-            const fresh = read.new ?? [];
-            const last = Math.max(0, ...regions.map((each) => each.item.number), ...fresh);
-            const reading = [...(last === 0 ? [] : [readAct(read, node.id, last)]), ...items];
-            if ((fresh.length > 0 || items.length > 0) && reading.some((each) => !isMarked(draft, each, CORE.done))) {
-                const what = `mark its news read${items.length === 0 ? "" : ", each item with it"}`;
-                return { on, node, says: `${what}${left.short}`, whole: `${what}${left.whole}`, acts: reading };
-            }
-            if (closed) {
-                return null;
-            }
-            if (waiting > 0) {
-                return { on, node, says: `not settled while ${waitingSaid(waiting)}`, acts: [] };
-            }
-            return { on, node, says: confirming ? "settle it: it works" : "settle it", acts: [threadAct(read, node.id, SETTLE)] };
-        }
-        case CORE.decline:
-            if (closed) {
-                return null;
-            }
-            if (waiting > 0) {
-                return { on, node, says: `not declined while ${waitingSaid(waiting)}`, acts: [] };
-            }
-            return { on, node, says: "decline it: nothing more will be done", acts: [threadAct(read, node.id, DECLINE)] };
-        case CORE.comment:
-            return { on, node, says: group.conversation === null ? "write on it, to no one" : `write on it, to ${naming.called(group.conversation)}`, acts: [{ kind: "comment" }] };
-        default:
-            return null;
-    }
 }
 
 /**
@@ -656,12 +597,11 @@ function offered(draft: Draft, act: Extract<Act, { kind: "mark" }>, verb: string
  * or remark written on a block offering what a comment on it implies, as a file of "since you approved" offers marking
  * it reviewed, or a file held at landing offers declining its landing, that offer marked by its verb on the block, at the
  * version the comment was written on, the latest written on it; none where the draft marks the block by that offer's
- * action already, by any verb, the operator's own mark the later word. And each thread they acted in read up to what the
- * review shows of it (`threadsRead`), as Space d on its banner reads it.
+ * action already, by any verb, the operator's own mark the later word.
  * Shown as the draft's own marks are, and kept in the draft as it's sent, so Ctrl+Enter applies them with the rest.
  */
 export function implied(laidOut: Laid, draft: Draft): Marked[] {
-    const found = new Map<string, Marked>(threadsRead(laidOut, draft).map((each) => [each.id, each]));
+    const found = new Map<string, Marked>();
     for (const each of laidOut.written) {
         const quote = "quote" in each ? each.quote : null;
         const block = quote?.block ?? "";
@@ -695,15 +635,13 @@ export function implied(laidOut: Laid, draft: Draft): Marked[] {
  * Return `now`, what the operator's comments imply as the review is laid out (`implied`), with each of `before`, what they
  * implied as it was last laid out, whose comment or thread another buffer has off the screen (`Showing`), so what's sent
  * doesn't depend on which buffer is on screen as it's sent: a mark on a block not laid out now, its comment still in
- * the draft and the draft not marking it itself; a thread's mark, the thread not laid out now and anything still drafted
- * that acts on a thread.
+ * the draft and the draft not marking it itself.
  */
 export function carried(before: readonly Marked[], now: readonly Marked[], laidOut: Laid, draft: Draft): Marked[] {
     const named = (mark: Marked) => `${mark.block} ${mark.action}`;
     const ids = new Set(now.map((each) => each.id));
     const places = new Set(now.map(named));
     const said = (each: { text: string }) => each.text.trim() !== "";
-    const acting = (draft.done ?? []).length > 0 || (draft.declined ?? []).length > 0 || (draft.comments ?? []).some(said) || (draft.letters ?? []).some(said);
     const writtenNow = new Map([...(draft.comments ?? []), ...(draft.letters ?? []), ...(draft.remarks ?? [])].map((each): [string, { text: string }] => [each.id ?? "", each]));
     return [
         ...now,
@@ -711,79 +649,10 @@ export function carried(before: readonly Marked[], now: readonly Marked[], laidO
             if (ids.has(mark.id) || places.has(named(mark))) {
                 return false;
             }
-            const thread = /^implied read (\d+)$/.exec(mark.id)?.[1];
-            if (thread !== undefined) {
-                return acting && !laidOut.groups.some((each) => each.thread?.thread.number === Number(thread));
-            }
             const comment = writtenNow.get(mark.id.slice("implied ".length));
             return findNode(laidOut.nodes, mark.block) === undefined && comment !== undefined && said(comment) && !(draft.marks ?? []).some((each) => each.block === mark.block && each.action === mark.action);
         }),
     ];
-}
-
-/**
- * Return each thread the operator acted in, as the draft says, read as far as the review shows it, its review mark moved
- * there as the reply is sent (`readAct`), so only what comes after is new to them, the latest few they read shown before
- * it: an item in it marked done or declined, or commented on, a message written on it, a check in it ticked or answered.
- * Read up to the last item it shows before the first news they leave unread, in the order the items came, so moving it
- * never takes news they haven't read out of what's new, as Space d on its banner reads it with it. An item, a check, is
- * the innermost thread's it's laid out in. None for a thread they mark read already, nor one showing no item before
- * what they leave unread.
- */
-export function threadsRead(laidOut: Laid, draft: Draft): Marked[] {
-    const threads = laidOut.groups.filter((each) => each.thread !== null);
-    // The innermost thread laid out at `at`: the latest begun of those it's within.
-    const threadAt = (at: number): Group | undefined => threads.findLast((each) => each.banner.from <= at && at <= each.end);
-    const acted = new Set<number>();
-    const items = new Set([
-        ...(draft.done ?? []),
-        ...(draft.declined ?? []),
-        ...(draft.comments ?? []).filter((each) => each.text.trim() !== "").map((each) => each.item),
-    ]);
-    const ticked = new Set(
-        (draft.marks ?? []).filter((each) => each.action === "inbox-check-answer").map((each) => Number((each.argument as { number?: number }).number ?? 0)),
-    );
-    for (const region of laidOut.regions) {
-        const thread = items.has(region.item.number) ? threadAt(region.header.from)?.thread : undefined;
-        if (thread != null) {
-            acted.add(thread.thread.number);
-        }
-    }
-    for (const check of laidOut.checks) {
-        if (items.has(check.check.check.number) || ticked.has(check.check.check.number)) {
-            acted.add(check.thread);
-        }
-    }
-    for (const letter of (draft.letters ?? []).filter((each) => each.text.trim() !== "")) {
-        if (letter.thread != null) {
-            acted.add(letter.thread);
-        }
-    }
-    const marked: Marked[] = [];
-    for (const number of acted) {
-        const headers = threads.filter((each) => each.thread?.thread.number === number);
-        const [group] = headers;
-        const read = group?.thread ?? null;
-        if (group === undefined || read === null) {
-            continue;
-        }
-        const node = findNode(laidOut.nodes, `group ${group.place}`);
-        const shown = laidOut.regions
-            .filter((each) => headers.some((header) => threadAt(each.header.from) === header))
-            .map((each) => each.item)
-            .toSorted((a, b) => a.number - b.number);
-        const unread = shown.findIndex((each) => news(each) && answering(each.offers, DONE_VERB).length > 0 && !items.has(each.number));
-        const upTo = (unread < 0 ? shown : shown.slice(0, unread)).at(-1);
-        const markedAlready = (draft.marks ?? []).some((each) => each.action === "review-mark" && headers.some((header) => each.block === `group ${header.place}`));
-        if (node === undefined || upTo === undefined || markedAlready) {
-            continue;
-        }
-        const act = readAct(read, node.id, upTo.number);
-        if (act.kind === "mark") {
-            marked.push({ id: `implied read ${read.thread.number}`, action: act.offer.action, argument: act.offer.argument ?? {}, verb: CORE.done, says: act.offer.says, block: act.block, version: null });
-        }
-    }
-    return marked;
 }
 
 /** What moving a review mark is given (`MoveMarks`, one of its marks): the repository, the module, its key and how far. */

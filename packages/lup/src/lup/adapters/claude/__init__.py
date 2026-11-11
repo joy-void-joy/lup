@@ -9,7 +9,9 @@ none of the operator's settings, and nothing written to their history
 
 The same declaration compiles for a terminal (`terminal`,
 `lup.adapters.claude.terminal`): Claude Code's interactive CLI, with lup's settings
-passed as flags and files of the launch's own.
+passed as flags and files of the launch's own; and for a session held with no
+terminal (`held`, `lup.adapters.claude.held`), the same CLI over its stream-json
+input and output.
 
 The Agent SDK is imported when an ask first runs, so the declaration, and its
 terminal, need no `lup[claude]` extra: a launch runs the CLI it's given.
@@ -19,6 +21,7 @@ from typing import TYPE_CHECKING, Literal, overload, override
 
 from pydantic import BaseModel
 
+from lup.adapters.claude.held import held_terminal, unpushed
 from lup.adapters.claude.layout import ClaudeLayout
 from lup.adapters.claude.settings import ClaudeSettings
 from lup.adapters.claude.terminal import compiled
@@ -77,3 +80,8 @@ class Claude(Declaration):
             settings=settings,
             layout=ClaudeLayout.of(ClaudeSettings()),
         )
+
+    @override
+    def held(self, settings: TerminalSettings) -> Terminal:
+        """Compile the declaration for Claude Code held over its stream-json input and output (`lup.adapters.claude.held`), with lup's settings."""
+        return held_terminal(self.terminal(unpushed(settings)))

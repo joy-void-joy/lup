@@ -41,7 +41,7 @@ describe("what comes to the demo as it runs, in headless Chromium", () => {
         await review.holds("── @61 question · new · ");
         await review.holds("→ called mcp__lup__ask · this item");
         // Counted on the row of the thread they work in, as what stops on the operator.
-        await dashboard.page.waitForFunction(() => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("@transcript-reader") && (each.textContent ?? "").includes("◆2")));
+        await dashboard.page.waitForFunction(() => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("The transcript reader") && (each.textContent ?? "").includes("◆2")));
     });
 
     it("brings two writes to a branch into its drawer, each flagged", async () => {

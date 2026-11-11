@@ -2,8 +2,8 @@
 
 Each runtime's module builds its `Adapter`, what lup needs of it: how its hooks
 are answered, how the host service reads them, adds to their answers and starts
-a turn of an idle session, and what a launch of it runs. The command line lists
-them.
+a turn of an idle session, what a launch of it runs, and how one is held with no
+terminal. The command line lists them.
 """
 
 from collections.abc import Callable
@@ -11,7 +11,9 @@ from datetime import timedelta
 from pathlib import Path, PurePosixPath
 
 from lup.events import SessionEvent
+from lup.rooms.engine import Pipes
 from lup.sessions.declaration import Declaration
+from lup.sessions.held import HeldSession
 from lup.sessions.terminal import Hook
 from lup.tools.serving import Notice
 from lup.types import JsonObject, Model
@@ -32,6 +34,31 @@ class Pushing(Model, arbitrary_types_allowed=True):
     notice: Callable[[str, str], Notice]
     """The notice for a message: its text and a token in, the notice out, its
     turn's prompt carrying the token whole."""
+
+
+class Holding(Model, arbitrary_types_allowed=True):
+    """How a runtime's session is held with no terminal (`lup.sessions.held`): the arguments naming its session, the session over its room's pipes, and the user turn that wakes it."""
+
+    minted: Callable[[], str]
+    """A new session's id, which the launch gives it up front, so the lock on
+    its writer is taken before it starts."""
+    normal: Callable[[str], str]
+    """A session's id in the one form the runtime gives it, by which its
+    writer's lock is kept and its hooks name it: an id typed in another form
+    of the same, its letters' case or its braces, given back so; raising
+    `ValueError` for one that can't be the runtime's."""
+    fresh: Callable[[str], list[str]]
+    """The arguments starting a new session under the id given."""
+    resuming: Callable[[str], list[str]]
+    """The arguments resuming the session of the id given; raising `ValueError`
+    for an id that can't be one of the runtime's."""
+    session: Callable[[Pipes, Callable[[str], None]], HeldSession]
+    """The session held over the room's pipes, saying what it does through the
+    function given."""
+    prompt: Callable[[str, str], str]
+    """The user turn starting an idle session on what waits for it: its text
+    and a token in, the turn's text out, carrying the token whole, as a push's
+    prompt does (`Delivery.taken`)."""
 
 
 class Adapter(Model, arbitrary_types_allowed=True):
@@ -65,6 +92,9 @@ class Adapter(Model, arbitrary_types_allowed=True):
     """Starts a turn of an idle session through lup's tool server, on its own
     connection; none where the runtime takes nothing a server pushes, a gap its
     module declares."""
+    holding: Holding | None
+    """Holds a session with no terminal; none where the runtime has no held
+    session yet, a gap its module declares."""
     hooks: Callable[[Callable[[type[SessionEvent]], list[str]], timedelta], list[Hook]]
     """The hooks a launched session runs at the events the host service hears,
     each running the command given for its event and waiting up to a timeout."""

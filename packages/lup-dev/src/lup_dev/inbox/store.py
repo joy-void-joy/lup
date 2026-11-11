@@ -1285,19 +1285,15 @@ class Whereabouts(Model):
     thread: int | None = None
     """The thread they work in, by its number, which what they send lands in
     where they name none: the one they joined, hold or were handed, else the
-    one they started on; none for their session's root thread
-    (`inbox/concerns.py`)."""
+    one they started on; none where they work in none (`inbox/concerns.py`)."""
     started: int | None = None
     """The thread they started on, which what they say with `how_it_felt` lands
-    in: their parent's, for a subagent; none for their session's root thread."""
+    in: their parent's, for a subagent whose parent worked in one; none else."""
     chose_start: bool = False
     """Whether a subagent chose the thread they started on, their parent's, by
     joining, holding or being handed it: until they do, they hear only what's
     addressed to them there, never a line for what lands in it, which they
     never chose to be on (`Concerns.quiet`)."""
-    root: int | None = None
-    """For a session's own conversation, their root thread, once it's opened or
-    taken; none before, and for a subagent."""
 
 
 class TalkComment(Model):

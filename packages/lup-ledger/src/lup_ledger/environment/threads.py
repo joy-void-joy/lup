@@ -5,15 +5,20 @@
 it drawn as any edge is (`Ledger.drawn`); this reads them. A thread's
 sub-threads are read from its repository's threads, by their `parent`, so a
 read walks one repository's threads at most, never the ledger.
+
+A root an earlier lup kept for a session is read as absent (`Thread.root`): no
+read here finds one, and a thread right under one reads as at the top.
 """
 
 from typing import TYPE_CHECKING
 
 from lup.types import Model
 from lup_ledger.environment.store import Ledger
+from lup_ledger.errors import LupLedgerError
 from lup_ledger.records import Edge, Node
 from lup_ledger.threads import (
     In,
+    Marks,
     Member,
     Moved,
     Parked,
@@ -21,6 +26,7 @@ from lup_ledger.threads import (
     Standing,
     Status,
     Thread,
+    without_roots,
 )
 
 if TYPE_CHECKING:
@@ -42,17 +48,30 @@ class Threads(Model, arbitrary_types_allowed=True):
     ledger: Ledger
 
     def thread(self, number: int) -> Thread:
-        """Return thread `number` as it stands; raise `LupLedgerError` where the ledger holds no thread by that number."""
-        return self.ledger.node(number, Thread)
+        """Return thread `number` as it stands, at the top where it's right under a root; raise `LupLedgerError` where the ledger holds no thread by that number, or a root."""
+        found = self.ledger.node(number, Thread)
+        if found.root:
+            message = f"the ledger holds no thread @{number}"
+            raise LupLedgerError(message)
+        above = None if found.parent is None else self.ledger.found(found.parent)
+        return (
+            found.model_copy(update={"parent": None})
+            if isinstance(above, Thread) and above.root
+            else found
+        )
 
     def named(self, repository: Path, name: str) -> Thread | None:
-        """Return the thread of `repository` named `name`; none where none is."""
+        """Return the thread of `repository` named `name`; none where none is, but a root."""
         found = self.ledger.named(repository, name)
-        return found if isinstance(found, Thread) else None
+        return (
+            self.thread(found.number)
+            if isinstance(found, Thread) and not found.root
+            else None
+        )
 
     def of(self, repository: Path) -> list[Thread]:
         """Return every thread of `repository`, by number."""
-        return self.ledger.nodes(repository, Thread)
+        return without_roots(self.ledger.nodes(repository, Thread))
 
     def under(self, number: int) -> list[Thread]:
         """Return the threads right under thread `number`, by number."""
@@ -112,10 +131,10 @@ class Threads(Model, arbitrary_types_allowed=True):
         return self.ledger.drawn_to(number, Refers)
 
     def parked(self, repository: Path | None = None) -> list[Parked]:
-        """Return what each parked thread waits for, the status it stands at, of `repository`, or of every one where it's none, in the order each was parked.
+        """Return what each parked thread waits for, the agent's mark it stands at, of `repository`, or of every one where it's none, in the order each was parked; none the operator cleared, nor of a root.
 
         Only the latest `Parked` drawn to each thread is read against its
-        status, so a thread parked many times costs one read.
+        marks, so a thread parked many times costs one read.
         """
         with self.ledger.together():
             found = [
@@ -127,7 +146,8 @@ class Threads(Model, arbitrary_types_allowed=True):
             return [
                 found[place]
                 for place in sorted(latest.values())
-                if self.status(found[place].target) == found[place]
+                if self.marks(found[place].target) == Marks(agent=found[place])
+                and not self.ledger.node(found[place].target, Thread).root
             ]
 
     def status(self, number: int) -> Status | None:
@@ -135,10 +155,17 @@ class Threads(Model, arbitrary_types_allowed=True):
         statuses = self.ledger.drawn_to(number, Status)
         return statuses[-1] if statuses else None
 
-    def standing(self, number: int) -> Standing:
-        """Return where thread `number` stands, read from the edges drawn to it and to what's in it (`Standing.read`)."""
+    def marks(self, number: int) -> Marks:
+        """Return thread `number`'s two marks, each read apart (`Marks`)."""
+        return Marks.read(self.ledger.drawn_to(number, Status))
+
+    def standing(
+        self, number: int, live: Callable[[Conversation], bool] = holding
+    ) -> Standing:
+        """Return where thread `number` stands, read from the edges drawn to it and to what's in it (`Standing.read`), and whoever answers for it, a holder `live` says has ended holding nothing."""
         with self.ledger.together():
             thread = self.thread(number)
             drawn = self.ledger.drawn_to(number, Edge)
             members = self.members(number)
-        return Standing.read(thread, drawn, members)
+            answering = self.answering(number, live)
+        return Standing.read(thread, drawn, members, running=answering is not None)

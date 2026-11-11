@@ -97,6 +97,19 @@ class RoomPaths(Model):
     Arch Linux's image sets, and podman's default for an image setting none."""
 
 
+class HostPaths(Model):
+    """The host's own places lup reads, outside lup's state: the kernel's word on what one process may do to another."""
+
+    proc: Path = Path("/proc")
+    """The host's processes, a directory each by its id, which a room's share
+    the kernel of."""
+
+    @property
+    def ptrace_scope(self) -> Path:
+        """Yama's setting of which processes of a user may trace which others: 0 any, 1 a process's own descendants alone, 2 an administrator alone, 3 none; no file where Yama isn't there, which is as 0."""
+        return self.proc / "sys" / "kernel" / "yama" / "ptrace_scope"
+
+
 class Bundle(Model):
     """The built engine, shipped inside `lup_dev`: its script and the stubs beside it.
 
@@ -475,6 +488,11 @@ class LaunchSockets(Model):
         """Where the session's own messaging socket is put, through which the host service starts a turn of an idle session, where their runtime has one."""
         return self.directory / "messages.sock"
 
+    @property
+    def session(self) -> Path:
+        """Where a held session's launcher listens for its room's first program, whose connection is the session's input and output: once, as the room starts, then it's gone (`lup.rooms.room.Room.hold`)."""
+        return self.directory / "session.sock"
+
 
 class InboxLayout(Model):
     """Where an earlier lup's inbox kept its items and its parties, one JSON file each (`docs/inbox.md`, *Kept on the ledger*).
@@ -723,6 +741,16 @@ class LaunchLayout(Model):
         may end it once its container is gone too.
         """
         return self.directory.with_name(f"{self.directory.name}.lock")
+
+    @property
+    def held(self) -> Path:
+        """The socket the launcher of a held session listens on, for the host service to reach it (`lup_dev.launch.held`): beside the launch's directory, where no room mounts it, so no room can speak to its own session as the operator."""
+        return self.directory.with_name(f"{self.directory.name}.sock")
+
+    @property
+    def log(self) -> Path:
+        """What the launcher of a held session prints, which has no terminal: kept where its launch failed before it was served, removed as it ends otherwise."""
+        return self.directory.with_name(f"{self.directory.name}.log")
 
     @property
     def gitconfig(self) -> Path:
@@ -1088,6 +1116,10 @@ class Layout(Model):
     def launch(self, launch: str) -> LaunchLayout:
         """Say where launch `launch`'s own places are."""
         return LaunchLayout(directory=self.launches / launch)
+
+    def writer(self, runtime: str, session: str) -> Path:
+        """Say where the lock is that the one launch writing `runtime`'s session `session` holds while its runtime runs it, which the runtime itself doesn't refuse a second of (`docs/launch.md`, *A session held with no terminal*)."""
+        return self.state / "writers" / runtime / f"{session}.lock"
 
     @property
     def worktrees(self) -> Path:

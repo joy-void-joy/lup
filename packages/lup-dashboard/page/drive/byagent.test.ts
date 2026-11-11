@@ -132,11 +132,11 @@ describe("the review as one buffer", () => {
         await review.until("back on their banner", (view, was) => view.state.doc.lineAt(view.state.selection.main.head).text === was, banner);
     });
 
-    it("says gt has nowhere to go, reading no threads", async () => {
+    it("says gt has nowhere to go, reading no concerns", async () => {
         await review.goTo("── @51 question");
         await review.settled(300, 0);
         await dashboard.keys.press(["g", "t"]);
-        await dashboard.page.waitForFunction(() => document.querySelector(".bar .said")?.textContent?.startsWith("gt: no thread here") === true);
+        await dashboard.page.waitForFunction(() => document.querySelector(".bar .said")?.textContent?.startsWith("gt: no concern here") === true);
         expect(await review.line()).toContain("@51 question");
     });
 });

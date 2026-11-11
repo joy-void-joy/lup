@@ -24,6 +24,7 @@ from lup.adapters.codex.settings import CodexSettings
 from lup.adapters.codex.terminal import compiled
 from lup.sessions.declaration import Asking, Declaration
 from lup.sessions.errors import needs_extra
+from lup.sessions.terminal import TerminalError
 
 if TYPE_CHECKING:
     from lup.sessions.results import TurnResult
@@ -80,3 +81,27 @@ class Codex(Declaration):
             settings=settings,
             layout=CodexLayout.of(CodexSettings()),
         )
+
+    @override
+    def held(self, settings: TerminalSettings) -> Terminal:
+        """Refuse: Codex has no held session yet.
+
+        Its held session would be `codex app-server --listen unix://…` in the room,
+        with lup's launcher a client of its socket, rather than a process held
+        over its input and output: over stdio the server ends with its
+        controller, and over a socket it outlives every connection, so a terminal
+        attaches to the live thread (`codex --remote unix://… resume <id>`)
+        rather than ending the process and resuming it, and only stopping the
+        container ends it. Its turns start with `turn/start`
+        while the thread is idle and `turn/steer` while it's busy, and
+        `turn/interrupt` ends the turn but leaves a running shell going. Codex
+        itself refuses a second writer on a thread. Measured against a stand-in
+        for the Responses API, on no real login (`docs/field-notes.md`, *A
+        session held with no terminal*).
+        """
+        del settings
+        message = (
+            "Codex has no held session yet: its app-server on a socket in the room "
+            "is how it would be held (`lup.adapters.codex`, `Codex.held`)"
+        )
+        raise TerminalError(message)

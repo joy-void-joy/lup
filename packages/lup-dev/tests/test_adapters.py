@@ -2059,6 +2059,40 @@ def test_claude_pushes_through_a_channel_and_codex_takes_no_push() -> None:
     assert codex.adapter().pushing is None
 
 
+@pytest.mark.parametrize(
+    ("source", "anew"),
+    [
+        ("startup", True),
+        ("resume", True),
+        ("fork", True),
+        ("clear", False),
+        ("compact", False),
+    ],
+)
+def test_a_session_s_start_says_whether_it_s_a_new_process(
+    source: str, anew: bool, tmp_path: Path
+) -> None:
+    started = payload(tmp_path, "SessionStart", source=source, model="m")
+    for runtime in [claude, codex]:
+        heard = runtime.heard(started)
+        assert heard.anew is anew, runtime
+
+
+def test_claude_is_held_under_a_session_it_names_and_codex_isn_t_yet() -> None:
+    holding = claude.adapter().holding
+    assert holding is not None
+    session = holding.minted()
+    assert holding.fresh(session) == ["--session-id", session]
+    assert holding.resuming(session) == ["--resume", session]
+    with pytest.raises(ValueError, match="hexadecimal UUID"):
+        holding.resuming("--dangerously-skip-permissions")
+    # An idle held session's turn reads as a pushed one's prompt does.
+    assert holding.prompt("Hi.", "t1") == (
+        '<channel source="lup" wake="t1">\nHi.\n</channel>'
+    )
+    assert codex.adapter().holding is None
+
+
 def test_claude_adds_what_a_conversation_is_told_to_every_answer() -> None:
     started = '{"session_id": "s1", "cwd": "/w", "hook_event_name": "SessionStart"}'
     assert json.loads(claude.told(started, "", ITEMS) or "") == {
@@ -2143,6 +2177,7 @@ def test_codex_says_whos_speaking_and_that_the_judge_reads_every_hook() -> None:
             session=session,
             judged=True,
             fresh=True,
+            anew=True,
         ),
         Heard(
             fits=10_000,

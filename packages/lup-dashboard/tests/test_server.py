@@ -771,21 +771,21 @@ def test_the_demo_reads_its_threads_as_the_host_does_and_the_operator_settles_on
 
     read = threads()
     assert {name: each.section for name, each in read.items()} == {
-        "lup-impl": "waiting on you",
+        "the-build": "waiting on you",
         "transcript-reader": "waiting on you",
         "auth-survey": "new",
         "clock-ticks": "every thread",
         "legacy-cache": "every thread",
         "reader-names": "every thread",
-        "guidance-voice": "waiting on you",
+        "the-voice": "waiting on you",
         "voice-branch": "every thread",
-        "main": "waiting on you",
-        "dev": "every thread",
-        "docs-pass": "every thread",
+        "render-pass": "waiting on you",
+        "old-notes": "every thread",
+        "docs-sweep": "every thread",
     }
     reader = read["transcript-reader"]
     assert [each.what for each in reader.asks] == ["a question", "a check"]
-    assert read["guidance-voice"].state == "done to confirm"
+    assert read["the-voice"].state == "done to confirm"
     # The parser's question and check, read, still show, after the latest three
     # read besides, but the flagged write, their exchange with their subagent
     # among them; the rest folds under what came earlier.
@@ -806,7 +806,7 @@ def test_the_demo_reads_its_threads_as_the_host_does_and_the_operator_settles_on
         "Keep the examples short."
     )
 
-    voice = read["guidance-voice"].thread.number
+    voice = read["the-voice"].thread.number
     settled = served.post(
         "/api/ask", json=SettleThread(number=voice).model_dump(), headers=bearing()
     )
@@ -817,7 +817,7 @@ def test_the_demo_reads_its_threads_as_the_host_does_and_the_operator_settles_on
     )
     assert CheckShown.model_validate(answered.json()).thread == "transcript-reader"
     after = threads()
-    assert after["guidance-voice"].section == "every thread"
+    assert after["the-voice"].section == "every thread"
     assert [each.what for each in after["transcript-reader"].asks] == ["a question"]
     refused = served.post(
         "/api/ask", json=SettleThread(number=9999).model_dump(), headers=bearing()
@@ -845,7 +845,7 @@ def test_the_demo_moves_frictions_and_how_it_felt_from_the_pile_into_a_thread_as
     before = threads()
     # The parser's friction stays in the pile, though it came before where the operator read its thread.
     assert before["transcript-reader"].pile == [57]
-    assert before["guidance-voice"].pile == [58]
+    assert before["the-voice"].pile == [58]
     moved = MovedIntoThread.model_validate(
         asked(MoveIntoThread(numbers=[57, 58], title="The gate's silent rebuild"))
     )
@@ -854,10 +854,10 @@ def test_the_demo_moves_frictions_and_how_it_felt_from_the_pile_into_a_thread_as
         True,
         [57, 58],
         "the-gate-s-silent-rebuild",
-        before["lup-impl"].thread.number,
+        before["the-build"].thread.number,
     )
     after = threads()
-    assert (after["transcript-reader"].pile, after["guidance-voice"].pile) == ([], [])
+    assert (after["transcript-reader"].pile, after["the-voice"].pile) == ([], [])
     gathered = ThreadShown.model_validate(
         asked(ShowThread(number=gate.number, whole=True))
     )

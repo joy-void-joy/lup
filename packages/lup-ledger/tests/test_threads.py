@@ -1,6 +1,7 @@
 """Threads on the ledger: what's in one, where it stands, who's on it, and the threads above and under it."""
 
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, override
 
@@ -15,12 +16,14 @@ from lup_ledger.parties import Conversation, Lup, Operator
 from lup_ledger.records import Edge, Kinds, Node
 from lup_ledger.threads import (
     KINDS,
+    ROOT,
     Answered,
     BranchLanded,
     Check,
     Declined,
     Done,
     In,
+    Marks,
     Moved,
     Parked,
     Refers,
@@ -29,10 +32,11 @@ from lup_ledger.threads import (
     Standing,
     Thread,
     TimeCame,
+    without_roots,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
 
 REPOSITORY = Path("/work/lup.git")
 OTHER = Path("/work/other.git")
@@ -141,8 +145,8 @@ def test_a_check_waits_on_the_operator_until_they_answer_it(
     ("said", "state"),
     [
         (
-            Parked(
-                target=1,
+            partial(
+                Parked,
                 repository=REPOSITORY,
                 by=WORKER,
                 at=at(1),
@@ -151,8 +155,8 @@ def test_a_check_waits_on_the_operator_until_they_answer_it(
             "parked",
         ),
         (
-            Done(
-                target=1,
+            partial(
+                Done,
                 repository=REPOSITORY,
                 by=WORKER,
                 at=at(1),
@@ -160,10 +164,13 @@ def test_a_check_waits_on_the_operator_until_they_answer_it(
             ),
             "done to confirm",
         ),
-        (Settled(target=1, repository=REPOSITORY, by=Operator(), at=at(1)), "settled"),
         (
-            Declined(
-                target=1,
+            partial(Settled, repository=REPOSITORY, by=Operator(), at=at(1)),
+            "settled",
+        ),
+        (
+            partial(
+                Declined,
                 repository=REPOSITORY,
                 by=Operator(),
                 at=at(1),
@@ -176,17 +183,17 @@ def test_a_check_waits_on_the_operator_until_they_answer_it(
 def test_a_thread_stands_as_its_latest_status_says(
     ledger: Ledger,
     threads: Threads,
-    said: Parked | Done | Settled | Declined,
+    said: Callable[..., Parked | Done | Settled | Declined],
     state: str,
 ) -> None:
     lag = opened(ledger, "lag")
     checked(ledger, lag)
-    ledger.drawn(said)
+    status = ledger.drawn(said(target=lag.number))
 
     standing = threads.standing(lag.number)
 
     assert standing.state == state
-    assert standing.status == said
+    assert standing.status == status
     assert len(standing.waiting) == 1
 
 
@@ -447,6 +454,8 @@ def test_a_thread_under_what_isn_t_a_thread_of_its_repository_or_under_itself_is
     sub = opened(ledger, "sub", parent=main.number)
     elsewhere = opened(ledger, "elsewhere", repository=OTHER)
     said = item(ledger)
+    # A number the sequence gave out, at which no node was kept.
+    unkept = ledger.numbered()
 
     refusals = {
         "would be under itself": main.model_copy(
@@ -456,7 +465,7 @@ def test_a_thread_under_what_isn_t_a_thread_of_its_repository_or_under_itself_is
             update={"parent": elsewhere.number, "at": at(1)}
         ),
         "not a thread": sub.model_copy(update={"parent": said.number, "at": at(1)}),
-        "isn't on the ledger": sub.model_copy(update={"parent": 99, "at": at(1)}),
+        "isn't on the ledger": sub.model_copy(update={"parent": unkept, "at": at(1)}),
     }
 
     for says, refused in refusals.items():
@@ -608,3 +617,213 @@ def test_the_threads_parked_are_those_whose_latest_status_parks_them(
 
     assert threads.parked(REPOSITORY) == [paged]
     assert threads.parked() == [paged, other]
+
+
+def rooted(ledger: Ledger, name: str, holder: Conversation | None = MAIN) -> Thread:
+    """Keep a root as an earlier lup kept one for a session: at the top, titled `ROOT`, held by them."""
+    return ledger.kept(
+        Thread(
+            number=ledger.numbered(),
+            repository=REPOSITORY,
+            by=MAIN,
+            at=START,
+            name=name,
+            title=ROOT,
+            holder=holder,
+        )
+    )
+
+
+def test_a_root_is_found_by_no_read_and_what_s_under_it_reads_as_at_the_top(
+    ledger: Ledger, threads: Threads
+) -> None:
+    root = rooted(ledger, "dev")
+    sshole = opened(ledger, "sshole", parent=root.number, holder=None)
+    deeper = opened(ledger, "deeper", parent=sshole.number, holder=None)
+
+    with pytest.raises(LupLedgerError, match="no thread"):
+        threads.thread(root.number)
+    assert threads.named(REPOSITORY, "dev") is None
+    assert threads.thread(sshole.number).parent is None
+    assert threads.named(REPOSITORY, "sshole") == threads.thread(sshole.number)
+    assert threads.thread(deeper.number).parent == sshole.number
+    assert [(each.name, each.parent) for each in threads.of(REPOSITORY)] == [
+        ("sshole", None),
+        ("deeper", sshole.number),
+    ]
+    assert [each.name for each in threads.under(sshole.number)] == ["deeper"]
+    # Nobody answers for it by the root, whose holder goes on.
+    assert threads.answering(sshole.number) is None
+    assert threads.answering(deeper.number) is None
+    # The ledger keeps the root as it was.
+    assert ledger.node(root.number, Thread) == root
+
+
+def test_without_roots_reads_every_thread_at_once_as_threads_reads_each(
+    ledger: Ledger,
+) -> None:
+    root = rooted(ledger, "dev")
+    lag = opened(ledger, "lag", parent=root.number)
+    tabs = opened(ledger, "tabs", parent=lag.number)
+    titled = opened(ledger, "titled")
+
+    read = without_roots([root, lag, tabs, titled])
+
+    assert [(each.name, each.parent) for each in read] == [
+        ("lag", None),
+        ("tabs", lag.number),
+        ("titled", None),
+    ]
+    assert root.root
+    assert not titled.root
+    # A thread under another titled as a root is no root.
+    assert not tabs.model_copy(update={"title": ROOT}).root
+
+
+def test_a_root_parked_is_none_of_the_threads_parked(
+    ledger: Ledger, threads: Threads
+) -> None:
+    root = rooted(ledger, "dev")
+    lag = opened(ledger, "lag")
+    for each in [root, lag]:
+        ledger.drawn(
+            Parked(
+                target=each.number,
+                repository=REPOSITORY,
+                by=MAIN,
+                at=at(1),
+                until=[BranchLanded(branch="x")],
+            )
+        )
+
+    assert [each.target for each in threads.parked(REPOSITORY)] == [lag.number]
+
+
+def test_a_thread_nobody_running_answers_for_stands_nobody_running_never_working(
+    ledger: Ledger, threads: Threads
+) -> None:
+    lag = opened(ledger, "lag", holder=WORKER)
+    unheld = opened(ledger, "unheld", holder=None)
+    under = opened(ledger, "under", parent=lag.number, holder=None)
+
+    def ended(conversation: Conversation) -> bool:
+        return conversation != WORKER
+
+    assert threads.standing(lag.number).state == "working"
+    assert threads.standing(lag.number, live=ended).state == "nobody running"
+    assert threads.standing(unheld.number).state == "nobody running"
+    assert threads.standing(under.number).state == "working"
+    assert threads.standing(under.number, live=ended).state == "nobody running"
+    # What waits on the operator still says so; and a status said is said.
+    checked(ledger, unheld)
+    assert threads.standing(unheld.number).state == "waiting on the operator"
+    ledger.drawn(
+        Done(target=lag.number, repository=REPOSITORY, by=WORKER, at=at(2), to_try="x")
+    )
+    assert threads.standing(lag.number, live=ended).state == "done to confirm"
+
+
+def done(thread: Thread, minutes: int, to_try: str = "Type fast.") -> Done:
+    return Done(
+        target=thread.number,
+        repository=thread.repository,
+        by=WORKER,
+        at=at(minutes),
+        to_try=to_try,
+    )
+
+
+def settled(thread: Thread, minutes: int) -> Settled:
+    return Settled(
+        target=thread.number,
+        repository=thread.repository,
+        by=Operator(),
+        at=at(minutes),
+    )
+
+
+def test_the_agent_s_mark_and_the_operator_s_are_read_apart_neither_moving_the_other(
+    ledger: Ledger, threads: Threads
+) -> None:
+    # Said done, then cleared: cleared, the agent's account kept.
+    lag = opened(ledger, "lag")
+    said = ledger.drawn(done(lag, 1))
+    cleared = ledger.drawn(settled(lag, 2))
+    # Cleared while the agent is still on it, then said done: still cleared, never
+    # back before the operator, as an earlier lup read its latest status.
+    page = opened(ledger, "page")
+    page_cleared = ledger.drawn(settled(page, 1))
+    page_said = ledger.drawn(done(page, 2, "Scroll."))
+
+    for thread, account, clearing in [
+        (lag, said, cleared),
+        (page, page_said, page_cleared),
+    ]:
+        standing = threads.standing(thread.number)
+        assert standing.state == "settled"
+        assert standing.marks == Marks(agent=account, operator=clearing)
+        assert standing.marks.done == account
+
+
+def test_the_operator_reopening_opens_both_marks_and_lup_reopening_the_agent_s_alone(
+    ledger: Ledger, threads: Threads
+) -> None:
+    lag = opened(ledger, "lag")
+    ledger.drawn(done(lag, 1))
+    ledger.drawn(settled(lag, 2))
+    ledger.drawn(
+        Reopened(target=lag.number, repository=REPOSITORY, by=Operator(), at=at(3))
+    )
+    page = opened(ledger, "page")
+    clearing = ledger.drawn(settled(page, 1))
+    ledger.drawn(
+        Parked(
+            target=page.number,
+            repository=REPOSITORY,
+            by=WORKER,
+            at=at(2),
+            until=[TimeCame(at=at(60))],
+        )
+    )
+    ledger.drawn(
+        Reopened(target=page.number, repository=REPOSITORY, by=Lup(), at=at(3), why="x")
+    )
+
+    assert threads.marks(lag.number) == Marks()
+    assert threads.standing(lag.number).state == "working"
+    assert threads.marks(page.number) == Marks(operator=clearing)
+    assert threads.standing(page.number).state == "settled"
+
+
+def test_a_sub_thread_is_cleared_apart_from_its_parent_and_its_parent_apart_from_it(
+    ledger: Ledger, threads: Threads
+) -> None:
+    lag = opened(ledger, "lag")
+    under = opened(ledger, "under", parent=lag.number)
+    other = opened(ledger, "other")
+    beneath = opened(ledger, "beneath", parent=other.number)
+    ledger.drawn(settled(lag, 1))
+    said = ledger.drawn(done(beneath, 1))
+
+    assert threads.standing(lag.number).state == "settled"
+    assert threads.standing(under.number).state == "working"
+    assert threads.standing(other.number).marks == Marks()
+    assert threads.standing(beneath.number).marks == Marks(agent=said)
+
+
+def test_a_thread_the_operator_cleared_is_none_of_the_threads_parked_however_late_it_was_parked(
+    ledger: Ledger, threads: Threads
+) -> None:
+    lag = opened(ledger, "lag")
+    ledger.drawn(settled(lag, 1))
+    ledger.drawn(
+        Parked(
+            target=lag.number,
+            repository=REPOSITORY,
+            by=WORKER,
+            at=at(2),
+            until=[BranchLanded(branch="feat")],
+        )
+    )
+
+    assert threads.parked(REPOSITORY) == []

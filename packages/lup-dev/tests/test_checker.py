@@ -192,8 +192,9 @@ def test_the_importers_pass_is_started_reading_the_launchs_environments(
     BackgroundSpawner().spawn(worktree, log)
     BackgroundSpawner(environments=tmp_path / "launch").spawn(worktree, log)
     assert started == [
-        ["-m", "lup_dev.cli", "importers", str(worktree)],
+        ["-P", "-m", "lup_dev.cli", "importers", str(worktree)],
         [
+            "-P",
             "-m",
             "lup_dev.cli",
             "importers",

@@ -51,6 +51,11 @@ class Probe(Declaration):
         message = "a probe has no terminal"
         raise AssertionError(message)
 
+    @override
+    def held(self, settings: TerminalSettings) -> Terminal:
+        message = "a probe is never held"
+        raise AssertionError(message)
+
     @overload
     async def ask(self, prompt: str, output: None = None) -> TurnResult[str]: ...
 

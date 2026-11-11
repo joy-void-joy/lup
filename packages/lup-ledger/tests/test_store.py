@@ -69,20 +69,23 @@ def test_every_number_is_one_sequence_s_across_repositories(ledger: Ledger) -> N
     first = ledger.kept(thread(ledger, "one"))
     second = ledger.kept(thread(ledger, "one", repository=OTHER))
 
-    assert [first.number, second.number, ledger.numbered()] == [1, 2, 3]
+    assert [second.number, ledger.numbered()] == [first.number + 1, first.number + 2]
+    # Where a fresh ledger's sequence starts is the point here, and nowhere else:
+    # `@1` is the first node any repository has.
+    assert first.number == 1
 
 
 def test_a_number_taken_is_never_taken_again_once_reopened(tmp_path: Path) -> None:
     layout = LedgerLayout(home=tmp_path)
     ledger = Ledger.opened(layout)
     kept = ledger.kept(thread(ledger, "one"))
-    ledger.numbered()
+    taken = ledger.numbered()
     ledger.close()
 
     reopened = Ledger.opened(layout)
 
     assert reopened.node(kept.number, Thread) == kept
-    assert reopened.numbered() == 3
+    assert reopened.numbered() == taken + 1
     reopened.close()
 
 
@@ -150,10 +153,10 @@ def test_a_node_stays_its_kind_and_in_its_repository(ledger: Ledger) -> None:
 
 
 def test_a_name_is_one_node_s_in_its_repository(ledger: Ledger) -> None:
-    ledger.kept(thread(ledger, "lag"))
+    lag = ledger.kept(thread(ledger, "lag"))
     ledger.kept(thread(ledger, "lag", repository=OTHER))
 
-    with pytest.raises(LupLedgerError, match="`lag` names @1"):
+    with pytest.raises(LupLedgerError, match=f"`lag` names @{lag.number}"):
         ledger.kept(thread(ledger, "lag"))
 
 
@@ -216,8 +219,10 @@ def test_a_node_of_another_kind_than_asked_is_refused(ledger: Ledger) -> None:
         LupLedgerError, match="is a `ledger:check`, not a `ledger:thread`"
     ):
         ledger.node(found.number, Thread)
-    with pytest.raises(LupLedgerError, match="holds no @99"):
-        ledger.node(99, Node)
+    # A number the sequence gave out, at which no node was kept.
+    unkept = ledger.numbered()
+    with pytest.raises(LupLedgerError, match=f"holds no @{unkept}"):
+        ledger.node(unkept, Node)
 
 
 def test_a_repository_s_nodes_are_read_by_kind(ledger: Ledger) -> None:
@@ -229,22 +234,23 @@ def test_a_repository_s_nodes_are_read_by_kind(ledger: Ledger) -> None:
     assert ledger.nodes(REPOSITORY, Node) == [first, found]
 
 
-@pytest.mark.parametrize("said", ["1", "@1", "lag", "@lag"])
+@pytest.mark.parametrize("said", ["{lag}", "@{lag}", "lag", "@lag"])
 def test_at_takes_a_number_or_a_name(ledger: Ledger, said: str) -> None:
     kept = ledger.kept(thread(ledger, "lag"))
 
-    assert ledger.cited(REPOSITORY, said) == kept
+    assert ledger.cited(REPOSITORY, said.format(lag=kept.number)) == kept
 
 
-@pytest.mark.parametrize("said", ["@2", "@1.3", "@nothing"])
+@pytest.mark.parametrize("said", ["@{elsewhere}", "@{lag}.3", "@nothing"])
 def test_at_refuses_another_repository_s_node_a_part_or_nothing(
     ledger: Ledger, said: str
 ) -> None:
-    ledger.kept(thread(ledger, "lag"))
-    ledger.kept(thread(ledger, "elsewhere", repository=OTHER))
+    lag = ledger.kept(thread(ledger, "lag"))
+    elsewhere = ledger.kept(thread(ledger, "elsewhere", repository=OTHER))
+    cited = said.format(lag=lag.number, elsewhere=elsewhere.number)
 
-    with pytest.raises(LupLedgerError, match=f"is `{said}`"):
-        ledger.cited(REPOSITORY, said)
+    with pytest.raises(LupLedgerError, match=f"is `{cited}`"):
+        ledger.cited(REPOSITORY, cited)
 
 
 def test_edges_are_read_in_the_order_drawn(ledger: Ledger) -> None:
@@ -295,14 +301,28 @@ def test_an_edge_needs_both_ends_on_the_ledger_and_in_its_repository(
     lag = ledger.kept(thread(ledger, "lag"))
     elsewhere = ledger.kept(thread(ledger, "elsewhere", repository=OTHER))
     found = check(ledger)
+    # A number the sequence gave out, at which no node was kept.
+    unkept = ledger.numbered()
 
-    with pytest.raises(LupLedgerError, match="@99 isn't on the ledger"):
+    with pytest.raises(LupLedgerError, match=f"@{unkept} isn't on the ledger"):
         ledger.drawn(
-            In(source=99, target=lag.number, repository=REPOSITORY, by=MAIN, at=START)
+            In(
+                source=unkept,
+                target=lag.number,
+                repository=REPOSITORY,
+                by=MAIN,
+                at=START,
+            )
         )
-    with pytest.raises(LupLedgerError, match="@99 isn't on the ledger"):
+    with pytest.raises(LupLedgerError, match=f"@{unkept} isn't on the ledger"):
         ledger.drawn(
-            In(source=found.number, target=99, repository=REPOSITORY, by=MAIN, at=START)
+            In(
+                source=found.number,
+                target=unkept,
+                repository=REPOSITORY,
+                by=MAIN,
+                at=START,
+            )
         )
     with pytest.raises(LupLedgerError, match=f"@{elsewhere.number} is of {OTHER}"):
         ledger.drawn(
@@ -389,12 +409,13 @@ def test_a_later_edge_from_the_same_node_replaces_an_earlier_one_where_its_kind_
 
 def test_nothing_is_kept_of_a_refused_write(ledger: Ledger) -> None:
     lag = ledger.kept(thread(ledger, "lag"))
+    again = thread(ledger, "lag")
 
     with pytest.raises(LupLedgerError):
-        ledger.kept(thread(ledger, "lag"))
+        ledger.kept(again)
 
     assert ledger.nodes(REPOSITORY, Node) == [lag]
-    assert ledger.versions(2) == []
+    assert ledger.versions(again.number) == []
 
 
 def test_a_ledger_whose_tables_are_a_later_version_is_refused(tmp_path: Path) -> None:
@@ -496,7 +517,7 @@ def test_no_read_or_write_walks_the_store(ledger: Ledger, threads: Threads) -> N
     )
     ledger.versions(lag.number)
     ledger.cited(REPOSITORY, "@lag")
-    ledger.cited(REPOSITORY, "@1")
+    ledger.cited(REPOSITORY, f"@{parent.number}")
     ledger.nodes(REPOSITORY, Thread)
     ledger.nodes(REPOSITORY, Node)
     ledger.drawn_from(found.number, Edge, current=True)

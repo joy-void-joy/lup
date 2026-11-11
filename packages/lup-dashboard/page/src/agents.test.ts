@@ -30,6 +30,7 @@ function registered(launch: string, name: string): Register {
         github: null,
         name,
         exact: false,
+        held: false,
     };
 }
 
