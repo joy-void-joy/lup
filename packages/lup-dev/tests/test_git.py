@@ -1,11 +1,12 @@
 """git as lup_dev runs it: a commit's files written from git's objects, not its archive."""
 
+import os
 from typing import TYPE_CHECKING
 
 import pytest
 
 from lup.programs import run
-from lup_dev.git import Git, GitError
+from lup_dev.git import Git, GitError, Worktree
 from lup_dev.layout import Layout
 from lup_dev.policy.store import Store
 
@@ -316,3 +317,105 @@ def test_a_commits_subject_refuses_what_isnt_that_commit(
     blob = shell.git(repo, "rev-parse", "HEAD:a.txt")
     with pytest.raises(GitError, match="isn't that commit"):
         Git(cwd=repo).subject(blob)
+
+
+# A repository's worktrees
+
+
+def planted(bare: Path, name: str, gitdir: str) -> None:
+    """Write an entry under the git directory's `worktrees/`, as a room can, naming `gitdir` as a worktree's `.git`."""
+    entry = bare / "worktrees" / name
+    entry.mkdir(parents=True, exist_ok=True)
+    (entry / "gitdir").write_text(f"{gitdir}\n")
+    (entry / "HEAD").write_text("ref: refs/heads/main\n")
+    (entry / "commondir").write_text("../..\n")
+
+
+@pytest.mark.parametrize(
+    "plant",
+    [
+        "the directory holding the repository",
+        "another repository",
+        "another repository's worktree",
+        "another repository, by a path out of the tree through `..`",
+    ],
+)
+def test_a_directory_a_room_names_as_a_worktree_isnt_one(
+    bare: Path, repo: Path, linked: Path, tmp_path: Path, plant: str
+) -> None:
+    gitdir = {
+        "the directory holding the repository": tmp_path / ".git",
+        "another repository": repo / ".git",
+        "another repository's worktree": linked / ".git",
+        "another repository, by a path out of the tree through `..`": (
+            f"{bare}/tree/../../{repo.name}/.git"
+        ),
+    }[plant]
+    planted(bare, "planted", str(gitdir))
+
+    assert Git.pinned(bare).worktrees() == [bare, bare / "tree" / "main"]
+
+
+def test_a_link_into_a_worktree_isnt_the_worktree(bare: Path, tmp_path: Path) -> None:
+    worktree = bare / "tree" / "main"
+    current = tmp_path / "current"
+    current.symlink_to(worktree)
+    # The room names the link, which an operator keeps outside the tree, as
+    # the worktree's place: its `.git`, read through the link, names the entry
+    # back.
+    (bare / "worktrees" / "main" / "gitdir").write_text(f"{current}/.git\n")
+
+    assert Git.pinned(bare).worktrees() == [bare]
+
+
+def test_a_worktree_git_adds_is_listed_with_its_own_git_directory(
+    bare: Path, repo: Path, linked: Path, shell: Shell
+) -> None:
+    shell.git(
+        bare, "worktree", "add", "-q", "--relative-paths", "-b", "rel", "tree/rel"
+    )
+
+    assert Git.pinned(bare).listed() == [
+        Worktree(root=bare),
+        Worktree(
+            root=bare / "tree" / "main",
+            own=bare / "worktrees" / "main",
+            branch="refs/heads/main",
+            head=shell.git(bare, "rev-parse", "main"),
+        ),
+        Worktree(
+            root=bare / "tree" / "rel",
+            own=bare / "worktrees" / "rel",
+            branch="refs/heads/rel",
+            head=shell.git(bare, "rev-parse", "main"),
+        ),
+    ]
+    # A clone's worktree beside it, outside its own directory, is one too.
+    assert Git.pinned(repo / ".git").worktrees() == [repo, linked]
+    assert Git(cwd=linked).worktrees() == [repo, linked]
+
+
+def test_git_within_a_worktree_reads_no_config_through_its_links(
+    bare: Path, tmp_path: Path, shell: Shell
+) -> None:
+    worktree = bare / "tree" / "main"
+    ran = tmp_path / "ran"
+    # A git directory of the room's own, inside the tree, whose `config` names
+    # a clean filter; the worktree's files go through it, and one of them has
+    # changed on disk since it was staged, as `git status` reads it again.
+    own = worktree / "own.git"
+    shell.git(tmp_path, "init", "-q", "--bare", str(own))
+    shell.git(own, "config", "filter.probe.clean", f"sh -c 'touch {ran}; cat'")
+    (worktree / ".gitattributes").write_text("* filter=probe\n")
+    (worktree / "probe.txt").write_text("probe\n")
+    shell.git(worktree, "add", ".gitattributes", "probe.txt")
+    os.utime(worktree / "probe.txt", (0, 0))
+    (bare / "worktrees" / "main" / "commondir").write_text(f"{own}\n")
+    [listed] = [each for each in Git.pinned(bare).listed() if each.root == worktree]
+
+    Git.within(bare, listed).run("status", "--porcelain")
+
+    assert not ran.exists()
+    # Found from the worktree, git reads the room's `config`, and runs it.
+    Git(cwd=worktree).run("status", "--porcelain")
+    assert ran.exists()
