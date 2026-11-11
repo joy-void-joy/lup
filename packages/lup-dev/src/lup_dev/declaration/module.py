@@ -269,3 +269,21 @@ class Modules(Selection[Module]):
         """Return the module `below` with `layer`'s module on it, where it was."""
         module = below.entry.edited(layer.entry, layer.position, layer.why)
         return below.model_copy(update={"entry": module})
+
+    @override
+    def taken(self, below: Placed[Module], added: Placed[Module]) -> Placed[Module]:
+        """Return the module `below`, which a layer below gave, with `added`'s module, which a layer above adds, on it.
+
+        A module of another class is another module of the same name, which
+        `.replace` puts in its place, so the swap is said where it's made.
+        """
+        if type(added.entry) is not type(below.entry):
+            name = below.entry.name
+            message = (
+                f"`Modules.add` puts `{type(added.entry).__name__}` on `{name}`, "
+                f"which a layer below gives as `{type(below.entry).__name__}`, "
+                f'another class: `.replace("{name}", …)` puts another module in '
+                "its place"
+            )
+            raise ProjectError(message)
+        return super().taken(below, added)

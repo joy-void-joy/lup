@@ -455,7 +455,10 @@ def test_no_module_holding_rules_runs_none(project: Project) -> None:
             Rules().add("no-such-rule"),
             "`Rules.add` names `no-such-rule`, which isn't one of lup's rules",
         ),
-        (Rules().add("regex"), "`Rules.add` names `regex`, already there"),
+        (
+            Rules().add("runtime-mention").add("runtime-mention"),
+            "`Rules.add` names `runtime-mention`, already there",
+        ),
         (
             Rules().drop("regex").drop("regex"),
             "`Rules.drop` names `regex`, which isn't there",
@@ -508,6 +511,12 @@ def test_the_rules_a_selection_runs_are_listed_in_the_tables_order() -> None:
         "regex",
         "tuple-shape",
     ]
+
+
+def test_a_layer_adding_a_rule_the_module_s_default_runs_runs_it_once() -> None:
+    assert listing(editing(Rules().add("regex"))) == listing(
+        resolve(Declaration()).rules
+    )
 
 
 def test_the_selected_modules_rules_are_listed_together() -> None:

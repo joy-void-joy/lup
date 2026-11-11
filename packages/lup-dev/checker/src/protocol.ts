@@ -142,8 +142,9 @@ interface RequestBase {
 
 // A rule selection as the declaration records it, mirroring `Selection` in
 // `lup_dev/declaration/grammar.py` field for field: where it starts, then its
-// operations in the order they were written. The reasons (`why`) and the anchors
-// (`before`, `after`) travel too, and change nothing here: rules have no order.
+// operations in the order they were written, each with the layer that wrote it
+// (`Operation.layer`). The reasons (`why`) and the anchors (`before`, `after`)
+// travel too, and change nothing here: rules have no order.
 export type Start =
     | { kind: 'below' }
     | { kind: 'default' }
@@ -151,11 +152,12 @@ export type Start =
     | { kind: 'only'; names: string[] }
     | { kind: 'of'; entries: string[] };
 
-export type Operation =
+export type Operation = { layer: number } & (
     | { verb: 'add'; entries: string[] }
     | { verb: 'drop'; names: string[] }
     | { verb: 'replace'; name: string; entry: string }
-    | { verb: 'edit'; entry: string };
+    | { verb: 'edit'; entry: string }
+);
 
 export interface Selection {
     start: Start;
