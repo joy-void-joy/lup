@@ -147,6 +147,13 @@ From the docs (code.claude.com, `cli-reference`, `settings-reference`, `env-vars
   - Connectors: off where any source's `disableClaudeAiConnectors` is `true` or `ENABLE_CLAUDEAI_MCP_SERVERS` is false; nothing turns them back on.
   - `idleCompaction` ("Setting it to true does not turn idle compaction on"): read from the highest source setting it, `true` where none does. Idle compaction runs only where a server-side flag's mode turns it on, `autoCompactEnabled` is on, and `idleCompaction` isn't `false`.
 
+## The silent-turn reminder (Claude Code 2.1.319, read from its binary; counted in this repository's Claude Code records from 2026-10-07 to 11-07, 2026-11-07)
+
+- **What the agent is told:** "The user hasn't heard from you in a while — say in a few words what you're doing, then continue.", the text a server-side flag gives; the binary's own default, used where the flag gives none, is "The user hasn't heard from you in a while. As you continue, keep them updated when there's something to tell — a finding, a change of plan." `CLAUDE_CODE_SILENT_TURN_REMINDER_TEXT` outranks both.
+- **When:** at a main conversation's turn that no prompt of the user's starts, after 5 model turns in a row with no text (a server-side flag can change the 5, `CLAUDE_CODE_SILENT_TURN_REMINDER_TURNS` outranks it), at most 3 times in one silent stretch; or, where `CLAUDE_CODE_SILENT_TURN_REMINDER_SECONDS` or the model's own settings give a number of seconds, once the stretch has lasted that long. Never in a subagent, nor in the focus view.
+- **Whether:** the model's `silent_turn_reminder` capability, which Opus 5.5 has; `CLAUDE_CODE_SILENT_TURN_REMINDER` outranks it, `0`, `false`, `no` and `off` turning it off, `1`, `true`, `yes` and `on` on, any case, around blanks. Nothing in the gate asks whether the session is interactive, so an SDK's session gets it too; that's read, not run.
+- **How often:** 3.2 to 6.3 reminders per 100 main-conversation turns in each stretch of a few days from 2026-10-07 to 11-07, with no trend, and none in about 400 subagents' records, counted as Claude Code's `silent_turn_reminder` attachments, one per record id.
+
 ## Codex 0.162.1: launching a session
 
 From the source at `rust-v0.162.1` (paths under `codex-rs/`), probed with `codex debug prompt-input` and `app-server`'s `hooks/list` against scratch homes; no model called.
