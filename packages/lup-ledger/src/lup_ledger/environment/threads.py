@@ -18,6 +18,7 @@ from lup_ledger.errors import LupLedgerError
 from lup_ledger.records import Edge, Node
 from lup_ledger.threads import (
     In,
+    Marks,
     Member,
     Moved,
     Parked,
@@ -130,10 +131,10 @@ class Threads(Model, arbitrary_types_allowed=True):
         return self.ledger.drawn_to(number, Refers)
 
     def parked(self, repository: Path | None = None) -> list[Parked]:
-        """Return what each parked thread waits for, the status it stands at, of `repository`, or of every one where it's none, in the order each was parked; none of a root.
+        """Return what each parked thread waits for, the agent's mark it stands at, of `repository`, or of every one where it's none, in the order each was parked; none the operator cleared, nor of a root.
 
         Only the latest `Parked` drawn to each thread is read against its
-        status, so a thread parked many times costs one read.
+        marks, so a thread parked many times costs one read.
         """
         with self.ledger.together():
             found = [
@@ -145,7 +146,7 @@ class Threads(Model, arbitrary_types_allowed=True):
             return [
                 found[place]
                 for place in sorted(latest.values())
-                if self.status(found[place].target) == found[place]
+                if self.marks(found[place].target) == Marks(agent=found[place])
                 and not self.ledger.node(found[place].target, Thread).root
             ]
 
@@ -153,6 +154,10 @@ class Threads(Model, arbitrary_types_allowed=True):
         """Return the latest edge saying where thread `number` stands; none where nothing has."""
         statuses = self.ledger.drawn_to(number, Status)
         return statuses[-1] if statuses else None
+
+    def marks(self, number: int) -> Marks:
+        """Return thread `number`'s two marks, each read apart (`Marks`)."""
+        return Marks.read(self.ledger.drawn_to(number, Status))
 
     def standing(
         self, number: int, live: Callable[[Conversation], bool] = holding

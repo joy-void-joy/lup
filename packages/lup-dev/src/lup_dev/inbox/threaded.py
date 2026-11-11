@@ -4,7 +4,10 @@
 buffer of threads (`docs/dashboard.md`, *The review*); the host reads them for
 it, every repository's, and the operator settles, declines and reopens them:
 - **`inbox-threads`** (`ListThreads`) lists every thread (`ThreadRead`): where
-  it stands; its section (`Section`): `waiting on you` where something in it
+  it stands, and its two marks apart (`done`, `cleared`); what it's about,
+  where its title reads as a name (`about`); the passages of the operator's it
+  came from, with what became of each (`passages`); its checks (`checks`); its
+  section (`Section`): `waiting on you` where something in it
   asks them, a question, an approval, a held change, a problem, a check, or
   it's done for them to confirm; else `new` where something came that they
   haven't read and that asks nothing; else `every thread`; what in it asks
@@ -76,8 +79,8 @@ from lup_dev.inbox.store import (
     asks,
     ranked,
 )
-from lup_dev.inbox.texts import what
-from lup_dev.inbox.threads import Anchor, anchors, spoken
+from lup_dev.inbox.texts import opening, what
+from lup_dev.inbox.threads import Anchor, anchors, cue, spoken
 from lup_ledger.environment.store import Written
 from lup_ledger.parties import Conversation, Operator
 from lup_ledger.threads import (
@@ -86,6 +89,7 @@ from lup_ledger.threads import (
     Declined,
     Done,
     In,
+    Marks,
     Moved,
     Parked,
     Refers,
@@ -94,6 +98,7 @@ from lup_ledger.threads import (
     State,
     Status,
     Thread,
+    answering,
     stood,
     without_roots,
 )
@@ -106,6 +111,14 @@ type Section = Literal["waiting on you", "new", "every thread"]
 """Where a thread is in the review: something in it asks the operator, or it's
 done for them to confirm; else something came they haven't read that asks
 nothing; else nothing calls for them."""
+
+type Reads = Literal["open", "for your eyes", "quiet", "gone"]
+"""How a concern reads on the operator's dashboard, by its two marks
+(`lup_ledger.threads.Marks`; #372, *Concerns*): open to both, a row like any
+other; said done by the agent and not cleared, for the operator's eyes;
+cleared by the operator while someone running still answers for it, a quiet row
+out of the counts; cleared and said done, or cleared with nobody running on it,
+gone, read under what's settled alone."""
 
 type Stated = Annotated[
     Parked | Done | Settled | Declined | Reopened, Field(discriminator="kind")
@@ -134,6 +147,8 @@ class Ledgered(Model):
     """What's in each thread, by its number, in the order it came."""
     statuses: dict[int, Stated]
     """Each thread's latest status, by its number, where one was said."""
+    marks: dict[int, Marks] = {}
+    """Each thread's two marks, by its number, where a status was said."""
     checks: dict[int, Check]
     answers: dict[int, Answered]
     """Each check's answer, by its number, where the operator gave one."""
@@ -196,6 +211,10 @@ class Ledgered(Model):
                 for number in dict.fromkeys(target for target, _ in joined)
             },
             statuses={each.target: each for each in statuses},
+            marks={
+                number: Marks.read([each for each in statuses if each.target == number])
+                for number in dict.fromkeys(each.target for each in statuses)
+            },
             checks={each.number: each for each in checks},
             answers={each.target: each for each in answers},
             references={
@@ -252,14 +271,48 @@ class Ask(Model):
     """Whether something stays stopped until they answer it (`ItemKind.holds`): an item's kind says; a check, nothing does."""
 
 
+class Passage(Model):
+    """A part of the operator's words moved into a thread, the passage it came from, and what became of it: the item in it that answered it, or none while it's open."""
+
+    spot: Spot
+    words: str
+    """The operator's words there, as they wrote them."""
+    answer: int | None = None
+    """The item in the thread that answered it, by its number, citing it or
+    answering the whole of what it's of; none while nothing does."""
+
+
+class CheckRead(Model):
+    """A check in a thread, with the operator's answer, where they gave one."""
+
+    check: Check
+    answer: Answered | None = None
+
+
 class ThreadRead(Model):
     """One thread as the review reads it: where it stands, the section it's in and why, what's new, and who answers for it."""
 
     thread: Thread
+    about: str | None = None
+    """What it's about, where its title is no real one but reads as a name,
+    one word of a name's letters, all lowercase (`untitled`): the first line of
+    the first thing in it with words; none where its title says it, or nothing
+    in it says anything."""
     state: State
+    """Where it stands in a word, as its two marks and what's in it say
+    (`stood`)."""
     status: Stated | None = None
-    """Its latest status, which says what a parked one waits for and what to
-    try on one done; none where none was said."""
+    """Its latest status, which says what a parked one waits for; none where
+    none was said."""
+    done: Done | None = None
+    """The agent's mark, where it says it's done: their account of what's done,
+    and what to try (`Marks.done`); none where their mark is open or parked."""
+    cleared: Settled | Declined | None = None
+    """The operator's mark, where they cleared it, settled or declined, whatever
+    the agent's says; none where it's open to them."""
+    reads: Reads = "open"
+    """How it reads on their dashboard, by both marks and whether anyone
+    running answers for it (`how_it_reads`)."""
     section: Section
     since: datetime
     """Since when it's been in its section: what first asked the operator
@@ -279,6 +332,12 @@ class ThreadRead(Model):
     """The parts of the operator's words moved into it that nothing in it
     answers yet (`Standing.unanswered`), in the order they came: each open in
     the thread, waiting on whoever answers for it, never on the operator."""
+    passages: list[Passage] = []
+    """Each part of the operator's words moved into it, in the order they came,
+    with what became of it: the passages it came from."""
+    checks: list[CheckRead] = []
+    """Each check in it, in the order it came, with the operator's answer where
+    they gave one."""
     members: int = 0
     """How much is in it: items, checks and parts moved in."""
     earlier: int = 0
@@ -332,13 +391,6 @@ class ThreadEntry(Model):
     to: Conversation | None = None
     """Whom those words were written to, where they're a review's message or
     remark (`Anchor.to`); none else."""
-
-
-class CheckRead(Model):
-    """A check in a thread, with the operator's answer, where they gave one."""
-
-    check: Check
-    answer: Answered | None = None
 
 
 class ThreadShown(Reply):
@@ -462,6 +514,42 @@ class ThreadStated(Reply):
     paths: list[Pathed] = []
 
 
+def how_it_reads(marks: Marks, *, answering: bool) -> Reads:
+    """Say how a concern reads on the operator's dashboard (`Reads`), by its two `marks`, and whether anyone running is `answering` for it.
+
+    >>> from datetime import UTC, datetime
+    >>> from pathlib import Path
+    >>> agent = Conversation(repository=Path("/r"), runtime="r", session="s")
+    >>> drawn = {"target": 4, "repository": Path("/r"), "at": datetime(2026, 1, 1, tzinfo=UTC)}
+    >>> done, settled = Done(by=agent, to_try="Type.", **drawn), Settled(by=Operator(), **drawn)
+    >>> how_it_reads(Marks(), answering=True), how_it_reads(Marks(agent=done), answering=False)
+    ('open', 'for your eyes')
+    >>> how_it_reads(Marks(operator=settled), answering=True), how_it_reads(Marks(operator=settled), answering=False)
+    ('quiet', 'gone')
+    >>> how_it_reads(Marks(agent=done, operator=settled), answering=True)
+    'gone'
+    """
+    if marks.operator is None:
+        return "open" if marks.done is None else "for your eyes"
+    return "quiet" if marks.done is None and answering else "gone"
+
+
+def untitled(title: str) -> bool:
+    """Say whether `title` is no real title but reads as a name: one word of a name's letters, all lowercase, as `send`'s `thread=` opens one named after a branch.
+
+    >>> untitled("close-wall-gaps"), untitled("findings-said-once"), untitled("")
+    (True, True, True)
+    >>> untitled("The cursor jumps"), untitled("Docs")
+    (False, False)
+    """
+    said = title.strip()
+    return said == "" or (
+        " " not in said
+        and said == said.lower()
+        and all(each.isalnum() or each in "-_." for each in said)
+    )
+
+
 def pile(item: Item) -> bool:
     """Say whether `item` is for the pile to read: a friction or how it felt."""
     return isinstance(item.reason, Friction | HowItFelt)
@@ -478,6 +566,9 @@ class Beside(Model):
     above it who does; none where nobody does."""
     unanswered: list[Spot] = []
     """In the order they came (`Standing.unanswered`)."""
+    answered: dict[Spot, int] = {}
+    """What answered each part of their words moved in that something did, by
+    the part, the answer's number (`lup_ledger.threads.answering`)."""
 
 
 class Concerned(Model, arbitrary_types_allowed=True):
@@ -491,7 +582,9 @@ class Concerned(Model, arbitrary_types_allowed=True):
 
     def beside(self, thread: Thread, *, moved: bool) -> Beside:
         """Return what `thread` is read with: its unanswered parts only where a part was `moved` in, which is all that reads them."""
-        standing = self.concerns.threads.standing(thread.number) if moved else None
+        threads = self.concerns.threads
+        members = threads.members(thread.number) if moved else []
+        standing = threads.standing(thread.number) if moved else None
         return Beside(
             mark=self.concerns.inbox.marks.of(
                 thread.repository, CORE, on_node(thread.number)
@@ -503,6 +596,11 @@ class Concerned(Model, arbitrary_types_allowed=True):
                 Spot(node=each.node.number, part=each.part)
                 for each in standing.unanswered
             ],
+            answered={
+                Spot(node=each.node.number, part=each.part): answer
+                for each in members
+                if (answer := answering(each, members)) is not None
+            },
         )
 
     def paths(self, conversations: Sequence[Conversation]) -> list[Pathed]:
@@ -564,6 +662,7 @@ class Readings(Model, arbitrary_types_allowed=True):
         items = self.source.items()
         members = ledgered.members.get(number, [])
         status = ledgered.statuses.get(number)
+        marks = ledgered.marks.get(number, Marks())
 
         def asked(member: Joined) -> Ask | None:
             # A part of the operator's words moved into a thread waits on its
@@ -596,7 +695,7 @@ class Readings(Model, arbitrary_types_allowed=True):
             thread, moved=any(each.part is not None for each in members)
         )
         mark = beside.mark
-        read_to = self.read_to(members, mark, status)
+        read_to = self.read_to(members, mark, marks)
 
         def unread(member: Joined) -> Item | None:
             item = (
@@ -625,20 +724,37 @@ class Readings(Model, arbitrary_types_allowed=True):
             if (item := unread(each)) is not None and pile(item)
         ]
         placing = self.placed(
-            thread, asking=asking, status=status, new=new, members=members
+            thread, asking=asking, marks=marks, new=new, members=members
         )
+        passages = [
+            Passage(spot=spot, words=words, answer=beside.answered.get(spot))
+            for each in members
+            if each.part is not None
+            and (words := self.words(each)) is not None
+            and (spot := Spot(node=each.node, part=each.part))
+        ]
         return ThreadRead(
             thread=thread,
+            about=self.about(thread, members),
             state=stood(
-                status, waiting=bool(asking), running=beside.answering is not None
+                marks, waiting=bool(asking), running=beside.answering is not None
             ),
             status=status,
+            done=marks.done,
+            cleared=marks.operator,
+            reads=how_it_reads(marks, answering=beside.answering is not None),
             section=placing.section,
             since=placing.since,
             asks=asking,
             new=new,
             pile=piled,
             unanswered=beside.unanswered,
+            passages=passages,
+            checks=[
+                CheckRead(check=check, answer=ledgered.answers.get(check.number))
+                for each in members
+                if (check := ledgered.checks.get(each.node)) is not None
+            ],
             members=len(members),
             earlier=read_to.members,
             mark=mark,
@@ -646,6 +762,33 @@ class Readings(Model, arbitrary_types_allowed=True):
             left_by=self.left_by(thread, beside.answering),
             bare=self.bare(number),
         )
+
+    def words(self, member: Joined) -> str | None:
+        """Return the operator's words of `member`, a part of an item of theirs moved into a thread, as they wrote them; none where it's no part, or its item is gone."""
+        item = None if member.part is None else self.source.items().get(member.node)
+        if item is None:
+            return None
+        return next(
+            (each.text for each in spoken(item) if each.id.part == member.part), None
+        )
+
+    def about(self, thread: Thread, members: list[Joined]) -> str | None:
+        """Return what `thread` is about where its title is no real one (`untitled`): the first line of the first thing in it with words, an item, a check or a part of the operator's words, cut short; none where its title says it, or nothing in it says anything."""
+        if not untitled(thread.title):
+            return None
+        items = self.source.items()
+
+        def said(member: Joined) -> str:
+            if member.part is not None:
+                return self.words(member) or ""
+            item = items.get(member.node)
+            if item is not None:
+                return opening(item)
+            check = self.ledgered.checks.get(member.node)
+            return "" if check is None else check.text
+
+        first = next((words for each in members if (words := said(each).strip())), None)
+        return None if first is None else cue(first, 60)
 
     @staticmethod
     def left_by(thread: Thread, answering: Conversation | None) -> Conversation | None:
@@ -673,9 +816,9 @@ class Readings(Model, arbitrary_types_allowed=True):
         )
 
     def read_to(
-        self, members: list[Joined], mark: ReviewMark | None, status: Stated | None
+        self, members: list[Joined], mark: ReviewMark | None, marks: Marks
     ) -> ReadTo:
-        """Return how far what's in a thread was last read: up to what its review `mark` names, or, where that's moved out of it since, what came by when the mark was moved; or what came by when the operator settled or declined it, `status`, where that's further: lup's settling isn't their reading."""
+        """Return how far what's in a thread was last read: up to what its review `mark` names, or, where that's moved out of it since, what came by when the mark was moved; or what came by when the operator cleared it, settled or declined, as their mark of it says (`marks`), where that's further: lup's settling isn't their reading."""
         marked = ReadTo()
         if mark is not None and mark.up_to is not None and mark.up_to.isdecimal():
             named = int(mark.up_to)
@@ -689,9 +832,10 @@ class Readings(Model, arbitrary_types_allowed=True):
                 if places
                 else ReadTo.by(members, mark.at)
             )
+        cleared = marks.operator
         closed = (
-            ReadTo.by(members, status.at)
-            if isinstance(status, Settled | Declined) and status.by == Operator()
+            ReadTo.by(members, cleared.at)
+            if cleared is not None and cleared.by == Operator()
             else ReadTo()
         )
         return marked if marked.members >= closed.members and marked.at else closed
@@ -701,15 +845,15 @@ class Readings(Model, arbitrary_types_allowed=True):
         thread: Thread,
         *,
         asking: list[Ask],
-        status: Stated | None,
+        marks: Marks,
         new: list[int],
         members: list[Joined],
     ) -> Placing:
-        """Return the section a thread is in, and since when."""
+        """Return the section a thread is in, and since when: one the agent says is done waits on the operator until they clear it."""
         if asking:
             return Placing(section="waiting on you", since=asking[0].came)
-        if isinstance(status, Done):
-            return Placing(section="waiting on you", since=status.at)
+        if marks.done is not None and marks.operator is None:
+            return Placing(section="waiting on you", since=marks.done.at)
         came = {each.node: each.came for each in members if each.part is None}
         if new:
             return Placing(section="new", since=came[new[0]])
@@ -725,7 +869,7 @@ class Readings(Model, arbitrary_types_allowed=True):
         members = ledgered.members.get(number, [])
         items = self.source.items()
         mark = read.mark
-        read_to = self.read_to(members, mark, read.status)
+        read_to = self.read_to(members, mark, ledgered.marks.get(number, Marks()))
         numbers = [each.node for each in members if each.part is None]
 
         def earlier(came: datetime) -> bool:

@@ -104,17 +104,6 @@ describe("what's new is read by being on screen, in headless Chromium", () => {
         await review.holds("@66 note");
     });
 
-    it("moves the thread's own mark in its own buffer, as another takes the screen", async () => {
-        await dashboard.openRow("@auth-survey");
-        await review.until("read the thread whole", (view) => view.state.doc.toString().startsWith("━━ @auth-survey") && !view.state.doc.toString().includes("reading…"));
-        await onScreen("── @66 note");
-        await passes(10_000);
-        await review.settled(300);
-        await dashboard.openRow("what's for you");
-        await review.holds("── @54 approval");
-        await expect.poll(() => moved().filter((each) => typeof each.key.node === "number" && each.up_to === "66").length, { timeout: 15_000 }).toBeGreaterThan(0);
-    });
-
     it("leaves what was scrolled past quickly new", async () => {
         await onScreen("── @56 turn ended");
         await passes(500);

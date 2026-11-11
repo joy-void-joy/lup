@@ -98,7 +98,7 @@ interface Actions {
     cite: (forward: boolean) => void;
     /** `gd`: follow a citation to the passage it cites, or a passage cited back to its citation. */
     follow: () => void;
-    /** `gt`: go to the thread what the cursor is in is of, whole. */
+    /** `gt`: go to the block of the concern what the cursor is on is of, where it's held. */
     thread: () => void;
     /** `g?`: open the list of every key. */
     list: () => void;
@@ -1700,7 +1700,7 @@ export interface Own<C> {
     cite?: (forward: boolean) => void;
     /** Follow a citation to what it cites, or back, as the review's `gd` does; none where the view has none. */
     follow?: () => void;
-    /** Go to the thread what the cursor is in is of, whole, as the review's `gt` does; none where the view has none. */
+    /** Go to the block of the concern what the cursor is on is of, as the review's `gt` does; none where the view has none. */
     thread?: () => void;
     /** What's painted on the lines from `from` to `to` while they're in view, beyond what `draw` drew: a changed file's lines and their highlighting. */
     paint?: (from: number, to: number) => Range<Decoration>[];

@@ -12,7 +12,7 @@ import { cited } from "./comments";
 export type ReplyPart =
     /** Something done to items, by their numbers, `read @64, @65`: `then` is said after them. */
     | { kind: "items"; done: string; numbers: readonly number[]; then?: string }
-    /** A thread marked, `@reader read`: read, settled or declined. */
+    /** A concern marked, by what it's called, `The reader cleared`: read, cleared or declined. */
     | { kind: "thread"; name: string; done: string }
     /** What reaches a party, `to lup-impl/parser: a message, comments on @62`. */
     | { kind: "to"; who: string; what: readonly string[] }
@@ -25,7 +25,7 @@ export function partSaid(part: ReplyPart): string {
         case "items":
             return `${part.done} ${part.numbers.map(cited).join(", ")}${part.then ?? ""}`;
         case "thread":
-            return `@${part.name} ${part.done}`;
+            return `${part.name} ${part.done}`;
         case "to":
             return `to ${part.who}: ${part.what.join(", ")}`;
         case "said":
@@ -35,7 +35,8 @@ export function partSaid(part: ReplyPart): string {
 
 /**
  * Say `parts` on one line, between `between`: two or more items done alike counted, `read 3 items`, one named; and two
- * or more threads marked alike, `@reader read` and `@auth read`, as `2 threads read`, said where the first of them was.
+ * or more concerns marked alike, `The reader cleared` and `Auth cleared`, as `2 concerns cleared`, said where the first
+ * of them was.
  */
 export function partsSaid(parts: readonly ReplyPart[], between: string = " · "): string {
     const threads = new Map<string, number>();
@@ -58,7 +59,7 @@ export function partsSaid(parts: readonly ReplyPart[], between: string = " · ")
                 return [];
             }
             said.add(part.done);
-            return [`${count} threads ${part.done}`];
+            return [`${count} concerns ${part.done}`];
         })
         .join(between);
 }

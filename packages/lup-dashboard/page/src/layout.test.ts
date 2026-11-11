@@ -3,7 +3,7 @@ import "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
 import { cursorRow, itemStanding, outlineOf, type Reading } from "./outline";
-import { EMPTY, barsOf, holderOf, laid, nested, opened, ownerOf, quoted, rowLabel, whose, UNREAD, UNSEEN, type AgentDrawers, type Around, type Conversation, type Draft, type GroupHead, type Item, type Placed, type Remark } from "./review";
+import { EMPTY, barsOf, holderOf, laid, nested, opened, ownerOf, quoted, rowLabel, whose, UNREAD, UNSEEN, type AgentDrawers, type Around, type Conversation, type Draft, type Head, type Item, type Placed, type Remark } from "./review";
 import { sightsOf } from "./seeing";
 import { around, linesOver, pinned, stickies, type Geometry } from "./stack";
 import { STANDING } from "./fixtures/looks";
@@ -36,10 +36,7 @@ function note(number: number, sender: Conversation, rank: Item["rank"] = NEWS): 
 
 const NOTHING: Around = { contexts: new Map(), files: new Map(), answers: [], commented: [] };
 const header = (item: Item, parked: boolean) => `── @${item.number} note${parked ? " · later" : ""} ──`;
-const banner = (head: GroupHead) => {
-    if ("thread" in head) {
-        return `━━ @${head.thread.thread.name} ━━`;
-    }
+const banner = (head: Head) => {
     const party = "item" in head ? head.item.sender : head.conversation;
     return `━━ ${party.party === "conversation" ? (party.agent ?? party.session) : "lup"} ━━`;
 };
@@ -326,7 +323,7 @@ describe("what a drawer's view says is read by being on screen", () => {
     const out = laid([], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { remote });
 
     it("says each block where it's laid out, moving that drawer's mark, in the order it comes", () => {
-        const sights = sightsOf(out, UNSEEN, EMPTY, remote, null);
+        const sights = sightsOf(out, UNSEEN, EMPTY, remote);
         expect(sights.map((each) => [each.moves?.up_to, each.standing, each.held])).toEqual([
             ["1", true, true],
             ["3", false, false],
@@ -344,7 +341,7 @@ describe("what a drawer's view says is read by being on screen", () => {
         const on = opened(out, out.text.indexOf("Thanks.")) as Remark;
         const draft: Draft = { ...EMPTY, remarks: [{ ...on, id: "mine", text: "And?" }] };
         const wrote = laid([], [PARENT], banner, header, draft, NOTHING, [], drawers, undefined, { remote });
-        const sights = sightsOf(wrote, UNSEEN, draft, remote, null);
+        const sights = sightsOf(wrote, UNSEEN, draft, remote);
         expect(sights.find((each) => each.moves?.up_to === "5")?.held).toBe(true);
     });
 });
