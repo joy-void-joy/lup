@@ -64,6 +64,7 @@ from lup_dev.host.records import Said
 from lup_transcripts.environment.conversation import (
     EARLIER_KIND,
     ITEMS_KIND,
+    LUP_TONE,
     RECEIVED_TONE,
     SENT_TONE,
     Calling,
@@ -196,10 +197,12 @@ def message(turn: Word, exchanged: Exchanged, report: Report, *, new: bool) -> B
         )
 
     match turn:
-        case Inboxed(heading=line, reading=reading, number=number):
+        case Inboxed(heading=line, reading=reading):
             tone = (
                 SENT_TONE
                 if turn.sent
+                else LUP_TONE
+                if turn.lups
                 else HEARD_TONE
                 if turn.by is not None
                 else RECEIVED_TONE
@@ -207,9 +210,9 @@ def message(turn: Word, exchanged: Exchanged, report: Report, *, new: bool) -> B
             last = "" if not turn.reported or turn.by is None else report(turn.by)
             text = "\n".join(kept(f"{last}\n\n{reading}"))
             if not text:
-                return Line(id=f"item {number} line", spans=heading(line or [], tone))
-            body = Markdown(id=f"text {number}", text=text, by=turn.by)
-            return under(f"item {number}", line or [], tone, body)
+                return Line(id=turn.line_id(), spans=heading(line or [], tone))
+            body = Markdown(id=turn.text_id(), text=text, by=turn.by)
+            return under(turn.named(), line or [], tone, body)
         case Spoken(step=step, said=said, repeated=repeated):
             text = "\n".join(kept(said.text))
             if said.by == "operator":

@@ -19,6 +19,11 @@ conversations is neither sent nor received: the message itself is (`copy`).
 
 `said` is each kind's own words, as the kind's summary view will say them once
 each kind is its module's (#113, step 4): the one place here naming the kinds.
+
+What lup told the conversation in no item, its lines left for them (`Left`), is
+worded here too (`relayed`): lup's own line as lup's (`lup → lup-impl/parser`),
+and someone's words a line carried whole as theirs reaching the conversation,
+saying how (`@812.1 you → lup-impl/parser · moved by lup-impl into @lag`).
 """
 
 from datetime import datetime
@@ -35,8 +40,10 @@ from lup_dev.inbox.store import (
     Done,
     Ended,
     Flagged,
+    Friction,
     HeldChange,
     Item,
+    Left,
     Message,
     Review,
     Stop,
@@ -50,7 +57,7 @@ from lup_dev.inbox.store import (
 from lup_ledger.parties import Conversation, Operator
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
 type Piece = str | Conversation
 """A run of an item's line: its own words, or a conversation it names, said as
@@ -91,7 +98,7 @@ class Lined(Model):
 
 
 def said(item: Item) -> list[Piece]:
-    """Say what `item` is, in its kind's own words: a turn's last words as their kind is named (`turn's end`, `inbox/texts.py`), a message by its kind, the operator's own as their message or their reply; their answer and review by what they answer; lup's word on citations by how many in which item; a held change, a stop, a flagged write; any other kind by its name.
+    """Say what `item` is, in its kind's own words: a turn's last words as their kind is named (`turn's end`, `inbox/texts.py`), a message by its kind, the operator's own as their message or their reply; their answer and review by what they answer; lup's word on citations by how many in which item; a held change, a stop, a flagged write; a concern's words as a concern, as `kind` names them; any other kind by its name.
 
     >>> from datetime import UTC
     >>> said(Item(number=54, reason=Message(kind="note", text="Good.", of=52),
@@ -128,6 +135,8 @@ def said(item: Item) -> list[Piece]:
             return ["stopped"]
         case Flagged(), _:
             return ["flagged write"]
+        case Friction(), _:
+            return ["concern"]
         case reason, _:
             return [reason.reason]
 
@@ -169,6 +178,157 @@ def worded(item: Item, party: Conversation) -> bool:
             return not (item.quiet and item.sender == party)
 
 
+def of_agent(conversation: Conversation) -> OfAgent:
+    """Refer to `conversation` by their runtime's ids, which never change as they're renamed."""
+    return OfAgent(
+        runtime=conversation.runtime,
+        session=conversation.session,
+        agent=conversation.agent,
+    )
+
+
+def spans(pieces: list[Piece], named: Callable[[Conversation], str]) -> list[Span]:
+    """Return `pieces` as a line's spans: each run of words one span, each conversation a span of their own, said as `named` calls them, referring to them by their runtime's ids (`Span.conversation`)."""
+    runs = groupby(pieces, key=lambda each: isinstance(each, str))
+    return [
+        span
+        for plain, run in runs
+        for span in (
+            [Span(text="".join(each for each in run if isinstance(each, str)))]
+            if plain
+            else [
+                Span(text=named(each), conversation=of_agent(each))
+                for each in run
+                if isinstance(each, Conversation)
+            ]
+        )
+    ]
+
+
+def dotted(*parts: list[Piece] | str | None) -> list[Piece]:
+    """Return `parts` one after the other, a ` · ` between each, those that are none or empty left out.
+
+    >>> dotted(["@5 note"], None, "read")
+    ['@5 note', ' · ', 'read']
+    """
+    kept = [[each] if isinstance(each, str) else each for each in parts if each]
+    return [
+        piece
+        for at, part in enumerate(kept)
+        for piece in [*([" · "] if at else []), *part]
+    ]
+
+
+class Relay(Model):
+    """One of lup's lines left for a conversation (`Left`), as a view of that conversation shows it: lup's own line, or someone's words it carried them whole."""
+
+    left: Left
+    line: list[Span]
+    """Its line among the conversation's steps: `← from lup`, or what it carries
+    and how it came (`← @7 note from lup-impl/parser, landed in @lag`)."""
+    heading: list[Span]
+    """Its heading among the conversation's words alone, who says it to whom:
+    `lup → lup-impl/fixer`, or `@812.1 you → lup-impl/fixer · moved by lup-impl
+    into @lag`."""
+    at: datetime
+    """When it reached the conversation: when it was told them, else left."""
+    carried: Item | None = None
+    """The item it carries, whole or a part of it, where it carries one the
+    inbox holds; none for lup's own line."""
+    part: int | None = None
+    """The part of the operator's words in `carried` it carries, where it carries
+    one part."""
+    by: OfAgent | None = None
+    """Who wrote what it carries, where that's another conversation: whom a
+    comment on its text goes to."""
+
+
+def relayed(
+    party: Conversation,
+    lines: list[Left],
+    items: Mapping[int, Item],
+    threads: Callable[[int], str | None],
+    named: Callable[[Conversation], str],
+) -> list[Relay]:
+    """Return each of lup's `lines` left for `party`, oldest first, as a view of `party` shows it, saying `not told yet` where they aren't.
+
+    One carrying someone's words whole, an item of `items` landing in a
+    thread or moved there, or a part of the operator's words moved there,
+    shows as those words reaching `party`, its writer's and of its kind, saying
+    in which thread, by its name as `threads` says it, and how it came there:
+    `landed`, or moved by whom. Any other, or one whose item or thread is gone,
+    is lup's own line to them, `lup → lup-impl/fixer`, never the operator's,
+    though it says what the operator did.
+    """
+
+    def one(left: Left) -> Relay:
+        waiting = "not told yet" if left.told is None else None
+        at = left.at if left.told is None else left.told
+        carries = left.carries
+        item = None if carries is None else items.get(carries.item)
+        name = None if carries is None else threads(carries.thread)
+        if carries is None or item is None or name is None:
+            return Relay(
+                left=left,
+                line=spans(dotted(["← from lup"], waiting), named),
+                heading=spans(dotted(["lup → ", party], waiting), named),
+                at=at,
+            )
+        match carries.moved:
+            case None:
+                came: list[Piece] = [f"landed in @{name}"]
+            case Operator():
+                came = [f"moved by you into @{name}"]
+            case Conversation() as mover:
+                came = ["moved by ", mover, f" into @{name}"]
+        writer: Piece = item.sender if isinstance(item.sender, Conversation) else "you"
+        if carries.part is not None:
+            said_as = f"{cited(item.number)}.{carries.part}"
+            return Relay(
+                left=left,
+                line=spans(
+                    dotted([f"← {said_as} your words, ", *came], waiting), named
+                ),
+                heading=spans(
+                    dotted([f"{said_as} ", writer, " → ", party], came, waiting), named
+                ),
+                at=at,
+                carried=item,
+                part=carries.part,
+            )
+        whose: list[Piece] = (
+            [*said(item), " from ", item.sender]
+            if isinstance(item.sender, Conversation)
+            else ["your ", *said(item)]
+        )
+        return Relay(
+            left=left,
+            line=spans(
+                dotted(
+                    [f"← {cited(item.number)} ", *whose, ", ", *came],
+                    waiting,
+                ),
+                named,
+            ),
+            heading=spans(
+                dotted(
+                    [f"{cited(item.number)} ", writer, " → ", party],
+                    list(said(item)),
+                    came,
+                    waiting,
+                ),
+                named,
+            ),
+            at=at,
+            carried=item,
+            by=of_agent(item.sender)
+            if isinstance(item.sender, Conversation) and item.sender != party
+            else None,
+        )
+
+    return [one(each) for each in lines]
+
+
 def lined(
     party: Conversation, items: list[Item], named: Callable[[Conversation], str]
 ) -> list[Lined]:
@@ -187,32 +347,7 @@ def lined(
     received = [each for each in items if told(party, each)]
 
     def spanned(pieces: list[Piece]) -> list[Span]:
-        def referring(conversation: Conversation) -> Span:
-            of = OfAgent(
-                runtime=conversation.runtime,
-                session=conversation.session,
-                agent=conversation.agent,
-            )
-            return Span(text=named(conversation), conversation=of)
-
-        runs = groupby(pieces, key=lambda each: isinstance(each, str))
-        return [
-            span
-            for plain, run in runs
-            for span in (
-                [Span(text="".join(each for each in run if isinstance(each, str)))]
-                if plain
-                else [referring(each) for each in run if isinstance(each, Conversation)]
-            )
-        ]
-
-    def dotted(*parts: list[Piece] | str | None) -> list[Piece]:
-        kept = [[each] if isinstance(each, str) else each for each in parts if each]
-        return [
-            piece
-            for at, part in enumerate(kept)
-            for piece in [*([" · "] if at else []), *part]
-        ]
+        return spans(pieces, named)
 
     def answering(item: Item) -> list[int]:
         def answers(each: Item) -> bool:

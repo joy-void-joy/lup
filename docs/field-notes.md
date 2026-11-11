@@ -743,6 +743,14 @@ Behind `docs/inbox.md`, *Threads* (#345): whether a concern is a workable unit f
 - **The grain:** 16 to about 60 concerns on any grain a careful reader could defend, from merging a branch's pieces into their issue to splitting a decision round into its points; 150 only at one per numbered decision.
 - Links were found by pattern (a citation `@` and digits, an issue `#` and two or three digits, a branch backticked in a landing's line); only the 56 messages between agents were read for what they reply to. Not measured: another session, whose briefs may not map workers to branches one to one as this one's did.
 
+## lup's lines told to agents (lup's kept Claude Code records and a copy of its ledger, threads from 2026-10-29, measured 2026-11-08)
+
+Behind `docs/inbox.md`, *Kept on the ledger*: how much a conversation's lines kept come to.
+- **Told, as the records say:** of the 504 Claude Code records kept for this repository, 2,864 hooks gave additional context, and 30 lines lup left a conversation were among it: 21 a thread's line, 3 a landing's invitation to say how the work felt, 3 a worktree left detached, 2 a check answered, 1 the operator settling a thread. No `<landed>` or `<moved>` tag. Read by each told piece's first words, `lup: ` or a tag's, each named line told apart from lup's other words (a session's name, its tools).
+- **Projected from the ledger**, by *Who's told*'s rules, approximately (a subagent's quiet in their parent's thread left out): of 614 items landing in a thread as they were sent, nearly all landed in a root their own session held, which tells nobody, its holder having sent it or being the session above the subagent who did. 2 would be told whole and 41 as a line, about 12 KB in all, to 23 conversations, 19 at most to one; beside them 42 statuses, moves and checks answered, a line each.
+- **An item a whole tag carries:** of 3,019 items from conversations, the median's text is 490 bytes, the 90th percentile 2,440, and 116 are past the 4,000 a tag told whole holds.
+- Not measured: a day of concerns handed to spawned agents, where most items land in a concern someone else holds, each told whole to them once and a line to each other on it.
+
 ## Package age gates (2026-10-12)
 
 - uv's `exclude-newer` accepts "3 days" (`UV_EXCLUDE_NEWER`);

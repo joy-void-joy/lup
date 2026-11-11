@@ -31,7 +31,7 @@ from lup_dev.adapters.claude import ClaudeTranscripts
 from lup_dev.adapters.codex import CodexTranscripts
 from lup_dev.host.records import Call, Called, Entry, Reader, Said
 from lup_dev.inbox.marks import ReviewMark
-from lup_dev.inbox.protocol import Exchanged, Pathed, exchanged
+from lup_dev.inbox.protocol import Exchanged, Pathed, Relayed, exchanged
 from lup_dev.inbox.store import (
     Answer,
     Answered,
@@ -846,6 +846,49 @@ def lines(view: Blocks, *marks: str) -> list[str]:
         )
         if each.startswith(marks)
     ]
+
+
+def test_lup_s_lines_told_in_no_item_are_lines_where_they_reached_the_conversation_lup_s_saying_how_they_start() -> (
+    None
+):
+    told = EXCHANGED.model_copy(
+        update={
+            "relayed": [
+                Relayed(
+                    number=1,
+                    line=[lup.Span(text="← from lup")],
+                    heading=[lup.Span(text="lup → lup-impl")],
+                    text="the operator settled @cursor.",
+                    at=at(5),
+                    lups=True,
+                ),
+                Relayed(
+                    number=2,
+                    line=[lup.Span(text="← @51.1 your words, moved by dev into @lag")],
+                    heading=[lup.Span(text="@51.1 you → lup-impl")],
+                    text="Fix the cursor.",
+                    at=at(7),
+                    lups=False,
+                ),
+            ]
+        }
+    )
+    view = read_back(CALLED, told)
+    assert lines(view, "← ") == [
+        "← @53 your answer to @51",
+        "← from lup · the operator settled @cursor.",
+        "← @51.1 your words, moved by dev into @lag",
+        "← @54 your reply to @52 · not told yet",
+    ]
+    settled = block(view.blocks, "lup 1")
+    assert isinstance(settled, Fold)
+    assert [span.tone for span in settled.summary] == ["lup", "muted"]
+    assert settled.content == [
+        Markdown(id="lup 1 text", text="the operator settled @cursor.")
+    ]
+    moved = block(view.blocks, "lup 2")
+    assert isinstance(moved, Fold)
+    assert [span.tone for span in moved.summary] == ["received"]
 
 
 def test_each_item_is_a_line_its_text_under_it_one_sent_after_the_call_that_made_it_one_received_when_told() -> (
@@ -1907,6 +1950,7 @@ def test_the_fold_kinds_keep_their_letters_and_colours() -> None:
         ("sent", "call", None),
         ("received", "operator", None),
         ("run", "muted", None),
+        ("lup", None, "ok"),
     ]
 
 
