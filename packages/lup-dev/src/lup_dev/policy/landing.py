@@ -207,6 +207,7 @@ from lup_dev.git import (
     Git,
     GitError,
     Tracked,
+    Worktree,
     nul_separated,
     refs_astray,
     threaded,
@@ -350,15 +351,6 @@ class Waited(Model):
 
     told: str
     outcomes: list[Outcome]
-
-
-class Worktree(Model):
-    """One worktree of the repository, as `git worktree list` gives it: its root, and the branch it has checked out, by its ref's full name."""
-
-    root: Path
-    branch: str | None = None
-    head: str | None = None
-    """The commit its `HEAD` names; none before the repository's first."""
 
 
 class Worker(Model):
@@ -910,35 +902,6 @@ def started(saw: Saw | None, git: Git, old: str | None, path: Path) -> bytes | N
     if old is None:
         return None
     return blob(git, old, path)
-
-
-def worktrees(git: Git) -> list[Worktree]:
-    """Return the repository's worktrees, its main one first, as `git worktree list` gives them, each with the branch it has checked out and the commit its `HEAD` names."""
-    fields = nul_separated(git.run("worktree", "list", "--porcelain", "-z").output)
-    starts = [at for at, field in enumerate(fields) if field.startswith("worktree ")]
-    records = [
-        fields[start:end]
-        for start, end in zip(starts, [*starts[1:], len(fields)], strict=True)
-    ]
-
-    def labelled(record: list[str], label: str) -> str | None:
-        return next(
-            (
-                field.removeprefix(f"{label} ")
-                for field in record
-                if field.startswith(f"{label} ")
-            ),
-            None,
-        )
-
-    return [
-        Worktree(
-            root=Path(record[0].removeprefix("worktree ")),
-            branch=labelled(record, "branch"),
-            head=labelled(record, "HEAD"),
-        )
-        for record in records
-    ]
 
 
 def passed(kept: Path) -> bool:
@@ -2212,7 +2175,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         """
         if local is None:
             return None
-        trees = await threaded(self.launch.repository, worktrees, git)
+        trees = await threaded(self.launch.repository, git.listed)
         checkout = next((each.root for each in trees if each.branch == onto), None)
         how = "git update-ref" if checkout is None else "git merge --ff-only"
         moving = (
@@ -2253,7 +2216,7 @@ class Lander(Model, arbitrary_types_allowed=True):
     async def conflicted(self, git: Git, asked: Merge, files: list[Path]) -> str:
         """Say that merging `asked`'s branch conflicts in `files`, and how it lands: merged the other way in its worktree, by whoever works there."""
         branch = f"refs/heads/{asked.branch}"
-        trees = await threaded(self.launch.repository, worktrees, git)
+        trees = await threaded(self.launch.repository, git.listed)
         places = list(self.delivery.inbox.whereabouts.values())
         working = await asyncio.to_thread(self.working, places)
         roots = [each.root for each in trees if each.branch == branch]
@@ -2305,7 +2268,7 @@ class Lander(Model, arbitrary_types_allowed=True):
             for ref in listed.output.decode().splitlines()
             if not matching(ref, limits.gated) and not matching(ref, limits.protected)
         ]
-        trees = await threaded(self.launch.repository, worktrees, git)
+        trees = await threaded(self.launch.repository, git.listed)
         working = await asyncio.to_thread(self.working, places)
         host = self.layout.host
         lines = [
@@ -2352,7 +2315,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         ]
         if not refs:
             return
-        trees = await threaded(self.launch.repository, worktrees, git)
+        trees = await threaded(self.launch.repository, git.listed)
         built = {
             each.root: short(each.branch)
             for each in trees
@@ -2542,7 +2505,7 @@ class Lander(Model, arbitrary_types_allowed=True):
             branch = self.brought_by(git, file, names, short(landing.onto))
             ref = f"refs/heads/{branch}"
             root = next(
-                (each.root for each in worktrees(git) if each.branch == ref), None
+                (each.root for each in git.listed() if each.branch == ref), None
             )
             return Brought(
                 branch=branch,
@@ -2794,7 +2757,7 @@ class Lander(Model, arbitrary_types_allowed=True):
             and not matching(ref, limits.protected)
         }
         listed = [ref.name for ref in refs]
-        trees = await threaded(self.launch.repository, worktrees, git)
+        trees = await threaded(self.launch.repository, git.listed)
         places = list(self.delivery.inbox.whereabouts.values())
         working = await asyncio.to_thread(self.working, places)
         main = trees[0].root if trees else None
