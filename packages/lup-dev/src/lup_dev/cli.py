@@ -36,6 +36,7 @@ from typer.core import TyperGroup
 
 from lup.doors import served as methods
 from lup.errors import LupError
+from lup.programs import Apart, detached
 from lup.rooms import ContainerError, Mount, Podman, Room
 from lup.rooms.engine import stopped
 from lup.types import JsonObject, Model, MutableModel
@@ -93,7 +94,7 @@ from lup_dev.gate import (
 )
 from lup_dev.gate import Ran as GateRan
 from lup_dev.git import Git, GitError, nul_separated
-from lup_dev.host.client import FromRoom, HostClient, RoomClient
+from lup_dev.host.client import FromRoom, HostClient, RoomClient, own_command
 from lup_dev.host.copying import Copying
 from lup_dev.host.courier import (
     Courier,
@@ -110,6 +111,25 @@ from lup_dev.host.dashboard import (
     Showing,
     plain_page,
 )
+from lup_dev.host.held import (
+    Abandon,
+    Abandoning,
+    AwaitHeld,
+    Awaiting,
+    CallingUp,
+    End,
+    HeldLaunch,
+    HeldUp,
+    Interrupt,
+    Launchers,
+    Spawn,
+    Spawning,
+    Starting,
+    launcher_command,
+)
+from lup_dev.host.held import Ending as HeldEnding
+from lup_dev.host.held import Interrupting as HeldInterrupting
+from lup_dev.host.holders import Holders
 from lup_dev.host.names import shaped
 from lup_dev.host.on_trial import (
     AcceptBranch,
@@ -123,12 +143,14 @@ from lup_dev.host.on_trial import (
 )
 from lup_dev.host.protocol import (
     Branches,
+    Done,
     GitHubRepository,
     HostError,
     Listed,
     ListLaunches,
     Register,
     Talker,
+    segment,
 )
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Called, Recorded
@@ -215,6 +237,7 @@ from lup_dev.inbox.threaded import routes as threaded_routes
 from lup_dev.inbox.tools import InboxTools
 from lup_dev.inbox.typed import TypeReader
 from lup_dev.launch.clis import CliCache
+from lup_dev.launch.held import Holder, Writing, untraceable
 from lup_dev.launch.hidden import removed
 from lup_dev.launch.homes import LaunchHome
 from lup_dev.launch.images import build
@@ -249,12 +272,14 @@ from lup_dev.launch.session import (
     hooked,
     terminal_settings,
 )
+from lup_dev.launch.trial import TerminalRun, Trial, scratched, taken_over_there
 from lup_dev.launch.trust import (
     Approving,
     Given,
     InboxApprovals,
     Outcome,
     Terminal,
+    Unattended,
     machine_trust,
     trusted,
 )
@@ -262,6 +287,7 @@ from lup_dev.layout import (
     CheckoutLayout,
     GitDirectoryLayout,
     HostLayout,
+    HostPaths,
     InboxLayout,
     LaunchLayout,
     Layout,
@@ -369,6 +395,14 @@ app.add_typer(dashboard, name="dashboard")
 app.add_typer(private, name="private")
 app.add_typer(account, name="account")
 app.add_typer(live, name="live")
+spawn = typer.Typer(
+    no_args_is_help=True,
+    help=(
+        "Sessions lup holds with no terminal, each its own launch: start one, "
+        "interrupt it, end it, or try the whole of it once."
+    ),
+)
+app.add_typer(spawn, name="spawn")
 
 
 def engine(environments: Path | None = None) -> Checker:
@@ -502,6 +536,11 @@ class Wakers(Model, Waker):
         pushing = self.adapters.named(runtime).pushing
         return {} if pushing is None else pushing.capabilities
 
+    def held(self, runtime: str, text: str, token: str) -> str | None:
+        """Return the user turn that starts an idle held session of `runtime` on `text`, carrying `token`; none where it has no held session (`Holders.prompt`)."""
+        holding = self.adapters.named(runtime).holding
+        return None if holding is None else holding.prompt(text, token)
+
 
 def services(environments: Path | None = None) -> Services:
     """Return what judging reaches, as configured on this machine.
@@ -630,6 +669,23 @@ def control_routes(
     ]
 
 
+def held_routes(layout: Layout, holders: Holders, launchers: Launchers) -> list[Route]:
+    """Route what the operator asks of sessions held with no terminal, and their launchers' word that one is up: each launcher started from the `lup-dev` the service runs, in its worktree, what it prints in its launch's log (`lup_dev.host.held`)."""
+
+    def start(spec: HeldLaunch, log: Path) -> Apart:
+        program, *rest = launcher_command(own_command(), spec)
+        return detached(program, *rest, log=log, cwd=spec.worktree)
+
+    return [
+        Route.to(Spawning(layout=layout, launchers=launchers, start=start)),
+        Route.to(Awaiting(layout=layout, launchers=launchers)),
+        Route.to(Abandoning(launchers=launchers)),
+        Route.to(CallingUp(launchers=launchers)),
+        Route.to(HeldInterrupting(holders=holders)),
+        Route.to(HeldEnding(holders=holders)),
+    ]
+
+
 def trial_routes(
     trying: Trying, delivery: Delivery, landing: LandingTools | None
 ) -> list[Route]:
@@ -679,11 +735,14 @@ def host_serve(context: typer.Context) -> None:
     layout = Layout.of(settings)
     changes = Changes()
     pushes = Pushes()
+    holders = Holders(layout=layout, prompt=wakers.held)
+    launchers = Launchers()
     dashboard = installed_dashboard(settings, layout.host)
     delivery = Delivery(
         inbox=inbox_opened(layout, changes, typer.echo),
         waker=wakers,
         pushes=pushes,
+        holders=holders,
         layout=layout.host,
         notices=Unsaid() if rehearsing else NotifySend(),
         clock=SystemClock(),
@@ -698,6 +757,7 @@ def host_serve(context: typer.Context) -> None:
             if adapter.queues is not None
         },
     )
+    holders.interrupted = delivery.interrupted
     types = TypeReader(delivery=delivery, read=typed_reading, say=typer.echo)
     podman = Podman()
     workers = Workers(
@@ -716,6 +776,7 @@ def host_serve(context: typer.Context) -> None:
         say=typer.echo,
         running=workers.commands,
         coming=None if rehearsing else coming,
+        reap=launchers.reaped,
     )
     turns = Turns()
     trying = Trying(
@@ -752,16 +813,19 @@ def host_serve(context: typer.Context) -> None:
             delivery=delivery, running=partial(running_branch, layout)
         ),
         namesakes=NodeNames(delivery=delivery),
-        routes=control_routes(
-            delivery,
-            recorded(),
-            dashboard,
-            layout,
-            ModuleViews(asking=asking, changes=changes, say=typer.echo),
-            waits=waits,
-            trying=trying,
-            landing=landing,
-        ),
+        routes=[
+            *control_routes(
+                delivery,
+                recorded(),
+                dashboard,
+                layout,
+                ModuleViews(asking=asking, changes=changes, say=typer.echo),
+                waits=waits,
+                trying=trying,
+                landing=landing,
+            ),
+            *held_routes(layout, holders, launchers),
+        ],
         tools=room_tools(delivery, layout, workers, landing=landing),
         room_routes=[
             *remote_routes(remotes),
@@ -782,6 +846,7 @@ def host_serve(context: typer.Context) -> None:
         changes=changes,
         waker=wakers,
         pushes=pushes,
+        holders=holders,
         companions=[
             *(
                 []
@@ -2093,6 +2158,11 @@ class Launcher(Model, arbitrary_types_allowed=True):
     """Asks the operator a question in their terminal, returning the line they
     answer, none at the end of its input; none where the launch runs in no
     terminal to ask in."""
+    pause: Callable[[float], Awaitable[None]] = asyncio.sleep
+    """Waits the seconds between two looks a held launch takes at whether the
+    host heard its session's first hook; a test gives its own."""
+    host_paths: HostPaths = HostPaths()
+    """The host's own places a held launch reads; a test gives its own."""
 
 
 def host_runtime(adapter: Adapter) -> HostRuntime:
@@ -2146,9 +2216,15 @@ def swept(
     a launch whose lock can be taken has no launcher left; its container, named
     when it registered, tells whether its session still runs, and one that
     isn't running, left as its launch ended before it started, is removed with
-    it. Each launch ended is said, and a launch ended first elsewhere is passed
-    over; its environments go with it. A launch runs it before it registers, and the host
-    service on its own (`Sweeping`).
+    it. A held launch's container still running is stopped first: nothing
+    reaches its session without its launcher, and its runtime outlives its
+    input during a call, a held hook or a background command
+    (`docs/field-notes.md`, *A session held with no terminal*), spending on
+    with no one reading; one podman can't stop is said and left for the next
+    sweep, so it keeps no other launch from starting. Each launch ended is
+    said, and a launch ended first elsewhere is passed over; its environments
+    go with it. A launch runs it
+    before it registers, and the host service on its own (`Sweeping`).
     """
 
     def ending(each: Register) -> bool:
@@ -2164,7 +2240,22 @@ def swept(
                 return False
             state = podman.state(each.container)
             if state is not None and not stopped(state):
-                return False
+                if not each.held:
+                    return False
+                try:
+                    podman.stop(each.container)
+                except ContainerError as failed:
+                    say(
+                        f"{each.container}, launch {each.launch}'s room, held by a "
+                        f"launcher that's gone, wasn't stopped, so it stays for the "
+                        f"next sweep: {failed}"
+                    )
+                    return False
+                say(
+                    f"Stopped {each.container}: launch {each.launch}'s session was "
+                    "held by a launcher that's gone."
+                )
+                state = podman.state(each.container)
             try:
                 host.unregister(each.launch)
             except HostError as gone:
@@ -2174,6 +2265,7 @@ def swept(
                 podman.discard(each.container)
             released(podman, own, say)
             vacated(own)
+            own.held.unlink(missing_ok=True)
             rooms = layout.rooms(each.repository)
             removed(rooms.home, rooms.launch(each.launch))
             say(
@@ -2209,6 +2301,9 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
     coming: Coming | None = None
     """What wakes the threads parked until what the sweep sees come; none wakes
     none."""
+    reap: Callable[[], None] | None = None
+    """Collects each held launch's launcher the service started that has
+    ended, so none is left a zombie (`Spawns.reaped`); none collects none."""
     pause: Callable[[float], Awaitable[None]] = asyncio.sleep
     """Waits the seconds between two sweeps; a test gives its own."""
     stopping: asyncio.Event = Field(default_factory=asyncio.Event)
@@ -2249,6 +2344,8 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
             told = "".join(traceback.format_exception(failed))
             self.say(f"{failing}:\n{told}")
         await self.pruned()
+        if self.reap is not None:
+            self.reap()
         self.woken()
 
     def woken(self) -> None:
@@ -2292,8 +2389,19 @@ def launched(
     name: str | None = None,
     profile: str | None = None,
     account: str | None = None,
+    held: HeldLaunch | None = None,
+    take_over: bool = False,
 ) -> int:
-    """Launch `adapter`'s runtime in a room for `worktree`, in this terminal, and return its CLI's exit status.
+    """Launch `adapter`'s runtime in a room for `worktree`, in this terminal, or held with none where `held` is given, and return its CLI's exit status.
+
+    A held launch (`held`) runs under the launch id the host minted, its session
+    named up front, new or resumed, its settings compiled for a held session,
+    and its last step the launcher holding it (`lup_dev.launch.held`) rather
+    than a terminal. Each launch whose session's id is known before its room
+    starts, a held one's, and a terminal's resuming one by its id, holds the
+    lock on that session's writer while its room runs (`Writing`); a terminal
+    finding a held launch on it offers to end that launch and take the session
+    over, or, with `take_over`, does so asking nothing.
 
     In the order `docs/launch.md` gives (*The command*): trust on launch, its
     report said; replace refs in the repository said, which lup's git ignores
@@ -2335,6 +2443,14 @@ def launched(
     appeared or changed in the project's tree meanwhile is said, and left.
     """
     runtime = adapter.runtime.name()
+    holding = adapter.holding
+    if held is not None and holding is None:
+        message = f"{runtime} has no session held with no terminal yet"
+        raise LaunchError(message)
+    traced = None if held is None else untraceable(launcher.host_paths)
+    if traced is not None:
+        message = f"no session is held on this machine: {traced}"
+        raise LaunchError(message)
     launcher.say(launcher.trust(worktree).report())
     repository = Path(
         Git(cwd=worktree).text(
@@ -2425,7 +2541,7 @@ def launched(
         }
         for place in shared.values():
             place.mkdir(parents=True, exist_ok=True)
-        launch = secrets.token_hex(8)
+        launch = secrets.token_hex(8) if held is None else held.launch
         own = launcher.layout.launch(launch)
         homing = LaunchHome.of(
             launcher.layout,
@@ -2473,7 +2589,11 @@ def launched(
             rules=running,
             home=homing.home,
         )
-        compiled = adapter.agent().terminal(settings)
+        compiled = (
+            adapter.agent().terminal(settings)
+            if held is None
+            else adapter.agent().held(settings)
+        )
         gating = Gating(
             command=declared.resolved.runner.command(["lup-dev", "check", "--at"]),
             refs=declared.resolved.limits.gated,
@@ -2498,7 +2618,10 @@ def launched(
             environments=environments.own,
             home=homing.home.shared,
             own=homing.home.directory,
+            held=held is not None,
         )
+        naming = named_session(adapter, arguments, held)
+        session, arguments = naming.session, naming.arguments
         hiding = RoomSecrets.of(
             Search(
                 patterns=declared.resolved.paths.secret,
@@ -2519,6 +2642,16 @@ def launched(
         ]:
             launcher.say(line)
         own.lock.parent.mkdir(parents=True, exist_ok=True)
+        writing = (
+            None if session is None else Writing.of(launcher.layout, runtime, session)
+        )
+        writer = (
+            None
+            if writing is None
+            else written_by(
+                launcher, writing, launch, held=held is not None, take_over=take_over
+            )
+        )
         try:
             with FileLock(own.lock):
                 serving = swept(
@@ -2565,7 +2698,22 @@ def launched(
                         engine=launcher.podman,
                         before=environments.before,
                     )
-                    return opened.launch(arguments=arguments, settings=settings)
+                    if held is None or holding is None or session is None:
+                        return opened.launch(arguments=arguments, settings=settings)
+                    holder = Holder(
+                        layout=launcher.layout,
+                        host=launcher.host,
+                        holding=holding.session,
+                        launch=launch,
+                        session=session,
+                        name=served.name,
+                        container=served.container,
+                        sockets=sockets,
+                        podman=launcher.podman,
+                        say=launcher.say,
+                        pause=launcher.pause,
+                    )
+                    return asyncio.run(holder.held(opened, arguments, settings))
                 finally:
                     carried = compiled.preferences
                     for line in [
@@ -2573,11 +2721,150 @@ def launched(
                         *([] if before is None else homing.ended(before)),
                     ]:
                         launcher.say(line)
-                    ended(launcher, launch)
-                    for line in [*environments.end(), *hiding.end()]:
-                        launcher.say(line)
+                    if held is not None and still_running(
+                        launcher.podman, served.container
+                    ):
+                        launcher.say(
+                            f"Launch `{served.name}`'s room, {served.container}, "
+                            "may still run: the launch stays registered, for the "
+                            "host's sweep to stop it and end it once this launcher "
+                            "is gone."
+                        )
+                    else:
+                        ended(launcher, launch)
+                        for line in [*environments.end(), *hiding.end()]:
+                            launcher.say(line)
+                        if held is not None:
+                            own.log.unlink(missing_ok=True)
         finally:
             own.lock.unlink(missing_ok=True)
+            if writing is not None and writer is not None:
+                writing.let_go(writer)
+
+
+class NamedSession(Model):
+    """The session a launch runs, where its id is known before its room starts, and the runtime's arguments naming it."""
+
+    session: str | None
+    arguments: list[str]
+
+
+def still_running(podman: Podman, container: str) -> bool:
+    """Say whether the container named `container` may still run: podman says it does, or can't say."""
+    try:
+        state = podman.state(container)
+    except ContainerError:
+        return True
+    return state is not None and not stopped(state)
+
+
+def named_session(
+    adapter: Adapter, arguments: list[str], held: HeldLaunch | None
+) -> NamedSession:
+    """Return the runtime's id for the session a launch runs, where it's known before its room starts, and the runtime's arguments: a held launch's, named up front, new or resumed, before the operator's own; a terminal's, the one its arguments resume by its id, they unchanged.
+
+    Raise `LaunchError` where a held launch resumes an id that can't be one of
+    the runtime's.
+    """
+    holding = adapter.holding
+    if held is None or holding is None:
+        return NamedSession(
+            session=an_id(adapter, adapter.resumed(arguments)), arguments=arguments
+        )
+    try:
+        session = (
+            holding.minted() if held.resume is None else holding.normal(held.resume)
+        )
+        naming = (
+            holding.fresh(session) if held.resume is None else holding.resuming(session)
+        )
+    except ValueError as unnamed:
+        message = f"`{held.resume}` can't be a session of {adapter.runtime.name()}'s"
+        raise LaunchError(message) from unnamed
+    return NamedSession(session=session, arguments=[*naming, *held.arguments])
+
+
+def an_id(adapter: Adapter, resumed: str | None) -> str | None:
+    """Return what a terminal launch's arguments resume where it's one of the runtime's session ids, in the one form the runtime gives it, by which its writer's lock is kept and the host heard it; none for a search term its picker opens on, or for none."""
+    if resumed is None:
+        return None
+    holding = adapter.holding
+    try:
+        return segment(resumed if holding is None else holding.normal(resumed))
+    except ValueError:
+        return None
+
+
+def run_elsewhere(launcher: Launcher, session: str) -> Register | None:
+    """Return the launch the host serves whose session's hooks name `session`, its latest; none where none does."""
+    listed = launcher.host.listed()
+    return next(
+        (
+            each
+            for each in listed.launches
+            if any(
+                talker.session == session
+                for talker in listed.talkers.get(each.launch, [])
+            )
+        ),
+        None,
+    )
+
+
+def written_by(
+    launcher: Launcher,
+    writing: Writing,
+    launch: str,
+    *,
+    held: bool,
+    take_over: bool = False,
+) -> FileLock:
+    """Take the lock on the session's writer for `launch`, and return it held.
+
+    Where a launch holds it already, a held launch refuses, naming it, and so
+    does a terminal's where that launch is another terminal's, which ends it
+    there. Where none holds it, but the host heard a served launch's hooks
+    name the session, as a terminal's that started it with no id it knew, one
+    `--continue`d, or one after `/clear`, it refuses too, naming that launch. Where it's a held one, the terminal's asks the operator whether to
+    end it, its session taken over here once it lets the lock go
+    (`lup_dev.launch.held`); `take_over` ends it asking nothing, and a
+    terminal with no one to ask refuses.
+    """
+    holder = writing.held_by()
+    if holder is None:
+        running = run_elsewhere(launcher, writing.path.stem)
+        if running is not None:
+            message = (
+                f"the session {writing.path.stem} is run by launch "
+                f"`{running.name}`, its hooks naming it, though it holds no lock "
+                "on its writer: a runtime lets a second process write one session, "
+                "and its record branches, so end that one first"
+            )
+            raise LaunchError(message)
+        return writing.taken(launch)
+    if held:
+        return writing.taken(launch)
+    holding = next(
+        (each for each in launcher.host.launches() if each.launch == holder), None
+    )
+    if holding is None or not holding.held:
+        return writing.taken(launch)
+    if not take_over:
+        if launcher.ask is None:
+            return writing.taken(launch)
+        answer = launcher.ask(
+            f"The session {writing.path.stem} is held by launch `{holding.name}`, "
+            "with no terminal. End it and take it over here? [Y/n] "
+        )
+        if answer is None or answer.strip().lower() not in ["", "y", "yes"]:
+            return writing.taken(launch)
+    outstanding = launcher.host.held(End(launch=holder))
+    try:
+        outstanding.reply(Done)
+    finally:
+        outstanding.close()
+    launcher.say(f"Launch `{holding.name}` ended; its session is taken over here.")
+    return writing.taken(launch, within=timedelta(minutes=1))
 
 
 def ended(launcher: Launcher, launch: str) -> None:
@@ -2608,15 +2895,19 @@ def released(podman: Podman, launch: LaunchLayout, say: Callable[[str], None]) -
         )
 
 
-def launching(say: Callable[[str], None]) -> Launcher:
+def launching(say: Callable[[str], None], *, unattended: bool = False) -> Launcher:
     """Return what a launch reaches on this machine, as its settings place it.
 
     It runs outside every agent's session, which the command checks first.
+    `unattended`, a held launch's launcher with no terminal, an approval waits
+    for its answer in the inbox alone, what trust says going to `say`.
     """
     layout = Layout.of(LupDevSettings())
     clock = SystemClock()
 
     def trust(root: Path) -> Outcome:
+        if unattended:
+            return machine_trust(root, [], asker=Unattended(say_to=say)).ensure()
         return trusted(root, [])
 
     def github(repository: Path) -> GitHubRepository:
@@ -2703,6 +2994,16 @@ def launch(
             ),
         ),
     ] = None,
+    take_over: Annotated[
+        bool,
+        typer.Option(
+            "--take-over",
+            help=(
+                "Where a launch lup holds with no terminal runs the session this "
+                "resumes, end it and take the session over here, asking nothing."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Launch a runtime's session in a room for this worktree, in this terminal.
 
@@ -2741,6 +3042,306 @@ def launch(
         name=name,
         profile=profile,
         account=account,
+        take_over=take_over,
+    )
+    raise typer.Exit(code=status)
+
+
+def refused_inside(doing: str) -> None:
+    """Refuse to run inside an agent's session, as a launch and an approval do: `doing` is what's refused, said."""
+    inside = [each.name() for each in runtimes() if each.inside()]
+    if inside:
+        message = (
+            f"this runs inside a {inside[0]} session, and {doing} is the "
+            "operator's: run it from your own terminal"
+        )
+        raise LaunchError(message)
+
+
+def spawned(
+    runtime: str,
+    arguments: list[str],
+    *,
+    worktree: Path,
+    name: str | None = None,
+    profile: str | None = None,
+    account: str | None = None,
+    resume: str | None = None,
+    restarts: int = 3,
+) -> HeldUp:
+    """Start a session of `runtime` lup holds with no terminal, in the worktree whose root is `worktree`, and return it once it's up.
+
+    Where the service restarts meanwhile, as answering the launcher's approval
+    restarts it, the wait is asked again of the one that runs next, `restarts`
+    times at most.
+
+    What the host runs is checked first, here, where an approval can be asked,
+    as a launch does; then the host service starts the launch's launcher apart,
+    which does the launch's whole setup and holds its session
+    (`lup_dev.host.held`). Refused inside an agent's session.
+    """
+    refused_inside("starting a held session")
+    adapter = Adapters(known=adapters()).named(runtime)
+    if adapter.holding is None:
+        message = f"{runtime} has no session held with no terminal yet"
+        raise LaunchError(message)
+    root = worktree
+    launcher = launching(typer.echo)
+    launcher.say(launcher.trust(root).report())
+    launcher.say(
+        "Starting the held session: the launcher sets its room up as a launch "
+        "does, an image build taking minutes where one is missing."
+    )
+    starting = launcher.host.ask(
+        Spawn(
+            runtime=runtime,
+            worktree=root,
+            name=name,
+            profile=profile,
+            account=account,
+            resume=resume,
+            arguments=arguments,
+        ),
+        Starting,
+    )
+    launcher.say(f"Launch {starting.launch}'s launcher writes to {starting.log}.")
+    awaiting = AwaitHeld(launch=starting.launch, pid=starting.pid)
+    outstanding = launcher.host.held(awaiting)
+    for _ in range(restarts):
+        try:
+            up = outstanding.reply(HeldUp)
+        except KeyboardInterrupt:
+            # Giving up here gives up the launch: its launcher, which may be
+            # waiting on an approval in the inbox, never calls a session up after.
+            launcher.host.ask(Abandon(launch=starting.launch, pid=starting.pid), Done)
+            launcher.say(f"Launch {starting.launch} abandoned: its launcher is ended.")
+            raise
+        finally:
+            outstanding.close()
+        if up is not None:
+            return up
+        # The service closed the wait, as an approval the launcher asked
+        # restarts it: the one that runs next is asked to wait on.
+        launcher.say(
+            "The host service restarted meanwhile; waiting on the launch with the "
+            "one that runs now."
+        )
+        outstanding = launcher.host.rejoined(awaiting)
+    outstanding.close()
+    message = (
+        f"the host service closed its wait on launch {starting.launch} "
+        f"{restarts} times; `lup-dev sessions` says whether it runs"
+    )
+    raise HostError(message)
+
+
+def spawning_command(runtime: str) -> Callable[..., None]:
+    """Return the command starting a held session of `runtime`, which `lup-dev spawn <runtime>` runs."""
+
+    def held(
+        context: typer.Context,
+        *,
+        name: Annotated[
+            str | None,
+            typer.Option(
+                "--name",
+                help=(
+                    "Name the launch as it is, refused where another holds it; by "
+                    "default, its worktree's branch, numbered where that's taken."
+                ),
+            ),
+        ] = None,
+        resume: Annotated[
+            str | None,
+            typer.Option(
+                "--resume",
+                help=(
+                    "The runtime's id for a session to resume, in this worktree; "
+                    "by default, a new one."
+                ),
+            ),
+        ] = None,
+        profile: Annotated[
+            str | None,
+            typer.Option("--profile", help="The profile it runs on, by its name."),
+        ] = None,
+        account: Annotated[
+            str | None,
+            typer.Option(
+                "--account", help="The account its runtime logs in with, by its name."
+            ),
+        ] = None,
+    ) -> None:
+        up = spawned(
+            runtime,
+            list(context.args),
+            worktree=toplevel(Path.cwd()),
+            name=name,
+            profile=profile,
+            account=account,
+            resume=resume,
+        )
+        typer.echo(
+            f"`{up.name}` holds the session {up.session}, with no terminal. "
+            f"`lup-dev inbox send {up.name} TEXT` gives it your words, `lup-dev "
+            f"spawn interrupt {up.name}` interrupts it, `lup-dev spawn end "
+            f"{up.name}` ends it, and `lup-dev launch {runtime} --resume "
+            f"{up.session}` takes it over in a terminal. Its launcher writes to "
+            f"{up.log}."
+        )
+
+    held.__doc__ = (
+        f"Start a {runtime} session lup holds with no terminal, in this worktree.\n\n"
+        "Run it yourself, in your own terminal: it checks what the host runs "
+        "first, as a launch does. The host service then starts the launch's "
+        "launcher apart from itself, which sets its room up as a launch does and "
+        "holds its session until it's ended, a restart of the service leaving it "
+        "be. It returns once the session is up, the host having heard its first "
+        "hook. Every argument it doesn't know, and each after `--`, reaches the "
+        "runtime."
+    )
+    return held
+
+
+def held_launch(to: str) -> Register:
+    """Return the held launch `to` names, by its name, its id or its worktree; refuse one that isn't held."""
+    client = host_client()
+    launch = the_launch(client.launches(), to)
+    if not launch.held:
+        message = (
+            f"`{launch.name}` runs in a terminal, which interrupts and ends it: only "
+            "a held session is lup's to"
+        )
+        raise LaunchError(message)
+    return launch
+
+
+@spawn.command("interrupt")
+def spawn_interrupt(
+    to: Annotated[
+        str,
+        typer.Argument(help="The held launch, by its name, its id or its worktree."),
+    ],
+) -> None:
+    """End the turn a held session has under way, a running command with it, as Escape does in a terminal."""
+    refused_inside("interrupting a held session")
+    launch = held_launch(to)
+    host_client().ask(Interrupt(launch=launch.launch), Done)
+    typer.echo(f"Interrupted `{launch.name}`.")
+
+
+@spawn.command("end")
+def spawn_end(
+    to: Annotated[
+        str,
+        typer.Argument(help="The held launch, by its name, its id or its worktree."),
+    ],
+) -> None:
+    """End a held session and its room, once a turn under way has finished: it resumes with `lup-dev spawn <runtime> --resume`, or in a terminal."""
+    refused_inside("ending a held session")
+    launch = held_launch(to)
+    outstanding = host_client().held(End(launch=launch.launch))
+    try:
+        outstanding.reply(Done)
+    finally:
+        outstanding.close()
+    typer.echo(f"Ended `{launch.name}`.")
+
+
+@spawn.command("trial")
+def spawn_trial(
+    model: Annotated[
+        str,
+        typer.Option(
+            "--model", help="The model the trial's session runs on, by its alias."
+        ),
+    ] = "haiku",
+) -> None:
+    """Try a held session end to end, once, on this machine, and file the report in your inbox.
+
+    Run it yourself, in your own terminal, in a worktree of a repository you
+    approved. In a scratch worktree beside this one, it starts a held session,
+    sends it your words and sees its answer, interrupts a long turn, restarts
+    the host service and sees the session survive, ends it, resumes it held,
+    has a terminal launch take it over, and resumes it held again; then it
+    removes the scratch worktree and files what passed, what failed and what
+    that means (`lup_dev.launch.trial`). It takes a few minutes, a few short
+    turns on your account, and a restart of the host service, which every
+    launch outlives. The host service must run a copy of lup that holds
+    sessions, one you approved with them.
+    """
+    refused_inside("the spawn trial")
+    known = [each for each in adapters() if each.holding is not None]
+    if not known:
+        message = "no runtime lup knows has a held session yet"
+        raise LaunchError(message)
+    runtime = known[0].runtime.name()
+    root = toplevel(Path.cwd())
+    layout = Layout.of(LupDevSettings())
+
+    def approved_commit(repository: Path) -> str | None:
+        approval = approved(layout, repository)
+        return None if approval is None else approval.commit
+
+    scratch = scratched(root, f"spawn-trial-{secrets.token_hex(4)}", approved_commit)
+    podman = Podman()
+    try:
+
+        def spawning(worktree: Path, resume: str | None) -> HeldUp:
+            return spawned(
+                runtime, ["--model", model], worktree=worktree, resume=resume
+            )
+
+        def terminal(worktree: Path, session: str) -> TerminalRun:
+            return taken_over_there(worktree, session, runtime, model)
+
+        def running(container: str) -> bool:
+            return podman.state(container) == "running"
+
+        def inside(container: str, command: list[str]) -> TerminalRun:
+            ran = podman.inside(container, command)
+            return TerminalRun(status=ran.status, output=ran.text())
+
+        trial = Trial(
+            host=host_client(),
+            spawn=spawning,
+            terminal=terminal,
+            running=running,
+            inside=inside,
+            clock=SystemClock(),
+            say=typer.echo,
+            worktree=scratch.path,
+        )
+        trial.run()
+        report = trial.report()
+        typer.echo(report)
+        number = trial.filed(scratch.repository, runtime)
+        typer.echo(f"The report is {cited(number)} in your inbox.")
+    finally:
+        scratch.removed()
+
+
+@spawn.command("launcher", hidden=True)
+def spawn_launcher(
+    spec: Annotated[str, typer.Argument(help="The held launch, as JSON.")],
+) -> None:
+    """Hold a launch's session with no terminal, its setup a launch's: what the host service starts, apart from itself, for `lup-dev spawn`."""
+    held = HeldLaunch.model_validate_json(spec)
+
+    def said(line: str) -> None:
+        typer.echo(line)
+        sys.stdout.flush()
+
+    adapter = Adapters(known=adapters()).named(held.runtime)
+    status = launched(
+        adapter,
+        [],
+        held.worktree,
+        launching(said, unattended=True),
+        name=held.name,
+        profile=held.profile,
+        account=held.account,
+        held=held,
     )
     raise typer.Exit(code=status)
 
@@ -2754,6 +3355,13 @@ def machine_accounts() -> Accounts:
             for each in adapters()
         ],
     )
+
+
+for known in adapters():
+    spawn.command(
+        known.runtime.name(),
+        context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    )(spawning_command(known.runtime.name()))
 
 
 @account.command("list")

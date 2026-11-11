@@ -10,6 +10,7 @@ import inspect
 import json
 import os
 import shutil
+import subprocess
 import threading
 from pathlib import Path
 
@@ -248,3 +249,22 @@ def test_a_start_s_command_that_isnt_a_list_of_words_is_refused(
     )
     assert ran.status == 1
     assert "lup: `lup-environment`'s first argument" in ran.said()
+
+
+def test_finding_the_worktree_hands_git_no_input_a_held_session_s_socket_among_it(
+    bare: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The start runs first in a held room, its input the session's socket, which no program but the runtime is to hold."""
+    given: list[object] = []
+
+    def recorded(
+        command: list[str], **keywords: object
+    ) -> subprocess.CompletedProcess[str]:
+        given.append(keywords.get("stdin"))
+        return subprocess.CompletedProcess(command, 1, "", "")
+
+    monkeypatch.setattr(subprocess, "run", recorded)
+
+    environments.worktree(bare / "tree" / "main", bare)
+
+    assert given == [subprocess.DEVNULL]

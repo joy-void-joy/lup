@@ -1,7 +1,9 @@
 """Running containers: the engine a room runs on, and podman, its one implementation.
 
-A run is in the foreground and removed when it exits, and every run is walled the
-same way (`docs/launch.md`, *The user, the process, the network*):
+A run is in the foreground (`run`), or beside the caller's event loop with no
+terminal and no input, its caller reaching its program some other way, as a held
+session's over a socket (`held`); either is removed when it exits, and every run
+is walled the same way (`docs/launch.md`, *The user, the process, the network*):
 - `--userns=keep-id`: the operator's uid inside, so what the agent writes is
   theirs on the host;
 - `--init`, which reaps exited processes: without it the first lup piled up 4,045
@@ -50,6 +52,9 @@ What this relies on, measured with rootless podman 6.1.3 (`docs/field-notes.md`,
 runs, and `--rm` removes it when it exits. `podman rename` renames a container in
 any state, running included, freeing its old name (`podman-rename(1)`).
 
+`podman stop --ignore --time=N` asks a container's program to end, makes it to
+past N seconds, and answers 0 for a name no container has (`podman-stop(1)`).
+
 A container a run created and never started stays, `created`, holding its
 name: a launch that took the host down before its container started left two,
 which the next launch's run met as "the container name … is already in use"
@@ -57,19 +62,20 @@ which the next launch's run met as "the container name … is already in use"
 and its `State`, `created` for that one.
 """
 
+import asyncio
 import csv
 import io
 import tempfile
 from abc import ABC, abstractmethod
-from collections.abc import Callable
-from datetime import datetime
+from collections.abc import Awaitable, Callable
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Literal, get_args, override
 
 from pydantic import TypeAdapter, model_validator
 from pydantic.alias_generators import to_pascal
 
 from lup.errors import LupError
-from lup.programs import ProgramMissingError, Ran, run
+from lup.programs import Child, ProgramMissingError, Ran, run, spawned
 from lup.rooms.container import AbsolutePath, Container, Image, Mask, Mount
 from lup.sessions.contract import guarded
 from lup.sessions.errors import RealCallInTestError
@@ -149,6 +155,58 @@ class Invocation(Model):
         return self
 
 
+class Pipes(Model, arbitrary_types_allowed=True):
+    """A program's input and output, as its caller talks to it."""
+
+    input: asyncio.StreamWriter
+    """Its standard input, open until its end is written (`write_eof`), which the
+    program reads as its end."""
+    output: asyncio.StreamReader
+    """Its standard output."""
+
+
+type Ending = Literal["asked", "made"]
+"""How a program is ended by a signal: asked (`SIGTERM`), which it may answer
+by finishing first, or made (`SIGKILL`)."""
+
+
+class Contained(ABC):
+    """A container's run beside the event loop: what `ContainerEngine.held` returns."""
+
+    @abstractmethod
+    async def waited(self) -> int:
+        """Wait for it to end, however it does, and return its status."""
+
+    @abstractmethod
+    def signalled(self, ending: Ending) -> None:
+        """End it by a signal, asked or made to; nothing where it has ended."""
+
+
+class Piped(Model, arbitrary_types_allowed=True):
+    """A container's program held beside the event loop: its run, and its input and output, which its caller talks to (`lup.rooms.room.Room.hold`)."""
+
+    run: Contained
+    pipes: Pipes
+
+
+async def ended(piped: Piped, within: timedelta) -> int:
+    """End `piped` and return its status: its input's end written, which a program held over it reads as its end, what it says after still read; past `within`, asked to end; past `within` again, made to.
+
+    `within` is how long the program may take to finish what it's doing at
+    its input's end, as a runtime finishes a turn under way.
+    """
+    if piped.pipes.input.can_write_eof():
+        piped.pipes.input.write_eof()
+    else:
+        piped.pipes.input.close()
+    for ending in get_args(Ending.__value__):
+        try:
+            return await asyncio.wait_for(piped.run.waited(), within.total_seconds())
+        except TimeoutError:
+            piped.run.signalled(ending)
+    return await piped.run.waited()
+
+
 class ContainerEngine(ABC):
     """Builds a room's image and runs its container."""
 
@@ -159,6 +217,10 @@ class ContainerEngine(ABC):
     @abstractmethod
     def run(self, invocation: Invocation) -> int:
         """Run the invocation's container in the foreground until it exits, and return its exit status."""
+
+    @abstractmethod
+    async def held(self, invocation: Invocation) -> Contained:
+        """Start the invocation's container beside the event loop, with no terminal and no input, and return it running."""
 
 
 class Process(Model):
@@ -198,6 +260,42 @@ def run_process(process: Process) -> Ran:
         raise ContainerError(str(missing)) from missing
 
 
+class Program(Model, Contained, arbitrary_types_allowed=True):
+    """A program `lup.programs` spawned, as a held run."""
+
+    child: Child
+
+    @override
+    async def waited(self) -> int:
+        return await self.child.waited()
+
+    @override
+    def signalled(self, ending: Ending) -> None:
+        match ending:
+            case "asked":
+                self.child.terminate()
+            case "made":
+                self.child.kill()
+
+
+async def start_program(arguments: list[str]) -> Contained:
+    """Start a program beside the event loop, its input nothing and its output the caller's own, unless real runs are refused, as in tests.
+
+    Raise `ContainerError` where the program isn't there.
+    """
+    if guarded.get():
+        message = (
+            "a test reached podman: give the engine a recording `start`, or the "
+            "room a recording engine"
+        )
+        raise RealCallInTestError(message)
+    program, *rest = arguments
+    try:
+        return Program(child=await spawned(program, *rest))
+    except ProgramMissingError as missing:
+        raise ContainerError(str(missing)) from missing
+
+
 def stopped(state: str) -> bool:
     """Say whether a container in `state` isn't running (`Stopped`).
 
@@ -226,6 +324,18 @@ class StoredImage(Model, alias_generator=to_pascal, populate_by_name=True):
     """How many containers use it, running or stopped."""
 
 
+def homed(invocation: Invocation) -> None:
+    """Make a run's home, and in it what each mount inside it lands on (`Invocation.landings`)."""
+    source = invocation.home_source
+    source.mkdir(mode=0o700, parents=True, exist_ok=True)
+    for path, directory in invocation.landings.items():
+        landing = source / path.relative_to(invocation.home)
+        if directory:
+            landing.mkdir(exist_ok=True)
+        else:
+            landing.touch()
+
+
 def mount_option(fields: list[str]) -> str:
     """Return podman's `--mount` value for these `key=value` fields: one CSV record."""
     record = io.StringIO()
@@ -245,6 +355,12 @@ class Podman(Model, ContainerEngine):
     fork bomb in a room from taking the host down."""
     execute: Callable[[Process], Ran] = run_process
     """Runs each podman command; a test gives a recording one."""
+    start: Callable[[list[str]], Awaitable[Contained]] = start_program
+    """Starts a held run's command beside the event loop (`held`); a test gives
+    a recording one, which talks as the runtime would."""
+    stopping: timedelta = timedelta(seconds=10)
+    """How long `stop` lets a container's program end once asked, before podman
+    makes it."""
 
     @override
     def ensure(self, image: Image) -> bool:
@@ -348,14 +464,7 @@ class Podman(Model, ContainerEngine):
         (`Invocation.landings`). A status of 125 is podman's own failure, not the
         program's, and raises.
         """
-        source = invocation.home_source
-        source.mkdir(mode=0o700, parents=True, exist_ok=True)
-        for path, directory in invocation.landings.items():
-            landing = source / path.relative_to(invocation.home)
-            if directory:
-                landing.mkdir(exist_ok=True)
-            else:
-                landing.touch()
+        homed(invocation)
         exited = self.execute(Process(arguments=self.command(invocation)))
         if exited.status == 125:
             message = (
@@ -364,6 +473,54 @@ class Podman(Model, ContainerEngine):
             )
             raise ContainerError(message)
         return exited.status
+
+    @override
+    async def held(self, invocation: Invocation) -> Contained:
+        """Start the invocation's container beside the event loop, with no terminal and no input, and return it running.
+
+        Its home is made first, as for `run`. What its program prints and says
+        reaches this process's own output. Asked to end, the run's podman passes
+        the signal on to the container's program (`--sig-proxy`, podman's
+        default).
+        """
+        if invocation.terminal:
+            message = "a held run has no terminal"
+            raise ContainerError(message)
+        homed(invocation)
+        return await self.start(self.command(invocation))
+
+    def inside(self, container: str, command: list[str]) -> Ran:
+        """Run `command` in the running container named `container`, as one of its own processes, its user and namespaces the room's (`podman exec`), and return how it ended, what it printed kept."""
+        return self.execute(
+            Process(arguments=[self.program, "exec", container, *command], capture=True)
+        )
+
+    def stop(self, container: str) -> None:
+        """Stop the container named `container`: its program asked to end, and made to past `stopping`; nothing where no container has that name.
+
+        Raise `ContainerError` where podman fails otherwise.
+        """
+        seconds = int(self.stopping.total_seconds())
+        stopped = self.execute(
+            Process(
+                arguments=[
+                    self.program,
+                    "stop",
+                    "--ignore",
+                    f"--time={seconds}",
+                    container,
+                ],
+                capture=True,
+            )
+        )
+        if stopped.status != 0:
+            said = stopped.said()
+            told = f": {said}" if said else ""
+            message = (
+                f"podman couldn't stop the container {container} "
+                f"(status {stopped.status}){told}"
+            )
+            raise ContainerError(message)
 
     def unshared(self, *arguments: str) -> None:
         """Run a command in podman's own user and mount namespace, where its rootless containers' mounts come from (`podman unshare`).

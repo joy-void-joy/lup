@@ -77,6 +77,15 @@ class Declaration(Model, Agent, ABC):
         own.
         """
 
+    @abstractmethod
+    def held(self, settings: TerminalSettings) -> Terminal:
+        """Compile the declaration for a session held with no terminal (`lup.sessions.held`): what `terminal` compiles, its command one whose input and output a launcher talks to.
+
+        It takes nothing a tool server pushes and has no messaging socket, whatever
+        `settings` say: what starts a turn of it comes on its input. Raise
+        `TerminalError` where the runtime has no held session yet, saying why.
+        """
+
 
 class Ran(Model):
     """A turn that ended: what the adapter reported, and the toolbox it ran with."""

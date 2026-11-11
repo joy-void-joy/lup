@@ -64,6 +64,8 @@ from lup_dev.git import GitError
 from lup_dev.host.client import HostClient, RoomClient, Starter
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard, Posted, Spawned, Spawns
+from lup_dev.host.held import Interrupt, Launchers
+from lup_dev.host.holders import HeldInterrupt, HeldPrompt, Holders
 from lup_dev.host.names import Names, container_name
 from lup_dev.host.on_trial import AcceptBranch, DropBranch, TrialSaid
 from lup_dev.host.protocol import (
@@ -77,6 +79,7 @@ from lup_dev.host.protocol import (
     ShowHolding,
     Stop,
 )
+from lup_dev.host.protocol import Done as Finished
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Called, Queues, Recorded, Said
 from lup_dev.host.service import UNDECIDED, HostService, Naming, Program, executed
@@ -511,6 +514,7 @@ def inboxed(
     queues: dict[str, Queues] | None = None,
     coming: Callable[[Delivery], Coming] | None = None,
     trying: Callable[[Turns], Trying] | None = None,
+    holding: bool = False,
 ) -> Generator[Watched]:
     """A host service with lup's inbox and the dashboard's kind, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter; containers asked of `podman`, where given; each hook answered by `judge`, else with nothing, and each launch's modules served by `modules`, where given; `land` pushing through the remotes `remotes` makes over the delivery, where given, else through remotes telling no one, running in a launch's room through `rooms`, reading a file's parse through `parser`, and waking parked threads through what `coming` makes over the delivery, where given; what's on trial moved through what `trying` makes over the landings' turns, where given; a new main session told its bearings where `bearings` asks, its integration branch `dev`; what each runtime holds for a conversation read by `queues`, where given, a held call looking at it, and at its time limit, every few milliseconds."""
     known = cli.Adapters(known=cli.adapters())
@@ -518,10 +522,12 @@ def inboxed(
     wakers = cli.Wakers(adapters=known)
     changes = Changes()
     pushes = Pushes()
+    holders = Holders(layout=machine, prompt=wakers.held) if holding else None
     delivery = Watched(
         inbox=inbox_opened(machine, changes),
         waker=wakers,
         pushes=pushes,
+        holders=holders,
         layout=machine.host,
         notices=notices,
         clock=clock,
@@ -532,6 +538,8 @@ def inboxed(
     )
     waits = Waits(changes=changes)
     delivery.landing = waits.holding
+    if holders is not None:
+        holders.interrupted = delivery.interrupted
 
     def saying(line: str) -> None:
         said.append(line)
@@ -565,15 +573,22 @@ def inboxed(
             else None
         ),
         namesakes=NodeNames(delivery=delivery),
-        routes=cli.control_routes(
-            delivery,
-            recorded or {},
-            None,
-            judging or machine,
-            waits=waits,
-            trying=None if trying is None else trying(turns),
-            landing=landing,
-        ),
+        routes=[
+            *cli.control_routes(
+                delivery,
+                recorded or {},
+                None,
+                judging or machine,
+                waits=waits,
+                trying=None if trying is None else trying(turns),
+                landing=landing,
+            ),
+            *(
+                []
+                if holders is None
+                else cli.held_routes(machine, holders, Launchers())
+            ),
+        ],
         tools=cli.room_tools(
             delivery,
             judging or machine,
@@ -586,6 +601,7 @@ def inboxed(
         changes=changes,
         waker=wakers,
         pushes=pushes,
+        holders=holders,
         podman=podman,
         companions=(
             []
@@ -605,6 +621,7 @@ def launched(
     runtime: str,
     *,
     repository: Path | None = None,
+    held: bool = False,
 ) -> Register:
     """Register a launch of `runtime` in `tmp_path` with the running service, its repository `tmp_path`'s `.git` unless `repository` names another."""
     judge = tmp_path / "judges" / "bin" / "lup-dev"
@@ -623,6 +640,7 @@ def launched(
         # one holding the worktree, where a test writes its records.
         home=tmp_path.parent,
         own=tmp_path.parent,
+        held=held,
     )
     client(machine.host, clock).register(registered)
     return registered
@@ -1642,6 +1660,226 @@ def test_an_idle_claude_session_is_pushed_what_waits_and_takes_it_at_its_turns_s
     assert after == ""
     assert frames == []
     assert f"one: pushed @{number} to `{tmp_path.name}`" in said
+
+
+def until(condition: Callable[[], bool]) -> bool:
+    """Say whether `condition` comes to hold within a minute, as what the service does on its own thread comes to pass."""
+    for _ in range(6000):
+        if condition():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+class Launcher(Socket):
+    """A stand-in for a held launch's launcher: each request read whole, and done."""
+
+    def __init__(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        super().__init__(path)
+
+    @override
+    def serve(self) -> None:
+        while True:
+            try:
+                connection, _ = self.listening.accept()
+            except OSError:
+                return
+            with connection, connection.makefile("rb") as stream:
+                self.frames.append(stream.read().decode())
+                connection.sendall(b'{"kind": "done"}')
+            self.rang.set()
+
+
+def test_an_idle_held_session_is_given_what_waits_through_its_launcher_and_takes_it_at_its_turns_start(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        messages = Socket(machine.host.launch("one").messages)
+        launcher = Launcher(machine.launch("one").held)
+        started = send(hook, claude("SessionStart", source="startup"))
+        _, title = named_at_start(started)
+        assert send(hook, claude("Stop", stop_hook_active=False)) == ""
+        inbox("send", "one", "Wake up.")
+        number = newest(delivery)
+        [given] = launcher.ringing()
+        prompt = HeldPrompt.model_validate_json(given)
+        pending = delivery.inbox.item(number).state
+        taken = send(
+            hook,
+            claude("UserPromptSubmit", prompt=prompt.text, session_title=title),
+        )
+        state = delivery.inbox.item(number).state
+        after = send(hook, bash("b1"))
+        launcher.close()
+        frames = messages.close()
+    # The items themselves, wrapped as a channel's message is, told once.
+    content, _, rest = prompt.text.partition("\n")
+    assert content.startswith('<channel source="lup" wake="')
+    assert rest == f"{note(number, 'Wake up.')}\n</channel>"
+    assert pending == Waiting()
+    assert state == Told(at=clock.now(), how="wake")
+    assert taken == ""
+    assert after == ""
+    assert frames == []
+    assert f"one: gave @{number} to `{tmp_path.name}`, held" in said
+
+
+def test_a_held_session_whose_launcher_can_t_be_reached_is_told_at_its_next_call(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        inbox("send", "one", "Anyone?")
+        number = newest(delivery)
+        state = delivery.inbox.item(number).state
+        told = send(hook, bash("b1"))
+    assert state == Waiting()
+    assert context(told) == note(number, "Anyone?")
+    assert any(
+        line.startswith(
+            f"one: what waits for `{tmp_path.name}` wasn't given their held "
+            "session, so it's told at their next call: launch `one`'s launcher"
+        )
+        for line in said
+    )
+
+
+def test_an_interrupt_through_lup_takes_the_held_session_for_idle_and_gives_it_what_came(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        launcher = Launcher(machine.launch("one").held)
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, bash("b1"))
+        inbox("send", "one", "Stop that.")
+        number = newest(delivery)
+        before = list(launcher.frames)
+        client(machine.host, clock).ask(Interrupt(launch="one"), Finished)
+        until(lambda: len(launcher.frames) == 2)
+        frames = launcher.close()
+    # Busy, nothing was given; interrupted, what came during the turn is.
+    assert before == []
+    interrupt, given = frames
+    assert interrupt == HeldInterrupt().model_dump_json()
+    assert note(number, "Stop that.") in HeldPrompt.model_validate_json(given).text
+
+
+def test_what_a_held_session_is_given_mid_call_is_told_once_as_its_turn_takes_it(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """After a restart of the service, a session mid-call is taken for idle and given a turn, which it reads only once its call ends, however long that takes: no hook tells it meanwhile."""
+    with inboxed(
+        machine, clock, notices, said, holding=True, patience=timedelta(0)
+    ) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        messages = Socket(machine.host.launch("one").messages)
+        launcher = Launcher(machine.launch("one").held)
+        started = send(hook, claude("SessionStart", source="startup"))
+        _, title = named_at_start(started)
+        inbox("send", "one", "Anyone?")
+        number = newest(delivery)
+        [given] = launcher.ringing()
+        prompt = HeldPrompt.model_validate_json(given).text
+        during = [
+            send(hook, bash("b1")),
+            send(hook, claude("PostToolUse", tool_name="Bash", tool_use_id="b1")),
+        ]
+        pending = delivery.inbox.item(number).state
+        taken = send(
+            hook, claude("UserPromptSubmit", prompt=prompt, session_title=title)
+        )
+        state = delivery.inbox.item(number).state
+        launcher.close()
+        frames = messages.close()
+    assert during == ["", ""]
+    assert pending == Waiting()
+    assert taken == ""
+    assert state == Told(at=clock.now(), how="wake")
+    assert frames == []
+
+
+def test_an_interrupt_lets_go_a_wait_inbox_it_cut_and_gives_the_held_session_what_came(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """The cut doesn't reach lup's hold here, as it may not on the real runtime: the hold is taken for ended all the same, so the words that come after reach the session, rather than a call nobody reads."""
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        launcher = Launcher(machine.launch("one").held)
+        send(hook, claude("SessionStart", source="startup"))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            waiting = pool.submit(call, mcp, "wait_inbox", {"within": "PT5M"})
+            assert delivery.holding.wait(timeout=60)
+            client(machine.host, clock).ask(Interrupt(launch="one"), Finished)
+            inbox("send", "one", "After the interrupt.")
+            number = newest(delivery)
+            given = until(lambda: len(launcher.frames) == 2)
+            clock.sleep(300)
+            returned = waiting.result(timeout=60)
+        frames = launcher.close()
+    assert given
+    interrupt, prompt = frames
+    assert interrupt == HeldInterrupt().model_dump_json()
+    assert (
+        note(number, "After the interrupt.")
+        in HeldPrompt.model_validate_json(prompt).text
+    )
+    # The call nobody reads any more counted nothing told.
+    assert returned == (
+        (
+            "Your turn ended while this call waited, so what reached your inbox "
+            "reaches you at your next call instead."
+        ),
+        False,
+    )
+
+
+def test_a_held_session_s_compaction_keeps_what_it_was_given_for_its_turn(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """A compaction comes in the process that was given the turn, which it still reads: told at the compaction too, it would be told twice."""
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        launcher = Launcher(machine.launch("one").held)
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        inbox("send", "one", "Anyone?")
+        number = newest(delivery)
+        launcher.ringing()
+        compacted = send(hook, claude("SessionStart", source="compact"))
+        state = delivery.inbox.item(number).state
+        launcher.close()
+    assert note(number, "Anyone?") not in compacted
+    assert state == Waiting()
+
+
+def test_what_a_held_session_never_took_is_told_its_next_start(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        launcher = Launcher(machine.launch("one").held)
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        inbox("send", "one", "Anyone?")
+        number = newest(delivery)
+        launcher.ringing()
+        resumed = send(hook, claude("SessionStart", source="resume"))
+        state = delivery.inbox.item(number).state
+        launcher.close()
+    assert note(number, "Anyone?") in context(resumed)
+    assert isinstance(state, Told)
 
 
 def test_a_push_not_taken_in_time_is_put_back_and_its_launch_rung_through_the_socket_from_then_on(

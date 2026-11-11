@@ -335,6 +335,12 @@ class Register(Request, reads=False):
     """Whether the name was asked for as it is (`--name`), so registering
     refuses where another launch holds it; otherwise `-2`, `-3` is added until
     it's free."""
+    held: bool = False
+    """Whether its session is held by its launcher with no terminal
+    (`docs/launch.md`, *A session held with no terminal*): the host wakes it
+    through its launcher's socket, which an interrupt and its end go through
+    too, and the sweep stops its room once its launcher is gone. False for a
+    session in a terminal, and in a record from before launches were held."""
 
 
 class Rename(Request, reads=False):

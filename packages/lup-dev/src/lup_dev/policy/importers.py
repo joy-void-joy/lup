@@ -12,7 +12,6 @@ changes broke (#41). The pass re-checks what's pending as one batch, so what it
 finds goes to every conversation that wrote into that batch.
 """
 
-import sys
 from abc import ABC, abstractmethod
 from datetime import timedelta
 from pathlib import Path
@@ -23,6 +22,7 @@ from filelock import FileLock, Timeout
 from lup.programs import detached
 from lup.types import Model, MutableModel
 from lup_dev.codescan.contract import Checker, FileReport
+from lup_dev.host.client import own_command
 from lup_dev.layout import StoreLayout
 from lup_dev.stored import read_model, write_model
 
@@ -56,10 +56,10 @@ class BackgroundSpawner(Spawner, Model):
             if self.environments is None
             else ["--environments", str(self.environments)]
         )
+        # Started from the asking process's directory, which may be a worktree
+        # a room writes: nothing there is on its path.
         detached(
-            sys.executable,
-            "-m",
-            "lup_dev.cli",
+            *own_command(),
             *self.command,
             str(worktree),
             *reading,

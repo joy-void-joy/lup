@@ -4,7 +4,9 @@
 send these, each a typed request on the control socket, starting the service
 where none runs, as a launch does: what waits for the operator (`ListInbox`), one
 item whole (`ShowItem`), a question's answer (`AnswerItem`), a message read
-(`FinishItem`), and a message to the session a launch runs (`SendItem`). They're
+(`FinishItem`), a message to the session a launch runs (`SendItem`), and the
+report of a run the operator started, filed under the conversation it ran
+(`FileReport`). They're
 the inbox's own kinds, registered with the service by `cli.py`. A room reaches
 those that only read on its launch's request socket, each answered with what's of
 its repository alone (`Reading`): an item of another's is refused, and a list
@@ -148,6 +150,15 @@ class SendItem(Request, reads=False):
     passages: list[Passage] = []
     """The passages of the conversation's words the operator replied to, where
     they send it from reading the conversation."""
+
+
+class FileReport(Request, reads=False):
+    """Put the report of a run the operator started in their inbox, as a note from the conversation it ran, under which it's read: `lup-dev spawn trial`'s."""
+
+    kind: Literal["inbox-report"] = "inbox-report"
+    sender: Conversation
+    text: str
+    worktree: Path | None = None
 
 
 class ShowDraft(Request, reads=True):
@@ -1170,6 +1181,26 @@ class Sending(Model, Handler[SendItem], arbitrary_types_allowed=True):
         return shown(self.delivery, sent)
 
 
+class Reporting(Model, Handler[FileReport], arbitrary_types_allowed=True):
+    """Answers `FileReport`: the report in the operator's inbox, a note from the conversation it ran."""
+
+    delivery: Delivery
+
+    @override
+    def request(self) -> type[FileReport]:
+        return FileReport
+
+    @override
+    async def answer(self, request: FileReport) -> Reply:
+        filed = await self.delivery.posted(
+            Message(kind="note", text=request.text),
+            request.sender,
+            Operator(),
+            request.worktree,
+        )
+        return shown(self.delivery, filed)
+
+
 class ApprovalAsking(Model, Handler[AskApproval], arbitrary_types_allowed=True):
     """Answers `AskApproval`: the approval in the operator's inbox, or the one waiting about the same zone."""
 
@@ -1621,6 +1652,7 @@ def routes(delivery: Delivery, recorded: dict[str, Recorded]) -> list[Route]:
         Route.to(CheckAnswering(delivery=delivery)),
         Route.to(Finishing(delivery=delivery)),
         Route.to(Sending(delivery=delivery)),
+        Route.to(Reporting(delivery=delivery)),
         Route.to(ApprovalAsking(delivery=delivery)),
         Route.reading(ApprovalAwaiting(delivery=delivery)),
         Route.to(ApprovalAnswering(delivery=delivery)),
