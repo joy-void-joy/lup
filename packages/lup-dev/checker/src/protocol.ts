@@ -18,6 +18,9 @@ export interface Span {
 // A finding made whole: for lup's rules, what the check saw followed by the rule's
 // mistake, and the rule's steer; for pyright's, its message, which may run over
 // several lines, and no steer.
+// - `detail`: for lup's rules, what the check saw alone, which a report tells in
+//   place of the message once it has told the rule's mistake and steer; empty for
+//   pyright's.
 export interface Finding {
     path: string;
     span: Span;
@@ -25,6 +28,7 @@ export interface Finding {
     rule: string;
     message: string;
     steer: string;
+    detail: string;
 }
 
 // Where one name of the surface is written: an export by its entry in `__all__` or

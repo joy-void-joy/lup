@@ -37,6 +37,7 @@ export function fullReport(warm: WarmProgram, uri: Uri, reportedPath: string, ru
             rule: reported.rule,
             message: `${reported.detail}. ${rule.mistake}`,
             steer: rule.steer,
+            detail: reported.detail,
         };
     });
     const isPackageRoot = info.fileUri.stripAllExtensions().fileName === '__init__';
@@ -86,6 +87,7 @@ function pyrightFindings(parse: ParseFileResults, diagnostics: Diagnostic[], rep
                     (diagnostic.category === DiagnosticCategory.Error ? 'error' : 'warning'),
                 message: diagnostic.message,
                 steer: '',
+                detail: '',
             };
         });
 }

@@ -1,4 +1,4 @@
-"""The reports, in pyright's shape: each finding told once, and a long report fitted to a hook."""
+"""The reports, in pyright's shape: each finding told once, the standing words around them once, and a long report fitted to a hook."""
 
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -13,7 +13,9 @@ from lup_dev.policy.report import (
     Part,
     Refused,
     Reports,
+    Words,
     fitted,
+    heard,
     information,
     moved,
     news,
@@ -31,7 +33,13 @@ PATH = ROOT / "src/lup/claude.py"
 
 
 def found(
-    place: Position, rule: str, message: str, *, steer: str = "", owner: str = "lup"
+    place: Position,
+    rule: str,
+    message: str,
+    *,
+    steer: str = "",
+    owner: str = "lup",
+    detail: str = "",
 ) -> Finding:
     return Finding.model_validate(
         {
@@ -41,6 +49,7 @@ def found(
             "rule": rule,
             "message": message,
             "steer": steer,
+            "detail": detail,
         }
     )
 
@@ -74,7 +83,7 @@ def test_the_findings_report_has_the_documented_shape() -> None:
             steer="use the format's own parser (lup docs rules regex)",
         ),
     ]
-    assert text(information(reported, [], [], [])) == documented()
+    assert text(information(reported, [], [], [], Words())) == documented()
 
 
 def test_a_refusal_lists_each_file_put_back_with_its_saved_copy() -> None:
@@ -115,7 +124,7 @@ def test_a_declined_or_unanswered_hold() -> None:
 
 def test_nothing_refused_is_no_report() -> None:
     assert refusal([]) == ""
-    assert information([], [], [], []) == []
+    assert information([], [], [], [], Words()) == []
     assert removed_notes([]) == ""
     assert turn_end([]) == []
 
@@ -127,6 +136,7 @@ def test_information_sections() -> None:
             [found(at(3, 1), "reportCallIssue", "bad call", owner="pyright")],
             [found(at(5, 1), "regex", "uses re")],
             [found(at(7, 1), "reportCallIssue", "caller broke", owner="pyright")],
+            Words(),
         )
     )
     assert report.startswith(
@@ -170,9 +180,10 @@ def test_a_move_of_head_is_told_as_its_commits() -> None:
                 ],
                 hold="ab12cd",
             )
-        ]
+        ],
+        Words(),
     )
-    assert told == (
+    assert text(told) == (
         "HEAD moved to 1a2b3c in /work/lup, bringing content no checkpoint judged. "
         "It was judged once, as its commits', and stays as committed:\n"
         "/work/lup/src/lup/claude.py\n"
@@ -183,7 +194,7 @@ def test_a_move_of_head_is_told_as_its_commits() -> None:
         "(hold ab12cd)."
     )
     quiet = Moved(worktree=ROOT, head="1a2b3c", files=[MovedFile(path=PATH)])
-    assert moved([quiet]) == ""
+    assert moved([quiet], Words()) == []
 
 
 def pyright(line: int, message: str = "bad call", path: Path = Path("a.py")) -> Finding:
@@ -275,7 +286,7 @@ def reports(tmp_path: Path, clock: FakeClock) -> Reports:
 
 def test_a_report_that_fits_is_told_whole(tmp_path: Path, clock: FakeClock) -> None:
     parts = [Part(whole="refused"), Part(whole="findings", short="short")]
-    assert fitted(parts, 100, reports(tmp_path, clock)) == "refused\n\nfindings"
+    assert fitted(parts, 100, reports(tmp_path, clock)).text == "refused\n\nfindings"
     assert not (tmp_path / "lup" / "reports").exists()
 
 
@@ -289,7 +300,7 @@ def test_a_long_report_is_kept_whole_and_told_short(
         Part(whole="types\n  a.py:1:1", short="types: 1 file"),
         Part(whole=f"importers\n{long}", short="importers: 3 files"),
     ]
-    said = fitted(parts, 400, reports(tmp_path, clock))
+    said = fitted(parts, 400, reports(tmp_path, clock)).text
     [kept] = (tmp_path / "lup" / "reports").iterdir()
     assert kept.read_text() == text(parts)
     assert f"kept whole at {kept}" in said
@@ -317,7 +328,7 @@ def test_a_section_told_short_counts_each_files_findings_by_rule() -> None:
             update={"rule": "reportAttributeAccessIssue"}
         ),
     ]
-    [part] = information([], [], [], found)
+    [part] = information([], [], [], found, Words())
     assert part.short == (
         "Type errors in files that import what changed (clean them before the turn ends):\n"
         "  /work/lup/src/lup/claude.py: 2 (reportCallIssue 2)\n"
@@ -329,5 +340,88 @@ def test_a_value_never_published_is_always_told_whole() -> None:
     private = pyright(1, path=PATH).model_copy(
         update={"owner": "lup", "rule": "private"}
     )
-    [part] = information([private], [], [], [])
+    [part] = information([private], [], [], [], Words())
     assert part.short is None
+
+
+# The standing words: a section's instructions, and a lup rule's mistake and
+# steer, told once to each conversation.
+
+SETS = "A set keeps only membership."
+"""A rule's mistake, which the engine adds to what its check saw."""
+
+
+def a_set(line: int, what: str = "`set()` builds a set") -> Finding:
+    """A lup finding as the engine sends it: what its check saw, then the rule's mistake, with the rule's steer, and what it saw apart."""
+    return found(
+        at(line),
+        "set-shape",
+        f"{what}. {SETS}",
+        steer="use a dict keyed by the members",
+        detail=what,
+    )
+
+
+def test_a_rules_mistake_and_steer_come_with_its_first_finding_alone() -> None:
+    parts = information([a_set(3)], [], [a_set(9, "`{1}` builds a set")], [], Words())
+    assert text(parts).endswith(
+        "  /work/lup/src/lup/claude.py:3:1 - set-shape: `set()` builds a set. "
+        "A set keeps only membership.\n"
+        "      steer: use a dict keyed by the members\n\n"
+        "lup's findings on lines no change touched (they fail the gate too):\n"
+        "  /work/lup/src/lup/claude.py:9:1 - set-shape: `{1}` builds a set"
+    )
+    assert [part.words.rules for part in parts] == [["set-shape"], []]
+
+
+def test_a_later_report_says_each_section_told_before_by_its_title_and_each_rule_in_a_line() -> (
+    None
+):
+    first = information([a_set(3)], [], [], [], Words())
+    later = information([a_set(5, "`{1}` builds a set")], [], [], [], heard(first))
+    assert text(later) == (
+        "lup's findings on the lines changed:\n"
+        "  /work/lup/src/lup/claude.py:5:1 - set-shape: `{1}` builds a set"
+    )
+
+
+def test_a_finding_with_nothing_apart_is_told_whole_each_time() -> None:
+    known = Words(rules=["set-shape", "malformed-directive", "reportCallIssue"])
+    directive = found(
+        at(2), "malformed-directive", "`ignore` names no rule", steer="name one"
+    )
+    typed = found(at(4), "reportCallIssue", "bad call", owner="pyright")
+    told = text(information([directive], [typed], [], [], known))
+    assert "malformed-directive: `ignore` names no rule\n      steer: name one" in told
+    assert "reportCallIssue: bad call" in told
+
+
+def test_a_part_told_short_tells_its_header_and_not_its_rules_words(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    many = [a_set(line) for line in range(1, 60)]
+    parts = information(many, [], [], [], Words())
+    told = fitted(parts, 400, reports(tmp_path, clock))
+    assert "/work/lup/src/lup/claude.py: 59 (set-shape 59)" in told.text
+    assert told.words.rules == []
+    assert told.words.headers == parts[0].words.headers
+    whole = fitted(parts, 100_000, reports(tmp_path, clock))
+    assert whole.words.rules == ["set-shape"]
+
+
+def test_the_turns_end_tells_every_finding_whole_and_its_words_are_then_known() -> None:
+    [part] = turn_end([a_set(3), a_set(5)])
+    assert part.whole.count("steer: use a dict keyed by the members") == 2
+    assert part.words.rules == ["set-shape"]
+
+
+def test_a_move_of_head_tells_a_rule_told_before_in_a_line() -> None:
+    files = [MovedFile(path=PATH, findings=[a_set(3)])]
+    [part] = moved(
+        [Moved(worktree=ROOT, head="1a2b3c", files=files)],
+        Words(rules=["set-shape"]),
+    )
+    assert "  /work/lup/src/lup/claude.py:3:1 - set-shape: `set()` builds a set\n" in (
+        part.whole
+    )
+    assert "steer:" not in part.whole
