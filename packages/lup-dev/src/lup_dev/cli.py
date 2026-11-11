@@ -152,6 +152,7 @@ from lup_dev.inbox.delivery import (
     standing,
 )
 from lup_dev.inbox.marks import routes as marks_routes
+from lup_dev.inbox.namesakes import NodeNames
 from lup_dev.inbox.notices import NotifySend, Unsaid
 from lup_dev.inbox.protocol import (
     AnswerApproval,
@@ -176,7 +177,6 @@ from lup_dev.inbox.protocol import (
 )
 from lup_dev.inbox.protocol import routes as inbox_routes
 from lup_dev.inbox.reading import Flags, by_agent, counted, landed
-from lup_dev.inbox.roots import RootNames
 from lup_dev.inbox.roster import ids
 from lup_dev.inbox.store import (
     Answer,
@@ -751,7 +751,7 @@ def host_serve(context: typer.Context) -> None:
         bearings=RepositoryBearings(
             delivery=delivery, running=partial(running_branch, layout)
         ),
-        roots=RootNames(delivery=delivery),
+        namesakes=NodeNames(delivery=delivery),
         routes=control_routes(
             delivery,
             recorded(),

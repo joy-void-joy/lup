@@ -10,13 +10,12 @@ import type { Merged } from "./looks";
 import { itemStanding } from "./outline";
 import { DRAFTED, GLYPHS } from "./Outline";
 import {
-    about,
     checkOwner,
     cutAt,
     grouped,
+    keptUnder,
     nested,
     PARTIES,
-    rootThread,
     taskOwner,
     toAnswer,
     toRead,
@@ -189,7 +188,7 @@ function checksWaiting(key: string, reading: Pick<ListReading, "checks" | "draft
     }).length;
 }
 
-/** Return each thread open that the agent named `key` owns, as a task (`taskOwner`). */
+/** Return each thread open that the agent named `key` answers for, as a task (`taskOwner`). */
 function tasksOf(key: string, reading: Pick<ListReading, "threads">): ThreadRead[] {
     return (reading.threads?.read.threads ?? []).filter((each) => {
         const owner = taskOwner(each);
@@ -202,9 +201,12 @@ function closedTask(read: ThreadRead): boolean {
     return read.state === "settled" || read.state === "declined";
 }
 
-/** Return each thread the agent named `key` owns that's done, for the operator to confirm. */
+/** Return each thread that's done, for the operator to confirm, under the agent named `key`, who answers for it or left it (`keptUnder`). */
 function confirmingOf(key: string, reading: Pick<ListReading, "threads">): ThreadRead[] {
-    return tasksOf(key, reading).filter((each) => each.state === "done to confirm");
+    return (reading.threads?.read.threads ?? []).filter((each) => {
+        const owner = keptUnder(each);
+        return each.state === "done to confirm" && owner !== null && whose(owner) === key;
+    });
 }
 
 /** Return what of the agent `group` is of asks the operator from what's nested under their row: their items, what stays stopped until they're answered apart from what only wants their eyes, their checks and their threads done, for them to confirm, among that. */
@@ -246,18 +248,15 @@ function ownersIn(reading: Pick<ListReading, "checks" | "threads">): Conversatio
         return owner === null ? [] : [owner];
     });
     const ofTasks = (reading.threads?.read.threads ?? []).filter(taskShown).flatMap((each) => {
-        const owner = taskOwner(each);
+        const owner = keptUnder(each);
         return owner === null ? [] : [owner];
     });
     return [...ofChecks, ...ofTasks];
 }
 
-/**
- * Return whether the list shows a thread as a task: one still open, but a session's own root with nothing in it asking,
- * which is no concern of its own, and would list each session a second time.
- */
+/** Return whether the list shows a thread as a task: one still open, but what the host says is nothing to list. */
 function taskShown(read: ThreadRead): boolean {
-    return !closedTask(read) && (!rootThread(read) || (read.asks ?? []).length > 0 || (read.new ?? []).length > 0 || read.state === "done to confirm");
+    return !closedTask(read) && read.bare !== true;
 }
 
 /** Return the conversation of the agent named `key`, among those the review names; none where it isn't one of them, as lup's approvals. */
@@ -293,12 +292,12 @@ function byName(groups: readonly Grouping[], called: ListReading["called"]): Gro
     return groups.toSorted((a, b) => name(a).localeCompare(name(b)) || a.key.localeCompare(b.key));
 }
 
-/** Return the row of the agent `group` is of, set in `depth` deep: how they stand, their name and their tally; under it, what they're doing, drawn, and what they're working on. */
-function agentRow(group: Grouping, depth: number, reading: ListReading): Row {
+/** Return the row of the agent `group` is of, set in `depth` deep: how they stand, their name and their tally; under it, what they're doing, drawn, and what they're working on, and, `nesting`, what's theirs. */
+function agentRow(group: Grouping, depth: number, reading: ListReading, nesting: boolean = true): Row {
     const conversation = group.conversation;
     const tally = agentTally(group, reading);
     const set = "  ".repeat(depth);
-    const under = nestOf(group, depth, reading);
+    const under = nesting ? nestOf(group, depth, reading) : undefined;
     if (conversation === null) {
         return {
             id: `agent ${group.key}`,
@@ -368,23 +367,31 @@ function itemKind(item: Item): string {
     return reason.reason === "message" ? (reason.ending ? "turn ended" : reason.kind) : reason.reason;
 }
 
-/** Return the row of `item`, of the group `group`, set in by `set`: how it stands, as the overview marks it, its number, what it is and how it begins, what's drafted on it at its end. */
-function itemRow(item: Item, group: Grouping, set: string, reading: ListReading): Row {
+/** Return the last part of what `called` calls `conversation`: a subagent by their own name, which a row has room for. */
+function shortly(conversation: Conversation, reading: Pick<ListReading, "called">): string {
+    const name = reading.called(conversation);
+    return name.split("/").at(-1) ?? name;
+}
+
+/** Return the row of `item`, of the group `group`, set in by `set`: how it stands, as the overview marks it, its number, what it is, who left it, in a party (`left`), and how it begins, what's drafted on it at its end. */
+function itemRow(item: Item, group: Grouping, set: string, reading: ListReading, left: boolean = false): Row {
     const standing = itemStanding({ item }, reading.draft, reading.seeing ?? UNSEEN);
     const mark = standing.marks[0];
     const glyph = mark === undefined ? " " : (GLYPHS[mark] ?? " ");
     const drafted = standing.draft.filter((each) => each !== "comment").map((each) => DRAFTED[each].glyph).join("");
     const named = `@${item.number} ${itemKind(item)}`;
-    const left: Stretch[] = [
+    const leaver = left && group.conversation !== null ? group.conversation : null;
+    const texts: Stretch[] = [
         { text: `${set}` },
         { text: `${glyph} `, look: mark === undefined ? "list-sub" : `mark-${mark}` },
         { text: named, look: mark === "waiting" || mark === "asking" ? "list-asks" : "list-sub" },
         ...(standing.fresh ? [{ text: " new", look: "outline-fresh" }] : []),
         ...(standing.draft.includes("comment") ? [{ text: ` ${DRAFTED.comment.glyph}`, look: "list-written" }] : []),
         ...(drafted === "" ? [] : [{ text: ` ${drafted}`, look: "outline-draft" }]),
+        ...(leaver === null ? [] : [{ text: ` ${shortly(leaver, reading)}:`, look: "list-name" }]),
         { text: ` ${itemWords(item)}`, look: "list-sub" },
     ];
-    return { id: `item ${item.number}`, lines: [{ stretches: fitted(left) }], opens: { kind: "agent", key: group.key }, says: named, writes: false, node: item.number };
+    return { id: `item ${item.number}`, lines: [{ stretches: fitted(texts) }], opens: { kind: "agent", key: group.key }, says: leaver === null ? named : `${named}, left by ${reading.called(leaver)}`, writes: false, node: item.number };
 }
 
 /** Return `left` cut at the list's width, as a row with no tally. */
@@ -394,7 +401,8 @@ function fitted(left: readonly Stretch[]): Stretch[] {
 
 /**
  * Return a task's row, set in by `set` and how deep it's nested among its owner's: one line, quiet, but what waits on the
- * operator there; opened, it reads across agents as a conversation, the thread's own buffer.
+ * operator there, saying who left it where nobody running answers for it, the name cut to leave room for that; opened, it
+ * reads across agents as a conversation, the thread's own buffer.
  */
 function taskRow(read: ThreadRead, set: string, depth: number, threads: Threading, reading: ListReading): Row {
     const tally = threadTally(read, threads, reading.draft);
@@ -404,15 +412,27 @@ function taskRow(read: ThreadRead, set: string, depth: number, threads: Threadin
     const answering = read.answering ?? null;
     const fell = read.state === "working" && holder !== null && answering !== null && whose(holder) !== whose(answering);
     const state = fell ? { text: "holder ended", look: "list-sub" } : threadState(read);
+    const leaver = read.left_by ?? null;
+    const whoLeft = leaver === null ? null : `left by ${shortly(leaver, reading)}`;
+    // Being left says nobody's running, and the marks at the row's end what waits on the operator: a word for anything else.
+    const kept = read.state === "nobody running" || read.state === "waiting on the operator" ? null : state.text;
+    const says = whoLeft === null ? state.text : kept === null ? whoLeft : `${kept}, ${whoLeft}`;
+    const inset = `${set}${"  ".repeat(depth)}`;
+    const room = whoLeft === null ? read.thread.name.length + 1 : Math.max(COLUMNS - tallied(tally).reduce((sum, each) => sum + each.text.length, 0) - inset.length - says.length - 3, 14);
     const left: Stretch[] = [
-        { text: `${set}${"  ".repeat(depth)}` },
-        { text: `@${read.thread.name}`, look: waiting ? "list-name" : "list-sub" },
+        { text: inset },
+        { text: `@${cutName(read.thread.name, room)}`, look: waiting ? "list-name" : "list-sub" },
         { text: " " },
-        waiting ? state : { text: state.text, look: "list-sub" },
+        waiting ? { text: says, look: state.look } : { text: says, look: "list-sub" },
     ];
     // What asks them alone: what's new is on the item's row under who sent it, read by being seen there, as a thread's mark isn't.
     const quiet = { ...tally, news: 0 };
-    return { id: `thread ${read.thread.number}`, lines: [{ stretches: padded(left, quiet) }], opens: { kind: "thread", number: read.thread.number }, says: `@${read.thread.name}: ${about(read.thread)}`, writes: true };
+    return { id: `thread ${read.thread.number}`, lines: [{ stretches: padded(left, quiet) }], opens: { kind: "thread", number: read.thread.number }, says: `@${read.thread.name}: ${read.thread.title}${leaver === null ? "" : `, left by ${reading.called(leaver)}`}`, writes: true };
+}
+
+/** Return `name` in `most` characters, its end cut where it doesn't fit. */
+function cutName(name: string, most: number): string {
+    return name.length <= most ? name : `${name.slice(0, Math.max(most - 1, 1))}…`;
 }
 
 /** Return the row of what's for the operator, with `tally`, what's there counted across everyone. */
@@ -444,8 +464,9 @@ function partyRow(party: Party, count: number, tally: Tally): Row {
 
 /**
  * Return the list by agent: what's for the operator; each view a repository's modules place under it; each agent running, a subagent under their parent, a repository
- * named where there are several; each party, each agent it holds with what's theirs nested under them, and each task it
- * holds that nobody ever owned; and lup's approvals. What nobody's in, no party and not running, isn't an agent.
+ * named where there are several; each party, flat: each task it holds, with what's nested under each staying so, each
+ * item an agent it holds left, and each of those agents whose drawers hold what waits, whatever else they left; and
+ * lup's approvals. What nobody's in, no party and not running, isn't an agent.
  */
 export function listedByAgent(reading: ListReading): Row[] {
     const groups = groupsOf(reading);
@@ -471,18 +492,14 @@ export function listedByAgent(reading: ListReading): Row[] {
     const threads = reading.threads;
     for (const party of parties) {
         const held = byName(groups.filter((each) => partyOf(each) === party), reading.called);
-        // A task no agent's ever owned sits in the party itself; one whose owner it holds, with them.
-        const unowned = threads === null ? [] : threads.read.threads.filter((each) => taskShown(each) && taskOwner(each) === null && party.holdsTask(each, reading.running));
-        if (held.length > 0 || unowned.length > 0) {
-            rows.push(partyRow(party, held.length + unowned.length, added(held.map(tallyOf))));
-            if (threads !== null) {
-                for (const { read, depth } of threadsNested(unowned, threads.read.threads)) {
-                    rows.push(taskRow(read, "", depth, threads, reading));
-                }
-            }
-            for (const { group, depth } of nested(held, reading.parents)) {
-                rows.push(agentRow(group, depth, reading));
-            }
+        const tasks = threads === null ? [] : threads.read.threads.filter((each) => taskShown(each) && party.holdsTask(each, reading.running));
+        const within: Row[] = [
+            ...(threads === null ? [] : threadsNested(tasks, threads.read.threads).map(({ read, depth }) => taskRow(read, "", depth, threads, reading))),
+            ...held.flatMap((group) => group.items.map((item) => ({ item, group }))).toSorted((a, b) => a.item.number - b.item.number).map(({ item, group }) => itemRow(item, group, "", reading, true)),
+            ...held.filter((group) => reading.agents.some((each) => whose(each) === group.key)).map((group) => agentRow(group, 0, reading, false)),
+        ];
+        if (within.length > 0) {
+            rows.push(partyRow(party, within.length, added(held.map(tallyOf))), ...within);
         }
     }
     for (const group of byName(groups.filter((each) => each.conversation === null), reading.called)) {
@@ -529,8 +546,10 @@ function threadState(read: ThreadRead): { text: string; look: string } {
             return { text: "settled", look: "list-sub" };
         case "declined":
             return { text: "declined", look: "list-sub" };
+        case "nobody running":
+            return { text: "nobody running", look: "mark-ended" };
         default:
-            return (read.answering ?? null) === null ? { text: "nobody running", look: "mark-ended" } : { text: read.state, look: "mark-calling" };
+            return { text: read.state, look: "mark-calling" };
     }
 }
 

@@ -128,14 +128,6 @@ export interface Threading {
     banner: (read: ThreadRead, landing: number) => string;
 }
 
-/** What every root thread is titled, the host's (`lup_dev.inbox.concerns.ROOT`): what it holds is whatever its session is given. */
-export const ROOT_TITLE = "a main session's root thread";
-
-/** Say what a thread is about: its title, a root its session's own. */
-export function about(thread: ThreadRead["thread"]): string {
-    return thread.parent == null && thread.title === ROOT_TITLE ? "the session's own" : thread.title;
-}
-
 /** Whether an item is a friction or how it felt. */
 function piled(item: Item): boolean {
     return item.reason.reason === "friction" || item.reason.reason === "how it felt";
@@ -393,7 +385,8 @@ export function isNobody(conversation: Conversation): boolean {
 
 /**
  * A party beside the agents, a place for what no agent running answers, or, once the operator can make one, what they
- * put there (#113): listed and laid out the same, whichever it is, by what it says of itself. `No agent` is one of them.
+ * put there (#113): listed flat and laid out the same, whichever it is, by what it says of itself. `No agent` is one of
+ * them. What's in it is what the host says of each thing, whose words are here until a party is a node of the ledger.
  */
 export interface Party {
     /** What names it among the others, by which its buffer's asked for. */
@@ -404,13 +397,13 @@ export interface Party {
     says: string;
     /** What its buffer says, over it, of whom the operator's words reach from there. */
     whom: string;
-    /** Whether the agent of this group sits in it, whatever's theirs with them, by who's running. */
+    /** Whether what the agent of this group left sits in it, each of their items a row of its own, by who's running. */
     holds: (group: Pick<Grouping, "key" | "conversation">, running: ReadonlyMap<string, unknown>) => boolean;
     /** Whether this task, a thread still open, sits in it, by who's running; each listed under the first holding it. */
     holdsTask: (read: ThreadRead, running: ReadonlyMap<string, unknown>) => boolean;
 }
 
-/** The party of what nobody running answers: each agent who's ended, with what they left, and each task nobody running owns, as nobody finished or reviewed it. */
+/** The party of what nobody running answers: what each agent who's ended left, and each task nobody running answers for, as the host says, as nobody finished or reviewed it. */
 export const NO_AGENT: Party = {
     name: "no agent",
     called: "No agent",
@@ -433,28 +426,25 @@ export interface OwnedCheck {
 }
 
 /**
- * Return who a check answers to: whoever holds its thread (`taskOwner`), or the one who
- * asked it where nobody ever did. So it sits under them, or, where they've ended, under `No agent`, one owner for
- * everything.
+ * Return who a check answers to: whose its thread is (`keptUnder`), or the one who asked it where nobody ever held it. So
+ * it sits under them, or, where they've ended, in `No agent`'s buffer, under who left it.
  */
 export function checkOwner(owned: OwnedCheck): Conversation | null {
     const by = owned.check.check.by;
-    return owned.thread.thread.holder ?? owned.thread.answering ?? (by.party === "conversation" ? by : taskOwner(owned.thread));
+    return keptUnder(owned.thread) ?? (by.party === "conversation" ? by : null);
 }
 
 /**
- * Return who owns a thread, as a task: whoever holds it, running or not, so a task whose
- * holder ended without finishing it sits under them, under `No agent`, though someone answers for it; else whoever answers
- * for it; else whoever opened it; none where the operator or lup did and nobody's taken it.
+ * Return who owns a thread, as a task: whoever answers for it, as the host reads it, its holder where they go on, else the
+ * nearest holder above; none where nobody does, which puts it in `No agent`.
  */
 export function taskOwner(read: ThreadRead): Conversation | null {
-    const by = read.thread.by;
-    return read.thread.holder ?? read.answering ?? (by.party === "conversation" ? by : null);
+    return read.answering ?? null;
 }
 
-/** Whether a thread's a session's own root, which holds whatever its session is given: no concern of its own to list, but where something in it waits. */
-export function rootThread(read: ThreadRead): boolean {
-    return read.thread.parent == null && read.thread.title === ROOT_TITLE;
+/** Return whose group what asks the operator in a thread is laid out under: whoever answers for it; else who left it, as the host says, whose group `No agent`'s buffer lays out; none where nobody did. */
+export function keptUnder(read: ThreadRead): Conversation | null {
+    return taskOwner(read) ?? read.left_by ?? null;
 }
 
 /** What a comment is followed from as the review is laid out anew (`placed`, `anchors.ts`): where each comment was last seated on its block, and that block's lines then. */
@@ -508,7 +498,7 @@ export interface Arranging {
     read?: boolean;
     /** What a buffer with nothing in it says until it's read. */
     unread?: string;
-    /** The threads done, for the operator to confirm, each laid out under whoever owns it (`taskOwner`), in panes; none else. */
+    /** The threads done, for the operator to confirm, each laid out under whose it is (`keptUnder`), in panes; none else. */
     confirming?: readonly ThreadRead[];
     /** The parties a buffer may show; unsaid, those declared here (`PARTIES`). */
     parties?: readonly Party[];
@@ -1571,7 +1561,7 @@ export function laid(
     const confirmsOf = new Map<string, ThreadRead[]>();
     const confirmLines: (Span & { thread: ThreadRead })[] = [];
     for (const each of arranging.confirming ?? []) {
-        const owner = taskOwner(each);
+        const owner = keptUnder(each);
         if (owner !== null) {
             confirmsOf.set(whose(owner), [...(confirmsOf.get(whose(owner)) ?? []), each]);
             checkOwners.push(owner);
@@ -1588,7 +1578,7 @@ export function laid(
             layGroup(group, false, 0, "own");
         }
     } else if (showing?.kind === "party") {
-        // Each agent the party holds, under their banner, and what's theirs.
+        // What each agent the party holds left, under their banner.
         const party = (arranging.parties ?? PARTIES).find((each) => each.name === showing.name);
         const inIt = (group: Grouping) => party?.holds(group, shown.running) === true;
         for (const { group, depth } of nested(kept([...now, ...empty].filter(inIt), false), arranging.parents ?? null)) {

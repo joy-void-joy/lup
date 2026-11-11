@@ -95,7 +95,7 @@ from lup_dev.inbox.texts import (
     body,
     what,
 )
-from lup_dev.inbox.threads import parts_of, spoken
+from lup_dev.inbox.threads import cue, parts_of, spoken
 from lup_ledger.parties import Conversation, Operator, Party
 from lup_ledger.threads import (
     BranchLanded,
@@ -121,7 +121,8 @@ class Said(Model):
 THREAD = (
     "The thread it lands in: an existing one's name (`dashboard-lag`), or a new "
     "title, which opens a thread under the one you work in. Left out, the one you "
-    "work in. Naming one doesn't move you there."
+    "work in, or on you alone where you work in none. Naming one doesn't move you "
+    "there."
 )
 """What `thread` says on every tool that sends: each speaking tool that sends
 takes the library's input with it, under the library's title, so its schema and
@@ -262,7 +263,7 @@ class Threading(Model):
         default=None,
         description=(
             "With `title`, the thread it opens under, by name or number; left out, "
-            "the one you work in."
+            "the one you work in, or at the top where you work in none."
         ),
     )
     join: bool = Field(
@@ -657,6 +658,15 @@ class Speaker(Model, arbitrary_types_allowed=True):
             thread = None if found is not None else self.threaded(asked.thread)
         except InboxError as refused:
             return Said(text=f"Not asked: {refused}")
+        if (
+            found is None
+            and thread is None
+            and asked.checks
+            and self.concerns.working(self.party) is None
+        ):
+            thread = self.concerns.opened(
+                self.party, cue(asked.question), self.party.repository
+            )
         item = (
             await self.said(question, thread)
             if found is None
@@ -698,7 +708,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         )
 
     def checked(self, item: Item, lines: list[str]) -> list[int]:
-        """Put a check for each of `lines` in the thread `item`, a question, landed in, and return their numbers."""
+        """Put a check for each of `lines` in the thread `item`, a question, landed in, one opened for it where they named none and work in none (`ask`), and return their numbers."""
         concerns = self.concerns
         thread = concerns.containing(item.number)
         if thread is None or not lines:
@@ -967,7 +977,8 @@ class Speaker(Model, arbitrary_types_allowed=True):
         thing, with sub-threads under it. `name` is the thread; each field you
         give says one thing of it, and one call can say several: open it
         under another, hold it, and move the operator's words in.
-        - `title` opens it, under `under`, or the thread you work in;
+        - `title` opens it, under `under`, or the thread you work in; where
+          nobody above would answer for it, your session holds it;
         - `join` makes it the thread you work in, where what you send without
           `thread` lands; `hold` makes you its holder too, who leads it and is
           told whole whatever lands there; `hand` gives it to another agent,
@@ -1055,8 +1066,10 @@ class Speaker(Model, arbitrary_types_allowed=True):
             opened = concerns.opened(
                 self.party,
                 threading.title,
+                repository,
                 under,
                 name=threading.name.removeprefix("@"),
+                taken=threading.hold or to is not None,
             )
         except ValidationError as unnamed:
             message = f"`{threading.name}` can't be a thread's name: letters, digits, `-`, `_` and `.`, a letter among them"
@@ -1065,7 +1078,16 @@ class Speaker(Model, arbitrary_types_allowed=True):
             thread=opened,
             to=to,
             until=until,
-            said=[f"Opened @{opened.name}, under @{under.name}."],
+            said=[
+                f"Opened @{opened.name}"
+                + ("" if under is None else f", under @{under.name}")
+                + (
+                    ""
+                    if opened.holder is None
+                    else f", held by {'you' if opened.holder == self.party else self.called(opened.holder)}"
+                )
+                + "."
+            ],
         )
 
     def until(self, parking: Parking) -> list[Trigger]:

@@ -66,6 +66,9 @@ describe("the panes by agent", () => {
         expect(list.some((each) => each.includes("what's for you"))).toBe(true);
         expect(list.some((each) => each.includes("guidance-voice"))).toBe(true);
         expect(list.some((each) => each.includes("No agent"))).toBe(true);
+        // What an ended session held sits in No agent itself, saying who left it, never under their name.
+        expect(list.some((each) => each.includes("@docs-sweep left by docs-pass"))).toBe(true);
+        expect(list.some((each) => each.includes("✕ docs-pass"))).toBe(false);
         expect(dashboard.thrown).toEqual([]);
     });
 

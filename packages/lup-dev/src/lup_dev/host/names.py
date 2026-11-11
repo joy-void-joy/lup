@@ -139,7 +139,7 @@ def claimed(
     """Return the name `request` takes among `launches`: as asked where it's exact, else the first of it, `-2`, `-3`… that's free.
 
     A name is free where no launch holds it and `refused` says nothing against
-    it: a thread of the repository has it (`Roots.refused`). A record from
+    it: a thread of the repository has it (`Namesakes.refused`). A record from
     before launches had names asks its worktree's. Raise `HostError` where an
     exact name is held.
     """
