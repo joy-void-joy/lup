@@ -1,6 +1,7 @@
 """Threads on the ledger: what's in one, where it stands, who's on it, and the threads above and under it."""
 
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, override
 
@@ -34,7 +35,7 @@ from lup_ledger.threads import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
 
 REPOSITORY = Path("/work/lup.git")
 OTHER = Path("/work/other.git")
@@ -143,8 +144,8 @@ def test_a_check_waits_on_the_operator_until_they_answer_it(
     ("said", "state"),
     [
         (
-            Parked(
-                target=1,
+            partial(
+                Parked,
                 repository=REPOSITORY,
                 by=WORKER,
                 at=at(1),
@@ -153,8 +154,8 @@ def test_a_check_waits_on_the_operator_until_they_answer_it(
             "parked",
         ),
         (
-            Done(
-                target=1,
+            partial(
+                Done,
                 repository=REPOSITORY,
                 by=WORKER,
                 at=at(1),
@@ -162,10 +163,13 @@ def test_a_check_waits_on_the_operator_until_they_answer_it(
             ),
             "done to confirm",
         ),
-        (Settled(target=1, repository=REPOSITORY, by=Operator(), at=at(1)), "settled"),
         (
-            Declined(
-                target=1,
+            partial(Settled, repository=REPOSITORY, by=Operator(), at=at(1)),
+            "settled",
+        ),
+        (
+            partial(
+                Declined,
                 repository=REPOSITORY,
                 by=Operator(),
                 at=at(1),
@@ -178,17 +182,17 @@ def test_a_check_waits_on_the_operator_until_they_answer_it(
 def test_a_thread_stands_as_its_latest_status_says(
     ledger: Ledger,
     threads: Threads,
-    said: Parked | Done | Settled | Declined,
+    said: Callable[..., Parked | Done | Settled | Declined],
     state: str,
 ) -> None:
     lag = opened(ledger, "lag")
     checked(ledger, lag)
-    ledger.drawn(said)
+    status = ledger.drawn(said(target=lag.number))
 
     standing = threads.standing(lag.number)
 
     assert standing.state == state
-    assert standing.status == said
+    assert standing.status == status
     assert len(standing.waiting) == 1
 
 
@@ -449,6 +453,8 @@ def test_a_thread_under_what_isn_t_a_thread_of_its_repository_or_under_itself_is
     sub = opened(ledger, "sub", parent=main.number)
     elsewhere = opened(ledger, "elsewhere", repository=OTHER)
     said = item(ledger)
+    # A number the sequence gave out, at which no node was kept.
+    unkept = ledger.numbered()
 
     refusals = {
         "would be under itself": main.model_copy(
@@ -458,7 +464,7 @@ def test_a_thread_under_what_isn_t_a_thread_of_its_repository_or_under_itself_is
             update={"parent": elsewhere.number, "at": at(1)}
         ),
         "not a thread": sub.model_copy(update={"parent": said.number, "at": at(1)}),
-        "isn't on the ledger": sub.model_copy(update={"parent": 99, "at": at(1)}),
+        "isn't on the ledger": sub.model_copy(update={"parent": unkept, "at": at(1)}),
     }
 
     for says, refused in refusals.items():
