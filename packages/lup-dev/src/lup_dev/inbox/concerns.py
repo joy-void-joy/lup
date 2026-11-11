@@ -51,6 +51,7 @@ from lup_dev.inbox.mentions import mentioned
 from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.roster import Roster
 from lup_dev.inbox.store import (
+    Carried,
     Flagged,
     Friction,
     HeldChange,
@@ -308,12 +309,14 @@ class Concerns(Model, arbitrary_types_allowed=True):
             return
         self.inbox.placed(place.model_copy(update=fields))
 
-    def left(self, party: Conversation, words: str) -> None:
-        """Leave lup's `words` for `party`, told at their next call, their turn's or their session's start, never holding an end nor waking them; nothing where they were never heard, or have ended."""
+    def left(
+        self, party: Conversation, words: str, carries: Carried | None = None
+    ) -> None:
+        """Leave lup's `words` for `party`, told at their next call, their turn's or their session's start, never holding an end nor waking them, and kept as a line of theirs, with what it `carries` of someone's words (`Inbox.left`); nothing where they were never heard, or have ended."""
         place = self.inbox.whereabouts.get(party.key())
         if place is None or not self.live(party):
             return
-        self.inbox.placed(place.model_copy(update={"words": [*place.words, words]}))
+        self.inbox.left(place, words, self.now(), carries)
 
     def working(self, party: Conversation) -> Thread | None:
         """Return the thread `party` works in: the one they joined, hold or were handed, else the one they started on; none where they work in none."""
@@ -443,6 +446,7 @@ class Concerns(Model, arbitrary_types_allowed=True):
             line=self.line(item, landing),
             holder=reach.holder != "none",
             others=reach.others != "none",
+            carries=Carried(item=item.number, thread=landing.number),
         )
         return landing
 
@@ -522,11 +526,15 @@ class Concerns(Model, arbitrary_types_allowed=True):
         line: str,
         holder: bool = True,
         others: bool = True,
+        carries: Carried | None = None,
     ) -> None:
-        """Tell who answers for `thread` `whole`, or `line` where it's none, where `holder` says; and everyone else on it `line`, where `others` says, but a subagent in the thread they started on and never chose (`quiet`). Nobody among `having`, who has it already, is told."""
+        """Tell who answers for `thread` `whole`, carrying what `carries` names, or `line` where it's none, where `holder` says; and everyone else on it `line`, where `others` says, but a subagent in the thread they started on and never chose (`quiet`). Nobody among `having`, who has it already, is told."""
         answering = self.answering(thread)
         if holder and answering is not None and answering not in having:
-            self.left(answering, whole or line)
+            if whole is None:
+                self.left(answering, line)
+            else:
+                self.left(answering, whole, carries)
         if not others:
             return
         for each in self.on(thread):
@@ -646,6 +654,7 @@ class Concerns(Model, arbitrary_types_allowed=True):
                 line=self.line(item, thread, by=party),
                 holder=reach.holder != "none",
                 others=reach.others != "none",
+                carries=Carried(item=item.number, thread=thread.number, moved=party),
             )
             return cited(item.number)
         try:
@@ -687,7 +696,10 @@ class Concerns(Model, arbitrary_types_allowed=True):
             f"lup: in @{thread.name}, the operator's words {wanted.cited()}, moved "
             f"there by {self.roster.who(party)}: {cue(anchor.text)}"
         )
-        self.telling(thread, [party], whole=whole, line=line)
+        carried = Carried(
+            item=item.number, part=wanted.part, thread=thread.number, moved=party
+        )
+        self.telling(thread, [party], whole=whole, line=line, carries=carried)
         return wanted.cited()
 
     def gathered(
@@ -771,6 +783,9 @@ class Concerns(Model, arbitrary_types_allowed=True):
                 [item.sender] if isinstance(item.sender, Conversation) else [],
                 whole=self.whole(item, thread, by=Operator()),
                 line=self.line(item, thread, by=Operator()),
+                carries=Carried(
+                    item=item.number, thread=thread.number, moved=Operator()
+                ),
             )
         return Gathered(thread=thread, items=items)
 
