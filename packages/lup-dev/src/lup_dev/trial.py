@@ -440,7 +440,7 @@ class Origin(Model):
         return self.git.model_copy(
             update={
                 "arguments": ["-c", "gc.auto=0", "-c", "maintenance.auto=false"],
-                "within": self.git.crossing,
+                "limit": self.git.crossing,
             }
         )
 

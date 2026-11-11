@@ -337,10 +337,10 @@ def test_git_reading_a_ref_a_room_made_a_fifo_is_stopped_past_its_limit(
         "stopped"
     )
     assert isinstance(late.value.__cause__, ProgramOverdueError)
-    briefly = git.model_copy(update={"within": timedelta(milliseconds=200)})
+    briefly = git.model_copy(update={"limit": timedelta(milliseconds=200)})
     with pytest.raises(GitError, match=r"ran past 0\.2 s"):
         briefly.commit("refs/heads/main")
 
 
 def test_git_has_a_time_limit_where_none_is_given(repo: Path) -> None:
-    assert Git(cwd=repo).within == timedelta(seconds=30)
+    assert Git(cwd=repo).limit == timedelta(seconds=30)

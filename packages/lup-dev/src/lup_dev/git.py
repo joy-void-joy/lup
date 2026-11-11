@@ -38,7 +38,7 @@ decides what the operator is asked and what the host runs, and the ids alone say
 what a commit holds, as a forge reads them (`docs/field-notes.md`, *Host-side git
 in a repository the room writes*).
 
-Every git `Git` runs is killed past a time limit (`Git.within`), since a room
+Every git `Git` runs is killed past a time limit (`Git.limit`), since a room
 can make a ref a FIFO in which git waits for good. A service running git off
 its event loop runs it in threads of the repository's own (`threaded`), never
 asyncio's default pool: a room slowing git on its repository then holds that
@@ -272,7 +272,7 @@ class Git(Model):
     index: Path | None = None
     """An index git stages in, in place of the worktree's own (`GIT_INDEX_FILE`);
     none for the worktree's."""
-    within: timedelta = timedelta(seconds=30)
+    limit: timedelta = timedelta(seconds=30)
     """The longest each git it runs may take, where a call gives none: past it,
     git is killed (`run`). Every git has a limit, since a room writes the
     repository's refs and can make one a FIFO nothing writes, in which git
@@ -301,8 +301,8 @@ class Git(Model):
         ok: list[int] | None = None,
         within: timedelta | None = None,
     ) -> Ran:
-        """Run git with `arguments`, killed past `within`, or this git's own limit where that's none (`Git.within`); raise `GitError` on an exit status not in `ok`, where git can't run, or where it runs past its limit, naming the command and the repository."""
-        limit = within or self.within
+        """Run git with `arguments`, killed past `within`, or this git's own where that's none (`Git.limit`); raise `GitError` on an exit status not in `ok`, where git can't run, or where it runs past its limit, naming the command and the repository."""
+        limit = within or self.limit
         safe = [
             "--no-replace-objects",
             *graphless(),
@@ -633,7 +633,7 @@ class Threads(MutableModel, arbitrary_types_allowed=True):
 
     Not asyncio's default pool, which the host service's hooks wait on
     (`Workers.current`, `host/workers.py`): a room can make git on its
-    repository wait the whole of its limit (`Git.within`), and trigger such
+    repository wait the whole of its limit (`Git.limit`), and trigger such
     git as often as it calls `land` or starts a session, so on a shared pool
     it could hold every thread, and every hook would wait behind them. A
     pool of its own for git alone would still let one room's repository
