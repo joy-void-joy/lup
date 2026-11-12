@@ -15475,6 +15475,41 @@ def test_what_the_room_s_git_prints_is_kept_to_its_end_and_a_refusal_quotes_that
     assert ran.error.endswith(b"fatal\n")
 
 
+def test_a_launch_whose_room_commands_were_killed_past_their_limit_a_few_times_spawns_no_more(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """Each command killed may leave the room's git running, and a process of podman's on the host: a room making its git wait for good leaves no more than a few."""
+    worktree = tmp_path / "w"
+    spawnable(worktree)
+    spawned = SpawnsMade(hung=True, making=timedelta(seconds=0.5), killing=2)
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        spawning=lambda delivery, launchers: spawned.tools(
+            delivery, machine, launchers
+        ),
+    ):
+        launched(machine, clock, worktree, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        first, _ = call(mcp, "spawn", {"name": "x", "brief": "Do it."})
+        run = len(spawned.programs)
+        second, _ = call(mcp, "spawn", {"name": "y", "brief": "Do it."})
+    # Its worktree's making, then its removal, each killed.
+    assert run == 2
+    assert first.startswith("Not spawned: its worktree,")
+    assert second == (
+        "Not spawned: 2 commands lup ran in your room to make or remove a spawn's "
+        "worktree ran past 0:00:00.500000 and were killed, each of which can leave "
+        "your room's git running, and a process of podman's on the host with it, "
+        "so your launch spawns no more: a launch started afresh does"
+    )
+    assert len(spawned.programs) == run
+    assert spawned.launches == []
+
+
 def test_a_room_git_killed_past_its_limit_has_what_it_may_make_removed(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
