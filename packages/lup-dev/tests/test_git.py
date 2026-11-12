@@ -401,14 +401,24 @@ def test_git_within_a_worktree_reads_no_config_through_its_links(
     worktree = bare / "tree" / "main"
     ran = tmp_path / "ran"
     # A git directory of the room's own, inside the tree, whose `config` names
-    # a clean filter; the worktree's files go through it, and one of them has
-    # changed on disk since it was staged, as `git status` reads it again.
+    # a clean filter, which writes down each file it reads; the worktree's
+    # files go through it.
     own = worktree / "own.git"
     shell.git(tmp_path, "init", "-q", "--bare", str(own))
-    shell.git(own, "config", "filter.probe.clean", f"sh -c 'touch {ran}; cat'")
+    shell.git(
+        own, "config", "filter.probe.clean", f"sh -c 'echo $1 >> {ran}; cat' - %f"
+    )
     (worktree / ".gitattributes").write_text("* filter=probe\n")
     (worktree / "probe.txt").write_text("probe\n")
     shell.git(worktree, "add", ".gitattributes", "probe.txt")
+    # One has changed on disk since it was staged, to as many bytes at another
+    # time, so `git status` reads it to tell, and, finding it changed, leaves
+    # its entry in the index as it was: the second `status` reads what the
+    # first did. Only touched, it was written back as clean by the first, and
+    # the second read nothing of it: that one ran the filter only on a file
+    # git took as racily clean, written in the same second as the index, and
+    # missed it in 133 of 2000 runs on 96 workers on 2026-11-12.
+    (worktree / "probe.txt").write_text("PROBE\n")
     os.utime(worktree / "probe.txt", (0, 0))
     (bare / "worktrees" / "main" / "commondir").write_text(f"{own}\n")
     [listed] = [each for each in Git.pinned(bare).listed() if each.root == worktree]
@@ -416,6 +426,7 @@ def test_git_within_a_worktree_reads_no_config_through_its_links(
     Git.within(bare, listed).run("status", "--porcelain")
 
     assert not ran.exists()
-    # Found from the worktree, git reads the room's `config`, and runs it.
+    # Found from the worktree, git reads the room's `config`, and runs its
+    # filter on the file the pinned `status` read.
     Git(cwd=worktree).run("status", "--porcelain")
-    assert ran.exists()
+    assert "probe.txt" in ran.read_text().splitlines()
