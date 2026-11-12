@@ -62,6 +62,8 @@ describe("the panes by agent", () => {
     });
 
     it("opens on what's for the operator, with the list beside it, by agent and with No agent", async () => {
+        // Listed as the host answers, which a loaded machine does after the review has settled.
+        await dashboard.page.waitForFunction(() => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("The docs sweep left by docs-pass")), undefined, { polling: 50 });
         const list = await listText(dashboard);
         expect(list.some((each) => each.includes("what's for you"))).toBe(true);
         expect(list.some((each) => each.includes("guidance-voice"))).toBe(true);
@@ -482,7 +484,8 @@ describe("what's read by being on screen, in panes", () => {
     const moved = () => told.flatMap((each) => each.marks as { key: Record<string, unknown>; up_to: string; seen: boolean }[]);
     /** Each mark moved as far as the voice session's turn's end, or the how it felt in view just after it. */
     const movedTo56 = () => moved().filter((each) => each.up_to === "56" || each.up_to === "58");
-    const passes = (ms: number) => dashboard.page.clock.runFor(ms);
+    /** Let the page's clock run on for `ms`, the page in view of someone reading it for that time alone. */
+    const passes = (ms: number) => dashboard.looks(ms);
     const row = (text: string) => dashboard.page.evaluate((wanted) => [...document.querySelectorAll(".list-buffer .cm-line")].find((each) => (each.textContent ?? "").includes(wanted))?.textContent ?? "", text);
 
     it("moves their agent's mark as what's been seen scrolls off, the list's count falling", async () => {
@@ -495,7 +498,8 @@ describe("what's read by being on screen, in panes", () => {
         expect(was).toContain("•");
         await dashboard.keys.press(["G"]);
         await review.settled(300);
-        await passes(4000);
+        // Time for the page to say what moved, out of view: what's at the end isn't read.
+        await dashboard.page.clock.runFor(4000);
         await review.settled(300);
         await expect.poll(() => movedTo56().length, { timeout: 15_000 }).toBeGreaterThan(0);
         const [mark] = movedTo56();

@@ -16,7 +16,9 @@ operator saw them, which the host reads with git in worktrees no demo has
 (`since`, `reviewed`); the merges what's on trial is computed with
 (`lup_dashboard/trialed.py`); the agents themselves, whose hooks and calls are a few
 timers set going as the page first asks (`asking`): a question that arrives,
-an approval's types read, two writes to a branch.
+an approval's types read, two writes to a branch. A script driving the demo
+brings the question at the step it says (`told`), so what it sees doesn't hang
+on how long its steps took.
 """
 
 import asyncio
@@ -253,7 +255,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     reading: asyncio.TimerHandle | None = None
     """The reading of the approval's types under way, once the page asked for its files."""
     arrives: timedelta = timedelta(seconds=10)
-    """How long after the page first asks for the inbox a question of the parser subagent's arrives, so a session can watch the review keep its place as an item comes to a group above."""
+    """How long after the page first asks for the inbox a question of the parser subagent's arrives, so a session can watch the review keep its place as an item comes to a group above; sooner where a script driving the demo brings it (`told`)."""
     arriving: asyncio.TimerHandle | None = None
     """The arrival under way, once the page asked for the inbox."""
     size: int = 36
@@ -1161,8 +1163,23 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             read = item.reason.model_copy(update={"typing": False})
             inbox.kept(item.model_copy(update={"reason": read}))
 
+    def told(self, line: str) -> None:
+        """Bring at once what a stand-in agent does, as a line of the demo's input names it (`--driven`): `arrive`, the parser subagent's late question; say what names nothing."""
+        match line.strip():
+            case "arrive":
+                self.arrive()
+            case "":
+                pass
+            case other:
+                self.say(
+                    f"`{other}` names nothing a stand-in agent does: `arrive` brings "
+                    "the late question"
+                )
+
     def arrive(self) -> None:
-        """Let the parser subagent's late question arrive, made at the clock's time, in the thread they work in, as an item a call of theirs made does."""
+        """Let the parser subagent's late question arrive, made at the clock's time, in the thread they work in, as an item a call of theirs made does; once, however often it's brought."""
+        if 61 in self.host.inbox.items:
+            return
         delivery = self.host.delivery
         parser = self.lup_session().model_copy(update={"agent": "a02"})
         question = Question(

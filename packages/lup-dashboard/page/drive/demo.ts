@@ -18,6 +18,15 @@ const PAGE = fileURLToPath(new URL("../", import.meta.url));
 /** The page as the demo serves it, built into the dashboard's package (`packages/lup-dashboard/build.py`). */
 const BUILT = fileURLToPath(new URL("../../src/lup_dashboard/page/index.html", import.meta.url));
 
+/**
+ * When what the demo's stand-in agents do of themselves comes, unless a script says: an hour, so never in a test's life,
+ * and the approval's types read at once, rather than `lup-dashboard demo`'s own few seconds, long enough for a person to
+ * watch. A test's steps take what time the machine gives them, so what came a few seconds after the page first asked
+ * would come between other steps of it on a machine more or less loaded, what the test sees changing with the load; a
+ * test about what comes brings it at the step it says (`Demo.arrive`), or waits on it.
+ */
+const NEVER = 3600;
+
 /** What the demo serves: the review's size and load, or a copy of the operator's, as `lup-dashboard demo --help` says each. */
 export interface DemoOptions {
     /** How many flagged writes of a busy day the review holds beside the demo's own items: a busy day's unless given, 0 for the demo's own alone. */
@@ -41,11 +50,11 @@ export interface DemoOptions {
      * timings --kept` to read; in the demo's own directory, gone as it stops, unless given.
      */
     timings?: string;
-    /** How many seconds after the page first asks for the inbox the late question arrives: long enough to watch by default. */
+    /** How many seconds after the page first asks for the inbox the late question arrives: never, unless given (`NEVER`) or brought (`Demo.arrive`). */
     arrives?: number;
-    /** How many seconds after the page first asks what the parser's branch changed two more writes come to it: long enough to watch by default. */
+    /** How many seconds after the page first asks what the parser's branch changed two more writes come to it: never, unless given (`NEVER`). */
     grows?: number;
-    /** How many seconds after the page first asks for the approval's files their types are read: long enough to watch by default. */
+    /** How many seconds after the page first asks for the approval's files their types are read: at once, unless given, as `NEVER` says. */
     typesRead?: number;
     /** How many seconds a merge's gate stands in as taking: long enough to watch by default. */
     mergeTakes?: number;
@@ -57,6 +66,11 @@ export interface DemoOptions {
 export interface Demo extends AsyncDisposable {
     /** Where to open it, its token in the fragment. */
     url: string;
+    /**
+     * Bring the parser subagent's late question at once, as `arrives` would at its time, and once however often it's
+     * brought: the page lays it out as the host tells it, which a test waits on.
+     */
+    arrive(): Promise<void>;
     close(): Promise<void>;
 }
 
@@ -81,30 +95,41 @@ export async function demo(options: DemoOptions = {}): Promise<Demo> {
     if (options.hooks !== undefined) {
         args.push("--hooks", String(options.hooks));
     }
-    if (options.arrives !== undefined) {
-        args.push("--arrives", String(options.arrives));
+    // What a copy holds comes as it comes: it takes none of these, and refuses them given.
+    const stood = options.copy !== true;
+    const timed = stood ? { ...options, arrives: options.arrives ?? NEVER, grows: options.grows ?? NEVER, typesRead: options.typesRead ?? 0 } : options;
+    if (timed.arrives !== undefined) {
+        args.push("--arrives", String(timed.arrives));
     }
-    if (options.grows !== undefined) {
-        args.push("--grows", String(options.grows));
+    if (timed.grows !== undefined) {
+        args.push("--grows", String(timed.grows));
     }
     if (options.mergeTakes !== undefined) {
         args.push("--merge-takes", String(options.mergeTakes));
     }
-    if (options.typesRead !== undefined) {
-        args.push("--types-read", String(options.typesRead));
+    if (timed.typesRead !== undefined) {
+        args.push("--types-read", String(timed.typesRead));
     }
-    if (options.copy === true) {
-        args.push("--copy");
-    }
+    args.push(stood ? "--driven" : "--copy");
     if (options.timings !== undefined) {
         args.push("--timings", options.timings);
     }
-    const served = await start("uv", args, { what: "`lup-dashboard demo`", cwd: ROOT });
+    const served = await start("uv", args, { what: "`lup-dashboard demo`", cwd: ROOT, input: stood });
     const url = new URL(served.first);
     if (options.oneBuffer === true) {
         url.searchParams.set("panes", "off");
     }
-    return { url: url.href, close: served.stop, [Symbol.asyncDispose]: served.stop };
+    return {
+        url: url.href,
+        async arrive() {
+            if (!stood) {
+                throw new Error("a copy of the operator's state has no stand-in agents to bring a question");
+            }
+            await served.tell("arrive");
+        },
+        close: served.stop,
+        [Symbol.asyncDispose]: served.stop,
+    };
 }
 
 /** Return the first of the page's sources newer than its build, the build itself where there's none, else null. */

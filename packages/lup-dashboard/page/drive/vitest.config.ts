@@ -11,6 +11,8 @@ export default defineConfig({
     test: {
         root: fileURLToPath(new URL(".", import.meta.url)),
         include: ["*.test.ts"],
+        // A test that runs out of its time stops, and takes nothing of itself into the next (`stopping.ts`).
+        setupFiles: ["stopping.ts"],
         testTimeout: 60_000,
         hookTimeout: 60_000,
         // Six files at a time: each runs a demo and a Chromium, about 230 processes and threads, so this peaks near 1,400

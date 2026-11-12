@@ -10,6 +10,7 @@ import secrets
 import socket
 import sys
 import tempfile
+import threading
 from datetime import timedelta
 from ipaddress import IPv6Address, ip_address
 from pathlib import Path
@@ -180,6 +181,18 @@ def demo(
             )
         ),
     ] = None,
+    driven: Annotated[
+        bool,
+        typer.Option(
+            "--driven",
+            help=(
+                "Read the demo's input a line at a time, each bringing at once what "
+                "a stand-in agent does, by its name: `arrive`, the parser subagent's "
+                "late question. For a script driving the demo, which says at which "
+                "of its steps (`page/drive/demo.ts`)."
+            ),
+        ),
+    ] = False,
     copy: Annotated[
         bool,
         typer.Option(
@@ -224,10 +237,12 @@ def demo(
             or grows
             or merge_takes
             or types_read
+            or driven
         ):
             message = (
                 "--copy serves the operator's state as it is: it takes none of "
-                "--size, --hooks, --approval-lines, --arrives, --grows or --types-read"
+                "--size, --hooks, --approval-lines, --arrives, --grows, --types-read "
+                "or --driven"
             )
             raise typer.BadParameter(message)
         copied(port, address, timings, token_file)
@@ -248,7 +263,7 @@ def demo(
         host.merge_takes = timedelta(seconds=merge_takes)
     if types_read is not None:
         host.types_read = timedelta(seconds=types_read)
-    served(host, port, address, token_file=token_file)
+    served(host, port, address, token_file=token_file, told=host if driven else None)
 
 
 def copied(
@@ -307,8 +322,10 @@ def served(
     address: str,
     copied: OfCopy | None = None,
     token_file: Path | None = None,
+    *,
+    told: Demo | None = None,
 ) -> None:
-    """Serve the demo over `host` on `address` and `port`, until stopped, printing where to open it, its token in the fragment."""
+    """Serve the demo over `host` on `address` and `port`, until stopped, printing where to open it, its token in the fragment; each line of the input told to `told`'s stand-in agents, where it's given (`Demo.told`)."""
     token = kept_token(token_file)
     listening = socket.create_server((address, port))
     bound = listening.getsockname()[1]
@@ -321,7 +338,30 @@ def served(
     )
     typer.echo(f"http://{address}:{bound}/#token={token}")
     server = uvicorn.Server(uvicorn.Config(app, log_level="warning"))
-    asyncio.run(server.serve(sockets=[listening]))
+    asyncio.run(serving(server, listening, told))
+
+
+async def serving(
+    server: uvicorn.Server, listening: socket.socket, told: Demo | None
+) -> None:
+    """Serve on `listening` until stopped, each line of the input told to `told`, where it's given, on the loop serving."""
+    if told is not None:
+        loop = asyncio.get_running_loop()
+        threading.Thread(target=telling, args=(loop, told), daemon=True).start()
+    await server.serve(sockets=[listening])
+
+
+def telling(loop: asyncio.AbstractEventLoop, told: Demo) -> None:
+    """Tell `told` each line of the input, on `loop`, until the input ends or the loop does.
+
+    In a thread the process doesn't wait on as it ends: a script keeps the
+    demo's input open, and a read waiting on it would hold the demo up as it
+    stops.
+    """
+    for line in sys.stdin:
+        if loop.is_closed():
+            return
+        loop.call_soon_threadsafe(told.told, line)
 
 
 @app.command()
