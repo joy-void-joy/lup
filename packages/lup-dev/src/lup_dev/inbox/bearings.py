@@ -27,7 +27,6 @@ worktrees through `lup_dev.git`, which every layer reads. The host service,
 lowest of `lup_dev`'s layers, asks it through `Bearings` (`host/service.py`).
 """
 
-import asyncio
 from collections.abc import Callable
 from datetime import datetime
 from itertools import batched
@@ -35,7 +34,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 from lup.types import Model
-from lup_dev.git import Git, GitError, nul_separated
+from lup_dev.git import Git, GitError, nul_separated, threaded
 from lup_dev.host.service import Bearings, Running
 from lup_dev.inbox.delivery import Delivery, clocked
 from lup_dev.inbox.reading import Reader
@@ -190,8 +189,13 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
         since = None if last is None else self.started(last)
         branch = self.running(launch.repository)
         try:
-            found = await asyncio.to_thread(
-                read_repository, launch.repository, branch, self.remote, since
+            found = await threaded(
+                launch.repository,
+                read_repository,
+                launch.repository,
+                branch,
+                self.remote,
+                since,
             )
         except GitError as unread:
             found = Repository(unlanded=[], landed=[], onto=branch, unread=str(unread))

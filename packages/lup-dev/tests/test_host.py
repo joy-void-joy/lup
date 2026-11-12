@@ -1357,6 +1357,27 @@ def test_a_program_the_service_runs_is_a_process_of_its_own(tmp_path: Path) -> N
     assert "gone" in missing.said()
 
 
+def test_a_program_past_its_time_limit_is_killed_and_said_as_timeout_says_it(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / "gh"
+    program.write_text("#!/bin/sh\nexec sleep 3600\n")
+    program.chmod(0o755)
+
+    ran = asyncio.run(
+        executed(
+            Program(
+                command=[str(program), "api"],
+                payload="",
+                within=timedelta(milliseconds=200),
+            )
+        )
+    )
+
+    assert ran.status == 124
+    assert ran.said() == f"`{program} api` ran past 0.2 s, and was killed"
+
+
 def test_a_program_whose_wait_is_cancelled_is_killed(tmp_path: Path) -> None:
     program = tmp_path / "gh"
     started = tmp_path / "started"

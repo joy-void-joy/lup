@@ -1,11 +1,12 @@
 """git as lup_dev runs it: a commit's files written from git's objects, not its archive."""
 
 import os
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import pytest
 
-from lup.programs import run
+from lup.programs import ProgramOverdueError, run
 from lup_dev.git import Git, GitError, Worktree
 from lup_dev.layout import Layout
 from lup_dev.policy.store import Store
@@ -317,6 +318,32 @@ def test_a_commits_subject_refuses_what_isnt_that_commit(
     blob = shell.git(repo, "rev-parse", "HEAD:a.txt")
     with pytest.raises(GitError, match="isn't that commit"):
         Git(cwd=repo).subject(blob)
+
+
+@pytest.mark.parametrize("fifo", ["packed-refs", "refs/heads/main"])
+def test_git_reading_a_ref_a_room_made_a_fifo_is_stopped_past_its_limit(
+    repo: Path, fifo: str
+) -> None:
+    # A FIFO nothing writes holds git in `open` for good: `packed-refs` every
+    # read of refs, a loose ref a read of that one (git 2.55).
+    common = repo / ".git"
+    (common / fifo).unlink(missing_ok=True)
+    os.mkfifo(common / fifo)
+    git = Git.pinned(common)
+    with pytest.raises(GitError) as late:
+        git.run("rev-parse", "--verify", "refs/heads/main", within=timedelta(seconds=1))
+    assert str(late.value).startswith(
+        f"git rev-parse --verify refs/heads/main ran past 1 s in {common}, and was "
+        "stopped"
+    )
+    assert isinstance(late.value.__cause__, ProgramOverdueError)
+    briefly = git.model_copy(update={"limit": timedelta(milliseconds=200)})
+    with pytest.raises(GitError, match=r"ran past 0\.2 s"):
+        briefly.commit("refs/heads/main")
+
+
+def test_git_has_a_time_limit_where_none_is_given(repo: Path) -> None:
+    assert Git(cwd=repo).limit == timedelta(seconds=30)
 
 
 # A repository's worktrees

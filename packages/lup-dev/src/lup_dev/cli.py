@@ -93,7 +93,7 @@ from lup_dev.gate import (
     report,
 )
 from lup_dev.gate import Ran as GateRan
-from lup_dev.git import Git, GitError, nul_separated
+from lup_dev.git import Git, GitError, nul_separated, threaded
 from lup_dev.host.client import FromRoom, HostClient, RoomClient, own_command
 from lup_dev.host.copying import Copying
 from lup_dev.host.courier import (
@@ -744,8 +744,8 @@ def host_serve(context: typer.Context) -> None:
         notices=Unsaid() if rehearsing else NotifySend(),
         clock=SystemClock(),
         say=typer.echo,
-        settle_hold=lambda change, approved, said: hold_answered(
-            layout, change, approved=approved, comment=said
+        settle_hold=lambda change, repository, approved, said: hold_answered(
+            layout, change, repository, approved=approved, comment=said
         ),
         hold_unheard=lambda change: hold_unheard(layout, change),
         queues={
@@ -965,7 +965,8 @@ async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) 
     """Put the approval of the host zone at the running branch's tip in the operator's inbox, where a launch's push moved that branch and the zone isn't the one approved.
 
     Trust reads the zone with git and asks the service itself, so it runs off
-    the event loop. Its repository is the launch's git directory, found
+    the event loop, in a thread of the repository's own (`threaded`), with
+    the git finding its main worktree. Its repository is the launch's git directory, found
     through git from its main worktree; one holding a `commondir`, which would
     lead git elsewhere, isn't read (`docs/credentials.md`, *Running git on the
     host*). That main worktree is a bare repository's own directory, where
@@ -990,11 +991,15 @@ async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) 
         )
         return
     git = Git.pinned(launch.repository)
-    root = git.main_worktree()
     pushed_by = delivery.running(launch.launch)
-    try:
+
+    def proposed() -> int | None:
+        root = git.main_worktree()
         trust = machine_trust(root, [], approval_reading(git, branches, root))
-        number = await asyncio.to_thread(trust.proposed, pushed_by)
+        return trust.proposed(pushed_by)
+
+    try:
+        number = await threaded(launch.repository, proposed)
     except (LupDevError, LupError) as failure:
         typer.echo(
             f"{launch.launch}: the push moved {running}, but its approval "
@@ -1198,9 +1203,14 @@ def heading(item: Item, paths: Sequence[Pathed] = ()) -> str:
 
 
 def hold_answered(
-    layout: Layout, change: HeldChange, *, approved: bool, comment: str
+    layout: Layout,
+    change: HeldChange,
+    repository: Path,
+    *,
+    approved: bool,
+    comment: str,
 ) -> str | None:
-    """Write the operator's answer to a held change where its hook waits for it, and return what to tell the conversation that made it where no call waits to hear it; a hold at landing has no hook, its answer its item's own state."""
+    """Write the operator's answer to a held change of the repository whose git directory is `repository` where its hook waits for it, and return what to tell the conversation that made it where no call waits to hear it; a hold at landing has no hook, its answer its item's own state."""
     if change.key is None:
         return None
     hold = answer(
@@ -1209,6 +1219,7 @@ def hold_answered(
         Response(approved=approved, comment=comment),
         runtimes(),
         SystemClock(),
+        repository=repository,
         worktree=change.worktree,
         telling=True,
     )

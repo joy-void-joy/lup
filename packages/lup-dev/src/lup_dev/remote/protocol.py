@@ -55,14 +55,17 @@ git runs with replace refs ignored, automatic maintenance, hooks and
 as the repository's `config` sets it: pinned, that `config` is the only one of
 the repository's git reads, read-only in every room and the operator's to
 write, so a project's own `core.sshCommand` there holds. Each git is awaited on
-the service's event loop, as each judge is (`host/service.py`, `executed`). The operator's credentials are the service's
-environment. Each push and fetch is said in the service's log, with git's
+the service's event loop, as each judge is (`host/service.py`, `executed`), and
+killed past its limit: `Remotes.crossing` where it crosses the network,
+`Remotes.reading` where it reads the repository alone. The operator's
+credentials are the service's environment. Each push and fetch is said in the service's log, with git's
 standard error once.
 """
 
 import asyncio
 import os
 from collections.abc import Awaitable, Callable
+from datetime import timedelta
 from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, override
@@ -425,6 +428,14 @@ class Remotes(Model, arbitrary_types_allowed=True):
     """Where each push and fetch is said: the service's log."""
     run: Callable[[Program], Awaitable[Ran]] = executed
     """Runs one git command to its end on the service's event loop."""
+    reading: timedelta = timedelta(seconds=30)
+    """The longest git reading the repository alone may take, past which it's
+    killed: a room can make a ref it reads a FIFO nothing writes, in which it
+    waits for good (`Program.within`)."""
+    crossing: timedelta = timedelta(minutes=10)
+    """The longest git crossing the network may take, listing, fetching or
+    pushing: a first push or a large fetch moves a whole history, and the
+    remote answers at its own pace."""
     landed: Callable[[Register, list[Update]], Awaitable[None]] | None = None
     """Told what a launch's push updated, each ref with the object it names,
     once it's done and before its room hears: a push moving the running branch
@@ -461,7 +472,9 @@ class Remotes(Model, arbitrary_types_allowed=True):
         Raise `HostError` where git can't.
         """
         url = await self.url(launch, remote, push=push)
-        ran = await self.git(launch, "ls-remote", "--end-of-options", url)
+        ran = await self.git(
+            launch, "ls-remote", "--end-of-options", url, crossing=True
+        )
         if ran.status != 0:
             self.told(launch, f"listing `{remote}` ({url})", ran)
             message = f"git couldn't list `{remote}`: {oneline(ran.said())}"
@@ -488,8 +501,10 @@ class Remotes(Model, arbitrary_types_allowed=True):
             return kept
         return [ref.object for ref in await self.listed(launch, remote, push=True)]
 
-    async def git(self, launch: Register, *arguments: str) -> Ran:
-        """Run git in `launch`'s repository's own git directory, pinned there (`pinning`), with what it could be led into turned off.
+    async def git(
+        self, launch: Register, *arguments: str, crossing: bool = False
+    ) -> Ran:
+        """Run git in `launch`'s repository's own git directory, pinned there (`pinning`), with what it could be led into turned off, killed past `crossing` where it crosses the network, else past `reading`.
 
         Each commit's parents are read from the commit alone (`ungrafted`,
         `graphless`), as `Git.run` reads them for the check of what a push
@@ -516,6 +531,7 @@ class Remotes(Model, arbitrary_types_allowed=True):
                 ],
                 payload="",
                 directory=launch.repository,
+                within=self.crossing if crossing else self.reading,
             )
         )
 
@@ -665,6 +681,7 @@ class Remotes(Model, arbitrary_types_allowed=True):
             "--end-of-options",
             url,
             *names,
+            crossing=True,
         )
         asked = ", ".join(f"{each.object} as {each.name}" for each in wanted)
         self.told(launch, f"fetching {asked} from `{remote}` ({url})", ran)
@@ -1006,6 +1023,7 @@ class Pusher(Model):
             "--end-of-options",
             url,
             *(refspec(each) for each in batch),
+            crossing=True,
         )
         updates = ", ".join(
             f"{each.source or 'deletion'} to {each.destination}" for each in batch
