@@ -49,7 +49,6 @@ import {
     pruned,
     remarks,
     withWrittenDuring,
-    checksWaiting as checksOf,
     concernReads,
     concernWords,
     countToRead,
@@ -67,7 +66,6 @@ import {
     type ThreadRead,
     type Item,
     type Keeping,
-    type OwnedCheck,
     type Since,
     type Threading,
     type Viewed,
@@ -101,7 +99,6 @@ const SAID = {
 /** What the review is laid out from before it's all read: no item, and no conversation running. */
 const NONE: Item[] = [];
 const NO_ONE: InboxConversation[] = [];
-const NO_CHECKS: readonly OwnedCheck[] = [];
 
 /** How long the page lets each agent's record and branch go unread with no hook heard, in milliseconds: a record written just after its hook, or a write no hook said, is read all the same. */
 const FALLBACK = 60_000;
@@ -261,7 +258,7 @@ export function App() {
     const [paneMode, setPaneMode] = useState(false);
     // The review's threads, as the host reads them for it (`docs/inbox.md`, *Threads in the review*): the same object
     // while the host says the same of them, which it says again at every hook.
-    // Read in panes alone: for the concerns listed and laid out as blocks, and the checks waiting on the operator.
+    // Read in panes alone: for the concerns listed and laid out as blocks.
     const threadsWatch = useWatched(panes ? { kind: "inbox-threads" } : null);
     const threadsRead = useSame(
         useMemo(() => (threadsWatch.reply?.kind === "inbox-threads-read" ? threadsWatch.reply : null), [threadsWatch.reply]),
@@ -281,14 +278,6 @@ export function App() {
             return found;
         }, [threadsRead, landings]),
         (map) => JSON.stringify([...map]),
-    );
-    // The checks waiting on the operator, each in the concern it's in, as the host reads it, but where they've cleared it.
-    const checksWaiting = useSame(
-        useMemo(
-            () => (threadsRead === null ? [] : threadsRead.threads.filter((thread) => (thread.cleared ?? null) === null).flatMap((thread) => checksOf(thread).map((check) => ({ check, thread })))),
-            [threadsRead],
-        ),
-        (list) => JSON.stringify(list),
     );
     // Each conversation the inbox's items and the threads read name, with their path as the host names it, by `whose`
     // they are: what names an agent who isn't running, or isn't their launch's latest session, which no launch listed
@@ -483,7 +472,7 @@ export function App() {
     // something stopped until they answer it, apart from what only wants their eyes.
     const toReadCount = countToRead(waiting, draft, seeing);
     const stoppedOnYou = holdingOn(waiting, draft.parked ?? []);
-    const flaggedForYou = waitingOn(waiting, draft.parked ?? []) + checksWaiting.length + (threadsRead?.threads ?? []).filter((each) => concernReads(each) === "for your eyes").length - stoppedOnYou;
+    const flaggedForYou = waitingOn(waiting, draft.parked ?? []) + (threadsRead?.threads ?? []).filter((each) => concernReads(each) === "for your eyes").length - stoppedOnYou;
 
     // What the draft marks or comments on that's past waiting, answered or replaced since it was written: laid out with
     // what's drafted on it, which stays in view, saying so, until it's sent.
@@ -493,8 +482,6 @@ export function App() {
     const setAside = useMemo(() => (inbox.reply?.kind === "inbox-items" ? inbox.reply.set_aside : []), [inbox.reply]);
 
     const threading = useMemo<Threading | null>(() => (threadsRead === null ? null : { read: threadsRead, landing: landingIn }), [threadsRead, landingIn]);
-    // The checks the concerns hold, by number: a comment on one is the operator's answer to it, in their words.
-    const checks = useMemo(() => new Set((threadsRead?.threads ?? []).flatMap((each) => (each.checks ?? []).map((check) => check.check.number))), [threadsRead]);
     const main = useRef<HTMLElement>(null);
 
     /** Return the conversation running the switch `argument` turns is of, by their launch, session and subagent; none for one not running. */
@@ -992,17 +979,11 @@ export function App() {
                     break;
                 }
                 case "inbox-settle-thread":
-                case "inbox-decline-thread":
-                case "inbox-check-answer": {
-                    // A thread settled or declined, the operator's, or a check ticked: the host's own requests.
+                case "inbox-decline-thread": {
+                    // A thread settled or declined, the operator's: the host's own requests.
                     const number = Number((mark.argument as { number?: number }).number ?? 0);
-                    const request: Asked =
-                        mark.action === "inbox-settle-thread"
-                            ? { kind: "inbox-settle-thread", number }
-                            : mark.action === "inbox-decline-thread"
-                              ? { kind: "inbox-decline-thread", number, why: "" }
-                              : { kind: "inbox-check-answer", number, text: "" };
-                    const reply = await answered(request, (answer) => (answer.kind === "inbox-thread-stated" || answer.kind === "inbox-check" ? answer : null));
+                    const request: Asked = mark.action === "inbox-settle-thread" ? { kind: "inbox-settle-thread", number } : { kind: "inbox-decline-thread", number, why: "" };
+                    const reply = await answered(request, (answer) => (answer.kind === "inbox-thread-stated" ? answer : null));
                     if ("refused" in reply) {
                         said.push({ kind: "said", text: `${mark.says}: ${reply.refused}` });
                     } else {
@@ -1113,11 +1094,7 @@ export function App() {
         typed.current = null;
         pending.current = null;
         writtenDuring.current = null;
-        const whole = pruned(impliedNow.current.length === 0 ? drafted : { ...drafted, marks: [...(drafted.marks ?? []), ...impliedNow.current] });
-        // A comment on a check is the operator's answer to it, which the page sends apart: the inbox knows no item by its
-        // number.
-        const onChecks = (whole.comments ?? []).filter((each) => checks.has(each.item));
-        const now = { ...whole, comments: (whole.comments ?? []).filter((each) => !checks.has(each.item)) };
+        const now = pruned(impliedNow.current.length === 0 ? drafted : { ...drafted, marks: [...(drafted.marks ?? []), ...impliedNow.current] });
         const kept = await ask({ kind: "inbox-keep-draft", draft: now });
         if (kept.kind === "refused") {
             return kept.error;
@@ -1140,23 +1117,12 @@ export function App() {
             told.push(...came);
             left = { ...left, marks: marks.filter((each) => !applied.includes(each.id)) };
         }
-        const unanswered = [];
-        for (const each of onChecks) {
-            const reply = await answered({ kind: "inbox-check-answer", number: each.item, text: each.text }, (answer) => (answer.kind === "inbox-check" ? answer : null));
-            if ("refused" in reply) {
-                told.push({ kind: "said", text: `check ${cited(each.item)}: ${reply.refused}` });
-                unanswered.push(each);
-            } else {
-                told.push({ kind: "said", text: `check ${cited(each.item)} answered` });
-            }
-        }
         // What was written or marked while this was sent goes with what's left, a keep it set going before the send's end
         // bringing nothing back; and what's kept is what's left then: the host may be stopping by now, for what an action
         // asked of it, which is no send refused.
         const during = writtenDuring.current;
         writtenDuring.current = null;
         left = during === null ? left : withWrittenDuring(drafted, during, left);
-        left = { ...left, comments: [...(left.comments ?? []), ...unanswered] };
         if (keeping.current !== null) {
             clearTimeout(keeping.current);
             keeping.current = null;
@@ -1167,7 +1133,7 @@ export function App() {
         }
         typed.current = null;
         pending.current = null;
-        if (marks.length > 0 || unanswered.length > 0 || during !== null) {
+        if (marks.length > 0 || during !== null) {
             const keptAfter = await answered({ kind: "inbox-keep-draft", draft: left }, (answer) => (answer.kind === "inbox-drafted" ? answer : null));
             if ("refused" in keptAfter) {
                 told.push({ kind: "said", text: keptAfter.refused });
@@ -1231,7 +1197,6 @@ export function App() {
         named,
         holder: (argument) => holderOf(argument)?.talker.path ?? null,
         thread: threadNamed,
-        checks,
         past,
         setAside,
     });
@@ -1338,7 +1303,6 @@ export function App() {
                         order={ready ? kept : null}
                         keepOrder={whole && !panes ? keepOrder : null}
                         panes={panes}
-                        checks={ready ? checksWaiting : NO_CHECKS}
                         paning={setPaneMode}
                         unreadSaid={connection === "refused" ? `${SAID.refused}.` : "Reading what's there…"}
                         looks={looks}
@@ -1492,8 +1456,6 @@ interface Naming {
     holder: (argument: { launch?: string; session?: string; agent?: string | null }) => string | null;
     /** A thread's name, by its number; none where the page doesn't know it. */
     thread?: (number: number) => string | null;
-    /** The checks shown, by number: a comment on one answers it. */
-    checks?: ReadonlySet<number>;
     /** What the draft marks or comments on that's past waiting on the operator, as it stands: a comment on one of a kind a reply answers goes to its sender, leaving it there. */
     past?: readonly Item[];
     /** What sending the draft sets aside, part by part, as the host says it: each mark dropped, each comment written elsewhere or kept drafted. */
@@ -1534,9 +1496,6 @@ export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): 
     for (const [said, count] of tallyOf(letters.map((each) => `${each.to == null ? "no one" : naming.called(each.to)}\n${on(each)}`))) {
         const [who = "", where = ""] = said.split("\n");
         reaching(who, `${count === 1 ? "a message" : `${count} messages`}${where}`);
-    }
-    for (const each of (draft.comments ?? []).filter((one) => naming.checks?.has(one.item) === true && one.text.trim() !== "")) {
-        reaching("the check", `answering ${cited(each.item)}`);
     }
     for (const [who, count] of tallyOf(remarks(draft).map((each) => naming.called(each.to)))) {
         reaching(who, count === 1 ? "a remark" : `${count} remarks`);

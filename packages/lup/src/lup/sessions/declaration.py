@@ -149,6 +149,7 @@ class Asking(Model, arbitrary_types_allowed=True):
                 session_id=ran.raw.session_id,
                 rejected=rejected,
                 notes=toolbox.notes(),
+                concerns=toolbox.concerns(),
                 frictions=toolbox.frictions(),
                 how_it_felt=toolbox.how_it_felt(),
             )
@@ -158,6 +159,7 @@ class Asking(Model, arbitrary_types_allowed=True):
             message,
             rejected=rejected,
             notes=toolbox.notes(),
+            concerns=toolbox.concerns(),
             frictions=toolbox.frictions(),
             how_it_felt=toolbox.how_it_felt(),
             usage=ran.raw.usage,
@@ -172,6 +174,7 @@ class Asking(Model, arbitrary_types_allowed=True):
             duration=elapsed(began),
             session_id=ran.raw.session_id,
             notes=ran.toolbox.notes(),
+            concerns=ran.toolbox.concerns(),
             frictions=ran.toolbox.frictions(),
             how_it_felt=ran.toolbox.how_it_felt(),
         )
@@ -223,6 +226,7 @@ class Asking(Model, arbitrary_types_allowed=True):
                 raise BlockedError(
                     problem,
                     notes=toolbox.notes(),
+                    concerns=toolbox.concerns(),
                     frictions=toolbox.frictions(),
                     how_it_felt=toolbox.how_it_felt(),
                     usage=ran.raw.usage,
@@ -231,6 +235,7 @@ class Asking(Model, arbitrary_types_allowed=True):
                 raise StoppedError(
                     why,
                     notes=toolbox.notes(),
+                    concerns=toolbox.concerns(),
                     frictions=toolbox.frictions(),
                     how_it_felt=toolbox.how_it_felt(),
                     usage=ran.raw.usage,

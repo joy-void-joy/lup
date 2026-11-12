@@ -1,6 +1,6 @@
 # The ledger: lup's typed graph, and threads
 
-The ledger keeps the work as a typed graph: nodes, the edges between them, and every version of every node. Threads are its first kind. A thread is one concern: what's in it (items, the operator's parts, checks) and where it stands. It's one of the core's submodules, always present. The host service opens it at its start, and keeps the inbox on it: each item a node, where it stands and what it answers edges (`docs/inbox.md`, *Kept on the ledger*). Agents open threads, work in them and are told what lands there through lup's tools (`docs/inbox.md`, *Threads*).
+The ledger keeps the work as a typed graph: nodes, the edges between them, and every version of every node. Threads are its first kind. A thread is one concern: what's in it (items, the operator's parts, checks) and where it stands. It's one of the core's submodules, always present. The host service opens it at its start, and keeps the inbox on it: each item a node, where it stands and what it answers edges (`docs/inbox.md`, *Kept on the ledger*). Agents open threads with the `concern` tool, work in them and are told what lands there (`docs/inbox.md`, *Threads*).
 
 ## Records
 
@@ -29,21 +29,22 @@ The ledger keeps the work as a typed graph: nodes, the edges between them, and e
 - the conversation holding it, or none.
 
 What's in it is edges drawn to it:
-- **a member** (`In`): an item, or a check (`Check`), something only the operator can try;
+- **a member** (`In`): an item, or a check (`Check`), something only the operator could try, which an earlier lup's question put there: nothing makes one, and none waits on anyone;
 - **a part** of an item, moved in by its id (`Moved`): the operator's words. It counts as a member while its item stays in its own thread, and waits on whoever answers for the thread until a node in the thread answers it, whoever wrote it (`answered`); a citation from outside is a reference, no answer, and so is one from an item moved in whole. Each kind of edge says whether it answers a part (`Edge.answers`), as the inbox's citation of the part does and its answer to the whole item the part is of, so the ledger reads one without knowing the inbox's kinds;
 - **an item moved in whole** (`Moved` with no part), as the operator gathers frictions into one concern: a member while it stays in its own thread, where `In` would take it out, so its own thread's history stays whole. Nothing waits on it: the thread is what stays open. Its writer isn't on the thread for it, having written it elsewhere;
 - **a reference** (`Refers`): an item of another thread that touches this one, shown here as a line pointing at it, and no member;
+- **its body** (`Body`): what whoever answers for it understands of it, rewritten whole as that changes, said of the thread alone. The latest drawn is the body, an empty one clearing it, and every one before stays. It's a kind of its own, so an earlier lup, which declares none, reads each as a plain `Edge`, its text kept, and none of its reads takes one: members, where it stands and `drawn_of` go by the kind;
 - **its status** (`Status`), each edge saying where it stands:
   - parked until the first of its triggers comes: an issue closing, a branch or a commit landing, a conversation ending, a time, or a condition named as `defer`'s `when=` names one;
   - done, in an agent's word, with what to try;
-  - settled (`Settled`): by the operator; or by lup, saying why, where an earlier lup made a thread of a past conversation and nothing in it waited on them, its act and never put in their name. Never by an agent: the request settling one is the operator's (`inbox-settle-thread`), and nothing an agent reaches, the `thread` tool among it, settles one;
+  - settled (`Settled`): by the operator; or by lup, saying why, where an earlier lup made a thread of a past conversation and nothing in it waited on them, its act and never put in their name. Never by an agent: the request settling one is the operator's (`inbox-settle-thread`), and nothing an agent reaches, the `concern` tool among it, settles one;
   - declined, which only the operator does (`Declined.by`);
   - reopened, by the operator, or by lup where what a parked thread waits for comes.
 
 **Its two marks** (`Marks`) are read apart from those edges, each its own, a sub-thread's apart from its parent's: the agent's, done or parked, from the latest `Done` or `Parked`, and the operator's, cleared, from the latest `Settled` or `Declined`, so an agent saying it's done after the operator cleared it leaves it cleared, and the operator clearing it keeps the agent's account of what's done. The operator reopening it opens both; lup reopening one parked opens the agent's alone. Nothing new is stored, so an earlier lup reads the same edges as it always did, its latest saying where the thread stands.
 
 `Standing.read` says four things, where it stands said once for any reader (`stood`):
-- **Where it stands:** cleared, settled or declined, where the operator's mark says so; else as the agent's says, done or parked. Open by both, it waits on the operator where a member does, and else stands `nobody running` where nobody who goes on answers for it, read and never drawn. A check waits until they answer it (`Answered`), and each kind of node answers for itself, so a new kind changes nothing in the reading.
+- **Where it stands:** cleared, settled or declined, where the operator's mark says so; else as the agent's says, done or parked. Open by both, it waits on the operator where a member does, and else stands `nobody running` where nobody who goes on answers for it, read and never drawn. Each kind of node answers for itself whether it waits (`Node.waiting`), so a new kind changes nothing in the reading.
 - **What waits on the operator.**
 - **What waits on whoever answers for it:** each part moved in that nothing answers yet.
 - **Who's on it:** its holder, then each conversation that wrote what's in it.
@@ -53,7 +54,7 @@ What's in it is edges drawn to it:
 - those under one;
 - who answers for one: its holder, or else the nearest thread above it that somebody holds, where a holder `live` says has ended holds nothing;
 - the threads parked, each by the status that parks it, the agent's mark, where the operator hasn't cleared it (`parked`);
-- what's in one, the references to it, and where it stands.
+- what's in one, the references to it, its body, and where it stands.
 
 A thread's sub-threads are read from its repository's threads by their `parent`, so a read covers at most one repository's threads.
 

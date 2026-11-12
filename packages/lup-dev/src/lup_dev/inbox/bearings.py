@@ -13,16 +13,13 @@ again after.
 - **Running beside them:** where more than one other main conversation of the
   repository runs, each by their name, since several sessions may work on one
   repository at once, and one's open threads aren't abandoned.
-- **Open threads:** each thread of the repository not settled or declined,
-  under the one it's under, with who holds it, where it stands and what in it
-  waits on the operator: what's there to take, none of it theirs by being told,
-  whatever they're called.
 - **Landed** on the remote's running branch, what `land` lands on, since the last main session
   started, its first-parent history, with whether that session still runs or
   when they were last heard, and how their exchange with the operator is read.
 
 What waits for the operator isn't told: it's theirs to answer, and the
-session starting can't act on it.
+session starting can't act on it. Nor are concerns: lup never reminds an agent
+of one, and they're the operator's to keep track of when nobody's running.
 
 It lives beside the inbox rather than with the judge (`policy/`): it reads the
 inbox's items, names and whereabouts as `inbox/reading.py` does, and lists
@@ -30,7 +27,6 @@ worktrees through `lup_dev.git`, which every layer reads. The host service,
 lowest of `lup_dev`'s layers, asks it through `Bearings` (`host/service.py`).
 """
 
-import asyncio
 from collections.abc import Callable
 from datetime import datetime
 from itertools import batched
@@ -38,17 +34,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 from lup.types import Model
-from lup_dev.git import Git, GitError, nul_separated
+from lup_dev.git import Git, GitError, nul_separated, threaded
 from lup_dev.host.service import Bearings, Running
 from lup_dev.inbox.delivery import Delivery, clocked
-from lup_dev.inbox.reading import Reader, stood
+from lup_dev.inbox.reading import Reader
 from lup_dev.listing import many
 from lup_ledger.parties import Conversation
 
 if TYPE_CHECKING:
     from lup_dev.host.protocol import Register
     from lup_dev.inbox.store import Item
-    from lup_ledger.threads import Thread
 
 
 class Unlanded(Model):
@@ -194,8 +189,13 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
         since = None if last is None else self.started(last)
         branch = self.running(launch.repository)
         try:
-            found = await asyncio.to_thread(
-                read_repository, launch.repository, branch, self.remote, since
+            found = await threaded(
+                launch.repository,
+                read_repository,
+                launch.repository,
+                branch,
+                self.remote,
+                since,
             )
         except GitError as unread:
             found = Repository(unlanded=[], landed=[], onto=branch, unread=str(unread))
@@ -224,7 +224,7 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
         found: Repository,
         running: list[Running],
     ) -> str:
-        """Say the bearings: what's not landed, the main sessions running beside the one starting where more than one does, the open threads, and what landed since `last` started."""
+        """Say the bearings: what's not landed, the main sessions running beside the one starting where more than one does, and what landed since `last` started."""
         items = self.delivery.inbox.about(starting.repository)
         reader = Reader(
             delivery=self.delivery,
@@ -245,7 +245,6 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
             ],
             self.unlanded(found),
             self.beside(beside, reader) if len(beside) > 1 else [],
-            self.threads(starting, reader),
             # lup: defer(issue=262, why="the last handoff's note is told here, after what landed, once `handoff` writes one: it waits for spawn (#117)")
             self.landed(found, last, beside, reader, items),
         ]
@@ -302,43 +301,6 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
                 f"in {each.launch.worktree}."
                 for each in beside
             ),
-        ]
-
-    def threads(self, starting: Conversation, reader: Reader) -> list[str]:
-        """Say the repository's open threads, each under the one it's under: who holds it, where it stands, and what waits on the operator."""
-        concerns = self.delivery.concerns()
-        threads = concerns.threads.of(starting.repository)
-        standings = {each.number: concerns.standing(each) for each in threads}
-        open_threads = [
-            each
-            for each in threads
-            if standings[each.number].state not in ["settled", "declined"]
-        ]
-        numbers = [each.number for each in open_threads]
-
-        def said(thread: Thread, depth: int) -> list[str]:
-            standing = standings[thread.number]
-            holder = (
-                "held by nobody"
-                if thread.holder is None or not concerns.live(thread.holder)
-                else f"held by {reader.called(thread.holder)}"
-            )
-            line = (
-                f'{"  " * depth}- @{thread.name}, "{thread.title}", {holder}: '
-                f"{stood(standing)}."
-            )
-            under = [each for each in open_threads if each.parent == thread.number]
-            return [line, *(each for sub in under for each in said(sub, depth + 1))]
-
-        tops = [each for each in open_threads if each.parent not in numbers]
-        if not tops:
-            return []
-        return [
-            (
-                "Open threads of this repository (`inbox` with `thread` reads one "
-                "whole; the `thread` tool with `hold` takes one):"
-            ),
-            *(each for top in tops for each in said(top, 0)),
         ]
 
     def landed(

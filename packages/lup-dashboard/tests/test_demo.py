@@ -181,11 +181,7 @@ def test_the_late_question_arrives_as_the_page_first_asks_for_the_inbox_in_the_t
 
     assert 61 not in [each.number for each in before.items]
     assert 61 in [each.number for each in after.items]
-    assert [each.node for each in threads(demo)["transcript-reader"].asks] == [
-        51,
-        311,
-        61,
-    ]
+    assert [each.node for each in threads(demo)["transcript-reader"].asks] == [51, 61]
     moment = asyncio.run(demo.ask(ShowContext(number=61)))
     assert isinstance(moment, Context)
 
@@ -200,11 +196,8 @@ def test_a_script_driving_the_demo_brings_the_late_question_once() -> None:
     demo.told("arrive\n")
     demo.told("land\n")
 
-    assert [each.node for each in threads(demo)["transcript-reader"].asks] == [
-        51,
-        311,
-        61,
-    ]
+    # The check an earlier lup kept beside the question asks nothing.
+    assert [each.node for each in threads(demo)["transcript-reader"].asks] == [51, 61]
     assert said == [
         "`land` names nothing a stand-in agent does: `arrive` brings the late question"
     ]

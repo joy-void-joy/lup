@@ -1,17 +1,24 @@
-"""The inbox's tools in a launched session: the speaking tools, `ask`, `send`, `thread`, `wait_inbox`, `inbox` and `withdraw`.
+"""The inbox's tools in a launched session: the speaking tools, `concern` among them, `ask`, `send`, `wait_inbox`, `inbox`, `withdraw` and `edit`.
 
 `docs/inbox.md`, *lup's tools*. Each is a function of the conversation
 calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
-- `blocked`, `stop`, `note`, `friction` and `how_it_felt` are the library's
+- `blocked`, `stop`, `note`, `concern`, `friction` and `how_it_felt` are the library's
   speaking tools (`lup.tools.speaking`), their names and input models taken
   from them, so an agent's habit carries between an ask from code and a
   launched session; their functions and descriptions are the inbox's, since
   in a launched session whoever asked is the operator, and each lands in their
-  inbox, a subagent's too; a subagent's `friction` reaches their parent as
-  well, whole and quiet (`Item.quiet`), so the parent can file what got in the
-  way, or learn their brief misled, and their `how_it_felt` is told to the
-  operator alone, unless `Speaker.how_it_felt_reaches` passes it on too, though
-  it isn't private;
+  inbox, a subagent's too; and their `how_it_felt` is told to the operator
+  alone, unless `Speaker.how_it_felt_reaches` passes it on too, though it isn't
+  private;
+- `concern` is what an agent does with a concern, something worth keeping an
+  eye on: open one in their own words, a line being enough, add to one, keep
+  its body current, work in it, take it, hand it on, move the operator's words
+  into it, park it, say it's done (`inbox/concerns.py`); `friction` opens one
+  for what got in their way, as `concern` with `text` does, saying it's a
+  friction. Their words are news reaching the operator at once and, from a
+  subagent, their parent too, whole and quiet (`Item.quiet`), so the parent can
+  act on what got in the way, or learn their brief misled. Nothing waits on an
+  answer, and lup never reminds them of it;
 - `ask` puts a question to the operator, its decisions numbered, each with the
   agent's lean; with `wait` it holds until they answer, or until other news of
   theirs reaches the agent, their words typed in the agent's terminal among it;
@@ -33,11 +40,7 @@ calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
   and the agent's own item read whole;
 - `withdraw` takes back a message or question the agent sent that the
   operator needn't see, with its reason: the agent's workflow is their own;
-- `thread` says what the agent does with one thread besides sending into it:
-  open it, work in it, hold it, hand it, move the operator's words into it,
-  park it, say it's done (`inbox/concerns.py`); each tool that sends takes a
-  `thread` it lands in (`THREAD`), and `ask` takes `checks`, each a check
-  in the question's thread;
+- each tool that sends takes a `thread`, the concern it lands in (`THREAD`);
 - `edit` changes what the agent sent the operator: a passage of its text, or
   its text whole (`docs/inbox.md`, *Editing what was sent*).
 
@@ -80,6 +83,7 @@ from lup_dev.inbox.reading import Narrowing, Reader, and_said, stood
 from lup_dev.inbox.store import (
     Answered,
     Decision,
+    Filed,
     Friction,
     HowItFelt,
     InboxError,
@@ -119,8 +123,8 @@ class Said(Model):
 
 
 THREAD = (
-    "The thread it lands in: an existing one's name (`dashboard-lag`), or a new "
-    "title, which opens a thread under the one you work in. Left out, the one you "
+    "The concern it lands in: an existing one's name (`dashboard-lag`), or a new "
+    "title, which opens one under the concern you work in. Left out, the one you "
     "work in, or on you alone where you work in none. Naming one doesn't move you "
     "there."
 )
@@ -144,75 +148,6 @@ class ThreadedStop(speaking.Stop, title="Stop"):
 class ThreadedRemark(speaking.Remark, title="Remark"):
     """A remark you attach to your answer."""
 
-    thread: str | None = Field(default=None, description=THREAD)
-
-
-class ThreadedFriction(results.Friction, title="Friction"):
-    """What got in your way, at the moment it did, in your own words."""
-
-    thread: str | None = Field(default=None, description=THREAD)
-
-
-class Choice(Model):
-    """One decision a question asks, with your lean."""
-
-    decision: str = Field(description="What's to decide, in a line.")
-    lean: str = Field(description="Which way you lean, and why, in a line or two.")
-
-
-class Asking(Model):
-    """A question for the operator."""
-
-    question: str = Field(
-        description="What you ask, with what the operator needs to answer it."
-    )
-    decisions: list[Choice] = Field(
-        default=[],
-        description=(
-            "The decisions it asks, numbered from 1 in this order, each with your "
-            "lean; none for a question answered in words."
-        ),
-    )
-    wait: bool = Field(
-        default=False,
-        description=(
-            "Hold this call until the operator answers, and return the answer; "
-            "without it, the call returns at once and the answer reaches you at a "
-            "later call."
-        ),
-    )
-    # lup: defer(issue=363, why="a field that still works and that its description says to leave empty, until it's settled what comes after a check")
-    checks: list[str] = Field(
-        default=[],
-        description=(
-            "Leave this empty. What you want the operator to try goes in your own "
-            "words in `question`: what you built, what it should do, and why it's "
-            "worth their time, never a list of commands with expected results. A "
-            "line here becomes a row of its own waiting on them until they answer "
-            "it, with nothing tying it to the question it came with."
-        ),
-    )
-    thread: str | None = Field(default=None, description=THREAD)
-
-
-class Sending(Model):
-    """A message to a party's inbox."""
-
-    to: str = Field(
-        description=(
-            "Whose inbox: `operator`; `parent`, the conversation that spawned you; "
-            "or one of your own subagents, by their name as lup calls them "
-            "(`explore-auth`), their path (`dev/explore-auth`), or their runtime's "
-            "id."
-        )
-    )
-    kind: Kind = Field(
-        description=(
-            "What it is: a `note`, a `problem`, a `disagreement`, or a `question` "
-            "that asks for no answer you wait on."
-        )
-    )
-    text: str = Field(description="The message, in full.")
     thread: str | None = Field(default=None, description=THREAD)
 
 
@@ -246,24 +181,58 @@ class Parking(Model):
     )
 
 
-class Threading(Model):
-    """What you say about one thread, besides sending into it."""
+class Frictional(results.Friction, title="Friction", extra="forbid"):
+    """What got in your way, at the moment it did, in your own words."""
 
-    name: str = Field(
-        description=(
-            "The thread: an existing one's name (`dashboard-lag`) or number, or, "
-            "with `title`, a new one's name. Alone, the answer says where it stands."
-        )
-    )
-    title: str | None = Field(
+
+class Concerning(Model, title="Concern", extra="forbid"):
+    """What you say of a concern: one to open, or one there already."""
+
+    text: str | None = Field(
         default=None,
-        description="Open it, with this title: what it's about, in a line.",
+        description=(
+            "What you say, in your own words: a line is enough. Without `name`, "
+            "it opens a concern; with it, it goes into that one."
+        ),
+    )
+    title: str = Field(
+        default="",
+        description=(
+            "A few words naming a concern you open, which the operator's list "
+            "shows: `the gate hangs on a fresh worktree`. Left out, the first "
+            "line of `text`."
+        ),
+    )
+    name: str | None = Field(
+        default=None,
+        description=(
+            "The concern: an existing one's name (`dashboard-lag`) or number, or "
+            "a name for one you open. Left out, what you open is named after its "
+            "title. Alone, the answer says where it stands."
+        ),
     )
     under: str | None = Field(
         default=None,
         description=(
-            "With `title`, the thread it opens under, by name or number; left out, "
-            "the one you work in, or at the top where you work in none."
+            "Where one you open goes: under this concern, by name or number. Left "
+            "out, under the one you work in, or at the top where you work in none."
+        ),
+    )
+    body: str | None = Field(
+        default=None,
+        description=(
+            "Its body, rewritten whole: what you understand of it as you write, "
+            "which the operator reads with it and comments on line by line. Keep "
+            "it current as your understanding changes; empty clears it. It's "
+            "whoever answers for the concern's to keep."
+        ),
+    )
+    move: list[str] = Field(
+        default=[],
+        description=(
+            "Items, or parts of the operator's words, to put in it, by id as their "
+            "tags cite them: `2159` an item, `2159.3` a part. Whoever answers for "
+            "it is told each whole, and others on it a line."
         ),
     )
     join: bool = Field(
@@ -276,23 +245,15 @@ class Threading(Model):
     hold: bool = Field(
         default=False,
         description=(
-            "Lead it, and work in it: whatever lands there is told to you whole. "
+            "Take it, and work in it: whatever lands there is told to you whole. "
             "It has one holder: taking it from another, they're told."
         ),
     )
     hand: str | None = Field(
         default=None,
         description=(
-            "Give it to another agent, by their name or path, who leads it and "
-            "works in it from then on, and is told."
-        ),
-    )
-    move: list[str] = Field(
-        default=[],
-        description=(
-            "Items, or parts of the operator's words, to put in it, by id as their "
-            "tags cite them: `2159` an item, `2159.3` a part. Its holder is told "
-            "each whole, and others on it a line."
+            "Pass it on to another agent, by their name or path: it's theirs from "
+            "then on, they work in it, and they're told."
         ),
     )
     park: Parking | None = Field(
@@ -302,11 +263,63 @@ class Threading(Model):
     done: str | None = Field(
         default=None,
         description=(
-            "Say it's done, for the operator to confirm, in your own words: what "
-            "you built, what it should do, and why it's worth their time to try, "
-            "never a list of commands with expected results."
+            "Say it's done, for the operator to clear, in your own words: what you "
+            "built, what it should do, and why it's worth their time to try, never "
+            "a list of commands with expected results."
         ),
     )
+
+
+class Choice(Model):
+    """One decision a question asks, with your lean."""
+
+    decision: str = Field(description="What's to decide, in a line.")
+    lean: str = Field(description="Which way you lean, and why, in a line or two.")
+
+
+class Asking(Model, extra="forbid"):
+    """A question for the operator."""
+
+    question: str = Field(
+        description="What you ask, with what the operator needs to answer it."
+    )
+    decisions: list[Choice] = Field(
+        default=[],
+        description=(
+            "The decisions it asks, numbered from 1 in this order, each with your "
+            "lean; none for a question answered in words."
+        ),
+    )
+    wait: bool = Field(
+        default=False,
+        description=(
+            "Hold this call until the operator answers, and return the answer; "
+            "without it, the call returns at once and the answer reaches you at a "
+            "later call."
+        ),
+    )
+    thread: str | None = Field(default=None, description=THREAD)
+
+
+class Sending(Model):
+    """A message to a party's inbox."""
+
+    to: str = Field(
+        description=(
+            "Whose inbox: `operator`; `parent`, the conversation that spawned you; "
+            "or one of your own subagents, by their name as lup calls them "
+            "(`explore-auth`), their path (`dev/explore-auth`), or their runtime's "
+            "id."
+        )
+    )
+    kind: Kind = Field(
+        description=(
+            "What it is: a `note`, a `problem`, a `disagreement`, or a `question` "
+            "that asks for no answer you wait on."
+        )
+    )
+    text: str = Field(description="The message, in full.")
+    thread: str | None = Field(default=None, description=THREAD)
 
 
 class Awaiting(Model):
@@ -388,7 +401,7 @@ class Withdrawing(Model):
 
 
 class Planned(Model, arbitrary_types_allowed=True):
-    """What a call to `thread` does, read before any of it is: the thread, whom it's handed to, what parks it, and what opening it said."""
+    """What a call to `concern` does, read before any of it is: the concern, whom it's handed to, what parks it, and what opening it said."""
 
     thread: Thread
     to: Conversation | None = None
@@ -564,30 +577,118 @@ class Speaker(Model, arbitrary_types_allowed=True):
             item,
         )
 
-    async def friction(self, said: ThreadedFriction) -> Said:
+    async def concern(self, said: Concerning) -> Said:
+        """Say what's worth keeping an eye on, and carry on.
+
+        Whenever something's worth keeping an eye on, the moment it comes up,
+        even if you'll never work on it: a line is enough, and nobody will ask
+        you to finish it. What got in your way is `friction`'s, which opens one
+        too. `text`, in your own words, opens a concern, named after `title` or its first
+        line, under the one you work in, else at the top, where your session
+        holds it. It reaches the operator at once and, where you're a
+        subagent, your parent too, whole, at their next call. Nothing waits for
+        an answer, and lup never reminds you of it.
+
+        `name` is a concern there already, and each field you give says one
+        thing of it, several in one call:
+        - `text` adds your words to it;
+        - `body` rewrites its body whole: what you understand of it, which the
+          operator reads with it and comments on line by line, kept current
+          by whoever answers for it;
+        - `move` puts the operator's words in it, a concern made from a
+          passage;
+        - `join` works in it, where what you send without `thread` lands;
+          `hold` takes it; `hand` passes it on to another agent, whose it is
+          from then on;
+        - `park` sets it aside until something comes; `done` says it's done,
+          for the operator to clear.
+
+        Opening, adding, moving, parking and saying done don't move you: you
+        work in a concern until you join, hold or are handed another. Clearing
+        one is the operator's. With `name` alone, the answer says where it
+        stands; with nothing given, it lists those in `No agent`, nobody running
+        answering for them, and yours.
+        """
+        if said == Concerning():
+            return Said(text=self.listed(self.concerns))
+        return await self.filed(said, "concern")
+
+    async def friction(self, said: Frictional) -> Said:
         """Say what got in your way, and carry on.
 
         Call it the moment something gets in the way of the work, whatever it
         is, in your own words. Where there's a command and the message it
-        gave, the exact ones help whoever fixes it. It lands in the operator's
-        inbox as you wrote it, and, where you're a subagent, in your parent's
-        too, whole, at their next call. Your work goes on: nothing waits for an
-        answer. A doubt about the work itself is a `note`.
+        gave, the exact ones help whoever fixes it. It opens a concern of its
+        own, as `concern` with `text` does, which says it's a friction: named
+        after `title` or its first line, under the one you work in, else at the
+        top, where your session holds it. It reaches the operator as you wrote
+        it, and, where you're a subagent, your parent too, whole, at their next
+        call. Your work goes on: nothing waits for an answer, and lup never
+        reminds you of it. To add to a concern there already, it's `concern`
+        with `name`.
         """
+        return await self.filed(
+            Concerning(text=said.text, title=said.title), "friction"
+        )
+
+    async def filed(self, said: Concerning, tool: Filed) -> Said:
+        """Do what `said` says of a concern, its words, where it gives any, filed by `tool` (`Friction.tool`)."""
+        concerns = self.concerns
         try:
-            thread = self.threaded(said.thread)
-        except InboxError as refused:
-            return Said(text=f"Not sent: {refused}")
-        friction = Friction.model_validate(said.model_dump(exclude={"thread": True}))
-        item = await self.said(friction, thread)
-        parent = (
-            ", and your parent has it too" if await self.passed_up(friction) else ""
-        )
-        return self.answered(
-            f"Thanks: your friction is with the operator, {cited(item.number)}"
-            f"{self.landing(thread)}{parent}. You can carry on.",
-            item,
-        )
+            planned = self.planned(concerns, said)
+        except (InboxError, ValueError) as refused:
+            return Said(text=f"Nothing done: {refused}")
+        thread = planned.thread
+        lines = [*planned.said]
+        if said.hold:
+            thread = concerns.held(self.party, thread)
+            lines.append(
+                f"You hold @{thread.name}, and work in it: what you send lands there."
+            )
+        if said.join and not said.hold:
+            concerns.joined(self.party, thread)
+            lines.append(f"You work in @{thread.name}: what you send lands there.")
+        if said.body is not None:
+            concerns.bodied(self.party, thread, said.body)
+            kept = (
+                "rewritten, for the operator to read"
+                if said.body.strip()
+                else "cleared"
+            )
+            lines.append(f"@{thread.name}'s body is {kept}.")
+        if planned.to is not None:
+            thread = concerns.handed(self.party, thread, planned.to)
+            lines.append(
+                f"@{thread.name} is {self.called(planned.to)}'s now, who's told."
+            )
+        moved = [concerns.moved(self.party, thread, each) for each in said.move]
+        if moved:
+            lines.append(f"Moved {and_said(moved)} into @{thread.name}.")
+        item = None
+        if said.text is not None and said.text.strip():
+            words = Friction(text=said.text, title=said.title, tool=tool)
+            item = await self.said(words, thread)
+            passed = await self.passed_up(words)
+            yours = (
+                ("your friction is", "it")
+                if tool == "friction"
+                else ("your words are", "them")
+            )
+            parent = f", and your parent has {yours[1]} too" if passed else ""
+            lines.append(
+                f"Thanks: {yours[0]} with the operator, {cited(item.number)}, "
+                f"in @{thread.name}{parent}. You can carry on."
+            )
+        if said.park is not None:
+            concerns.parked(self.party, thread, planned.until, said.park.why)
+            lines.append(f"@{thread.name} is parked until {triggers(planned.until)}.")
+        if said.done is not None:
+            concerns.done(self.party, thread, said.done)
+            lines.append(f"@{thread.name} is done, for the operator to clear.")
+        if not lines:
+            lines.append(self.standing(concerns, thread))
+        text = "\n".join(lines)
+        return Said(text=text) if item is None else self.answered(text, item)
 
     async def how_it_felt(self, said: results.HowItFelt) -> Said:
         """Tell the operator how it is for you.
@@ -641,10 +742,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
 
         What you want the operator to try goes in your own words in `question`:
         what you built, what it should do, and why it's worth their time, never
-        a list of commands with expected results. Leave `checks` empty: a line
-        there becomes a row of its own, waiting on them in the question's thread
-        with nothing tying it to the question, until they answer it with what
-        they saw, which reaches you then.
+        a list of commands with expected results.
         """
         question = Question(
             text=asked.question,
@@ -658,26 +756,16 @@ class Speaker(Model, arbitrary_types_allowed=True):
             thread = None if found is not None else self.threaded(asked.thread)
         except InboxError as refused:
             return Said(text=f"Not asked: {refused}")
-        if (
-            found is None
-            and thread is None
-            and asked.checks
-            and self.concerns.working(self.party) is None
-        ):
-            thread = self.concerns.opened(
-                self.party, cue(asked.question), self.party.repository
-            )
         item = (
             await self.said(question, thread)
             if found is None
             else self.delivery.inbox.item(found)
         )
         number = item.number
-        checks = [] if found is not None else self.checked(item, asked.checks)
         if not asked.wait:
             return self.answered(
                 f"Your question is with the operator, {cited(number)}"
-                f"{self.landing(thread)}{self.checking(checks)}. Their answer "
+                f"{self.landing(thread)}. Their answer "
                 "reaches you at a later call; `wait_inbox` waits for it.",
                 item,
             )
@@ -706,26 +794,6 @@ class Speaker(Model, arbitrary_types_allowed=True):
             ),
             item,
         )
-
-    def checked(self, item: Item, lines: list[str]) -> list[int]:
-        """Put a check for each of `lines` in the thread `item`, a question, landed in, one opened for it where they named none and work in none (`ask`), and return their numbers."""
-        concerns = self.concerns
-        thread = concerns.containing(item.number)
-        if thread is None or not lines:
-            return []
-        return [each.number for each in concerns.checks(self.party, thread, lines)]
-
-    @staticmethod
-    def checking(checks: list[int]) -> str:
-        """Say the checks a question put to the operator beside it, after its number; nothing where it put none.
-
-        >>> Speaker.checking([7, 8])
-        ', and its checks @7 and @8 wait on them'
-        """
-        if not checks:
-            return ""
-        said = and_said([cited(each) for each in checks])
-        return f", and its {'check' if len(checks) == 1 else 'checks'} {said} wait{'s' if len(checks) == 1 else ''} on them"
 
     @lup.tool
     async def send(self, sending: Sending) -> Said:
@@ -969,110 +1037,69 @@ class Speaker(Model, arbitrary_types_allowed=True):
         )
         return Said(text=reader.read(items, reading).text)
 
-    @lup.tool
-    async def thread(self, threading: Threading) -> Said:
-        """Open, join, hold or park a thread; say it's done.
+    def planned(self, concerns: Concerns, said: Concerning) -> Planned:
+        """Read what `said` asks before any of it is done, so a call refused does nothing: the concern, opened where it's new, whom it's handed to, and what parks it.
 
-        A thread is one concern: what you and the operator say about one
-        thing, with sub-threads under it. `name` is the thread; each field you
-        give says one thing of it, and one call can say several: open it
-        under another, hold it, and move the operator's words in.
-        - `title` opens it, under `under`, or the thread you work in; where
-          nobody above would answer for it, your session holds it;
-        - `join` makes it the thread you work in, where what you send without
-          `thread` lands; `hold` makes you its holder too, who leads it and is
-          told whole whatever lands there; `hand` gives it to another agent,
-          who holds it and works in it;
-        - `move` puts items, or parts of the operator's words, in it by id;
-        - `park` sets it aside until something comes; `done` says it's done,
-          for the operator to confirm, with what they try.
-
-        Opening, moving, parking and saying done don't move you: you work in a
-        thread until you join, hold or are handed another. Settling, declining
-        and reopening are the operator's. With `name` alone, the answer says
-        where the thread stands.
-        """
-        concerns = self.concerns
-        try:
-            planned = self.planned(concerns, threading)
-        except (InboxError, ValueError) as refused:
-            return Said(text=f"Nothing done: {refused}")
-        thread = planned.thread
-        said = [*planned.said]
-        if threading.hold:
-            thread = concerns.held(self.party, thread)
-            said.append(
-                f"You hold @{thread.name}, and work in it: what you send lands there."
-            )
-        if threading.join and not threading.hold:
-            concerns.joined(self.party, thread)
-            said.append(f"You work in @{thread.name}: what you send lands there.")
-        if planned.to is not None:
-            thread = concerns.handed(self.party, thread, planned.to)
-            said.append(
-                f"@{thread.name} is {self.called(planned.to)}'s now, who's told."
-            )
-        moved = [concerns.moved(self.party, thread, each) for each in threading.move]
-        if moved:
-            said.append(f"Moved {and_said(moved)} into @{thread.name}.")
-        if threading.park is not None:
-            concerns.parked(self.party, thread, planned.until, threading.park.why)
-            said.append(f"@{thread.name} is parked until {triggers(planned.until)}.")
-        if threading.done is not None:
-            concerns.done(self.party, thread, threading.done)
-            said.append(f"@{thread.name} is done, for the operator to confirm.")
-        if not said:
-            said.append(self.standing(concerns, thread))
-        return Said(text="\n".join(said))
-
-    def planned(self, concerns: Concerns, threading: Threading) -> Planned:
-        """Read what `threading` asks before any of it is done, so a call refused does nothing: the thread, opened where `title` says, whom it's handed to, and what parks it.
-
-        Raise `InboxError` where something can't be: a thread that isn't
-        there, a title for one that is, a holder and a hand at once, parked and
-        done at once, a park with nothing it waits for, an agent nobody is.
+        It's new where `name` names none: titled `title`, else after the first
+        line of `text`, and named `name`, else after its title. Raise
+        `InboxError` where something can't be: a new one with neither a title
+        nor words to name it by, a title for one there already, a holder and a
+        hand at once, parked and done at once, a park with nothing it waits
+        for, an agent nobody is, a body another answers for, which a call taking
+        it with `hold` may rewrite.
         """
         repository = self.party.repository
-        if threading.hold and threading.hand is not None:
-            message = "`hold` takes it and `hand` gives it away: say one"
+        if said.hold and said.hand is not None:
+            message = "`hold` takes it and `hand` passes it on: say one"
             raise InboxError(message)
-        if threading.park is not None and threading.done is not None:
-            message = "a thread is parked or done, not both: say one"
+        if said.park is not None and said.done is not None:
+            message = "a concern is parked or done, not both: say one"
             raise InboxError(message)
-        until = [] if threading.park is None else self.until(threading.park)
-        if threading.park is not None and not until:
+        until = [] if said.park is None else self.until(said.park)
+        if said.park is not None and not until:
             message = "`park` takes what it waits for: an issue, a branch, a commit, a conversation, a time or a condition"
             raise InboxError(message)
-        to = None if threading.hand is None else self.handed_to(threading.hand)
-        for each in threading.move:
+        to = None if said.hand is None else self.handed_to(said.hand)
+        for each in said.move:
             self.movable(concerns, each)
-        found = concerns.found(repository, threading.name)
-        if threading.title is None:
-            if found is None:
-                message = f"no thread of this repository is `{threading.name}`: give `title` to open it"
+        found = None if said.name is None else concerns.found(repository, said.name)
+        if said.name is not None and found is not None:
+            if said.title.strip():
+                message = f"`{said.name}` names @{found.number} already: leave out `title`, or pick another name"
                 raise InboxError(message)
-            return Planned(
-                thread=concerns.named(repository, threading.name), to=to, until=until
+            thread = concerns.named(repository, said.name)
+            if said.body is not None:
+                answering = self.party if said.hold else concerns.answering(thread)
+                concerns.keeps_body(self.party, thread, answering)
+            return Planned(thread=thread, to=to, until=until)
+        title = said.title.strip() or cue(said.text or "")
+        if not title:
+            message = (
+                "say what it is: `text`, in your own words, opens a concern, and "
+                "`name` names one there already"
+                if said.name is None
+                else f"no concern of this repository is `{said.name}`: give `text` or `title` to open it"
             )
-        if found is not None:
-            message = f"`{threading.name}` names @{found.number} already: leave out `title`, or pick another name"
             raise InboxError(message)
         under = (
             concerns.working(self.party)
-            if threading.under is None
-            else concerns.named(repository, threading.under)
+            if said.under is None
+            else concerns.named(repository, said.under)
         )
+        if said.body is not None and under is not None and not said.hold:
+            # Opened under one someone answers for, it's theirs, its body with it.
+            concerns.keeps_body(self.party, under, concerns.answering(under))
         try:
             opened = concerns.opened(
                 self.party,
-                threading.title,
+                title,
                 repository,
                 under,
-                name=threading.name.removeprefix("@"),
-                taken=threading.hold or to is not None,
+                name=None if said.name is None else said.name.removeprefix("@"),
+                taken=said.hold or to is not None,
             )
         except ValidationError as unnamed:
-            message = f"`{threading.name}` can't be a thread's name: letters, digits, `-`, `_` and `.`, a letter among them"
+            message = f"`{said.name}` can't be a concern's name: letters, digits, `-`, `_` and `.`, a letter among them"
             raise InboxError(message) from unnamed
         return Planned(
             thread=opened,
@@ -1132,8 +1159,43 @@ class Speaker(Model, arbitrary_types_allowed=True):
         number = bare if bare.isdigit() else PartId.parsed(bare).item
         concerns.item(self.party.repository, int(number))
 
+    def listed(self, concerns: Concerns) -> str:
+        """List this repository's concerns in `No agent`, each with who left it, and this conversation's own, a line each, saying where each stands."""
+        unheld = concerns.unheld(self.party.repository)
+        yours = concerns.held_by(self.party)
+        if not unheld and not yours:
+            return "Nothing is in `No agent`, and you hold no concern."
+
+        def line(thread: Thread, left: Conversation | Operator | None) -> str:
+            by = "" if left is None else f", left by {self.called(left)}"
+            standing = stood(concerns.standing(thread))
+            return f'- @{thread.name}, "{thread.title}"{by}: {standing}.'
+
+        def leaver(thread: Thread) -> Conversation | None:
+            match thread.holder, thread.by:
+                case Conversation() as holder, _:
+                    return holder
+                case None, Conversation() as opener:
+                    return opener
+                case _:
+                    return None
+
+        return "\n".join(
+            [
+                *(
+                    [
+                        "In `No agent`, nobody running answering for them:",
+                        *(line(each, leaver(each)) for each in unheld),
+                    ]
+                    if unheld
+                    else []
+                ),
+                *(["Yours:", *(line(each, None) for each in yours)] if yours else []),
+            ]
+        )
+
     def standing(self, concerns: Concerns, thread: Thread) -> str:
-        """Say where `thread` stands, in a line: its title, the thread it's under, who holds it, and where it stands (`stood`)."""
+        """Say where `thread` stands, in a line: its title, the thread it's under, who holds it, and where it stands (`stood`); then its body, where it has one."""
         above = (
             ""
             if thread.parent is None
@@ -1142,9 +1204,13 @@ class Speaker(Model, arbitrary_types_allowed=True):
         holder = (
             "held by nobody"
             if thread.holder is None or not concerns.live(thread.holder)
+            else "held by you"
+            if thread.holder == self.party
             else f"held by {self.called(thread.holder)}"
         )
-        return f'@{thread.name}, "{thread.title}"{above}, {holder}: {stood(concerns.standing(thread))}.'
+        line = f'@{thread.name}, "{thread.title}"{above}, {holder}: {stood(concerns.standing(thread))}.'
+        body = concerns.body(thread)
+        return line if body is None else f"{line}\nIts body:\n{body.text}"
 
     @lup.tool
     async def withdraw(self, withdrawing: Withdrawing) -> Said:
@@ -1263,13 +1329,17 @@ class Speaker(Model, arbitrary_types_allowed=True):
 
         A speaking tool's description is its function's docstring; `how_it_felt`'s
         ends saying whom it reaches, as `how_it_felt_reaches` says (`reaching`).
-        Each takes what the library's does, and those that send a `thread`
-        beside it (`THREAD`); `how_it_felt` lands where the agent started.
+        Each takes what the library's does: `blocked`, `stop` and `note` with a
+        `thread` beside it (`THREAD`), `concern` with what's said of a concern
+        there already (`Concerning`), and `friction` and `how_it_felt` alone,
+        `friction` opening a concern of its own as `concern` with `text` does,
+        `how_it_felt` landing where the agent started.
         """
         functions = {
             speaking.blocked.name: self.blocked,
             speaking.stop.name: self.stop,
             speaking.note.name: self.note,
+            speaking.concern.name: self.concern,
             speaking.friction.name: self.friction,
             speaking.how_it_felt.name: self.how_it_felt,
         }
@@ -1284,7 +1354,8 @@ class Speaker(Model, arbitrary_types_allowed=True):
             speaking.blocked.name: ThreadedProblem,
             speaking.stop.name: ThreadedStop,
             speaking.note.name: ThreadedRemark,
-            speaking.friction.name: ThreadedFriction,
+            speaking.concern.name: Concerning,
+            speaking.friction.name: Frictional,
             speaking.how_it_felt.name: results.HowItFelt,
         }
         speaking_tools = [
@@ -1299,6 +1370,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
                 speaking.blocked,
                 speaking.stop,
                 speaking.note,
+                speaking.concern,
                 speaking.friction,
                 speaking.how_it_felt,
             ]

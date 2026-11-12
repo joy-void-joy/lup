@@ -10,7 +10,9 @@ conversation holding it, or none. What's in it are edges drawn to it:
 - **a reference** from an item of another thread that touches it (`Refers`),
   which is no member;
 - **its status,** the edges saying where it stands (`Status`): parked until
-  something comes, done to confirm, settled, declined, or reopened.
+  something comes, done to confirm, settled, declined, or reopened;
+- **its body** (`Body`), the text its holder rewrites whole as their
+  understanding changes: the latest drawn is it.
 
 How it stands is read from those edges at each read, never stored
 (`Standing.read`): its two marks, read apart (`Marks`), what in it waits on the
@@ -124,19 +126,18 @@ def without_roots(threads: list[Thread]) -> list[Thread]:
 
 
 class Check(Node):
-    """Something only the operator can try, in a thread: an experiment, a measurement, a step on the host.
+    """Something only the operator could try, which an agent's question once put in a thread: an experiment, a measurement, a step on the host.
 
-    It waits on the operator until they answer it (`Answered`).
+    No call makes one: what an agent wants tried goes in their own
+    words in what they send. Those on the ledger stay readable, each with the
+    operator's answer where they gave one (`Answered`), and wait on nobody, so
+    none keeps a thread waiting on the operator.
     """
 
     kind: Literal["ledger:check"] = "ledger:check"
     name: Name | None = None
     text: str
     """What to try, and what to look for, in the words of the agent asking."""
-
-    @override
-    def waiting(self, drawn: list[Edge]) -> bool:
-        return not any(isinstance(each, Answered) for each in drawn)
 
 
 class In(Edge):
@@ -226,6 +227,27 @@ class Answered(Edge):
         return (
             f"an answer is drawn to a check, and @{target.number} is a `{target.kind}`"
         )
+
+
+class Body(Edge):
+    """A thread's body, rewritten whole by whoever answers for it: what they understand of it as they write it, which the operator reads and comments on line by line.
+
+    Said of the thread alone. The latest drawn is the body, an empty one
+    clearing it, and every one before stays, each never changed. A kind of its
+    own, so an earlier lup, which declares none, reads one as a plain `Edge`
+    and nothing of its reading takes it: a thread's members, where it stands,
+    and every reader of edges of a kind go by the kind.
+    """
+
+    kind: Literal["ledger:body"] = "ledger:body"
+    source: None = None
+    by: Conversation
+    text: str
+    """The body whole, in its holder's words; empty where they cleared it."""
+
+    @override
+    def refused(self, source: Node | None, target: Node) -> str | None:
+        return thread_only(self, target)
 
 
 class IssueClosed(Model):
@@ -356,7 +378,18 @@ class Reopened(Status):
 
 KINDS = Kinds(
     nodes=[Thread, Check],
-    edges=[In, Moved, Refers, Answered, Parked, Done, Settled, Declined, Reopened],
+    edges=[
+        In,
+        Moved,
+        Refers,
+        Answered,
+        Parked,
+        Done,
+        Settled,
+        Declined,
+        Reopened,
+        Body,
+    ],
 )
 """The kinds the ledger declares itself."""
 

@@ -128,6 +128,7 @@ import secrets
 import textwrap
 from collections.abc import Callable, Coroutine, Generator, Sequence
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal, override
 
 from pydantic import TypeAdapter
@@ -213,8 +214,6 @@ from lup_ledger import threads as ledger
 from lup_ledger.parties import Conversation, Operator, Party
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from lup_dev.host.courier import Conversation as Caller
     from lup_ledger.threads import Thread
 
@@ -273,12 +272,12 @@ def readable(parts: list[Tag | str]) -> str:
     > The gate hung.
     <BLANKLINE>
     Fix it.
-    >>> print(readable([Tag(name="on", attributes={"item": "7", "kind": "note"}, parts=["Yes."]), Tag(name="on", attributes={"item": "9", "kind": "friction"}, parts=["No."])]))
+    >>> print(readable([Tag(name="on", attributes={"item": "7", "kind": "note"}, parts=["Yes."]), Tag(name="on", attributes={"item": "9", "kind": "concern"}, parts=["No."])]))
     On @7, note:
     <BLANKLINE>
     Yes.
     <BLANKLINE>
-    On @9, friction:
+    On @9, concern:
     <BLANKLINE>
     No.
     """
@@ -492,6 +491,19 @@ def changed_since(code: Quoted) -> str | None:
     }
     gone = [code.first + at for at in range(len(code.lines)) if at not in found]
     return " ".join(str(number) for number in gone) if gone else None
+
+
+def body_quoted(letter: Letter) -> list[Tag]:
+    """Return the lines of a thread's body `letter` is written on, as a quote its message tag carries before the operator's words; none where it's on no lines.
+
+    >>> from lup_dev.inbox.store import Quote
+    >>> on = Quote(text="It starts at `read_indent`.", start=0, end=27)
+    >>> [each.written() for each in body_quoted(Letter(thread=4, quote=on, text="It's `lex`."))]
+    ['<quote of="body">It starts at `read_indent`.</quote>']
+    """
+    if letter.quote is None:
+        return []
+    return [Tag(name="quote", attributes={"of": "body"}, parts=[letter.quote.text])]
 
 
 def remarking(remark: Remark, attributes: dict[str, str]) -> Tag:
@@ -910,11 +922,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     settling: dict[int, asyncio.Event] = {}
     """By approval's number, in memory: set once the approval is answered, which
     wakes every launch waiting on it."""
-    settle_hold: Callable[[HeldChange, bool, str], str | None] | None = None
-    """Writes the operator's answer to a held change where its hook waits for
-    it, yes or no and their comment, and returns what to tell the conversation
-    that made it where no call waits to hear it; none where this service answers
-    no hold."""
+    settle_hold: Callable[[HeldChange, Path, bool, str], str | None] | None = None
+    """Writes the operator's answer to a held change of a repository, by its
+    git directory, where its hook waits for it, yes or no and their comment,
+    and returns what to tell the conversation that made it where no call waits
+    to hear it; none where this service answers no hold."""
     hold_unheard: Callable[[HeldChange], str | None] = lambda _: None
     """Returns what to tell the conversation that made a held change, answered
     already, where neither a call nor their inbox told them, noting it told."""
@@ -1530,7 +1542,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 Tag(
                     name="message",
                     attributes={**numbered(at), **on_thread(each)},
-                    parts=[each.text],
+                    parts=[*body_quoted(each), each.text],
                 )
                 for at, each in enumerate(review.letters)
                 if each.to == to
@@ -2042,8 +2054,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             thread = self.on_thread(letter)
             if thread is None:
                 continue
+            on = readable([*body_quoted(letter), letter.text])
             note = self.inbox.made(
-                Message(kind="note", text=letter.text, repository=thread.repository),
+                Message(kind="note", text=on, repository=thread.repository),
                 Operator(),
                 Operator(),
                 None,
@@ -3018,7 +3031,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     f"{cited(number)} is a held change, which this service can't answer"
                 )
                 raise InboxError(message)
-            unheard = self.settle_hold(item.reason, approved, comment)
+            if not isinstance(item.sender, Conversation):
+                message = f"{cited(number)} is a held change no conversation made"
+                raise InboxError(message)
+            unheard = self.settle_hold(
+                item.reason, item.sender.repository, approved, comment
+            )
         decided = Decided(at=self.clock.now(), approved=approved, comment=comment)
         answered = self.inbox.kept(item.model_copy(update={"state": decided}))
         self.settle(number)

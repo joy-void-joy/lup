@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING, Literal, override
 
 from lup import blocks
 from lup.types import Model
-from lup_dev.git import Git
+from lup_dev.git import Git, threaded
 from lup_dev.host.protocol import LaunchId, Reply, Request
 from lup_dev.host.records import (
     Entry,
@@ -82,8 +82,7 @@ from lup_dev.inbox.texts import (
 from lup_dev.inbox.threads import spoken
 from lup_dev.listing import Span
 from lup_ledger.parties import Conversation, Operator
-from lup_ledger.records import Edge
-from lup_ledger.threads import Check, Thread
+from lup_ledger.threads import Thread
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -115,21 +114,6 @@ class AnswerItem(Request, reads=False):
     number: int
     rulings: list[Ruling] = []
     comment: str = ""
-
-
-class ShowCheck(Request, reads=True):
-    """Show a check: what only the operator can try, which an agent's question put in a thread; none where the number isn't one."""
-
-    kind: Literal["inbox-check-show"] = "inbox-check-show"
-    number: int
-
-
-class AnswerCheck(Request, reads=False):
-    """Answer a check with what the operator saw, or tick it with no words."""
-
-    kind: Literal["inbox-check-answer"] = "inbox-check-answer"
-    number: int
-    text: str = ""
 
 
 class FinishItem(Request, reads=False):
@@ -424,16 +408,6 @@ class Shown(Reply):
     paths: list[Pathed] = []
     """Each conversation the item names, with their path, where lup knows it
     (`pathed`): how `lup-dev inbox` names them."""
-
-
-class CheckShown(Reply):
-    """A check, with the thread it's in and whether it waits on the operator; none where the number asked isn't a check."""
-
-    kind: Literal["inbox-check"] = "inbox-check"
-    check: Check | None = None
-    thread: str | None = None
-    """The name of the thread it's in; none where it's in none."""
-    waiting: bool = False
 
 
 class Settled(Reply):
@@ -836,9 +810,7 @@ async def ran_in(transcript: Transcript, repository: Path) -> None:
     ran: the record found under that session's id is read only where it ran
     in the asker's repository.
     """
-    under = await asyncio.to_thread(
-        lambda: [repository, *Git.pinned(repository).worktrees()]
-    )
+    under = [repository, *await threaded(repository, Git.pinned(repository).worktrees)]
     ran = transcript.directory
     if ran is None or not within(ran, under):
         message = "the conversation isn't one of this repository's"
@@ -1099,55 +1071,6 @@ class Answering(Model, Handler[AnswerItem], arbitrary_types_allowed=True):
             request.number, request.rulings, request.comment
         )
         return shown(self.delivery, answer)
-
-
-class CheckShowing(Model, Reading[ShowCheck], arbitrary_types_allowed=True):
-    """Answers `ShowCheck`: the check, with its thread; nothing where the number isn't a check, or, for a room, is another repository's."""
-
-    delivery: Delivery
-
-    @override
-    def request(self) -> type[ShowCheck]:
-        return ShowCheck
-
-    @override
-    async def answer(self, request: ShowCheck) -> Reply:
-        return self.shown(request.number, None)
-
-    @override
-    async def scoped(self, request: ShowCheck, repository: Path) -> Reply:
-        return self.shown(request.number, repository)
-
-    def shown(self, number: int, repository: Path | None) -> CheckShown:
-        """Show check `number`, of `repository` where it's given; nothing where it's no check, or another repository's."""
-        concerns = self.delivery.concerns()
-        check = concerns.check(number)
-        if check is None or repository not in [None, check.repository]:
-            return CheckShown()
-        thread = concerns.containing(number)
-        drawn = self.delivery.inbox.ledger.drawn_to(number, Edge)
-        return CheckShown(
-            check=check,
-            thread=None if thread is None else thread.name,
-            waiting=check.waiting(drawn),
-        )
-
-
-class CheckAnswering(Model, Handler[AnswerCheck], arbitrary_types_allowed=True):
-    """Answers `AnswerCheck`: the check answered, whoever asked it told (`Concerns.checked`)."""
-
-    delivery: Delivery
-
-    @override
-    def request(self) -> type[AnswerCheck]:
-        return AnswerCheck
-
-    @override
-    async def answer(self, request: AnswerCheck) -> Reply:
-        concerns = self.delivery.concerns()
-        check = concerns.checked(request.number, request.text)
-        thread = concerns.containing(check.number)
-        return CheckShown(check=check, thread=None if thread is None else thread.name)
 
 
 class Finishing(Model, Handler[FinishItem], arbitrary_types_allowed=True):
@@ -1648,8 +1571,6 @@ def routes(delivery: Delivery, recorded: dict[str, Recorded]) -> list[Route]:
         Route.reading(InboxReading(delivery=delivery)),
         Route.reading(Showing(delivery=delivery)),
         Route.to(Answering(delivery=delivery)),
-        Route.reading(CheckShowing(delivery=delivery)),
-        Route.to(CheckAnswering(delivery=delivery)),
         Route.to(Finishing(delivery=delivery)),
         Route.to(Sending(delivery=delivery)),
         Route.to(Reporting(delivery=delivery)),

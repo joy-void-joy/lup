@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from datetime import datetime
 
-    from lup.sessions.results import Friction, HowItFelt, Rejection, Usage
+    from lup.sessions.results import Concern, Friction, HowItFelt, Rejection, Usage
 
 
 class TurnError(LupError):
@@ -42,7 +42,7 @@ class OutputMissingError(TurnError):
     """No answer was accepted within the submission layer's attempts.
 
     `rejected` holds every refused attempt in full: what was submitted, and why it
-    was refused. `notes`, `frictions` and `how_it_felt` hold what the agent said
+    was refused. `notes`, `concerns`, `frictions` and `how_it_felt` hold what the agent said
     beside their attempts, and `usage` what the turn used, where the runtime
     reported it.
     """
@@ -53,6 +53,7 @@ class OutputMissingError(TurnError):
         *,
         rejected: list[Rejection],
         notes: list[str],
+        concerns: list[Concern],
         frictions: list[Friction],
         how_it_felt: list[HowItFelt],
         usage: Usage | None,
@@ -61,6 +62,7 @@ class OutputMissingError(TurnError):
         super().__init__(message)
         self.rejected = rejected
         self.notes = notes
+        self.concerns = concerns
         self.frictions = frictions
         self.how_it_felt = how_it_felt
         self.usage = usage
@@ -69,7 +71,7 @@ class OutputMissingError(TurnError):
 class BlockedError(TurnError):
     """The agent stopped without an answer, saying the work can't go on and what's wrong.
 
-    `problem` is their words; `notes`, `frictions` and `how_it_felt` what they
+    `problem` is their words; `notes`, `concerns`, `frictions` and `how_it_felt` what they
     said before stopping; `usage` what the turn used, where the runtime reported it.
     It isn't retried: asking again gets the same problem.
     """
@@ -79,6 +81,7 @@ class BlockedError(TurnError):
         problem: str,
         *,
         notes: list[str],
+        concerns: list[Concern],
         frictions: list[Friction],
         how_it_felt: list[HowItFelt],
         usage: Usage | None,
@@ -87,6 +90,7 @@ class BlockedError(TurnError):
         super().__init__(f"the agent is blocked and didn't answer: {problem}")
         self.problem = problem
         self.notes = notes
+        self.concerns = concerns
         self.frictions = frictions
         self.how_it_felt = how_it_felt
         self.usage = usage
@@ -97,7 +101,7 @@ class StoppedError(TurnError):
 
     They're done and nothing more is worth doing, or they'd rather not go on:
     not a failure, nor `BlockedError`'s "they can't". `why` is their words;
-    `notes`, `frictions` and `how_it_felt` what they said before stopping; `usage` what the
+    `notes`, `concerns`, `frictions` and `how_it_felt` what they said before stopping; `usage` what the
     turn used, where the runtime reported it. It isn't retried.
     """
 
@@ -106,6 +110,7 @@ class StoppedError(TurnError):
         why: str,
         *,
         notes: list[str],
+        concerns: list[Concern],
         frictions: list[Friction],
         how_it_felt: list[HowItFelt],
         usage: Usage | None,
@@ -114,6 +119,7 @@ class StoppedError(TurnError):
         super().__init__(f"the agent chose to stop without an answer: {why}")
         self.why = why
         self.notes = notes
+        self.concerns = concerns
         self.frictions = frictions
         self.how_it_felt = how_it_felt
         self.usage = usage

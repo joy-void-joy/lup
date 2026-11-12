@@ -12,7 +12,8 @@
           "reason": {
             "reason": "friction",
             "text": "The gate printed nothing for four minutes.",
-            "title": ""
+            "title": "",
+            "tool": "friction"
           },
           "sender": {
             "party": "conversation",

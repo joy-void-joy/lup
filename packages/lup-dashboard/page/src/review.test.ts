@@ -283,7 +283,7 @@ describe("laid", () => {
         const friction: Item = hosted({
             ...NOTE,
             number: 50,
-            reason: { reason: "friction", text: "`ls` failed", title: "" },
+            reason: { reason: "friction", text: "`ls` failed", title: "", tool: "friction" },
             sender: from("s1", "a1"),
             rank: NEWS,
         });
@@ -358,7 +358,7 @@ describe("laid", () => {
     });
 
     it("walks to what's to answer with ]a and [a, in the order it came, passing over news, flags and what's settled", () => {
-        const friction: Item = hosted({ ...NOTE, number: 60, reason: { reason: "friction", text: "`ls` failed", title: "" }, sender: from("s1", "a1"), rank: NEWS });
+        const friction: Item = hosted({ ...NOTE, number: 60, reason: { reason: "friction", text: "`ls` failed", title: "", tool: "friction" }, sender: from("s1", "a1"), rank: NEWS });
         const out = laid([QUESTION, PROBLEM, friction, FLAGGED, APPROVAL], [], banner, header, EMPTY, NOTHING);
         expect(heads(out)).toEqual(["━━ s1 ━━", "── #51 ──", "── #60 ──", "━━ s2 ━━", "── #52 ──", "── #70 ──", "━━ lup ━━", "── #54 ──"]);
         const at = (text: string) => out.text.indexOf(text);
@@ -394,7 +394,7 @@ describe("laid", () => {
     });
 
     it("counts what's to answer and what's only to read apart for the header over the review, those settled in the draft left out", () => {
-        const friction: Item = hosted({ ...NOTE, number: 60, reason: { reason: "friction", text: "`ls` failed", title: "" }, rank: NEWS });
+        const friction: Item = hosted({ ...NOTE, number: 60, reason: { reason: "friction", text: "`ls` failed", title: "", tool: "friction" }, rank: NEWS });
         const items = [QUESTION, PROBLEM, friction, FLAGGED];
         // Each group seen up to an item, as the operator marked it with Space d on its banner.
         const seen = (upTo: number): Seeing => ({ groups: new Map([[whose(from("s1", "a1")), upTo], [whose(from("s2")), upTo]]), commented: new Set() });
@@ -411,7 +411,7 @@ describe("laid", () => {
         const friction: Item = hosted({
             ...NOTE,
             number: 62,
-            reason: { reason: "friction", text: "`uv run lup-dev check` printed: engine stale\nI was running the gate.", title: "" },
+            reason: { reason: "friction", text: "`uv run lup-dev check` printed: engine stale\nI was running the gate.", title: "", tool: "friction" },
         });
         const went: Item = hosted({
             ...NOTE,
@@ -1174,6 +1174,21 @@ describe("every agent's group, and the messages under its banner", () => {
         expect(isLetter(comment)).toBe(false);
         expect(whose(from("s1", "a1"))).not.toBe(whose(from("s1")));
     });
+
+    it("tells a message from a remark by its thread, whether the host says its quote is none or it quotes lines of a thread's body", () => {
+        const quote: Quote = { text: "It lags.", block: "concern 307 body", version: AT, line: 0, lines: ["It lags."], start: 0, end: 8 };
+        // As the host keeps them: every field said, none where there's none.
+        const kept = { id: "m1", to: S3, thread: null, quote: null, text: "Hi." };
+        const onBody = { id: "m2", to: S3, thread: 307, quote, text: "Still?" };
+        const remark: Remark = { id: "r1", to: S3, quote: { ...quote, block: "step 4" }, text: "Why?", step: null, code: null };
+        expect([kept, onBody, remark].map((each) => [isLetter(each), isRemark(each)])).toEqual([
+            [true, false],
+            [true, false],
+            [false, true],
+        ]);
+        const draft = withWritten(EMPTY, [kept, onBody, remark]);
+        expect([draft.letters, draft.remarks]).toEqual([[kept, onBody], [remark]]);
+    });
 });
 
 describe("replies kept from before", () => {
@@ -1373,6 +1388,12 @@ describe("an answer in a turn's last words", () => {
             "  on @52: “UTF-8”",
             "  Every one? Even a stray byte?",
         ]);
+    });
+
+    it("says the lines of a concern's body a message to them quoted, above its words", () => {
+        const quote: Quote = { text: "It jumps on a long comment.", block: "concern 307 body", version: AT, line: 0, lines: ["It jumps on a long comment."], start: 0, end: 27 };
+        const onBody: Item = hosted({ ...REVIEW, reason: { ...REVIEW.reason, comments: [], letters: [{ id: "", to: SESSION, thread: 307, quote, text: "Only there?" }] } as Item["reason"] });
+        expect(above(END, [onBody], [NOTE, OTHERS]).map((each) => each.text)).toEqual(["you · @70, your review", "  on the concern's body: “It jumps on a long comment.”", "  Only there?"]);
     });
 
     it("says a comment outdated where an edit changed the passage it quotes", () => {

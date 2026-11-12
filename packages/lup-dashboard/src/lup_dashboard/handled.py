@@ -464,7 +464,7 @@ def handled(
         notices=withheld,
         clock=clock,
         say=say,
-        settle_hold=lambda change, approved, said: withheld.hold(
+        settle_hold=lambda change, _repository, approved, said: withheld.hold(
             change, approved=approved, comment=said
         ),
         landing=waits.holding,

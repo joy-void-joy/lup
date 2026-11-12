@@ -148,7 +148,7 @@ class Store(Model):
         """Write the worktree into the store as a tree, and return its id."""
         self.ensure()
         store = self.snapshots()
-        store.run("add", "--all")
+        store.run("add", "--all", within=store.whole)
         return store.text("write-tree")
 
     def ref(self, name: str) -> str | None:

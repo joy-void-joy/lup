@@ -29,6 +29,14 @@ describe("the palette's table", () => {
         expect(part?.keys.map((key) => key.keys)).toEqual(['"+y "*y', '"+p "*p', "v… ^c"]);
     });
 
+    it("names a concern, a friction and a concern's words, as the host does: no key says a thread", () => {
+        const verbs = REVIEW_KEYS.find((part) => part.title === "Answering")?.keys ?? [];
+        const marks = REVIEW_KEYS.flatMap((part) => part.keys).filter((key) => ["◇ orange", "•"].includes(key.keys));
+        const does = [...verbs, ...marks].map((key) => key.does);
+        expect(does.filter((each) => /thread/.test(each))).toEqual([]);
+        expect(does.some((each) => each.includes("a friction, a concern's words"))).toBe(true);
+    });
+
     it("lists every key once a part, each saying what it does", () => {
         for (const part of REVIEW_KEYS) {
             const keys = part.keys.map((key) => key.keys);

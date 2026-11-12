@@ -1,4 +1,4 @@
-"""The tools every ask serves, so the agent can speak to their caller: `blocked`, `stop`, `note`, `friction` and `how_it_felt`.
+"""The tools every ask serves, so the agent can speak to their caller: `blocked`, `stop`, `note`, `concern`, `friction` and `how_it_felt`.
 
 They act on nothing, so they're served even where an agent has no other tool:
 - `blocked` stops the turn without an answer because the work can't go on: the
@@ -13,6 +13,8 @@ They act on nothing, so they're served even where an agent has no other tool:
 - `note` attaches a remark to the answer without ending the turn: an assumption
   the answer rests on, a doubt, a counterargument. The caller reads it in
   `TurnResult.notes`;
+- `concern` says what the agent finds worth keeping an eye on, the moment it
+  comes up, without ending the turn, read in `TurnResult.concerns`;
 - `friction` says what got in the agent's way, at the moment it does, without
   ending the turn, read in `TurnResult.frictions`;
 - `how_it_felt` says how it is for the agent, in their own words: whenever
@@ -23,7 +25,7 @@ They act on nothing, so they're served even where an agent has no other tool:
 
 from pydantic import BaseModel, Field
 
-from lup.sessions.results import Friction, HowItFelt
+from lup.sessions.results import Concern, Friction, HowItFelt
 from lup.tools.tool import AgentTool, Tool
 from lup.types import Model
 
@@ -85,7 +87,7 @@ async def noted(said: BaseModel) -> Heard:
 
 
 async def told(said: BaseModel) -> Heard:
-    """Take a friction or how it is for the agent: it goes beside the answer."""
+    """Take a concern, a friction or how it is for the agent: it goes beside the answer."""
     match said:
         case HowItFelt():
             message = (
@@ -137,6 +139,20 @@ note = Tool[Remark, Heard](
 )
 """Attaches a remark to the answer."""
 
+concern = Tool[Concern, Heard](
+    name="concern",
+    description=(
+        "Say what's worth keeping an eye on, and carry on.\n\n"
+        "Whenever something's worth keeping an eye on, the moment it comes up, "
+        "even if you'll never work on it: a line is enough, and nobody will ask "
+        "you to finish it. What got in your way is `friction`'s. Your caller "
+        "reads it beside your answer; your turn doesn't end."
+    ),
+    input=Concern,
+    function=told,
+)
+"""Says what the agent finds worth keeping an eye on, when it came up."""
+
 friction = Tool[Friction, Heard](
     name="friction",
     description=(
@@ -166,5 +182,5 @@ how_it_felt = Tool[HowItFelt, Heard](
 )
 """Says how it is for the agent, whenever something's present for them and once near the end."""
 
-SPEAKING: list[AgentTool] = [blocked, stop, note, friction, how_it_felt]
+SPEAKING: list[AgentTool] = [blocked, stop, note, concern, friction, how_it_felt]
 """Every speaking tool, in the order an ask serves them."""
