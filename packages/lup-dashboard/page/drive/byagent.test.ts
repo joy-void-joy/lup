@@ -1,12 +1,32 @@
 // The review by agent, as the page opens and as one buffer beside the overview, the fallback its address may ask for
 // (`?panes=off`; `docs/dashboard.md`, *The review*): what agents tell each other is in their messages drawers, each way alike.
 // A fold-wise selection lasting as the review is laid out anew, and what only the one buffer does.
+import type { Request } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { open, type Dashboard } from "./dashboard.ts";
 import { demo, type Demo, type DemoOptions } from "./demo.ts";
 import type { Review } from "./review.ts";
 import { DEMO_ITEM } from "./typing.ts";
+
+/** explore-auth's banner, over their drawers. */
+const EXPLORE_AUTH = "━━ lup · dev · lup-impl/explore-auth";
+
+/**
+ * The line of explore-auth's drawer of `kind`, among theirs under their banner, as the review stands; null where they
+ * have none. Another agent's drawer may say the same, as grep-tokens' messages do once the late question has come.
+ */
+const theirs = (review: Review, kind: string) =>
+    review.evaluate(
+        (view, { banner, kind }) => {
+            const lines = view.state.doc.toString().split("\n");
+            const at = lines.findIndex((each) => each.startsWith(banner));
+            const after = at === -1 ? [] : lines.slice(at + 1);
+            const end = after.findIndex((each) => each.startsWith("━━ "));
+            return (end === -1 ? after : after.slice(0, end)).find((each) => each.startsWith(`${kind} · `)) ?? null;
+        },
+        { banner: EXPLORE_AUTH, kind },
+    );
 
 const ways: [string, DemoOptions][] = [
     ["as the page opens", { size: 0 }],
@@ -32,6 +52,8 @@ describe.each(ways)("the review by agent, %s", (_way, options) => {
     });
 
     it("shows what agents tell each other in both their messages drawers, and no copy of it among the operator's items", async () => {
+        // Each drawer laid out as the host answers its view, which a loaded machine does after the review has settled.
+        await review.until("lay out both drawers holding the message", (view) => view.state.doc.toString().split("\n").filter((each) => each.startsWith("@72 lup-impl/explore-auth → lup-impl · note")).length >= 2);
         const lines = (await review.text()).split("\n");
         // What one agent told another is no item of the review's; what they told the operator is.
         expect(lines.filter((each) => /^── @(64|65|67|70)\b/.test(each))).toEqual([]);
@@ -59,20 +81,33 @@ describe.each(ways)("the review by agent, %s", (_way, options) => {
     });
 
     it("reaches a messages drawer by its letter, and marks it read with Space d as the reply is sent, the trace's mark as it was", async () => {
-        await review.goTo("━━ lup · dev · lup-impl/explore-auth");
+        // Each mark the page moves on the host, as it asks.
+        const marked: { key: Record<string, unknown> }[] = [];
+        const asked = (request: Request) => {
+            const body = request.method() === "POST" && request.url().endsWith("/api/ask") ? (JSON.parse(request.postData() ?? "{}") as Record<string, unknown>) : {};
+            if (body.kind === "review-mark") {
+                marked.push(...(body.marks as { key: Record<string, unknown> }[]));
+            }
+        };
+        dashboard.page.on("request", asked);
+        await review.goTo(EXPLORE_AUTH);
         await dashboard.keys.press(["]", "M"]);
         await review.until("go to the next messages drawer", (view) => view.state.doc.lineAt(view.state.selection.main.head).text.startsWith("messages · "));
         const before = await review.line();
         expect(before).toMatch(/ new$/);
-        const trace = (await review.text()).split("\n").find((each, at, lines) => lines[at - 1] !== undefined && each.startsWith("trace · ") && lines.slice(0, at).lastIndexOf(before) >= 0);
+        expect(await theirs(review, "messages")).toBe(before);
         await dashboard.keys.press([" ", "d"]);
         await dashboard.page.waitForFunction(() => document.querySelector(".status")?.textContent?.includes("mark their messages read") === true);
         await dashboard.keys.press(["Control+Enter"]);
         await dashboard.page.waitForFunction(() => document.querySelector(".bar .said")?.textContent?.startsWith("Sent") === true);
+        dashboard.page.off("request", asked);
         // What's been read is no longer new, and the comment on another's words went to them.
         expect(await dashboard.page.locator(".bar .said").innerText()).toContain("lup-impl/explore-auth");
-        await review.until("say the drawer holds nothing new", (view, was) => !view.state.doc.toString().includes(was), before);
-        expect((await review.text()).split("\n").filter((each) => each === trace).length).toBeGreaterThan(0);
+        await expect.poll(() => theirs(review, "messages"), { timeout: 30_000 }).toMatch(/^messages · \d+$/);
+        // The messages' mark alone: their trace's says it's new no more all the same, the operator's words to them
+        // reading what had reached them as they were sent (`docs/dashboard.md`, *Review marks*).
+        expect(marked.filter((each) => each.key.drawer === "messages")).not.toEqual([]);
+        expect(marked.filter((each) => each.key.drawer !== "messages")).toEqual([]);
         expect(dashboard.thrown).toEqual([]);
     });
 });
@@ -86,8 +121,7 @@ describe("the review as one buffer", () => {
     const rows = () => dashboard.page.evaluate(() => [...document.querySelectorAll(".outline .outline-row")].map((each) => each.textContent ?? ""));
 
     beforeAll(async () => {
-        // Nothing of the demo's own comes as a key of this goes down, which reads what's laid out.
-        served = await demo({ size: 0, oneBuffer: true, arrives: 3600, grows: 3600 });
+        served = await demo({ size: 0, oneBuffer: true });
         dashboard = await open(served.url);
         review = await dashboard.review();
         await review.holds(DEMO_ITEM);
@@ -119,7 +153,7 @@ describe("the review as one buffer", () => {
     });
 
     it("goes from an agent's name to their own views with gd, their conversation opened, and back with Ctrl+O", async () => {
-        await review.goTo("━━ lup · dev · lup-impl/explore-auth");
+        await review.goTo(EXPLORE_AUTH);
         const banner = await review.line();
         await review.evaluate((view, name) => {
             const at = view.state.doc.lineAt(view.state.selection.main.head);
@@ -143,8 +177,7 @@ describe("the review as one buffer", () => {
 
 describe("a fold-wise selection as the review is laid out anew, in headless Chromium", () => {
     it("is kept, its head under a closed fold, and acts as it did", async () => {
-        // The late question arriving as the selection's made, as what arrives does on the host.
-        await using served = await demo({ size: 6, arrives: 6 });
+        await using served = await demo({ size: 6 });
         await using dashboard = await open(served.url);
         const review = await dashboard.review();
         await review.holds(DEMO_ITEM);
@@ -152,6 +185,8 @@ describe("a fold-wise selection as the review is laid out anew, in headless Chro
         await dashboard.keys.press([" ", "F", "M"]);
         await review.inMode("visual");
         const before = await review.text();
+        // The late question arriving once the selection's made, as what arrives does on the host.
+        await served.arrive();
         await review.until("was laid out anew", (view, was) => view.state.doc.toString() !== was, before);
         await dashboard.page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
         expect(await review.mode()).toBe("visual");

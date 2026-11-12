@@ -10,8 +10,7 @@ let dashboard: Dashboard;
 let review: Review;
 
 beforeAll(async () => {
-    // Nothing of the demo's own comes as the keys go down.
-    served = await demo({ size: 0, arrives: 3600, grows: 3600 });
+    served = await demo({ size: 0 });
     dashboard = await open(served.url);
     review = await dashboard.review();
     await review.holds(DEMO_ITEM);
@@ -61,19 +60,23 @@ const said = (number: number | null, text: string) => `${number} "${text.slice(0
  */
 async function stepped(key: "j" | "k"): Promise<string[]> {
     const wrong: string[] = [];
+    // Where each step lands is where the next starts from: one question of the page a step, as few as a loaded machine
+    // answers in a test's time.
+    let from = await position(key);
     for (let step = 0; step < 5000; step += 1) {
-        const from = await position(key);
         if (from.next === null) {
             return wrong;
         }
         await dashboard.keys.press([key]);
         const to = await position(key);
         if (to.length !== from.length || to.number === from.next) {
+            from = to;
             continue;
         }
         wrong.push(`${key} from ${said(from.number, from.text)} went to ${said(to.number, to.text)}, not ${said(from.next, from.expected)} (step ${step + 1})`);
         // Go on from where it should have been.
         await review.evaluate((view, number) => view.dispatch({ selection: { anchor: view.state.doc.line(number).from } }), from.next);
+        from = await position(key);
     }
     return [...wrong, `${key} never reached the review's end`];
 }
@@ -95,8 +98,8 @@ describe("moving through the review, line by line, in headless Chromium", () => 
     });
 
     it("goes ]g and [g to each group in turn, the first from the review's first line", async () => {
-        // Walked again where the review was laid out anew meanwhile, what's been seen no longer saying it's new moving what's
-        // below, a key going where its layout says before it's in the editor.
+        // Walked again where the review was laid out anew meanwhile, a key going where its layout says before it's in the
+        // editor.
         let walked: { landings: number[]; forward: number[]; back: number[] } = { landings: [], forward: [], back: [] };
         for (let tried = 0; tried < 5; tried += 1) {
             const landings = await review.evaluate((view) => {

@@ -1,6 +1,7 @@
 // What's new is read by being on screen (`docs/dashboard.md`, *Review marks*): for long enough, in a tab they're in, their
 // hands not on a comment, its mark moving on the host as what was seen leaves the screen or the tab goes. Over the
-// page's own clock, which the test moves, each on a demo of its own, what one reads being gone for the next.
+// page's own clock, which the test moves, the page in view only as it does (`Dashboard.looks`), so the time the steps
+// between take counts for nothing; each on a demo of its own, what one reads being gone for the next.
 import type { Request } from "playwright";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -21,8 +22,7 @@ let told: Record<string, unknown>[] = [];
 
 beforeEach(async () => {
     told = [];
-    // Nothing of the demo's own comes meanwhile: what's on screen stays there as the page's clock is moved.
-    served = await demo({ size: 0, arrives: 3600, grows: 3600, typesRead: 0 });
+    served = await demo({ size: 0 });
     dashboard = await open(served.url, { clock: true });
     dashboard.page.on("request", (request: Request) => {
         if (request.method() === "POST" && request.url().endsWith("/api/ask")) {
@@ -43,8 +43,8 @@ afterEach(async () => {
     await served.close();
 });
 
-/** Let the page's clock run on for `ms`, as a time in view, a tick at a time. */
-const passes = (ms: number) => dashboard.page.clock.runFor(ms);
+/** Let the page's clock run on for `ms`, a tick at a time, the page in view of someone reading it for that time alone. */
+const passes = (ms: number) => dashboard.looks(ms);
 
 /** Go to `text`, in the middle of the view, all of what's under it there. */
 const onScreen = async (text: string) => {
@@ -66,11 +66,14 @@ const onScreen = async (text: string) => {
     });
 };
 
-/** Go to the end of the review, or its start, and give the page time to say what moved. */
+/**
+ * Go to the end of the review, or its start, and give the page time to say what moved, out of view meanwhile: what's on
+ * screen there isn't read, to move a mark as the next test step takes it off screen.
+ */
 const away = async (...keys: string[]) => {
     await dashboard.keys.press(keys);
     await review.settled(300);
-    await passes(4000);
+    await dashboard.page.clock.runFor(4000);
     await review.settled(300);
 };
 
