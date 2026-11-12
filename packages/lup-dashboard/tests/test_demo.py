@@ -190,6 +190,26 @@ def test_the_late_question_arrives_as_the_page_first_asks_for_the_inbox_in_the_t
     assert isinstance(moment, Context)
 
 
+def test_a_script_driving_the_demo_brings_the_late_question_once() -> None:
+    said: list[str] = []
+    demo = Demo(clock=Fixed(), size=0, say=said.append)
+    asyncio.run(demo.ask(ListInbox()))
+    assert 61 not in demo.host.inbox.items
+
+    demo.told("arrive\n")
+    demo.told("arrive\n")
+    demo.told("land\n")
+
+    assert [each.node for each in threads(demo)["transcript-reader"].asks] == [
+        51,
+        311,
+        61,
+    ]
+    assert said == [
+        "`land` names nothing a stand-in agent does: `arrive` brings the late question"
+    ]
+
+
 def test_the_two_writes_come_to_the_parser_s_branch_the_flag_on_each_waiting() -> None:
     demo = Demo(clock=Fixed(), size=0)
     asyncio.run(demo.ask(ListInbox()))

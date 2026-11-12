@@ -14,8 +14,7 @@ let dashboard: Dashboard;
 let review: Review;
 
 beforeAll(async () => {
-    // Nothing of the demo's own comes while the keys go down, as the test counts the layouts they make.
-    served = await demo({ size: 0, arrives: 3600, grows: 3600, typesRead: 0 });
+    served = await demo({ size: 0 });
     dashboard = await open(served.url);
     review = await dashboard.review();
     await review.holds(DEMO_ITEM);

@@ -61,10 +61,6 @@ describe.each(ways)("the review by agent, %s", (_way, options) => {
     beforeAll(async () => {
         served = await demo(options);
         dashboard = await open(served.url);
-        // Nothing read by being on screen, the page told it hasn't the focus: what's read moves no mark here but Space d's.
-        await dashboard.page.evaluate(() => {
-            Document.prototype.hasFocus = () => false;
-        });
         review = await dashboard.review();
         await review.holds(DEMO_ITEM);
         await review.settled();
@@ -152,8 +148,7 @@ describe("the review as one buffer", () => {
     const rows = () => dashboard.page.evaluate(() => [...document.querySelectorAll(".outline .outline-row")].map((each) => each.textContent ?? ""));
 
     beforeAll(async () => {
-        // Nothing of the demo's own comes as a key of this goes down, which reads what's laid out.
-        served = await demo({ size: 0, oneBuffer: true, arrives: 3600, grows: 3600 });
+        served = await demo({ size: 0, oneBuffer: true });
         dashboard = await open(served.url);
         review = await dashboard.review();
         await review.holds(DEMO_ITEM);
@@ -185,7 +180,7 @@ describe("the review as one buffer", () => {
     });
 
     it("goes from an agent's name to their own views with gd, their conversation opened, and back with Ctrl+O", async () => {
-        await review.goTo("━━ lup · dev · lup-impl/explore-auth");
+        await review.goTo(EXPLORE_AUTH);
         const banner = await review.line();
         await review.evaluate((view, name) => {
             const at = view.state.doc.lineAt(view.state.selection.main.head);
@@ -209,8 +204,7 @@ describe("the review as one buffer", () => {
 
 describe("a fold-wise selection as the review is laid out anew, in headless Chromium", () => {
     it("is kept, its head under a closed fold, and acts as it did", async () => {
-        // The late question arriving as the selection's made, as what arrives does on the host.
-        await using served = await demo({ size: 6, arrives: 6 });
+        await using served = await demo({ size: 6 });
         await using dashboard = await open(served.url);
         const review = await dashboard.review();
         await review.holds(DEMO_ITEM);
@@ -218,6 +212,8 @@ describe("a fold-wise selection as the review is laid out anew, in headless Chro
         await dashboard.keys.press([" ", "F", "M"]);
         await review.inMode("visual");
         const before = await review.text();
+        // The late question arriving once the selection's made, as what arrives does on the host.
+        await served.arrive();
         await review.until("was laid out anew", (view, was) => view.state.doc.toString() !== was, before);
         await dashboard.page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
         expect(await review.mode()).toBe("visual");

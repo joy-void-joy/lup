@@ -14,7 +14,7 @@ const FOUND = `document.querySelector(".review-buffer .cm-content")?.cmTile?.roo
 const VIEW = `(() => { const view = ${FOUND}; if (view === undefined) { throw new Error("the review's editor is gone from the page"); } return view; })()`;
 
 /** The line a closed fold holds in place of what it holds, until it opens (`UNLAID`, `page/src/review.ts`). */
-const UNLAID = "opening…";
+export const UNLAID = "opening…";
 
 /** Vim's mode in the review. */
 export type Mode = "normal" | "insert" | "visual";

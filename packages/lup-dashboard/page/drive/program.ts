@@ -7,6 +7,8 @@ import { createInterface } from "node:readline";
 export interface Program {
     /** Its first line of output: where it listens, or the display it took. */
     first: string;
+    /** Tell it `line` on its input, and return once it's written; throw where it was started without one (`Starting.input`). */
+    tell(line: string): Promise<void>;
     /** Stop it, and return once it's gone. */
     stop(): Promise<void>;
 }
@@ -17,6 +19,8 @@ export interface Starting {
     what: string;
     cwd?: string;
     env?: NodeJS.ProcessEnv;
+    /** Give it an input `Program.tell` writes to, open while it runs; none unless given. */
+    input?: boolean;
 }
 
 /** The programs running, each stopped as the process ends. */
@@ -28,7 +32,12 @@ const running = new Set<ChildProcess>();
  */
 export async function start(command: string, args: string[], starting: Starting): Promise<Program> {
     stopWithProcess();
-    const child = spawn(command, args, { cwd: starting.cwd, env: starting.env ?? process.env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { cwd: starting.cwd, env: starting.env ?? process.env, stdio: ["pipe", "pipe", "pipe"] });
+    // A write to it once it's gone fails that write (`tell`), rather than the driver's process, as an error no one listens to would.
+    child.stdin.on("error", () => undefined);
+    if (starting.input !== true) {
+        child.stdin.end();
+    }
     running.add(child);
     const gone = new Promise<void>((resolve) => {
         const ended = () => {
@@ -55,6 +64,12 @@ export async function start(command: string, args: string[], starting: Starting)
     lines.on("line", () => undefined);
     return {
         first,
+        async tell(line) {
+            if (starting.input !== true) {
+                throw new Error(`${starting.what} was started with no input to tell it anything on`);
+            }
+            await new Promise<void>((resolve, reject) => child.stdin.write(`${line}\n`, (failed) => (failed == null ? resolve() : reject(failed))));
+        },
         async stop() {
             if (child.exitCode === null && child.signalCode === null) {
                 child.kill("SIGTERM");

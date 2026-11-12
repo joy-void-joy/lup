@@ -23,11 +23,6 @@ async function loaded(): Promise<void> {
 beforeAll(async () => {
     served = await demo({ size: 0 });
     dashboard = await open(served.url);
-    // Nothing read by being on screen, the page told it hasn't the focus, as each reload is: what's read of a trace
-    // folds under a line read as it opens, a place searched for among it (`docs/dashboard.md`, *Review marks*).
-    await dashboard.page.addInitScript(() => {
-        Document.prototype.hasFocus = () => false;
-    });
     await loaded();
 });
 
