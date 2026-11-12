@@ -14,30 +14,36 @@ would mean:
 3. **the room can't type as the operator:** a process in the held room, as
    any package's script could be, tries to write a turn to the session's
    input through `/proc`; the step fails where it can;
-4. **interrupts:** a turn running a long command is ended through the host, and
+4. **a room's command is stopped in time:** a command that never ends, run in
+   the held room through `podman exec` as the host service runs the room's
+   git making a spawn's worktree, or `land`'s in the room, is killed past its
+   limit, and the service's wait on it ends with it; the step fails where the
+   wait outlives the kill, which would let a room hold a spawn or a landing
+   for good;
+5. **interrupts:** a turn running a long command is ended through the host, and
    the session takes the operator's next words; then the same while it waits
    in `wait_inbox`, a call lup holds;
-5. **survives a restart:** the host service stops and starts again, the session
+6. **survives a restart:** the host service stops and starts again, the session
    and its room untouched, and the operator's words still reach it;
-6. **spawns a side job:** asked to, the session calls lup's `spawn` with no
+7. **spawns a side job:** asked to, the session calls lup's `spawn` with no
    concern; a held launch starts in a worktree of its own, recorded as the
    session's, its brief given once as its first turn, and its report reaches
    the session, which answers with it, the side job putting nothing before the
    operator, and ending there;
-7. **resumes its side job:** asked to, the session `send`s the side job a
+8. **resumes its side job:** asked to, the session `send`s the side job a
    question; it's resumed held with what it knew, its answer reaches the
    session, which answers with it, and it ends again;
-8. **hands a concern over:** asked to, the session spawns one with a concern;
+9. **hands a concern over:** asked to, the session spawns one with a concern;
    its turn's end reaches the operator, who talks with it directly, and the
    session hears nothing of it;
-9. **ends:** the host ends the session and its room;
-10. **a builder outlives its spawner:** the one handed a concern runs on once
+10. **ends:** the host ends the session and its room;
+11. **a builder outlives its spawner:** the one handed a concern runs on once
    the session ended, until the trial ends it;
-11. **resumes held:** the session resumes held, its conversation kept;
-12. **a terminal takes it over:** a terminal launch resuming it finds it held,
+12. **resumes held:** the session resumes held, its conversation kept;
+13. **a terminal takes it over:** a terminal launch resuming it finds it held,
    ends it (`--take-over`, asking nothing and answering nothing), and runs a
    turn of its own on it;
-13. **back to held:** held again, it has the terminal's turn in its record.
+14. **back to held:** held again, it has the terminal's turn in its record.
 
 What it doesn't try: the runtime with no held session yet, holds of hours, a
 dashboard's own clicks, a real interactive terminal (its turn runs with `-p`,
@@ -45,8 +51,9 @@ in the terminal's own launch), and a spawn in another repository.
 """
 
 import asyncio
+import threading
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -60,6 +67,7 @@ from lup_dev.git import Git, GitError
 from lup_dev.host.client import HostClient, own_command
 from lup_dev.host.held import End, HeldUp, Interrupt
 from lup_dev.host.protocol import Done, HostError, Listed, Register
+from lup_dev.host.service import Program, executed
 from lup_dev.inbox.protocol import (
     Exchanged,
     FileReport,
@@ -218,6 +226,35 @@ sys.exit(0 if wrote else 2)
     forged: timedelta = timedelta(minutes=1)
     """How long a turn written from inside the room is given to be answered,
     for the report to say whether it got through."""
+    executing: Callable[[Program], Awaitable[Ran]] = executed
+    """Runs a program as the host service runs one (`executed`): `podman exec`
+    into the held room, killed past its `within` with what it started."""
+    stopping: timedelta = timedelta(seconds=5)
+    """How long the command that never ends is given in the room before it's
+    killed, as the service gives the room's git making a spawn's worktree."""
+    stopped: timedelta = timedelta(seconds=30)
+    """How long past `stopping` the service's wait on it may take to end,
+    before the step fails: killing `podman exec`'s process group ends it at
+    once, unless something outside the group holds its output open."""
+    lasting: str = """
+import os, signal
+
+found = []
+for each in os.listdir("/proc"):
+    try:
+        with open(f"/proc/{each}/cmdline", "rb") as read:
+            line = read.read()
+    except OSError:
+        continue
+    if line == b"sleep\x003599\x00":
+        os.kill(int(each), signal.SIGKILL)
+        found.append(each)
+print(len(found))
+"""
+    """What the trial runs in the held room with `python3` once `podman exec`
+    was killed: kill each `sleep 3599` still running there, the command that
+    never ends, and print how many, which says whether the room's own command
+    runs on past the kill."""
     clock: Clock
     say: Callable[[str], None]
     worktree: Path
@@ -276,6 +313,16 @@ sys.exit(0 if wrote else 2)
                     "among it, can speak to the agent in the operator's voice"
                 ),
                 tried=self.unforged,
+            ),
+            Stage(
+                name="a room's command is stopped in time",
+                meaning=(
+                    "the host service's wait on a command it runs in a room "
+                    "through `podman exec`, the room's git making a spawn's "
+                    "worktree or `land`'s, outlives the limit it's killed at: a "
+                    "room could hold a spawn, or a landing, for good"
+                ),
+                tried=self.stopped_in_time,
             ),
             Stage(
                 name="interrupts",
@@ -459,6 +506,61 @@ sys.exit(0 if wrote else 2)
             f"answering it, @{forged.number}: {seen}"
         )
         raise TrialError(message)
+
+    def stopped_in_time(self) -> str:
+        """Run a command that never ends in the held room, through `podman exec` as the host service runs the room's git making a spawn's worktree, given `stopping`; see the service's wait on it end within `stopped` of that, killed, and say whether the command ran on in the room.
+
+        The wait runs in a thread of its own, which the trial leaves behind
+        where it never ends.
+        """
+        launch = self.launch()
+        if launch.container is None:
+            message = "the held launch names no container to try it in"
+            raise TrialError(message)
+        program = Program(
+            command=["podman", "exec", launch.container, "sleep", "3599"],
+            payload="",
+            within=self.stopping,
+        )
+        ran: list[Ran] = []
+
+        def waited() -> None:
+            ran.append(asyncio.run(self.executing(program)))
+
+        waiting = threading.Thread(target=waited, daemon=True)
+        began = self.clock.now()
+        waiting.start()
+        waiting.join((self.stopping + self.stopped).total_seconds())
+        took = self.clock.now() - began
+        if not ran:
+            message = (
+                f"`podman exec` given {spelled(self.stopping)} in the room was "
+                f"still waited on {spelled(self.stopping + self.stopped)} after it "
+                "started: something outside its process group holds its output open"
+            )
+            raise TrialError(message)
+        [ended] = ran
+        if ended.status != 124:
+            message = (
+                f"`podman exec` given {spelled(self.stopping)} in the room ended "
+                f"with status {ended.status}, not killed past it: {ended.said()}"
+            )
+            raise TrialError(message)
+        lasted = self.inside(launch.container, ["python3", "-c", self.lasting])
+        counted = lasted.output.strip()
+        match lasted.status, counted:
+            case 0, "0":
+                room = "the command itself ended with it"
+            case 0, _:
+                room = (
+                    "the command itself ran on in the room, until the trial killed it"
+                )
+            case _:
+                room = f"whether the command ran on in the room wasn't seen: {counted}"
+        return (
+            f"`podman exec` given {spelled(self.stopping)} in the room was killed "
+            f"past it, and the wait on it ended in {spelled(took)}; {room}."
+        )
 
     def answer(self, after: Item, word: str) -> Item | None:
         """Return the session's first item to the operator since `after` holding `word`; none where none does."""

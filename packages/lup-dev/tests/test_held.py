@@ -51,7 +51,7 @@ from lup_dev.host.protocol import (
     Spawner,
     Talker,
 )
-from lup_dev.host.service import Dispatcher, Route, unix_server
+from lup_dev.host.service import Dispatcher, Program, Route, unix_server
 from lup_dev.host.watch import Changes
 from lup_dev.inbox.protocol import (
     Exchange,
@@ -654,6 +654,19 @@ def played(tmp_path: Path, clock: FakeClock) -> tuple[Played, Trial]:
             output="Launch `trial` ended; its session is taken over here.\nKIWI\n",
         )
 
+    def inside(container: str, command: list[str]) -> TerminalRun:
+        if "3599" in command[-1]:
+            # The command `podman exec` ran, which killing it left running.
+            return TerminalRun(status=0, output="1\n")
+        return TerminalRun(
+            status=2, output="opening /proc/7/fd/0: [Errno 6] No such device or address"
+        )
+
+    async def killed(program: Program) -> Ran:
+        """Answer as `executed` does for a program killed past its `within`."""
+        late = f"ran past {program.within.total_seconds():g} s, and was killed"
+        return Ran(command=program.command, status=124, error=late.encode())
+
     trial = Trial(
         host=host,
         spawn=spawn,
@@ -661,9 +674,8 @@ def played(tmp_path: Path, clock: FakeClock) -> tuple[Played, Trial]:
         running=lambda container: any(
             each.container == container for each in host.served
         ),
-        inside=lambda container, command: TerminalRun(
-            status=2, output="opening /proc/7/fd/0: [Errno 6] No such device or address"
-        ),
+        inside=inside,
+        executing=killed,
         clock=clock,
         say=lambda _: None,
         worktree=tmp_path / "spawn-trial-1",
@@ -687,6 +699,7 @@ def test_the_trial_tries_each_step_and_files_what_it_saw_under_the_session(
         ("held", True),
         ("answers", True),
         ("the room can't type as the operator", True),
+        ("a room's command is stopped in time", True),
         ("interrupts", True),
         ("survives a restart", True),
         ("spawns a side job", True),
@@ -701,7 +714,7 @@ def test_the_trial_tries_each_step_and_files_what_it_saw_under_the_session(
     report = written(host.items[number - 1])
     assert report.startswith(
         f"**Spawn's trial**, `lup-dev spawn trial`, in {tmp_path / 'spawn-trial-1'}: "
-        "13 of 13 steps passed."
+        "14 of 14 steps passed."
     )
     assert "**What it means:** a session lup holds with no terminal works" in report
     assert host.items[number - 1].sender == host.conversation
@@ -731,7 +744,7 @@ def test_a_trial_whose_session_never_starts_says_so_and_files_it_anyway(
 
     assert [(each.name, each.passed) for each in steps] == [("held", False)]
     report = written(host.items[number - 1])
-    assert "0 of 13 steps passed." in report
+    assert "0 of 14 steps passed." in report
     assert (
         "- **held**, failed in 0 s: the launcher of launch h1 ended before its "
         "session was up"
@@ -739,9 +752,10 @@ def test_a_trial_whose_session_never_starts_says_so_and_files_it_anyway(
     assert "**held** failing means no session is held on this machine" in report
     assert (
         "Not tried, after that: answers, the room can't type as the operator, "
-        "interrupts, survives a restart, spawns a side job, resumes its side job, "
-        "hands a concern over, ends, a builder outlives its spawner, resumes held, "
-        "a terminal takes it over, back to held."
+        "a room's command is stopped in time, interrupts, survives a restart, "
+        "spawns a side job, resumes its side job, hands a concern over, ends, a "
+        "builder outlives its spawner, resumes held, a terminal takes it over, back "
+        "to held."
     ) in report
     sender = host.items[number - 1].sender
     assert isinstance(sender, Conversation)
@@ -895,6 +909,81 @@ def test_a_terminal_launch_that_asks_anything_fails_its_step_unanswered(
     assert not taking.passed
     assert taking.seen.startswith(
         "the terminal launch asked something, which the trial answers nothing to"
+    )
+
+
+def test_a_room_s_command_killed_past_its_limit_passes_saying_it_ran_on_in_the_room(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    _, trial = played(tmp_path, clock)
+    run: list[Program] = []
+    executing = trial.executing
+
+    async def recorded(program: Program) -> Ran:
+        run.append(program)
+        return await executing(program)
+
+    trial.executing = recorded
+    steps = trial.run()
+
+    [stopped] = [
+        each for each in steps if each.name == "a room's command is stopped in time"
+    ]
+    assert stopped.passed
+    assert stopped.seen == (
+        "`podman exec` given 5 s in the room was killed past it, and the wait on it "
+        "ended in 0 s; the command itself ran on in the room, until the trial killed "
+        "it."
+    )
+    [program] = run
+    assert program.command == ["podman", "exec", "lup-trial", "sleep", "3599"]
+    assert program.within == timedelta(seconds=5)
+
+
+def test_a_room_s_command_whose_wait_outlives_its_kill_fails_its_step_and_the_trial_goes_on(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    """As where something outside `podman exec`'s process group held its output open: the wait is left behind, in a thread of its own."""
+    _, trial = played(tmp_path, clock)
+
+    async def held(program: Program) -> Ran:
+        await asyncio.Event().wait()
+        return Ran(command=program.command, status=0)
+
+    trial.executing = held
+    trial.stopping = timedelta(0)
+    trial.stopped = timedelta(seconds=0.2)
+    steps = trial.run()
+
+    [stopped] = [
+        each for each in steps if each.name == "a room's command is stopped in time"
+    ]
+    assert not stopped.passed
+    assert stopped.seen == (
+        "`podman exec` given 0 s in the room was still waited on 0 s after it "
+        "started: something outside its process group holds its output open"
+    )
+    [interrupts] = [each for each in steps if each.name == "interrupts"]
+    assert interrupts.passed
+
+
+def test_a_room_s_command_that_ends_on_its_own_fails_its_step(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    _, trial = played(tmp_path, clock)
+
+    async def ended(program: Program) -> Ran:
+        return Ran(command=program.command, status=0)
+
+    trial.executing = ended
+    steps = trial.run()
+
+    [stopped] = [
+        each for each in steps if each.name == "a room's command is stopped in time"
+    ]
+    assert not stopped.passed
+    assert stopped.seen.startswith(
+        "`podman exec` given 5 s in the room ended with status 0, not killed past it"
     )
 
 
