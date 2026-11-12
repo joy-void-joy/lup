@@ -35,7 +35,7 @@ raises `GitHubError`, saying why in `gh`'s own words.
 """
 
 import shlex
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -76,13 +76,18 @@ class GitHubError(LupDevError):
 async def ran(arguments: list[str], directory: Path, given: str = "") -> str:
     """Run `gh` with `arguments` in the git directory `directory`, the git it runs pinned there, `given` on its input, and return what it printed.
 
-    Raise `GitHubError` where it fails, saying why: `gh` that couldn't run (not
-    installed, or `directory` gone), without a GitHub login, or ending with a
-    failure, in its own words.
+    It's killed past two minutes: GitHub answers in seconds, a search of a
+    thousand matches reads ten pages, and the git `gh` runs reads a directory
+    a room writes (`Program.within`). Raise `GitHubError` where it fails,
+    saying why: `gh` that couldn't run (not installed, or `directory` gone),
+    without a GitHub login, or ending with a failure, in its own words.
     """
     command = [PROGRAM, *arguments]
     program = Program(
-        command=[*pinning(directory), *command], payload=given, directory=directory
+        command=[*pinning(directory), *command],
+        payload=given,
+        directory=directory,
+        within=timedelta(minutes=2),
     )
     answer = await executed(program)
     error = answer.said()

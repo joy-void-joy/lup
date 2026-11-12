@@ -128,6 +128,7 @@ import secrets
 import textwrap
 from collections.abc import Callable, Coroutine, Generator, Sequence
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal, override
 
 from pydantic import TypeAdapter
@@ -213,8 +214,6 @@ from lup_ledger import threads as ledger
 from lup_ledger.parties import Conversation, Operator, Party
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from lup_dev.host.courier import Conversation as Caller
     from lup_ledger.threads import Thread
 
@@ -910,11 +909,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     settling: dict[int, asyncio.Event] = {}
     """By approval's number, in memory: set once the approval is answered, which
     wakes every launch waiting on it."""
-    settle_hold: Callable[[HeldChange, bool, str], str | None] | None = None
-    """Writes the operator's answer to a held change where its hook waits for
-    it, yes or no and their comment, and returns what to tell the conversation
-    that made it where no call waits to hear it; none where this service answers
-    no hold."""
+    settle_hold: Callable[[HeldChange, Path, bool, str], str | None] | None = None
+    """Writes the operator's answer to a held change of a repository, by its
+    git directory, where its hook waits for it, yes or no and their comment,
+    and returns what to tell the conversation that made it where no call waits
+    to hear it; none where this service answers no hold."""
     hold_unheard: Callable[[HeldChange], str | None] = lambda _: None
     """Returns what to tell the conversation that made a held change, answered
     already, where neither a call nor their inbox told them, noting it told."""
@@ -3018,7 +3017,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     f"{cited(number)} is a held change, which this service can't answer"
                 )
                 raise InboxError(message)
-            unheard = self.settle_hold(item.reason, approved, comment)
+            if not isinstance(item.sender, Conversation):
+                message = f"{cited(number)} is a held change no conversation made"
+                raise InboxError(message)
+            unheard = self.settle_hold(
+                item.reason, item.sender.repository, approved, comment
+            )
         decided = Decided(at=self.clock.now(), approved=approved, comment=comment)
         answered = self.inbox.kept(item.model_copy(update={"state": decided}))
         self.settle(number)

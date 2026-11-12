@@ -690,10 +690,11 @@ def scratch_worktree(beside: Path, git: Git, name: str, commit: str) -> Path:
     run in a worktree, git would follow the worktree's git directory, which a
     room writes, its `commondir` among it, to a `config` whose filters the
     checkout would run on the host (`docs/field-notes.md`, *Host-side git in a
-    repository the room writes*).
+    repository the room writes*). Given as long as git checking out a whole
+    worktree is (`Git.whole`).
     """
     scratch = beside / name
-    git.run("worktree", "add", "--detach", str(scratch), commit)
+    git.run("worktree", "add", "--detach", str(scratch), commit, within=git.whole)
     return scratch
 
 
@@ -705,8 +706,10 @@ class Scratch(Model):
     git: Git
 
     def removed(self) -> None:
-        """Remove the worktree, whatever is in it."""
-        self.git.run("worktree", "remove", "--force", str(self.path))
+        """Remove the worktree, whatever is in it, given as long as git removing a whole worktree is (`Git.whole`)."""
+        self.git.run(
+            "worktree", "remove", "--force", str(self.path), within=self.git.whole
+        )
 
 
 def scratched(
