@@ -6,8 +6,11 @@ import type { Review } from "./review.ts";
 import { timed } from "./timing.ts";
 import { DEMO_ITEM, typing } from "./typing.ts";
 
-/** A line of the demo's under a fold as the page loads: an item's context, in a conversation's drawer. */
-const FOLDED = "→ @58 how it felt to you · unread";
+/**
+ * A line of the demo's under a fold once explore-auth's trace is open, closed until then, which a closed drawer lays out
+ * nothing of (`docs/dashboard.md`, *The drawers*): the end of what they told their lead, folded under its line there.
+ */
+const FOLDED = "my note to the operator says where each is.";
 
 let served: Demo;
 let dashboard: Dashboard;
@@ -29,6 +32,15 @@ afterAll(async () => {
     await served?.close();
 });
 
+/** Open every conversation's trace, as Space F v then zo does, so what they hold is laid out: a run of calls among it. */
+async function everyTrace(): Promise<void> {
+    await dashboard.keys.press(["g", "g", " ", "F", "v"]);
+    await review.inMode("visual");
+    await dashboard.keys.press(["z", "o"]);
+    await review.inMode("normal");
+    await review.until("laid out a run of calls", (view) => /\n· \d+ calls: /.test(view.state.doc.toString()));
+}
+
 /** Whether a line the review draws holds `text`: false where a fold hides every such line. */
 const drawn = (text: string) =>
     dashboard.page.evaluate((text) => [...document.querySelectorAll(".review-buffer .cm-line")].some((line) => line.textContent?.includes(text)), text);
@@ -40,6 +52,10 @@ describe("the review's editor, in headless Chromium", () => {
     });
 
     it("goes to a line a fold hides with vim's search, which opens the folds around it", async () => {
+        await review.until("lay out explore-auth's trace", (view) => /\n━━ lup · dev · lup-impl\/explore-auth[^\n]*\n(?:(?!━━ )[^\n]*\n)*trace · /.test(view.state.doc.toString()));
+        await review.goTo("━━ lup · dev · lup-impl/explore-auth");
+        await review.unfold("trace · ");
+        expect(await review.text()).toContain(FOLDED);
         expect(await drawn(FOLDED)).toBe(false);
         await review.goTo(FOLDED);
         expect(await review.line()).toContain(FOLDED);
@@ -72,6 +88,7 @@ describe("the review's editor, in headless Chromium", () => {
     });
 
     it("closes a run of calls with zc from any of its rows, each a closed fold of its own, as vim's closes what holds a closed fold", async () => {
+        await everyTrace();
         const run = (await review.text()).split("\n").find((line) => /^· \d+ calls: /.test(line));
         if (run === undefined) {
             throw new Error("the demo holds no run of calls");
@@ -91,6 +108,7 @@ describe("the review's editor, in headless Chromium", () => {
     });
 
     it("counts a mark once, though the editor's state holds its decorations twice", async () => {
+        await everyTrace();
         const held = await review.evaluate((view) => {
             let count = 0;
             for (const value of (view.state as unknown as { values: unknown[] }).values) {

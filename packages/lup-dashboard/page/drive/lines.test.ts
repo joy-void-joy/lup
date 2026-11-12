@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { open, type Dashboard } from "./dashboard.ts";
 import { demo, type Demo } from "./demo.ts";
-import type { Review } from "./review.ts";
+import { UNLAID, type Review } from "./review.ts";
 import { DEMO_ITEM } from "./typing.ts";
 
 let served: Demo;
@@ -174,6 +174,16 @@ describe("moving through the review, line by line, in headless Chromium", () => 
             await dashboard.keys.press(["]", drawer === "since you approved" ? "s" : drawer === "messages" ? "M" : "v"]);
             await review.until(`go to the ${drawer}`, (view, wanted) => view.state.doc.lineAt(view.state.selection.main.head).text.startsWith(wanted), drawer);
             await dashboard.keys.press(["z", "o"]);
+            // What it holds laid out as it opens, in place of the line standing for it, before a walk counts its lines.
+            await review.until(
+                `lay out the ${drawer}`,
+                (view, unlaid) => {
+                    const doc = view.state.doc;
+                    const line = doc.lineAt(view.state.selection.main.head);
+                    return line.number < doc.lines && doc.line(line.number + 1).text !== unlaid;
+                },
+                UNLAID,
+            );
         }
         await to("first");
         expect(await stepped("j")).toEqual([]);

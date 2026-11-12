@@ -47,6 +47,8 @@ export interface Folding extends Span {
     scope?: boolean;
     /** Whether what it holds is read from another view as it opens and isn't read yet: its placeholder counts no lines. */
     unread?: boolean;
+    /** Whether what it holds isn't laid out while it's closed, one line standing for it: its placeholder counts no lines. */
+    unlaid?: boolean;
 }
 
 /** One row of a thing said: its text, where its words start in it, and where they start in the words kept. */
