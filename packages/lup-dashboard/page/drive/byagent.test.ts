@@ -1,6 +1,7 @@
 // The review by agent, as the page opens and as one buffer beside the overview, the fallback its address may ask for
 // (`?panes=off`; `docs/dashboard.md`, *The review*): what agents tell each other is in their messages drawers, each way alike.
 // A fold-wise selection lasting as the review is laid out anew, and what only the one buffer does.
+import type { Request } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { open, type Dashboard } from "./dashboard.ts";
@@ -10,6 +11,22 @@ import { DEMO_ITEM } from "./typing.ts";
 
 /** explore-auth's banner, over their drawers. */
 const EXPLORE_AUTH = "━━ lup · dev · lup-impl/explore-auth";
+
+/**
+ * The line of explore-auth's drawer of `kind`, among theirs under their banner, as the review stands; null where they
+ * have none. Another agent's drawer may say the same, as grep-tokens' messages do once the late question has come.
+ */
+const theirs = (review: Review, kind: string) =>
+    review.evaluate(
+        (view, { banner, kind }) => {
+            const lines = view.state.doc.toString().split("\n");
+            const at = lines.findIndex((each) => each.startsWith(banner));
+            const after = at === -1 ? [] : lines.slice(at + 1);
+            const end = after.findIndex((each) => each.startsWith("━━ "));
+            return (end === -1 ? after : after.slice(0, end)).find((each) => each.startsWith(`${kind} · `)) ?? null;
+        },
+        { banner: EXPLORE_AUTH, kind },
+    );
 
 /** The banner of explore-auth's lead, lup-impl, whose own goes on past the name, over their drawers. */
 const LUP_IMPL = "━━ lup · dev · lup-impl · ";
@@ -91,20 +108,33 @@ describe.each(ways)("the review by agent, %s", (_way, options) => {
     });
 
     it("reaches a messages drawer by its letter, and marks it read with Space d as the reply is sent, the trace's mark as it was", async () => {
+        // Each mark the page moves on the host, as it asks.
+        const marked: { key: Record<string, unknown> }[] = [];
+        const asked = (request: Request) => {
+            const body = request.method() === "POST" && request.url().endsWith("/api/ask") ? (JSON.parse(request.postData() ?? "{}") as Record<string, unknown>) : {};
+            if (body.kind === "review-mark") {
+                marked.push(...(body.marks as { key: Record<string, unknown> }[]));
+            }
+        };
+        dashboard.page.on("request", asked);
         await review.goTo(EXPLORE_AUTH);
         await dashboard.keys.press(["]", "M"]);
         await review.until("go to the next messages drawer", (view) => view.state.doc.lineAt(view.state.selection.main.head).text.startsWith("messages · "));
         const before = await review.line();
         expect(before).toMatch(/ new$/);
-        const trace = (await review.text()).split("\n").find((each, at, lines) => lines[at - 1] !== undefined && each.startsWith("trace · ") && lines.slice(0, at).lastIndexOf(before) >= 0);
+        expect(await theirs(review, "messages")).toBe(before);
         await dashboard.keys.press([" ", "d"]);
         await dashboard.page.waitForFunction(() => document.querySelector(".status")?.textContent?.includes("mark their messages read") === true);
         await dashboard.keys.press(["Control+Enter"]);
         await dashboard.page.waitForFunction(() => document.querySelector(".bar .said")?.textContent?.startsWith("Sent") === true);
+        dashboard.page.off("request", asked);
         // What's been read is no longer new, and the comment on another's words went to them.
         expect(await dashboard.page.locator(".bar .said").innerText()).toContain("lup-impl/explore-auth");
-        await review.until("say the drawer holds nothing new", (view, was) => !view.state.doc.toString().includes(was), before);
-        expect((await review.text()).split("\n").filter((each) => each === trace).length).toBeGreaterThan(0);
+        await expect.poll(() => theirs(review, "messages"), { timeout: 30_000 }).toMatch(/^messages · \d+$/);
+        // The messages' mark alone: their trace's says it's new no more all the same, the operator's words to them
+        // reading what had reached them as they were sent (`docs/dashboard.md`, *Review marks*).
+        expect(marked.filter((each) => each.key.drawer === "messages")).not.toEqual([]);
+        expect(marked.filter((each) => each.key.drawer !== "messages")).toEqual([]);
         expect(dashboard.thrown).toEqual([]);
     });
 });

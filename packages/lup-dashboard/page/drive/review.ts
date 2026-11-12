@@ -56,8 +56,8 @@ export interface Review {
     /**
      * Go to the first line after the cursor saying `text`, as `goTo` does, open the fold it's the summary line of with
      * `za`, and return once what that fold holds is laid out: a closed drawer, a closed fold of a drawer's view and an
-     * item's closed context hold one line standing for it, `UNLAID`, until they open (`docs/dashboard.md`, *The
-     * drawers*), so a search finds nothing of what they hold before.
+     * item's closed context hold one line standing for it, `UNLAID`, until they open, so a search finds nothing of
+     * what they hold before (`docs/dashboard.md`, *The drawers*).
      */
     unfold(text: string): Promise<void>;
     /**
