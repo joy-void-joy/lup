@@ -88,6 +88,43 @@ def test_an_interrupt_unanswered_within_its_patience_raises() -> None:
         asyncio.run(unanswered())
 
 
+def test_a_turn_sent_returns_at_once_though_the_runtime_reads_none_of_its_input() -> (
+    None
+):
+    """A runtime stopped, as any process of its room can stop it, reads nothing: what's sent waits on its input, and the launcher, answering the host, never waits with it."""
+
+    async def sending() -> tuple[int, int]:
+        ours, theirs = socket.socketpair()
+        reading, writing = await asyncio.open_unix_connection(sock=ours)
+        held = ClaudeHeld(pipes=Pipes(input=writing, output=reading), said=print)
+        sent = 0
+        try:
+            for _ in range(40):
+                await asyncio.wait_for(held.send("x" * 20_000), 2)
+                sent += 20_000
+        finally:
+            writing.close()
+            theirs.close()
+        return sent, 40 * 20_000
+
+    sent, given = asyncio.run(sending())
+
+    assert sent == given
+
+
+def test_a_turn_sent_to_a_session_whose_input_closed_raises() -> None:
+    async def sending() -> None:
+        ours, theirs = socket.socketpair()
+        reading, writing = await asyncio.open_unix_connection(sock=ours)
+        held = ClaudeHeld(pipes=Pipes(input=writing, output=reading), said=print)
+        writing.close()
+        theirs.close()
+        await held.send("hello")
+
+    with pytest.raises(HeldError, match="input is closed"):
+        asyncio.run(sending())
+
+
 def test_a_request_waiting_as_the_session_ends_fails_and_one_of_its_own_is_refused() -> (
     None
 ):

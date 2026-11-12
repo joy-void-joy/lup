@@ -1436,13 +1436,20 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         await self.wake(party)
 
     async def rewoken(self) -> None:
-        """Give each idle held session what waits for them that nothing would tell, at the sweep: where giving it failed, as at their call-up, an idle held session sends no hook that would tell it, so it's given again until it's given (`wake`)."""
+        """Give each idle held session what waits for them that nothing would tell, at the sweep: where giving it failed, as at their call-up, an idle held session sends no hook that would tell it, so it's given again until it's given (`wake`).
+
+        Each is given at once, apart from the others, so a launcher slow to
+        answer holds no other session's, nor the sweep past its own limit
+        (`Holders.answering`).
+        """
         if self.holders is None:
             return
-        for launch in self.holders.held:
-            party = self.running(launch)
-            if party is not None:
-                await self.wake(party)
+        parties = [
+            party
+            for launch in self.holders.held
+            if (party := self.running(launch)) is not None
+        ]
+        await asyncio.gather(*(self.wake(each) for each in parties))
 
     @staticmethod
     def spawner_of(launch: Register, party: Conversation) -> Conversation | None:

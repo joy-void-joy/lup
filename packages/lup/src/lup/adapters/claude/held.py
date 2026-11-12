@@ -300,6 +300,15 @@ class ClaudeHeld(MutableModel, HeldSession, arbitrary_types_allowed=True):
                 pass
 
     async def written(self, line: Model) -> None:
-        """Write one line to the session's input, whole, and wait until it's taken."""
-        self.pipes.input.write(f"{line.model_dump_json()}\n".encode())
-        await self.pipes.input.drain()
+        """Put one line on the session's input, whole, and return at once, whether or not the runtime reads it; raise `HeldError` where its input is closed.
+
+        Never waiting for the runtime to read it: any process of the room can
+        stop the runtime, which then reads nothing, and a wait for its input to
+        drain would hold the launcher's answer to the host with it. What isn't
+        read yet waits in the launcher, the runtime reading it as it goes on.
+        """
+        writer = self.pipes.input
+        if writer.is_closing():
+            message = "the session's input is closed: its runtime has ended"
+            raise HeldError(message)
+        writer.write(f"{line.model_dump_json()}\n".encode())

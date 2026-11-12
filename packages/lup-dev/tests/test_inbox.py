@@ -15534,6 +15534,96 @@ def test_a_side_job_ends_at_its_report_and_its_spawner_s_send_resumes_it(
 # another session's own.
 
 
+class Stalled(Socket):
+    """A held launch's launcher that reads each request whole and never answers, as one waiting for its runtime to read its input did, once any process of the room stopped that runtime."""
+
+    def __init__(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.held: list[socket.socket] = []
+        super().__init__(path)
+
+    @override
+    def serve(self) -> None:
+        while True:
+            try:
+                connection, _ = self.listening.accept()
+            except OSError:
+                return
+            chunks: list[bytes] = []
+            while chunk := connection.recv(65536):
+                chunks.append(chunk)
+            self.frames.append(b"".join(chunks).decode())
+            self.held.append(connection)
+            self.rang.set()
+
+
+def test_the_sweep_gives_each_held_session_apart_and_none_waits_past_a_launcher_that_never_answers(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """A stopped runtime once held its launcher's answer, the sweep's give with it, and every other session's after it: each give waits `Holders.answering` at most, at once."""
+    numbers: dict[str, int] = {}
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        holders = delivery.holders
+        assert holders is not None
+        holders.answering = timedelta(seconds=2)
+        for name in ["one", "two", "three"]:
+            launched(machine, clock, tmp_path / name, name, "claude", held=True)
+            hook = machine.host.launch(name).hook
+            send(hook, claude("SessionStart", source="startup"))
+            send(hook, claude("Stop", stop_hook_active=False))
+            # No launcher listens yet: what's sent isn't given, and waits.
+            inbox("send", name, f"For {name}.")
+            numbers[name] = newest(delivery)
+        stalled = [Stalled(machine.launch(each).held) for each in ["one", "two"]]
+        launcher = Launcher(machine.launch("three").held)
+        began = time.monotonic()
+        asyncio.run(asyncio.wait_for(delivery.rewoken(), 30))
+        took = time.monotonic() - began
+        [given] = launcher.ringing()
+        for each in stalled:
+            each.close()
+        launcher.close()
+    assert [len(each.frames) for each in stalled] == [1, 1]
+    # The two stalled gives waited at once, not one after the other.
+    assert took < 3.5
+    assert note(numbers["three"], "For three.") in HeldPrompt.model_validate_json(
+        given
+    ).text
+    assert any(
+        line.startswith("one: what waits for")
+        and "didn't answer within 0:00:02" in line
+        for line in said
+    )
+
+
+def test_the_operator_s_words_for_a_held_session_whose_launcher_never_answers_come_back_at_its_limit(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        holders = delivery.holders
+        assert holders is not None
+        holders.answering = timedelta(seconds=1)
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        stalled = Stalled(machine.launch("one").held)
+        done = threading.Event()
+
+        def sending() -> None:
+            inbox("send", "one", "Anyone?")
+            done.set()
+
+        threading.Thread(target=sending, daemon=True).start()
+        returned = done.wait(30)
+        number = newest(delivery)
+        state = delivery.inbox.item(number).state
+        stalled.close()
+    assert returned
+    # Not given: it waits, told at their next call.
+    assert state == Waiting()
+
+
 def test_a_terminal_room_naming_the_session_a_held_launch_runs_is_answered_with_nothing(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
