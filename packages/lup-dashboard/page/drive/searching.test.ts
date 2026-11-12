@@ -18,6 +18,8 @@ async function loaded(): Promise<void> {
     review = await dashboard.review();
     await review.holds(DEMO_ITEM);
     await review.settled(1500);
+    // The drawers each place is in laid out as the host answers their views, which a loaded machine does after the review has settled.
+    await review.until("lay out the five places of the line searched", (view, text) => view.state.doc.toString().split(text).length - 1 === 5, LINE);
 }
 
 beforeAll(async () => {

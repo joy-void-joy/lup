@@ -13,7 +13,9 @@ let dashboard: Dashboard;
 let review: Review;
 
 beforeAll(async () => {
-    served = await demo({ size: 0 });
+    // The late question there from the first: it gives the lines around it, @66's the longest of them, Space h on the
+    // parser.
+    served = await demo({ size: 0, arrives: 0 });
     dashboard = await open(served.url);
     review = await dashboard.review();
     await review.holds(DEMO_ITEM);
@@ -59,12 +61,10 @@ const overrun = () =>
 
 describe("every line of the page on one row, at the demo's width, in headless Chromium", () => {
     it("keeps the line of keys and the line under the review to one row on every drawer's line, banner and item header", async () => {
-        // The demo's late question first, however fast this runs: it gives the lines around it, @66's the longest of them,
-        // Space h on the parser, and nothing the demo brings after it makes a line longer.
         await review.holds("── @61 question");
         const wrong: string[] = [];
         let heads = 0;
-        // Each found as it's gone to, by its place among them: the parser's two writes come later, and move the text.
+        // Each found as it's gone to, by its place among them, as the review is laid out then.
         while (
             await review.evaluate((view, index) => {
                 const found: number[] = [];
