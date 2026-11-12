@@ -2,7 +2,7 @@
 
 A test's declaration goes through the real `ask`: its layers, the output tool
 and its guard, the record. Only the turn is scripted. A typed answer, and what
-the agent says beside it or instead (a note, a concern, how it felt, being
+the agent says beside it or instead (a note, a concern, a friction, how it felt, being
 blocked, stopping), go through the real tools, so validation and `before` hooks
 run as they would on a real turn.
 
@@ -16,8 +16,8 @@ from pydantic import BaseModel, JsonValue
 from lup.errors import LupError
 from lup.sessions.contract import Adapter, RawTurn, Seam, TurnRequest
 from lup.sessions.declaration import Declaration
-from lup.sessions.results import Concern, HowItFelt, Usage
-from lup.tools.speaking import blocked, concern, how_it_felt, note, stop
+from lup.sessions.results import Concern, Friction, HowItFelt, Usage
+from lup.tools.speaking import blocked, concern, friction, how_it_felt, note, stop
 from lup.types import Model, MutableModel
 
 
@@ -30,6 +30,7 @@ class Saying(Model):
 
     notes: list[str] = []
     concerns: list[Concern] = []
+    frictions: list[Friction] = []
     how_it_felt: list[HowItFelt] = []
 
 
@@ -86,7 +87,7 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
     """Scripted answers for a test's asks, and every ask made, in order.
 
     Each script but `fail` takes what the agent says before it: `notes`,
-    `concerns` and `how_it_felt`.
+    `concerns`, `frictions` and `how_it_felt`.
     """
 
     queued: list[Queued] = []
@@ -99,6 +100,7 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
         *,
         notes: list[str] | None = None,
         concerns: list[Concern] | None = None,
+        frictions: list[Friction] | None = None,
         how_it_felt: list[HowItFelt] | None = None,
     ) -> None:
         """Queue `value` as the accepted answer to the next ask for `output`, after what the agent says."""
@@ -106,6 +108,7 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
             submissions=[value.model_dump(mode="json")],
             notes=notes or [],
             concerns=concerns or [],
+            frictions=frictions or [],
             how_it_felt=how_it_felt or [],
         )
         self.queue(output, submitting)
@@ -116,6 +119,7 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
         *,
         notes: list[str] | None = None,
         concerns: list[Concern] | None = None,
+        frictions: list[Friction] | None = None,
         how_it_felt: list[HowItFelt] | None = None,
     ) -> None:
         """Queue `text` as the answer to the next untyped ask, after what the agent says."""
@@ -123,6 +127,7 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
             text=text,
             notes=notes or [],
             concerns=concerns or [],
+            frictions=frictions or [],
             how_it_felt=how_it_felt or [],
         )
         self.queue(None, texting)
@@ -145,6 +150,7 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
         *,
         notes: list[str] | None = None,
         concerns: list[Concern] | None = None,
+        frictions: list[Friction] | None = None,
         how_it_felt: list[HowItFelt] | None = None,
     ) -> None:
         """Queue the agent saying they're blocked, instead of an answer, for the next ask of `output`."""
@@ -152,6 +158,7 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
             problem=problem,
             notes=notes or [],
             concerns=concerns or [],
+            frictions=frictions or [],
             how_it_felt=how_it_felt or [],
         )
         self.queue(output, blocking)
@@ -163,6 +170,7 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
         *,
         notes: list[str] | None = None,
         concerns: list[Concern] | None = None,
+        frictions: list[Friction] | None = None,
         how_it_felt: list[HowItFelt] | None = None,
     ) -> None:
         """Queue the agent stopping by choice, instead of an answer, for the next ask of `output`."""
@@ -170,6 +178,7 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
             why=why,
             notes=notes or [],
             concerns=concerns or [],
+            frictions=frictions or [],
             how_it_felt=how_it_felt or [],
         )
         self.queue(output, stopping)
@@ -224,6 +233,8 @@ class FakeAdapter(Model, Adapter, arbitrary_types_allowed=True):
             await toolbox.call(note.name, {"remark": remark})
         for each in script.concerns:
             await toolbox.call(concern.name, each.model_dump(mode="json"))
+        for each in script.frictions:
+            await toolbox.call(friction.name, each.model_dump(mode="json"))
         for each in script.how_it_felt:
             await toolbox.call(how_it_felt.name, each.model_dump(mode="json"))
         match script:

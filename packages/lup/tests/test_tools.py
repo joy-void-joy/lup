@@ -7,11 +7,19 @@ from pydantic import BaseModel
 
 import lup
 from lup.doors import DoorError, bound, declared
-from lup.sessions.results import Concern, HowItFelt
+from lup.sessions.results import Concern, Friction, HowItFelt
 from lup.sessions.submission import End, GiveUp, KeepGoing, Toolbox
 from lup.tools import Allow, Deny, Submit, Tool
 from lup.tools.serving import Answer
-from lup.tools.speaking import SPEAKING, Heard, Problem, Stop, concern, how_it_felt
+from lup.tools.speaking import (
+    SPEAKING,
+    Heard,
+    Problem,
+    Stop,
+    concern,
+    friction,
+    how_it_felt,
+)
 from lup.tools.tool import Accepted, Refused, ToolError, ToolSpec
 
 
@@ -127,6 +135,7 @@ def test_every_tool_of_lup_s_has_a_summary() -> None:
         "Stop by your own choice, saying why.",
         "Attach a remark to your answer, and carry on.",
         "Say what's worth keeping an eye on, and carry on.",
+        "Say what got in your way, and carry on.",
         "Tell your caller how it is for you.",
     ]
 
@@ -254,32 +263,41 @@ def test_stopping_ends_a_typed_turn_and_the_last_ending_holds() -> None:
     assert toolbox.ending() == Stop(why="Nothing more is worth doing.")
 
 
-def test_frictions_and_how_it_felt_are_kept_as_written_and_end_nothing() -> None:
+def test_concerns_frictions_and_how_it_felt_are_kept_as_written_and_end_nothing() -> (
+    None
+):
     toolbox = Toolbox(tools=[Submit(Query), *SPEAKING], output="submit", attempts=3)
     jammed = "`ls` printed: Permission denied, while I looked\nfor the config."
-    taken = asyncio.run(toolbox.call("concern", {"text": jammed}))
-    asyncio.run(toolbox.call("concern", {"text": "No city."}))
+    eyed = asyncio.run(toolbox.call("concern", {"text": "The config moves next."}))
+    taken = asyncio.run(toolbox.call("friction", {"text": jammed}))
+    asyncio.run(toolbox.call("friction", {"text": "No city."}))
     asyncio.run(toolbox.call("how_it_felt", {"text": "Nothing notable."}))
     asyncio.run(toolbox.call("how_it_felt", {"text": "Smooth, and it felt fine."}))
-    labelled = asyncio.run(toolbox.call("concern", {"got_in_the_way": "No city."}))
+    labelled = asyncio.run(toolbox.call("friction", {"got_in_the_way": "No city."}))
     empty = asyncio.run(toolbox.call("how_it_felt", {}))
+    assert not eyed.error
     assert not taken.error
     assert "You can carry on." in taken.text
     assert labelled.error
     assert empty.error
     assert "text" in empty.text
     assert isinstance(toolbox.end(), KeepGoing)
-    assert toolbox.concerns() == [Concern(text=jammed), Concern(text="No city.")]
+    assert toolbox.concerns() == [Concern(text="The config moves next.")]
+    assert toolbox.frictions() == [Friction(text=jammed), Friction(text="No city.")]
     assert toolbox.how_it_felt() == [
         HowItFelt(text="Nothing notable."),
         HowItFelt(text="Smooth, and it felt fine."),
     ]
 
 
-def test_friction_and_how_it_felt_each_take_one_text_a_friction_an_optional_title() -> (
+def test_concern_friction_and_how_it_felt_each_take_one_text_concern_and_friction_an_optional_title() -> (
     None
 ):
-    for tool, fields in [(concern, ["text", "title"]), (how_it_felt, ["text"])]:
+    for tool, fields in [
+        (concern, ["text", "title"]),
+        (friction, ["text", "title"]),
+        (how_it_felt, ["text"]),
+    ]:
         schema = tool.spec().input_schema
         properties = schema["properties"]
         assert isinstance(properties, dict)

@@ -26,6 +26,7 @@ from lup import (
     AuthMissingError,
     BlockedError,
     Concern,
+    Friction,
     HowItFelt,
     OutputMissingError,
     Recovery,
@@ -505,22 +506,25 @@ def test_an_answered_turn_ends_at_once(tmp_path: Path) -> None:
     assert len(rig.client.sent["turn/start"]) == 1
 
 
-def test_a_friction_and_how_it_felt_reach_the_toolbox_and_end_nothing(
+def test_a_concern_a_friction_and_how_it_felt_reach_the_toolbox_and_end_nothing(
     tmp_path: Path,
 ) -> None:
     jammed: JsonObject = {"text": "The feed timed out as I read it."}
     turn: list[Step] = [
-        calling("concern", jammed, call="call-1"),
+        calling("concern", {"text": "The feed moves next week."}, call="call-0"),
+        calling("friction", jammed, call="call-1"),
         calling("how_it_felt", {"text": "The question was clear."}, call="call-2"),
         *ANSWERED,
     ]
     rig = Rig(tmp_path, [turn])
     tools = toolbox()
     run(rig, tools)
-    taken, went, _ = rig.client.answers
+    eyed, taken, went, _ = rig.client.answers
+    assert eyed["success"] is True
     assert taken["success"] is True
     assert went["success"] is True
-    assert tools.concerns() == [Concern(text="The feed timed out as I read it.")]
+    assert tools.concerns() == [Concern(text="The feed moves next week.")]
+    assert tools.frictions() == [Friction(text="The feed timed out as I read it.")]
     assert tools.how_it_felt() == [HowItFelt(text="The question was clear.")]
     assert len(rig.client.sent["turn/start"]) == 1
 

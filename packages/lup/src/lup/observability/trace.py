@@ -8,10 +8,17 @@ the system prompt, the answer and every rejected attempt.
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, JsonValue, model_validator
+from pydantic import BaseModel, JsonValue
 
 from lup.sessions.errors import BlockedError, OutputMissingError, StoppedError
-from lup.sessions.results import Concern, HowItFelt, Rejection, TurnResult, Usage
+from lup.sessions.results import (
+    Concern,
+    Friction,
+    HowItFelt,
+    Rejection,
+    TurnResult,
+    Usage,
+)
 from lup.types import Model
 
 if TYPE_CHECKING:
@@ -36,29 +43,13 @@ class CallRecord(Model):
     notes: list[str] = []
     """The remarks the agent attached, whether they answered or not."""
     concerns: list[Concern] = []
-    """What the agent found worth keeping an eye on, what got in their way among
-    it, whether they answered or not."""
+    """What the agent found worth keeping an eye on, whether they answered or not."""
+    frictions: list[Friction] = []
+    """What got in the agent's way, whether they answered or not."""
     how_it_felt: list[HowItFelt] = []
     """Each time the agent said how it was for them, whether they answered or not."""
     usage: Usage | None = None
     """None where the ask failed before the runtime reported any."""
-
-    @model_validator(mode="before")
-    @classmethod
-    def frictions(cls, stored: JsonValue) -> JsonValue:
-        """Read a record kept while `concern` was `friction`, its concerns under `frictions`, as one kept since.
-
-        >>> from datetime import UTC, datetime
-        >>> kept = {"runtime": "r", "model": None, "started_at": datetime(2026, 1, 1, tzinfo=UTC),
-        ...     "duration": 1.0, "prompt": "?", "system_prompt": None, "frictions": [{"text": "Slow."}]}
-        >>> CallRecord.model_validate(kept).concerns
-        [Concern(text='Slow.', title='')]
-        """
-        match stored:
-            case {"frictions": list() as frictions, **rest} if "concerns" not in rest:
-                return {**rest, "concerns": frictions}
-            case _:
-                return stored
 
     def append(self, path: Path) -> None:
         """Append this record to the trace at `path`, as one JSON line."""
@@ -73,6 +64,7 @@ class Kept(Model):
     rejected: list[Rejection] = []
     notes: list[str] = []
     concerns: list[Concern] = []
+    frictions: list[Friction] = []
     how_it_felt: list[HowItFelt] = []
     usage: Usage | None = None
 
@@ -87,6 +79,7 @@ class Answered(Model):
     rejected: list[Rejection]
     notes: list[str]
     concerns: list[Concern]
+    frictions: list[Friction]
     how_it_felt: list[HowItFelt]
 
     @classmethod
@@ -102,6 +95,7 @@ class Answered(Model):
             rejected=result.rejected,
             notes=result.notes,
             concerns=result.concerns,
+            frictions=result.frictions,
             how_it_felt=result.how_it_felt,
         )
 
@@ -128,6 +122,7 @@ class Asked(Model):
             rejected=answer.rejected,
             notes=answer.notes,
             concerns=answer.concerns,
+            frictions=answer.frictions,
             how_it_felt=answer.how_it_felt,
             usage=answer.usage,
         )
@@ -136,7 +131,7 @@ class Asked(Model):
         """Return the record of this ask failing with `error` after `duration`.
 
         A turn that ran without an answer keeps what the agent said beside it
-        (their notes, their concerns, how it felt) and what the turn used; a missing
+        (their notes, their concerns and frictions, how it felt) and what the turn used; a missing
         answer also keeps every rejected attempt.
         """
         match error:
@@ -144,6 +139,7 @@ class Asked(Model):
                 kept = Kept(
                     notes=error.notes,
                     concerns=error.concerns,
+                    frictions=error.frictions,
                     how_it_felt=error.how_it_felt,
                     usage=error.usage,
                 )
@@ -152,6 +148,7 @@ class Asked(Model):
                     rejected=error.rejected,
                     notes=error.notes,
                     concerns=error.concerns,
+                    frictions=error.frictions,
                     how_it_felt=error.how_it_felt,
                     usage=error.usage,
                 )
@@ -168,6 +165,7 @@ class Asked(Model):
             rejected=kept.rejected,
             notes=kept.notes,
             concerns=kept.concerns,
+            frictions=kept.frictions,
             how_it_felt=kept.how_it_felt,
             usage=kept.usage,
         )
