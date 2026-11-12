@@ -133,8 +133,18 @@ class Hidden(Model):
 
 
 def walked(tree: Path, path: Path, stack: ExitStack) -> int | None:
-    """Open the directory holding `path`, inside `tree`, walking from `tree` a directory at a time without following a link, and return its descriptor, closed with `stack`; none where a directory on the way isn't one, or is gone."""
-    if path == tree or not path.is_relative_to(tree):
+    """Open the directory holding `path`, inside `tree`, walking from `tree` a directory at a time without following a link, and return its descriptor, closed with `stack`; none where a directory on the way isn't one, or is gone.
+
+    None, too, where `path` holds a `..`: inside `tree` by its text, it leads
+    out of it, and a `..` isn't a link that refusing links would stop. git
+    lists a worktree at a path with one as it's written in a file the room
+    writes.
+    """
+    if (
+        path == tree
+        or not path.is_relative_to(tree)
+        or ".." in path.relative_to(tree).parts
+    ):
         return None
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
     try:

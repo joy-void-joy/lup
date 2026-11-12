@@ -80,6 +80,7 @@ def test_claude_runs_in_the_launch_s_own_directory_linking_its_history_to_the_ho
     assert terminal.env == {
         "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS": "0",
         "DISABLE_AUTOUPDATER": "1",
+        "CLAUDE_CODE_SILENT_TURN_REMINDER": "0",
         "CLAUDE_CONFIG_DIR": str(own),
     }
     assert terminal.home == own

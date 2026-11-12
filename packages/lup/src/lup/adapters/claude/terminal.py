@@ -27,7 +27,9 @@ settings compiled for each runtime*):
   too, and carries this launch's guidance;
 - the variables: `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0` so a held call isn't
   moved to the background after two minutes, `DISABLE_AUTOUPDATER` since the
-  CLI's file is read-only, and `CLAUDE_CONFIG_DIR` naming the home;
+  CLI's file is read-only, `CLAUDE_CODE_SILENT_TURN_REMINDER=0` so the agent
+  isn't told the user hasn't heard from them while the dashboard shows each of
+  their calls as it happens, and `CLAUDE_CONFIG_DIR` naming the home;
 - the launch's own state file, onboarding done and the trusted paths accepted,
   mounted read-write where Claude Code reads it, so concurrent starts can't
   race on one;
@@ -200,7 +202,13 @@ its 2.1.294, 2.1.296 and 2.1.301 binaries:
   `projects/<folder>/memory/` reached the request's system prompt with auto
   memory on, and didn't with `--settings` placing the directory elsewhere,
   user settings pointing it back there or not (`docs/field-notes.md`, *Auto
-  memory on a home of the rooms' own*).
+  memory on a home of the rooms' own*);
+- the silent-turn reminder, "The user hasn't heard from you in a while", is
+  added to a main conversation after five turns in a row with no text, at most
+  three times a stretch, where the model has its capability, as Opus 5.5 does;
+  `CLAUDE_CODE_SILENT_TURN_REMINDER` outranks the capability, and reads `0`,
+  `false`, `no` or `off` as off (the 2.1.319 binary; `docs/field-notes.md`,
+  *The silent-turn reminder*).
 """
 
 import json
@@ -261,6 +269,11 @@ KEEP_CALLS = "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS"
 
 NO_UPDATES = "DISABLE_AUTOUPDATER"
 """The variable turning off the CLI's own updater."""
+
+SILENT_TURN_REMINDER = "CLAUDE_CODE_SILENT_TURN_REMINDER"
+"""The variable turning off (`0`) the reminder telling a main conversation, after
+a stretch of turns with no text, that the user hasn't heard from them; an ask
+sets it too, since no user reads an ask's turns as they go."""
 
 CONFIG_DIR = "CLAUDE_CONFIG_DIR"
 """The variable moving Claude Code's directory."""
@@ -642,7 +655,7 @@ def compiled(
                 ]
             ),
         ],
-        env={KEEP_CALLS: "0", NO_UPDATES: "1", **moved},
+        env={KEEP_CALLS: "0", NO_UPDATES: "1", SILENT_TURN_REMINDER: "0", **moved},
         files=files,
         copies=homed.copies,
         links=homed.links,

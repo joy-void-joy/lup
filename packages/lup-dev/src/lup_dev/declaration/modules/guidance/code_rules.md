@@ -1,6 +1,6 @@
 # lup's code rules
 
-lup's code rules are notes like this guidance: each catches a pattern that's rarely the right choice, at the moment it's chosen, since other code gets built on the choice. You needn't learn them: each finding is written to be read cold, saying what it caught, why that's a mistake, and where it steers.
+lup's code rules are notes like this guidance: each catches a pattern that's rarely the right choice, at the moment it's chosen, since other code gets built on the choice. You needn't learn them: the first time a rule finds something in your work, it says what it caught, why that's a mistake and where it steers; its later findings are a line each, since you've read why.
 
 **A few are worth knowing before you write,** since hearing one after a long file means restructuring it rather than fixing a line:
 - **Nothing is private:** no leading underscore, and a helper with one caller nests inside it. A name is public or nested, so a reviewer never wonders whether `_x` is really private.

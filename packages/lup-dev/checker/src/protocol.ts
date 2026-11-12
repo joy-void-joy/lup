@@ -18,6 +18,9 @@ export interface Span {
 // A finding made whole: for lup's rules, what the check saw followed by the rule's
 // mistake, and the rule's steer; for pyright's, its message, which may run over
 // several lines, and no steer.
+// - `detail`: for lup's rules, what the check saw alone, which a report tells in
+//   place of the message once it has told the rule's mistake and steer; empty for
+//   pyright's.
 export interface Finding {
     path: string;
     span: Span;
@@ -25,6 +28,7 @@ export interface Finding {
     rule: string;
     message: string;
     steer: string;
+    detail: string;
 }
 
 // Where one name of the surface is written: an export by its entry in `__all__` or
@@ -142,8 +146,9 @@ interface RequestBase {
 
 // A rule selection as the declaration records it, mirroring `Selection` in
 // `lup_dev/declaration/grammar.py` field for field: where it starts, then its
-// operations in the order they were written. The reasons (`why`) and the anchors
-// (`before`, `after`) travel too, and change nothing here: rules have no order.
+// operations in the order they were written, each with the layer that wrote it
+// (`Operation.layer`). The reasons (`why`) and the anchors (`before`, `after`)
+// travel too, and change nothing here: rules have no order.
 export type Start =
     | { kind: 'below' }
     | { kind: 'default' }
@@ -151,11 +156,12 @@ export type Start =
     | { kind: 'only'; names: string[] }
     | { kind: 'of'; entries: string[] };
 
-export type Operation =
+export type Operation = { layer: number } & (
     | { verb: 'add'; entries: string[] }
     | { verb: 'drop'; names: string[] }
     | { verb: 'replace'; name: string; entry: string }
-    | { verb: 'edit'; entry: string };
+    | { verb: 'edit'; entry: string }
+);
 
 export interface Selection {
     start: Start;

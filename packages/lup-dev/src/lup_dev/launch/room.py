@@ -7,7 +7,8 @@ each at its host path (`docs/launch.md`, *The mounts*):
   so `git worktree add` and `remove` work as on the host, and an agent reads any
   other worktree it's pointed at. The tree is the nearest directory holding them
   all; one that would hold the operator's home is refused, since the whole of it
-  would be writable;
+  would be writable. A worktree is one that names the repository back
+  (`Git.listed`), since git lists one from a file the room writes;
 - the git directory's `config` and `hooks/` read-only over it: they run on the
   host, so a hook or a `core.fsmonitor` written there would run at the
   operator's next git command. `hooks/` is made if it's missing, so the room
@@ -231,8 +232,9 @@ class Repository(Model):
     git: Path
     """Its git directory, which every worktree shares (`git rev-parse --git-common-dir`)."""
     worktrees: list[Path]
-    """Each worktree's root that exists, as `git worktree list` gives it; a bare
-    repository's own directory among them."""
+    """Each worktree's root that exists, as `Git.listed` gives it, each linked
+    one naming the repository back; a bare repository's own directory among
+    them."""
     main: Path
     """The main worktree, which `git worktree list` gives first: a clone's root, or
     a bare repository's own directory. The runtimes ask about it for a linked
@@ -244,11 +246,19 @@ class Repository(Model):
 def repository(worktree: Path) -> Repository:
     """Return the repository of the worktree at `worktree`, and the tree a room mounts for it.
 
-    Raise `RoomError` where that tree would hold the operator's home.
+    Its worktrees are listed by git pinned to its common git directory, each
+    linked one kept only where it names the repository back (`Git.listed`):
+    git lists one from a file the room writes, so a room could otherwise have
+    the next launch mount any directory holding the repository, read-write.
+    Raise `RoomError` where that tree would hold the operator's home, as its
+    path says or with its links resolved, as git gives the worktrees' paths.
     """
-    git = Git(cwd=worktree)
-    common = Path(git.text("rev-parse", "--path-format=absolute", "--git-common-dir"))
-    roots = worktrees(git)
+    common = Path(
+        Git(cwd=worktree).text(
+            "rev-parse", "--path-format=absolute", "--git-common-dir"
+        )
+    )
+    roots = Git.pinned(common).worktrees()
     present = [root for root in roots if root.exists()]
     tree = next(
         each
@@ -256,7 +266,7 @@ def repository(worktree: Path) -> Repository:
         if all(root.is_relative_to(each) for root in present)
     )
     home = Path.home()
-    if home.is_relative_to(tree):
+    if home.is_relative_to(tree) or home.resolve().is_relative_to(tree):
         places = ", ".join(str(each) for each in [common, *present])
         message = (
             f"The repository's git directory and worktrees ({places}) meet only at "
@@ -268,16 +278,6 @@ def repository(worktree: Path) -> Repository:
         raise RoomError(message)
     [main, *_] = roots
     return Repository(git=common, worktrees=present, main=main, tree=tree)
-
-
-def worktrees(git: Git) -> list[Path]:
-    """Return the root of each of the repository's worktrees, as `git worktree list` gives them, the main one first, whether or not it's on disk."""
-    listed = git.run("worktree", "list", "--porcelain", "-z").output
-    return [
-        Path(field.removeprefix("worktree "))
-        for field in nul_separated(listed)
-        if field.startswith("worktree ")
-    ]
 
 
 class Described(Model):
@@ -697,10 +697,11 @@ class RoomEnvironments(Model):
         """Remove the launch's environments, and each of the host's environments that appeared in a worktree while the room ran, and say each of those removed.
 
         The repository's worktrees are listed again, since the room may have
-        added some; only those inside its tree are looked in.
+        added some, each naming the repository back (`Git.listed`); only those
+        inside its tree are looked in.
         """
         removed(self.rooms.home, self.directory)
-        appeared = self.hidden.appeared(worktrees(Git.pinned(self.repository)))
+        appeared = self.hidden.appeared(Git.pinned(self.repository).worktrees())
         return [
             (
                 f"Removed {each}, an environment that appeared in a worktree while "

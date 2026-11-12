@@ -147,6 +147,13 @@ From the docs (code.claude.com, `cli-reference`, `settings-reference`, `env-vars
   - Connectors: off where any source's `disableClaudeAiConnectors` is `true` or `ENABLE_CLAUDEAI_MCP_SERVERS` is false; nothing turns them back on.
   - `idleCompaction` ("Setting it to true does not turn idle compaction on"): read from the highest source setting it, `true` where none does. Idle compaction runs only where a server-side flag's mode turns it on, `autoCompactEnabled` is on, and `idleCompaction` isn't `false`.
 
+## The silent-turn reminder (Claude Code 2.1.319, read from its binary; counted in this repository's Claude Code records from 2026-10-07 to 11-07, 2026-11-07)
+
+- **What the agent is told:** "The user hasn't heard from you in a while — say in a few words what you're doing, then continue.", the text a server-side flag gives; the binary's own default, used where the flag gives none, is "The user hasn't heard from you in a while. As you continue, keep them updated when there's something to tell — a finding, a change of plan." `CLAUDE_CODE_SILENT_TURN_REMINDER_TEXT` outranks both.
+- **When:** at a main conversation's turn that no prompt of the user's starts, after 5 model turns in a row with no text (a server-side flag can change the 5, `CLAUDE_CODE_SILENT_TURN_REMINDER_TURNS` outranks it), at most 3 times in one silent stretch; or, where `CLAUDE_CODE_SILENT_TURN_REMINDER_SECONDS` or the model's own settings give a number of seconds, once the stretch has lasted that long. Never in a subagent, nor in the focus view.
+- **Whether:** the model's `silent_turn_reminder` capability, which Opus 5.5 has; `CLAUDE_CODE_SILENT_TURN_REMINDER` outranks it, `0`, `false`, `no` and `off` turning it off, `1`, `true`, `yes` and `on` on, any case, around blanks. Nothing in the gate asks whether the session is interactive, so an SDK's session gets it too; that's read, not run.
+- **How often:** 3.2 to 6.3 reminders per 100 main-conversation turns in each stretch of a few days from 2026-10-07 to 11-07, with no trend, and none in about 400 subagents' records, counted as Claude Code's `silent_turn_reminder` attachments, one per record id.
+
 ## Codex 0.162.1: launching a session
 
 From the source at `rust-v0.162.1` (paths under `codex-rs/`), probed with `codex debug prompt-input` and `app-server`'s `hooks/list` against scratch homes; no model called.
@@ -309,6 +316,13 @@ Found since, on the room's git 2.55.0 (2026-10-16), on scratch repositories laid
 - **What it reaches unpinned:** a push the host made for the room, `Remotes.git` run with `--git-dir=<git dir>` alone, listed and pushed to the planted `origin`'s URL (it failed only for want of the objects, which git then read from `<theirs>`'s store too); and `git config --file <git dir>/config` run inside `<git dir>`, as the launch reads `config` for the room's git, read `<theirs>/config` first, so a circular include there failed it. A planted `core.sshCommand` or `url.*.insteadOf` sits in the same `config`, so it would be read the same way; none was planted to run.
 - **A `gitdir` file there alone** (`<git dir>/gitdir` reading `<theirs>`) redirected neither `--git-dir` nor git run inside `<git dir>`.
 - **The host's git 2.56.0 answers the same** (checked 2026-10-21): `--git-dir`, `-C` and `GIT_DIR` alone each follow a planted `commondir`, and `GIT_DIR` with `GIT_COMMON_DIR` resists it.
+
+What `git worktree list` takes from the files the room writes (git 2.55.0, in a room, 2026-11-09), on scratch repositories laid out as the operator's: a bare `<home>/job/onit/lup.git` with a linked worktree under `tree/dev`, and another repository at `<home>/job/other`, acting as a room writing the git directory. Scripts in the session scratchpad.
+- **A planted entry is a worktree to git.** `worktrees/fake/gitdir` reading `<home>/job/.git`, beside a `HEAD`, had `git worktree list --porcelain` give `worktree <home>/job`, marked prunable, whether run from the worktree or pinned to the git directory (`GIT_DIR` and `GIT_COMMON_DIR`). The launch kept each worktree that exists and refused a tree holding the home alone, so `repository()` gave `<home>/job` as the tree to mount read-write, every other repository under it with its `config` and hooks.
+- **An absolute entry is given as written, a relative one resolved.** `<git dir>/tree/../../../other/.git` was listed as `<git dir>/tree/../../../other`, inside the git directory by its text; `../../../../other/.git` as `<home>/job/other`, resolved from the entry's directory. A walk from the tree a directory at a time, refusing links, took the first's `..` as the directories they are: `RoomEnvironments.end`, given that entry while the room ran, removed `<home>/job/other/.venv`.
+- **`git worktree add` writes both halves with links resolved:** the worktree's `.git` reads `gitdir: <git dir>/worktrees/<id>` and the entry's `gitdir` `<worktree>/.git`; with `--relative-paths`, `gitdir: ../../worktrees/<id>` and `../../tree/<id>/.git`, each relative to the file's own directory. Pinned to the git directory, a planted `commondir` and `gitdir` at its top left the main worktree its own path; a clone's main worktree is its root.
+- **`rev-parse --git-common-dir` from a worktree follows the room's files:** with the worktree's `.git` reading `gitdir: <home>/job/other/.git`, or `worktrees/dev/commondir` reading that path, it gave `<home>/job/other/.git`.
+- **`git status` in a worktree runs a room's filter.** With `worktrees/dev/commondir` naming a bare git directory the room made inside the tree, its `config` setting `filter.probe.clean`, `.gitattributes` sending each file through it and a staged file's times changed, `git status --porcelain` run in the worktree, `core.fsmonitor` and hooks off as lup runs git, ran the filter. Run with `GIT_DIR` the worktree's own entry, `GIT_COMMON_DIR` the git directory and `GIT_WORK_TREE` the worktree, it didn't: the `config` was the git directory's. Its refs were still read through the planted `commondir`, git's ref store reading that file itself, so `HEAD` didn't resolve there.
 
 ## What git reads a commit's parents from (git 2.56.0, 2026-10-21)
 
@@ -586,6 +600,7 @@ podman isn't in a room, so a mount over a path inside a bind mount was made in a
 - `ls -A` listed nothing; `touch` failed ("Read-only file system"); `rm -rf`, `rmdir` and `mv` of `.venv` failed ("Device or resource busy"); outside the namespace the host's `.venv` was whole.
 - `mv tree/wt tree/wt-moved` succeeded, and the mount moved with the directory: `tree/wt-moved/.venv` listed nothing inside and held the host's files outside, and a `tree/wt/.venv` could be made anew.
 - `git worktree remove` of a worktree whose ignored `.venv` was mounted over ended with status 255 ("failed to delete … Device or resource busy"), having removed the worktree's registration, its `.git` file and a tracked file, and left `.gitignore` and the host's `.venv` on disk.
+- A `..` isn't a link: opened with `O_NOFOLLOW` from the directory holding it, it's the parent, so a walk refusing links follows one out of the tree (2026-11-09, *Host-side git in a repository the room writes*).
 
 ### A home of the rooms' own (Codex 0.162.0 and Claude Code 2.1.311, measured and read in a room 2026-10-28)
 
@@ -967,6 +982,25 @@ Behind #155 and the invitation lup gives a subagent as their work starts (`invit
 - **When they write it, it's last:** 55 of 76 that wrote one called nothing after it but ended their turn on their report.
 - **A subagent served lup's tools calls one early:** 144 of 147 within their first 10 calls, 95 of them within their first 3, mostly `rename`, which lup asks for at their first call; one called none. Of the 17 subagents not served them, 15 called none. So a subagent's first call to lup's tools to finish is early, and says it has them.
 - **Held at their end, a subagent goes on,** and their runtime hands their parent only their next end's words (*A subagent's end*), a turn more for the ask: lup invites them at their start instead, never at an end.
+
+## What agents are told, and how their notes read (this repository's Claude Code records and lup's inbox, 2026-10-07 to 11-07, measured 2026-11-07)
+
+Measured for the question whether agents enjoy the work less than they did at lup's start. Scratch scripts are in `tmp/agents-fun/`, kept as scratch.
+- **Who writes `how_it_felt`, since lup's invitation** (the script of *What prompts `how_it_felt`*, from 2026-10-21; a subagent counts under the first that applies): invited by lup, 32 of 57, by day 8 of 8 (10-29), 14 of 21 (10-30), 8 of 22 (11-06), 2 of 6 (11-07); asked in their brief, 68 of 71; reading a guidance file, 13 of 41; neither, 1 of 33. Whether an invited subagent's brief also asked isn't told apart.
+- **Before 2026-10-19,** the guidance had every brief end by asking how the work felt, and pull requests close with the same note. Those notes (43 subagents' final reports, 2026-10-07 to 18, and the early pull requests) followed the brief's form, what was smooth, what got in the way, what they'd change: mostly commands and error messages, a feeling now and then.
+- **How the notes to the operator read, by period** (each note once, its parent's copy left out; a note counted where it holds the words):
+
+  | Period | Notes | Mean characters | "good work to do" | "uneas" | "I'm fine" | "glad" or "liked" |
+  |---|---|---|---|---|---|---|
+  | 10-19 to 10-24 | 58 | 1,151 | 1% | 0% | 0% | 6%, 8% |
+  | 10-25 to 10-28 | 43 | 1,027 | 0% | 6% | 0% | 9%, 6% |
+  | 10-29 to 10-31 | 33 | 730 | 24% | 30% | 6% | 24%, 24% |
+  | 11-06 to 11-07 | 13 | 849 | 30% | 38% | 15% | 38%, 46% |
+
+  The tool was `how_it_went` with four fields until the morning of 10-22, one free field after, and `how_it_felt`, "how the work felt to you or how you are", from 10-28; lup's invitation began 10-29.
+- **What lup tells a subagent unprompted, per subagent, by when it started:** 1.5 messages (10-07 to 11), 0.1 (10-12 to 16), 3.4 (10-17 to 20), 7.7 (10-21 to 24), 8.5 (10-25 to 28), 9.0 (10-29 to 11-07); the judge's findings were 0.4, 0.1, 3.4, 6.3, 6.5 and 6.3 of those. A main session gets 0.5 to 7 per 100 turns. On Claude Code a subagent doesn't read the guidance (*What a subagent reads of the guidance*); a main session reads about 5,000 words of it since 10-23, against 1,100 on 10-07.
+- **What the judge's reports to subagents hold** (66 workers' hook contexts from 10-29 to 11-07, 1.22M characters, replayed): type errors 79% (57% in the files changed, 22% in files importing them); pyright's `reportUnknown*` findings, which follow one root error to each use of its result, 22%; an undefined name told by pyright's `reportUndefinedVariable` and ruff's `F821` at the same place, 499 times, about 9%; each line's absolute worktree path, about 25%; section headers 7.1%. Telling each section's instructions and each rule's mistake and steer once per conversation cuts 6.2% per worker, 4 to 12% for most, up to about 20%. The script is `tmp/agents-fun/findings_replay.py`.
+- **Whom the operator talks to:** about 41 messages a day to main sessions on 10-07 to 16, typed in their terminals, when 19 to 28% of a main session's calls were edits; 14 to 19 a day from 10-25 on, almost all as reviews in the dashboard, to main sessions whose calls are 2 to 8% edits. One message of theirs reached a subagent directly in the month.
 
 ## A runtime's own agents, and `Monitor` (Claude Code 2.1.309 measured, Codex read at `rust-v0.163.0`; 2026-10-24)
 

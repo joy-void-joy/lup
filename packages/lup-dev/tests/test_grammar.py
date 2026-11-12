@@ -119,9 +119,28 @@ def test_add_puts_entries_beside_the_ones_there() -> None:
     assert names(added) == [*DEFAULTS, "runtime-mention"]
 
 
-def test_adding_a_name_already_there_is_refused() -> None:
-    with pytest.raises(ProjectError, match=r"`Rules.add` names `regex`, already there"):
-        Rules.default().add("regex").resolve(DEFAULTS, KNOWN)
+def test_adding_a_name_the_defaults_give_puts_the_entry_where_it_was() -> None:
+    assert names(Rules.default().add("regex").resolve(DEFAULTS, KNOWN)) == DEFAULTS
+    assert names(Rules.all().add("regex").resolve(DEFAULTS, KNOWN)) == KNOWN
+    mine = Step(name="ruff", command=["mine"])
+    placed = Gate.default().add(mine).resolve([step("ruff"), step("pytest")], [])
+    assert [each.entry for each in placed] == [mine, step("pytest")]
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        Rules.only("regex").add("regex"),
+        Rules.of("mine").add("mine"),
+        Rules.default().add("regex").add("regex"),
+        Rules.default().replace("regex", "mine").add("mine"),
+    ],
+)
+def test_adding_a_name_the_same_layer_gave_is_refused(selection: Rules) -> None:
+    with pytest.raises(
+        ProjectError, match=r"`Rules.add` names `(regex|mine)`, already"
+    ):
+        selection.resolve(DEFAULTS, KNOWN)
 
 
 def test_adding_one_name_twice_is_refused() -> None:
@@ -198,6 +217,48 @@ def test_layers_stack_three_deep() -> None:
     third = Exemptions().drop("regex")
     stacked = third.over(second.over(first))
     assert [each.entry.rule for each in stacked.resolve([], [])] == ["set-shape"]
+
+
+def test_a_layer_adding_a_name_below_gave_puts_its_entry_where_that_one_was() -> None:
+    below = Gate.of(step("ruff"), step("pytest"))
+    mine = Step(name="ruff", command=["mine"])
+    placed = Gate().add(mine).over(below).resolve([], [])
+    assert [each.entry for each in placed] == [mine, step("pytest")]
+    assert names(
+        Rules().add("regex").over(Rules.default()).resolve(DEFAULTS, KNOWN)
+    ) == (DEFAULTS)
+
+
+def test_a_layer_adding_a_name_below_gave_places_it_where_the_add_says() -> None:
+    below = Gate.of(step("ruff"), step("pytest"))
+    layered = Gate().add(step("ruff"), after="pytest").over(below)
+    assert [each.name for each in Gate().ordered(layered.resolve([], []))] == [
+        "pytest",
+        "ruff",
+    ]
+
+
+def test_the_topmost_of_three_layers_adding_one_name_wins() -> None:
+    first = Exemptions().add(Exemption(rule="regex", paths=["a/**"], why="a"))
+    second = Exemptions().add(Exemption(rule="regex", paths=["b/**"], why="b"))
+    third = Exemptions().add(Exemption(rule="regex", paths=["c/**"], why="c"))
+    stacked = third.over(second.over(first))
+    assert [each.entry.why for each in stacked.resolve([], [])] == ["c"]
+
+
+@pytest.mark.parametrize(
+    "layer",
+    [
+        Rules().add("regex").add("regex"),
+        Rules().add("mine").add("mine"),
+        Rules().replace("regex", "mine").add("mine"),
+    ],
+)
+def test_a_layer_adding_a_name_it_gave_itself_is_refused(layer: Rules) -> None:
+    with pytest.raises(
+        ProjectError, match=r"`Rules.add` names `(regex|mine)`, already"
+    ):
+        layer.over(Rules.default()).resolve(DEFAULTS, KNOWN)
 
 
 def test_a_part_with_no_defaults_starts_from_nothing() -> None:

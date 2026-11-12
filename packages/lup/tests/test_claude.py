@@ -365,7 +365,10 @@ def test_a_session_gets_lup_s_tools_and_nothing_of_the_operator_s() -> None:
     assert options.skills == []
     assert options.plugins == []
     assert options.verbatim_prompts is True
-    assert options.env == {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
+    assert options.env == {
+        "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+        "CLAUDE_CODE_SILENT_TURN_REMINDER": "0",
+    }
     assert options.extra_args == {"no-session-persistence": None}
     assert isinstance(options.mcp_servers, dict)
     assert list(options.mcp_servers) == ["lup"]

@@ -289,7 +289,7 @@ def test_a_near_miss_gets_no_finding_from_its_rule(
 # What a finding holds.
 
 
-def test_a_finding_is_whole_its_message_saying_what_was_seen_and_the_mistake(
+def test_a_finding_is_whole_and_says_what_was_seen_apart(
     project: Project,
 ) -> None:
     report = project.check(
@@ -300,6 +300,7 @@ def test_a_finding_is_whole_its_message_saying_what_was_seen_and_the_mistake(
     [rule] = [each for each in RULES if each.id == "tuple-shape"]
     assert finding.rule == "tuple-shape"
     assert finding.message == f"`tuple[int, int]` is a tuple type. {rule.mistake}"
+    assert finding.detail == "`tuple[int, int]` is a tuple type"
     assert finding.steer == rule.steer
     assert finding.path == Path("example/whole.py")
     assert (finding.span.start.line, finding.span.start.column) == (3, 15)
@@ -337,6 +338,7 @@ def test_pyright_errors_and_warnings_come_as_findings(project: Project) -> None:
     assert "reportUnusedVariable" in rules  # a warning in this project
     assert "reportReturnType" in rules  # an error
     assert all(f.steer == "" for f in report.findings if f.owner == "pyright")
+    assert all(f.detail == "" for f in report.findings if f.owner == "pyright")
 
 
 # Which rules run: each module's selection as the declaration records it, which the
@@ -455,7 +457,14 @@ def test_no_module_holding_rules_runs_none(project: Project) -> None:
             Rules().add("no-such-rule"),
             "`Rules.add` names `no-such-rule`, which isn't one of lup's rules",
         ),
-        (Rules().add("regex"), "`Rules.add` names `regex`, already there"),
+        (
+            Rules().add("runtime-mention").add("runtime-mention"),
+            "`Rules.add` names `runtime-mention`, already there",
+        ),
+        (
+            Rules.only("regex").add("regex"),
+            "`Rules.add` names `regex`, already there",
+        ),
         (
             Rules().drop("regex").drop("regex"),
             "`Rules.drop` names `regex`, which isn't there",
@@ -508,6 +517,19 @@ def test_the_rules_a_selection_runs_are_listed_in_the_tables_order() -> None:
         "regex",
         "tuple-shape",
     ]
+
+
+@pytest.mark.parametrize(
+    "rules",
+    [Rules().add("regex"), Rules.default().add("regex")],
+    ids=["below", "default"],
+)
+def test_adding_a_rule_the_module_s_default_runs_runs_it_once(rules: Rules) -> None:
+    assert listing(editing(rules)) == listing(resolve(Declaration()).rules)
+
+
+def test_adding_a_rule_every_rule_holds_runs_every_rule_once() -> None:
+    assert listing(editing(Rules.all().add("regex"))) == TABLE
 
 
 def test_the_selected_modules_rules_are_listed_together() -> None:
