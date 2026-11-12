@@ -23,7 +23,7 @@ import shutil
 import sys
 import traceback
 import webbrowser
-from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Iterator, Mapping, Sequence
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
@@ -165,6 +165,7 @@ from lup_dev.host.service import (
     Naming,
     Route,
     recorded_launches,
+    side_job_ended,
 )
 from lup_dev.host.timings import (
     ShowTimings,
@@ -816,6 +817,7 @@ def host_serve(context: typer.Context) -> None:
         coming=None if rehearsing else coming,
         reap=reap,
         rewake=delivery.rewoken,
+        ended=partial(side_job_ended, holders, say=typer.echo),
     )
     turns = Turns()
     trying = Trying(
@@ -2407,6 +2409,12 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
     ended, so none is left a zombie, and tells the agent who spawned one whose
     session never came up (`Launchers.reaped`, `SpawnTools.lost`); none
     collects none."""
+    ended: Callable[[Register], Coroutine[None, None, None]] | None = None
+    """Ends a side job's session through its launcher, on the event loop, as
+    the end of its spawner's launch does (`side_job_ended`): an end is
+    answered once a turn under way finishes, minutes later, and a thread
+    waiting on each would hold asyncio's default ones, which the service's
+    hooks wait on too. None ends none."""
     pause: Callable[[float], Awaitable[None]] = asyncio.sleep
     """Waits the seconds between two sweeps; a test gives its own."""
     stopping: asyncio.Event = Field(default_factory=asyncio.Event)
@@ -2467,6 +2475,9 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
         except (HostError, OSError) as failed:
             self.say(f"Side jobs whose spawner ended weren't looked for: {failed}")
             return
+        ended = self.ended
+        if ended is None:
+            return
         for each in orphaned(launches):
             if each.launch not in self.ending:
                 self.say(
@@ -2474,9 +2485,7 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
                     f"{each.spawner.launch if each.spawner else '?'} ended, so it's "
                     "ended too"
                 )
-                self.ending[each.launch] = asyncio.create_task(
-                    asyncio.to_thread(ended_held, self.host, each, self.say)
-                )
+                self.ending[each.launch] = asyncio.create_task(ended(each))
 
     def woken(self) -> None:
         """Wake each thread parked until what the sweep sees come (`Coming.swept`), on the event loop, as the inbox is written; where it fails, say why, with its traceback, and the next sweep goes on."""
@@ -2952,21 +2961,6 @@ def orphaned(launches: list[Register]) -> list[Register]:
         and each.spawner.concern is None
         and each.spawner.launch not in served
     ]
-
-
-def ended_held(host: HostClient, launch: Register, say: Callable[[str], None]) -> None:
-    """End `launch`'s held session through its launcher, once it has ended; where it can't be, say so, for the operator to end it."""
-    try:
-        outstanding = host.held(End(launch=launch.launch))
-        try:
-            outstanding.reply(Done)
-        finally:
-            outstanding.close()
-    except (HostError, OSError) as failed:
-        say(
-            f"{launch.launch}: the side job wasn't ended, `lup-dev spawn end "
-            f"{launch.name}` ends it: {failed}"
-        )
 
 
 class NamedSession(Model):

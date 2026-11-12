@@ -182,6 +182,21 @@ class Program(Model):
     gate, is given longer where it's made, saying why."""
 
 
+async def side_job_ended(
+    holders: Holders, launch: Register, say: Callable[[str], None]
+) -> None:
+    """Ask the launcher of `launch`, a side job whose spawner's launch ended, to end its session, on the event loop, holding no thread while it ends; where it can't be reached, refuses or doesn't answer in time (`Holders.ending`), say so, for the operator to end it."""
+    try:
+        await holders.asked(launch.launch, HeldEnd())
+    except HostError as failed:
+        say(
+            f"{launch.launch}: a side job whose spawner's launch ended wasn't "
+            f"ended with it, `lup-dev spawn end {launch.name}` ends it: {failed}"
+        )
+        return
+    say(f"{launch.launch}: ended with the launch that spawned it")
+
+
 def records(layout: HostLayout) -> list[Path]:
     """Return where each launch the service serves is recorded, in their ids' order: its record is written as it's served and removed as it ends (`Launches.open`, `close`)."""
     # Each launch's conversations are kept beside its record, and aren't a record.
@@ -1554,18 +1569,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         ]
 
     async def side_job_ended(self, launch: Register) -> None:
-        """Ask the launcher of `launch`, a side job whose spawner's launch ended, to end its session; where it can't be reached or refuses, say so, for the operator to end it."""
-        if self.holders is None:
-            return
-        try:
-            await self.holders.asked(launch.launch, HeldEnd())
-        except HostError as failed:
-            self.say(
-                f"{launch.launch}: a side job whose spawner's launch ended wasn't "
-                f"ended with it, `lup-dev spawn end {launch.name}` ends it: {failed}"
-            )
-            return
-        self.say(f"{launch.launch}: ended with the launch that spawned it")
+        """Ask the launcher of `launch`, a side job whose spawner's launch ended, to end its session (`side_job_ended`)."""
+        if self.holders is not None:
+            await side_job_ended(self.holders, launch, self.say)
 
     def spawning(
         self,

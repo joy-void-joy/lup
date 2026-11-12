@@ -4,6 +4,7 @@ import asyncio
 import json
 import socket
 import sys
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -1314,8 +1315,18 @@ def test_the_sweep_ends_each_side_job_whose_spawner_s_launch_isn_t_served(
         ),
     ]
     said: list[str] = []
+    ended: list[str] = []
+
+    async def ending(launch: Register) -> None:
+        ended.append(launch.launch)
+
     sweeping = cli.Sweeping(
-        layout=layout, host=host, podman=Podman(), say=said.append, running=list
+        layout=layout,
+        host=host,
+        podman=Podman(),
+        say=said.append,
+        running=list,
+        ended=ending,
     )
 
     async def swept() -> None:
@@ -1324,11 +1335,64 @@ def test_the_sweep_ends_each_side_job_whose_spawner_s_launch_isn_t_served(
 
     asyncio.run(swept())
 
-    assert [each.launch for each in host.asked if isinstance(each, End)] == ["side"]
-    assert [each.launch for each in host.served] == ["built"]
+    assert ended == ["side"]
     assert (
         "side: a side job whose spawner's launch gone ended, so it's ended too"
     ) in said
+
+
+def test_side_jobs_the_sweep_ends_hold_none_of_the_threads_the_judge_s_hooks_wait_on(
+    layout: Layout, tmp_path: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An end is answered once its session's turn finished, minutes later: a room orphaning as many side jobs as it may, its own launch ended, once held as many of asyncio's default threads, which the service's hooks wait on too."""
+    host, _ = played(tmp_path, clock)
+    spawner = Spawner(launch="gone", conversation=host.conversation)
+    host.served[:] = [
+        held(f"side{number}").model_copy(
+            update={"spawner": spawner, "name": f"side{number}"}
+        )
+        for number in range(40)
+    ]
+    released = threading.Event()
+    answered = Played.held
+
+    def unanswered(self: Played, request: Request) -> Outstanding:
+        released.wait(20)
+        return answered(self, request)
+
+    monkeypatch.setattr(Played, "held", unanswered)
+    ended: list[str] = []
+
+    async def ending(launch: Register) -> None:
+        ended.append(launch.launch)
+        await asyncio.Event().wait()
+
+    sweeping = cli.Sweeping(
+        layout=layout,
+        host=host,
+        podman=Podman(),
+        say=lambda _: None,
+        running=list,
+        ended=ending,
+    )
+
+    async def swept() -> bool:
+        await sweeping.orphans_ended()
+        await asyncio.sleep(0.1)
+        try:
+            await asyncio.wait_for(asyncio.to_thread(int), 5)
+        except TimeoutError:
+            return False
+        finally:
+            released.set()
+            for each in sweeping.ending.values():
+                each.cancel()
+        return True
+
+    free = asyncio.run(swept())
+
+    assert free
+    assert sorted(ended) == sorted(f"side{number}" for number in range(40))
 
 
 def process_table(root: Path, processes: dict[int, tuple[str, dict[int, str]]]) -> Path:
