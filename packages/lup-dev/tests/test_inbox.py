@@ -15624,6 +15624,79 @@ def test_the_operator_s_words_for_a_held_session_whose_launcher_never_answers_co
     assert state == Waiting()
 
 
+def test_a_turn_given_and_not_yet_taken_isn_t_given_again_past_a_compaction(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """A compaction keeps the process, and its input with what was given: the sweep after it gives nothing more."""
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        launcher = Launcher(machine.launch("one").held)
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        inbox("send", "one", "Anyone?")
+        number = newest(delivery)
+        [given] = launcher.ringing()
+        send(hook, claude("SessionStart", source="compact"))
+        asyncio.run(delivery.rewoken())
+        frames = list(launcher.frames)
+        # Its turn takes it, and what comes after is given anew.
+        prompt = HeldPrompt.model_validate_json(given).text
+        send(hook, claude("UserPromptSubmit", prompt=prompt))
+        send(hook, claude("Stop", stop_hook_active=False))
+        inbox("send", "one", "And again?")
+        later = newest(delivery)
+        until(lambda: len(launcher.frames) == 2)
+        again = launcher.close()[-1]
+    assert frames == [given]
+    assert note(number, "Anyone?") in prompt
+    assert note(later, "And again?") in HeldPrompt.model_validate_json(again).text
+    assert note(number, "Anyone?") not in HeldPrompt.model_validate_json(again).text
+
+
+def test_a_turn_given_as_a_turn_under_way_ends_isn_t_given_again_by_the_sweep(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """A turn the host took for idle, as a background command's end starts one, reads what was given once its call ends: its turn's end before that leaves it on the input."""
+    with inboxed(
+        machine, clock, notices, said, holding=True, patience=timedelta(0)
+    ) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        Socket(machine.host.launch("one").messages)
+        launcher = Launcher(machine.launch("one").held)
+        send(hook, claude("SessionStart", source="startup"))
+        inbox("send", "one", "Anyone?")
+        launcher.ringing()
+        send(hook, bash("b1"))
+        send(hook, claude("PostToolUse", tool_name="Bash", tool_use_id="b1"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        asyncio.run(delivery.rewoken())
+        frames = launcher.close()
+    assert len(frames) == 1
+
+
+def test_a_turn_given_a_held_process_a_terminal_took_over_is_told_in_the_terminal(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """What was given went with the process that held it: the terminal's session is told it as anything waiting."""
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        launcher = Launcher(machine.launch("one").held)
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        inbox("send", "one", "Anyone?")
+        number = newest(delivery)
+        launcher.ringing()
+        launcher.close()
+        client(machine.host, clock).unregister("one")
+        launched(machine, clock, tmp_path, "two", "claude")
+        theirs = machine.host.launch("two").hook
+        started = send(theirs, claude("SessionStart", source="resume"))
+    assert note(number, "Anyone?") in context(started)
+
+
 def test_a_terminal_room_naming_the_session_a_held_launch_runs_is_answered_with_nothing(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:

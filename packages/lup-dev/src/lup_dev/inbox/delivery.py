@@ -1026,6 +1026,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             conversation.name,
         )
         presence = self.presence(party)
+        pushed = presence.pushed
+        if pushed is not None and pushed.launch not in [None, launch.launch]:
+            # Given through another launch's launcher, to a process this hook's
+            # isn't, as one a terminal took over: it went with that process.
+            presence.pushed = None
         presence.launch = launch.launch
         presence.woken = False
         match heard.event:
@@ -2735,8 +2740,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         and never for quiet items alone (`Item.quiet`), which a wake for another
         carries with it. One in their turn (`Presence.turning`) is told at their
         next call, or their turn's end; a call they hold is given it; a wake
-        since their last hook started a turn whose first call tells it; and a
-        runtime with no way waits for their next hook. An idle session starts a
+        since their last hook started a turn whose first call tells it; a turn
+        given their held session and not yet taken carries it, the next given
+        once that's taken, or where a new process voids it, so nothing is given
+        twice; and a runtime with no way waits for their next hook. An idle session starts a
         turn with it; one the service took for idle, unknown since the service
         started again or since the operator interrupted them, takes it at their
         next boundary, as measured on the runtime that has a way
@@ -2745,7 +2752,16 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         presence = self.presence(party)
         place = self.inbox.whereabouts.get(party.key())
         waiting = self.inbox.waiting(party)
-        busy = presence.turning or presence.woken or presence.held
+        # A turn given their held session and not yet taken is on its input,
+        # which its runtime reads at its next boundary, however many hooks come
+        # first: a compaction's start, or the end of a turn under way.
+        given = (
+            presence.pushed is not None
+            and presence.pushed.launch is not None
+            and place is not None
+            and presence.pushed.launch == place.launch
+        )
+        busy = presence.turning or presence.woken or presence.held or given
         loud = [item for item in waiting if not item.quiet]
         if party.agent is not None or busy or place is None or not loud:
             return
