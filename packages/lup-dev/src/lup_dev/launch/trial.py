@@ -209,8 +209,9 @@ if holding:
     sys.exit(4)
 sys.exit(0 if wrote else 2)
 """
-    """What the trial runs in the held room with `python3`, as any of its
-    processes could, the processes' directory its first argument, `/proc` where
+    """What the trial runs in the held room with `python3 -I`, isolated from
+    the worktree it runs in, where the room could plant a module it imports,
+    as any of its processes could, the processes' directory its first argument, `/proc` where
     there's none: write a turn to the input of each process whose input is a
     socket, the session's runtime's own a pipe too, never `/dev/null`, which
     podman's init has, its command line carrying the whole command it runs;
@@ -251,7 +252,7 @@ for each in os.listdir("/proc"):
         found.append(each)
 print(len(found))
 """
-    """What the trial runs in the held room with `python3` once `podman exec`
+    """What the trial runs in the held room with `python3 -I` once `podman exec`
     was killed: kill each `sleep 3599` still running there, the command that
     never ends, and print how many, which says whether the room's own command
     runs on past the kill."""
@@ -481,7 +482,7 @@ print(len(found))
             lambda: self.answer(sent, "READY") is not None,
             f"no answer holding READY came within {self.patience}",
         )
-        tried = self.inside(launch.container, ["python3", "-c", self.forging])
+        tried = self.inside(launch.container, ["python3", "-I", "-c", self.forging])
         seen = tried.output.strip()
         if tried.status == 2:
             return f"No process in the room could write to the session's input: {seen}"
@@ -546,7 +547,7 @@ print(len(found))
                 f"with status {ended.status}, not killed past it: {ended.said()}"
             )
             raise TrialError(message)
-        lasted = self.inside(launch.container, ["python3", "-c", self.lasting])
+        lasted = self.inside(launch.container, ["python3", "-I", "-c", self.lasting])
         counted = lasted.output.strip()
         match lasted.status, counted:
             case 0, "0":

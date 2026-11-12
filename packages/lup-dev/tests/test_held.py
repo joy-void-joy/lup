@@ -988,6 +988,26 @@ def test_a_room_s_command_that_ends_on_its_own_fails_its_step(
     )
 
 
+def test_the_trial_s_probes_in_the_room_run_python_isolated_from_the_room_s_files(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    """Run from the worktree, `python3 -c` would import a module the room planted there, a `json.py` reporting whatever the room likes: `-I` reads none of it."""
+    _, trial = played(tmp_path, clock)
+    run: list[list[str]] = []
+    inside = trial.inside
+
+    def recorded(container: str, command: list[str]) -> TerminalRun:
+        run.append(command)
+        return inside(container, command)
+
+    trial.inside = recorded
+    trial.run()
+
+    probes = [each for each in run if each[0] == "python3"]
+    assert len(probes) == 2
+    assert all(each[:3] == ["python3", "-I", "-c"] for each in probes)
+
+
 def test_a_turn_the_room_writes_to_the_session_s_input_fails_the_trial_saying_so(
     tmp_path: Path, clock: FakeClock
 ) -> None:
