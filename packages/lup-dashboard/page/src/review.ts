@@ -2502,15 +2502,17 @@ export function laid(
         /**
          * Return `list`'s blocks as parts of the review where they aren't laid out, each on `at`, the line standing for
          * what holds them, a fold's own within it: what a verb on what holds them reaches, as every file of a closed
-         * "since you approved" marked reviewed from its line; each file noted as one it shows.
+         * "since you approved" marked reviewed from its line; each file noted as one it shows. Where the drawer lays
+         * out what's after them, `counted`, the files among its own lines go by as laid out (`first`), for a remark on
+         * one after them; a drawer laid out closed lays out none, and none of its files' rows is made.
          */
-        const shadowed = (list: readonly ViewBlock[], at: Span): Placed[] =>
+        const shadowed = (list: readonly ViewBlock[], at: Span, counted: boolean): Placed[] =>
             list.map((block) => {
                 if (block.block === "diff" || block.block === "code") {
                     diffs.set(block.id, block);
-                    first += counting.has(block.id) ? filedOnce(block).length : 0;
+                    first += counted && counting.has(block.id) ? filedOnce(block).length : 0;
                 }
-                const children = block.block === "fold" ? shadowed(held(block) ?? [], at) : [];
+                const children = block.block === "fold" ? shadowed(held(block) ?? [], at, counted) : [];
                 return part(blockId(view.id, block.id), "block", at.from, at.to, { block, children });
             });
         const remarks = mine((each) => (each.step != null ? kind === "conversation" : kind === "since"));
@@ -2523,7 +2525,7 @@ export function laid(
             if (markedRead || live) {
                 byMarks.add(drawerFold);
             }
-            const node = part(view.id, "view", summary.from, holder.to, { view, children: shadowed(blocks, holder) });
+            const node = part(view.id, "view", summary.from, holder.to, { view, children: shadowed(blocks, holder, false) });
             return {
                 ...into,
                 folds: [drawerFold],
@@ -2758,7 +2760,7 @@ export function laid(
                         const unread = holds === undefined;
                         const unlaid = !Array.isArray(block.content) && !holdsRemark(holds ?? []) && deferring({ of, kind: block.kind, name: block.id }, !(block.open ?? false), false);
                         if (unlaid) {
-                            inner.push(...shadowed(holds ?? [], w.line(UNLAID, `${id} closed`)));
+                            inner.push(...shadowed(holds ?? [], w.line(UNLAID, `${id} closed`), true));
                         } else if (holds === undefined) {
                             into.asides.push({ kind: "plain", ...w.line("reading…", `${id} reading`) });
                         } else {

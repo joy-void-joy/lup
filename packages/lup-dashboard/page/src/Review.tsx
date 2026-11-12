@@ -68,7 +68,7 @@ import { DRAFTED, GLYPHS } from "./Outline";
 import { linesOver, stickies, type Sticky } from "./stack";
 import { depths, levelled } from "./folds";
 import { ask } from "./api";
-import { ACT, carried, chainAt, findNode, implied, isMarked, marking, marksOn, reachOf, reachedIn, type Act, type Acting, type Marked } from "./grammar";
+import { ACT, carried, chainAt, implied, isMarked, marking, marksOn, placedBy, reachOf, reachedIn, type Act, type Acting, type Marked } from "./grammar";
 import { Listing, type ListHandle, type Viewed as ListViewed } from "./Panes";
 import { arrivalIn, bufferKey, bufferSpans, conversationNamed, listedByAgent, marginFolds, spanAt, titled, type Showing } from "./panes";
 import type { DrawerKind, FoldKind, Here } from "./keys";
@@ -565,7 +565,7 @@ function decorations(
     marks.push(...citing(citationsOf(laidOut)));
     // Each mark the draft holds beyond the items', on the first line of what it marks, saying what Ctrl+Enter does with it.
     for (const mark of draft.marks ?? []) {
-        const node = findNode(laidOut.nodes, mark.block);
+        const node = placedBy(laidOut.nodes, mark.block);
         if (node !== undefined) {
             // One whose line reads otherwise while it's marked, as a box ticked, is that, and is struck through by no verb.
             const draws = mark.draws ?? null;
@@ -1833,7 +1833,7 @@ export function Review({
         if (act.kind !== "mark") {
             return;
         }
-        const node = findNode(laidOut.nodes, act.block);
+        const node = placedBy(laidOut.nodes, act.block);
         const drawer = node?.kind === "view" && laidOut.drawers.some((each) => each.view.id === node.id);
         const fold = node === undefined ? undefined : laidFor.folds.find((each) => (each.kind === "file" || (drawer && each.scope === true)) && each.summary.from === node.from);
         if (fold !== undefined) {

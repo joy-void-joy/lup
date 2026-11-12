@@ -298,6 +298,16 @@ describe("the views the page lays out itself", () => {
         expect(producerOf("judge", "since")?.answer(AGENT as never, shownOf({ drawers: { [whose(PARSER)]: {} } }), REPOSITORY)).toBeNull();
     });
 
+    it("makes \"since you approved\" once for each reading of the agent's branches, the same answer until they're read anew", () => {
+        const answer = (since: Since) => producerOf("judge", "since")?.answer(AGENT as never, shownOf({ drawers: { [whose(PARSER)]: { since } } }), REPOSITORY);
+        const first = answer(SINCE);
+        expect(first).not.toBeNull();
+        expect(answer(SINCE)).toBe(first);
+        const again = answer({ ...SINCE });
+        expect(again).not.toBe(first);
+        expect(again).toEqual(first);
+    });
+
     it("offers each file of \"since you approved\" to be marked reviewed at its version, and every one not settled as the drawer's own", () => {
         const since = producerOf("judge", "since")?.answer(AGENT as never, shownOf(CASES["judge since"]![0]!.given), REPOSITORY);
         const blocks = since?.blocks;
