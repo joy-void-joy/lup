@@ -1361,6 +1361,39 @@ def test_the_sweep_ends_each_side_job_whose_spawner_s_launch_isn_t_served(
     ) in said
 
 
+def test_the_sweep_removes_what_a_side_job_was_started_with_once_its_worktree_is_gone(
+    layout: Layout, tmp_path: Path, clock: FakeClock
+) -> None:
+    """Nothing resumes a side job whose worktree is gone, as `land` removes a landed branch's."""
+    kept, gone = tmp_path / "kept", tmp_path / "gone"
+    kept.mkdir()
+    for session, worktree in [("c1", kept), ("c2", gone)]:
+        record = layout.side_job(session)
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(
+            HeldLaunch(
+                launch=f"l-{session}",
+                runtime="claude",
+                worktree=worktree,
+                session=session,
+            ).model_dump_json()
+        )
+    layout.side_job("c3").write_text("{")
+    said: list[str] = []
+    host, _ = played(tmp_path, clock)
+    sweeping = cli.Sweeping(
+        layout=layout, host=host, podman=Podman(), say=said.append, running=list
+    )
+
+    sweeping.forgotten()
+
+    assert sorted(each.stem for each in layout.side_jobs.glob("*.json")) == ["c1"]
+    assert said == [
+        f"What side job c2 was started with is removed: its worktree, {gone}, is gone.",
+        "What side job c3 was started with is removed: it didn't read.",
+    ]
+
+
 def test_side_jobs_the_sweep_ends_hold_none_of_the_threads_the_judge_s_hooks_wait_on(
     layout: Layout, tmp_path: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:

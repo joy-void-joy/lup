@@ -2462,9 +2462,38 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
         if self.reap is not None:
             await self.reap()
         await self.orphans_ended()
+        self.forgotten()
         if self.rewake is not None:
             await self.rewake()
         self.woken()
+
+    def forgotten(self) -> None:
+        """Remove what each side job was started with where its worktree is gone, so nothing resumes it again (`Layout.side_job`, `SpawnTools.resumed`), or where it doesn't read, saying each; what can't be read or removed is said, and the next sweep looks again."""
+        try:
+            kept = sorted(self.layout.side_jobs.glob("*.json"))
+        except OSError as unread:
+            self.say(f"What side jobs were started with wasn't looked at: {unread}")
+            return
+        for each in kept:
+            try:
+                spec = HeldLaunch.model_validate_json(each.read_text())
+                gone = not spec.worktree.is_dir()
+            except ValueError, OSError:
+                gone = True
+                spec = None
+            if not gone:
+                continue
+            try:
+                each.unlink(missing_ok=True)
+            except OSError as failed:
+                self.say(f"{each} wasn't removed: {failed}")
+                continue
+            why = (
+                "it didn't read"
+                if spec is None
+                else f"its worktree, {spec.worktree}, is gone"
+            )
+            self.say(f"What side job {each.stem} was started with is removed: {why}.")
 
     async def orphans_ended(self) -> None:
         """Ask the launcher of each side job whose spawner's launch the service doesn't serve to end it, in the background, as that launch's end does (`Launches.close`): one that registered after its spawner ended, or whose spawner's end a restart cut short, would run on for nobody, its reports reaching someone gone. Where the launches can't be listed, say so; the next sweep looks again."""
