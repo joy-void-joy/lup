@@ -18,6 +18,7 @@ from lup_ledger.threads import (
     KINDS,
     ROOT,
     Answered,
+    Body,
     BranchLanded,
     Check,
     Declined,
@@ -30,6 +31,7 @@ from lup_ledger.threads import (
     Reopened,
     Settled,
     Standing,
+    Status,
     Thread,
     TimeCame,
     without_roots,
@@ -101,7 +103,37 @@ def placed(ledger: Ledger, node: Node, thread: Thread, minutes: int = 0) -> In:
     )
 
 
+class Asks(Node):
+    """A node waiting on the operator, standing for an item of the inbox's asking them, whose kind the ledger doesn't declare."""
+
+    kind: Literal["test:asks"] = "test:asks"
+    name: None = None
+
+    @override
+    def waiting(self, drawn: list[Edge]) -> bool:
+        return True
+
+
+@pytest.fixture
+def ledger(tmp_path: Path) -> Generator[Ledger]:
+    """A ledger reading `Asks` beside its own kinds."""
+    kinds = Kinds(nodes=[*KINDS.nodes, Asks], edges=KINDS.edges)
+    opened = Ledger.opened(LedgerLayout(home=tmp_path / "ledger"), kinds)
+    yield opened
+    opened.close()
+
+
+def asking(ledger: Ledger, thread: Thread, by: Conversation = WORKER) -> Asks:
+    """Keep something asking the operator in `thread`, by `by`."""
+    found = ledger.kept(
+        Asks(number=ledger.numbered(), repository=REPOSITORY, by=by, at=START)
+    )
+    placed(ledger, found, thread)
+    return found
+
+
 def checked(ledger: Ledger, thread: Thread, by: Conversation = WORKER) -> Check:
+    """Keep a check in `thread`, by `by`, as an earlier lup's question did."""
     found = ledger.kept(
         Check(
             number=ledger.numbered(),
@@ -123,22 +155,33 @@ def test_a_thread_with_nothing_in_it_is_worked_on_by_its_holder(
     assert threads.standing(lag.number) == Standing(state="working", on=[WORKER])
 
 
-def test_a_check_waits_on_the_operator_until_they_answer_it(
+def test_what_asks_the_operator_keeps_a_thread_waiting_on_them(
+    ledger: Ledger, threads: Threads
+) -> None:
+    lag = opened(ledger, "lag")
+    found = asking(ledger, lag)
+
+    waiting = threads.standing(lag.number)
+
+    assert waiting.state == "waiting on the operator"
+    assert [each.node for each in waiting.waiting] == [found]
+
+
+def test_a_check_waits_on_nobody_answered_or_not(
     ledger: Ledger, threads: Threads
 ) -> None:
     lag = opened(ledger, "lag")
     found = checked(ledger, lag)
 
-    waiting = threads.standing(lag.number)
+    unanswered = threads.standing(lag.number)
     ledger.drawn(
         Answered(target=found.number, repository=REPOSITORY, by=Operator(), at=at(1))
     )
     answered = threads.standing(lag.number)
 
-    assert waiting.state == "waiting on the operator"
-    assert [each.node for each in waiting.waiting] == [found]
-    assert answered.state == "working"
-    assert answered.waiting == []
+    assert (unanswered.state, unanswered.waiting) == ("working", [])
+    assert (answered.state, answered.waiting) == ("working", [])
+    assert [each.node for each in threads.members(lag.number)] == [found]
 
 
 @pytest.mark.parametrize(
@@ -187,7 +230,7 @@ def test_a_thread_stands_as_its_latest_status_says(
     state: str,
 ) -> None:
     lag = opened(ledger, "lag")
-    checked(ledger, lag)
+    asking(ledger, lag)
     status = ledger.drawn(said(target=lag.number))
 
     standing = threads.standing(lag.number)
@@ -244,7 +287,7 @@ def test_reopening_a_thread_brings_it_back_to_what_its_members_say(
         )
     )
     working = threads.standing(lag.number)
-    checked(ledger, lag)
+    asking(ledger, lag)
 
     assert working.state == "working"
     assert working.status == reopened
@@ -268,7 +311,7 @@ def test_a_node_moved_to_another_thread_is_in_that_one_alone(
 ) -> None:
     lag = opened(ledger, "lag")
     page = opened(ledger, "page")
-    found = checked(ledger, lag)
+    found = asking(ledger, lag)
     placed(ledger, found, page, minutes=1)
 
     assert threads.members(lag.number) == []
@@ -472,6 +515,62 @@ def test_a_thread_under_what_isn_t_a_thread_of_its_repository_or_under_itself_is
         with pytest.raises(LupLedgerError, match=says):
             ledger.kept(refused)
     assert ledger.node(sub.number, Thread).parent == main.number
+
+
+def test_a_thread_s_body_is_its_latest_and_an_earlier_lup_reads_each_as_a_plain_edge_taking_none(
+    ledger: Ledger, threads: Threads, tmp_path: Path
+) -> None:
+    lag = opened(ledger, "lag")
+    asking(ledger, lag)
+
+    def bodied(text: str, minutes: int) -> Body:
+        return ledger.drawn(
+            Body(
+                target=lag.number,
+                repository=REPOSITORY,
+                by=WORKER,
+                at=at(minutes),
+                text=text,
+            )
+        )
+
+    bodied("It jumps.", 1)
+    latest = bodied("It jumps when typing fast.", 2)
+    standing = threads.standing(lag.number)
+    members = threads.members(lag.number)
+    assert threads.body(lag.number) == latest
+    on_a_member = Body(
+        target=members[0].node.number,
+        repository=REPOSITORY,
+        by=WORKER,
+        at=at(3),
+        text="x",
+    )
+    with pytest.raises(LupLedgerError, match="drawn to a thread"):
+        ledger.drawn(on_a_member)
+    ledger.close()
+
+    # An earlier lup declares no `Body`: it reads each as a plain `Edge`, its
+    # text kept, and nothing it reads of the thread takes one.
+    earlier = Kinds(
+        nodes=[*KINDS.nodes, Asks],
+        edges=[each for each in KINDS.edges if each is not Body],
+    )
+    old = Ledger.opened(LedgerLayout(home=tmp_path / "ledger"), earlier)
+    read = Threads(ledger=old)
+    plain = [
+        each for each in old.drawn_to(lag.number, Edge) if each.kind == "ledger:body"
+    ]
+    assert [type(each) for each in plain] == [Edge, Edge]
+    assert [each.model_dump()["text"] for each in plain] == [
+        "It jumps.",
+        "It jumps when typing fast.",
+    ]
+    assert read.standing(lag.number) == standing
+    assert read.members(lag.number) == members
+    assert old.drawn_of(Edge) != []
+    assert all(each.kind != "ledger:body" for each in old.drawn_of(Status))
+    old.close()
 
 
 def test_a_thread_is_found_by_its_name_and_nothing_else_is(
@@ -715,7 +814,7 @@ def test_a_thread_nobody_running_answers_for_stands_nobody_running_never_working
     assert threads.standing(under.number).state == "working"
     assert threads.standing(under.number, live=ended).state == "nobody running"
     # What waits on the operator still says so; and a status said is said.
-    checked(ledger, unheld)
+    asking(ledger, unheld)
     assert threads.standing(unheld.number).state == "waiting on the operator"
     ledger.drawn(
         Done(target=lag.number, repository=REPOSITORY, by=WORKER, at=at(2), to_try="x")

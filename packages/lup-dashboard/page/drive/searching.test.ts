@@ -18,6 +18,8 @@ async function loaded(): Promise<void> {
     review = await dashboard.review();
     await review.holds(DEMO_ITEM);
     await review.settled(1500);
+    // The drawers each place is in laid out as the host answers their views, which a loaded machine does after the review has settled.
+    await review.until("lay out the five places of the line searched", (view, text) => view.state.doc.toString().split(text).length - 1 === 5, LINE);
 }
 
 beforeAll(async () => {
@@ -93,66 +95,25 @@ const backInReview = () =>
     dashboard.page.waitForFunction(() => document.querySelector(".keys-palette") === null && document.activeElement?.closest(".review-buffer") != null, undefined, { polling: 20 });
 
 /**
- * Four places, each in a conversation's trace, two conversations': the line of the fold of the agent's words, and those
- * words, which that fold hides once it's closed (`opened`). None of what comes to the demo later holds it, unlike the
- * parser's words, which the late question's context does.
+ * Five places, each under a closed fold as the review opens: two conversations' drawers, in each the line of the fold of
+ * the agent's words and those words, an item's context between them. None of what comes to the demo later holds it, unlike
+ * the parser's words, which the late question's context does.
  */
 const LINE = "Rendering frames 1 to 600.";
-
-/**
- * Open every conversation's trace, then close every one of the agent's words in them, each kind's folds at once, as
- * Space F and its letter then zo or zc does: what a closed drawer holds isn't laid out, so no search finds it until it's
- * opened (`docs/dashboard.md`, *The drawers*), and what its view gives whole is, folded or not.
- */
-async function opened(): Promise<void> {
-    // Each trace laid out as the host answers its view, which a loaded machine does after the review has settled.
-    await review.until("lay out both conversations' traces", (view) => {
-        const lines = view.state.doc.toString().split("\n");
-        return ["━━ zoetrope · main · main · ", "━━ zoetrope · main · main/render_frames"].every((banner) => {
-            const at = lines.findIndex((each) => each.startsWith(banner));
-            const after = at === -1 ? [] : lines.slice(at + 1);
-            const end = after.findIndex((each) => each.startsWith("━━ "));
-            return (end === -1 ? after : after.slice(0, end)).some((each) => each.startsWith("trace · "));
-        });
-    });
-    await dashboard.keys.press([" ", "F", "v"]);
-    await review.inMode("visual");
-    await dashboard.keys.press(["z", "o"]);
-    await review.until("lay out the four places", (view, text) => view.state.doc.toString().split(text).length - 1 === 4, LINE);
-    await dashboard.keys.press([" ", "F", "m"]);
-    await review.inMode("visual");
-    await dashboard.keys.press(["z", "c"]);
-    await review.inMode("normal");
-    await review.until(
-        "closed the agent's words",
-        (view, text) => {
-            const whole = view.state.doc.toString();
-            let hidden = 0;
-            for (let at = whole.indexOf(text); at !== -1; at = whole.indexOf(text, at + 1)) {
-                const line = view.state.doc.lineAt(at);
-                hidden += view.lineBlockAt(line.from).from !== line.from ? 1 : 0;
-            }
-            return hidden === 2;
-        },
-        LINE,
-    );
-}
 
 /** What vim's line under the review says of the folds a search opened. */
 const OPENED = "^opened (a fold|\\d+ folds) to reach it$";
 
 describe("searching the review backward with ?, in headless Chromium", () => {
-    // The page made afresh, every fold closed as the review opens, the traces then opened and the agent's words in them
-    // closed: each test opens those around a match.
+    // The page made afresh, every fold closed as the review opens: each test opens those around a match.
     beforeEach(async () => {
         await dashboard.page.reload();
         await loaded();
-        await opened();
     });
 
     it("asks in a prompt of its own, goes to the match before the cursor opening the folds around it, and n goes on back and N forward", async () => {
         await dashboard.keys.press(["G"]);
-        expect(await found(LINE)).toMatchObject({ before: 4, hidden: [false, true, false, true] });
+        expect(await found(LINE)).toMatchObject({ before: 5, hidden: [true, true, true, true, true] });
 
         await dashboard.keys.press(["?"]);
         await dashboard.page.waitForSelector(".cm-vim-panel input:focus");
@@ -161,61 +122,61 @@ describe("searching the review backward with ?, in headless Chromium", () => {
         await dashboard.keys.type(LINE.replace(".", "\\."));
         await dashboard.keys.press(["Enter"]);
 
-        await onPlace(LINE, 3);
+        await onPlace(LINE, 4);
         await below(OPENED);
-        expect(await found(LINE)).toMatchObject({ on: 3, hidden: [false, true, false, false] });
+        expect(await found(LINE)).toMatchObject({ on: 4, hidden: [true, true, true, false, false] });
 
-        // Back onto that conversation's line of those words, then into the other conversation's words, opening them.
+        // Back onto that conversation's line of those words, then into the item's context, before the other conversation.
+        await dashboard.keys.press(["n"]);
+        await onPlace(LINE, 3);
+        expect((await found(LINE)).hidden).toEqual([true, true, true, false, false]);
         await dashboard.keys.press(["n"]);
         await onPlace(LINE, 2);
-        expect((await found(LINE)).hidden).toEqual([false, true, false, false]);
-        await dashboard.keys.press(["n"]);
-        await onPlace(LINE, 1);
-        expect((await found(LINE)).hidden).toEqual([false, false, false, false]);
+        expect((await found(LINE)).hidden).toEqual([true, true, false, false, false]);
         await dashboard.keys.press(["N"]);
-        await onPlace(LINE, 2);
-        await dashboard.keys.press(["n", "n"], 50);
+        await onPlace(LINE, 3);
+        await dashboard.keys.press(["n", "n", "n"], 50);
         await onPlace(LINE, 0);
+        expect((await found(LINE)).hidden).toEqual([false, false, false, false, false]);
         // Back from the first, it goes round to the last, as vim's does.
         await dashboard.keys.press(["n"]);
-        await onPlace(LINE, 3);
+        await onPlace(LINE, 4);
     });
 
     it("leaves / going forward, n going on forward and N back", async () => {
         await dashboard.keys.press(["g", "g"]);
-        expect(await found(LINE)).toMatchObject({ before: 0, hidden: [false, true, false, true] });
+        expect(await found(LINE)).toMatchObject({ before: 0, hidden: [true, true, true, true, true] });
         await search("/", LINE.replace(".", "\\."));
         await onPlace(LINE, 0);
-        expect((await found(LINE)).hidden).toEqual([false, true, false, true]);
+        await below(OPENED);
+        expect((await found(LINE)).hidden).toEqual([false, false, true, true, true]);
         await dashboard.keys.press(["n"]);
         await onPlace(LINE, 1);
-        await below(OPENED);
-        expect((await found(LINE)).hidden).toEqual([false, false, false, true]);
+        expect((await found(LINE)).hidden).toEqual([false, false, true, true, true]);
         await dashboard.keys.press(["n"]);
         await onPlace(LINE, 2);
-        expect((await found(LINE)).hidden).toEqual([false, false, false, true]);
+        expect((await found(LINE)).hidden).toEqual([false, false, false, true, true]);
         await dashboard.keys.press(["N"]);
         await onPlace(LINE, 1);
     });
 
     it("opens the folds around the match a count reaches, for ?, / and n alike", async () => {
-        await dashboard.keys.press(["G", "3", "?"], 50);
+        await dashboard.keys.press(["G", "2", "?"], 50);
         await dashboard.page.waitForSelector(".cm-vim-panel input:focus");
         await dashboard.keys.type(LINE.replace(".", "\\."));
         await dashboard.keys.press(["Enter"]);
-        await onPlace(LINE, 1);
+        await onPlace(LINE, 3);
         await below(OPENED);
-        expect((await found(LINE)).hidden).toEqual([false, false, false, true]);
+        expect((await found(LINE)).hidden).toEqual([true, true, true, false, false]);
 
         await dashboard.page.reload();
         await loaded();
-        await opened();
         await dashboard.keys.press(["g", "g", "2", "/"], 50);
         await dashboard.page.waitForSelector(".cm-vim-panel input:focus");
         await dashboard.keys.type(LINE.replace(".", "\\."));
         await dashboard.keys.press(["Enter"]);
         await onPlace(LINE, 1);
-        expect((await found(LINE)).hidden).toEqual([false, false, false, true]);
+        expect((await found(LINE)).hidden).toEqual([false, false, true, true, true]);
         await dashboard.keys.press(["g", "g", "2", "n"], 50);
         await onPlace(LINE, 1);
     });

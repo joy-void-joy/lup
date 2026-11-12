@@ -9,7 +9,7 @@ resumed in a launch of their own finds what waited for them there.
 An item has a number, one sequence per user, cited `@12` wherever it's named
 (`cited`), so the operator answers `@12`, or `12`; a reason (a message with its
 kind, a question with its numbered decisions, an answer, an approval asked yes
-or no; a friction, how it felt, or a stop by choice, each as the
+or no; a concern's words, how it felt, or a stop by choice, each as the
 agent's tool took it; a change held, or a write that landed flagged, as the
 judge put it), whose kind ranks it (`ranked`); a sender and a recipient; when
 it was made; and its state: waiting, told (when, and how), answered, done, or
@@ -181,10 +181,22 @@ class Labelled(Model):
         return labelled("", parts) or "Nothing notable."
 
 
+type Filed = Literal["friction", "concern"]
+"""Which tool filed a concern's words: `friction`, for what got in the agent's
+way, or `concern`, for anything else worth keeping an eye on."""
+
+
 class Friction(results.Friction):
-    """What got in a conversation's way, which they told the operator at the moment it did (`friction`), in their own words: news to read, never a question."""
+    """A concern's words, in their own words, as a conversation told the operator at the moment it came up, opening a concern or adding to one: what got in their way (`friction`), or anything else worth keeping an eye on (`concern`). News to read, never a question.
+
+    Kept as `friction` whichever tool filed it, which an earlier lup reads, and
+    `tool` says which, so lup names its kind as its tool (`kind`, `what`); one
+    kept before `tool` was is a friction, which is all there was then.
+    """
 
     reason: Literal["friction"] = "friction"
+    tool: Filed = "friction"
+    """Which tool filed it: `friction` or `concern`."""
 
     @model_validator(mode="before")
     @classmethod
@@ -609,6 +621,10 @@ class Letter(Model):
     thread: int | None = None
     """The thread it's written on, by its number, where it shows in order as
     the operator's words; none for a message written under an agent's banner."""
+    quote: Quote | None = None
+    """The lines of the thread's body it's written on, where the operator
+    commented on them, told quoted before their words; none for a message on the
+    thread whole, or under an agent's banner."""
     text: str
 
 
@@ -1003,7 +1019,7 @@ def kind_of(reason: Reason) -> ItemKind:
     | a held change | waiting on you | yes | yes | as an approval's, a comment on it approving it |
     | a question, a problem (`blocked`) | waiting on you | yes | yes | mark read, leave for later |
     | a disagreement, a question sent as a message | waiting on you | yes | no | mark read, leave for later |
-    | a note, a turn's last words among them, a friction, how it felt, a stop by choice, the operator's copy of a message between conversations, done as it's made | news | no | no | mark read, leave for later |
+    | a note, a turn's last words among them, a concern's words, how it felt, a stop by choice, the operator's copy of a message between conversations, done as it's made | news | no | no | mark read, leave for later |
     | a subagent's end, lup's word on citations that didn't resolve | news | no | no | none |
     | a write that landed flagged | flag | no | no | mark read, leave for later |
     | the operator's own answer or review | waiting on you | no | no | none |

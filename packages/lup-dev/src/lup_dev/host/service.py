@@ -615,14 +615,15 @@ def introduction(tools: list[ToolSpec]) -> str:
     type's name doesn't fix the tools (a project's agent of the same name
     replaces a built-in one), so they're told some types go without lup's.
 
-    >>> from lup.tools.speaking import friction, how_it_felt
-    >>> print(introduction([friction.spec(), how_it_felt.spec()]))
+    >>> from lup.tools.speaking import concern, friction, how_it_felt
+    >>> print(introduction([concern.spec(), friction.spec(), how_it_felt.spec()]))
     lup, the environment you work in, serves you these tools, as it does your session's main conversation. Your tool search finds each by its name, with its full description. Some subagent types are given only their own tools, without lup's: where your tool search finds none of these, you're one of them.
     <BLANKLINE>
+    - `concern`: Say what's worth keeping an eye on, and carry on.
     - `friction`: Say what got in your way, and carry on.
     - `how_it_felt`: Tell your caller how it is for you.
     <BLANKLINE>
-    `friction` and `how_it_felt` reach the operator directly, whatever your parent passes on.
+    `concern`, `friction` and `how_it_felt` reach the operator directly, whatever your parent passes on.
     """
     opening = (
         "lup, the environment you work in, serves you these tools, as it does "
@@ -632,7 +633,8 @@ def introduction(tools: list[ToolSpec]) -> str:
         "these, you're one of them."
     )
     direct = (
-        f"`{speaking.friction.name}` and `{speaking.how_it_felt.name}` reach the "
+        f"`{speaking.concern.name}`, `{speaking.friction.name}` and "
+        f"`{speaking.how_it_felt.name}` reach the "
         "operator directly, whatever your parent passes on."
     )
     return "\n".join([opening, "", *summaries(tools), "", direct])

@@ -34,10 +34,10 @@
   what they send into it after, running or resumed, being news there, since
   what the operator settled never comes back on its own.
 
-What an agent says of a thread besides sending into it is the `thread` tool's
-(`inbox/tools.py`): open, join, hold, hand, move into, park, say done. Settling,
+What an agent says of a thread is the `concern` tool's (`inbox/tools.py`):
+open it, add to it, join, hold, hand, move into, park, say done. Settling,
 declining and reopening are the operator's (`settled`, `declined`,
-`reopened`), and so is answering a check (`checked`).
+`reopened`).
 """
 
 import textwrap
@@ -69,11 +69,9 @@ from lup_dev.inbox.threads import cue, parts_of, spoken
 from lup_ledger.environment.threads import Threads
 from lup_ledger.errors import LupLedgerError
 from lup_ledger.parties import Conversation, Lup, Operator
-from lup_ledger.records import Edge
 from lup_ledger.threads import (
-    Answered,
+    Body,
     BranchLanded,
-    Check,
     CommitLanded,
     ConditionHeld,
     ConversationEnded,
@@ -142,15 +140,17 @@ def told(item: Item) -> Reach:
 
 
 def slugged(title: str, longest: int = 40) -> str:
-    """Return a thread's name made from its `title`: shortened to `longest` characters at a word's end, lowercase, each run of what a name can't hold a `-`; `thread` where that leaves no letter.
+    """Return a thread's name made from its `title`: shortened to `longest` characters at a word's end, lowercase, each run of what a name can't hold a `-`, and no `.` at its end, as a sentence's stop is; `thread` where that leaves no letter.
 
     >>> slugged("The cursor jumps when typing fast in a long comment")
     'the-cursor-jumps-when-typing-fast-in-a'
+    >>> slugged("The gate hangs.")
+    'the-gate-hangs'
     >>> slugged("#316")
     'thread-316'
     """
     short = textwrap.shorten(title, width=longest, placeholder="")
-    made = shaped(short) or ""
+    made = (shaped(short) or "").removesuffix(".")
     lettered = any(each.isalpha() for each in made)
     return made if lettered else "-".join(each for each in ["thread", made] if each)
 
@@ -286,15 +286,7 @@ class Concerns(Model, arbitrary_types_allowed=True):
             raise InboxError(str(refused)) from refused
 
     def drawn[
-        E: In
-        | Moved
-        | Refers
-        | Answered
-        | Parked
-        | Done
-        | Settled
-        | Declined
-        | Reopened
+        E: In | Moved | Refers | Parked | Done | Settled | Declined | Reopened | Body
     ](self, edge: E) -> E:
         """Draw `edge` on the ledger; say why where the ledger refuses it."""
         try:
@@ -867,6 +859,36 @@ class Concerns(Model, arbitrary_types_allowed=True):
         )
         return self.stated(thread, status, line, party)
 
+    def keeps_body(
+        self, party: Conversation, thread: Thread, answering: Conversation | None
+    ) -> None:
+        """Say, raising `InboxError`, where `party` can't rewrite the body of `thread`, which `answering` answers for: it's theirs to keep, and a subagent's below them, whose work it is; anyone's where nobody running answers for it."""
+        if (
+            answering is None
+            or answering == party
+            or answering in self.forebears(party)
+        ):
+            return
+        message = f"@{thread.name}'s body is {self.roster.who(answering)}'s to keep, who answers for it"
+        raise InboxError(message)
+
+    def bodied(self, party: Conversation, thread: Thread, text: str) -> Body:
+        """Rewrite `thread`'s body whole as `text`, by `party`, whoever answers for it or a subagent below them (`keeps_body`); an empty `text` clears it. Nobody is told: it's for the operator to read where the thread is."""
+        self.keeps_body(party, thread, self.answering(thread))
+        return self.drawn(
+            Body(
+                target=thread.number,
+                repository=thread.repository,
+                by=party,
+                at=self.now(),
+                text=text,
+            )
+        )
+
+    def body(self, thread: Thread) -> Body | None:
+        """Return `thread`'s body as it stands; none where it has none."""
+        return self.threads.body(thread.number)
+
     def settled(self, thread: Thread) -> Thread:
         """Settle `thread`, as the operator does, telling whoever answers for it."""
         status = Settled(
@@ -963,89 +985,35 @@ class Concerns(Model, arbitrary_types_allowed=True):
             case ConditionHeld(when=when):
                 return f"`{when}` holds"
 
-    def checks(
-        self, party: Conversation, thread: Thread, lines: list[str]
-    ) -> list[Check]:
-        """Put a check in `thread` for each of `lines`, by `party`: something only the operator can try, waiting on them until they answer it."""
-
-        def checked(text: str) -> Check:
-            check = self.inbox.ledger.kept(
-                Check(
-                    number=self.inbox.ledger.numbered(),
-                    repository=thread.repository,
-                    by=party,
-                    at=self.now(),
-                    text=text,
-                )
-            )
-            self.drawn(
-                In(
-                    source=check.number,
-                    target=thread.number,
-                    repository=thread.repository,
-                    by=party,
-                    at=self.now(),
-                )
-            )
-            return check
-
-        return [checked(each) for each in lines if each.strip()]
-
-    def check(self, number: int) -> Check | None:
-        """Return check `number`; none where the ledger holds no check by that number."""
-        found = self.inbox.ledger.found(number)
-        return found if isinstance(found, Check) else None
-
     def containing(self, number: int) -> Thread | None:
         """Return the thread node `number` is in; none where it's in none."""
         drawn = self.inbox.ledger.drawn_from(number, In, current=True)
         return None if not drawn else self.at(drawn[-1].target)
 
-    def checked(self, number: int, text: str) -> Check:
-        """Answer check `number`, as the operator does, with what they saw, or a tick where `text` is empty; tell whoever asked it, where they go on, else whoever answers for its thread.
+    def open_to(self, thread: Thread) -> bool:
+        """Say whether `thread` is open and something's there to read: the operator hasn't cleared it, and something's in it, its body, or what was said of where it stands."""
+        standing = self.standing(thread)
+        return standing.marks.operator is None and (
+            bool(self.threads.members(thread.number))
+            or standing.status is not None
+            or self.body(thread) is not None
+        )
 
-        Say where it's no check, or one answered already.
-        """
-        check = self.check(number)
-        if check is None:
-            message = f"{cited(number)} isn't a check"
-            raise InboxError(message)
-        if not check.waiting(self.inbox.ledger.drawn_to(number, Edge)):
-            message = f"{cited(number)} is answered already"
-            raise InboxError(message)
-        self.drawn(
-            Answered(
-                target=number,
-                repository=check.repository,
-                by=Operator(),
-                at=self.now(),
-                text=text,
-            )
-        )
-        thread = self.containing(number)
-        where = "" if thread is None else f" in @{thread.name}"
-        said = Tag(
-            name="checked",
-            attributes={
-                "item": str(number),
-                **({} if thread is None else {"thread": thread.name}),
-            },
-            parts=[text or "Ticked: they saw what it says."],
-        ).written()
-        asker = check.by if isinstance(check.by, Conversation) else None
-        whom = (
-            asker
-            if asker is not None and self.live(asker)
-            else None
-            if thread is None
-            else self.answering(thread)
-        )
-        if whom is not None:
-            self.left(
-                whom,
-                f"lup: the operator answered your check {cited(number)}{where}:\n{said}",
-            )
-        return check
+    def unheld(self, repository: Path) -> list[Thread]:
+        """Return `repository`'s concerns in `No agent`, by number: open, with something there (`open_to`), and nobody running answering for them."""
+        return [
+            each
+            for each in self.threads.of(repository)
+            if self.answering(each) is None and self.open_to(each)
+        ]
+
+    def held_by(self, party: Conversation) -> list[Thread]:
+        """Return the concerns `party` holds, open, with something there (`open_to`), by number: a session's own conversation's, what they open or are handed."""
+        return [
+            each
+            for each in self.threads.of(party.repository)
+            if each.holder == party and self.open_to(each)
+        ]
 
     def standing(self, thread: Thread) -> Standing:
         """Return where `thread` stands (`Standing.read`), nobody running where nobody who goes on answers for it."""

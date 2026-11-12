@@ -95,64 +95,35 @@ export function useNow(every = 1000): Date {
     return now;
 }
 
-/** Return which views to start watching, of those `asked`, and which to stop, of those `watching`, by their ids: those newly asked, and those no longer, every other left as it is. */
-export function rewatching(watching: ReadonlySet<string>, asked: ReadonlySet<string>): { start: string[]; stop: string[] } {
-    return { start: [...asked].filter((id) => !watching.has(id)), stop: [...watching].filter((id) => !asked.has(id)) };
-}
-
 /**
  * What the host answers of each view in `asked`, each watched while it's asked, answered again at its own triggers
  * (`docs/host.md`, *The views the dashboard shows*), by its instance's id (`views.ts`); a refusal, or a view not yet
- * answered, none. A view no longer asked stops being watched, and what it answered goes; one newly asked is watched
- * alone, every other left watched as it was, so a fold's view read as it opens, or let go as it closes, asks the host
- * nothing more of the rest.
+ * answered, none. A view no longer asked stops being watched, and what it answered goes.
  */
 export function useViews(asked: readonly Instance[]): ReadonlyMap<string, Blocks> {
     const [answers, setAnswers] = useState<ReadonlyMap<string, Blocks>>(new Map());
-    // How to stop watching each view watched, by its id.
-    const watching = useRef(new Map<string, () => void>());
     const key = JSON.stringify(asked.map((each) => instanceOf(each.repository, each.module, each.view, each.argument)).sort());
     useEffect(() => {
-        const byId = new Map(asked.map((each) => [instanceOf(each.repository, each.module, each.view, each.argument), each]));
-        const ids = new Set(byId.keys());
-        const { start, stop } = rewatching(new Set(watching.current.keys()), ids);
-        for (const id of stop) {
-            watching.current.get(id)?.();
-            watching.current.delete(id);
-        }
-        for (const id of start) {
-            const each = byId.get(id);
-            if (each === undefined) {
-                continue;
-            }
+        const ids = new Set<string>();
+        const stops = asked.map((each) => {
+            const id = instanceOf(each.repository, each.module, each.view, each.argument);
+            ids.add(id);
             const request = { kind: "module-view" as const, repository: each.repository, module: each.module, view: each.view, argument: each.argument as never };
-            watching.current.set(
-                id,
-                watch(
-                    request,
-                    (reply) => {
-                        if (reply.kind === "module-viewed") {
-                            setAnswers((before) => new Map(before).set(id, reply.blocks));
-                        }
-                    },
-                    () => undefined,
-                ),
+            return watch(
+                request,
+                (reply) => {
+                    if (reply.kind === "module-viewed") {
+                        setAnswers((before) => new Map(before).set(id, reply.blocks));
+                    }
+                },
+                () => undefined,
             );
-        }
-        setAnswers((before) => ([...before.keys()].every((id) => ids.has(id)) ? before : new Map([...before].filter(([id]) => ids.has(id)))));
+        });
+        setAnswers((before) => new Map([...before].filter(([id]) => ids.has(id))));
+        return () => stops.forEach((stop) => stop());
         // Watched again only where what's asked changes, by the views' ids.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [key]);
-    // Every watch stops as the page lets the views go.
-    useEffect(() => {
-        const watched = watching.current;
-        return () => {
-            for (const stop of watched.values()) {
-                stop();
-            }
-            watched.clear();
-        };
-    }, []);
     return answers;
 }
 

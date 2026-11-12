@@ -91,7 +91,7 @@ from lup_dev.host.workers import (
     WorkerJudge,
     Workers,
 )
-from lup_dev.inbox import tools
+from lup_dev.inbox import texts, tools
 from lup_dev.inbox.bearings import (
     Repository,
     RepositoryBearings,
@@ -2270,7 +2270,7 @@ def test_blocked_note_and_send_reach_the_operator_a_note_raising_no_notice(
     assert notices.raised[1].startswith(f"lup: a disagreement from `{tmp_path.name}`")
 
 
-def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_subagent(
+def test_a_concern_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_subagent(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     other = tmp_path / "other"
@@ -2310,11 +2310,11 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
         answers = [
             call(
                 mcp,
-                "friction",
+                "concern",
                 stamped(
                     hook,
                     lup_call(
-                        "friction",
+                        "concern",
                         jammed,
                         "f1",
                         agent_id="a1",
@@ -2326,9 +2326,7 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
                 mcp, "how_it_felt", stamped(hook, lup_call("how_it_felt", quiet, "h1"))
             ),
             call(mcp, "stop", stamped(hook, lup_call("stop", stopping, "s1"))),
-            call(
-                mcp2, "friction", stamped(hook2, codex_call("friction", jammed, "c1"))
-            ),
+            call(mcp2, "concern", stamped(hook2, codex_call("concern", jammed, "c1"))),
             call(
                 mcp2,
                 "how_it_felt",
@@ -2340,7 +2338,7 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
                 stamped(hook2, codex_call("stop", stopping, "c3", agent_id="b1")),
             ),
         ]
-        labelled = call(mcp, "friction", {"got_in_the_way": "The gate hung."})
+        labelled = call(mcp, "concern", {"got_in_the_way": "The gate hung."})
         # One item for each answered call, the subagent's friction a second for
         # their parent; the refused friction makes none.
         (
@@ -2368,27 +2366,39 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
             if isinstance(each.reason, HowItFelt)
         ]
     # Each subagent has a parent, their session's own conversation, who gets a
-    # copy of their friction (`copied`); how it felt is told to the operator
-    # alone. Each item lands in no thread.
-    assert threads == []
-    assert [text for text, _ in answers] == [
-        f"Thanks: your friction is with the operator, @{claude_friction}, and your parent has it too. You can carry on.",
-        f"Thank you for telling them. It's with the operator, as you wrote it, @{claude_felt}.",
-        f"The operator will read why you stopped, @{claude_stop}. You can end your turn now.",
-        f"Thanks: your friction is with the operator, @{codex_friction}. You can carry on.",
-        f"Thank you for telling them. It's with the operator, as you wrote it, @{codex_felt}.",
-        f"The operator will read why you stopped, @{codex_stop}. You can end your turn now.",
-    ]
-    assert not any(error for _, error in answers)
-    # The parts a friction once had are refused: it's one text.
-    assert labelled[1]
-    assert labelled[0].startswith("Refused: 1 validation error for Friction")
+    # copy of their concern's words (`copied`); how it felt is told to the
+    # operator alone. Each concern opens at the top, its words in it, held by
+    # the session whose agent opened it, working in none; the rest lands in none.
     claude_session = Conversation(
         repository=tmp_path / ".git", runtime="claude", session="s1"
     )
     codex_session = Conversation(
         repository=other / ".git", runtime="codex", session="t1"
     )
+    title = "`uv run lup-dev check` printed: engine stale"
+    assert [(each.title, each.holder, each.parent) for each in threads] == [
+        (title, claude_session, None),
+        (title, codex_session, None),
+    ]
+    stale = threads[0].name
+    assert [text for text, _ in answers] == [
+        (
+            f"Opened @{stale}, held by `{tmp_path.name}`.\n"
+            f"Thanks: your words are with the operator, @{claude_friction}, in @{stale}, and your parent has them too. You can carry on."
+        ),
+        f"Thank you for telling them. It's with the operator, as you wrote it, @{claude_felt}.",
+        f"The operator will read why you stopped, @{claude_stop}. You can end your turn now.",
+        (
+            f"Opened @{stale}, held by you.\n"
+            f"Thanks: your words are with the operator, @{codex_friction}, in @{stale}. You can carry on."
+        ),
+        f"Thank you for telling them. It's with the operator, as you wrote it, @{codex_felt}.",
+        f"The operator will read why you stopped, @{codex_stop}. You can end your turn now.",
+    ]
+    assert not any(error for _, error in answers)
+    # The parts a friction once had are refused: it's one text.
+    assert labelled[1]
+    assert labelled[0].startswith("Refused: 1 validation error for Concern")
     assert [
         (each.number, each.sender, each.recipient, each.call) for each in waiting
     ] == [
@@ -2414,7 +2424,7 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
             "c3",
         ),
     ]
-    friction = Friction.model_validate(jammed)
+    friction = Friction.model_validate({**jammed, "tool": "concern"})
     assert (passed.reason, passed.recipient, passed.quiet) == (
         friction,
         claude_session,
@@ -2431,7 +2441,7 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
     ]
     first = listed.splitlines()[0]
     assert first.startswith(
-        f"{cited(claude_friction):>5}  2026-10-01 12:00  a friction from `"
+        f"{cited(claude_friction):>5}  2026-10-01 12:00  a concern from `"
     )
     assert first.endswith(
         f"`{tmp_path.name}/a1` in {tmp_path}: "
@@ -2906,8 +2916,8 @@ def introduction() -> str:
         "these, you're one of them."
     )
     direct = (
-        "`friction` and `how_it_felt` reach the operator directly, whatever your "
-        "parent passes on."
+        "`concern`, `friction` and `how_it_felt` reach the operator directly, "
+        "whatever your parent passes on."
     )
     lines = [f"- `{spec.name}`: {spec.summary}" for spec in served]
     return "\n".join([opening, "", *lines, "", direct])
@@ -3317,7 +3327,7 @@ def test_claude_codes_own_agents_are_answered_with_nothing_judged_by_no_one_and_
         befriended = send(
             hook,
             lup_call(
-                "friction",
+                "concern",
                 {"text": "stuck"},
                 "c3",
                 agent_id="f2",
@@ -3946,7 +3956,7 @@ def test_what_a_subagent_said_at_an_end_held_for_what_waited_reaches_its_parent_
 
 
 @pytest.mark.parametrize("reach", ["operator", "operator and parent"])
-def test_a_subagents_friction_reaches_its_parent_whole_and_how_it_felt_where_lup_passes_it_on(
+def test_a_subagents_concern_reaches_its_parent_whole_and_how_it_felt_where_lup_passes_it_on(
     machine: Layout,
     clock: FakeClock,
     notices: Raised,
@@ -3979,7 +3989,7 @@ def test_a_subagents_friction_reaches_its_parent_whole_and_how_it_felt_where_lup
         send(hook, records.spawn("t1", name="parser"))
         records.recorded("a1", "Explore", "t1", name="parser")
         rollouts.recorded("th1", "t1", "/root/lexer")
-        jam = records.lup((hook, mcp), "friction", jammed, "a1", "Explore")
+        jam = records.lup((hook, mcp), "concern", jammed, "a1", "Explore")
         how = rollouts.lup((hook2, mcp2), "how_it_felt", went, "th1")
         ended = send(hook, claude("Stop", stop_hook_active=False))
         told = context(send(hook, bash("m1")))
@@ -3992,14 +4002,18 @@ def test_a_subagents_friction_reaches_its_parent_whole_and_how_it_felt_where_lup
         described = next(
             each.description for each in specs() if each.name == "how_it_felt"
         )
-    friction = Friction.model_validate(jammed)
+        [stale] = [each.name for each in delivery.inbox.ledger.every(Thread)]
+    friction = Friction.model_validate({**jammed, "tool": "concern"})
     how_it_felt = HowItFelt.model_validate(went)
     assert jam == (
-        f"Thanks: your friction is with the operator, @{reported}, and your parent has it too. You can carry on.",
+        (
+            f"Opened @{stale}, held by `w`.\n"
+            f"Thanks: your words are with the operator, @{reported}, in @{stale}, and your parent has them too. You can carry on."
+        ),
         False,
     )
     assert ended == ""
-    assert told.startswith(f'<item item="{copied}" from="w/parser" kind="friction">')
+    assert told.startswith(f'<item item="{copied}" from="w/parser" kind="concern">')
     assert friction.text in told
     assert operators == [reported, felt]
     copies = [
@@ -4074,7 +4088,7 @@ def test_what_a_subagent_tells_their_parent_is_no_item_of_the_operator_s_and_wha
         called("send", to="parent", kind="problem", text="To my parent.")
         called("send", to="operator", kind="note", text="To the operator.")
         called("note", remark="A doubt.")
-        called("friction", text="The gate hung.")
+        called("concern", text="The gate hung.")
         called("how_it_felt", text="Calm.")
         waiting = delivery.inbox.waiting(Operator())
         every = list(delivery.inbox.items.values())
@@ -5161,24 +5175,113 @@ def test_a_room_whose_service_runs_an_older_copy_is_told_so(
     )
 
 
+@pytest.mark.parametrize("runtime", ["claude", "codex"])
+def test_a_friction_opens_a_concern_of_its_own_saying_it_s_a_friction_beside_a_concern_on_each_runtime(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+    *,
+    runtime: str,
+) -> None:
+    """`friction` files a concern as `concern` with `text` does, its words named a friction wherever lup names a kind, and `concern`'s a concern, on either runtime."""
+    start = claude if runtime == "claude" else codex
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", runtime)
+        mcp = machine.host.launch("one").mcp
+        send(machine.host.launch("one").hook, start("SessionStart", source="startup"))
+        jammed = call(
+            mcp, "friction", {"text": "The gate hung.", "title": "gate hangs"}
+        )
+        hung = newest(delivery)
+        eyed = call(mcp, "concern", {"text": "The page lags on 40 concerns."})
+        lags = newest(delivery)
+        old = call(mcp, "friction", {"text": "Again.", "thread": "gate-hangs"})
+        listed = inbox("--kind", "friction")
+        concerns = delivery.concerns()
+        repository = tmp_path / ".git"
+        gate = concerns.named(repository, "gate-hangs")
+        page = concerns.named(repository, "the-page-lags-on-40-concerns")
+        [hung_item, lags_item] = [delivery.inbox.item(each) for each in (hung, lags)]
+    assert jammed == (
+        (
+            "Opened @gate-hangs, held by you.\n"
+            f"Thanks: your friction is with the operator, @{hung}, in @gate-hangs. "
+            "You can carry on."
+        ),
+        False,
+    )
+    assert not eyed[1]
+    assert (concerns.containing(hung), concerns.containing(lags)) == (gate, page)
+    assert [
+        (each.reason.reason, each.reason.model_dump()["tool"])
+        for each in (hung_item, lags_item)
+    ] == [
+        ("friction", "friction"),
+        ("friction", "concern"),
+    ]
+    assert [texts.what(each) for each in (hung_item, lags_item)] == [
+        "a friction",
+        "a concern",
+    ]
+    assert [texts.kind(each) for each in (hung_item, lags_item)] == [
+        "friction",
+        "concern",
+    ]
+    # It takes the library's input alone: an old habit's `thread` is refused.
+    assert old[1]
+    assert "thread" in old[0]
+    assert f"@{hung}" in listed
+    assert f"@{lags}" not in listed
+
+
+@pytest.mark.parametrize("runtime", ["claude", "codex"])
+def test_lup_never_reminds_an_agent_of_a_concern_they_hold_at_a_call_or_their_turn_s_end(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+    *,
+    runtime: str,
+) -> None:
+    """A concern is never a chore: holding several, open, with bodies, a session's calls and their turn's end are told nothing of them, on either runtime."""
+    start = claude if runtime == "claude" else codex
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", runtime)
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, start("SessionStart", source="startup"))
+        for text in ["The gate hangs.", "The page lags on 40 concerns."]:
+            _, refused = call(mcp, "concern", {"text": text, "body": "Unread yet."})
+            assert not refused
+        clock.sleep(3600)
+        called = send(hook, bash("b1") if runtime == "claude" else codex_bash("b1"))
+        ended = send(hook, start("Stop", stop_hook_active=False))
+        again = send(hook, start("Stop", stop_hook_active=False))
+    assert (called, ended, again) == ("", "", "")
+
+
 def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
     served = specs()
     assert [spec.name for spec in served] == [
         "blocked",
         "stop",
         "note",
+        "concern",
         "friction",
         "how_it_felt",
         "ask",
         "send",
         "wait_inbox",
         "inbox",
-        "thread",
         "withdraw",
         "edit",
     ]
-    # Each takes the library's input, and those that send a `thread` beside it;
-    # how it felt lands where its sender started, and takes none.
+    # Each takes the library's input first: `blocked`, `stop` and `note` with
+    # a `thread` beside it, `concern` with what's said of one there already;
+    # `friction` opens one of its own and how it felt lands where its sender
+    # started, and neither takes anything more.
     library = [tool.spec().input_schema for tool in SPEAKING]
 
     def properties(schema: dict[str, JsonValue]) -> list[str]:
@@ -5186,22 +5289,38 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
         assert isinstance(found, dict)
         return list(found)
 
-    assert [properties(spec.input_schema) for spec in served[:5]] == [
-        [*properties(each), *(["thread"] if at < 4 else [])]
-        for at, each in enumerate(library)
+    concerning = [
+        "name",
+        "under",
+        "body",
+        "move",
+        "join",
+        "hold",
+        "hand",
+        "park",
+        "done",
     ]
-    assert served[4].input_schema == library[4]
+    assert [properties(spec.input_schema) for spec in served[:6]] == [
+        [*properties(library[0]), "thread"],
+        [*properties(library[1]), "thread"],
+        [*properties(library[2]), "thread"],
+        [*properties(library[3]), *concerning],
+        properties(library[4]),
+        properties(library[5]),
+    ]
+    assert served[5].input_schema == library[5]
+    assert served[4].input_schema["additionalProperties"] is False
     assert [spec.summary for spec in served] == [
         "Say the work can't go on, and what's wrong.",
         "End your work by your own choice, saying why.",
         "Tell the operator a doubt, and carry on.",
+        "Say what's worth keeping an eye on, and carry on.",
         "Say what got in your way, and carry on.",
         "Tell the operator how it is for you.",
         "Ask the operator, with numbered decisions.",
         "Send a message to a party's inbox.",
         "Wait until something reaches you.",
         "Read this repository's inbox, changing nothing.",
-        "Open, join, hold or park a thread; say it's done.",
         "Take back an item the operator needn't see.",
         "Edit what you sent the operator.",
     ]
@@ -5418,10 +5537,12 @@ def test_a_friction_and_how_it_felt_kept_in_labelled_parts_or_as_how_it_went_rea
         )["reason"]
         for each in (1, 4)
     ]
+    # Kept before a concern's words said which tool filed them: a friction's.
     assert rewritten == {
         "reason": "friction",
         "text": "`ls` printed: Permission denied\nTrying: look for the config",
         "title": "",
+        "tool": "friction",
     }
     assert renamed == {"reason": "how it felt", "text": "Heavy toward the end."}
     assert [Inbox.opened(kept).item(each) for each in (1, 4)] == [read[0], read[3]]
@@ -5919,7 +6040,7 @@ def test_a_review_quotes_by_part_and_first_line_reads_in_one_line_and_names_othe
         doubt = newest(delivery)
         call(mcp, "note", {"remark": "Done reading."})
         reading = newest(delivery)
-        call(mcp2, "friction", {"text": "Gate hung."})
+        call(mcp2, "concern", {"text": "Gate hung."})
         hung = newest(delivery)
         draft = Draft(
             comments=[
@@ -5993,7 +6114,7 @@ def test_a_review_quotes_by_part_and_first_line_reads_in_one_line_and_names_othe
         f'<read items="{reading}"/>\n'
         "<context>\n"
         f"{CONTEXT_LINE}\n"
-        f'<on item="{hung}" kind="friction" from="other" worktree="{other}">\n'
+        f'<on item="{hung}" kind="concern" from="other" worktree="{other}">\n'
         f'<quote part="{hung}.1">Gate hung.</quote>\n'
         "<reply>Again?</reply>\n"
         "</on>\n"
@@ -6002,7 +6123,7 @@ def test_a_review_quotes_by_part_and_first_line_reads_in_one_line_and_names_othe
     )
     assert told2 == (
         f'<review item="{to_two}" from="operator" covers="{covers}">\n'
-        f'<on item="{hung}" kind="friction">\n'
+        f'<on item="{hung}" kind="concern">\n'
         f'<quote part="{hung}.1">Gate hung.</quote>\n'
         f'<reply id="{to_two}.5">Again?</reply>\n'
         "</on>\n"
@@ -13773,18 +13894,12 @@ def test_a_new_main_session_is_told_where_its_repository_stands_once_as_it_start
     assert resumed == ""
     assert compacted == ""
     s0 = "`w` (claude session s0)"
-    # A session cleared in its launch holds nothing: the next one hears what it
-    # left, none of it given to them.
+    # A session cleared in its launch holds nothing, and the next one hears
+    # nothing of the concern it left, none of it given to them.
     assert second == "\n\n".join(
         [
             opening,
             unlanded,
-            (
-                "Open threads of this repository (`inbox` with `thread` reads one "
-                "whole; the `thread` tool with `hold` takes one):\n"
-                '- @which-parser, "Which parser", held by nobody: waiting on the '
-                "operator: 1 question."
-            ),
             "\n".join(
                 [
                     (
@@ -13987,13 +14102,13 @@ def test_agents_open_and_hold_threads_and_are_told_what_lands_there_on_each_runt
         launched(machine, clock, worktree, "one", runtime)
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         send(hook, start("SessionStart", source="startup"))
-        opened = own("thread", {"name": "lag", "title": "The cursor jumps"}, "m1")
+        opened = own("concern", {"name": "lag", "title": "The cursor jumps"}, "m1")
         if runtime == "claude":
             send(hook, records.spawn("t1", name="parser"))
             records.recorded("a1", "Explore", "t1", name="parser")
         else:
             rollouts.recorded("th1", "t1", "/root/lexer")
-        held = subagent("thread", {"name": "lag", "hold": True})
+        held = subagent("concern", {"name": "lag", "hold": True})
         noted = own("note", {"remark": "Typing fast moves it.", "thread": "lag"}, "m2")
         told = context(subagent_calls("c1"))
         theirs = subagent("note", {"remark": "Found it: the debounce."})
@@ -14077,7 +14192,7 @@ def test_a_subagent_hears_only_what_s_addressed_to_them_in_their_parent_s_thread
         launched(machine, clock, worktree, "one", runtime)
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         send(hook, start("SessionStart", source="startup"))
-        call(mcp, "thread", {"name": "home", "title": "Home", "hold": True})
+        call(mcp, "concern", {"name": "home", "title": "Home", "hold": True})
         for spawned_by, name in [("t1", "parser"), ("t2", "lexer")]:
             agent, thread = agents[name]
             if runtime == "claude":
@@ -14104,7 +14219,7 @@ def test_a_subagent_hears_only_what_s_addressed_to_them_in_their_parent_s_thread
         spared = subagent_calls("parser", "c1")
         subagent("lexer", "note", {"remark": "Tabs here too.", "thread": "tabs-vanish"})
         under = subagent_calls("parser", "c2")
-        joined = subagent("lexer", "thread", {"name": "home", "join": True})
+        joined = subagent("lexer", "concern", {"name": "home", "join": True})
         subagent("parser", "note", {"remark": "The parser is done."})
         heard = subagent_calls("lexer", "c3")
     assert opened[0].endswith(", in @tabs-vanish. You can carry on.")
@@ -14121,7 +14236,7 @@ def test_a_subagent_hears_only_what_s_addressed_to_them_in_their_parent_s_thread
     assert heard.endswith(": The parser is done.")
 
 
-def test_lup_dev_inbox_answer_answers_a_check_and_whoever_asked_it_is_told(
+def test_ask_with_checks_is_refused_and_lup_dev_inbox_answer_answers_no_check(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     with inboxed(machine, clock, notices, said) as delivery:
@@ -14136,25 +14251,21 @@ def test_lup_dev_inbox_answer_answers_a_check_and_whoever_asked_it_is_told(
                 "checks": ["Launch a fresh room: it starts within 5 s."],
             },
         )
-        question = newest(delivery)
-        [check] = [each.number for each in delivery.inbox.ledger.every(Check)]
-        answered = inbox("answer", str(check), "--comment", "It took 9 s.")
-        again = refused("answer", str(check), "--comment", "Again.")
-        told = context(send(hook, bash("b1")))
-    assert asked == (
-        (
-            f"Your question is with the operator, @{question}, in "
-            f"@does-a-fresh-room-start-fast, and its check @{check} waits on them. "
-            "Their answer reaches you at a later call; `wait_inbox` waits for it."
-        ),
-        False,
-    )
-    assert answered == f"Answered @{check}: whoever asked it is told.\n"
-    assert again == f"@{check} is answered already"
-    # Working in no thread, the asker had one opened for the question, as a check is a thread's.
-    assert told == (
-        f"lup: the operator answered your check @{check} in "
-        "@does-a-fresh-room-start-fast:\n"
-        f'<checked item="{check}" thread="does-a-fresh-room-start-fast">It took 9 s.'
-        "</checked>"
-    )
+        ledger = delivery.inbox.ledger
+        check = ledger.kept(
+            Check(
+                number=ledger.numbered(),
+                repository=tmp_path / ".git",
+                by=Operator(),
+                at=clock.now(),
+                text="Launch a fresh room.",
+            )
+        )
+        answered = refused("answer", str(check.number), "--comment", "It took 9 s.")
+    # What an agent wants tried goes in their own words: `checks` is no field of `ask`.
+    text, error = asked
+    assert error
+    assert "checks" in text
+    assert delivery.inbox.items == {}
+    # A check an earlier lup kept is no item to answer.
+    assert str(check.number) in answered

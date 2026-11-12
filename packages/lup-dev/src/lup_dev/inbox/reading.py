@@ -482,7 +482,7 @@ class Reader(Model, arbitrary_types_allowed=True):
         )
 
     def heading_of(self, concerns: Concerns, thread: Thread) -> list[str]:
-        """Say where `thread` stands, the threads right under it, and the items of other threads that name it, a line each."""
+        """Say where `thread` stands, its body where it has one, the threads right under it, and the items of other threads that name it, a line each."""
         above = (
             ""
             if thread.parent is None
@@ -502,11 +502,24 @@ class Reader(Model, arbitrary_types_allowed=True):
             for each in concerns.threads.references(thread.number)
             if (item := self.delivery.inbox.items.get(each.source)) is not None
         ]
+        body = concerns.body(thread)
+        bodied = (
+            []
+            if body is None
+            else [
+                Tag(
+                    name="body",
+                    attributes={"by": self.called(body.by), "at": clocked(body.at)},
+                    parts=[body.text],
+                ).written()
+            ]
+        )
         return [
             (
                 f'Thread @{thread.name} (@{thread.number}), "{thread.title}"{above}, '
                 f"{holder}: {stood(concerns.standing(thread))}."
             ),
+            *bodied,
             *(["Under it:", *under] if under else []),
             *(["Elsewhere, naming it:", *refers] if refers else []),
         ]
@@ -551,7 +564,7 @@ class Reader(Model, arbitrary_types_allowed=True):
         if isinstance(node, Check):
             answers = [each for each in member.drawn if isinstance(each, Answered)]
             stands = (
-                "waiting on the operator"
+                "never answered"
                 if not answers
                 else f"answered at {clocked(answers[-1].at)}"
             )
@@ -859,8 +872,6 @@ def stood(standing: Standing) -> str:
 
     def named(member: Member) -> str:
         match member.node:
-            case Check():
-                return "check"
             case ItemNode() as node if member.part is None:
                 return kind(node.item(Waiting()))
             case _:

@@ -356,28 +356,6 @@ describe("the panes by agent", () => {
         await review.holds("to guidance-voice");
     });
 
-    it("shows a check in its concern's block, in the buffer of whoever owns it, and answers it from there", async () => {
-        const { page } = dashboard;
-        await listRow(dashboard, "parser");
-        await page.keyboard.press("Enter");
-        await review.holds("check @");
-        const lines = (await review.text()).split("\n");
-        const at = lines.findIndex((each) => each.trimStart().startsWith("◇ check @"));
-        const line = lines[at] ?? "";
-        expect(lines.slice(0, at).findLast((each) => each.trimStart().startsWith("§ "))).toContain("§ The transcript reader");
-        const number = /check @(\d+)/.exec(line)?.[1] ?? "";
-        // Counted with what wants the operator's eyes, on its task's row, whose question holds apart from it.
-        const taskSays = (flagged: boolean) => page.waitForFunction((wanted) => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("The transcript reader") && (each.textContent ?? "").includes("◇1") === wanted), flagged, { polling: 50 });
-        await taskSays(true);
-        await review.goTo(`check @${number}`);
-        await dashboard.keys.press([" ", "d"]);
-        await page.waitForFunction(() => (document.querySelector(".status")?.textContent ?? "").includes("No reply drafted") === false, undefined, { polling: 50 });
-        await taskSays(false);
-        // Undone: nothing of it is sent by what follows.
-        await page.keyboard.press("u");
-        await taskSays(true);
-    });
-
     it("lists concerns under whoever owns them, and jumps from a row to its block in their own buffer", async () => {
         const { page } = dashboard;
         await listRow(dashboard, "The transcript reader");

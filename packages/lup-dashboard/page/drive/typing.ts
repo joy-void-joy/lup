@@ -8,7 +8,6 @@ import { parseArgs } from "node:util";
 
 import type { components } from "../src/generated/api.ts";
 import { open, type Dashboard } from "./dashboard.ts";
-import type { Review } from "./review.ts";
 import { demo } from "./demo.ts";
 import { percentiles, timed, type Timed } from "./timing.ts";
 
@@ -122,7 +121,6 @@ async function main(): Promise<void> {
             gap: { type: "string", default: "120" },
             slower: { type: "string", default: "1" },
             rounds: { type: "string", default: "1" },
-            quiet: { type: "string", default: "1500" },
             help: { type: "boolean", default: false },
         },
     });
@@ -144,7 +142,6 @@ async function main(): Promise<void> {
     const gap = number("gap", values.gap) ?? 120;
     const slower = number("slower", values.slower) ?? 1;
     const rounds = number("rounds", values.rounds) ?? 1;
-    const quiet = number("quiet", values.quiet) ?? 1500;
     const text = PANGRAM.repeat(Math.ceil(count / PANGRAM.length) + 1).slice(0, count);
     const size = number("size", values.size);
     const approvalLines = number("approval-lines", values["approval-lines"]);
@@ -156,7 +153,7 @@ async function main(): Promise<void> {
     await using dashboard = await open(served?.url ?? values.url ?? "");
     const review = await dashboard.review();
     await review.holds(values.at);
-    await settled(review, quiet);
+    await review.settled();
     const sized = await review.evaluate((view) => ({ lines: view.state.doc.lines, characters: view.state.doc.length }));
     await dashboard.slow(slower);
     console.log(
@@ -178,30 +175,10 @@ async function main(): Promise<void> {
     }
 }
 
-/**
- * Return once the review's length has stayed within 2,000 characters for `quiet` milliseconds, or after five minutes: a
- * copy of the operator's state reads its agents' views for a minute or so after the first item shows.
- */
-async function settled(review: Review, quiet: number): Promise<void> {
-    const began = Date.now();
-    let length = -1;
-    let since = began;
-    while (Date.now() - began < 300_000) {
-        const now = await review.evaluate((view) => view.state.doc.length);
-        if (Math.abs(now - length) > 2000) {
-            length = now;
-            since = Date.now();
-        } else if (Date.now() - since >= quiet) {
-            return;
-        }
-        await new Promise((done) => setTimeout(done, 250));
-    }
-}
-
 /** Say `times`' percentiles, in milliseconds. */
 function said(times: number[]): string {
     const read = percentiles(times);
-    return read === null ? "never drawn" : `median ${read.median.toFixed(0)} ms, p90 ${read.p90.toFixed(0)} ms, p95 ${read.p95.toFixed(0)} ms, most ${read.most.toFixed(0)} ms`;
+    return read === null ? "never drawn" : `median ${read.median.toFixed(0)} ms, p90 ${read.p90.toFixed(0)} ms, most ${read.most.toFixed(0)} ms`;
 }
 
 const HELP = `node packages/lup-dashboard/page/drive/typing.ts [options]
@@ -218,9 +195,7 @@ keys were lost. The demo is started on a free port, at the size given, unless --
   --keys N             how many keys to type (default: ${PANGRAM.length})
   --gap MS             milliseconds between keys (default: 120)
   --slower RATE        Chromium's CPU slowed RATE times (default: 1)
-  --rounds N           how many comments to type, each taken back after (default: 1)
-  --quiet MS           how long the review's length stays put before typing begins (default: 1500); a copy of the
-                       operator's state (lup-dashboard demo --copy, through --url) reads for a minute: 20000`;
+  --rounds N           how many comments to type, each taken back after (default: 1)`;
 
 if (import.meta.main) {
     await main();

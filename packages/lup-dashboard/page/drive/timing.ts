@@ -18,11 +18,10 @@ export interface Timed {
     seen: number;
 }
 
-/** The middle of a measure's values, its 90th and 95th percentiles, and its most, each in milliseconds: the 95th as the page's own timings say it (`lup-dev dashboard timings`). */
+/** The middle of a measure's values, its 90th percentile, and its most, each in milliseconds. */
 export interface Percentiles {
     median: number;
     p90: number;
-    p95: number;
     most: number;
 }
 
@@ -76,9 +75,9 @@ export async function timed(page: Page, send: () => Promise<Sent[]>, within = 30
     };
 }
 
-/** The median, the 90th and 95th percentiles and the most of `values`, each one of them, the nearest rank's; null where there are none. */
+/** The median, the 90th percentile and the most of `values`, each one of them, the nearest rank's; null where there are none. */
 export function percentiles(values: number[]): Percentiles | null {
     const sorted = values.toSorted((a, b) => a - b);
     const at = (rank: number) => sorted[Math.min(sorted.length - 1, Math.floor(rank * sorted.length))] ?? 0;
-    return sorted.length === 0 ? null : { median: at(0.5), p90: at(0.9), p95: at(0.95), most: at(1) };
+    return sorted.length === 0 ? null : { median: at(0.5), p90: at(0.9), most: at(1) };
 }

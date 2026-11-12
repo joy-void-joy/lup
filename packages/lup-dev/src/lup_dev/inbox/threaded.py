@@ -6,9 +6,10 @@ it, every repository's, and the operator settles, declines and reopens them:
 - **`inbox-threads`** (`ListThreads`) lists every thread (`ThreadRead`): where
   it stands, and its two marks apart (`done`, `cleared`); what it's about,
   where its title reads as a name (`about`); the passages of the operator's it
-  came from, with what became of each (`passages`); its checks (`checks`); its
+  came from, with what became of each (`passages`); the checks an earlier lup
+  put in it, which wait on nobody (`checks`); its
   section (`Section`): `waiting on you` where something in it
-  asks them, a question, an approval, a held change, a problem, a check, or
+  asks them, a question, an approval, a held change, a problem, or
   it's done for them to confirm; else `new` where something came that they
   haven't read and that asks nothing; else `every thread`; what in it asks
   them (`Ask`), each in the order it came, and since when it's been in its
@@ -85,6 +86,7 @@ from lup_ledger.environment.store import Written
 from lup_ledger.parties import Conversation, Operator
 from lup_ledger.threads import (
     Answered,
+    Body,
     Check,
     Declined,
     Done,
@@ -154,6 +156,9 @@ class Ledgered(Model):
     """Each check's answer, by its number, where the operator gave one."""
     references: dict[int, list[int]]
     """The items of other threads that name each, by its number."""
+    bodies: dict[int, Body] = {}
+    """Each thread's body, by its number, where its holder wrote one and
+    hasn't cleared it."""
     went: dict[int, int] = {}
     """The thread each item moved whole went to, by the item's number: where a
     friction or how it felt the operator gathered went, which its own thread
@@ -175,6 +180,7 @@ class Ledgered(Model):
             checks = ledger.every(Check)
             answers = ledger.drawn_of(Answered)
             refers = ledger.drawn_of(Refers)
+            bodies = ledger.drawn_of(Body)
         current = {each.source: each for each in ins}
         parts = {(each.source, each.part): each for each in moved}
         numbers = {each.number: each for each in threads}
@@ -222,6 +228,11 @@ class Ledgered(Model):
                 for number in dict.fromkeys(each.target for each in refers)
             },
             went=went,
+            bodies={
+                number: each
+                for number, each in {each.target: each for each in bodies}.items()
+                if each.text.strip()
+            },
         )
 
 
@@ -262,13 +273,13 @@ class Spot(Model):
 
 
 class Ask(Model):
-    """One thing in a thread asking the operator: an item or a check waiting on them, by its number, what it is in a few words (`a question`, `a check`), and when it came into the thread."""
+    """One thing in a thread asking the operator: an item waiting on them, by its number, what it is in a few words (`a question`), and when it came into the thread."""
 
     node: int
     what: str
     came: datetime
     holds: bool = False
-    """Whether something stays stopped until they answer it (`ItemKind.holds`): an item's kind says; a check, nothing does."""
+    """Whether something stays stopped until they answer it, as its kind says (`ItemKind.holds`)."""
 
 
 class Passage(Model):
@@ -338,6 +349,10 @@ class ThreadRead(Model):
     checks: list[CheckRead] = []
     """Each check in it, in the order it came, with the operator's answer where
     they gave one."""
+    body: Body | None = None
+    """Its body, as whoever answers for it last wrote it, which the page lays
+    out in its block for the operator to read and comment on line by line; none
+    where it has none."""
     members: int = 0
     """How much is in it: items, checks and parts moved in."""
     earlier: int = 0
@@ -353,8 +368,8 @@ class ThreadRead(Model):
     answers for it, or the operator opened it and nobody took it."""
     bare: bool = False
     """Whether it's nothing to list: nobody running answers for it or works in it,
-    nothing's in it, nothing was said of where it stands, as parking it, and the
-    same of each thread under it."""
+    nothing's in it, it has no body, nothing was said of where it stands, as
+    parking it, and the same of each thread under it."""
 
 
 class ThreadEntry(Model):
@@ -668,27 +683,16 @@ class Readings(Model, arbitrary_types_allowed=True):
             # A part of the operator's words moved into a thread waits on its
             # holder, not on them: it shows open in the thread until an item
             # there cites it, and never keeps the operator from inbox zero. An
-            # item moved in whole asks where it landed, if anywhere.
+            # item moved in whole asks where it landed, if anywhere. A check
+            # asks nothing: no call makes one, and those kept wait on nobody.
             if member.part is not None or member.moved:
                 return None
             item = items.get(member.node)
-            if item is not None:
-                waiting = asks(item.recipient, item.reason, item.state)
-                return (
-                    Ask(
-                        node=item.number,
-                        what=what(item),
-                        came=member.came,
-                        holds=item.holds,
-                    )
-                    if waiting
-                    else None
-                )
-            check = ledgered.checks.get(member.node)
-            answer = ledgered.answers.get(member.node)
-            if check is None or not check.waiting([] if answer is None else [answer]):
+            if item is None or not asks(item.recipient, item.reason, item.state):
                 return None
-            return Ask(node=check.number, what="a check", came=member.came)
+            return Ask(
+                node=item.number, what=what(item), came=member.came, holds=item.holds
+            )
 
         asking = [ask for each in members if (ask := asked(each)) is not None]
         beside = self.source.beside(
@@ -755,6 +759,7 @@ class Readings(Model, arbitrary_types_allowed=True):
                 for each in members
                 if (check := ledgered.checks.get(each.node)) is not None
             ],
+            body=ledgered.bodies.get(number),
             members=len(members),
             earlier=read_to.members,
             mark=mark,
@@ -806,6 +811,7 @@ class Readings(Model, arbitrary_types_allowed=True):
         return (
             not ledgered.members.get(number)
             and number not in ledgered.statuses
+            and number not in ledgered.bodies
             and not any(each.thread == number for each in self.working)
             and self.source.concerns.answering(thread) is None
             and all(

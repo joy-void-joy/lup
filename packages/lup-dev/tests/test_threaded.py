@@ -55,17 +55,25 @@ from lup_dev.inbox.threaded import (
 from lup_dev.inbox.tools import (
     Asking,
     Choice,
+    Concerning,
     Parking,
     Speaker,
-    ThreadedFriction,
     ThreadedRemark,
-    Threading,
 )
 from lup_dev.layout import Layout
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
 from lup_ledger.parties import Conversation, Lup, Operator
-from lup_ledger.threads import ROOT, Declined, In, Reopened, Settled, Thread
+from lup_ledger.threads import (
+    ROOT,
+    Answered,
+    Check,
+    Declined,
+    In,
+    Reopened,
+    Settled,
+    Thread,
+)
 from lup_ledger.threads import Done as ThreadDone
 
 if TYPE_CHECKING:
@@ -104,7 +112,8 @@ class Work:
     """A session, `lead`, at work in a repository: four threads, each standing differently.
 
     - `home`, which they hold and work in: a note and a friction, the pile's;
-    - `lag`: a question with its decision and a check, both asking the operator;
+    - `lag`: a question with its decision, asking the operator, and a check an
+      earlier lup kept, which asks nothing;
     - `voice`: a note, then done, for the operator to confirm;
     - `docs`: a note, read.
     """
@@ -127,42 +136,60 @@ class Work:
         Names(path=delivery.layout.names).keep("s1", "lead")
         delivery.heard_in(LEAD, register, None)
         self.lead = Speaker(delivery=delivery, launch=register, party=LEAD)
-        self.ran(self.lead.thread(Threading(name="home", title="Home", hold=True)))
+        self.ran(self.lead.concern(Concerning(name="home", title="Home", hold=True)))
         self.note = self.sent(ThreadedRemark(remark="Built."))
         self.home = self.thread_of(self.note)
         self.friction = self.ran(
-            self.lead.friction(ThreadedFriction(text="The gate hung."))
+            self.lead.concern(Concerning(text="The gate hung.", name="home"))
         )
         for name, title in [
             ("lag", "The cursor jumps"),
             ("voice", "Voice"),
             ("docs", "Docs"),
         ]:
-            self.ran(self.lead.thread(Threading(name=name, title=title)))
+            self.ran(self.lead.concern(Concerning(name=name, title=title)))
         self.question = self.ran(
             self.lead.ask(
                 Asking(
                     question="Long comments only?",
                     decisions=[Choice(decision="Long ones", lean="yes")],
-                    checks=["Type in a long one."],
                     thread="lag",
                 )
             )
         )
         self.lag = self.thread_of(self.question)
-        [self.check] = [
-            each.node
-            for each in self.reading().readings_now().ledgered.members[self.lag.number]
-            if each.node != self.question
-        ]
+        self.check = self.kept_check("Type in a long one.")
         self.voiced = self.sent(ThreadedRemark(remark="Voice works.", thread="voice"))
         self.voice = self.thread_of(self.voiced)
         self.ran(
-            self.lead.thread(Threading(name="voice", done="Say hello: it answers."))
+            self.lead.concern(Concerning(name="voice", done="Say hello: it answers."))
         )
         self.documented = self.sent(ThreadedRemark(remark="Docs.", thread="docs"))
         self.docs = self.thread_of(self.documented)
         delivery.done(self.documented)
+
+    def kept_check(self, text: str) -> int:
+        """Keep a check in `lag`, as an earlier lup's `ask` did with its `checks`: no call makes one. Return its number."""
+        ledger = self.delivery.inbox.ledger
+        check = ledger.kept(
+            Check(
+                number=ledger.numbered(),
+                repository=REPOSITORY,
+                by=LEAD,
+                at=self.clock.now(),
+                text=text,
+            )
+        )
+        ledger.drawn(
+            In(
+                source=check.number,
+                target=self.lag.number,
+                repository=REPOSITORY,
+                by=LEAD,
+                at=self.clock.now(),
+            )
+        )
+        return check.number
 
     def ran(self, coroutine: object) -> int:
         """Run a tool's call; return the number of the item it made, as its answer cites it, or 0."""
@@ -215,9 +242,9 @@ def test_each_thread_s_section_says_what_asks_the_operator_what_s_new_and_the_pi
     assert sorted(read) == ["docs", "home", "lag", "voice"]
     lag, voice, home, docs = read["lag"], read["voice"], read["home"], read["docs"]
     assert (lag.section, lag.state) == ("waiting on you", "waiting on the operator")
+    # The check an earlier lup kept beside the question asks nothing.
     assert [(each.node, each.what, each.holds) for each in lag.asks] == [
         (work.question, "a question", True),
-        (work.check, "a check", False),
     ]
     assert lag.since == lag.asks[0].came
     assert (voice.section, voice.state, voice.asks) == (
@@ -398,14 +425,14 @@ def test_the_agent_s_mark_and_the_operator_s_are_read_apart_and_cleared_waits_on
     # Cleared while still at work, then said done: still cleared, never back
     # before the operator.
     concerns.declined(work.docs, "Not now.")
-    work.ran(work.lead.thread(Threading(name="docs", done="Read the docs.")))
+    work.ran(work.lead.concern(Concerning(name="docs", done="Read the docs.")))
     docs = work.read()["docs"]
     assert (docs.state, docs.section) == ("declined", "every thread")
     assert isinstance(docs.cleared, Declined)
     assert docs.done is not None
     assert docs.done.to_try == "Read the docs."
     # Open to the operator, said done: theirs to clear.
-    work.ran(work.lead.thread(Threading(name="lag", done="Type in a long one.")))
+    work.ran(work.lead.concern(Concerning(name="lag", done="Type in a long one.")))
     lag = work.read()["lag"]
     assert (lag.state, lag.cleared) == ("done to confirm", None)
     assert lag.done is not None
@@ -429,7 +456,7 @@ def test_a_reply_of_the_operator_s_in_a_thread_done_reopens_it_back_to_whoever_h
     assert isinstance(voice.status, Reopened)
     assert voice.status.why == "the operator replied there"
     # Commented on in a review, a thread done is reopened the same way.
-    work.ran(work.lead.thread(Threading(name="voice", done="Say hello again.")))
+    work.ran(work.lead.concern(Concerning(name="voice", done="Say hello again.")))
     work.delivery.inbox.drafted(
         Draft(comments=[Comment(item=work.voiced, text="Still lags.")])
     )
@@ -472,7 +499,7 @@ def test_a_part_moved_in_stands_open_until_an_item_there_cites_it_never_asking_t
     )
     part = Spot(node=answer.number, part=2)
     clock.sleep(60)
-    work.ran(work.lead.thread(Threading(name="docs", move=[f"{answer.number}.2"])))
+    work.ran(work.lead.concern(Concerning(name="docs", move=[f"{answer.number}.2"])))
 
     docs = work.read()["docs"]
     assert docs.unanswered == [part]
@@ -519,15 +546,25 @@ def test_a_thread_whose_title_reads_as_a_name_says_what_it_s_about_from_what_s_i
     assert read["lag"].about is None
 
 
-def test_a_thread_s_checks_are_read_with_it_each_with_the_operator_s_answer(
+def test_a_thread_s_checks_are_read_with_it_each_with_the_operator_s_answer_asking_nothing(
     work: Work,
 ) -> None:
     [check] = work.read()["lag"].checks
     assert (check.check.number, check.answer) == (work.check, None)
-    work.delivery.concerns().checked(work.check, "It held.")
-    [answered] = work.read()["lag"].checks
+    work.delivery.inbox.ledger.drawn(
+        Answered(
+            target=work.check,
+            repository=REPOSITORY,
+            by=Operator(),
+            at=work.clock.now(),
+            text="It held.",
+        )
+    )
+    read = work.read()["lag"]
+    [answered] = read.checks
     assert answered.answer is not None
     assert answered.answer.text == "It held."
+    assert [each.node for each in read.asks] == [work.question]
 
 
 def test_where_each_conversation_works_is_read_with_the_threads(work: Work) -> None:
@@ -536,7 +573,7 @@ def test_where_each_conversation_works_is_read_with_the_threads(work: Work) -> N
     assert [(each.conversation, each.thread) for each in listed.working] == [
         (LEAD, work.home.number)
     ]
-    work.ran(work.lead.thread(Threading(name="lag", join=True)))
+    work.ran(work.lead.concern(Concerning(name="lag", join=True)))
     listed = asyncio.run(ThreadsListing(reading=work.reading()).answer(ListThreads()))
     assert isinstance(listed, ThreadsRead)
     assert [(each.conversation, each.thread) for each in listed.working] == [
@@ -668,6 +705,50 @@ def test_a_message_to_no_one_stays_in_its_thread_as_the_operator_s_waking_nobody
     assert note.reason.text == "Note to self: docs."
     assert note.reason.repository == REPOSITORY
     assert isinstance(note.state, Done)
+
+
+def test_a_comment_on_lines_of_a_concern_s_body_reaches_whoever_answers_for_it_quoting_them(
+    work: Work, clock: FakeClock
+) -> None:
+    work.ran(
+        work.lead.concern(
+            Concerning(name="lag", body="It jumps on a long comment.\nNot a short one.")
+        )
+    )
+    on = Quote(
+        text="Not a short one.",
+        block=f"concern {work.lag.number} body",
+        lines=["Not a short one."],
+        start=0,
+        end=16,
+    )
+    clock.sleep(60)
+    work.delivery.inbox.drafted(
+        Draft(
+            letters=[
+                Letter(to=LEAD, thread=work.lag.number, quote=on, text="It does too."),
+                Letter(thread=work.docs.number, quote=on, text="Note to self."),
+            ]
+        )
+    )
+    [review] = asyncio.run(work.delivery.reviewed()).reviews
+
+    told = work.delivery.said(work.delivery.inbox.item(review.number))
+    [note] = [
+        each
+        for each in work.delivery.inbox.items.values()
+        if each.sender == Operator()
+        and isinstance(each.reason, Message)
+        and each.reason.repository == REPOSITORY
+    ]
+
+    assert (
+        '<message id="'
+        f'{review.number}.1" thread="lag">\n<quote of="body">Not a short one.</quote>\n'
+        "It does too.\n</message>"
+    ) in told
+    assert isinstance(note.reason, Message)
+    assert note.reason.text == "> Not a short one.\n\nNote to self."
 
 
 def test_a_message_on_a_thread_is_refused_to_no_one_on_none_or_to_another_repository(
@@ -872,10 +953,10 @@ def test_the_operator_moves_frictions_and_how_it_felt_into_a_new_thread_under_th
 ) -> None:
     sub = worker(work)
     rebuilt = work.ran(
-        sub.friction(
-            ThreadedFriction(
+        sub.concern(
+            Concerning(
                 text="The engine rebuilt for four minutes, saying nothing.",
-                title="the engine rebuilds silently",
+                name="home",
             )
         )
     )
@@ -923,7 +1004,7 @@ def test_the_operator_moves_frictions_and_how_it_felt_into_a_new_thread_under_th
         in each
         for each in words
     )
-    assert any(f'item="{rebuilt}" kind="friction"' in each for each in words)
+    assert any(f'item="{rebuilt}" kind="concern"' in each for each in words)
 
 
 def test_frictions_moved_into_a_thread_done_reopen_it_and_one_moved_again_leaves_the_last(
@@ -1008,7 +1089,9 @@ def test_a_nested_thread_whose_holder_ended_is_answered_for_by_who_holds_above_i
     work: Work,
 ) -> None:
     sub = worker(work)
-    work.ran(sub.thread(Threading(name="tabs", title="Tabs", under="home", hold=True)))
+    work.ran(
+        sub.concern(Concerning(name="tabs", title="Tabs", under="home", hold=True))
+    )
     place = work.delivery.inbox.whereabouts[sub.party.key()]
     work.delivery.inbox.placed(place.model_copy(update={"ended": work.clock.now()}))
 
@@ -1032,7 +1115,7 @@ def test_a_thread_opened_by_whom_nobody_running_answers_for_says_its_opener_left
     assert (gate.thread.by, gate.answering, gate.left_by) == (Operator(), None, None)
 
 
-def test_what_s_nothing_to_list_is_empty_nobody_s_on_and_nothing_said_of_it_or_under_it(
+def test_what_s_nothing_to_list_is_empty_bodiless_nobody_s_on_and_nothing_said_of_it_or_under_it(
     work: Work,
 ) -> None:
     for name, title, under in [
@@ -1043,9 +1126,11 @@ def test_what_s_nothing_to_list_is_empty_nobody_s_on_and_nothing_said_of_it_or_u
         ("child", "Child", "parent"),
         ("full", "Full", None),
         ("holding", "Holding", "full"),
+        ("bodied", "Bodied", None),
     ]:
-        work.ran(work.lead.thread(Threading(name=name, title=title, under=under)))
-    work.ran(work.lead.thread(Threading(name="parked", park=Parking(issue=12))))
+        work.ran(work.lead.concern(Concerning(name=name, title=title, under=under)))
+    work.ran(work.lead.concern(Concerning(name="parked", park=Parking(issue=12))))
+    work.ran(work.lead.concern(Concerning(name="bodied", body="What it is.")))
     work.sent(ThreadedRemark(remark="Here.", thread="full"))
     held = work.read()
     ended(work)
@@ -1056,8 +1141,8 @@ def test_what_s_nothing_to_list_is_empty_nobody_s_on_and_nothing_said_of_it_or_u
     party = Conversation(repository=REPOSITORY, runtime="claude", session="s2")
     work.delivery.heard_in(party, other, None)
     work.ran(
-        Speaker(delivery=work.delivery, launch=other, party=party).thread(
-            Threading(name="worked", join=True)
+        Speaker(delivery=work.delivery, launch=other, party=party).concern(
+            Concerning(name="worked", join=True)
         )
     )
 
@@ -1074,6 +1159,12 @@ def test_what_s_nothing_to_list_is_empty_nobody_s_on_and_nothing_said_of_it_or_u
     assert read["parked"].state == "parked"
     assert not read["worked"].bare
     assert not read["full"].bare
+    # A body is something in it to read, and the review carries it.
+    assert not read["bodied"].bare
+    body = read["bodied"].body
+    assert body is not None
+    assert (body.by, body.text) == (LEAD, "What it is.")
+    assert read["full"].body is None
 
 
 def test_an_earlier_lup_s_root_is_left_out_of_the_review_what_s_under_it_at_the_top(

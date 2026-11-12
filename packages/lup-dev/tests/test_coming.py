@@ -22,7 +22,7 @@ from lup_dev.inbox.delivery import Delivery
 from lup_dev.inbox.notices import Notices
 from lup_dev.inbox.reading import Narrowing, Reader
 from lup_dev.inbox.store import KINDS, Inbox
-from lup_dev.inbox.tools import Parking, Speaker, ThreadedRemark, Threading
+from lup_dev.inbox.tools import Concerning, Parking, Speaker, ThreadedRemark
 from lup_dev.layout import GitDirectoryLayout, Layout
 from lup_dev.policy.coming import Coming, hashed
 from lup_dev.remote.protocol import Update
@@ -124,15 +124,15 @@ class World:
     def parked(self, name: str, parking: Parking, holder: Conversation) -> Thread:
         """Open thread `name`, handed to `holder`, and park it as `parking` says."""
         said = asyncio.run(
-            self.speaker(self.main("s1")).thread(
-                Threading(name=name, title=f"About {name}", park=parking)
+            self.speaker(self.main("s1")).concern(
+                Concerning(name=name, title=f"About {name}", park=parking)
             )
         ).text
         assert "is parked until" in said, said
         if holder != self.main("s1"):
             hand = self.delivery.roster().own(holder)
             asyncio.run(
-                self.speaker(self.main("s1")).thread(Threading(name=name, hand=hand))
+                self.speaker(self.main("s1")).concern(Concerning(name=name, hand=hand))
             )
         self.told(holder)
         return self.thread(name)
@@ -176,7 +176,7 @@ def test_a_parked_thread_woken_is_reopened_by_lup_and_whoever_answers_for_it_is_
     assert isinstance(world.status("later"), Parked)
     assert world.told(world.main("s1")) == []
     standing = asyncio.run(
-        world.speaker(world.main("s1")).thread(Threading(name="release"))
+        world.speaker(world.main("s1")).concern(Concerning(name="release"))
     ).text
     assert standing.endswith("working; came due: `build-x` landed.")
 
@@ -186,8 +186,8 @@ def test_a_thread_whose_holder_ended_is_told_to_the_holder_above_as_it_comes_due
 ) -> None:
     # The session holds the concern it's under, and works there.
     asyncio.run(
-        world.speaker(world.main("s1")).thread(
-            Threading(name="home", title="Home", hold=True)
+        world.speaker(world.main("s1")).concern(
+            Concerning(name="home", title="Home", hold=True)
         )
     )
     worker = world.spawned("a1", "fixer")

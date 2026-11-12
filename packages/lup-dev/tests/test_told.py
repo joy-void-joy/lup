@@ -25,7 +25,7 @@ from lup_dev.inbox.store import (
     heard,
     left_for,
 )
-from lup_dev.inbox.tools import Sending, Speaker, ThreadedRemark, Threading
+from lup_dev.inbox.tools import Concerning, Sending, Speaker, ThreadedRemark
 from lup_dev.layout import Layout
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
@@ -146,8 +146,8 @@ def test_a_passage_moved_to_an_agent_shows_in_their_messages_as_the_operator_s_w
     )
     clock.sleep(60)
     said(
-        lead.thread(
-            Threading(
+        lead.concern(
+            Concerning(
                 name="cursor",
                 title="The cursor",
                 move=[f"{review.number}.1"],
@@ -187,8 +187,8 @@ def test_the_operator_settling_a_concern_shows_in_its_holder_s_messages_as_lup_s
     register = launched(delivery, "dev", "s1")
     holder = spawned(delivery, register, main("s1"), "a1", "fixer")
     said(
-        speaker(delivery, register, holder).thread(
-            Threading(name="cursor", title="The cursor", hold=True)
+        speaker(delivery, register, holder).concern(
+            Concerning(name="cursor", title="The cursor", hold=True)
         )
     )
     concerns = delivery.concerns()
@@ -220,8 +220,8 @@ def test_an_item_told_whole_to_a_thread_s_holder_shows_in_their_messages_as_its_
     holder = spawned(delivery, register, main("s1"), "a1", "fixer")
     reviewer = spawned(delivery, register, main("s1"), "a2", "reviewer")
     said(
-        speaker(delivery, register, holder).thread(
-            Threading(name="lag", title="The cursor jumps", hold=True)
+        speaker(delivery, register, holder).concern(
+            Concerning(name="lag", title="The cursor jumps", hold=True)
         )
     )
     said(
@@ -263,8 +263,8 @@ def test_lup_s_lines_are_records_of_their_own_an_older_lup_reading_whereabouts_n
     register = launched(delivery, "dev", "s1")
     holder = spawned(delivery, register, main("s1"), "a1", "fixer")
     said(
-        speaker(delivery, register, holder).thread(
-            Threading(name="cursor", title="The cursor", hold=True)
+        speaker(delivery, register, holder).concern(
+            Concerning(name="cursor", title="The cursor", hold=True)
         )
     )
     concerns = delivery.concerns()

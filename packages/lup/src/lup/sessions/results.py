@@ -1,12 +1,13 @@
 """What an ask returns: the answer, what it cost, the attempts refused before it, and what the agent said beside it.
 
-`Friction` and `HowItFelt` are the inputs of the `friction` and `how_it_felt`
-tools (`lup.tools.speaking`) as much as part of the result, so the caller reads
-them as the agent wrote them; they live here because the tools' module builds on
-this one. Each is one text in the agent's own words, never a form of labelled
-parts: what's present for an agent at the moment isn't shaped like one, and a
-form shapes the answer it asks for. A friction may carry a short title beside
-it, naming it where frictions are listed a line each.
+`Concern`, `Friction` and `HowItFelt` are the inputs of the `concern`,
+`friction` and `how_it_felt` tools (`lup.tools.speaking`) as much as part of the
+result, so the caller reads them as the agent wrote them; they live here because
+the tools' module builds on this one. Each is one text in the agent's own words,
+never a form of labelled parts: what's present for an agent at the moment isn't
+shaped like one, and a form shapes the answer it asks for. A concern or a
+friction may carry a short title beside it, naming it where they're listed a
+line each.
 """
 
 from datetime import timedelta
@@ -36,6 +37,19 @@ class Rejection(Model):
 
     submitted: JsonValue
     reason: str
+
+
+class Concern(Model):
+    """Something worth keeping an eye on, the moment it came up, in your own words."""
+
+    text: str = Field(description="In your own words: a line is enough.")
+    title: str = Field(
+        default="",
+        description=(
+            "A few words naming it, which a list of concerns shows a line each: "
+            "`the gate hangs on a fresh worktree`. Left out, its first line."
+        ),
+    )
 
 
 class Friction(Model):
@@ -72,6 +86,9 @@ class TurnResult[T](Model):
     """The submissions refused before the accepted one, oldest first."""
     notes: list[str] = []
     """The remarks the agent attached to their answer, oldest first."""
+    concerns: list[Concern] = []
+    """What the agent found worth keeping an eye on, each when it came up,
+    oldest first."""
     frictions: list[Friction] = []
     """What got in the agent's way, each when it did, oldest first."""
     how_it_felt: list[HowItFelt] = []
