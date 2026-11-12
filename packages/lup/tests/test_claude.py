@@ -37,6 +37,7 @@ from lup import (
     AgentUnavailableError,
     AuthMissingError,
     BlockedError,
+    Concern,
     Friction,
     HowItFelt,
     OutputMissingError,
@@ -365,7 +366,10 @@ def test_a_session_gets_lup_s_tools_and_nothing_of_the_operator_s() -> None:
     assert options.skills == []
     assert options.plugins == []
     assert options.verbatim_prompts is True
-    assert options.env == {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
+    assert options.env == {
+        "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+        "CLAUDE_CODE_SILENT_TURN_REMINDER": "0",
+    }
     assert options.extra_args == {"no-session-persistence": None}
     assert isinstance(options.mcp_servers, dict)
     assert list(options.mcp_servers) == ["lup"]
@@ -402,6 +406,7 @@ def test_the_server_lists_each_tool_with_its_schema() -> None:
         "blocked",
         "stop",
         "note",
+        "concern",
         "friction",
         "how_it_felt",
         "submit",
@@ -447,11 +452,12 @@ def test_a_note_is_taken_through_the_server() -> None:
     assert turn.toolbox.notes() == ["Assumes London."]
 
 
-def test_a_friction_and_how_it_felt_are_taken_through_the_server() -> None:
+def test_a_concern_a_friction_and_how_it_felt_are_taken_through_the_server() -> None:
     jammed = {"text": "The feed timed out; a retry would have saved it."}
     clients = Clients(
         [
             init(tools=UNTYPED_TOOLS),
+            Call(name="concern", arguments={"text": "The feed moves next week."}),
             Call(name="friction", arguments=jammed),
             Call(name="how_it_felt", arguments={"text": "Calm."}),
             result(),
@@ -459,9 +465,11 @@ def test_a_friction_and_how_it_felt_are_taken_through_the_server() -> None:
     )
     turn = request(None)
     asyncio.run(adapter(clients).run(turn))
-    taken, went = clients.only().answers
+    eyed, taken, went = clients.only().answers
+    assert not eyed.is_error
     assert not taken.is_error
     assert not went.is_error
+    assert turn.toolbox.concerns() == [Concern(text="The feed moves next week.")]
     assert turn.toolbox.frictions() == [
         Friction(text="The feed timed out; a retry would have saved it.")
     ]

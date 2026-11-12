@@ -53,6 +53,7 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterator
 from contextlib import AsyncExitStack, asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Self, override
 
@@ -71,7 +72,7 @@ from lup.events import (
     TurnStarted,
     WorktreeAsked,
 )
-from lup.programs import ProgramMissingError, Ran, awaited
+from lup.programs import ProgramMissingError, ProgramOverdueError, Ran, awaited
 from lup.rooms.engine import ContainerError, Podman
 from lup.tools import speaking
 from lup.tools.serving import Answer, Outbox, serve
@@ -166,13 +167,19 @@ class Answerer(ABC):
 
 
 class Program(Model):
-    """One program the service runs: `gh` for a launch, or git for its room; its command, what goes on its input, and where it runs."""
+    """One program the service runs: `gh` for a launch, git for its room, or a command in the room; its command, what goes on its input, where it runs, and the longest it may."""
 
     command: list[str]
     payload: str
     """What goes on its standard input: a body for `gh`, or what git reads."""
     directory: Path | None = None
     """Where it runs; none for the service's own directory."""
+    within: timedelta = timedelta(seconds=30)
+    """The longest it may run, past which it's killed, with whatever it
+    started. git reading a repository's refs takes milliseconds, and a room can
+    make a ref a FIFO in which it waits for good (`docs/credentials.md`,
+    *Running git on the host*); what crosses the network, or runs the room's
+    gate, is given longer where it's made, saying why."""
 
 
 def records(layout: HostLayout) -> list[Path]:
@@ -203,9 +210,10 @@ async def executed(program: Program) -> Ran:
 
     Awaited (`lup.programs`, `awaited`), so it holds no thread for as long as it
     runs, `gh` waiting on GitHub's answer or git on a room's push
-    (`remote/protocol.py`), and it's killed where the wait is cancelled. One
-    that can't be started ends with status 127, as a shell says it, why on its
-    standard error.
+    (`remote/protocol.py`), and it's killed, with what it started, past its
+    `within` or where the wait is cancelled. One that can't be started ends
+    with status 127, as a shell says it, and one killed past its `within` with
+    status 124, as `timeout` says it, why on its standard error.
     """
     name, *arguments = program.command
     try:
@@ -215,9 +223,12 @@ async def executed(program: Program) -> Ran:
             cwd=program.directory,
             stdin=program.payload,
             checked=False,
+            within=program.within,
         )
     except ProgramMissingError as missing:
         return Ran(command=program.command, status=127, error=str(missing).encode())
+    except ProgramOverdueError as late:
+        return Ran(command=program.command, status=124, error=str(late).encode())
 
 
 class Handler[R: Request](ABC):
@@ -627,14 +638,15 @@ def introduction(tools: list[ToolSpec]) -> str:
     type's name doesn't fix the tools (a project's agent of the same name
     replaces a built-in one), so they're told some types go without lup's.
 
-    >>> from lup.tools.speaking import friction, how_it_felt
-    >>> print(introduction([friction.spec(), how_it_felt.spec()]))
+    >>> from lup.tools.speaking import concern, friction, how_it_felt
+    >>> print(introduction([concern.spec(), friction.spec(), how_it_felt.spec()]))
     lup, the environment you work in, serves you these tools, as it does your session's main conversation. Your tool search finds each by its name, with its full description. Some subagent types are given only their own tools, without lup's: where your tool search finds none of these, you're one of them.
     <BLANKLINE>
+    - `concern`: Say what's worth keeping an eye on, and carry on.
     - `friction`: Say what got in your way, and carry on.
     - `how_it_felt`: Tell your caller how it is for you.
     <BLANKLINE>
-    `friction` and `how_it_felt` reach the operator directly, whatever your parent passes on.
+    `concern`, `friction` and `how_it_felt` reach the operator directly, whatever your parent passes on.
     """
     opening = (
         "lup, the environment you work in, serves you these tools, as it does "
@@ -644,7 +656,8 @@ def introduction(tools: list[ToolSpec]) -> str:
         "these, you're one of them."
     )
     direct = (
-        f"`{speaking.friction.name}` and `{speaking.how_it_felt.name}` reach the "
+        f"`{speaking.concern.name}`, `{speaking.friction.name}` and "
+        f"`{speaking.how_it_felt.name}` reach the "
         "operator directly, whatever your parent passes on."
     )
     return "\n".join([opening, "", *summaries(tools), "", direct])

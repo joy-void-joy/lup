@@ -83,7 +83,7 @@ export function spokenOf(item: Item): Said[] {
                 on.push({ ...plain, id: id(at + 1), text: each.text, on: each.item, quote: each.quote ?? null });
             });
             for (const each of reason.letters ?? []) {
-                rest.push({ ...plain, text: each.text, to: each.to ?? null });
+                rest.push({ ...plain, text: each.text, to: each.to ?? null, quote: each.quote ?? null });
             }
             for (const each of reason.remarks ?? []) {
                 rest.push({ ...plain, text: each.text, to: each.to, quote: each.quote, remark: true });
@@ -208,8 +208,8 @@ export function outdated(item: Item | undefined, quote: Quote | Offsets | null |
 
 /**
  * Return the lines of the operator's words that `item`, an agent's, answers (`Message.answers`), above its own: for
- * each of their items it answers, who wrote it and what it is, then what of it was the agent's: a review's message and
- * remarks to them and its comments on the agent's own items, each after what it's on, a comment on a passage an edit
+ * each of their items it answers, who wrote it and what it is, then what of it was the agent's: a review's message, after
+ * the lines of a concern's body it quotes where it quotes some, and remarks to them and its comments on the agent's own items, each after what it's on, a comment on a passage an edit
  * changed said to be outdated; a message's words; an answer's rulings, each after its decision, then its comment. The
  * operator's items are read from `answers`, the agent's they're on from `commented`; none where the item answers
  * nothing.
@@ -230,8 +230,9 @@ export function above(item: Item, answers: Item[], commented: Item[]): Row[] {
         const rows: Row[] = [by(`you · ${cited(number)}, ${theirs(theirsItem)}`)];
         const said = spokenOf(theirsItem);
         const whose = (on: number | null) => (on === null ? undefined : onItems.get(on));
+        // A message, on the lines of a concern's body it quotes where it quotes some.
         for (const each of said.filter((part) => part.to !== null && !part.remark && same(part.to, agent))) {
-            rows.push(...worded(each, SET_IN));
+            rows.push(...(each.quote === null ? [] : [quoted(`on the concern's body: “${cue(each.quote.text)}”`)]), ...worded(each, SET_IN));
         }
         for (const each of said.filter((part) => part.remark && same(part.to, agent))) {
             rows.push(quoted(`on your words: “${cue(each.quote?.text ?? "")}”`), ...worded(each, SET_IN));

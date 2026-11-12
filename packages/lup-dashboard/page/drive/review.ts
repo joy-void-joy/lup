@@ -13,6 +13,9 @@ const FOUND = `document.querySelector(".review-buffer .cm-content")?.cmTile?.roo
 /** The review's `EditorView` as `FOUND` finds it, where a script waiting on it is told at once that it's gone. */
 const VIEW = `(() => { const view = ${FOUND}; if (view === undefined) { throw new Error("the review's editor is gone from the page"); } return view; })()`;
 
+/** The line a closed fold holds in place of what it holds, until it opens (`UNLAID`, `page/src/review.ts`). */
+export const UNLAID = "opening…";
+
 /** Vim's mode in the review. */
 export type Mode = "normal" | "insert" | "visual";
 
@@ -50,6 +53,13 @@ export interface Review {
     goTo(text: string): Promise<void>;
     /** Open a comment under the cursor's line with `o`, and return once it's being written, in insert mode. */
     comment(): Promise<void>;
+    /**
+     * Go to the first line after the cursor saying `text`, as `goTo` does, open the fold it's the summary line of with
+     * `za`, and return once what that fold holds is laid out: a closed drawer, a closed fold of a drawer's view and an
+     * item's closed context hold one line standing for it, `UNLAID`, until they open, so a search finds nothing of
+     * what they hold before (`docs/dashboard.md`, *The drawers*).
+     */
+    unfold(text: string): Promise<void>;
     /**
      * How many ranges of the review's decorations carry `className`: each decoration set the editor's state holds
      * counted once, though a state field providing decorations is in `state.values` twice, its own value and the
@@ -91,7 +101,7 @@ export async function review(page: Page, thrown: readonly Error[] = []): Promise
     };
     const inMode = (wanted: Mode) => until(`${mode} === ${JSON.stringify(wanted)}`, `went into ${wanted} mode`);
     const holds = (text: string) => until(`(${VIEW}).state.doc.toString().includes(${JSON.stringify(text)})`, `held ${JSON.stringify(text)}`);
-    return {
+    const made: Review = {
         evaluate,
         text: () => evaluate((view) => view.state.doc.toString()),
         line: () => evaluate((view) => view.state.doc.lineAt(view.state.selection.main.head).text),
@@ -133,6 +143,16 @@ export async function review(page: Page, thrown: readonly Error[] = []): Promise
             await keyboard("o");
             await inMode("insert");
         },
+        async unfold(text) {
+            await made.goTo(text);
+            await page.keyboard.press("z");
+            await page.keyboard.press("a");
+            await until(
+                `(() => { const view = ${VIEW}; const doc = view.state.doc; const line = doc.lineAt(view.state.selection.main.head); ` +
+                    `return line.number < doc.lines && doc.line(line.number + 1).text !== ${JSON.stringify(UNLAID)}; })()`,
+                `laid out what the fold under ${JSON.stringify(text)} holds`,
+            );
+        },
         decorated: (className) =>
             evaluate((view, wanted) => {
                 const counted = new Set<unknown>();
@@ -152,4 +172,5 @@ export async function review(page: Page, thrown: readonly Error[] = []): Promise
                 return count;
             }, className),
     };
+    return made;
 }

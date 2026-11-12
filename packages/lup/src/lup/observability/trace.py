@@ -11,7 +11,14 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, JsonValue
 
 from lup.sessions.errors import BlockedError, OutputMissingError, StoppedError
-from lup.sessions.results import Friction, HowItFelt, Rejection, TurnResult, Usage
+from lup.sessions.results import (
+    Concern,
+    Friction,
+    HowItFelt,
+    Rejection,
+    TurnResult,
+    Usage,
+)
 from lup.types import Model
 
 if TYPE_CHECKING:
@@ -35,6 +42,8 @@ class CallRecord(Model):
     rejected: list[Rejection] = []
     notes: list[str] = []
     """The remarks the agent attached, whether they answered or not."""
+    concerns: list[Concern] = []
+    """What the agent found worth keeping an eye on, whether they answered or not."""
     frictions: list[Friction] = []
     """What got in the agent's way, whether they answered or not."""
     how_it_felt: list[HowItFelt] = []
@@ -54,6 +63,7 @@ class Kept(Model):
 
     rejected: list[Rejection] = []
     notes: list[str] = []
+    concerns: list[Concern] = []
     frictions: list[Friction] = []
     how_it_felt: list[HowItFelt] = []
     usage: Usage | None = None
@@ -68,6 +78,7 @@ class Answered(Model):
     duration: timedelta
     rejected: list[Rejection]
     notes: list[str]
+    concerns: list[Concern]
     frictions: list[Friction]
     how_it_felt: list[HowItFelt]
 
@@ -83,6 +94,7 @@ class Answered(Model):
             duration=result.duration,
             rejected=result.rejected,
             notes=result.notes,
+            concerns=result.concerns,
             frictions=result.frictions,
             how_it_felt=result.how_it_felt,
         )
@@ -109,6 +121,7 @@ class Asked(Model):
             output=answer.output,
             rejected=answer.rejected,
             notes=answer.notes,
+            concerns=answer.concerns,
             frictions=answer.frictions,
             how_it_felt=answer.how_it_felt,
             usage=answer.usage,
@@ -118,13 +131,14 @@ class Asked(Model):
         """Return the record of this ask failing with `error` after `duration`.
 
         A turn that ran without an answer keeps what the agent said beside it
-        (their notes, their frictions, how it felt) and what the turn used; a missing
+        (their notes, their concerns and frictions, how it felt) and what the turn used; a missing
         answer also keeps every rejected attempt.
         """
         match error:
             case BlockedError() | StoppedError():
                 kept = Kept(
                     notes=error.notes,
+                    concerns=error.concerns,
                     frictions=error.frictions,
                     how_it_felt=error.how_it_felt,
                     usage=error.usage,
@@ -133,6 +147,7 @@ class Asked(Model):
                 kept = Kept(
                     rejected=error.rejected,
                     notes=error.notes,
+                    concerns=error.concerns,
                     frictions=error.frictions,
                     how_it_felt=error.how_it_felt,
                     usage=error.usage,
@@ -149,6 +164,7 @@ class Asked(Model):
             error=f"{type(error).__name__}: {error}",
             rejected=kept.rejected,
             notes=kept.notes,
+            concerns=kept.concerns,
             frictions=kept.frictions,
             how_it_felt=kept.how_it_felt,
             usage=kept.usage,

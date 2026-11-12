@@ -66,7 +66,7 @@ from pydantic import Field, StringConstraints
 from lup.types import Model, MutableModel
 from lup_dev.approval import approved_branches
 from lup_dev.declaration.kinds import Level, Role
-from lup_dev.git import Git, GitError, Tracked
+from lup_dev.git import Git, GitError, Tracked, threaded
 from lup_dev.host.protocol import Reply, Request
 from lup_dev.host.service import Handler, Reading, Route
 from lup_dev.inbox import store as inbox
@@ -990,7 +990,9 @@ class SinceShowing(Model, Reading[ShowSince], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: ShowSince) -> Reply:
-        return await asyncio.to_thread(self.reader.read, request)
+        return await threaded(
+            request.conversation.repository, self.reader.read, request
+        )
 
     @override
     async def scoped(self, request: ShowSince, repository: Path) -> Reply:
@@ -1013,7 +1015,9 @@ class SinceReviewing(Model, Handler[ReviewSince], arbitrary_types_allowed=True):
     @override
     async def answer(self, request: ReviewSince) -> Reply:
         async with self.turns:
-            marking = await asyncio.to_thread(self.reader.marked, request)
+            marking = await threaded(
+                request.conversation.repository, self.reader.marked, request
+            )
         self.reader.woke(marking.woken)
         return marking.reviewed
 

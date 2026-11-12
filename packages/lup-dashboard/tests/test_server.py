@@ -39,8 +39,6 @@ from lup_dev.host.records import Called
 from lup_dev.host.timings import TimingsStore
 from lup_dev.host.workers import Viewed, Viewing
 from lup_dev.inbox.protocol import (
-    AnswerCheck,
-    CheckShown,
     Conversed,
     Files,
     Items,
@@ -752,7 +750,7 @@ def test_the_demo_refuses_a_draft_declining_what_isnt_an_approval_or_a_held_chan
     assert {52, 54} <= {each["number"] for each in waiting.json()["items"]}
 
 
-def test_the_demo_reads_its_threads_as_the_host_does_and_the_operator_settles_one_and_answers_a_check(
+def test_the_demo_reads_its_threads_as_the_host_does_and_the_operator_settles_one(
     page: Path,
 ) -> None:
     served = client(Demo(clock=Fixed(), size=0), page)
@@ -784,20 +782,23 @@ def test_the_demo_reads_its_threads_as_the_host_does_and_the_operator_settles_on
         "docs-sweep": "every thread",
     }
     reader = read["transcript-reader"]
-    assert [each.what for each in reader.asks] == ["a question", "a check"]
+    assert [each.what for each in reader.asks] == ["a question"]
+    # The parser keeps its body, which the page lays out in its block.
+    assert reader.body is not None
+    assert reader.body.by == reader.answering
+    assert reader.body.text.startswith("It reads a session's record")
     assert read["the-voice"].state == "done to confirm"
-    # The parser's question and check, read, still show, after the latest three
-    # read besides, but the flagged write, their exchange with their subagent
-    # among them; the rest folds under what came earlier.
+    # The parser's question, read, still shows, after the latest three read
+    # besides, but the flagged write, the check an earlier lup kept, which asks
+    # nothing, among them; the rest folds under what came earlier.
     conversation = shown(reader.thread.number)
     assert [(each.spot.node, each.seen) for each in conversation.entries] == [
-        (67, True),
         (70, True),
         (51, False),
-        (311, False),
+        (311, True),
         (57, True),
     ]
-    assert conversation.left == 3
+    assert conversation.left == 4
     # A part of the operator's words moved in says what they said, open.
     [part] = shown(read["voice-branch"].thread.number, whole=True).entries
     assert part.unanswered
@@ -811,11 +812,6 @@ def test_the_demo_reads_its_threads_as_the_host_does_and_the_operator_settles_on
         "/api/ask", json=SettleThread(number=voice).model_dump(), headers=bearing()
     )
     assert ThreadStated.model_validate(settled.json()).read.state == "settled"
-    check = reader.asks[1].node
-    answered = served.post(
-        "/api/ask", json=AnswerCheck(number=check).model_dump(), headers=bearing()
-    )
-    assert CheckShown.model_validate(answered.json()).thread == "transcript-reader"
     after = threads()
     assert after["the-voice"].section == "every thread"
     assert [each.what for each in after["transcript-reader"].asks] == ["a question"]

@@ -16,7 +16,9 @@ operator saw them, which the host reads with git in worktrees no demo has
 (`since`, `reviewed`); the merges what's on trial is computed with
 (`lup_dashboard/trialed.py`); the agents themselves, whose hooks and calls are a few
 timers set going as the page first asks (`asking`): a question that arrives,
-an approval's types read, two writes to a branch.
+an approval's types read, two writes to a branch. A script driving the demo
+brings the question at the step it says (`told`), so what it sees doesn't hang
+on how long its steps took.
 """
 
 import asyncio
@@ -124,6 +126,7 @@ from lup_dev.stored import write_model
 from lup_dev.trial import OnTrial, Trial, Trials, Version
 from lup_ledger.parties import Conversation, Lup, Operator
 from lup_ledger.threads import (
+    Body,
     Check,
     In,
     Moved,
@@ -205,11 +208,12 @@ class Changing(Model):
 
 
 class Threaded(Model):
-    """The demo's threads as it seeds them: each with what's in it, the check in one, and each one's latest status."""
+    """The demo's threads as it seeds them: each with what's in it, the check in one, each one's latest status, and the bodies of those with one."""
 
     threads: list[StandInThread]
     check: Check
     statuses: list[Status]
+    bodies: list[Body]
 
 
 class Cast(Model):
@@ -251,7 +255,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     reading: asyncio.TimerHandle | None = None
     """The reading of the approval's types under way, once the page asked for its files."""
     arrives: timedelta = timedelta(seconds=10)
-    """How long after the page first asks for the inbox a question of the parser subagent's arrives, so a session can watch the review keep its place as an item comes to a group above."""
+    """How long after the page first asks for the inbox a question of the parser subagent's arrives, so a session can watch the review keep its place as an item comes to a group above; sooner where a script driving the demo brings it (`told`)."""
     arriving: asyncio.TimerHandle | None = None
     """The arrival under way, once the page asked for the inbox."""
     size: int = 36
@@ -532,7 +536,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         )
 
     def seeded(self, inbox: Inbox) -> None:
-        """Keep the demo's state in `inbox`, as the host keeps its own: each item (`every`), with the files of each that changes any; each conversation's whereabouts (`cast`); each thread, its check, what's in each and its status (`stand_in_threads`); how far the operator has read and seen each, as of 3 minutes before the demo began, so what came since is new."""
+        """Keep the demo's state in `inbox`, as the host keeps its own: each item (`every`), with the files of each that changes any; each conversation's whereabouts (`cast`); each thread, its check, what's in each, its status and its body (`stand_in_threads`); how far the operator has read and seen each, as of 3 minutes before the demo began, so what came since is new."""
         items = sorted(self.every(), key=lambda each: each.number)
         threaded = self.stand_in_threads()
         numbered = {each.thread.name: each.thread.number for each in threaded.threads}
@@ -574,6 +578,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     )
             for status in threaded.statuses:
                 ledger.drawn(status)
+            for body in threaded.bodies:
+                ledger.drawn(body)
             self.read_before(inbox, items, threaded)
 
     def read_before(self, inbox: Inbox, items: list[Item], threaded: Threaded) -> None:
@@ -900,7 +906,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         )
 
     def stand_in_threads(self) -> Threaded:
-        """Return the demo's threads, over its items (`every`): what each session holds; the lup-impl session's build, with their subagents' work under it, the parser's reader with its question, a check and the parser's exchange with their subagent, explore-auth's survey new with its exchange with the session, the clock's ticks whose landing waits on a file, whose holder ended, so the build's holder answers, the legacy reader's cache settled, the reader's names parked; the voice session's voice done, to confirm, with a part of the operator's words moved under it; zoetrope's render, its problem asking; the docs sweep, held by a session that has ended, its last note read, which its end settles not, so it's in `No agent`; and each worker's module, of a busy day."""
+        """Return the demo's threads, over its items (`every`): what each session holds; the lup-impl session's build, with their subagents' work under it, the parser's reader with its body, its question, a check and the parser's exchange with their subagent, explore-auth's survey new with its exchange with the session, the clock's ticks whose landing waits on a file, whose holder ended, so the build's holder answers, the legacy reader's cache settled, the reader's names parked; the voice session's voice done, to confirm, with a part of the operator's words moved under it; zoetrope's render, its problem asking; the docs sweep, held by a session that has ended, its last note read, which its end settles not, so it's in `No agent`; and each worker's module, of a busy day."""
         first, second = self.runtimes
         lup = Path("/home/op/lup.git")
         zoetrope = Path("/home/op/zoetrope.git")
@@ -1104,6 +1110,20 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         return Threaded(
             threads=stood,
             check=tried,
+            bodies=[
+                Body(
+                    target=reader,
+                    repository=lup,
+                    by=parser,
+                    at=self.ago(5),
+                    text=(
+                        "It reads a session's record as it grows, a line at a time.\n"
+                        "It stops at the first line it can't parse, and says which.\n"
+                        "\n"
+                        "Its name waits on your answer."
+                    ),
+                )
+            ],
             statuses=[
                 Settled(target=cache, repository=lup, by=Operator(), at=self.ago(16)),
                 Parked(
@@ -1143,8 +1163,23 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             read = item.reason.model_copy(update={"typing": False})
             inbox.kept(item.model_copy(update={"reason": read}))
 
+    def told(self, line: str) -> None:
+        """Bring at once what a stand-in agent does, as a line of the demo's input names it (`--driven`): `arrive`, the parser subagent's late question; say what names nothing."""
+        match line.strip():
+            case "arrive":
+                self.arrive()
+            case "":
+                pass
+            case other:
+                self.say(
+                    f"`{other}` names nothing a stand-in agent does: `arrive` brings "
+                    "the late question"
+                )
+
     def arrive(self) -> None:
-        """Let the parser subagent's late question arrive, made at the clock's time, in the thread they work in, as an item a call of theirs made does."""
+        """Let the parser subagent's late question arrive, made at the clock's time, in the thread they work in, as an item a call of theirs made does; once, however often it's brought."""
+        if 61 in self.host.inbox.items:
+            return
         delivery = self.host.delivery
         parser = self.lup_session().model_copy(update={"agent": "a02"})
         question = Question(

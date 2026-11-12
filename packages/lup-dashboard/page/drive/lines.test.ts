@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { open, type Dashboard } from "./dashboard.ts";
 import { demo, type Demo } from "./demo.ts";
-import type { Review } from "./review.ts";
+import { UNLAID, type Review } from "./review.ts";
 import { DEMO_ITEM } from "./typing.ts";
 
 let served: Demo;
@@ -10,8 +10,7 @@ let dashboard: Dashboard;
 let review: Review;
 
 beforeAll(async () => {
-    // Nothing of the demo's own comes as the keys go down.
-    served = await demo({ size: 0, arrives: 3600, grows: 3600 });
+    served = await demo({ size: 0 });
     dashboard = await open(served.url);
     review = await dashboard.review();
     await review.holds(DEMO_ITEM);
@@ -27,28 +26,56 @@ afterAll(async () => {
     await served?.close();
 });
 
+/** Where the cursor was as a key went down, and where that key should take it (`noting`). */
+interface Step {
+    number: number;
+    text: string;
+    next: number | null;
+    expected: string;
+    /** The text's length, which says whether the review was laid out anew in between. */
+    length: number;
+}
+
 /**
- * Where the cursor is and where `key` should take it: the line it's on, by its number, and its text; the next line shown
- * after it, or before it for `k`, a line under a closed fold not shown, the fold's summary line standing for it, and the
- * empty line after the text's last line break not one, which no cursor rests on; and the text's length, which says whether
- * the review was laid out anew in between, as the demo's arrivals lay it out.
+ * Note in the page, as each `key` goes down, before anything of the page's handles it, where the cursor is and where the
+ * key should take it: the next line shown after it, or before it for `k`, a line under a closed fold not shown, the fold's
+ * summary line standing for it, and the empty line after the text's last line break not one, which no cursor rests on.
+ * Return how many lines shown there are to go, the keys a walk to the end takes.
  */
-const position = (key: "j" | "k") =>
+const noting = (key: "j" | "k") =>
     review.evaluate((view, forward) => {
-        const doc = view.state.doc;
-        const line = doc.lineAt(view.state.selection.main.head);
-        let next: number | null = null;
-        const last = doc.line(doc.lines).length === 0 ? doc.lines - 1 : doc.lines;
-        for (let number = line.number + (forward ? 1 : -1); number >= 1 && number <= last; number += forward ? 1 : -1) {
-            const each = doc.line(number);
-            const block = view.lineBlockAt(each.from);
-            if (block.from === each.from && !(block.from <= line.from && block.to >= line.from)) {
-                next = number;
-                break;
+        /** The next line shown from line `number` the way the key goes, as the review is laid out now; none at the end. */
+        const shownFrom = (number: number): number | null => {
+            const doc = view.state.doc;
+            const last = doc.line(doc.lines).length === 0 ? doc.lines - 1 : doc.lines;
+            const line = doc.line(number);
+            for (let at = number + (forward ? 1 : -1); at >= 1 && at <= last; at += forward ? 1 : -1) {
+                const block = view.lineBlockAt(doc.line(at).from);
+                if (block.from === doc.line(at).from && !(block.from <= line.from && block.to >= line.from)) {
+                    return at;
+                }
             }
+            return null;
+        };
+        const where = (): Step => {
+            const doc = view.state.doc;
+            const line = doc.lineAt(view.state.selection.main.head);
+            const next = shownFrom(line.number);
+            return { number: line.number, text: line.text, next, expected: next === null ? "" : doc.line(next).text, length: doc.length };
+        };
+        const steps: Step[] = [];
+        const noted = (event: KeyboardEvent) => {
+            if (event.key === (forward ? "j" : "k")) {
+                steps.push(where());
+            }
+        };
+        addEventListener("keydown", noted, { capture: true });
+        Object.assign(globalThis, { lupDriveWalk: { steps, where, stop: () => removeEventListener("keydown", noted, { capture: true }) } });
+        let count = 0;
+        for (let at = shownFrom(where().number); at !== null; at = shownFrom(at)) {
+            count += 1;
         }
-        const expected = next === null ? "" : doc.line(next).text;
-        return { number: line.number, text: line.text, next, expected, length: doc.length };
+        return count;
     }, key === "j");
 
 /** Say a line by its number and its words. */
@@ -56,30 +83,39 @@ const said = (number: number | null, text: string) => `${number} "${text.slice(0
 
 /**
  * Press `key` from where the cursor is to the review's end, or its start, each press moving the cursor exactly one line
- * shown; return each step that moved otherwise, saying where from, where to, and where it should have gone. A step the
- * review was laid out anew during, as an item arriving, is taken again from where it landed.
+ * shown; return each step that moved otherwise, saying where from, where to, and where it should have gone.
+ *
+ * Every key goes at once, as a held key's repeats do, and the page notes each step as its key goes down (`noting`): where
+ * one key landed is where the next found the cursor. A walk of hundreds of keys asks nothing of the page between them,
+ * so what it takes is the page's own work on each key, not a round trip each at the machine's speed. A step the review
+ * was laid out anew during is left unjudged; one that went wrong leaves the next to start where it landed.
  */
 async function stepped(key: "j" | "k"): Promise<string[]> {
+    const count = await noting(key);
+    await dashboard.keys.press(Array<string>(count).fill(key));
+    const { steps, last } = await review.evaluate(() => {
+        const walk = (globalThis as unknown as { lupDriveWalk: { steps: Step[]; where: () => Step; stop: () => void } }).lupDriveWalk;
+        walk.stop();
+        return { steps: walk.steps, last: walk.where() };
+    });
     const wrong: string[] = [];
-    for (let step = 0; step < 5000; step += 1) {
-        const from = await position(key);
-        if (from.next === null) {
-            return wrong;
-        }
-        await dashboard.keys.press([key]);
-        const to = await position(key);
-        if (to.length !== from.length || to.number === from.next) {
-            continue;
-        }
-        wrong.push(`${key} from ${said(from.number, from.text)} went to ${said(to.number, to.text)}, not ${said(from.next, from.expected)} (step ${step + 1})`);
-        // Go on from where it should have been.
-        await review.evaluate((view, number) => view.dispatch({ selection: { anchor: view.state.doc.line(number).from } }), from.next);
+    if (steps.length !== count) {
+        wrong.push(`${count} ${key} were sent and the page saw ${steps.length}`);
     }
-    return [...wrong, `${key} never reached the review's end`];
+    steps.forEach((from, at) => {
+        const landed = steps[at + 1] ?? last;
+        if (from.next !== null && landed.length === from.length && landed.number !== from.next) {
+            wrong.push(`${key} from ${said(from.number, from.text)} went to ${said(landed.number, landed.text)}, not ${said(from.next, from.expected)} (step ${at + 1})`);
+        }
+    });
+    if (last.next !== null) {
+        wrong.push(`${key} never reached the review's end, stopping on ${said(last.number, last.text)}`);
+    }
+    return wrong;
 }
 
 /** The line the cursor is on, by its number. */
-const here = async () => (await position("j")).number;
+const here = () => review.evaluate((view) => view.state.doc.lineAt(view.state.selection.main.head).number);
 
 /** Put the cursor on the review's first line, or its last. */
 const to = async (end: "first" | "last") => {
@@ -95,8 +131,8 @@ describe("moving through the review, line by line, in headless Chromium", () => 
     });
 
     it("goes ]g and [g to each group in turn, the first from the review's first line", async () => {
-        // Walked again where the review was laid out anew meanwhile, what's been seen no longer saying it's new moving what's
-        // below, a key going where its layout says before it's in the editor.
+        // Walked again where the review was laid out anew meanwhile, a key going where its layout says before it's in the
+        // editor.
         let walked: { landings: number[]; forward: number[]; back: number[] } = { landings: [], forward: [], back: [] };
         for (let tried = 0; tried < 5; tried += 1) {
             const landings = await review.evaluate((view) => {
@@ -138,6 +174,16 @@ describe("moving through the review, line by line, in headless Chromium", () => 
             await dashboard.keys.press(["]", drawer === "since you approved" ? "s" : drawer === "messages" ? "M" : "v"]);
             await review.until(`go to the ${drawer}`, (view, wanted) => view.state.doc.lineAt(view.state.selection.main.head).text.startsWith(wanted), drawer);
             await dashboard.keys.press(["z", "o"]);
+            // What it holds laid out as it opens, in place of the line standing for it, before a walk counts its lines.
+            await review.until(
+                `lay out the ${drawer}`,
+                (view, unlaid) => {
+                    const doc = view.state.doc;
+                    const line = doc.lineAt(view.state.selection.main.head);
+                    return line.number < doc.lines && doc.line(line.number + 1).text !== unlaid;
+                },
+                UNLAID,
+            );
         }
         await to("first");
         expect(await stepped("j")).toEqual([]);
@@ -152,5 +198,83 @@ describe("moving through the review, line by line, in headless Chromium", () => 
         expect(await stepped("j")).toEqual([]);
         await to("last");
         expect(await stepped("k")).toEqual([]);
+    });
+});
+
+describe("going to each line that matters with ]c and [c, in headless Chromium", () => {
+    let served: Demo;
+    let dashboard: Dashboard;
+    let review: Review;
+
+    beforeAll(async () => {
+        served = await demo({ size: 0 });
+        dashboard = await open(served.url);
+        review = await dashboard.review();
+        await review.holds(DEMO_ITEM);
+        await review.settled();
+        // Every "since you approved" read, so each holds what it's going to.
+        await review.until("lay out the parser's since you approved", (view) => /\n━━ lup · dev · lup-impl\/parser[^\n]*\n(?:(?!━━ )[^\n]*\n)*since you approved · /.test(view.state.doc.toString()));
+    });
+
+    afterEach(() => {
+        expect(dashboard.thrown).toEqual([]);
+    });
+
+    afterAll(async () => {
+        await dashboard?.close();
+        await served?.close();
+    });
+
+    /** Put this page's cursor on the review's first line, or its last. */
+    const end = async (which: "first" | "last") => {
+        await dashboard.keys.press(which === "first" ? ["g", "g"] : ["G"]);
+        await review.settled(400, 0);
+    };
+
+    /** Each since you approved, as one key selects every one and another opens or closes them all. */
+    const everySince = async (key: "o" | "c") => {
+        await dashboard.keys.press(["g", "g", " ", "F", "s"]);
+        await review.inMode("visual");
+        await dashboard.keys.press(["z", key]);
+        await review.inMode("normal");
+        await review.settled(400, 0);
+    };
+
+    /** Press `]c`, or `[c`, from where the cursor is until it goes no further, and return the line each lands on. */
+    const walked = async (forward: boolean): Promise<string[]> => {
+        const landed: string[] = [];
+        let was = await review.evaluate((view) => view.state.selection.main.head);
+        for (let step = 0; step < 100; step += 1) {
+            await dashboard.keys.press(forward ? ["]", "c"] : ["[", "c"]);
+            await review.settled(400, 0);
+            const at = await review.evaluate((view) => view.state.selection.main.head);
+            if (at === was) {
+                return landed;
+            }
+            was = at;
+            landed.push(await review.line());
+        }
+        throw new Error(`${forward ? "]c" : "[c"} went on past 100 lines`);
+    };
+
+    /** Whether a closed drawer lays out what it holds, its lines standing for it instead. */
+    const unlaid = () => review.evaluate((view, line) => view.state.doc.toString().split("\n").filter((each) => each === line).length, UNLAID);
+
+    it("goes into a closed drawer to its lines that matter, opening it, as it goes over every one laid out open", async () => {
+        const closedBefore = await unlaid();
+        await end("first");
+        const closedWalk = await walked(true);
+        // It went into what was closed: a drawer holding a line that matters is laid out open now.
+        expect(closedWalk.length).toBeGreaterThan(0);
+        expect(await unlaid()).toBeLessThan(closedBefore);
+        // The same lines, in the same order, as every since you approved laid out open from the start.
+        await everySince("c");
+        await everySince("o");
+        await end("first");
+        expect(await walked(true)).toEqual(closedWalk);
+        // Back from the review's end, every one closed again: the same lines the other way, the last of a drawer first.
+        await everySince("c");
+        await end("last");
+        expect(await walked(false)).toEqual(closedWalk.toReversed());
     });
 });

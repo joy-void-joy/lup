@@ -84,7 +84,7 @@ if TYPE_CHECKING:
     from lup.doors import Method
     from lup_dev.host.records import Call
     from lup_dev.inbox.marks import ReviewMark
-    from lup_dev.inbox.protocol import Exchange, Exchanged
+    from lup_dev.inbox.protocol import Exchange, Exchanged, Relayed
 
 
 CALL_TONE = Tone(name="call", colour="orange")
@@ -95,8 +95,11 @@ RECEIVED_TONE = Tone(name="received", like="operator")
 """An item the conversation was sent: in the blue of the operator's words."""
 RUN_TONE = Tone(name="run", like="muted")
 """A run of calls' line, saying how many of which."""
+LUP_TONE = Tone(name="lup", colour="ok")
+"""lup's own words to the conversation, in a colour of their own, so they never
+read as the operator's, though they say what the operator did."""
 
-TONES = [CALL_TONE, SENT_TONE, RECEIVED_TONE, RUN_TONE]
+TONES = [CALL_TONE, SENT_TONE, RECEIVED_TONE, RUN_TONE, LUP_TONE]
 """The tones `Transcripts` declares beside the shell's, which its conversation's
 lines are drawn in; the operator's words are in the shell's `operator`, and
 what's set back in its `muted`."""
@@ -207,9 +210,16 @@ class OfCall(OfAgent):
 
 
 class Inboxed(Model):
-    """An item of lup's inbox as the conversation shows it: its line, its text folded under it, and where it goes among the steps."""
+    """An item of lup's inbox as the conversation shows it, or one of lup's lines told them in no item (`relayed`): its line, its text folded under it, and where it goes among the steps."""
 
     number: int
+    """The item's number; for one of lup's lines, its place among those told
+    the conversation."""
+    relayed: bool = False
+    """Whether it's one of lup's lines told the conversation, or someone's words
+    it carried them, rather than an item (`Exchanged.relayed`)."""
+    lups: bool = False
+    """Whether it's lup's own words, drawn in lup's tone, never the operator's."""
     sent: bool
     """Whether the conversation sent it, rather than was sent it."""
     line: list[Span]
@@ -245,6 +255,18 @@ class Inboxed(Model):
     """When the operator said it, where it's their own words, sent through lup:
     what had reached the conversation by then they said having read (`Read`); none
     for anyone else's."""
+
+    def named(self) -> str:
+        """Return what names it among the turns, and its fold: `item 51`, or `lup 3` for lup's third line told the conversation."""
+        return f"{'lup' if self.relayed else 'item'} {self.number}"
+
+    def text_id(self) -> str:
+        """Return the id of its text's block: `text 51`, or `lup 3 text`."""
+        return f"lup {self.number} text" if self.relayed else f"text {self.number}"
+
+    def line_id(self) -> str:
+        """Return the id of its line where it has no text under it: `item 51 line`, or `lup 3 line`."""
+        return f"{self.named()} line"
 
 
 class Spoken(Model):
@@ -373,7 +395,7 @@ def key(turn: Turn) -> str:
     """Return what names `turn` among the others, whatever comes after it."""
     match turn:
         case Inboxed():
-            return f"item {turn.number}"
+            return turn.named()
         case Spoken() | Calling():
             return f"step {turn.step}"
 
@@ -524,7 +546,7 @@ def counted(count: int, one: str) -> str:
 
 
 def inboxed(exchanged: Exchanged) -> list[Inboxed]:
-    """Return the items the agent exchanged as their conversation shows them, those they sent first, then those they were sent: each in its line as the core words it (`Exchange.line`), in the tone of its way, sent or received, its text under it with the operator's comment on deciding it after it."""
+    """Return the items the agent exchanged as their conversation shows them, those they sent first, then those they were sent, then lup's lines told them in no item: each in its line as the core words it (`Exchange.line`, `Relayed.line`), in the tone of its way, sent or received, or lup's for lup's own words, its text under it with the operator's comment on deciding it after it."""
 
     def text(said: str, comment: str) -> str:
         parts = [said, *([f"your comment: {comment}"] if comment else [])]
@@ -552,9 +574,26 @@ def inboxed(exchanged: Exchanged) -> list[Inboxed]:
             else None,
         )
 
+    def relayed(each: Relayed) -> Inboxed:
+        tone = LUP_TONE if each.lups else RECEIVED_TONE
+        said = "\n".join(kept(each.text))
+        return Inboxed(
+            number=each.number,
+            relayed=True,
+            lups=each.lups,
+            sent=False,
+            line=[span.model_copy(update={"tone": tone.name}) for span in each.line],
+            text=said,
+            by=each.by,
+            heading=each.heading,
+            reading=said,
+            at=each.at,
+        )
+
     return [
         *(shown(each, sent=True) for each in exchanged.sent),
         *(shown(each, sent=False) for each in exchanged.received),
+        *(relayed(each) for each in exchanged.relayed),
     ]
 
 
@@ -619,14 +658,14 @@ def merged(entries: list[Entry], items: list[Inboxed]) -> list[Turn]:
 
     # Of two items saying one step's words, as in a record with no times, the later stands for it, the other alone.
     repeating = {step: each for each in items if (step := repeated(each)) is not None}
-    standing = {each.number: each for each in repeating.values()}
+    standing = {each.named(): each for each in repeating.values()}
     steps = [
         each.model_copy(update={"repeated": repeating[each.step]})
         if each.step in repeating and isinstance(each, Spoken)
         else each
         for each in steps
     ]
-    items = [each for each in items if each.number not in standing]
+    items = [each for each in items if each.named() not in standing]
 
     def before(item: Inboxed) -> int:
         """Return the step `item` goes just after by when it was: the last at or before then, or with no time yet; -1 for before every step."""
@@ -636,15 +675,15 @@ def merged(entries: list[Entry], items: list[Inboxed]) -> list[Turn]:
         )
 
     made = {
-        each.number: calls[each.call]
+        each.named(): calls[each.call]
         for each in items
         if each.call is not None and each.call in calls
     }
-    timed = {each.number: before(each) for each in items if each.number not in made}
+    timed = {each.named(): before(each) for each in items if each.named() not in made}
 
-    def ordered(placed: dict[int, int], step: int) -> list[Inboxed]:
-        found = [each for each in items if placed.get(each.number) == step]
-        return sorted(found, key=lambda each: (each.at, each.number))
+    def ordered(placed: dict[str, int], step: int) -> list[Inboxed]:
+        found = [each for each in items if placed.get(each.named()) == step]
+        return sorted(found, key=lambda each: (each.at, each.relayed, each.number))
 
     return [
         *ordered(timed, -1),
@@ -739,7 +778,7 @@ def turned(
     Each line is at most `row` characters (`cut`).
     """
     sending = {
-        each.call: each.number
+        each.call: each.named()
         for each in reversed(turns)
         if isinstance(each, Inboxed) and each.call is not None and each.call_sends_it
     }
@@ -766,9 +805,10 @@ def turned(
         )
 
     def line_of(inboxed: Inboxed, text: str, least: int = 20) -> list[Span]:
-        """Return an item's line, saying how `text` starts after it where the conversation sent it, the words of theirs it stands for, in what the row has left, nothing where that's under `least` characters."""
+        """Return an item's line, saying how `text` starts after it where the conversation sent it, the words of theirs it stands for, or where it's lup's own line, in what the row has left, nothing where that's under `least` characters."""
         room = row - sum(len(span.text) for span in inboxed.line) - len(" · ")
-        start = starting(text, room) if inboxed.sent and room >= least else ""
+        says = inboxed.sent or inboxed.lups
+        start = starting(text, room) if says and room >= least else ""
         return [
             *inboxed.line,
             *([Span(text=f" · {start}", tone="muted")] if start else []),
@@ -777,19 +817,18 @@ def turned(
     def made_by(inboxed: Inboxed) -> list[Block]:
         """Return the line of the call `inboxed` stands for, where it's the first item that call sent and the call is laid out here."""
         ran = inboxed.call
-        if ran is None or sending.get(ran) != inboxed.number or ran not in calls:
+        if ran is None or sending.get(ran) != inboxed.named() or ran not in calls:
             return []
         return [call(calls[ran])]
 
     def item(inboxed: Inboxed) -> Block:
-        number = inboxed.number
         summary = line_of(inboxed, inboxed.text)
-        text = [Markdown(id=f"text {number}", text=inboxed.text, by=inboxed.by)]
+        text = [Markdown(id=inboxed.text_id(), text=inboxed.text, by=inboxed.by)]
         content = [*(text if inboxed.text else []), *made_by(inboxed)]
         if not content:
-            return Line(id=f"item {number} line", spans=summary)
+            return Line(id=inboxed.line_id(), spans=summary)
         return Fold(
-            id=f"item {number}",
+            id=inboxed.named(),
             kind=ITEMS_KIND.name,
             summary=summary,
             barred=True,

@@ -124,17 +124,16 @@ describe("what's read by being on screen", () => {
 });
 
 describe("where what's written goes, on the line under the review", () => {
-    it("says where each message on a concern goes, by what it's called, and a check answered in words", () => {
+    it("says where each message on a concern goes, by what it's called", () => {
         const draft = {
             ...EMPTY,
             letters: [
                 { id: "m1", to: WORKER, thread: 307, text: "It still lags." },
                 { id: "m2", to: null, thread: 303, text: "A note to myself." },
             ],
-            comments: [{ id: "c1", item: 311, quote: null, text: "Found it." }],
         };
-        const naming = { called: (party: Item["sender"]) => (party.party === "operator" ? "you" : called(party)), named: () => "", holder: () => null, thread: (number: number) => (number === 307 ? "The voice" : "The auth"), checks: new Set([311]) };
-        expect(toSend(draft, [], naming).map(partSaid)).toEqual(["to s1/a1: a message on The voice", "to no one: a message on The auth", "to the check: answering @311"]);
+        const naming = { called: (party: Item["sender"]) => (party.party === "operator" ? "you" : called(party)), named: () => "", holder: () => null, thread: (number: number) => (number === 307 ? "The voice" : "The auth") };
+        expect(toSend(draft, [], naming).map(partSaid)).toEqual(["to s1/a1: a message on The voice", "to no one: a message on The auth"]);
     });
 });
 

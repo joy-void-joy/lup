@@ -62,6 +62,8 @@ describe("the panes by agent", () => {
     });
 
     it("opens on what's for the operator, with the list beside it, by agent and with No agent", async () => {
+        // Listed as the host answers, which a loaded machine does after the review has settled.
+        await dashboard.page.waitForFunction(() => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("The docs sweep left by docs-pass")), undefined, { polling: 50 });
         const list = await listText(dashboard);
         expect(list.some((each) => each.includes("what's for you"))).toBe(true);
         expect(list.some((each) => each.includes("guidance-voice"))).toBe(true);
@@ -354,28 +356,6 @@ describe("the panes by agent", () => {
         await review.holds("to guidance-voice");
     });
 
-    it("shows a check in its concern's block, in the buffer of whoever owns it, and answers it from there", async () => {
-        const { page } = dashboard;
-        await listRow(dashboard, "parser");
-        await page.keyboard.press("Enter");
-        await review.holds("check @");
-        const lines = (await review.text()).split("\n");
-        const at = lines.findIndex((each) => each.trimStart().startsWith("◇ check @"));
-        const line = lines[at] ?? "";
-        expect(lines.slice(0, at).findLast((each) => each.trimStart().startsWith("§ "))).toContain("§ The transcript reader");
-        const number = /check @(\d+)/.exec(line)?.[1] ?? "";
-        // Counted with what wants the operator's eyes, on its task's row, whose question holds apart from it.
-        const taskSays = (flagged: boolean) => page.waitForFunction((wanted) => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("The transcript reader") && (each.textContent ?? "").includes("◇1") === wanted), flagged, { polling: 50 });
-        await taskSays(true);
-        await review.goTo(`check @${number}`);
-        await dashboard.keys.press([" ", "d"]);
-        await page.waitForFunction(() => (document.querySelector(".status")?.textContent ?? "").includes("No reply drafted") === false, undefined, { polling: 50 });
-        await taskSays(false);
-        // Undone: nothing of it is sent by what follows.
-        await page.keyboard.press("u");
-        await taskSays(true);
-    });
-
     it("lists concerns under whoever owns them, and jumps from a row to its block in their own buffer", async () => {
         const { page } = dashboard;
         await listRow(dashboard, "The transcript reader");
@@ -504,7 +484,8 @@ describe("what's read by being on screen, in panes", () => {
     const moved = () => told.flatMap((each) => each.marks as { key: Record<string, unknown>; up_to: string; seen: boolean }[]);
     /** Each mark moved as far as the voice session's turn's end, or the how it felt in view just after it. */
     const movedTo56 = () => moved().filter((each) => each.up_to === "56" || each.up_to === "58");
-    const passes = (ms: number) => dashboard.page.clock.runFor(ms);
+    /** Let the page's clock run on for `ms`, the page in view of someone reading it for that time alone. */
+    const passes = (ms: number) => dashboard.looks(ms);
     const row = (text: string) => dashboard.page.evaluate((wanted) => [...document.querySelectorAll(".list-buffer .cm-line")].find((each) => (each.textContent ?? "").includes(wanted))?.textContent ?? "", text);
 
     it("moves their agent's mark as what's been seen scrolls off, the list's count falling", async () => {
@@ -517,7 +498,8 @@ describe("what's read by being on screen, in panes", () => {
         expect(was).toContain("•");
         await dashboard.keys.press(["G"]);
         await review.settled(300);
-        await passes(4000);
+        // Time for the page to say what moved, out of view: what's at the end isn't read.
+        await dashboard.page.clock.runFor(4000);
         await review.settled(300);
         await expect.poll(() => movedTo56().length, { timeout: 15_000 }).toBeGreaterThan(0);
         const [mark] = movedTo56();

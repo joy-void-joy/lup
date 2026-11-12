@@ -17,6 +17,7 @@ from lup_ledger.environment.store import Ledger
 from lup_ledger.errors import LupLedgerError
 from lup_ledger.records import Edge, Node
 from lup_ledger.threads import (
+    Body,
     In,
     Marks,
     Member,
@@ -149,6 +150,11 @@ class Threads(Model, arbitrary_types_allowed=True):
                 if self.marks(found[place].target) == Marks(agent=found[place])
                 and not self.ledger.node(found[place].target, Thread).root
             ]
+
+    def body(self, number: int) -> Body | None:
+        """Return thread `number`'s body, the latest drawn to it; none where none was, or the latest cleared it."""
+        bodies = self.ledger.drawn_to(number, Body)
+        return bodies[-1] if bodies and bodies[-1].text.strip() else None
 
     def status(self, number: int) -> Status | None:
         """Return the latest edge saying where thread `number` stands; none where nothing has."""

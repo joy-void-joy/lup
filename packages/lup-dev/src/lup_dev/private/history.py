@@ -235,7 +235,13 @@ def remotes_hold(repository: Git) -> Remotes:
     """
     names = repository.run("remote").output.decode().splitlines()
     listed = {
-        name: repository.run("ls-remote", "--end-of-options", name, ok=[0, 1, 2, 128])
+        name: repository.run(
+            "ls-remote",
+            "--end-of-options",
+            name,
+            ok=[0, 1, 2, 128],
+            within=repository.crossing,
+        )
         for name in names
     }
     tracking = repository.run(

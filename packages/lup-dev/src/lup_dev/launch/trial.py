@@ -1077,10 +1077,11 @@ def scratch_worktree(beside: Path, git: Git, name: str, commit: str) -> Path:
     run in a worktree, git would follow the worktree's git directory, which a
     room writes, its `commondir` among it, to a `config` whose filters the
     checkout would run on the host (`docs/field-notes.md`, *Host-side git in a
-    repository the room writes*).
+    repository the room writes*). Given as long as git checking out a whole
+    worktree is (`Git.whole`).
     """
     scratch = beside / name
-    git.run("worktree", "add", "--detach", str(scratch), commit)
+    git.run("worktree", "add", "--detach", str(scratch), commit, within=git.whole)
     return scratch
 
 
@@ -1092,18 +1093,26 @@ class Scratch(Model):
     git: Git
 
     def removed(self) -> None:
-        """Remove the worktree, whatever is in it."""
-        self.git.run("worktree", "remove", "--force", str(self.path))
+        """Remove the worktree, whatever is in it, given as long as git removing a whole worktree is (`Git.whole`)."""
+        self.git.run(
+            "worktree", "remove", "--force", str(self.path), within=self.git.whole
+        )
 
     def unspawned(self, spawned: list[Register], say: Callable[[str], None]) -> None:
-        """Remove the worktree and the branch of each launch the trial's session spawned, whatever is in them, each under `tree/` of the repository and named for its branch (`made_root`); where git can't, say so, and go on."""
+        """Remove the worktree and the branch of each launch the trial's session spawned, whatever is in them, each under `tree/` of the repository and named for its branch (`made_root`), the removal given as long as git removing a whole worktree is (`Git.whole`); where git can't, say so, and go on."""
         # A side job resumed holds the worktree it was spawned in: each once.
         for each in {launch.worktree: launch for launch in spawned}.values():
             if each.worktree.parent != self.repository / "tree":
                 say(f"{each.worktree} isn't one a spawn made, so it's left.")
                 continue
             try:
-                self.git.run("worktree", "remove", "--force", str(each.worktree))
+                self.git.run(
+                    "worktree",
+                    "remove",
+                    "--force",
+                    str(each.worktree),
+                    within=self.git.whole,
+                )
                 self.git.run("branch", "-D", "--end-of-options", each.worktree.name)
             except GitError as failed:
                 say(

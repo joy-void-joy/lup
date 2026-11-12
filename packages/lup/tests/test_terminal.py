@@ -169,6 +169,7 @@ def test_claude_compiles_its_flags_settings_state_and_mounts(
     assert terminal.env == {
         "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS": "0",
         "DISABLE_AUTOUPDATER": "1",
+        "CLAUDE_CODE_SILENT_TURN_REMINDER": "0",
     }
     command = {"type": "command", "command": HOOK_LINE}
     timed = {**command, "timeout": 36000}
@@ -368,6 +369,7 @@ def test_claude_leaves_every_session_setting_to_the_runtime_when_none_is_given(
     assert terminal.env == {
         "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS": "0",
         "DISABLE_AUTOUPDATER": "1",
+        "CLAUDE_CODE_SILENT_TURN_REMINDER": "0",
     }
     written = lup_settings(terminal, launch)
     assert written["env"] == {}

@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING, Literal, override
 
 from lup import blocks
 from lup.types import Model
-from lup_dev.git import Git
+from lup_dev.git import Git, threaded
 from lup_dev.host.protocol import LaunchId, Reply, Request
 from lup_dev.host.records import (
     Entry,
@@ -54,6 +54,7 @@ from lup_dev.inbox.delivery import (
     Unanswerable,
 )
 from lup_dev.inbox.marks import CORE
+from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.reading import Narrowing, Reader, Spelling
 from lup_dev.inbox.roster import Roster, ids
 from lup_dev.inbox.store import (
@@ -65,6 +66,7 @@ from lup_dev.inbox.store import (
     HeldChange,
     InboxError,
     Item,
+    Left,
     Message,
     Order,
     Passage,
@@ -77,13 +79,13 @@ from lup_dev.inbox.store import (
 from lup_dev.inbox.texts import (
     written,
 )
+from lup_dev.inbox.threads import spoken
 from lup_dev.listing import Span
 from lup_ledger.parties import Conversation, Operator
-from lup_ledger.records import Edge
-from lup_ledger.threads import Check
+from lup_ledger.threads import Thread
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
 
 class ListInbox(Request, Span, reads=True):
@@ -112,21 +114,6 @@ class AnswerItem(Request, reads=False):
     number: int
     rulings: list[Ruling] = []
     comment: str = ""
-
-
-class ShowCheck(Request, reads=True):
-    """Show a check: what only the operator can try, which an agent's question put in a thread; none where the number isn't one."""
-
-    kind: Literal["inbox-check-show"] = "inbox-check-show"
-    number: int
-
-
-class AnswerCheck(Request, reads=False):
-    """Answer a check with what the operator saw, or tick it with no words."""
-
-    kind: Literal["inbox-check-answer"] = "inbox-check-answer"
-    number: int
-    text: str = ""
 
 
 class FinishItem(Request, reads=False):
@@ -423,16 +410,6 @@ class Shown(Reply):
     (`pathed`): how `lup-dev inbox` names them."""
 
 
-class CheckShown(Reply):
-    """A check, with the thread it's in and whether it waits on the operator; none where the number asked isn't a check."""
-
-    kind: Literal["inbox-check"] = "inbox-check"
-    check: Check | None = None
-    thread: str | None = None
-    """The name of the thread it's in; none where it's in none."""
-    waiting: bool = False
-
-
 class Settled(Reply):
     """An approval as it stands once answered, and whether this answer was the one that answered it."""
 
@@ -583,6 +560,32 @@ class Exchange(Model):
     no words of theirs (`lines.worded`)."""
 
 
+class Relayed(Model):
+    """One of lup's lines told a conversation, which no item holds (`Left`), as a view of the conversation shows it (`inbox/lines.py`, `relayed`): lup's own line, in lup's words, or someone's words it carried them whole, an item landing in a thread they answer for or moved there, or a part of the operator's words moved there."""
+
+    number: int
+    """Its place among the lines lup left the conversation, from 1, which names it."""
+    line: list[blocks.Span]
+    """Its line among the conversation's steps: `← from lup`, or what it
+    carries and how it came, `← @812.1 your words, moved by lup-impl into
+    @lag`; each conversation a span of their own, as in `Exchange.line`."""
+    heading: list[blocks.Span]
+    """Its heading among the conversation's words alone, who says it to whom:
+    `lup → lup-impl/fixer`, or `@812.1 you → lup-impl/fixer · moved by
+    lup-impl into @lag`; `not told yet` after it until it's told."""
+    text: str
+    """What it says, in Markdown: lup's own line as told, after `lup: `; the
+    passage of the operator's words it carries; or the item it carries as
+    the operator reads it back."""
+    at: datetime
+    """When it reached the conversation: when it was told them, else left."""
+    lups: bool
+    """Whether it's lup's own words, rather than someone's it carries."""
+    by: blocks.OfAgent | None = None
+    """Who wrote what it carries, where that's another conversation: whom a
+    comment on its text goes to, whichever drawer it's written in."""
+
+
 class Pathed(Model):
     """A conversation, and their path as lup's commands call it: their session's name, then each subagent's down to them (`lup-impl/parser`), an unnamed one by their runtime's id; and whether another conversation shares it."""
 
@@ -671,6 +674,9 @@ class Exchanged(Reply):
     last_words: list[blocks.Span] = []
     """The heading of a subagent's last words, which their runtime hands their
     parent and no item holds: `lup-impl/parser → lup-impl · their last words`."""
+    relayed: list[Relayed] = []
+    """What lup told them in no item, oldest first: its own lines, and the
+    words its lines carried them whole (`Left`)."""
 
     def path(self, conversation: Conversation) -> str | None:
         """Return `conversation`'s path, as the exchange gives it; none where lup knows none."""
@@ -689,8 +695,9 @@ def exchanged(
     paths: list[Pathed],
     read: Callable[[Item], str] | None = None,
     parent: Conversation | None = None,
+    relayed: Sequence[Relayed] = (),
 ) -> Exchanged:
-    """Return `items`, those `party` sent, with the text as they wrote it (`written`), and those they were sent, as they're told them (`told`), lup's word on their citations among those, though it's their own item; each with its line as a view of `party` shows it (`lines.lined`), and, where it's words of theirs, its heading and its text as the operator reads it back (`read`, else as they wrote it), each conversation it names called by their path among `paths`, else by their runtime's ids; and the headings of what no item holds, the operator's words typed to `party`, and `party`'s last words to `parent`, who spawned them."""
+    """Return `items`, those `party` sent, with the text as they wrote it (`written`), and those they were sent, as they're told them (`told`), lup's word on their citations among those, though it's their own item; each with its line as a view of `party` shows it (`lines.lined`), and, where it's words of theirs, its heading and its text as the operator reads it back (`read`, else as they wrote it), each conversation it names called by their path among `paths`, else by their runtime's ids; the headings of what no item holds, the operator's words typed to `party`, and `party`'s last words to `parent`, who spawned them; and what lup told them in no item, `relayed` (`relaying`)."""
     reading = written if read is None else read
 
     def named(conversation: Conversation) -> str:
@@ -740,7 +747,46 @@ def exchanged(
             *([] if parent is None else [blocks.Span(text=" → "), referring(parent)]),
             blocks.Span(text=" · their last words"),
         ],
+        relayed=list(relayed),
     )
+
+
+def relaying(
+    party: Conversation,
+    left: list[Left],
+    items: Mapping[int, Item],
+    *,
+    threads: Callable[[int], str | None],
+    paths: list[Pathed],
+    read: Callable[[Item], str],
+) -> list[Relayed]:
+    """Return lup's lines `left` for `party`, oldest first, as a view of them shows each (`lines.relayed`), each conversation it names called by their path among `paths`: lup's own line with what it says after `lup: `; a part of the operator's words it carries, that passage; an item it carries whole, as the operator reads it back (`read`)."""
+
+    def named(conversation: Conversation) -> str:
+        return called(conversation, paths)
+
+    def text(relay: lines.Relay) -> str:
+        item, part = relay.carried, relay.part
+        if item is None:
+            return relay.left.text.removeprefix("lup: ")
+        if part is None:
+            return read(item)
+        wanted = PartId(item=item.number, part=part)
+        anchor = next((each for each in spoken(item) if each.id == wanted), None)
+        return relay.left.text if anchor is None else anchor.text
+
+    return [
+        Relayed(
+            number=each.left.number,
+            line=each.line,
+            heading=each.heading,
+            text=text(each),
+            at=each.at,
+            lups=each.carried is None,
+            by=each.by,
+        )
+        for each in lines.relayed(party, left, items, threads, named)
+    ]
 
 
 def shown(delivery: Delivery, item: Item) -> Shown:
@@ -764,9 +810,7 @@ async def ran_in(transcript: Transcript, repository: Path) -> None:
     ran: the record found under that session's id is read only where it ran
     in the asker's repository.
     """
-    under = await asyncio.to_thread(
-        lambda: [repository, *Git.pinned(repository).worktrees()]
-    )
+    under = [repository, *await threaded(repository, Git.pinned(repository).worktrees)]
     ran = transcript.directory
     if ran is None or not within(ran, under):
         message = "the conversation isn't one of this repository's"
@@ -1029,55 +1073,6 @@ class Answering(Model, Handler[AnswerItem], arbitrary_types_allowed=True):
         return shown(self.delivery, answer)
 
 
-class CheckShowing(Model, Reading[ShowCheck], arbitrary_types_allowed=True):
-    """Answers `ShowCheck`: the check, with its thread; nothing where the number isn't a check, or, for a room, is another repository's."""
-
-    delivery: Delivery
-
-    @override
-    def request(self) -> type[ShowCheck]:
-        return ShowCheck
-
-    @override
-    async def answer(self, request: ShowCheck) -> Reply:
-        return self.shown(request.number, None)
-
-    @override
-    async def scoped(self, request: ShowCheck, repository: Path) -> Reply:
-        return self.shown(request.number, repository)
-
-    def shown(self, number: int, repository: Path | None) -> CheckShown:
-        """Show check `number`, of `repository` where it's given; nothing where it's no check, or another repository's."""
-        concerns = self.delivery.concerns()
-        check = concerns.check(number)
-        if check is None or repository not in [None, check.repository]:
-            return CheckShown()
-        thread = concerns.containing(number)
-        drawn = self.delivery.inbox.ledger.drawn_to(number, Edge)
-        return CheckShown(
-            check=check,
-            thread=None if thread is None else thread.name,
-            waiting=check.waiting(drawn),
-        )
-
-
-class CheckAnswering(Model, Handler[AnswerCheck], arbitrary_types_allowed=True):
-    """Answers `AnswerCheck`: the check answered, whoever asked it told (`Concerns.checked`)."""
-
-    delivery: Delivery
-
-    @override
-    def request(self) -> type[AnswerCheck]:
-        return AnswerCheck
-
-    @override
-    async def answer(self, request: AnswerCheck) -> Reply:
-        concerns = self.delivery.concerns()
-        check = concerns.checked(request.number, request.text)
-        thread = concerns.containing(check.number)
-        return CheckShown(check=check, thread=None if thread is None else thread.name)
-
-
 class Finishing(Model, Handler[FinishItem], arbitrary_types_allowed=True):
     """Answers `FinishItem`: the message off the operator's list."""
 
@@ -1312,17 +1307,45 @@ class ItemsListing(Model, Reading[ListItems], arbitrary_types_allowed=True):
         return self.exchanged(party, [each for each in items if each.of(repository)])
 
     def exchanged(self, party: Conversation, items: list[Item]) -> Exchanged:
-        """Return `items` as `party` sent them, as they wrote them, and as they were sent them, as they're told them, each with its line (`exchanged`), and as the operator reads them back (`Delivery.read_back`); and each conversation among the items' parties, `party` and their parent among them, by their path, as lup names them (`pathed`)."""
+        """Return `items` as `party` sent them, as they wrote them, and as they were sent them, as they're told them, each with its line (`exchanged`), and as the operator reads them back (`Delivery.read_back`); what lup told them in no item, its lines left for them (`relaying`); and each conversation among the items' parties, the lines' and `party` and their parent among them, by their path, as lup names them (`pathed`)."""
+        inbox = self.delivery.inbox
         parent = self.delivery.parent(party)
-        also = [party, *([] if parent is None else [parent])]
+        left = inbox.lines_of(party)
+        carried = [
+            found
+            for each in left
+            if each.carries is not None
+            and (found := inbox.items.get(each.carries.item)) is not None
+            and found.of(party.repository)
+        ]
+        movers = [
+            each.carries.moved
+            for each in left
+            if each.carries is not None and isinstance(each.carries.moved, Conversation)
+        ]
+        also = [party, *([] if parent is None else [parent]), *movers]
+        paths = pathed(self.delivery.roster(), [*items, *carried], also)
+
+        def thread(number: int) -> str | None:
+            found = inbox.ledger.found(number)
+            return found.name if isinstance(found, Thread) else None
+
         return exchanged(
             party,
             items,
             written=written,
             told=self.delivery.words,
-            paths=pathed(self.delivery.roster(), items, also),
+            paths=paths,
             read=self.delivery.read_back,
             parent=parent,
+            relayed=relaying(
+                party,
+                left,
+                {each.number: each for each in carried},
+                threads=thread,
+                paths=paths,
+                read=self.delivery.read_back,
+            ),
         )
 
 
@@ -1548,8 +1571,6 @@ def routes(delivery: Delivery, recorded: dict[str, Recorded]) -> list[Route]:
         Route.reading(InboxReading(delivery=delivery)),
         Route.reading(Showing(delivery=delivery)),
         Route.to(Answering(delivery=delivery)),
-        Route.reading(CheckShowing(delivery=delivery)),
-        Route.to(CheckAnswering(delivery=delivery)),
         Route.to(Finishing(delivery=delivery)),
         Route.to(Sending(delivery=delivery)),
         Route.to(Reporting(delivery=delivery)),

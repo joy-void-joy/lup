@@ -563,11 +563,65 @@ def test_all_is_every_module_lup_ships() -> None:
     ]
 
 
-def test_adding_a_module_already_there_is_refused() -> None:
+@pytest.mark.parametrize(
+    "start", [Modules(), Modules.default()], ids=["below", "default"]
+)
+def test_a_project_adding_one_of_lup_s_default_modules_changes_it(
+    start: Modules,
+) -> None:
+    roots = TestRoots.of(Pytest(root=Path("t")))
+    resolved = resolve(Project(modules=start.add(Python(tests=roots))))
+    [python] = [each for each in resolved.modules if isinstance(each, Python)]
+    assert python.tests == roots
+    assert python.runner == Uv()
+    assert [each.name for each in resolved.modules] == [
+        each.name for each in resolve(Project()).modules
+    ]
+
+
+@pytest.mark.parametrize(
+    "start", [Modules.default(), Modules.all()], ids=["default", "all"]
+)
+def test_a_module_added_loads_whether_or_not_lup_s_default_has_it(
+    start: Modules,
+) -> None:
+    resolved = resolve(Project(modules=start.add(Versions(running="live"))))
+    assert [each.name for each in resolved.modules].count("versions") == 1
+    assert resolved.branches.running == "live"
+
+
+def test_adding_a_module_the_same_layer_added_is_refused() -> None:
     with pytest.raises(
         ProjectError, match=r"`Modules.add` names `python`, already there"
     ):
-        resolve(Project(modules=Modules.default().add(Python())))
+        resolve(Project(modules=Modules.default().add(Python()).add(Python())))
+
+
+def test_a_layer_adding_a_module_twice_is_refused() -> None:
+    project = Project(modules=Modules.default().add(Versions(running="live")))
+    person = Project(modules=Modules().add(Versions()).add(Versions()))
+    with pytest.raises(
+        ProjectError, match=r"`Modules.add` names `versions`, already there"
+    ):
+        resolve(applied(person, project, ["modules"]))
+
+
+@pytest.mark.parametrize(
+    "start", [Modules(), Modules.default()], ids=["below", "default"]
+)
+def test_adding_another_module_by_a_name_from_below_is_refused(start: Modules) -> None:
+    class Imposter(Module):
+        """Python's name, another module."""
+
+        name = "python"
+
+    with pytest.raises(ProjectError) as refused:
+        resolve(Project(modules=start.add(Imposter())))
+    assert str(refused.value) == (
+        "`Modules.add` puts `Imposter` on `python`, already there from below as "
+        '`Python`, another class: `.replace("python", …)` puts another module in '
+        "its place"
+    )
 
 
 def test_replace_puts_another_module_in_place_from_its_own_defaults() -> None:

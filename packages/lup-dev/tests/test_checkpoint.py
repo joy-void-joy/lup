@@ -2859,6 +2859,98 @@ def test_a_report_past_what_a_hook_tells_whole_is_kept_and_told_short(
     assert f"{repo}/src/pkg/core.py:12:" in kept.read_text()
 
 
+# The standing words: a section's instructions, and a lup rule's mistake and
+# steer, told once to each conversation (`Words`).
+
+INSTRUCTED = "lup's findings on the lines changed (clear each, or keep it with"
+"""The header of lup's findings on the lines changed, its instructions said."""
+TITLED = "lup's findings on the lines changed:\n"
+"""The same header, its instructions told before."""
+STEER = "steer: do it the other way"
+
+
+def finding_added(kit: Kit, repo: Path, key: str, name: str, agent: str = "") -> str:
+    """Add a line with a `regex` finding to `CORE` in a shell call of conversation `agent`, and return what they're told after it."""
+    call(kit, repo, key, agent=agent)
+    (repo / CORE).write_text((repo / CORE).read_text() + f"{name} = 1  # BAD regex\n")
+    return finish(kit, repo, key, agent=agent).context
+
+
+def test_a_sections_instructions_and_a_rules_steer_are_told_once(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    first = finding_added(kit, repo, "c1", "a")
+    assert first.startswith(INSTRUCTED)
+    assert STEER in first
+    later = finding_added(kit, repo, "c2", "b")
+    assert later == f"{TITLED}  {repo}/src/pkg/core.py:12:8 - regex: regex fires here"
+
+
+def test_a_compacted_conversation_is_told_the_standing_words_again(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    finding_added(kit, repo, "c1", "a")
+    SessionStarted(session=SESSION, cwd=repo, forgotten=True).apply(kit.bench)
+    again = finding_added(kit, repo, "c2", "b")
+    assert again.startswith(INSTRUCTED)
+    assert again.count(STEER) == 1
+
+
+def test_each_conversation_is_told_the_standing_words_for_itself(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    finding_added(kit, repo, "c1", "a")
+    theirs = finding_added(kit, repo, "w1", "b", agent="worker")
+    assert theirs.startswith(INSTRUCTED)
+    assert STEER in theirs
+    assert finding_added(kit, repo, "w2", "c", agent="worker").startswith(TITLED)
+    record = ConversationRecord(layout=kit.layout, session=SESSION)
+    subagent_ends(kit, repo, "worker")
+    assert list(record.read().words) == [""]
+
+
+def test_a_file_tools_write_is_told_the_standing_words_a_shell_call_told_alone(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    finding_added(kit, repo, "c1", "a")
+    edit = Replacement(
+        call="e1",
+        tool="Edit",
+        path=repo / CORE,
+        old="    return x\n",
+        new="    return x  # BAD regex\n",
+    )
+    told = before(kit.bench, edit, SESSION, repo).told
+    assert told.startswith(TITLED)
+    assert STEER not in told
+
+
+def test_the_turns_end_tells_each_finding_whole_though_its_words_were_told(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    finding_added(kit, repo, "c1", "a")
+    finding_added(kit, repo, "c2", "b")
+    assert end(kit, repo).block.count(STEER) == 2
+
+
+def test_a_quiet_lifting_tells_a_rule_told_before_in_a_line(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    finding_added(kit, repo, "c1", "a")
+    quiet(kit, "rules")
+    assert finding_added(kit, repo, "c2", "b") == ""
+    lifted = quiet(kit)
+    assert "lup's findings in the files you touched (clear each" in lifted
+    assert f"{repo}/src/pkg/core.py:12:8 - regex: regex fires here" in lifted
+    assert STEER not in lifted
+
+
 # Quiet: a conversation asks not to be told some kinds of findings, and is told
 # once, as they lift the quiet, what stands that they weren't told.
 

@@ -94,7 +94,7 @@ from lup_dev.gate import (
     report,
 )
 from lup_dev.gate import Ran as GateRan
-from lup_dev.git import Git, GitError, link_file, nul_separated
+from lup_dev.git import Git, GitError, link_file, nul_separated, threaded
 from lup_dev.git import Worktree as Checkout
 from lup_dev.host.client import FromRoom, HostClient, RoomClient, own_command
 from lup_dev.host.copying import Copying
@@ -188,9 +188,7 @@ from lup_dev.inbox.namesakes import NodeNames
 from lup_dev.inbox.notices import NotifySend, Unsaid
 from lup_dev.inbox.protocol import (
     AnswerApproval,
-    AnswerCheck,
     AnswerItem,
-    CheckShown,
     Context,
     FinishItem,
     Items,
@@ -200,7 +198,6 @@ from lup_dev.inbox.protocol import (
     Readout,
     SendItem,
     Settled,
-    ShowCheck,
     ShowContext,
     ShowDiff,
     ShowItem,
@@ -781,8 +778,8 @@ def host_serve(context: typer.Context) -> None:
         notices=Unsaid() if rehearsing else NotifySend(),
         clock=SystemClock(),
         say=typer.echo,
-        settle_hold=lambda change, approved, said: hold_answered(
-            layout, change, approved=approved, comment=said
+        settle_hold=lambda change, repository, approved, said: hold_answered(
+            layout, change, repository, approved=approved, comment=said
         ),
         hold_unheard=lambda change: hold_unheard(layout, change),
         queues={
@@ -1011,7 +1008,8 @@ async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) 
     """Put the approval of the host zone at the running branch's tip in the operator's inbox, where a launch's push moved that branch and the zone isn't the one approved.
 
     Trust reads the zone with git and asks the service itself, so it runs off
-    the event loop. Its repository is the launch's git directory, found
+    the event loop, in a thread of the repository's own (`threaded`), with
+    the git finding its main worktree. Its repository is the launch's git directory, found
     through git from its main worktree; one holding a `commondir`, which would
     lead git elsewhere, isn't read (`docs/credentials.md`, *Running git on the
     host*). That main worktree is a bare repository's own directory, where
@@ -1036,11 +1034,15 @@ async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) 
         )
         return
     git = Git.pinned(launch.repository)
-    root = git.main_worktree()
     pushed_by = delivery.running(launch.launch)
-    try:
+
+    def proposed() -> int | None:
+        root = git.main_worktree()
         trust = machine_trust(root, [], approval_reading(git, branches, root))
-        number = await asyncio.to_thread(trust.proposed, pushed_by)
+        return trust.proposed(pushed_by)
+
+    try:
+        number = await threaded(launch.repository, proposed)
     except (LupDevError, LupError) as failure:
         typer.echo(
             f"{launch.launch}: the push moved {running}, but its approval "
@@ -1274,9 +1276,14 @@ def heading(item: Item, paths: Sequence[Pathed] = ()) -> str:
 
 
 def hold_answered(
-    layout: Layout, change: HeldChange, *, approved: bool, comment: str
+    layout: Layout,
+    change: HeldChange,
+    repository: Path,
+    *,
+    approved: bool,
+    comment: str,
 ) -> str | None:
-    """Write the operator's answer to a held change where its hook waits for it, and return what to tell the conversation that made it where no call waits to hear it; a hold at landing has no hook, its answer its item's own state."""
+    """Write the operator's answer to a held change of the repository whose git directory is `repository` where its hook waits for it, and return what to tell the conversation that made it where no call waits to hear it; a hold at landing has no hook, its answer its item's own state."""
     if change.key is None:
         return None
     hold = answer(
@@ -1285,6 +1292,7 @@ def hold_answered(
         Response(approved=approved, comment=comment),
         runtimes(),
         SystemClock(),
+        repository=repository,
         worktree=change.worktree,
         telling=True,
     )
@@ -1951,15 +1959,8 @@ def inbox_answer(
     for the agent who made it: the write has landed, and your reply comes to
     them as "yes, but".
 
-    A check, which an agent's question put in a thread for you to try, takes
-    what you saw, or nothing for a tick; `--comment` gives it without asking.
-    The agent who asked it is told.
     """
     client = answering()
-    check = client.ask(ShowCheck(number=number), CheckShown)
-    if check.check is not None:
-        check_answered(client, check, comment)
-        return
     approvals = InboxApprovals(host=client)
     seen = client.ask(ShowItem(number=number), Shown)
     item = seen.item
@@ -2009,26 +2010,6 @@ def inbox_answer(
         f"{done} {cited(number)}: your {noun}, {cited(answer.number)}, is for "
         f"{called(answer.recipient, answered.paths)}."
     )
-
-
-def check_answered(client: HostClient, shown: CheckShown, comment: str | None) -> None:
-    """Answer the check `shown` with what the operator saw: `comment` where given, else asked at this terminal after it, nothing for a tick."""
-    check = shown.check
-    if check is None:
-        return
-    if not shown.waiting:
-        message = f"{cited(check.number)} is answered already"
-        raise InboxError(message)
-    if comment is None:
-        where = "" if shown.thread is None else f" in @{shown.thread}"
-        typer.echo(f"{cited(check.number)}, a check{where}:\n{check.text}")
-    said: str = (
-        typer.prompt("What you saw (empty for a tick)", default="", show_default=False)
-        if comment is None
-        else comment
-    )
-    client.ask(AnswerCheck(number=check.number, text=said), CheckShown)
-    typer.echo(f"Answered {cited(check.number)}: whoever asked it is told.")
 
 
 def held_answer(

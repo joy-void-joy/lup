@@ -46,18 +46,19 @@ line, a path or git, is held to this:
 - **The brief** is text in the inbox alone: an item from the spawner to the
   session spawned, which reaches it as its first turn through its launcher, as
   the operator's words do (`Delivery.called_up`). `concern` is resolved through
-  the threads of the spawner's repository alone.
+  the concerns of the spawner's repository alone.
 - **How many:** at most `limit` sessions an agent spawned run at once on the
   host, and `each` of one repository's, counted from those served, those whose
   launcher started and hasn't registered yet, and the spawns under way: against
   a loop of spawns, not a budget.
 - **Nothing a room can slow holds the service, or another room's spawn.** git
   on the host reads refs a room writes, any of which it can make a pipe
-  nothing writes: it runs off the service's loop, stopped past `reading`, and
-  a branch's free number is read in one call, `numbers` at most tried. The
-  room's own git making the worktree is stopped past `making`. Nothing is held
-  across either: a spawn is counted, and takes its branch, at once, between
-  two awaits (`reserved`).
+  nothing writes: it runs in the repository's own threads, off the service's
+  loop (`threaded`), killed past `reading`, and a branch's free number is
+  read in one call, `numbers` at most tried. `podman exec` running the room's
+  own git to make the worktree is killed past `making`, with what it started
+  (`executed`). Nothing is held across either: a spawn is counted, and takes
+  its branch, at once, between two awaits (`reserved`).
 
 What isn't covered: another repository, which the call can't name yet; and a
 spawn whose launcher fails after an approval restarted the service, which the
@@ -79,7 +80,7 @@ from lup.tools.serving import Answer
 from lup.tools.tool import Accepted, AgentTool, ToolSpec
 from lup.tools.tool import Refused as Rejected
 from lup.types import Model, MutableModel
-from lup_dev.git import Git, GitError
+from lup_dev.git import Git, GitError, threaded
 from lup_dev.host.held import HeldLaunch, Launchers, Spawning
 from lup_dev.host.protocol import Register, Spawner, branch_name, segment
 from lup_dev.host.rooms import RoomTools
@@ -113,9 +114,9 @@ class Spawn(Model):
     concern: str | None = Field(
         default=None,
         description=(
-            "A concern to hand over with it: an existing thread's name or "
-            "number, or a new title, which opens one under the thread you work "
-            "in. It holds it and works in it, its reports land there, and the "
+            "A concern to hand over with it: an existing one's name or number, "
+            "or a new title, which opens one under the one you work in. It "
+            "holds it and works in it, its reports land there, and the "
             "operator talks with it directly: once handed, it's theirs. Left "
             "out, it's a side job for you, its report coming back to you."
         ),
@@ -208,7 +209,9 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
     """The branch work starts from in the repository at the git directory
     given, as the declaration approved names it."""
     run: Callable[[Program], Awaitable[Ran]] = executed
-    """Runs one program on the host: `podman exec` into the spawner's room."""
+    """Runs one program on the host: `podman exec` into the spawner's room,
+    killed past its `within` with what it started, which ends with status
+    124."""
     limit: int = 32
     """How many sessions agents spawned may run at once on the host, every
     repository's: against a loop of spawns, each about 300 MB of a held runtime
@@ -223,17 +226,13 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
     """How many numbers a branch's name takes, `-2` to this, before the spawn
     is refused: a room can make as many `tree/<name>-<n>` as it likes."""
     reading: timedelta = timedelta(seconds=30)
-    """How long git on the host may take to read a ref, before it's stopped:
-    a room can make a ref a pipe nothing writes."""
+    """How long git on the host may take to read refs, before it's killed, as
+    long as `Git.limit` gives any: a room can make a ref a pipe nothing
+    writes."""
     making: timedelta = timedelta(minutes=2)
     """How long the spawner's room's git may take to make the worktree, a
-    checkout of the whole tree, before it's stopped and the spawn refused."""
-    letting: timedelta = timedelta(seconds=10)
-    """How long a program's cancelled wait may take to end, before it's given
-    up on and left to end behind."""
-    behind: list[asyncio.Future[Ran]] = []
-    """The programs' waits given up on and still ending, kept so none is
-    collected mid-wait."""
+    checkout of the whole tree, before `podman exec` is killed with what it
+    started and the spawn refused."""
     reserved: list[Reserved] = []
     """Each spawn under way, from its count against the limits to its
     launcher's start, with the branch it took once it took one: counted, so
@@ -328,7 +327,7 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
             if (found is None and numbered) or (
                 found is not None and not isinstance(found, Thread)
             ):
-                message = f"`{spawn.concern}` names no thread of this repository"
+                message = f"`{spawn.concern}` names no concern of this repository"
                 raise SpawnError(message)
         taken = await branches(git, wanted, self.reading)
         made = await self.worktree(
@@ -474,9 +473,10 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
                 ],
                 payload="",
                 directory=launch.repository,
+                within=self.making,
             )
-            ran = await self.within(program, self.making)
-            if ran is None or ran.status != 0:
+            ran = await self.run(program)
+            if ran.status != 0:
                 return f"; its worktree, {made.root}, and branch `{made.branch}` stay"
         return "; its worktree and branch were removed"
 
@@ -592,11 +592,12 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
             ],
             payload="",
             directory=repository,
+            within=self.making,
         )
         made = Made(root=root, branch=branch, commit=commit)
-        ran = await self.within(program, self.making)
-        if ran is None:
-            # Stopping `podman exec` may leave the room's git running, which
+        ran = await self.run(program)
+        if ran.status == 124:  # `executed` killed it past `within`
+            # Killing `podman exec` may leave the room's git running, which
             # can make the worktree after all: it's removed all the same.
             message = (
                 f"its worktree, {root}, wasn't made in your room within "
@@ -609,18 +610,6 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
             message = f"its worktree, {root}, wasn't made in your room: {said}"
             raise SpawnError(message)
         return made
-
-    async def within(self, program: Program, longest: timedelta) -> Ran | None:
-        """Run `program`, waiting `longest` at most; none where it runs past it, its wait cancelled, and given up on past `letting` where the cancel itself waits, as on a pipe a process left behind holds open: kept running behind (`behind`), so it's never collected mid-wait."""
-        running = asyncio.ensure_future(self.run(program))
-        await asyncio.wait([running], timeout=longest.total_seconds())
-        if running.done():
-            return running.result()
-        running.cancel()
-        await asyncio.wait([running], timeout=self.letting.total_seconds())
-        if not running.done():
-            self.behind = [*(each for each in self.behind if not each.done()), running]
-        return None
 
     async def lost(self, spec: HeldLaunch) -> None:
         """Tell the agent who spawned `spec`'s launch that its session never came up, with the end of what its launcher wrote, as a problem from it: loud, so a spawner waiting on its report hears instead."""
@@ -648,22 +637,31 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
 
 
 async def started_at(git: Git, start: str, within: timedelta) -> str:
-    """Return the commit the local branch `start` is at, read by git pinned to the repository's common directory, stopped past `within`; raise `SpawnError` where `start` isn't a branch's short name, names no branch there, or git can't read it in time."""
+    """Return the commit the local branch `start` is at, read by git pinned to the repository's common directory, in the repository's own threads (`threaded`), stopped past `within`; raise `SpawnError` where `start` isn't a branch's short name, names no branch there, or git can't read it in time."""
+    repository = git.where()
     try:
         branch_name(start)
-        await git.awaited("check-ref-format", f"refs/heads/{start}", within=within)
+        await threaded(
+            repository,
+            git.run,
+            "check-ref-format",
+            f"refs/heads/{start}",
+            within=within,
+        )
     except (ValueError, GitError) as unnamed:
         message = f"`{start}` isn't a branch's short name"
         raise SpawnError(message) from unnamed
     try:
-        found = await git.awaited(
+        found = await threaded(
+            repository,
+            git.run,
             "rev-parse",
             "--verify",
             "--quiet",
             "--end-of-options",
             f"refs/heads/{start}^{{commit}}",
-            within=within,
             ok=[0, 1],
+            within=within,
         )
     except GitError as unread:
         message = f"`{start}` couldn't be read: {unread}"
@@ -676,9 +674,11 @@ async def started_at(git: Git, start: str, within: timedelta) -> str:
 
 
 async def branches(git: Git, wanted: str, within: timedelta) -> list[str]:
-    """Return the branches of the repository named `wanted` or `wanted-<anything>`, by their short names, read in one go by git pinned to its common directory, stopped past `within`; raise `SpawnError` where git can't read them in time."""
+    """Return the branches of the repository named `wanted` or `wanted-<anything>`, by their short names, read in one go by git pinned to its common directory, in the repository's own threads (`threaded`), stopped past `within`; raise `SpawnError` where git can't read them in time."""
     try:
-        found = await git.awaited(
+        found = await threaded(
+            git.where(),
+            git.run,
             "for-each-ref",
             "--format=%(refname:lstrip=2)",
             f"refs/heads/{wanted}",

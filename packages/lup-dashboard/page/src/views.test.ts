@@ -235,7 +235,7 @@ const CASES: Record<string, Case[]> = {
             given: { items: [item(51, { reason: "question", text: "Which parser?", decisions: [{ text: "pydantic", lean: "yes" }, { text: "by hand", lean: "no" }] }, WAITING)] },
         },
     ],
-    "inbox friction": [{ name: "a friction", repository: REPOSITORY, argument: { number: 57 }, given: { items: [item(57, { reason: "friction", text: "The gate printed nothing for four minutes.", title: "" })] } }],
+    "inbox friction": [{ name: "a friction", repository: REPOSITORY, argument: { number: 57 }, given: { items: [item(57, { reason: "friction", text: "The gate printed nothing for four minutes.", title: "", tool: "friction" })] } }],
     "inbox how_it_felt": [{ name: "how it felt", repository: REPOSITORY, argument: { number: 58 }, given: { items: [item(58, { reason: "how it felt", text: "Steady." })] } }],
     "inbox stop": [{ name: "a stop by choice", repository: REPOSITORY, argument: { number: 67 }, given: { items: [item(67, { reason: "stop", why: "Nothing more is worth doing." })] } }],
     "adapters tasks": [
@@ -296,6 +296,16 @@ describe("the views the page lays out itself", () => {
         expect(since?.blocks).toMatchObject([{ id: "unread", spans: [{ text: "the copy reads no worktree", tone: "refused" }] }]);
         expect(since?.waiting).toBe(false);
         expect(producerOf("judge", "since")?.answer(AGENT as never, shownOf({ drawers: { [whose(PARSER)]: {} } }), REPOSITORY)).toBeNull();
+    });
+
+    it("makes \"since you approved\" once for each reading of the agent's branches, the same answer until they're read anew", () => {
+        const answer = (since: Since) => producerOf("judge", "since")?.answer(AGENT as never, shownOf({ drawers: { [whose(PARSER)]: { since } } }), REPOSITORY);
+        const first = answer(SINCE);
+        expect(first).not.toBeNull();
+        expect(answer(SINCE)).toBe(first);
+        const again = answer({ ...SINCE });
+        expect(again).not.toBe(first);
+        expect(again).toEqual(first);
     });
 
     it("offers each file of \"since you approved\" to be marked reviewed at its version, and every one not settled as the drawer's own", () => {

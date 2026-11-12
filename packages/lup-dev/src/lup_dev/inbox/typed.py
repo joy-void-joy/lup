@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import override
 
 from lup.types import MutableModel
+from lup_dev.git import threaded
 from lup_dev.host.service import Companion
 from lup_dev.inbox.delivery import Delivery
 from lup_dev.inbox.store import Approval, ChangedFile, InboxError, Item, cited
@@ -97,7 +98,7 @@ class TypeReader(MutableModel, Companion, arbitrary_types_allowed=True):
             raise InboxError(message)
         inbox = self.delivery.inbox
         files = await asyncio.to_thread(inbox.files, number)
-        read = await asyncio.to_thread(self.read, approval, worktree, files)
+        read = await threaded(approval.repository, self.read, approval, worktree, files)
         await asyncio.to_thread(inbox.filed, number, read)
 
     def over(self, number: int, why: str) -> None:

@@ -43,7 +43,7 @@ from lup_dev.clock import Clock
 from lup_dev.composing import Apart, Composed, Unmerged, apart
 from lup_dev.copies import Copies
 from lup_dev.errors import LupDevError
-from lup_dev.git import Git
+from lup_dev.git import Git, threaded
 from lup_dev.host.on_trial import (
     AcceptBranch,
     ChangeBranches,
@@ -263,7 +263,9 @@ class Trying(Model, arbitrary_types_allowed=True):
         if branches.running == branches.integration:
             return []
         async with self.turns.of(repository):
-            return await asyncio.to_thread(self.following, repository, branches, remote)
+            return await threaded(
+                repository, self.following, repository, branches, remote
+            )
 
     def following(self, repository: Path, branches: Branches, remote: str) -> list[str]:
         """Do what `moved_dev` says, off the event loop."""
@@ -321,8 +323,8 @@ class Trying(Model, arbitrary_types_allowed=True):
         repository = self.repository(asked)
         async with self.turns.of(repository):
             self.refuse_merging(repository)
-            return await asyncio.to_thread(
-                self.picking, repository, names, seen or {}, dev
+            return await threaded(
+                repository, self.picking, repository, names, seen or {}, dev
             )
 
     def refuse_unseen(self, trial: Trial, seen: dict[str, str]) -> None:
@@ -384,8 +386,8 @@ class Trying(Model, arbitrary_types_allowed=True):
         repository = self.repository(asked)
         async with self.turns.of(repository):
             self.refuse_merging(repository)
-            return await asyncio.to_thread(
-                self.changing, repository, taking, leaving, seen
+            return await threaded(
+                repository, self.changing, repository, taking, leaving, seen
             )
 
     def changing(
@@ -534,7 +536,7 @@ class Trying(Model, arbitrary_types_allowed=True):
             if on is None:
                 message = f"`{branch}` isn't on trial: `lup-dev live` lists what is"
                 raise HostError(message)
-            reply = await asyncio.to_thread(self.dropping, repository, trial, on)
+            reply = await threaded(repository, self.dropping, repository, trial, on)
             told = self.told(delivery, on, words)
         if told:
             return reply.model_copy(update={"said": f"{reply.said}\n{told}"})

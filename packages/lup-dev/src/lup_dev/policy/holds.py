@@ -480,6 +480,7 @@ def answer(
     runtimes: list[Runtime],
     clock: Clock,
     *,
+    repository: Path | None = None,
     worktree: Path | None = None,
     telling: bool = False,
 ) -> Hold:
@@ -487,7 +488,12 @@ def answer(
 
     A key is unique within one store alone, so one kept in more than one store,
     where no worktree is named, is refused, naming them, rather than answered
-    in either.
+    in either. The answer goes in the verdict log of `repository`, the
+    repository's git directory, as the judge keys it; where that's none, git
+    finds it from the hold's worktree, as `Worktree.at` does. The host
+    service always names it, from its record of the launch: a room writes its
+    worktree's `.git`, and can make git following it wait, on the service's
+    event loop, where the operator's answer is written.
     """
     inside = [runtime.name() for runtime in runtimes if runtime.inside()]
     if inside:
@@ -511,10 +517,12 @@ def answer(
     told = telling and found.unheard(key)
     hold = found.answer(key, response, clock, told=told)
     if not hold.waited():
-        common = Git(cwd=hold.worktree).text(
-            "rev-parse", "--path-format=absolute", "--git-common-dir"
+        common = repository or Path(
+            Git(cwd=hold.worktree).text(
+                "rev-parse", "--path-format=absolute", "--git-common-dir"
+            )
         )
-        log = VerdictLog(path=layout.verdicts(Path(common)))
+        log = VerdictLog(path=layout.verdicts(common))
         log.append(answered(hold, "approved" if response.approved else "declined"))
     return hold
 

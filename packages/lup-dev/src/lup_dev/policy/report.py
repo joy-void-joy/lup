@@ -13,7 +13,10 @@ report names each file by its absolute path, as pyright's command line does.
 The texts name no runtime: each adapter carries them as its runtime hears them.
 
 **Told once** (`docs/judging-writes.md`, *Told once*): a conversation is told a
-finding when it first appears, and not again while it stands (`Known`, `news`).
+finding when it first appears, and not again while it stands (`Known`, `news`);
+and the standing words around findings, a section's instructions and a lup
+rule's mistake and steer, the first time they're due, each finding of a rule
+told before saying in a line what its check saw (`Words`).
 **Quiet** (*Quiet*): a conversation can ask not to be told some kinds of
 findings for a while (`Kind`, `Quiet`); what a quiet holds back isn't told, and
 isn't remembered as told, so it's told once the quiet lifts (`summary`).
@@ -24,8 +27,9 @@ per file (`fitted`), so the runtime never moves it out of the agent's sight.
 
 import hashlib
 from collections import Counter
+from functools import reduce
 from pathlib import Path
-from typing import Literal, get_args
+from typing import TYPE_CHECKING, Literal, get_args
 
 from lup.types import Model
 from lup_dev.clock import Clock
@@ -33,6 +37,9 @@ from lup_dev.codescan.contract import Finding, Owner
 from lup_dev.confined import Confined
 from lup_dev.layout import GitDirectoryLayout
 from lup_dev.policy.judge import PRIVATE, Ask, RemovedNote
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 def placed(root: Path, findings: list[Finding]) -> list[Finding]:
@@ -265,6 +272,56 @@ def described(kind: Kind) -> str:
             return "type errors in the files importing what changed"
 
 
+class Words(Model):
+    """The standing words a conversation was told around findings, which a report tells them once (`docs/judging-writes.md`, *Told once*).
+
+    A section of findings says what to do with them, in a parenthesis after its
+    title, the first time a conversation is told that section; its title alone
+    after. A lup rule's finding says the mistake the rule prevents and where it
+    steers the first time a conversation is told one of that rule's; after, what
+    its check saw alone, in a line, where the engine told that apart
+    (`Finding.detail`). pyright's and ruff's findings have no such words, nor do
+    those the judge makes itself, so they're told whole each time. Kept with the
+    session's conversations, every worktree's reports alike, and forgotten as
+    what they knew is, when their runtime compacts or clears them.
+    """
+
+    headers: list[str] = []
+    """The sections told with their instructions, each by its header so."""
+    rules: list[str] = []
+    """The lup rules whose mistake and steer were told, by id."""
+
+    def then(self, later: Words) -> Words:
+        """Return these words and `later`'s."""
+        return Words(
+            headers=list(dict.fromkeys([*self.headers, *later.headers])),
+            rules=list(dict.fromkeys([*self.rules, *later.rules])),
+        )
+
+    def firsts(self, found: list[Finding]) -> list[Finding]:
+        """Return the findings of `found` that tell their rule's mistake and steer: of each lup rule these words don't hold, its first finding that says apart what its check saw (`Finding.detail`)."""
+        fresh = dict.fromkeys(
+            each.rule for each in found if each.detail and each.rule not in self.rules
+        )
+        return [
+            next(each for each in found if each.detail and each.rule == rule)
+            for rule in fresh
+        ]
+
+    def lines(self, found: list[Finding]) -> list[str]:
+        """Spell `found` as pyright does: each lup rule's mistake and steer with its first finding where these words don't hold them (`firsts`), and its other findings in a line each (`finding_lines`)."""
+        firsts = self.firsts(found)
+        return [
+            line
+            for each in found
+            for line in finding_lines(each, standing=each in firsts)
+        ]
+
+    def taught(self, found: list[Finding]) -> Words:
+        """Return the words telling `found` tells beyond these: the rules whose mistake and steer it says."""
+        return Words(rules=[each.rule for each in self.firsts(found)])
+
+
 class Part(Model):
     """One section of what lup tells after an event: told whole where the report fits what a hook tells whole, else short where it can be (`fitted`)."""
 
@@ -273,6 +330,80 @@ class Part(Model):
     """The section with a line per file, saying how many findings it has of
     each rule; none where it's always told whole: a refusal, a move, a notice,
     a value never published, a removed note."""
+    words: Words = Words()
+    """The standing words it tells whole, which its reader then knows; told
+    short, its header's alone."""
+
+    def told(self, *, whole: bool) -> Words:
+        """Return the standing words this tells, `whole` or short."""
+        return self.words if whole else Words(headers=self.words.headers)
+
+
+def heard(parts: list[Part]) -> Words:
+    """Return the standing words `parts` tell, each whole."""
+    return reduce(Words.then, [part.words for part in parts], Words())
+
+
+class Section(Model):
+    """A section of findings under its header, told whole, or short where it can be (`fitted`)."""
+
+    title: str
+    instructions: str
+    """What to do with its findings, said in a parenthesis after its title the
+    first time a conversation is told the section."""
+    findings: list[Finding]
+    short: bool = True
+    """Whether it can be told short: a value never published is always told
+    whole."""
+
+    @property
+    def header(self) -> str:
+        """Its header whole: its title, then its instructions in a parenthesis."""
+        return f"{self.title} ({self.instructions}):"
+
+    def part(self, words: Words) -> Part:
+        """Say this section to a reader who knows `words`: its title alone where they hold its header, and each lup rule's mistake and steer once (`Words.lines`).
+
+        >>> from lup_dev.codescan.contract import Position, Span
+        >>> at = Position(line=3, column=1)
+        >>> found = Finding(path=Path("/w/a.py"), span=Span(start=at, end=at),
+        ...     owner="lup", rule="set-shape", message="`set()` builds a set. Sets forget.",
+        ...     steer="a dict", detail="`set()` builds a set")
+        >>> section = Section(title="Findings", instructions="clear each",
+        ...     findings=[found, found.model_copy(update={"detail": "`{1}` builds a set"})])
+        >>> first = section.part(Words())
+        >>> print(first.whole)
+        Findings (clear each):
+          /w/a.py:3:1 - set-shape: `set()` builds a set. Sets forget.
+              steer: a dict
+          /w/a.py:3:1 - set-shape: `{1}` builds a set
+        >>> print(section.part(first.words).whole)
+        Findings:
+          /w/a.py:3:1 - set-shape: `set()` builds a set
+          /w/a.py:3:1 - set-shape: `{1}` builds a set
+        """
+        known = self.header in words.headers
+        header = f"{self.title}:" if known else self.header
+        said = Words(headers=[] if known else [self.header])
+        return Part(
+            whole="\n".join([header, *words.lines(self.findings)]),
+            short=counted(header, self.findings) if self.short else None,
+            words=said.then(words.taught(self.findings)),
+        )
+
+
+def parts_of(found: list[Section], words: Words) -> list[Part]:
+    """Say each section of `found` that has findings, in order, to a reader who knows `words` and what the sections before it tell."""
+
+    def each() -> Iterator[Part]:
+        knows = words
+        for section in found:
+            if section.findings:
+                part = section.part(knows)
+                knows = knows.then(part.words)
+                yield part
+
+    return list(each())
 
 
 def text(parts: list[Part]) -> str:
@@ -334,18 +465,27 @@ class Reports(Model, arbitrary_types_allowed=True):
         return home / name
 
 
-def fitted(parts: list[Part], fits: int, reports: Reports) -> str:
+class Fitted(Model):
+    """A report as a hook tells it, and the standing words it tells (`Words`)."""
+
+    text: str
+    words: Words = Words()
+
+
+def fitted(parts: list[Part], fits: int, reports: Reports) -> Fitted:
     """Say `parts` in `fits` bytes: whole where they fit, else shortened.
 
     A report past `fits` is kept whole (`reports`) and told with a line saying
     where; then each part that can be shortened is told whole where it still
     fits, in order, and short where it doesn't, so what matters most comes
-    whole. Parts always told whole may still take it past `fits`.
+    whole. Parts always told whole may still take it past `fits`. A part told
+    short tells its header and none of its rules' mistakes and steers, which
+    its reader is told with the next finding of each.
     """
     whole = text(parts)
     size = len(whole.encode())
     if size <= fits:
-        return whole
+        return Fitted(text=whole, words=heard(parts))
     where = reports.keep(whole)
     note = (
         f"lup's report is {size:,} bytes, more than a hook tells whole: it's kept "
@@ -371,7 +511,10 @@ def fitted(parts: list[Part], fits: int, reports: Reports) -> str:
         trial = [*whole_at[:index], True, *whole_at[index + 1 :]]
         if len(said(trial).encode()) <= fits:
             whole_at = trial
-    return said(whole_at)
+    words = [
+        part.told(whole=wholly) for part, wholly in zip(parts, whole_at, strict=True)
+    ]
+    return Fitted(text=said(whole_at), words=reduce(Words.then, words, Words()))
 
 
 class Refused(Model):
@@ -391,20 +534,29 @@ class Refused(Model):
     """Whether its call was interrupted while it waited for the operator."""
 
 
-def finding_lines(finding: Finding, indent: str = "  ") -> list[str]:
-    """Spell one finding as pyright does, with lup's steer beneath it.
+def finding_lines(
+    finding: Finding, indent: str = "  ", *, standing: bool = True
+) -> list[str]:
+    """Spell one finding as pyright does, with lup's steer beneath it; without its `standing` words, a lup rule's told before (`Words`), in a line saying what its check saw, where the engine told that apart.
 
     >>> from lup_dev.codescan.contract import Position, Span
     >>> at = Position(line=41, column=12)
     >>> found = Finding(path=Path("a.py"), span=Span(start=at, end=at), owner="lup",
-    ...     rule="tuple-shape", message="a tuple hides its fields", steer="a model")
+    ...     rule="tuple-shape", message="`tuple[str, int]` is a tuple type. A tuple hides its fields.",
+    ...     steer="a model", detail="`tuple[str, int]` is a tuple type")
     >>> finding_lines(found)
-    ['  a.py:41:12 - tuple-shape: a tuple hides its fields', '      steer: a model']
+    ['  a.py:41:12 - tuple-shape: `tuple[str, int]` is a tuple type. A tuple hides its fields.', '      steer: a model']
+    >>> finding_lines(found, standing=False)
+    ['  a.py:41:12 - tuple-shape: `tuple[str, int]` is a tuple type']
     """
     start = finding.span.start
     place = f"{finding.path}:{start.line}:{start.column}"
-    said = f"{indent}{place} - {finding.rule}: {finding.message}"
-    steer = [f"{indent}    steer: {finding.steer}"] if finding.steer else []
+    short = not standing and bool(finding.detail)
+    message = finding.detail if short else finding.message
+    said = f"{indent}{place} - {finding.rule}: {message}"
+    steer = (
+        [f"{indent}    steer: {finding.steer}"] if finding.steer and not short else []
+    )
     return [said, *steer]
 
 
@@ -477,77 +629,73 @@ def information(
     findings: list[Finding],
     untouched: list[Finding],
     importers: list[Finding],
+    words: Words,
 ) -> list[Part]:
-    """Report what a checkpoint found in the files it judged: values never published on the lines changed, lup's findings on them, type errors and ruff's findings, lup's findings elsewhere, and type errors in the files importing them.
+    """Report what a checkpoint found in the files it judged, to a reader who knows `words`: values never published on the lines changed, lup's findings on them, type errors and ruff's findings, lup's findings elsewhere, and type errors in the files importing them.
 
     A value never published is told apart from a rule's finding, since no
     `ignore` keeps it: each names its kind, never the value, and its section is
     always told whole. The others can be told short (`fitted`).
     """
-    return [
-        *section(
-            (
-                "Values never published, on the lines changed (rewrite each before "
-                "it's committed: the operator sees this write with them, the gate's "
-                "`private` step fails on them, and a push or a post carrying one is "
-                "refused):"
+    return parts_of(
+        [
+            Section(
+                title="Values never published, on the lines changed",
+                instructions=(
+                    "rewrite each before it's committed: the operator sees this "
+                    "write with them, the gate's `private` step fails on them, and "
+                    "a push or a post carrying one is refused"
+                ),
+                findings=[found for found in reported if found.rule == PRIVATE],
+                short=False,
             ),
-            [found for found in reported if found.rule == PRIVATE],
-            short=False,
-        ),
-        *section(
-            (
-                "lup's findings on the lines changed (clear each, or keep it with "
-                '`# lup: ignore("<rule>", why="<reason>")` on its line or the line '
-                "above, which the operator is asked about; they fail the gate):"
+            Section(
+                title="lup's findings on the lines changed",
+                instructions=CLEARING,
+                findings=[found for found in reported if found.rule != PRIVATE],
             ),
-            [found for found in reported if found.rule != PRIVATE],
-        ),
-        *section(
-            (
-                "Type errors and ruff's findings in the files changed "
-                "(clean them before the turn ends):"
+            Section(
+                title="Type errors and ruff's findings in the files changed",
+                instructions="clean them before the turn ends",
+                findings=findings,
             ),
-            findings,
-        ),
-        *section(
-            "lup's findings on lines no change touched (they fail the gate too):",
-            [found for found in untouched if found.rule != PRIVATE],
-        ),
-        *section(
-            (
-                "Values never published, on lines no change touched (the gate's "
-                "`private` step fails on them too):"
+            Section(
+                title="lup's findings on lines no change touched",
+                instructions="they fail the gate too",
+                findings=[found for found in untouched if found.rule != PRIVATE],
             ),
-            [found for found in untouched if found.rule == PRIVATE],
-            short=False,
-        ),
-        *section(IMPORTERS, importers),
-    ]
+            Section(
+                title="Values never published, on lines no change touched",
+                instructions="the gate's `private` step fails on them too",
+                findings=[found for found in untouched if found.rule == PRIVATE],
+                short=False,
+            ),
+            importing(importers),
+        ],
+        words,
+    )
 
 
-IMPORTERS = (
-    "Type errors in files that import what changed (clean them before the turn ends):"
+CLEARING = (
+    'clear each, or keep it with `# lup: ignore("<rule>", why="<reason>")` on its '
+    "line or the line above, which the operator is asked about; they fail the gate"
 )
-"""The header of the type errors in the files importing what changed, after a call
-and as a quiet lifts."""
+"""What to do with lup's findings, which their section says after a call and as a quiet lifts."""
 
 
-def section(header: str, found: list[Finding], *, short: bool = True) -> list[Part]:
-    """Say a section of findings under its header, each as pyright does, with its line per file where `short` lets it be told short (`fitted`); nothing where there's none."""
-    if not found:
-        return []
-    lines = [line for each in found for line in finding_lines(each)]
-    return [
-        Part(
-            whole="\n".join([header, *lines]),
-            short=counted(header, found) if short else None,
-        )
-    ]
+def importing(found: list[Finding]) -> Section:
+    """Return the section of the type errors in the files importing what changed, after a call and as a quiet lifts."""
+    return Section(
+        title="Type errors in files that import what changed",
+        instructions="clean them before the turn ends",
+        findings=found,
+    )
 
 
-def summary(touched: list[Finding], importers: list[Finding]) -> list[Part]:
-    """Say what stands that a conversation wasn't told, as their quiet lifts: in the files they touched, values never published, lup's findings, type errors and ruff's; then type errors in the files importing them.
+def summary(
+    touched: list[Finding], importers: list[Finding], words: Words
+) -> list[Part]:
+    """Say what stands that a conversation wasn't told, as their quiet lifts, to a reader who knows `words`: in the files they touched, values never published, lup's findings, type errors and ruff's; then type errors in the files importing them.
 
     Which of lup's findings are on lines a change touched isn't said: that's
     what a change's judgement reads, and the files are read as they stand.
@@ -558,7 +706,7 @@ def summary(touched: list[Finding], importers: list[Finding]) -> list[Part]:
     ...     return Finding(path=Path(path), span=Span(start=at, end=at), owner=owner,
     ...         rule=rule, message="m")
     >>> told = summary([found("/w/a.py", "lup", "regex"), found("/w/a.py", "ruff", "E501")],
-    ...     [found("/w/b.py", "pyright", "reportCallIssue")])
+    ...     [found("/w/b.py", "pyright", "reportCallIssue")], Words())
     >>> print(text(told))
     lup's findings in the files you touched (clear each, or keep it with `# lup: ignore("<rule>", why="<reason>")` on its line or the line above, which the operator is asked about; they fail the gate):
       /w/a.py:3:1 - regex: m
@@ -570,34 +718,31 @@ def summary(touched: list[Finding], importers: list[Finding]) -> list[Part]:
       /w/b.py:3:1 - reportCallIssue: m
     """
     lup = [each for each in touched if each.owner == "lup"]
-    return [
-        *section(
-            (
-                "Values never published, in the files you touched "
-                "(rewrite each before it's committed: the gate's `private` step "
-                "fails on them, and a push or a post carrying one is refused):"
+    return parts_of(
+        [
+            Section(
+                title="Values never published, in the files you touched",
+                instructions=(
+                    "rewrite each before it's committed: the gate's `private` step "
+                    "fails on them, and a push or a post carrying one is refused"
+                ),
+                findings=[each for each in lup if each.rule == PRIVATE],
+                short=False,
             ),
-            [each for each in lup if each.rule == PRIVATE],
-            short=False,
-        ),
-        *section(
-            (
-                "lup's findings in the files you touched (clear each, "
-                'or keep it with `# lup: ignore("<rule>", why="<reason>")` on its '
-                "line or the line above, which the operator is asked about; they "
-                "fail the gate):"
+            Section(
+                title="lup's findings in the files you touched",
+                instructions=CLEARING,
+                findings=[each for each in lup if each.rule != PRIVATE],
             ),
-            [each for each in lup if each.rule != PRIVATE],
-        ),
-        *section(
-            (
-                "Type errors and ruff's findings in the files you touched (clean "
-                "them before the turn ends):"
+            Section(
+                title="Type errors and ruff's findings in the files you touched",
+                instructions="clean them before the turn ends",
+                findings=[each for each in touched if each.owner != "lup"],
             ),
-            [each for each in touched if each.owner != "lup"],
-        ),
-        *section(IMPORTERS, importers),
-    ]
+            importing(importers),
+        ],
+        words,
+    )
 
 
 def removed_notes(notes: list[RemovedNote]) -> str:
@@ -638,8 +783,12 @@ class Moved(Model):
     """The hold asking the operator about it after the fact, if it asks."""
 
 
-def moved(moves: list[Moved]) -> str:
-    """Tell what moves of `HEAD` brought: judged once, and left as committed."""
+def moved(moves: list[Moved], words: Words) -> list[Part]:
+    """Tell what moves of `HEAD` brought, to a reader who knows `words`: judged once, and left as committed, each lup rule's mistake and steer told once (`Words`); nothing where they brought no finding, ask or removed note."""
+    found = [
+        finding for move in moves for each in move.files for finding in each.findings
+    ]
+    firsts = words.firsts(found)
 
     def one(move: Moved) -> str:
         told = [
@@ -652,7 +801,11 @@ def moved(moves: list[Moved]) -> str:
             for each in told
             for line in [
                 str(each.path),
-                *(line for found in each.findings for line in finding_lines(found)),
+                *(
+                    line
+                    for finding in each.findings
+                    for line in finding_lines(finding, standing=finding in firsts)
+                ),
                 *(f"  asks: {ask.reason}" for ask in each.asks),
                 *(f"  removes the note: # lup: {note.text}" for note in each.removed),
             ]
@@ -679,11 +832,12 @@ def moved(moves: list[Moved]) -> str:
         )
         return "\n".join([header, *files, *gate, *asked])
 
-    return sections([one(move) for move in moves])
+    said = sections([one(move) for move in moves])
+    return [Part(whole=said, words=words.taught(found))] if said else []
 
 
 def turn_end(findings: list[Finding]) -> list[Part]:
-    """Say why the turn can't end: what's still wrong in the files they touched, every finding, or a line per file where that doesn't fit (`fitted`)."""
+    """Say why the turn can't end: what's still wrong in the files they touched, every finding whole, each lup rule's mistake and steer however often its reader was told them, or a line per file where that doesn't fit (`fitted`)."""
     if not findings:
         return []
     header = (
@@ -700,6 +854,7 @@ def turn_end(findings: list[Finding]) -> list[Part]:
         Part(
             whole="\n".join([header, *lines, footer]),
             short="\n".join([counted(header, findings), footer]),
+            words=Words().taught(findings),
         )
     ]
 

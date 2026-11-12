@@ -39,6 +39,15 @@ const said = (text: string) => dashboard.page.waitForFunction((text) => document
 describe("what comes to the demo as it runs, in headless Chromium", () => {
     it("brings a late question into the thread its asker works in, with its moment", async () => {
         await review.holds("── @61 question · new · ");
+        // Its moment, under its context's line, laid out as that opens.
+        await review.until("read the question's moment", (view) => {
+            const text = view.state.doc.toString();
+            const at = text.indexOf("── @61 question");
+            const next = text.indexOf("\n── @", at + 1);
+            return at >= 0 && text.slice(at, next < 0 ? undefined : next).includes("\ncontext · ");
+        });
+        await review.goTo("── @61 question");
+        await review.unfold("context · ");
         await review.holds("→ called mcp__lup__ask · this item");
         // Counted on the row of the thread they work in, as what stops on the operator.
         await dashboard.page.waitForFunction(() => [...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("The transcript reader") && (each.textContent ?? "").includes("◆2")));
