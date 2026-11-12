@@ -2942,6 +2942,20 @@ function findPlaced(nodes: readonly Placed[], id: string): Placed | undefined {
     return undefined;
 }
 
+/**
+ * Return how many lines that matter a drawer laid out closed holds (`Fold.unlaid`), each a stop of `]c` and `[c` once it
+ * opens (`Scope.stops`): those of its files, as `layCode` stops at them, through every fold of its view given with it; a
+ * fold read from another view holds none of them till it's read, and lays out closed. None of a drawer laid out.
+ */
+export function stopsHeld(drawer: Drawer): number {
+    if (drawer.folds.at(-1)?.unlaid !== true) {
+        return 0;
+    }
+    const counted = (list: readonly ViewBlock[]): number =>
+        list.reduce((sum, block) => sum + (isFiled(block) ? filedOnce(block).filter((each) => each.stop).length : block.block === "fold" && Array.isArray(block.content) ? counted(block.content) : 0), 0);
+    return counted(drawer.view.answer?.blocks.blocks ?? []);
+}
+
 /** Return the stop after the line starting at `line`, or before it, of `stops`, in the text's order; none past the last, or before the first. */
 export function stepped(stops: number[], line: number, forward: boolean): number | undefined {
     return forward ? stops.find((each) => each > line) : [...stops].reverse().find((each) => each < line);

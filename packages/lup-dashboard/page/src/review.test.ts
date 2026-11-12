@@ -48,6 +48,7 @@ import {
     regionAt,
     shownAt,
     stepped,
+    stopsHeld,
     steps,
     tallied,
     threadsOf,
@@ -2010,6 +2011,18 @@ describe("the drawers under each agent's banner", () => {
                 expect(large.text.slice(fold.from + 1, fold.to)).toBe(UNLAID);
                 expect(large.deferred.get(foldKey(fold))).toBe(true);
             }
+        });
+
+        it("counts the lines that matter a closed drawer holds as many as it stops at laid out open, for ]c and [c to reach", () => {
+            const closed = lazily(sized(3, 10));
+            const key = foldKey(own(closed, "since"));
+            const open = lazily(sized(3, 10), new Map([[key, false]]));
+            const since = (laidOut: Laid) => laidOut.drawers.find((each) => each.kind === "since")!;
+            expect(since(closed).stops).toEqual([]);
+            expect(since(open).stops.length).toBeGreaterThan(0);
+            expect(stopsHeld(since(closed))).toBe(since(open).stops.length);
+            // One laid out, open, holds its own: none to count.
+            expect(stopsHeld(since(open))).toBe(0);
         });
 
         it("lays out what a drawer holds once the operator opens it, and no more once they close it, the others as they were", () => {

@@ -124,6 +124,7 @@ import {
     shownAs,
     sinceFileAt,
     stepped,
+    stopsHeld,
     tallied,
     toAnswer,
     toKeep,
@@ -919,6 +920,9 @@ export function Review({
     // buffer holds what's open, however much is folded. Laid out anew as one of those opens or closes (`refolds`).
     const foldsLeft = useRef(new Map<string, boolean>());
     const [refolds, setRefolds] = useState(0);
+    // The closed drawer `]c` or `[c` opened to reach a line that matters in it, by its fold's key, which way it went: the
+    // cursor lands there once the drawer is laid out open.
+    const matterIn = useRef<{ key: string; forward: boolean } | null>(null);
     /** Lay out `drafted`, the buffer `shownNow` of the review, or the review whole. */
     const layOut = (drafted: Draft, shownNow: Showing | null): Laid =>
         laid(
@@ -1364,6 +1368,24 @@ export function Review({
         const seen = uncovered(closed, current.state.selection.main.head);
         if (visual === null && seen !== current.state.selection.main.head) {
             current.dispatch({ selection: { anchor: seen }, annotations: rebuilt.of(true) });
+        }
+        // What `]c` or `[c` opened a closed drawer to reach, once it's laid out open: its first line that matters, or its
+        // last going back, as it would have gone there had the drawer been laid out all along.
+        const inDrawer = matterIn.current;
+        if (inDrawer !== null) {
+            const drawer = laidOut.drawers.find((each) => {
+                const own = each.folds.at(-1);
+                return own !== undefined && foldKey(own) === inDrawer.key;
+            });
+            if (drawer === undefined || drawer.folds.at(-1)?.unlaid !== true) {
+                matterIn.current = null;
+                const at = drawer === undefined ? undefined : inDrawer.forward ? drawer.stops[0] : drawer.stops.at(-1);
+                if (at !== undefined) {
+                    opening(current, at);
+                    bring(current, at);
+                    onScreen = null;
+                }
+            }
         }
         // The buffer just gone to, once it's laid out and read: the cursor where it was left, on the part it was in;
         // first opened, on what asks the operator there, else at its end, under what's live; or on the item it was gone to for.
@@ -2149,9 +2171,12 @@ export function Review({
                 return;
             }
             const line = current.state.doc.lineAt(editor.head()).from;
-            // An item marked read or left for later, and folded, is put by, as a drawer folded: their lines aren't walked until opened.
+            // An item marked read or left for later, and folded, is put by: its lines aren't walked until opened. A drawer's
+            // are, open or closed, as the folds around a line that matters open as it's reached.
+            const drawn = new Set<Scope>(laidOut.drawers);
             const walked = scopesOf(laidOut).filter(
                 (scope) =>
+                    drawn.has(scope) ||
                     !laidFor.folds.some(
                         (fold) => fold.of === scope.of && kindOf(fold.kind)?.whole === true && isFolded(current.state, fold),
                     ),
@@ -2161,6 +2186,21 @@ export function Review({
                 line,
                 forward,
             );
+            // A drawer laid out closed holding a line that matters before it (`stopsHeld`) is reached first: it opens, what it
+            // holds laid out as it does, and the cursor lands on its first such line, or its last going back (`matterIn`).
+            // What it holds comes after its summary line, so from that line it's ahead, never behind.
+            const ahead = (at: number) => (forward ? at >= line && (target === undefined || at < target) : at < line && (target === undefined || at > target));
+            const closed = laidOut.drawers
+                .filter((each) => each.folds.at(-1)?.unlaid === true && ahead(each.header.from))
+                .sort((a, b) => (forward ? a.header.from - b.header.from : b.header.from - a.header.from))
+                .find((each) => stopsHeld(each) > 0);
+            const own = closed?.folds.at(-1);
+            if (closed !== undefined && own !== undefined) {
+                matterIn.current = { key: foldKey(own), forward };
+                bring(current, editor.fromLaid(closed.header.from));
+                opening(current, editor.fromLaid(closed.header.to + 1));
+                return;
+            }
             if (target === undefined) {
                 return;
             }
