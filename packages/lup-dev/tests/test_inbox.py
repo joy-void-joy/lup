@@ -91,7 +91,7 @@ from lup_dev.host.workers import (
     WorkerJudge,
     Workers,
 )
-from lup_dev.inbox import tools
+from lup_dev.inbox import texts, tools
 from lup_dev.inbox.bearings import (
     Repository,
     RepositoryBearings,
@@ -2424,7 +2424,7 @@ def test_a_concern_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and
             "c3",
         ),
     ]
-    friction = Friction.model_validate(jammed)
+    friction = Friction.model_validate({**jammed, "tool": "concern"})
     assert (passed.reason, passed.recipient, passed.quiet) == (
         friction,
         claude_session,
@@ -2916,8 +2916,8 @@ def introduction() -> str:
         "these, you're one of them."
     )
     direct = (
-        "`concern` and `how_it_felt` reach the operator directly, whatever your "
-        "parent passes on."
+        "`concern`, `friction` and `how_it_felt` reach the operator directly, "
+        "whatever your parent passes on."
     )
     lines = [f"- `{spec.name}`: {spec.summary}" for spec in served]
     return "\n".join([opening, "", *lines, "", direct])
@@ -4003,7 +4003,7 @@ def test_a_subagents_concern_reaches_its_parent_whole_and_how_it_felt_where_lup_
             each.description for each in specs() if each.name == "how_it_felt"
         )
         [stale] = [each.name for each in delivery.inbox.ledger.every(Thread)]
-    friction = Friction.model_validate(jammed)
+    friction = Friction.model_validate({**jammed, "tool": "concern"})
     how_it_felt = HowItFelt.model_validate(went)
     assert jam == (
         (
@@ -5080,6 +5080,67 @@ def test_a_room_whose_service_runs_an_older_copy_is_told_so(
 
 
 @pytest.mark.parametrize("runtime", ["claude", "codex"])
+def test_a_friction_opens_a_concern_of_its_own_saying_it_s_a_friction_beside_a_concern_on_each_runtime(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+    *,
+    runtime: str,
+) -> None:
+    """`friction` files a concern as `concern` with `text` does, its words named a friction wherever lup names a kind, and `concern`'s a concern, on either runtime."""
+    start = claude if runtime == "claude" else codex
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", runtime)
+        mcp = machine.host.launch("one").mcp
+        send(machine.host.launch("one").hook, start("SessionStart", source="startup"))
+        jammed = call(
+            mcp, "friction", {"text": "The gate hung.", "title": "gate hangs"}
+        )
+        hung = newest(delivery)
+        eyed = call(mcp, "concern", {"text": "The page lags on 40 concerns."})
+        lags = newest(delivery)
+        old = call(mcp, "friction", {"text": "Again.", "thread": "gate-hangs"})
+        listed = inbox("--kind", "friction")
+        concerns = delivery.concerns()
+        repository = tmp_path / ".git"
+        gate = concerns.named(repository, "gate-hangs")
+        page = concerns.named(repository, "the-page-lags-on-40-concerns")
+        [hung_item, lags_item] = [delivery.inbox.item(each) for each in (hung, lags)]
+    assert jammed == (
+        (
+            "Opened @gate-hangs, held by you.\n"
+            f"Thanks: your friction is with the operator, @{hung}, in @gate-hangs. "
+            "You can carry on."
+        ),
+        False,
+    )
+    assert not eyed[1]
+    assert (concerns.containing(hung), concerns.containing(lags)) == (gate, page)
+    assert [
+        (each.reason.reason, each.reason.model_dump()["tool"])
+        for each in (hung_item, lags_item)
+    ] == [
+        ("friction", "friction"),
+        ("friction", "concern"),
+    ]
+    assert [texts.what(each) for each in (hung_item, lags_item)] == [
+        "a friction",
+        "a concern",
+    ]
+    assert [texts.kind(each) for each in (hung_item, lags_item)] == [
+        "friction",
+        "concern",
+    ]
+    # It takes the library's input alone: an old habit's `thread` is refused.
+    assert old[1]
+    assert "thread" in old[0]
+    assert f"@{hung}" in listed
+    assert f"@{lags}" not in listed
+
+
+@pytest.mark.parametrize("runtime", ["claude", "codex"])
 def test_lup_never_reminds_an_agent_of_a_concern_they_hold_at_a_call_or_their_turn_s_end(
     machine: Layout,
     clock: FakeClock,
@@ -5112,6 +5173,7 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
         "stop",
         "note",
         "concern",
+        "friction",
         "how_it_felt",
         "ask",
         "send",
@@ -5122,7 +5184,8 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
     ]
     # Each takes the library's input first: `blocked`, `stop` and `note` with
     # a `thread` beside it, `concern` with what's said of one there already;
-    # how it felt lands where its sender started, and takes nothing more.
+    # `friction` opens one of its own and how it felt lands where its sender
+    # started, and neither takes anything more.
     library = [tool.spec().input_schema for tool in SPEAKING]
 
     def properties(schema: dict[str, JsonValue]) -> list[str]:
@@ -5141,19 +5204,22 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
         "park",
         "done",
     ]
-    assert [properties(spec.input_schema) for spec in served[:5]] == [
+    assert [properties(spec.input_schema) for spec in served[:6]] == [
         [*properties(library[0]), "thread"],
         [*properties(library[1]), "thread"],
         [*properties(library[2]), "thread"],
         [*properties(library[3]), *concerning],
         properties(library[4]),
+        properties(library[5]),
     ]
-    assert served[4].input_schema == library[4]
+    assert served[5].input_schema == library[5]
+    assert served[4].input_schema["additionalProperties"] is False
     assert [spec.summary for spec in served] == [
         "Say the work can't go on, and what's wrong.",
         "End your work by your own choice, saying why.",
         "Tell the operator a doubt, and carry on.",
         "Say what's worth keeping an eye on, and carry on.",
+        "Say what got in your way, and carry on.",
         "Tell the operator how it is for you.",
         "Ask the operator, with numbered decisions.",
         "Send a message to a party's inbox.",
@@ -5375,10 +5441,12 @@ def test_a_friction_and_how_it_felt_kept_in_labelled_parts_or_as_how_it_went_rea
         )["reason"]
         for each in (1, 4)
     ]
+    # Kept before a concern's words said which tool filed them: a friction's.
     assert rewritten == {
         "reason": "friction",
         "text": "`ls` printed: Permission denied\nTrying: look for the config",
         "title": "",
+        "tool": "friction",
     }
     assert renamed == {"reason": "how it felt", "text": "Heavy toward the end."}
     assert [Inbox.opened(kept).item(each) for each in (1, 4)] == [read[0], read[3]]

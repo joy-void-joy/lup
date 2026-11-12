@@ -365,7 +365,7 @@ def test_a_subagent_s_news_for_their_parent_has_a_heading_in_their_parent_s_view
     [theirs] = listed(quiet, party=SURVEY).sent
     assert theirs.words is None
     [told] = listed(quiet).received
-    assert headed(told) == "@80 lup-impl/a04 → lup-impl · concern · not told yet"
+    assert headed(told) == "@80 lup-impl/a04 → lup-impl · friction · not told yet"
 
 
 def test_a_comment_on_it_goes_to_whoever_wrote_it_where_that_s_another_conversation() -> (

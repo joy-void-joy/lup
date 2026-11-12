@@ -2,7 +2,7 @@
 
 `docs/inbox.md`, *lup's tools*. Each is a function of the conversation
 calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
-- `blocked`, `stop`, `note`, `concern` and `how_it_felt` are the library's
+- `blocked`, `stop`, `note`, `concern`, `friction` and `how_it_felt` are the library's
   speaking tools (`lup.tools.speaking`), their names and input models taken
   from them, so an agent's habit carries between an ask from code and a
   launched session; their functions and descriptions are the inbox's, since
@@ -13,11 +13,12 @@ calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
 - `concern` is what an agent does with a concern, something worth keeping an
   eye on: open one in their own words, a line being enough, add to one, keep
   its body current, work in it, take it, hand it on, move the operator's words
-  into it, park it, say it's done (`inbox/concerns.py`). Its words are kept as
-  a friction was, news reaching the operator at once and, from a subagent,
-  their parent too, whole and quiet (`Item.quiet`), so the parent can act on
-  what got in the way, or learn their brief misled. Nothing waits on an answer,
-  and lup never reminds them of it;
+  into it, park it, say it's done (`inbox/concerns.py`); `friction` opens one
+  for what got in their way, as `concern` with `text` does, saying it's a
+  friction. Their words are news reaching the operator at once and, from a
+  subagent, their parent too, whole and quiet (`Item.quiet`), so the parent can
+  act on what got in the way, or learn their brief misled. Nothing waits on an
+  answer, and lup never reminds them of it;
 - `ask` puts a question to the operator, its decisions numbered, each with the
   agent's lean; with `wait` it holds until they answer, or until other news of
   theirs reaches the agent, their words typed in the agent's terminal among it;
@@ -82,6 +83,7 @@ from lup_dev.inbox.reading import Narrowing, Reader, and_said, stood
 from lup_dev.inbox.store import (
     Answered,
     Decision,
+    Filed,
     Friction,
     HowItFelt,
     InboxError,
@@ -177,6 +179,10 @@ class Parking(Model):
         default=None,
         description="A condition holding, as `defer`'s `when=` names one.",
     )
+
+
+class Frictional(results.Friction, title="Friction", extra="forbid"):
+    """What got in your way, at the moment it did, in your own words."""
 
 
 class Concerning(Model, title="Concern", extra="forbid"):
@@ -576,9 +582,8 @@ class Speaker(Model, arbitrary_types_allowed=True):
 
         Whenever something's worth keeping an eye on, the moment it comes up,
         even if you'll never work on it: a line is enough, and nobody will ask
-        you to finish it. What gets in your way counts: where there's a command
-        and the message it gave, the exact ones help whoever fixes it. `text`,
-        in your own words, opens a concern, named after `title` or its first
+        you to finish it. What got in your way is `friction`'s, which opens one
+        too. `text`, in your own words, opens a concern, named after `title` or its first
         line, under the one you work in, else at the top, where your session
         holds it. It reaches the operator at once and, where you're a
         subagent, your parent too, whole, at their next call. Nothing waits for
@@ -604,9 +609,31 @@ class Speaker(Model, arbitrary_types_allowed=True):
         stands; with nothing given, it lists those in `No agent`, nobody running
         answering for them, and yours.
         """
-        concerns = self.concerns
         if said == Concerning():
-            return Said(text=self.listed(concerns))
+            return Said(text=self.listed(self.concerns))
+        return await self.filed(said, "concern")
+
+    async def friction(self, said: Frictional) -> Said:
+        """Say what got in your way, and carry on.
+
+        Call it the moment something gets in the way of the work, whatever it
+        is, in your own words. Where there's a command and the message it
+        gave, the exact ones help whoever fixes it. It opens a concern of its
+        own, as `concern` with `text` does, which says it's a friction: named
+        after `title` or its first line, under the one you work in, else at the
+        top, where your session holds it. It reaches the operator as you wrote
+        it, and, where you're a subagent, your parent too, whole, at their next
+        call. Your work goes on: nothing waits for an answer, and lup never
+        reminds you of it. To add to a concern there already, it's `concern`
+        with `name`.
+        """
+        return await self.filed(
+            Concerning(text=said.text, title=said.title), "friction"
+        )
+
+    async def filed(self, said: Concerning, tool: Filed) -> Said:
+        """Do what `said` says of a concern, its words, where it gives any, filed by `tool` (`Friction.tool`)."""
+        concerns = self.concerns
         try:
             planned = self.planned(concerns, said)
         except (InboxError, ValueError) as refused:
@@ -639,13 +666,17 @@ class Speaker(Model, arbitrary_types_allowed=True):
             lines.append(f"Moved {and_said(moved)} into @{thread.name}.")
         item = None
         if said.text is not None and said.text.strip():
-            words = Friction(text=said.text, title=said.title)
+            words = Friction(text=said.text, title=said.title, tool=tool)
             item = await self.said(words, thread)
-            parent = (
-                ", and your parent has them too" if await self.passed_up(words) else ""
+            passed = await self.passed_up(words)
+            yours = (
+                ("your friction is", "it")
+                if tool == "friction"
+                else ("your words are", "them")
             )
+            parent = f", and your parent has {yours[1]} too" if passed else ""
             lines.append(
-                f"Thanks: your words are with the operator, {cited(item.number)}, "
+                f"Thanks: {yours[0]} with the operator, {cited(item.number)}, "
                 f"in @{thread.name}{parent}. You can carry on."
             )
         if said.park is not None:
@@ -1300,14 +1331,16 @@ class Speaker(Model, arbitrary_types_allowed=True):
         ends saying whom it reaches, as `how_it_felt_reaches` says (`reaching`).
         Each takes what the library's does: `blocked`, `stop` and `note` with a
         `thread` beside it (`THREAD`), `concern` with what's said of a concern
-        there already (`Concerning`), and `how_it_felt` alone, landing where the
-        agent started.
+        there already (`Concerning`), and `friction` and `how_it_felt` alone,
+        `friction` opening a concern of its own as `concern` with `text` does,
+        `how_it_felt` landing where the agent started.
         """
         functions = {
             speaking.blocked.name: self.blocked,
             speaking.stop.name: self.stop,
             speaking.note.name: self.note,
             speaking.concern.name: self.concern,
+            speaking.friction.name: self.friction,
             speaking.how_it_felt.name: self.how_it_felt,
         }
         descriptions = {
@@ -1322,6 +1355,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
             speaking.stop.name: ThreadedStop,
             speaking.note.name: ThreadedRemark,
             speaking.concern.name: Concerning,
+            speaking.friction.name: Frictional,
             speaking.how_it_felt.name: results.HowItFelt,
         }
         speaking_tools = [
@@ -1337,6 +1371,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
                 speaking.stop,
                 speaking.note,
                 speaking.concern,
+                speaking.friction,
                 speaking.how_it_felt,
             ]
         ]

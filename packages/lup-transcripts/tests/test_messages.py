@@ -288,7 +288,7 @@ def test_what_the_operator_sends_through_lup_is_read_back_rather_than_told_in_ta
     assert markdown(view, "text 51").text == "> Which?\n\nA model."
 
 
-def test_a_concern_s_words_a_how_it_felt_and_a_note_to_the_operator_show_and_what_s_no_words_doesn_t() -> (
+def test_a_friction_a_how_it_felt_and_a_note_to_the_operator_show_and_what_s_no_words_doesn_t() -> (
     None
 ):
     friction = item(50, Friction(text="The gate hung."), 1)
@@ -316,16 +316,16 @@ def test_a_concern_s_words_a_how_it_felt_and_a_note_to_the_operator_show_and_wha
     view = drawer(TALK[:1], listed(friction, flagged, unresolved, noted))
     assert headings(view) == [
         "you → lup-impl",
-        "@50 lup-impl → you · concern · unread · new",
+        "@50 lup-impl → you · friction · unread · new",
         "@54 lup-impl → you · note · unread · new",
     ]
     # In the parent's drawer the friction they're told shows; in the worker's, what they told the operator alone.
     worker_said = item(50, Friction(text="The gate hung."), 1, sender=WORKER)
     worker = drawer([], listed(worker_said, quiet, party=WORKER), OF_WORKER)
-    assert headings(worker) == ["@50 lup-impl/parser → you · concern · unread · new"]
+    assert headings(worker) == ["@50 lup-impl/parser → you · friction · unread · new"]
     parent = drawer(TALK[:1], listed(quiet))
     assert headings(parent)[1:] == [
-        "@51 lup-impl/parser → lup-impl · concern · not told yet · new"
+        "@51 lup-impl/parser → lup-impl · friction · not told yet · new"
     ]
 
 

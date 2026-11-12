@@ -102,7 +102,7 @@ const MARKS: Part[] = [
             { keys: "◇ cyan", does: "a file to review as you come to it, with nothing holding it", short: "to review" },
             { keys: "⚑", does: "a file with a line that matters, held or flagged; lup's approvals in the overview", short: "matters" },
             { keys: "·", does: "a file folded whole: automatic, a test, data, a first approval's", short: "folded" },
-            { keys: "•", does: "news, to read rather than answer: a note, a turn's last words, a concern's words, how it felt, a stop", short: "news" },
+            { keys: "•", does: "news, to read rather than answer: a note, a turn's last words, a friction, a concern's words, how it felt, a stop", short: "news" },
             { keys: "‖", does: "an item left for later", short: "parked" },
             { keys: "new", does: "an item that came after you marked its agent seen, Space d on its banner, and that you haven't commented on", short: "new" },
             { keys: "▶ ○ ✕", does: "an agent calling a tool, between calls, ended", short: "agents" },

@@ -1072,8 +1072,8 @@ def test_a_friction_the_operator_moved_reads_whole_in_the_thread_it_went_to_sayi
 
     assert read.text.endswith(
         "Moved here by the operator, from where it landed:\n"
-        f"@{friction}  2026-10-01 12:00  a concern from you to the operator, waiting:\n"
-        f'<item item="{friction}" kind="concern" from="dev">It hung.</item>'
+        f"@{friction}  2026-10-01 12:00  a friction from you to the operator, waiting:\n"
+        f'<item item="{friction}" kind="friction" from="dev">It hung.</item>'
     )
 
 

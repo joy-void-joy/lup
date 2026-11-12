@@ -98,7 +98,7 @@ class Lined(Model):
 
 
 def said(item: Item) -> list[Piece]:
-    """Say what `item` is, in its kind's own words: a turn's last words as their kind is named (`turn's end`, `inbox/texts.py`), a message by its kind, the operator's own as their message or their reply; their answer and review by what they answer; lup's word on citations by how many in which item; a held change, a stop, a flagged write; a concern's words as a concern, as `kind` names them; any other kind by its name.
+    """Say what `item` is, in its kind's own words: a turn's last words as their kind is named (`turn's end`, `inbox/texts.py`), a message by its kind, the operator's own as their message or their reply; their answer and review by what they answer; lup's word on citations by how many in which item; a held change, a stop, a flagged write; a concern's words as the tool that filed them, `friction` or `concern`, as `kind` names them; any other kind by its name.
 
     >>> from datetime import UTC
     >>> said(Item(number=54, reason=Message(kind="note", text="Good.", of=52),
@@ -135,8 +135,8 @@ def said(item: Item) -> list[Piece]:
             return ["stopped"]
         case Flagged(), _:
             return ["flagged write"]
-        case Friction(), _:
-            return ["concern"]
+        case Friction(tool=tool), _:
+            return [tool]
         case reason, _:
             return [reason.reason]
 

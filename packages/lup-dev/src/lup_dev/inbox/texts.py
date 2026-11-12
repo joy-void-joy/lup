@@ -34,8 +34,8 @@ def what(item: Item) -> str:
             return "a question, as a message"
         case Message(kind=kind):
             return f"a {kind}"
-        case Friction():
-            return "a concern"
+        case Friction(tool=tool):
+            return f"a {tool}"
         case HowItFelt():
             return "how it felt"
         case Stop():
@@ -131,6 +131,7 @@ type ItemKind = Literal[
     "problem",
     "disagreement",
     "question as a message",
+    "friction",
     "concern",
     "how it felt",
     "stop",
@@ -165,8 +166,8 @@ def kind(item: Item) -> ItemKind:
             return "question as a message"
         case Message(kind=said):
             return said
-        case Friction():
-            return "concern"
+        case Friction(tool=tool):
+            return tool
         case HowItFelt():
             return "how it felt"
         case Stop():

@@ -181,14 +181,22 @@ class Labelled(Model):
         return labelled("", parts) or "Nothing notable."
 
 
-class Friction(results.Concern):
-    """What a conversation found worth keeping an eye on, what got in their way among it, in their own words, as they told the operator in a concern at the moment it came up (`concern`): news to read, never a question.
+type Filed = Literal["friction", "concern"]
+"""Which tool filed a concern's words: `friction`, for what got in the agent's
+way, or `concern`, for anything else worth keeping an eye on."""
 
-    Named `friction` as `concern` was before it, and kept so, which an earlier
-    lup reads: what lup names a kind (`kind`, `what`) says `concern`.
+
+class Friction(results.Friction):
+    """A concern's words, in their own words, as a conversation told the operator at the moment it came up, opening a concern or adding to one: what got in their way (`friction`), or anything else worth keeping an eye on (`concern`). News to read, never a question.
+
+    Kept as `friction` whichever tool filed it, which an earlier lup reads, and
+    `tool` says which, so lup names its kind as its tool (`kind`, `what`); one
+    kept before `tool` was is a friction, which is all there was then.
     """
 
     reason: Literal["friction"] = "friction"
+    tool: Filed = "friction"
+    """Which tool filed it: `friction` or `concern`."""
 
     @model_validator(mode="before")
     @classmethod
