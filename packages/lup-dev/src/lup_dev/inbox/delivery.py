@@ -1286,11 +1286,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         await self.posted(news, party, place.parent, launch.worktree, quiet=True)
 
     def left(self, party: Conversation, words: str) -> None:
-        """Leave lup's `words` for `party`, told beside their next call or at their next turn's or session's start, never holding their turn's end (`Whereabouts.words`); nothing where they were never heard."""
+        """Leave lup's `words` for `party`, told beside their next call or at their next turn's or session's start, never holding their turn's end (`Whereabouts.words`), and kept as a line of theirs a view of them shows (`Inbox.left`); nothing where they were never heard."""
         place = self.inbox.whereabouts.get(party.key())
         if place is None:
             return
-        self.inbox.placed(place.model_copy(update={"words": [*place.words, words]}))
+        self.inbox.left(place, words, self.clock.now())
 
     def worded(self, party: Conversation, posted: Posted) -> Posted:
         """Return what `posted` tells `party`, after lup's words left for them, which are taken: told once."""
@@ -1299,12 +1299,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         )
 
     def taken_words(self, party: Conversation) -> list[str]:
-        """Return lup's words left for `party`, oldest first, taken so they're told once; none where none are left."""
+        """Return lup's words left for `party`, oldest first, taken so they're told once, each line of theirs kept as told at this moment (`Inbox.taken`); none where none are left."""
         place = self.inbox.whereabouts.get(party.key())
         if place is None or not place.words:
             return []
-        self.inbox.placed(place.model_copy(update={"words": []}))
-        return place.words
+        return self.inbox.taken(place, self.clock.now())
 
     def held_saying(self, party: Conversation, said: str | None) -> None:
         """Keep what subagent `party` said at an end of their turn held to tell them what waited, for their parent with their end (`Ended.held`): their runtime hands their parent only the words of the end it lets through, and nothing else would hand these on."""

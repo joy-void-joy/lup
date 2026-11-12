@@ -28,6 +28,7 @@ from lup_dev import (
     Section,
     Step,
     TestRoots,
+    Versions,
 )
 
 
@@ -205,5 +206,8 @@ project = Project(
             )
         )
     )
-    .add(LupDevelopment()),
+    .add(LupDevelopment())
+    # lup is used while it's built, so what lands is tried on `live` before it's
+    # merged onto `dev` (`docs/trust.md`, *What the host runs while it's on trial*).
+    .add(Versions(running="live")),
 )

@@ -191,6 +191,7 @@ def test_lups_own_declaration_is_its_modules_with_its_changes() -> None:
         "transcripts",
         "private",
         "lup-development",
+        "versions",
     ]
     assert (resolved.held, resolved.flagged) == (Project().held, Project().flagged)
     assert [each.name for each in resolved.gate][:4] == [
@@ -459,6 +460,34 @@ def test_the_person_s_layer_edits_the_project_s_own_module(tmp_path: Path) -> No
     resolved = resolve(load(tmp_path).project)
     assert resolved.repositories == []
     assert resolved.held == ["ignore", "regex"]
+
+
+@pytest.mark.parametrize(
+    ("mine", "running"),
+    [("Versions()", "live"), ('Versions(running="trial")', "trial")],
+)
+def test_a_module_the_person_s_layer_adds_and_the_project_adopts_is_one(
+    tmp_path: Path, mine: str, running: str
+) -> None:
+    write(
+        tmp_path / "lup_project.py",
+        """
+        from lup_dev import Modules, Project, Versions
+
+        project = Project(modules=Modules.default().add(Versions(running="live")))
+        """,
+    )
+    write(
+        tmp_path / "lup_project.local.py",
+        f"""
+        from lup_dev import Modules, Project, Versions
+
+        project = Project(modules=Modules().add({mine}))
+        """,
+    )
+    resolved = resolve(load(tmp_path).project)
+    assert [module.name for module in resolved.modules].count("versions") == 1
+    assert resolved.branches.running == running
 
 
 def test_the_person_s_layer_alone_is_layered_on_the_defaults(tmp_path: Path) -> None:

@@ -19,12 +19,13 @@ from lup.blocks import (
     Markdown,
     OfAgent,
     Offer,
+    Span,
 )
 from lup_dev.adapters.claude import ClaudeTranscripts
 from lup_dev.adapters.codex import CodexTranscripts
 from lup_dev.host.records import Called, Entry, Reader, Said
 from lup_dev.inbox.marks import ReviewMark
-from lup_dev.inbox.protocol import Exchanged, Pathed, exchanged
+from lup_dev.inbox.protocol import Exchanged, Pathed, Relayed, exchanged
 from lup_dev.inbox.store import (
     Done,
     Ended,
@@ -37,10 +38,11 @@ from lup_dev.inbox.store import (
     Unresolved,
 )
 from lup_ledger.parties import Conversation, Operator
-from lup_transcripts.environment.conversation import EARLIER_KIND, inboxed
+from lup_transcripts.environment.conversation import EARLIER_KIND, inboxed, key
 from lup_transcripts.environment.messages import (
     OfMessages,
     earlier_messages_blocks,
+    messages,
     messages_blocks,
 )
 
@@ -325,6 +327,83 @@ def test_a_friction_a_how_it_felt_and_a_note_to_the_operator_show_and_what_s_no_
     assert headings(parent)[1:] == [
         "@51 lup-impl/parser → lup-impl · friction · not told yet · new"
     ]
+
+
+RELAYED = [
+    Relayed(
+        number=1,
+        line=[Span(text="← from lup")],
+        heading=[Span(text="lup → "), Span(text="lup-impl", conversation=OF_SESSION)],
+        text="the operator settled @cursor.",
+        at=at(2),
+        lups=True,
+    ),
+    Relayed(
+        number=2,
+        line=[Span(text="← @51.1 your words, moved by lup-impl/parser into @lag")],
+        heading=[
+            Span(text="@51.1 you → "),
+            Span(text="lup-impl", conversation=OF_SESSION),
+            Span(text=" · moved by lup-impl/parser into @lag"),
+        ],
+        text="Fix the cursor.",
+        at=at(4),
+        lups=False,
+    ),
+    Relayed(
+        number=3,
+        line=[Span(text="← @60 note from lup-impl/parser, landed in @lag")],
+        heading=[Span(text="@60 lup-impl/parser → lup-impl · note · landed in @lag")],
+        text="Typing fast moves it.",
+        at=at(5),
+        lups=False,
+        by=OF_WORKER,
+    ),
+]
+"""What lup told the session in no item: its own line, the operator's words moved to
+them, and another agent's note told them whole, as the core words each."""
+
+
+def test_lup_s_lines_and_the_words_they_carried_show_in_order_lup_s_in_a_tone_of_its_own() -> (
+    None
+):
+    beside = listed().model_copy(update={"relayed": RELAYED})
+    view = drawer(TALK, beside)
+    assert [key(each) for each in messages(TALK, beside, OF_SESSION)] == [
+        "step 0",
+        "lup 1",
+        "step 3",
+        "lup 2",
+        "lup 3",
+        "step 4",
+    ]
+    # Read up to the operator's last words, what came before folds but the last three.
+    assert view.text().splitlines()[2:] == [
+        "▾ @51.1 you → lup-impl · moved by lup-impl/parser into @lag",
+        "  Fix the cursor.",
+        "▾ @60 lup-impl/parser → lup-impl · note · landed in @lag",
+        "  Typing fast moves it.",
+        "▾ you → lup-impl",
+        "  Build the reader.",
+    ]
+    whole = drawer(TALK[:4], beside)
+    assert whole.text().splitlines()[3:5] == [
+        "▾ lup → lup-impl · new",
+        "  the operator settled @cursor.",
+    ]
+    folds = {
+        each.id: each
+        for each in [*every(view.blocks), *every(whole.blocks)]
+        if isinstance(each, Fold)
+    }
+    # lup's own in lup's tone; the operator's words in theirs; another agent's in its own.
+    assert [span.tone for span in folds["lup 1"].summary[:2]] == ["lup", "lup"]
+    assert folds["lup 2"].summary[0].tone == "received"
+    assert folds["lup 3"].summary[0].tone == "heard"
+    # A comment on another agent's words goes to them; on the operator's or lup's, to the agent.
+    assert markdown(view, "lup 3 text").by == OF_WORKER
+    assert markdown(view, "lup 2 text").by is None
+    assert markdown(whole, "lup 1 text").by is None
 
 
 def test_a_turn_s_end_an_item_repeats_stands_under_that_item_s_heading_its_words_the_step_s() -> (
@@ -761,6 +840,14 @@ def test_each_runtime_s_record_gives_the_same_words_the_operator_s_their_turn_s_
         "  Fix it.",
         "▾ @71 lup-impl → you · turn's end · unread · new",
         "  Fixed.",
+    ]
+    settled = RELAYED[0].model_copy(
+        update={"at": datetime(2026, 10, 18, 10, 0, 2, tzinfo=UTC)}
+    )
+    told = drawer(entries, listed(ended).model_copy(update={"relayed": [settled]}))
+    assert told.text().splitlines()[-2:] == [
+        "▾ lup → lup-impl · new",
+        "  the operator settled @cursor.",
     ]
 
 

@@ -99,7 +99,7 @@ from claude_agent_sdk import (
 from claude_agent_sdk.types import AssistantMessageError, SyncHookJSONOutput
 
 from lup.adapters.claude import Effort
-from lup.adapters.claude.terminal import AUTO_MEMORY_OFF
+from lup.adapters.claude.terminal import AUTO_MEMORY_OFF, SILENT_TURN_REMINDER
 from lup.sessions.contract import Adapter, RawTurn, TurnRequest, guarded
 from lup.sessions.errors import (
     AgentUnavailableError,
@@ -358,7 +358,7 @@ class ClaudeAdapter(Model, Adapter, arbitrary_types_allowed=True):
             skills=[],
             plugins=[],
             verbatim_prompts=True,
-            env={AUTO_MEMORY_OFF: "1"},
+            env={AUTO_MEMORY_OFF: "1", SILENT_TURN_REMINDER: "0"},
             extra_args={NO_PERSISTENCE: None},
             hooks={"Stop": [HookMatcher(hooks=[stopping])]},
         )

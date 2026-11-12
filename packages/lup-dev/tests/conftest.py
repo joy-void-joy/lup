@@ -123,6 +123,7 @@ def marked(
                 rule=rule,
                 message=f"{rule} fires here",
                 steer="do it the other way" if owner == "lup" else "",
+                detail=f"{rule} fires here" if owner == "lup" else "",
             )
         )
     return found

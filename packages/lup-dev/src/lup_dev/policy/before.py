@@ -59,8 +59,8 @@ from lup_dev.policy.report import (
     Part,
     Quiet,
     Refused,
+    Words,
     approval,
-    information,
     placed,
     refusal,
 )
@@ -161,8 +161,8 @@ def told(
     content: str,
     *,
     quiet: Quiet,
-) -> list[Part]:
-    """Say what a write's judgement found in `content`, its files named from `root`, as a checkpoint reports it: what conversation `agent` wasn't told yet, which `record` remembers it told (`Session.news`), and their `quiet` doesn't hold; nothing where that's nothing."""
+) -> Checked:
+    """Return what a write's judgement found in `content`, its files named from `root`, as a checkpoint reports it: what conversation `agent` wasn't told yet, which `record` remembers it told (`Session.news`), and their `quiet` doesn't hold; nothing where that's nothing."""
 
     def seen(kind: Kind, found: list[Finding]) -> Look:
         look = Look(
@@ -183,11 +183,10 @@ def told(
     def kept(kind: Kind, found: list[Finding]) -> list[Finding]:
         return placed(root, [each for each in quiet.told(kind, found) if each in new])
 
-    return information(
-        kept("rules", judgement.findings),
-        kept("changed", judgement.information),
-        kept("untouched", judgement.untouched),
-        [],
+    return Checked(
+        findings=kept("rules", judgement.findings),
+        information=kept("changed", judgement.information),
+        untouched=kept("untouched", judgement.untouched),
     )
 
 
@@ -293,7 +292,7 @@ def before(
         to = Attributed(worktree=worktree.root, session=session, tool=proposal.tool)
         logged = None if judgement.outcome == "ask" else verdict(bench, to, judgement)
         gathering = path in record.flagging.get(writer, [])
-        found: list[Part] = []
+        found = Checked()
         if logged is not None:
             pending = Pending(
                 call=proposal.call,
@@ -339,8 +338,12 @@ def before(
     )
     unflag(bench, worktree, session, writer, put.read)
     unsaid = [Part(whole=said) for said in put.unsaid]
+
+    def parts(words: Words) -> list[Part]:
+        return [*found.parts(words), *unsaid]
+
     return Decision(
-        outcome="allow", told=bench.said(held.repository, [*found, *unsaid])
+        outcome="allow", told=bench.told(held.repository, session, writer, parts)
     )
 
 
@@ -466,7 +469,9 @@ def held_write(
                 decision = Decision(
                     outcome="allow",
                     reason=said,
-                    told=bench.said(worktree.repository, found),
+                    told=bench.told(
+                        worktree.repository, session, agent or "", found.parts
+                    ),
                 )
             else:
                 number = state.saved + 1
