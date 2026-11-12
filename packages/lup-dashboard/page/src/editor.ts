@@ -1022,6 +1022,19 @@ export function chosenIn<F extends Pick<Folding, "summary" | "kind">>(folds: rea
     return folds.filter((each) => each.summary.from >= from && each.summary.from <= to && (kind === null || each.kind === kind));
 }
 
+/**
+ * End vim's visual selection in `view`, as one key acting on all it holds ends it, the cursor staying at its head: the
+ * selection left a range, as vim leaves it, would be taken for a visual one again as the review is next laid out, as
+ * opening a closed drawer lays it out at once.
+ */
+function ended(view: EditorView, cm: NonNullable<ReturnType<typeof vimOf>>): void {
+    Vim.exitVisualMode(cm, false);
+    const head = view.state.selection.main.head;
+    if (!view.state.selection.main.empty) {
+        view.dispatch({ selection: { anchor: head } });
+    }
+}
+
 /** Return the text's span vim's visual selection covers in `state`, whole lines, as a fold-wise selection is linewise; none outside visual mode. */
 function visualSpan(state: EditorState): { from: number; to: number } | null {
     const range = state.selection.main;
@@ -1664,6 +1677,10 @@ interface Config<D, C> {
     pending?: (keys: string) => void;
     /** Told each fold the operator opens, by its keys or a click, as a view reads what a drawer shows on opening it. */
     unfolded?: (fold: Folding) => void;
+    /** Told each fold the operator closes, by its keys or a click, as a view lays out no more what a closed fold holds. */
+    refolded?: (fold: Folding) => void;
+    /** Where the folds the operator opened or closed are kept (`Editor.kept`), where the view lays out by them too; the editor's own unless given. */
+    kept?: RefObject<Map<string, boolean>>;
     /** Say something in the page's top line, as why a yank didn't reach the clipboard. */
     say?: (text: string) => void;
     /** Told the folds a fold-wise selection holds and their kind each time they change, so the page says what the keys do to them; none once it ends. */
@@ -1800,7 +1817,8 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
     const view = useRef<EditorView | null>(null);
     const bound = useRef<Bound>({ actions: null, keyed: { ...NONE } });
     const landing = useRef<Landing>(null);
-    const kept = useRef(new Map<string, boolean>());
+    const ownKept = useRef(new Map<string, boolean>());
+    const kept = config.kept ?? ownKept;
     // The draft as it stands: the view's, taken in as it gives another, or as the editor changed it since, which the
     // view may not have rendered yet, what's typed being laid out once typing pauses.
     const latest = useRef(config.draft);
@@ -1827,6 +1845,8 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
     chording.current = config.pending;
     const unfolding = useRef(config.unfolded);
     unfolding.current = config.unfolded;
+    const refolding = useRef(config.refolded);
+    refolding.current = config.refolded;
     // The draft's history, for `u`, Ctrl+R, `g-` and `g+`; and whether the comment being written has its step
     // already, so it's undone whole.
     const history = useRef<History<D>>(begun(config.draft));
@@ -2234,7 +2254,7 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 }
                 const span = visualSpan(editor.state);
                 const folds = span === null ? [] : chosenIn(live().folds, span.from, span.to, editor.state.field(chosenKind));
-                Vim.exitVisualMode(cm, false);
+                ended(editor, cm);
                 if (folds.length === 0) {
                     return;
                 }
@@ -2253,7 +2273,7 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 const kind = editor.state.field(chosenKind);
                 // A fold-wise selection's folds; a plain one's, each scope it holds the header of: groups, items, drawers, files.
                 const folds = span === null ? [] : chosenIn(live().folds, span.from, span.to, kind).filter((each) => kind !== null || each.scope === true);
-                Vim.exitVisualMode(cm, false);
+                ended(editor, cm);
                 own.verbOn?.(name, folds);
             },
             chosen: (folds) => config.chosen?.(folds),
@@ -2293,8 +2313,12 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 const laid = laidOf(update.state);
                 kept.current = keptFolds(laid.folds, update.startState, update.state, kept.current);
                 for (const fold of laid.folds) {
-                    if (isFolded(update.startState, fold) && !isFolded(update.state, fold)) {
+                    const was = isFolded(update.startState, fold);
+                    const now = isFolded(update.state, fold);
+                    if (was && !now) {
                         unfolding.current?.(fold);
+                    } else if (!was && now) {
+                        refolding.current?.(fold);
                     }
                 }
             },

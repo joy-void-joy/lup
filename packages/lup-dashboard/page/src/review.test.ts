@@ -48,6 +48,7 @@ import {
     regionAt,
     shownAt,
     stepped,
+    stopsHeld,
     steps,
     tallied,
     threadsOf,
@@ -60,6 +61,7 @@ import {
     sinceFileAt,
     rowLabel,
     sinceSummary,
+    UNLAID,
     UNREAD,
     UNSEEN,
     seeingOf,
@@ -1994,5 +1996,123 @@ describe("the drawers under each agent's banner", () => {
         const on = (line: string) => laidOut.text.indexOf(line);
         expect(fileHeads(laidOut)).toEqual([on("reader.py · created"), on("test_reader.py · created")]);
         expect(fileHeads(laid([QUESTION], [S1], banner, header, EMPTY, NOTHING, [], new Map([[whose(S1), { ...DATA, since: onFeat([kept]) }]])))).toEqual([]);
+    });
+
+    describe("laid out by the folds the operator left, as the page lays it out", () => {
+        /** A new module flagged at `path`, of `count` lines. */
+        const module = (path: string, count: number): SinceFile => ({
+            path,
+            file: {
+                path,
+                before: null,
+                after: { kind: "text", text: `${Array.from({ length: count }, (_, at) => `x${at} = ${at}`).join("\n")}\n` },
+                reading: { role: "production", asks: [{ name: "new-file", taken: "flagged", side: "after" }], findings: [] },
+            },
+            version: `${path}1`,
+            flags: [70],
+            since: null,
+        });
+        /** The agent's drawers, "since you approved" showing `files` modules of `count` lines each. */
+        const sized = (files: number, count: number): Drawers => new Map([[whose(S1), { ...DATA, since: onFeat(Array.from({ length: files }, (_, at) => module(`m${at}.py`, count))) }]]);
+        /** Laid out as the page lays it out, the folds left as `folds` says, every other as it's laid out. */
+        const lazily = (given: Drawers, folds: ReadonlyMap<string, boolean> = new Map(), draft: Draft = EMPTY) => laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], given, undefined, { remote, folds });
+        const count = (laidOut: Laid) => laidOut.text.split("\n").length;
+        const own = (laidOut: Laid, kind: string) => laidOut.drawers.find((each) => each.kind === kind)!.folds.at(-1)!;
+
+        it("lays each closed drawer out as its summary line and a line standing for it, however much it holds", () => {
+            const small = lazily(sized(1, 10));
+            const large = lazily(sized(12, 200));
+            // The buffer's size is the same whatever the closed drawers hold: 2,400 lines more of it, laid out whole.
+            expect(count(large)).toBe(count(small));
+            expect(count(laid([QUESTION, NOTE], [S1], banner, header, EMPTY, NOTHING, [], sized(12, 200), undefined, { remote }))).toBeGreaterThan(count(large) + 2_400);
+            expect(large.drawers.map((each) => each.kind)).toEqual(["tasks", "since", "conversation"]);
+            for (const drawer of large.drawers) {
+                const fold = drawer.folds.at(-1)!;
+                expect([fold.kind, fold.closed, fold.unlaid]).toEqual([drawer.kind, true, true]);
+                expect(large.text.slice(fold.from + 1, fold.to)).toBe(UNLAID);
+                expect(large.deferred.get(foldKey(fold))).toBe(true);
+            }
+        });
+
+        it("counts the lines that matter a closed drawer holds as many as it stops at laid out open, for ]c and [c to reach", () => {
+            const closed = lazily(sized(3, 10));
+            const key = foldKey(own(closed, "since"));
+            const open = lazily(sized(3, 10), new Map([[key, false]]));
+            const since = (laidOut: Laid) => laidOut.drawers.find((each) => each.kind === "since")!;
+            expect(since(closed).stops).toEqual([]);
+            expect(since(open).stops.length).toBeGreaterThan(0);
+            expect(stopsHeld(since(closed))).toBe(since(open).stops.length);
+            // One laid out, open, holds its own: none to count.
+            expect(stopsHeld(since(open))).toBe(0);
+        });
+
+        it("lays out what a drawer holds once the operator opens it, and no more once they close it, the others as they were", () => {
+            const closed = lazily(sized(12, 200));
+            const key = foldKey(own(closed, "since"));
+            const open = lazily(sized(12, 200), new Map([[key, false]]));
+            expect(count(open)).toBeGreaterThan(count(closed) + 2_400);
+            expect([own(open, "since").unlaid, open.deferred.get(key)]).toEqual([undefined, false]);
+            expect(open.text).toContain("m11.py · created · 200 lines · new file");
+            expect(open.drawers.filter((each) => each.kind !== "since").map((each) => each.folds.at(-1)!.unlaid)).toEqual([true, true]);
+            expect(lazily(sized(12, 200), new Map([[key, true]])).text).toBe(closed.text);
+        });
+
+        it("reaches what a closed drawer holds as it does open: Space d on its line, or from the banner, marks every file reviewed", () => {
+            const closed = lazily(sized(3, 10));
+            const open = lazily(sized(3, 10), new Map([[foldKey(own(closed, "since")), false]]));
+            const blocks = (laidOut: Laid, line: string) => {
+                const reach = reachOf(laidOut, laidOut.text.indexOf(line), verb("done"), { called: (each) => each.session });
+                return reach.on === null ? [] : reach.acts.map((each) => (each.kind === "mark" ? `${each.block} ${each.version}` : each.kind));
+            };
+            expect(blocks(closed, "since you approved ·")).toHaveLength(3);
+            expect(blocks(closed, "since you approved ·")).toEqual(blocks(open, "since you approved ·"));
+            expect(blocks(closed, "━━ s1")).toEqual(blocks(open, "━━ s1"));
+            // Each file it shows is known as shown, as the cursor leaving it takes it as looked at.
+            const since = (laidOut: Laid) => laidOut.drawers.find((each) => each.kind === "since")!;
+            expect([...since(closed).diffs.keys()]).toEqual([...since(open).diffs.keys()]);
+            expect(since(closed).files).toEqual(since(open).files);
+        });
+
+        it("lays out a closed drawer whole where it holds what the operator wrote, under the line it's on", () => {
+            const on = opened(out, at("        a = 1")) as Remark;
+            const wrote = lazily(drawers, new Map(), { ...EMPTY, remarks: [{ ...on, id: "name", text: "Name it." }] });
+            expect(wrote.text).toContain("        a = 1\nName it.\n");
+            expect(own(wrote, "since").unlaid).toBeUndefined();
+            expect(wrote.deferred.has(foldKey(own(wrote, "since")))).toBe(false);
+            // The others, holding nothing of theirs, wait.
+            expect(own(wrote, "conversation").unlaid).toBe(true);
+        });
+
+        it("lays out a fold of an open drawer's view read from another view only while it's open, what the view gives whole laid out", () => {
+            const trace = foldKey(own(out, "conversation"));
+            const earlier = `conversation ${whose(S1)} earlier exchange 0`;
+            const open = lazily(drawers, new Map([[trace, false]]));
+            // Its earlier exchange, closed, though the host has answered it: one line standing for it.
+            expect(open.text).toContain(`you: Build the reader.\n${UNLAID}\nyou: Ask me first.`);
+            expect(open.deferred.get(earlier)).toBe(true);
+            expect([...open.drawers.find((each) => each.kind === "conversation")!.loads.keys()]).toEqual(["exchange 0"]);
+            // Opened, it's laid out as it is laid out whole; the agent's words, open as their view lays them out, as well.
+            const both = lazily(drawers, new Map([[trace, false], [earlier, false]]));
+            const whole = (laidOut: Laid) => laidOut.text.slice(own(laidOut, "conversation").summary.from, own(laidOut, "conversation").to);
+            expect(whole(both)).toBe(whole(out));
+            expect(both.deferred.get(earlier)).toBe(false);
+            // A message closed by the operator, which its view gives whole, laid out still, for a search to find.
+            const said = out.drawers.find((each) => each.kind === "conversation")!.folds.find((each) => each.label === "Twenty kinds of line.")!;
+            const shut = lazily(drawers, new Map([[trace, false], [foldKey(said), true]]));
+            expect(shut.text).toContain("Four carry what was said.");
+            expect(shut.deferred.has(foldKey(said))).toBe(false);
+        });
+
+        it("lays an item's context out as its summary line alone while it's closed, its steps once it's opened", () => {
+            const around: Around = { ...NOTHING, contexts: new Map([[51, { shown: CONTEXT }]]) };
+            const whole = laid([QUESTION], [], banner, header, EMPTY, around);
+            const closed = laid([QUESTION], [], banner, header, EMPTY, around, [], new Map(), undefined, { folds: new Map() });
+            const fold = closed.regions[0]!.folds.find((each) => each.kind === "context")!;
+            expect([fold.closed, fold.unlaid]).toEqual([true, true]);
+            expect(closed.text.slice(fold.from + 1, fold.to)).toBe(UNLAID);
+            expect(closed.text).not.toContain("Reading the records.");
+            const open = laid([QUESTION], [], banner, header, EMPTY, around, [], new Map(), undefined, { folds: new Map([[foldKey(fold), false]]) });
+            expect(open.text).toBe(whole.text);
+        });
     });
 });

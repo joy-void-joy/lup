@@ -167,6 +167,33 @@ export function findNode(nodes: readonly Placed[], id: string): Placed | undefin
     return undefined;
 }
 
+/** Each part of a layout's tree by its id, the first in the tree's order where two share one, as `findNode` finds it. */
+const indexed = new WeakMap<readonly Placed[], Map<string, Placed>>();
+
+/**
+ * Return the part of `nodes` whose id is `id`, as `findNode` does, from an index of them made once for each layout: each
+ * mark the draft holds is drawn on its part's first line at every layout, and walking the whole tree for each, every
+ * file of every "since you approved" among it, grew with the marks times the files.
+ */
+export function placedBy(nodes: readonly Placed[], id: string): Placed | undefined {
+    let index = indexed.get(nodes);
+    if (index === undefined) {
+        const made = new Map<string, Placed>();
+        const walk = (list: readonly Placed[]) => {
+            for (const each of list) {
+                if (!made.has(each.id)) {
+                    made.set(each.id, each);
+                }
+                walk(each.children);
+            }
+        };
+        walk(nodes);
+        indexed.set(nodes, made);
+        index = made;
+    }
+    return index.get(id);
+}
+
 /** Return the offers of `offers` answering `verb`. */
 function answering(offers: readonly Offer[] | undefined, verb: Verb): Offer[] {
     return (offers ?? []).filter((each) => each.verb === verb.name);
@@ -608,7 +635,7 @@ export function implied(laidOut: Laid, draft: Draft): Marked[] {
         if (block === "" || each.text.trim() === "") {
             continue;
         }
-        const offers = findNode(laidOut.nodes, block)?.block?.offers ?? [];
+        const offers = placedBy(laidOut.nodes, block)?.block?.offers ?? [];
         for (const offer of offers) {
             const verb = offer.verb ?? null;
             if (offer.commented !== true || verb === null) {
@@ -650,7 +677,7 @@ export function carried(before: readonly Marked[], now: readonly Marked[], laidO
                 return false;
             }
             const comment = writtenNow.get(mark.id.slice("implied ".length));
-            return findNode(laidOut.nodes, mark.block) === undefined && comment !== undefined && said(comment) && !(draft.marks ?? []).some((each) => each.block === mark.block && each.action === mark.action);
+            return placedBy(laidOut.nodes, mark.block) === undefined && comment !== undefined && said(comment) && !(draft.marks ?? []).some((each) => each.block === mark.block && each.action === mark.action);
         }),
     ];
 }

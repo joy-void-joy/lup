@@ -35,7 +35,7 @@ describe("a key as the DevTools protocol sends it, on a US keyboard", () => {
 
 describe("what a measure says", () => {
     it("takes the median, the 90th percentile and the most by the nearest rank", () => {
-        expect(percentiles([5, 1, 4, 2, 3, 10, 9, 8, 7, 6])).toEqual({ median: 6, p90: 10, most: 10 });
+        expect(percentiles([5, 1, 4, 2, 3, 10, 9, 8, 7, 6])).toEqual({ median: 6, p90: 10, p95: 10, most: 10 });
         expect(percentiles([])).toBeNull();
     });
 

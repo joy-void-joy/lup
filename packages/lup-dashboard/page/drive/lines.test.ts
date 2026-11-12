@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { open, type Dashboard } from "./dashboard.ts";
 import { demo, type Demo } from "./demo.ts";
-import type { Review } from "./review.ts";
+import { UNLAID, type Review } from "./review.ts";
 import { DEMO_ITEM } from "./typing.ts";
 
 let served: Demo;
@@ -174,6 +174,16 @@ describe("moving through the review, line by line, in headless Chromium", () => 
             await dashboard.keys.press(["]", drawer === "since you approved" ? "s" : drawer === "messages" ? "M" : "v"]);
             await review.until(`go to the ${drawer}`, (view, wanted) => view.state.doc.lineAt(view.state.selection.main.head).text.startsWith(wanted), drawer);
             await dashboard.keys.press(["z", "o"]);
+            // What it holds laid out as it opens, in place of the line standing for it, before a walk counts its lines.
+            await review.until(
+                `lay out the ${drawer}`,
+                (view, unlaid) => {
+                    const doc = view.state.doc;
+                    const line = doc.lineAt(view.state.selection.main.head);
+                    return line.number < doc.lines && doc.line(line.number + 1).text !== unlaid;
+                },
+                UNLAID,
+            );
         }
         await to("first");
         expect(await stepped("j")).toEqual([]);
@@ -188,5 +198,83 @@ describe("moving through the review, line by line, in headless Chromium", () => 
         expect(await stepped("j")).toEqual([]);
         await to("last");
         expect(await stepped("k")).toEqual([]);
+    });
+});
+
+describe("going to each line that matters with ]c and [c, in headless Chromium", () => {
+    let served: Demo;
+    let dashboard: Dashboard;
+    let review: Review;
+
+    beforeAll(async () => {
+        served = await demo({ size: 0 });
+        dashboard = await open(served.url);
+        review = await dashboard.review();
+        await review.holds(DEMO_ITEM);
+        await review.settled();
+        // Every "since you approved" read, so each holds what it's going to.
+        await review.until("lay out the parser's since you approved", (view) => /\n━━ lup · dev · lup-impl\/parser[^\n]*\n(?:(?!━━ )[^\n]*\n)*since you approved · /.test(view.state.doc.toString()));
+    });
+
+    afterEach(() => {
+        expect(dashboard.thrown).toEqual([]);
+    });
+
+    afterAll(async () => {
+        await dashboard?.close();
+        await served?.close();
+    });
+
+    /** Put this page's cursor on the review's first line, or its last. */
+    const end = async (which: "first" | "last") => {
+        await dashboard.keys.press(which === "first" ? ["g", "g"] : ["G"]);
+        await review.settled(400, 0);
+    };
+
+    /** Each since you approved, as one key selects every one and another opens or closes them all. */
+    const everySince = async (key: "o" | "c") => {
+        await dashboard.keys.press(["g", "g", " ", "F", "s"]);
+        await review.inMode("visual");
+        await dashboard.keys.press(["z", key]);
+        await review.inMode("normal");
+        await review.settled(400, 0);
+    };
+
+    /** Press `]c`, or `[c`, from where the cursor is until it goes no further, and return the line each lands on. */
+    const walked = async (forward: boolean): Promise<string[]> => {
+        const landed: string[] = [];
+        let was = await review.evaluate((view) => view.state.selection.main.head);
+        for (let step = 0; step < 100; step += 1) {
+            await dashboard.keys.press(forward ? ["]", "c"] : ["[", "c"]);
+            await review.settled(400, 0);
+            const at = await review.evaluate((view) => view.state.selection.main.head);
+            if (at === was) {
+                return landed;
+            }
+            was = at;
+            landed.push(await review.line());
+        }
+        throw new Error(`${forward ? "]c" : "[c"} went on past 100 lines`);
+    };
+
+    /** Whether a closed drawer lays out what it holds, its lines standing for it instead. */
+    const unlaid = () => review.evaluate((view, line) => view.state.doc.toString().split("\n").filter((each) => each === line).length, UNLAID);
+
+    it("goes into a closed drawer to its lines that matter, opening it, as it goes over every one laid out open", async () => {
+        const closedBefore = await unlaid();
+        await end("first");
+        const closedWalk = await walked(true);
+        // It went into what was closed: a drawer holding a line that matters is laid out open now.
+        expect(closedWalk.length).toBeGreaterThan(0);
+        expect(await unlaid()).toBeLessThan(closedBefore);
+        // The same lines, in the same order, as every since you approved laid out open from the start.
+        await everySince("c");
+        await everySince("o");
+        await end("first");
+        expect(await walked(true)).toEqual(closedWalk);
+        // Back from the review's end, every one closed again: the same lines the other way, the last of a drawer first.
+        await everySince("c");
+        await end("last");
+        expect(await walked(false)).toEqual(closedWalk.toReversed());
     });
 });

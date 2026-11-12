@@ -322,6 +322,11 @@ export interface Fold extends Span {
     scope?: boolean;
     /** Whether what it holds is read from another view as it opens and isn't read yet, a line saying so in its place. */
     unread?: boolean;
+    /**
+     * Whether it's closed and what it holds isn't laid out, one line standing in its place, laid out as it opens
+     * (`Arranging.folds`, `Laid.deferred`): its placeholder counts no lines.
+     */
+    unlaid?: boolean;
 }
 
 /** Where a changed file is under its item or in its drawer: from its header to its last line and the comments under it. */
@@ -588,7 +593,18 @@ export interface Arranging {
     concerns?: readonly ThreadRead[];
     /** The parties a buffer may show; unsaid, those declared here (`PARTIES`). */
     parties?: readonly Party[];
+    /**
+     * How the operator left each fold they opened or closed, by its key (`foldKey`), whether it's closed: given, a
+     * drawer, an item's context and each fold of a drawer's view read from another of its views that's closed lays out
+     * its summary line and one line standing for what it holds, rather than what it holds, which is laid out as it
+     * opens (`Laid.deferred`), so the buffer holds what's open whatever's folded; but where it holds what the operator
+     * wrote, which is always laid out. Unsaid, everything is laid out, folded or not.
+     */
+    folds?: ReadonlyMap<string, boolean> | null;
 }
+
+/** The line standing for what a closed fold holds, where it isn't laid out until it opens (`Fold.unlaid`): seen only for the moment it opens. */
+export const UNLAID = "opening…";
 
 /**
  * What an item and a drawer lay out alike: a header line, the lines comments may be on (an item's own, a file's
@@ -711,6 +727,12 @@ export interface Laid {
     asides: Aside[];
     /** Each concern laid out, in the text's order, as a block or dim as context. */
     concerns: ConcernBlock[];
+    /**
+     * Each fold that lays out what it holds only while it's open (`Arranging.folds`), by its key, and whether it's
+     * closed now, its summary line alone laid out (`Fold.unlaid`): what opening or closing it lays out anew. Empty where
+     * everything's laid out.
+     */
+    deferred: ReadonlyMap<string, boolean>;
 }
 
 export const EMPTY: Draft = { comments: [], letters: [], remarks: [], done: [], declined: [], parked: [], marks: [] };
@@ -1603,6 +1625,26 @@ export function laid(
     const breaks: number[] = [];
     const unreadGroups = new Set<string>();
     const showing = arranging.showing ?? null;
+    // How the operator left the folds, where what a closed one holds waits until it opens; and each fold laid out so,
+    // whether it's closed now.
+    const foldsLeft = arranging.folds ?? null;
+    const deferred = new Map<string, boolean>();
+    /**
+     * Return whether `fold`, laid out closed as `laidClosed` says, is closed as the operator left it, where what it
+     * holds waits until it opens, and note it among those that do; false where everything's laid out. Its kind says how
+     * every one of it starts, as the review's last pass has it (`FoldKind.starts_open`), but where a mark or what's live
+     * says (`marked`).
+     */
+    const deferring = (fold: Pick<Fold, "of" | "kind" | "name">, laidClosed: boolean, marked: boolean): boolean => {
+        if (foldsLeft === null) {
+            return false;
+        }
+        const starts = marked ? null : (kindOf(fold.kind)?.startsOpen ?? null);
+        const key = foldKey(fold);
+        const closed = foldsLeft.get(key) ?? (starts === null ? laidClosed : !starts);
+        deferred.set(key, closed);
+        return closed;
+    };
     // Whether what the review is laid out from is read yet: until then, a buffer's empty for that alone.
     const readYet = arranging.read ?? true;
     // Every concern the host reads; of them, those the buffer on screen lays out as blocks (`concernsIn`), each under its
@@ -1733,6 +1775,7 @@ export function laid(
         drawn: drawnAt,
         asides,
         concerns: concernLines,
+        deferred,
     };
 
     /** Lay a line of the buffer's own, no part's but its own: what's said where there's nothing else to read. */
@@ -2270,14 +2313,18 @@ export function laid(
         if (context !== null) {
             const line = { kind: context.summary.kind, ...w.line(context.summary.text, `${id} context`) };
             into.asides.push(line);
-            const shownLines = context.lines.map((each) => {
-                const aside = { kind: each.kind, ...w.line(each.text, `${id} context`) };
-                into.asides.push(aside);
-                return aside;
-            });
+            // Closed, the line standing for its steps alone, which are laid out as it opens: read, never commented.
+            const unlaid = context.lines.length > 0 && deferring({ of, kind: "context", name: "" }, true, false);
+            const shownLines = unlaid
+                ? [w.line(UNLAID, `${id} context`)]
+                : context.lines.map((each) => {
+                      const aside = { kind: each.kind, ...w.line(each.text, `${id} context`) };
+                      into.asides.push(aside);
+                      return aside;
+                  });
             const last = shownLines.at(-1);
             if (last !== undefined) {
-                into.folds.push({ of, kind: "context", name: "", label: "context", closed: true, summary: { from: line.from, to: line.to }, from: line.to, to: last.to });
+                into.folds.push({ of, kind: "context", name: "", label: "context", closed: true, summary: { from: line.from, to: line.to }, from: line.to, to: last.to, ...(unlaid ? { unlaid } : {}) });
             }
         }
         frame("context", contextFrom);
@@ -2387,6 +2434,66 @@ export function laid(
         // What a fold reads as it opens, another of its module's views, and what the host last answered of it.
         const loaded = (content: { view: string; argument: unknown }): Instance => ({ repository: view.repository, module: view.module, view: content.view, argument: content.argument });
         const read = (each: Instance) => remote.get(instanceOf(each.repository, each.module, each.view, each.argument));
+        // What a fold of the view holds, as it's given or as the host last answered it; none where it isn't read yet.
+        const held = (block: ViewBlock & { block: "fold" }): readonly ViewBlock[] | undefined => {
+            if (Array.isArray(block.content)) {
+                return block.content;
+            }
+            const answered = read(loaded(block.content));
+            return answered === undefined ? undefined : (answered.blocks ?? []);
+        };
+        // How far the files counted among its own lines have gone, for a remark on a file's lines (`layCode`).
+        let first = 0;
+        const counting = new Set<string>(filedIn(blocks).map((each) => each.id));
+        /**
+         * Return `list`'s blocks as parts of the review where they aren't laid out, each on `at`, the line standing for
+         * what holds them, a fold's own within it: what a verb on what holds them reaches, as every file of a closed
+         * "since you approved" marked reviewed from its line; each file noted as one it shows. Where the drawer lays
+         * out what's after them, `counted`, the files among its own lines go by as laid out (`first`), for a remark on
+         * one after them; a drawer laid out closed lays out none, and none of its files' rows is made.
+         */
+        const shadowed = (list: readonly ViewBlock[], at: Span, counted: boolean): Placed[] =>
+            list.map((block) => {
+                if (block.block === "diff" || block.block === "code") {
+                    diffs.set(block.id, block);
+                    first += counted && counting.has(block.id) ? filedOnce(block).length : 0;
+                }
+                const children = block.block === "fold" ? shadowed(held(block) ?? [], at, counted) : [];
+                return part(blockId(view.id, block.id), "block", at.from, at.to, { block, children });
+            });
+        const remarks = mine((each) => (each.step != null ? kind === "conversation" : kind === "since"));
+        const markedRead = markedDone.has(view.id) && remarks.length === 0;
+        // Closed, holding nothing the operator wrote: its summary line alone, one line standing for what it holds, laid out
+        // as it opens, so a drawer costs a line however much it holds.
+        if (blocks.length > 0 && remarks.length === 0 && deferring({ of, kind, name: "" }, !live || markedRead, live || markedRead)) {
+            const holder = w.line(UNLAID, `${view.id} closed`);
+            const drawerFold: Fold = { of, kind, name: "", label: `${said}${label}`, closed: !live || markedRead, summary, from: summary.to, to: holder.to, scope: true, unlaid: true };
+            if (markedRead || live) {
+                byMarks.add(drawerFold);
+            }
+            const node = part(view.id, "view", summary.from, holder.to, { view, children: shadowed(blocks, holder, false) });
+            return {
+                ...into,
+                folds: [drawerFold],
+                end: holder.to,
+                kind,
+                conversation,
+                view,
+                diffs,
+                loads,
+                toned,
+                texts,
+                writers,
+                bars,
+                files: [...(answer.files?.values() ?? [])],
+                reviewed,
+                settled,
+                waiting: answer.blocks.waiting ?? false,
+                of,
+                header: summary,
+                node,
+            };
+        }
         // Each block laid out of the view, given or read, by its id: each Markdown block's lines, which a remark on it
         // is placed by, and each line's, which says the step is no words of the agent's.
         const markdown = new Map<string, string[]>();
@@ -2415,7 +2522,6 @@ export function laid(
         // A remark on a file's lines goes under the line it's on, each file's block its own, a file in a fold of the
         // view's, as a place of "since you approved", among them, in the order they're laid out.
         const topFiles = filedIn(blocks);
-        const counted = new Set<string>(topFiles.map((each) => each.id));
         const ofLine = new OfBlocks();
         const firstOf = new Map<string, number>();
         const shownFiles: FileLine[] = [];
@@ -2433,8 +2539,13 @@ export function laid(
         const placed = new Map<number | null, Written[]>();
         // Those on a Markdown block's line, by the block's id and the line.
         const onWords = new Map<string, Written[]>();
+        // The blocks a remark is on, which every fold holding one keeps laid out, open or not.
+        const remarked = new Set<string>();
+        const holdsRemark = (list: readonly ViewBlock[]): boolean =>
+            remarked.size > 0 && list.some((block) => remarked.has(blockId(view.id, block.id)) || (block.block === "fold" && holdsRemark(held(block) ?? [])));
         const place = (rid: string, remark: Written, quote: Quote) => {
             const block = quote.block ?? "";
+            remarked.add(block);
             const lines = markdown.get(block);
             if (lines === undefined) {
                 const line = seat(rid, quote, firstOf);
@@ -2446,7 +2557,7 @@ export function laid(
         };
         // One drafted before quotes named their block: on the agent's words at a step, the conversation's; on a file's
         // lines, "since you approved"'s.
-        for (const remark of mine((each) => (each.step != null ? kind === "conversation" : kind === "since"))) {
+        for (const remark of remarks) {
             const rid = writtenId(remark);
             const quote = remark.quote;
             if ((quote.block ?? "") !== "") {
@@ -2508,7 +2619,6 @@ export function laid(
         for (const comment of orphans.filter((each) => !standing.has(`reviewed ${fileOf(each)}`))) {
             writeWritten(comment, into.blocks, children);
         }
-        let first = 0;
         const layBlocks = (list: readonly ViewBlock[], top: boolean, within: Placed[]) => {
             for (const block of list) {
                 const id = blockId(view.id, block.id);
@@ -2518,7 +2628,7 @@ export function laid(
                         const lines = filedOnce(block);
                         const before = into.filed.length;
                         layCode(w, into, of, lines, first, starts, writeBlocks, () => id);
-                        first += counted.has(block.id) ? lines.length : 0;
+                        first += counting.has(block.id) ? lines.length : 0;
                         diffs.set(block.id, block);
                         const span = into.filed[before];
                         if (span !== undefined) {
@@ -2584,28 +2694,30 @@ export function laid(
                         drawnIn(head.from, line.drawn);
                         tones(head.from, block.summary.filter((each) => !isDrawn(each)));
                         const inner: Placed[] = [];
-                        let unread = false;
-                        if (Array.isArray(block.content)) {
-                            layBlocks(block.content, false, inner);
+                        if (!Array.isArray(block.content)) {
+                            // Read from another of its module's views as it opens, which opening the fold asks for.
+                            loads.set(block.id, loaded(block.content));
+                        }
+                        const holds = held(block);
+                        // What the host answered of it, or a line saying it's being read; one read from another view,
+                        // closed, holding nothing the operator wrote, a line standing for it alone, what it holds laid
+                        // out as it opens, as its view meant it to be read a fold at a time. What a view gives with it
+                        // is laid out, closed or not, so a search finds it in a drawer open.
+                        const unread = holds === undefined;
+                        const unlaid = !Array.isArray(block.content) && !holdsRemark(holds ?? []) && deferring({ of, kind: block.kind, name: block.id }, !(block.open ?? false), false);
+                        if (unlaid) {
+                            inner.push(...shadowed(holds ?? [], w.line(UNLAID, `${id} closed`), true));
+                        } else if (holds === undefined) {
+                            into.asides.push({ kind: "plain", ...w.line("reading…", `${id} reading`) });
                         } else {
-                            // Read from another of its module's views as it opens: what the host answered of it, or a
-                            // line saying it's being read, which opening the fold asks for.
-                            const reading = loaded(block.content);
-                            loads.set(block.id, reading);
-                            const answered = read(reading);
-                            if (answered === undefined) {
-                                into.asides.push({ kind: "plain", ...w.line("reading…", `${id} reading`) });
-                                unread = true;
-                            } else {
-                                layBlocks(answered.blocks ?? [], false, inner);
-                            }
+                            layBlocks(holds, false, inner);
                         }
                         const last = w.at - 1;
                         if (block.kind === "lines" && block.id.startsWith("reviewed")) {
                             settled ??= { from: head.from, to: head.to };
                         }
                         if (last > head.to) {
-                            into.folds.push({ of, kind: block.kind, name: block.id, label: line.text, closed: !(block.open ?? false), summary: { from: head.from, to: head.to }, from: head.to, to: last, unread });
+                            into.folds.push({ of, kind: block.kind, name: block.id, label: line.text, closed: !(block.open ?? false), summary: { from: head.from, to: head.to }, from: head.to, to: last, unread, ...(unlaid ? { unlaid } : {}) });
                             if (block.barred ?? false) {
                                 bars.push({ from: head.to + 1, to: last, kind: block.kind });
                             }
@@ -2776,6 +2888,20 @@ function findPlaced(nodes: readonly Placed[], id: string): Placed | undefined {
         }
     }
     return undefined;
+}
+
+/**
+ * Return how many lines that matter a drawer laid out closed holds (`Fold.unlaid`), each a stop of `]c` and `[c` once it
+ * opens (`Scope.stops`): those of its files, as `layCode` stops at them, through every fold of its view given with it; a
+ * fold read from another view holds none of them till it's read, and lays out closed. None of a drawer laid out.
+ */
+export function stopsHeld(drawer: Drawer): number {
+    if (drawer.folds.at(-1)?.unlaid !== true) {
+        return 0;
+    }
+    const counted = (list: readonly ViewBlock[]): number =>
+        list.reduce((sum, block) => sum + (isFiled(block) ? filedOnce(block).filter((each) => each.stop).length : block.block === "fold" && Array.isArray(block.content) ? counted(block.content) : 0), 0);
+    return counted(drawer.view.answer?.blocks.blocks ?? []);
 }
 
 /** Return the stop after the line starting at `line`, or before it, of `stops`, in the text's order; none past the last, or before the first. */

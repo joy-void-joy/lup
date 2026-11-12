@@ -429,6 +429,11 @@ export function App() {
         const id = instanceOf(view.repository, view.module, view.view, view.argument);
         setLoads((before) => (before.some((each) => instanceOf(each.repository, each.module, each.view, each.argument) === id) ? before : [...before, view]));
     }, []);
+    // A fold's view closed again: no more asked of the host, read again as it opens again, so what's watched is what's open.
+    const unload = useCallback((view: Instance) => {
+        const id = instanceOf(view.repository, view.module, view.view, view.argument);
+        setLoads((before) => (before.some((each) => instanceOf(each.repository, each.module, each.view, each.argument) === id) ? before.filter((each) => instanceOf(each.repository, each.module, each.view, each.argument) !== id) : before));
+    }, []);
     // What the banner says of an agent beyond their name: where they are, the core's, what they're doing drawn after it;
     // what they're working on, their context and whether their flagged writes are held are their banner's parts, which
     // their views say (`views/`).
@@ -1305,6 +1310,7 @@ export function App() {
                         landings={landings}
                         remote={remote}
                         load={load}
+                        unload={unload}
                         sizing={sizing}
                     />
                     <div className="status" ref={statusLine} title={wholeSaid.slice(1).flatMap((part) => part.lines).join("\n")}>
