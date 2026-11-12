@@ -93,9 +93,18 @@ export async function open(url: string, options: OpenOptions = {}): Promise<Dash
         await screen?.close();
         throw failed;
     }
+    const opening: Opened = {
+        end: async () => {
+            await browser.close();
+            await screen?.close();
+        },
+        ended: null,
+        owner,
+    };
+    opened.add(opening);
     const close = async () => {
-        await browser.close();
-        await screen?.close();
+        opened.delete(opening);
+        await opening.end();
     };
     try {
         const page = await browser.newPage({ viewport });
@@ -149,6 +158,54 @@ export async function open(url: string, options: OpenOptions = {}): Promise<Dash
         await close();
         throw failed;
     }
+}
+
+/** A dashboard open, as `endAll` ends it: why it was ended, where it was, and what opened it (`owning`). */
+interface Opened {
+    end: () => Promise<void>;
+    ended: string | null;
+    owner: string | null;
+}
+
+/** Each dashboard open in this process and not yet closed by whoever opened it, or forgotten with its owner (`forget`). */
+const opened = new Set<Opened>();
+
+/** What the dashboards opened from now on are opened by (`owning`): none for what's shared, opened outside any test. */
+let owner: string | null = null;
+
+/** Say that the dashboards opened from now on are `by`'s own, a test's, or shared, where it's none (`forget`). */
+export function owning(by: string | null): void {
+    owner = by;
+}
+
+/**
+ * Forget each dashboard `by` opened that was ended (`endAll`): a test that ran out of its time never closes what it
+ * opened for itself, which no other test shares.
+ */
+export function forget(by: string): void {
+    for (const each of [...opened]) {
+        if (each.owner === by && each.ended !== null) {
+            opened.delete(each);
+        }
+    }
+}
+
+/**
+ * End every dashboard open in this process, saying `why`: its browser closed, so what a test goes on doing on its page
+ * after vitest has moved on, the test having run out of its time, fails at once rather than reaching the next test's
+ * (`drive/stopping.ts`). Each stays ended (`ended`) until whoever opened it closes it.
+ */
+export async function endAll(why: string): Promise<void> {
+    const ending = [...opened].filter((each) => each.ended === null);
+    for (const each of ending) {
+        each.ended = why;
+    }
+    await Promise.all(ending.map((each) => each.end()));
+}
+
+/** Why a dashboard still open was ended (`endAll`); none where none was. */
+export function ended(): string | null {
+    return [...opened].find((each) => each.ended !== null)?.ended ?? null;
 }
 
 /** Route what `page` asks of `url` through `handler`, and return once a request of the page's has reached a route, asking until one does. */
