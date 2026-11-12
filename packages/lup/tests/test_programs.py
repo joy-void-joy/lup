@@ -7,10 +7,11 @@ forever ends only where lup kills it.
 
 import asyncio
 import os
+import select
 import signal
 import sys
 from datetime import timedelta
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -23,6 +24,9 @@ from lup.programs import (
     run,
     started,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 PYTHON = sys.executable
 
@@ -169,15 +173,21 @@ def test_awaited_reads_a_program_killed_where_the_wait_is_cancelled_to_its_end(
         os.kill(pid, 0)
 
 
-def gone(pid: int) -> bool:
-    """Say whether the process `pid` has ended: it's no longer there, or it's a zombie its new parent hasn't reaped yet."""
+def gone(pid: int, within: timedelta = timedelta(seconds=10)) -> bool:
+    """Say whether the process `pid` ends within `within`, reaped or not: waited on through a pidfd, readable once it has.
+
+    A killed process closes its pipes before it's a zombie, so a wait that
+    ended as the pipes closed can look at it still exiting.
+    """
     try:
-        stat = Path(f"/proc/{pid}/stat").read_text()
-    except FileNotFoundError:
+        watching = os.pidfd_open(pid)
+    except ProcessLookupError:
         return True
-    # Its state follows its name, which is in parentheses and may hold spaces.
-    _, after = stat.rsplit(")", 1)
-    return after.split()[0] == "Z"
+    try:
+        ended, _, _ = select.select([watching], [], [], within.total_seconds())
+    finally:
+        os.close(watching)
+    return bool(ended)
 
 
 def test_run_kills_a_program_past_its_time_limit() -> None:
