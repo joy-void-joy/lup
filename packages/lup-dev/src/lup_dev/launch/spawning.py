@@ -233,6 +233,10 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
     """How long the spawner's room's git may take to make the worktree, a
     checkout of the whole tree, before `podman exec` is killed with what it
     started and the spawn refused."""
+    heard: int = 16 * 1024
+    """The most of what the room's git prints that's kept, its end, which a
+    refusal quotes: the room chooses that git, which could print without end
+    into the service's memory (`Program.kept`)."""
     reserved: list[Reserved] = []
     """Each spawn under way, from its count against the limits to its
     launcher's start, with the branch it took once it took one: counted, so
@@ -474,6 +478,7 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
                 payload="",
                 directory=launch.repository,
                 within=self.making,
+                kept=self.heard,
             )
             ran = await self.run(program)
             if ran.status != 0:
@@ -593,6 +598,7 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
             payload="",
             directory=repository,
             within=self.making,
+            kept=self.heard,
         )
         made = Made(root=root, branch=branch, commit=commit)
         ran = await self.run(program)

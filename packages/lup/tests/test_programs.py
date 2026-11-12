@@ -74,6 +74,20 @@ def test_awaited_kills_a_program_printing_past_its_limit() -> None:
     assert printed.output == b"0123456789"
 
 
+def test_a_program_saying_more_than_kept_keeps_its_end_and_says_how_much_went() -> None:
+    """A program another chose can print as much as it likes: what's kept of each output is its end, `kept` bytes or a chunk more, the rest read and dropped as it runs."""
+    saying = "head -c 1000000 /dev/zero | tr '\\0' a >&2; echo the end >&2; echo done"
+    ran = asyncio.run(awaited("sh", "-c", saying, checked=False, kept=1000))
+
+    said = ran.error.decode()
+    assert ran.status == 0
+    assert ran.output == b"done\n"
+    assert said.endswith("aaaathe end\n")
+    assert said.startswith("[")
+    assert " bytes before this left out]\n" in said
+    assert len(ran.error) < 70_000
+
+
 def test_awaited_discards_what_it_prints_and_never_waits_on_a_process_holding_it(
     tmp_path: Path,
 ) -> None:

@@ -15443,6 +15443,38 @@ def test_a_held_launch_s_hook_naming_another_session_is_answered_with_nothing(
     )
 
 
+def test_what_the_room_s_git_prints_is_kept_to_its_end_and_a_refusal_quotes_that_alone(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """The room chooses the git a spawn's worktree is made by, which could print without end into the service's memory."""
+    worktree = tmp_path / "w"
+    spawnable(worktree)
+    spawned = SpawnsMade(status=128)
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        spawning=lambda delivery, launchers: spawned.tools(
+            delivery, machine, launchers
+        ),
+    ):
+        launched(machine, clock, worktree, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        call(mcp, "spawn", {"name": "x", "brief": "Do it."})
+    assert {each.kept for each in spawned.programs} == {16 * 1024}
+    printing = spawned.programs[0].model_copy(
+        update={
+            "command": ["sh", "-c", "head -c 1000000 /dev/zero >&2; echo fatal >&2"],
+            "directory": tmp_path,
+        }
+    )
+    ran = asyncio.run(executed(printing))
+    assert len(ran.error) < 16 * 1024 + 70_000
+    assert ran.error.endswith(b"fatal\n")
+
+
 def test_a_room_git_killed_past_its_limit_has_what_it_may_make_removed(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:

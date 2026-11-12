@@ -180,6 +180,11 @@ class Program(Model):
     make a ref a FIFO in which it waits for good (`docs/credentials.md`,
     *Running git on the host*); what crosses the network, or runs the room's
     gate, is given longer where it's made, saying why."""
+    kept: int | None = None
+    """The most of each of its outputs kept, in bytes, their end, the rest
+    dropped as it runs (`awaited`): for a command whose program a room chose,
+    which could print without end. None keeps them whole, where all of it is
+    needed, as `gh`'s answer is."""
 
 
 async def side_job_ended(
@@ -238,6 +243,7 @@ async def executed(program: Program) -> Ran:
             cwd=program.directory,
             stdin=program.payload,
             checked=False,
+            kept=program.kept,
             within=program.within,
         )
     except ProgramMissingError as missing:

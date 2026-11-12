@@ -45,6 +45,7 @@ import signal
 
 # lup: ignore("subprocess", why="lup's one runner of programs, which every other module uses")
 import subprocess
+from collections import deque
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
@@ -186,6 +187,7 @@ async def awaited(
     merged: bool = False,
     discarded: bool = False,
     limit: int | None = None,
+    kept: int | None = None,
     within: timedelta | None = None,
 ) -> Ran:
     """Run `program` with `arguments` to its end on the event loop, which goes on meanwhile, and return how it ended.
@@ -197,6 +199,11 @@ async def awaited(
       a clipboard's program serving what was copied.
     - `limit`: the most it may print on its standard output, in bytes; past
       it, it's killed.
+    - `kept`: the most of each of its outputs kept, in bytes, give or take a
+      read's 64 KiB: their end, what came before read and dropped as it runs,
+      and said in a line first; it runs on. For a program another chose, whose
+      output would be held whole otherwise, as a room's command is. `limit`
+      takes its standard output where both are given.
 
     It runs as the leader of a process group of its own, and where it's killed,
     past `within` or `limit` or as the wait is cancelled, the whole group is,
@@ -277,6 +284,25 @@ async def awaited(
                 return None
         return bytes(kept)
 
+    async def tailed(reader: asyncio.StreamReader | None) -> bytes:
+        """Read `reader` to its end, keeping its last `kept` bytes, give or take a read, and saying first how many before them were dropped."""
+        if reader is None:
+            return b""
+        chunks: deque[bytes] = deque()
+        held = 0
+        dropped = 0
+        while chunk := await reader.read(64 * 1024):
+            chunks.append(chunk)
+            held += len(chunk)
+            while kept is not None and held - len(chunks[0]) >= kept:
+                gone = chunks.popleft()
+                held -= len(gone)
+                dropped += len(gone)
+        said = b"".join(chunks)
+        if not dropped:
+            return said
+        return f"[{dropped:,} bytes before this left out]\n".encode() + said
+
     async def ended() -> None:
         """Kill it and its group, and wait for them, their pipes read to their end."""
         kill()
@@ -285,8 +311,13 @@ async def awaited(
 
     try:
         async with asyncio.timeout(None if within is None else within.total_seconds()):
+            printed = (
+                drained(process.stdout, limit)
+                if kept is None or limit is not None
+                else tailed(process.stdout)
+            )
             output, error, _ = await asyncio.gather(
-                drained(process.stdout, limit), drained(process.stderr, None), fed()
+                printed, tailed(process.stderr), fed()
             )
             status = await process.wait()
     except TimeoutError as late:
