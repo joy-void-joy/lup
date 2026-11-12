@@ -196,11 +196,8 @@ def test_a_script_driving_the_demo_brings_the_late_question_once() -> None:
     demo.told("arrive\n")
     demo.told("land\n")
 
-    assert [each.node for each in threads(demo)["transcript-reader"].asks] == [
-        51,
-        311,
-        61,
-    ]
+    # The check an earlier lup kept beside the question asks nothing.
+    assert [each.node for each in threads(demo)["transcript-reader"].asks] == [51, 61]
     assert said == [
         "`land` names nothing a stand-in agent does: `arrive` brings the late question"
     ]
