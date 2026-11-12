@@ -239,6 +239,8 @@ interface Props {
     remote: Remote;
     /** Told each view a fold reads as it opens, its module's, as the operator opens it, so the page asks it of the host. */
     load: (view: Instance) => void;
+    /** Told each view a fold read as it opened once the operator closes it, so the page stops asking it of the host: read again as it opens again. */
+    unload?: (view: Instance) => void;
     /** Given how to read the review's size, as the page's timings take it (`timings.ts`): its lines, the items, the drawers open. */
     sizing?: RefObject<(() => Readonly<Record<string, number>>) | null>;
     /** Whether the page's address lays the review out in panes (`panes.ts`), or as one buffer. */
@@ -844,6 +846,7 @@ export function Review({
     landings,
     remote,
     load,
+    unload,
     sizing,
     panes = false,
     paning,
@@ -911,6 +914,11 @@ export function Review({
     // Laid out with what's typed in a comment, though it isn't given yet, so the text laid out is what the editor holds.
     // Every concern as the host reads it, each laid out as a block where the buffer on screen holds it.
     const concerns = useMemo(() => threadsRead?.read.threads ?? [], [threadsRead]);
+    // How the operator left each fold, by its key, which the editor keeps as they open and close them: a drawer, an
+    // item's context and a fold of a drawer's view lay out what they hold only while open (`Arranging.folds`), so the
+    // buffer holds what's open, however much is folded. Laid out anew as one of those opens or closes (`refolds`).
+    const foldsLeft = useRef(new Map<string, boolean>());
+    const [refolds, setRefolds] = useState(0);
     /** Lay out `drafted`, the buffer `shownNow` of the review, or the review whole. */
     const layOut = (drafted: Draft, shownNow: Showing | null): Laid =>
         laid(
@@ -936,16 +944,17 @@ export function Review({
             ordered(places.current, order ?? []),
             drawers,
             called,
-            { ...arranging, previous: panes ? followed.current : before.current, showing: shownNow, concerns: shownNow === null ? [] : concerns, read: order !== null, unread: unreadSaid },
+            { ...arranging, previous: panes ? followed.current : before.current, showing: shownNow, concerns: shownNow === null ? [] : concerns, read: order !== null, unread: unreadSaid, folds: foldsLeft.current },
         );
     const layout = useMemo(() => {
         const drafted = typed.current ?? given;
         const began = performance.now();
         const laidOut = layOut(drafted, panes ? showing : null);
         return { drafted, laidOut, cost: performance.now() - began };
-        // `typed` is read as the review is laid out, whatever else lays it out: what's typed alone doesn't.
+        // `typed` is read as the review is laid out, whatever else lays it out: what's typed alone doesn't; nor do the
+        // folds the operator left, but where one that lays out what it holds only while open opens or closes (`refolds`).
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [items, agents, banner, called, given, around, drawers, seeing, arranging, order, concerns, showing]);
+    }, [items, agents, banner, called, given, around, drawers, seeing, arranging, order, concerns, showing, refolds]);
     const { laidOut } = layout;
     // The draft as the review is laid out: with what was typed in a comment as it was laid out.
     const draft = layout.drafted;
@@ -1012,17 +1021,29 @@ export function Review({
         list,
         whole,
         pending,
+        kept: foldsLeft,
         unfolded: (fold) => {
             const drawer = laidOut.drawers.find((each) => each.folds.some((own) => foldKey(own) === fold.key && own.kind === each.kind));
             if (drawer !== undefined && !isNobody(drawer.conversation)) {
                 told(drawer.conversation, drawer.kind);
             }
             // A fold of a module's view's, read from another of its views as it opens.
-            for (const each of laidOut.drawers) {
-                for (const [name, view] of each.loads) {
-                    if (each.folds.some((own) => own.name === name && foldKey(own) === fold.key)) {
-                        load(view);
-                    }
+            for (const view of loadsOf(fold)) {
+                load(view);
+            }
+            // What it holds laid out, where it waited for it to open.
+            if (laidOut.deferred.get(fold.key) === true) {
+                setRefolds((count) => count + 1);
+            }
+        },
+        refolded: (fold) => {
+            // What it holds laid out no more, nor read from another view, until it opens again: a drawer's, every view
+            // its folds read, each read again once it's laid out open again.
+            if (laidOut.deferred.get(fold.key) === false) {
+                setRefolds((count) => count + 1);
+                const drawer = laidOut.drawers.find((each) => each.folds.some((own) => foldKey(own) === fold.key && own.kind === each.kind && own.name === ""));
+                for (const view of drawer === undefined ? loadsOf(fold) : [...drawer.loads.values()]) {
+                    unload?.(view);
                 }
             }
         },
@@ -1093,6 +1114,17 @@ export function Review({
         mapScopeKeys(looks.kinds);
         mapVerbs(looks.verbs);
     }, [looks]);
+    // A fold of a drawer's view laid out open whose view isn't read, as one the operator left open in a drawer closed
+    // since, which let it go, is read again.
+    useEffect(() => {
+        for (const drawer of laidOut.drawers) {
+            for (const [name, view] of drawer.loads) {
+                if (drawer.folds.some((own) => own.name === name && own.unread === true && laidOut.deferred.get(foldKey(own)) === false)) {
+                    load(view);
+                }
+            }
+        }
+    }, [laidOut, load]);
     // What's laid out now, which a click on a citation, or on the passage of the operator's words it answers, reads.
     const laidNow = useRef(laidOut);
     laidNow.current = laidOut;
@@ -1178,6 +1210,11 @@ export function Review({
         const party = item === undefined ? null : recipient(item);
         return reachedBy(laidOut, each, party, called);
     };
+
+    /** Return each view a fold of a drawer's view reads as it opens, where `fold` is one: what's asked of the host while it's open. */
+    function loadsOf(fold: Folding): Instance[] {
+        return laidOut.drawers.flatMap((each) => [...each.loads].flatMap(([name, view]) => (each.folds.some((own) => own.name === name && foldKey(own) === fold.key) ? [view] : [])));
+    }
 
     /** Take each "since you approved" drawer read for the first time as looked at, and forget what was looked at of each file standing as the operator last saw it, which shows each of its changes once it comes back. */
     function read(laid: Laid) {
@@ -1268,6 +1305,10 @@ export function Review({
         const anchor = landed(laidOut, changing, arriving);
         const now = Date.now();
         const flashing = readBy(loading.current, order !== null, now) && going === null;
+        // What a fold the operator just opened holds, laid out as it opened, is no news: it never flashes.
+        const wasDeferred = before.current?.deferred;
+        const opened = laidFor.folds.filter((each) => wasDeferred?.get(each.key) === true && laidOut.deferred.get(each.key) === false);
+        const arrived = opened.length === 0 ? made.arrived : made.arrived.filter((line) => !opened.some((each) => line.from > each.from && line.from <= each.to));
         // What's written in Markdown goes with the text, which is read by it in this transaction; and whose each line
         // is; and, once the review has been read (`readBy`), what arrived flashes.
         current.dispatch({
@@ -1275,7 +1316,7 @@ export function Review({
             selection: anchor === null ? undefined : { anchor },
             scrollIntoView: anchor !== null,
             annotations: rebuilt.of(true),
-            effects: [sourced.of(laidFor.sources), owned.of(laidOut.runs), ...(flashing ? [arrivedLines.of({ lines: made.arrived, at: now })] : [])],
+            effects: [sourced.of(laidFor.sources), owned.of(laidOut.runs), ...(flashing ? [arrivedLines.of({ lines: arrived, at: now })] : [])],
         });
         if (current.state.doc.length !== laidOut.text.length || current.state.sliceDoc() !== laidOut.text) {
             // The changes always make the text laid out; were they ever not to, it's laid out whole, and said.

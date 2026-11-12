@@ -8,6 +8,29 @@ import { demo, type Demo, type DemoOptions } from "./demo.ts";
 import type { Review } from "./review.ts";
 import { DEMO_ITEM } from "./typing.ts";
 
+/** explore-auth's banner, over their drawers. */
+const EXPLORE_AUTH = "━━ lup · dev · lup-impl/explore-auth";
+
+/** The banner of explore-auth's lead, lup-impl, whose own goes on past the name, over their drawers. */
+const LUP_IMPL = "━━ lup · dev · lup-impl · ";
+
+/** Open the drawer of `kind` under `banner`, once the host has answered its view: the next one after the banner may be another agent's until then. */
+async function unfoldTheirs(review: Review, banner: string, kind: string): Promise<void> {
+    await review.until(
+        `lay out the ${kind} drawer under ${banner}`,
+        (view, { banner, kind }) => {
+            const lines = view.state.doc.toString().split("\n");
+            const at = lines.findIndex((each) => each.startsWith(banner));
+            const after = at === -1 ? [] : lines.slice(at + 1);
+            const end = after.findIndex((each) => each.startsWith("━━ "));
+            return (end === -1 ? after : after.slice(0, end)).some((each) => each.startsWith(`${kind} · `));
+        },
+        { banner, kind },
+    );
+    await review.goTo(banner);
+    await review.unfold(`${kind} · `);
+}
+
 const ways: [string, DemoOptions][] = [
     ["as the page opens", { size: 0 }],
     ["as one buffer", { size: 0, oneBuffer: true }],
@@ -37,8 +60,16 @@ describe.each(ways)("the review by agent, %s", (_way, options) => {
         expect(lines.filter((each) => /^── @(64|65|67|70)\b/.test(each))).toEqual([]);
         expect(lines.some((each) => each.startsWith("── @66 note"))).toBe(true);
         expect(lines.some((each) => each.startsWith("── @57 friction"))).toBe(true);
-        // The message itself, in the sender's drawer and the recipient's, saying who's talking to whom.
-        expect(lines.filter((each) => each.startsWith("@72 lup-impl/explore-auth → lup-impl · note"))).toHaveLength(2);
+        // The message itself, in the sender's drawer and the recipient's, saying who's talking to whom: each opened in
+        // turn, what a closed drawer holds not being laid out, and closed again before it's on screen long enough to be read.
+        const told: string[] = [];
+        for (const banner of [LUP_IMPL, EXPLORE_AUTH]) {
+            await unfoldTheirs(review, banner, "messages");
+            told.push(...(await review.text()).split("\n").filter((each) => each.startsWith("@72 lup-impl/explore-auth → lup-impl · note")));
+            await dashboard.keys.press(["z", "c"]);
+            await review.until("closed the drawer", (view) => !view.state.doc.toString().includes("@72 lup-impl/explore-auth → lup-impl · note"));
+        }
+        expect(told).toHaveLength(2);
         // Each drawer called what it is, the messages over the trace.
         const summaries = lines.filter((each) => /^(messages|trace) · /.test(each));
         expect(summaries[0]).toMatch(/^messages · /);
@@ -47,6 +78,7 @@ describe.each(ways)("the review by agent, %s", (_way, options) => {
     });
 
     it("writes a comment on what another agent wrote to them, whichever drawer it's written in, saying so", async () => {
+        await unfoldTheirs(review, LUP_IMPL, "messages");
         await review.goTo("@72 lup-impl/explore-auth → lup-impl · note");
         await dashboard.keys.press(["j"]);
         await review.comment();
@@ -59,7 +91,7 @@ describe.each(ways)("the review by agent, %s", (_way, options) => {
     });
 
     it("reaches a messages drawer by its letter, and marks it read with Space d as the reply is sent, the trace's mark as it was", async () => {
-        await review.goTo("━━ lup · dev · lup-impl/explore-auth");
+        await review.goTo(EXPLORE_AUTH);
         await dashboard.keys.press(["]", "M"]);
         await review.until("go to the next messages drawer", (view) => view.state.doc.lineAt(view.state.selection.main.head).text.startsWith("messages · "));
         const before = await review.line();
