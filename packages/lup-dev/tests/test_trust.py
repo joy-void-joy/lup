@@ -47,7 +47,7 @@ from lup_dev.declaration.requirements import (
 from lup_dev.declaration.resolve import resolve
 from lup_dev.git import Git, GitError
 from lup_dev.host.client import Detached, HostClient, Starter
-from lup_dev.host.protocol import Branches, HostError, Limits, Register, Stop
+from lup_dev.host.protocol import Behind, Branches, HostError, Limits, Register, Stop
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.service import HostService
 from lup_dev.host.workers import LaunchJudge
@@ -92,6 +92,7 @@ from lup_dev.launch.trust import (
     Unattended,
     Unchanged,
     UvToolchain,
+    behind,
     building,
     diffed,
     machine_trust,
@@ -3480,22 +3481,43 @@ def test_a_launcher_with_no_terminal_takes_the_answer_given_in_the_inbox() -> No
     assert Unattended(say_to=lambda _: None).ask("Approve?", Arrived()) is None
 
 
-def test_a_spawn_s_approval_says_first_who_asked_it_and_trust_reads_the_repository_it_was_given(
+def test_a_spawn_s_trust_asks_nothing_keeps_the_copy_approved_and_reads_the_repository_it_was_given(
     lup: Path, kit: Kit, shell: Shell
 ) -> None:
-    """A launch found its repository already: trust's git is pinned to that git directory, never led through the worktree's `.git`, and an agent's spawn says first that it asked."""
+    """A launch found its repository already: trust's git is pinned to that git directory, never led through the worktree's `.git`; and an agent's spawn, which a room times, asks the operator nothing, running the copy approved as a decline would."""
     common = Path(shell.git(lup, "rev-parse", "--absolute-git-dir"))
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    head = changed(lup, {"lup_project.py": DECLARED + "# changed\n"}, shell)
     trust = trusting(lup, kit, yes()).model_copy(
-        update={"found": common, "asked_for": "**Asked by an agent's spawn.**"}
+        update={"found": common, "asking": False}
     )
 
-    trust.ensure()
+    outcome = trust.ensure()
 
     assert trust.repository() == common
     assert trust.git() == Git.pinned(common)
     assert isinstance(trust.approvals, Here)
-    [asking] = trust.approvals.asking
-    assert Text.from_ansi(asking.summary).plain.startswith(
-        "**Asked by an agent's spawn.**\n\n"
+    assert trust.approvals.asking == []
+    assert outcome == Kept(commit=head, approval=first.approval, asked=False)
+    assert behind(outcome) == Behind(running=first.approval.commit, tip=head)
+    assert outcome.report() == (
+        "Not asked, the launch being an agent's spawn, which never asks: the tip "
+        "isn't the code judging this session. The host keeps running `lup-dev` "
+        f"from {first.approval.commit}, which you approved; the host zone at "
+        f"{head} differs from it."
     )
-    assert asking.repository == common
+    assert recording(trust).installed == []
+    assert approved(lup, kit, shell) == first.approval
+
+
+def test_a_spawn_s_trust_with_nothing_approved_launches_nothing_asking_nothing(
+    lup: Path, kit: Kit
+) -> None:
+    trust = trusting(lup, kit, yes()).model_copy(update={"asking": False})
+
+    with pytest.raises(TrustError, match="asks nothing, so nothing launches"):
+        trust.ensure()
+
+    assert isinstance(trust.approvals, Here)
+    assert trust.approvals.asking == []

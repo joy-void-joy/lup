@@ -1465,7 +1465,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return None if spawner == party else spawner
 
     def introduced(self, launch: Register) -> str:
-        """Say, in lup's words, what a session an agent spawned through lup is, as their session starts: whose they are, where they work, and where what they say goes, a side job's report back to their spawner, a builder's into the concern handed them, theirs."""
+        """Say, in lup's words, what a session an agent spawned through lup is, as their session starts: whose they are, where they work, and where what they say goes, a side job's report back to their spawner, a builder's into the concern handed them, theirs; and where its host code is the copy approved, not the tip's, which a spawn never asks about (`Register.behind`), both, so they can ask the operator for the newer."""
         spawner = launch.spawner
         if spawner is None:
             return ""
@@ -1477,6 +1477,18 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         handed = (
             None if spawner.concern is None else self.concerns().at(spawner.concern)
         )
+        behind = launch.behind
+        running = (
+            ""
+            if behind is None
+            else (
+                f" lup's host code judging you is `lup-dev` from {behind.running}, "
+                "the copy the operator approved, not the running branch's tip, "
+                f"whose host zone at {behind.tip} nobody approved yet: a session an "
+                "agent spawns never asks. Where you need the newer, say so to the "
+                "operator, who approves it from their own terminal."
+            )
+        )
         if handed is None:
             return (
                 f"lup: {who} spawned you through lup's `spawn`, as a side job for "
@@ -1484,7 +1496,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 "your turn saying is your report, handed to them whole, and you end "
                 "there, so end it with what they asked for. `send` to `parent` "
                 "reaches them meanwhile, and what they send you after resumes you, "
-                "with all you know so far."
+                f"with all you know so far.{running}"
             )
         return (
             f"lup: {who} spawned you through lup's `spawn` and handed you "
@@ -1493,7 +1505,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             "so ask them what's theirs to decide, and land your own branch. "
             f"{who} hears when you end, not what you report; `send` to `parent` "
             "reaches them where their brief is wrong on what matters. Their brief "
-            "comes as your first turn."
+            f"comes as your first turn.{running}"
         )
 
     async def closed(self, launch: Register) -> None:

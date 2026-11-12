@@ -288,6 +288,15 @@ class Spawner(Model):
     build. None for a side job, whose report comes back to its spawner."""
 
 
+class Behind(Model):
+    """The host code a launch an agent spawned runs, where the running branch's tip holds another nobody approved, which it asked nothing about (`Trust.asking`): the commit of each."""
+
+    running: str
+    """The commit of the copy approved, which judges its session."""
+    tip: str
+    """The commit of the tip's host zone, unapproved."""
+
+
 class Register(Request, reads=False):
     """Serve a launch: its socket directory, the hook socket inside, its record."""
 
@@ -370,6 +379,11 @@ class Register(Request, reads=False):
     up front: the one session its hooks may name, so a room's hook can't speak
     as another session of the repository's, a spawner among them. None for a
     terminal's, whose session the operator may clear and the runtime names."""
+    behind: Behind | None = None
+    """Where an agent spawned the launch, and the tip's host zone isn't the one
+    approved: the copy approved it runs, which its session is told as it
+    starts, so an agent needing the newer can ask the operator for it. None
+    where it runs the tip's."""
 
 
 class Rename(Request, reads=False):

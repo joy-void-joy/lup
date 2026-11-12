@@ -71,6 +71,7 @@ from lup_dev.host.holders import HeldEnd, HeldInterrupt, HeldPrompt, Holders
 from lup_dev.host.names import Names, container_name
 from lup_dev.host.on_trial import AcceptBranch, DropBranch, TrialSaid
 from lup_dev.host.protocol import (
+    Behind,
     Branches,
     Holding,
     HostError,
@@ -669,8 +670,9 @@ def launched(
     spawner: Spawner | None = None,
     model: str | None = None,
     session: str | None = None,
+    behind: Behind | None = None,
 ) -> Register:
-    """Register a launch of `runtime` in `tmp_path` with the running service, its repository `tmp_path`'s `.git` unless `repository` names another, spawned by `spawner` where it's given."""
+    """Register a launch of `runtime` in `tmp_path` with the running service, its repository `tmp_path`'s `.git` unless `repository` names another, spawned by `spawner` where it's given, running the host code `behind` says where it's given."""
     judge = tmp_path / "judges" / "bin" / "lup-dev"
     judge.parent.mkdir(parents=True, exist_ok=True)
     judge.touch()
@@ -691,6 +693,7 @@ def launched(
         spawner=spawner,
         model=model,
         session=session,
+        behind=behind,
     )
     client(machine.host, clock).register(registered)
     return registered
@@ -14711,8 +14714,9 @@ def side_job(
     *,
     name: str = "two",
     concern: int | None = None,
+    behind: Behind | None = None,
 ) -> Register:
-    """Register a held launch an agent of launch `one`, `spawner`, spawned, in a worktree of its own, as its launcher registers it: a side job, or a concern handed over where `concern` names one."""
+    """Register a held launch an agent of launch `one`, `spawner`, spawned, in a worktree of its own, as its launcher registers it: a side job, or a concern handed over where `concern` names one, running the host code `behind` says where it's given."""
     return launched(
         machine,
         clock,
@@ -14722,6 +14726,7 @@ def side_job(
         repository=spawner.repository,
         held=True,
         spawner=Spawner(launch="one", conversation=spawner, concern=concern),
+        behind=behind,
     )
 
 
@@ -14762,6 +14767,33 @@ def test_a_side_job_s_report_reaches_its_spawner_whole_waking_them_and_never_the
     assert waiting == []
     assert "spawned you through lup's `spawn`, as a side job for them" in context(
         started
+    )
+    assert "lup's host code judging you" not in context(started)
+
+
+def test_a_spawned_session_running_the_copy_approved_behind_the_tip_is_told_both_as_it_starts(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """A spawn's launcher asks the operator nothing: it runs the copy approved, and its session can ask for the newer."""
+    worktree = tmp_path / "w"
+    spawner = Conversation(repository=worktree / ".git", runtime="claude", session="s1")
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, worktree, "one", "claude")
+        side_job(
+            machine,
+            clock,
+            tmp_path,
+            spawner,
+            behind=Behind(running="a" * 40, tip="b" * 40),
+        )
+        child = machine.host.launch("two").hook
+        started = send(child, claude("SessionStart", source="startup", session_id="c1"))
+    assert context(started).endswith(
+        f"lup's host code judging you is `lup-dev` from {'a' * 40}, the copy the "
+        "operator approved, not the running branch's tip, whose host zone at "
+        f"{'b' * 40} nobody approved yet: a session an agent spawns never asks. "
+        "Where you need the newer, say so to the operator, who approves it from "
+        "their own terminal."
     )
 
 
@@ -15586,9 +15618,10 @@ def test_the_sweep_gives_each_held_session_apart_and_none_waits_past_a_launcher_
     assert [len(each.frames) for each in stalled] == [1, 1]
     # The two stalled gives waited at once, not one after the other.
     assert took < 3.5
-    assert note(numbers["three"], "For three.") in HeldPrompt.model_validate_json(
-        given
-    ).text
+    assert (
+        note(numbers["three"], "For three.")
+        in HeldPrompt.model_validate_json(given).text
+    )
     assert any(
         line.startswith("one: what waits for")
         and "didn't answer within 0:00:02" in line

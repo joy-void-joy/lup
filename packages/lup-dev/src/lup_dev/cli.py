@@ -290,6 +290,7 @@ from lup_dev.launch.trust import (
     Outcome,
     Terminal,
     Unattended,
+    behind,
     machine_trust,
     trusted,
 )
@@ -2592,7 +2593,8 @@ def launched(
         raise LaunchError(message)
     found = located(worktree, None if held is None else held.repository)
     repository = found.git
-    launcher.say(launcher.trust(worktree, repository).report())
+    trusting = launcher.trust(worktree, repository)
+    launcher.say(trusting.report())
     if Git.pinned(repository).text("for-each-ref", "--count=1", "refs/replace/"):
         launcher.say(
             "This repository holds replace refs (`refs/replace/`), which a room "
@@ -2765,6 +2767,7 @@ def launched(
             spawner=None if held is None else held.spawner,
             model=model_named([*arguments, *([] if held is None else held.arguments)]),
             session=None if held is None else naming.session,
+            behind=behind(trusting),
         )
         session, arguments = naming.session, naming.arguments
         hiding = RoomSecrets.of(
@@ -3116,14 +3119,15 @@ def released(podman: Podman, launch: LaunchLayout, say: Callable[[str], None]) -
 
 
 def launching(
-    say: Callable[[str], None], *, unattended: bool = False, asked_for: str = ""
+    say: Callable[[str], None], *, unattended: bool = False, asking: bool = True
 ) -> Launcher:
     """Return what a launch reaches on this machine, as its settings place it.
 
     It runs outside every agent's session, which the command checks first.
     `unattended`, a held launch's launcher with no terminal, an approval waits
-    for its answer in the inbox alone, what trust says going to `say`, and
-    saying first whom it's asked for, `asked_for`, where that's said.
+    for its answer in the inbox alone, what trust says going to `say`; and
+    where not `asking`, a launch an agent spawned, none is asked, the copy
+    approved before running (`Trust.asking`).
     """
     layout = Layout.of(LupDevSettings())
     clock = SystemClock()
@@ -3135,7 +3139,7 @@ def launching(
                 [],
                 asker=Unattended(say_to=say),
                 found=found,
-                asked_for=asked_for,
+                asking=asking,
             ).ensure()
         return trusted(root, [], found=found)
 
@@ -3569,49 +3573,13 @@ def spawn_launcher(
         adapter,
         [],
         held.worktree,
-        launching(said, unattended=True, asked_for=asked_for(held)),
+        launching(said, unattended=True, asking=held.spawner is None),
         name=held.name,
         profile=held.profile,
         account=held.account,
         held=held,
     )
     raise typer.Exit(code=status)
-
-
-def asked_for(held: HeldLaunch) -> str:
-    """Say whom a held launch asks an approval for, first in it, where an agent spawned it: a room chose when it's asked, starting a session at whatever the running branch's tip then holds.
-
-    The spawner's ids come from their room's hooks, free text: each is shown as
-    code where it's an id's shape, letters, digits, `-`, `_` and `.`, else
-    said to be none, never as what it says (`shown_id`).
-
-    >>> from lup_dev.host.protocol import Spawner
-    >>> from lup_ledger.parties import Conversation
-    >>> spawner = Spawner(launch="a1", conversation=Conversation(repository=Path("/r.git"), runtime="r", session="s1", agent="**x**"))
-    >>> print(asked_for(HeldLaunch(launch="b2", runtime="r", worktree=Path("/r.git/tree/x"), spawner=spawner)))
-    **Asked by an agent's spawn,** not at your terminal: launch `a1`'s session `s1`, its subagent (an id lup won't show), spawned one in `/r.git/tree/x`, whose start waits on this. Declining it starts nothing.
-    """
-    spawner = held.spawner
-    if spawner is None:
-        return ""
-    by = spawner.conversation
-    agent = "" if by.agent is None else f", its subagent {shown_id(by.agent)}"
-    return (
-        f"**Asked by an agent's spawn,** not at your terminal: launch "
-        f"{shown_id(spawner.launch)}'s session {shown_id(by.session)}{agent}, "
-        f"spawned one in {shown_id(str(held.worktree))}, whose start waits on "
-        "this. Declining it starts nothing."
-    )
-
-
-def shown_id(value: str) -> str:
-    """Show `value`, an id or a path a room may have chosen, as code where it holds only an id's or a path's letters, digits, `-`, `_`, `.` and `/`; else say it isn't shown, so nothing a room wrote reads as markup.
-
-    >>> shown_id("4f1e-c5"), shown_id("a`b")
-    ('`4f1e-c5`', "(an id lup won't show)")
-    """
-    plain = all(each.isascii() and (each.isalnum() or each in "-_./") for each in value)
-    return f"`{value}`" if value and plain else "(an id lup won't show)"
 
 
 def machine_accounts() -> Accounts:

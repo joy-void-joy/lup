@@ -141,7 +141,7 @@ from lup_dev.errors import LupDevError
 from lup_dev.gate import invoked
 from lup_dev.git import Git, Tracked
 from lup_dev.host.client import HostClient, Outstanding
-from lup_dev.host.protocol import Branches, HostError
+from lup_dev.host.protocol import Behind, Branches, HostError
 from lup_dev.inbox.protocol import (
     AnswerApproval,
     AskApproval,
@@ -720,17 +720,25 @@ class Trusted(Model):
 
 
 class Kept(Model):
-    """The operator declined the tip's host zone: the copy approved before stays."""
+    """The operator declined the tip's host zone, or a launch an agent spawned asked nothing about it: the copy approved before stays."""
 
     commit: str
     approval: Approval
     again: bool = False
     """Whether the repository's copy approved before was missing, and installed again."""
+    asked: bool = True
+    """Whether the operator was asked, and declined; not for a launch an agent
+    spawned, which never asks (`Trust.asking`)."""
 
     def report(self) -> str:
         """Say that the tip isn't the code judging the session, and what is."""
+        how = (
+            "Declined"
+            if self.asked
+            else "Not asked, the launch being an agent's spawn, which never asks"
+        )
         return (
-            "Declined: the tip isn't the code judging this session. The host keeps "
+            f"{how}: the tip isn't the code judging this session. The host keeps "
             f"running `lup-dev` from {self.approval.commit}, which you approved; the "
             f"host zone at {self.commit} differs from it."
             + reinstalled(self.approval, again=self.again)
@@ -756,6 +764,15 @@ class Unanswered(Model):
 
 type Outcome = Unchanged | Trusted | Kept | Unanswered
 """What `Trust.ensure` came to: approved before, approved at this check, declined, or approved with a copy that doesn't answer."""
+
+
+def behind(outcome: Outcome) -> Behind | None:
+    """Return the host code a launch that asked nothing runs, and the tip's it didn't ask about, where they differ (`Trust.asking`); none where it runs the tip's, or the operator answered."""
+    match outcome:
+        case Kept(asked=False, approval=approval, commit=commit):
+            return Behind(running=approval.commit, tip=commit)
+        case _:
+            return None
 
 
 class Elsewhere(ABC):
@@ -1735,10 +1752,12 @@ class Trust(Model, arbitrary_types_allowed=True):
     (`Git.pinned`), never led through the worktree's `.git` file again, which
     a room writes. None finds it through `root`, as the operator's own
     `lup-dev trust` does in their worktree."""
-    asked_for: str = ""
-    """Who a launch asks an approval for, said first in it, where that's not
-    the operator at their terminal: an agent's spawn, which chose when to ask,
-    naming who spawned it; empty says nothing."""
+    asking: bool = True
+    """Whether it asks the operator where the tip's host zone isn't the one
+    approved: not for a launch an agent spawned, which runs on the copy
+    approved before, as a decline leaves it, so a room never picks when the
+    operator is asked, by moving the running branch and then spawning. Asks
+    come from the operator's own launches and from pushes alone."""
     reading: Path | None = None
     """The worktree an approval it asks has its types read in, where that's not
     `root` (`proposed`): a bare repository's own directory holds no project, so
@@ -2150,6 +2169,8 @@ class Trust(Model, arbitrary_types_allowed=True):
                 # The tip's zone is the approved one, so its copy is the same.
                 again = self.reinstall(approval, zone.commit, copy)
                 return Unchanged(commit=zone.commit, approval=approval, again=again)
+            if not self.asking:
+                return self.unasked(standing, copy)
             if self.inside:
                 message = (
                     f"this runs inside a {self.inside[0]} session, and an agent "
@@ -2158,11 +2179,7 @@ class Trust(Model, arbitrary_types_allowed=True):
                 )
                 raise TrustError(message)
             change = self.change(standing)
-            summary = (
-                f"{self.asked_for}\n\n{change.summary()}"
-                if self.asked_for
-                else change.summary()
-            )
+            summary = change.summary()
             question = change.question()
             diff = change.diff()
             number = self.approvals.asked(
@@ -2196,6 +2213,21 @@ class Trust(Model, arbitrary_types_allowed=True):
             return self.ensure()
         with lock:
             return self.answered(repository, standing, given)
+
+    def unasked(self, standing: Standing, copy: JudgeLayout) -> Kept:
+        """Keep the copy approved before, asking nothing, as a decline does, for a launch an agent spawned (`asking`); raise `TrustError` where none was approved, so nothing launches."""
+        approval = standing.approval
+        zone = standing.zone
+        if approval is None:
+            message = (
+                f"the host zone at {zone.commit} isn't approved, and none was "
+                "approved before, so there's no `lup-dev` the host may run; a "
+                "launch an agent spawned asks nothing, so nothing launches until "
+                "you approve one from your own terminal"
+            )
+            raise TrustError(message)
+        again = self.reinstall(approval, approval.commit, copy)
+        return Kept(commit=zone.commit, approval=approval, again=again, asked=False)
 
     def proposed(self, pushed_by: Conversation | None = None) -> int | None:
         """Put the approval of the tip's host zone in the operator's inbox where it isn't the one approved, asking nothing here, and return its number; none where it's approved.
@@ -2471,7 +2503,7 @@ def machine_trust(
     asker: Asker | None = None,
     *,
     found: Path | None = None,
-    asked_for: str = "",
+    asking: bool = True,
 ) -> Trust:
     """Return trust on launch for the repository at `root`, with this machine's settings, the terminal, the inbox in the host service, uv, the service's client, and the engine and ruff to judge the zone's change with.
 
@@ -2479,7 +2511,7 @@ def machine_trust(
     the worktree an approval it asks has its types read in (`Trust.reading`),
     `asker` where it asks, this terminal by default, `found` the
     repository's git directory, where a launch found it already
-    (`Trust.found`), and `asked_for` whom it asks for (`Trust.asked_for`).
+    (`Trust.found`), and `asking` whether it asks at all (`Trust.asking`).
     """
     settings = LupDevSettings()
     layout = Layout.of(settings)
@@ -2489,7 +2521,7 @@ def machine_trust(
     return Trust(
         root=root,
         found=found,
-        asked_for=asked_for,
+        asking=asking,
         reading=reading,
         layout=layout,
         asker=Terminal() if asker is None else asker,
