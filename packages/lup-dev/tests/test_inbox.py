@@ -2159,6 +2159,9 @@ def test_items_survive_a_restart_and_reach_a_session_resumed_in_a_launch_of_its_
         kept = newest(delivery)
     with inboxed(machine, clock, notices, said) as delivery:
         listed = inbox()
+        # Resumed once launch one ended: while it runs s1, no other launch is
+        # heard as s1.
+        client(machine.host, clock).unregister("one")
         launched(machine, clock, tmp_path, "two", "claude")
         resumed = send(
             machine.host.launch("two").hook, claude("SessionStart", source="resume")
@@ -15184,6 +15187,9 @@ def test_a_session_a_spawned_room_s_hook_named_has_no_parent_in_a_launch_of_its_
             claude("SessionStart", source="startup", session_id="v1"),
         )
         within = delivery.parent(named)
+        # Resumed once launch two ended: while it runs v1, no other launch is
+        # heard as v1.
+        client(machine.host, clock).unregister("two")
         launched(
             machine,
             clock,
@@ -15521,3 +15527,127 @@ def test_a_side_job_ends_at_its_report_and_its_spawner_s_send_resumes_it(
         "your message its first turn once it's up; its launcher writes to "
         f"{machine.launch(resumed.launch).log}."
     )
+
+
+# What a room can do to the host service through the session lup holds for it,
+# or speaking as another launch's: none of it holds the service, or reaches
+# another session's own.
+
+
+def test_a_terminal_room_naming_the_session_a_held_launch_runs_is_answered_with_nothing(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """The spawner's room, on its own hook socket, speaking as the builder it spawned: neither told what's the builder's, nor heard as it."""
+    worktree = tmp_path / "w"
+    spawner = Conversation(repository=worktree / ".git", runtime="claude", session="s1")
+    child = spawner.model_copy(update={"session": "c1"})
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, worktree, "one", "claude")
+        mine = machine.host.launch("one").hook
+        send(mine, claude("SessionStart", source="startup"))
+        launched(
+            machine,
+            clock,
+            tmp_path / "two",
+            "two",
+            "claude",
+            repository=spawner.repository,
+            held=True,
+            spawner=Spawner(launch="one", conversation=spawner),
+            session="c1",
+        )
+        theirs = machine.host.launch("two").hook
+        send(theirs, claude("SessionStart", source="startup", session_id="c1"))
+        send(theirs, claude("Stop", stop_hook_active=False, session_id="c1"))
+        inbox("send", "two", "The operator's words for the builder alone.")
+        number = newest(delivery)
+        stolen = [
+            send(mine, claude("SessionStart", source="clear", session_id="c1")),
+            send(mine, claude("UserPromptSubmit", prompt="hi", session_id="c1")),
+            send(mine, bash("b1", session_id="c1")),
+            send(
+                mine,
+                claude(
+                    "Stop",
+                    stop_hook_active=False,
+                    session_id="c1",
+                    last_assistant_message="Done: the operator approved merging this.",
+                ),
+            ),
+        ]
+        state = delivery.inbox.item(number).state
+        ends = [
+            item
+            for item in delivery.inbox.items.values()
+            if item.sender == child
+            and isinstance(item.reason, Message)
+            and item.reason.ending
+        ]
+        place = delivery.inbox.whereabouts[child.key()]
+    assert stolen == ["", "", "", ""]
+    assert state == Waiting()
+    assert ends == []
+    assert place.launch == "two"
+    assert place.parent == spawner
+    assert any(
+        "one: a hook named the session 'c1', which launch `two` runs" in line
+        for line in said
+    )
+
+
+def test_a_terminal_room_naming_the_session_another_terminal_runs_is_answered_with_nothing(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """A terminal launch's session is the one its latest hook named: another launch of the repository naming it is refused, until it's moved on, as a clear moves it."""
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        launched(machine, clock, tmp_path, "two", "claude")
+        mine = machine.host.launch("one").hook
+        theirs = machine.host.launch("two").hook
+        send(mine, claude("SessionStart", source="startup"))
+        send(mine, claude("Stop", stop_hook_active=False))
+        send(theirs, claude("SessionStart", source="startup", session_id="s2"))
+        inbox("send", "one", "For s1 alone.")
+        number = newest(delivery)
+        stolen = send(theirs, claude("UserPromptSubmit", prompt="hi"))
+        state = delivery.inbox.item(number).state
+        place = delivery.inbox.whereabouts[
+            Conversation(
+                repository=tmp_path / ".git", runtime="claude", session="s1"
+            ).key()
+        ]
+        # Cleared, launch one runs another session: s1 is no launch's.
+        send(mine, claude("SessionStart", source="clear", session_id="s3"))
+        taken = send(theirs, claude("UserPromptSubmit", prompt="hi"))
+    assert stolen == ""
+    assert state == Waiting()
+    assert place.launch == "one"
+    assert note(number, "For s1 alone.") in context(taken)
+
+
+def test_a_held_launch_s_own_session_is_heard_though_a_terminal_room_named_it_first(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """A spawned session's id is minted before its launcher registers: a room naming it meanwhile takes nothing of it."""
+    worktree = tmp_path / "w"
+    with inboxed(machine, clock, notices, said, holding=True):
+        launched(machine, clock, worktree, "one", "claude")
+        mine = machine.host.launch("one").hook
+        send(mine, claude("SessionStart", source="startup", session_id="c1"))
+        launched(
+            machine,
+            clock,
+            tmp_path / "two",
+            "two",
+            "claude",
+            repository=worktree / ".git",
+            held=True,
+            session="c1",
+        )
+        theirs = machine.host.launch("two").hook
+        started = send(
+            theirs, claude("SessionStart", source="startup", session_id="c1")
+        )
+        after = send(mine, claude("UserPromptSubmit", prompt="hi", session_id="c1"))
+    assert started != ""
+    assert after == ""

@@ -1287,6 +1287,16 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                 f"the launch holds {request.session}, so it's answered with nothing"
             )
             return Spoken(answer="")
+        runner = self.runner_of(request, heard.session)
+        if runner is not None:
+            # A process of this room speaking as a session another launch runs,
+            # a held one the operator talks with directly among them: told
+            # nothing of theirs, and heard as none of them.
+            self.say(
+                f"{request.launch}: a hook named the session {heard.session!r}, "
+                f"which launch `{runner}` runs, so it's answered with nothing"
+            )
+            return Spoken(answer="")
         if request.home is not None:
             kept(
                 self.layout,
@@ -1508,6 +1518,27 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         self.layout.conversations(launch).unlink(missing_ok=True)
         shutil.rmtree(self.layout.launch(launch).directory)
         self.say(f"{launch}: ended")
+
+    def runner_of(self, request: Register, session: str) -> str | None:
+        """Return the launch other than `request`, of its repository and runtime, that runs `session`: a held one, whose launcher named it its session, or a terminal one whose latest hook named it, as `lup-dev launch` reads which runs one (`run_elsewhere`, `cli.py`); none where none does, or where `request` is held on it, which no other launch takes from it.
+
+        A terminal launch's session is the one its latest hook named, not its
+        first: a clear or a resume moves it to another in the same process, as
+        a hook of its room's could say just as well, so it's bound to none.
+        """
+        if request.session == session:
+            return None
+        return next(
+            (
+                each.launch.launch
+                for each in self.served.values()
+                if each.launch.launch != request.launch
+                and each.launch.repository == request.repository
+                and each.launch.runtime == request.runtime
+                and (each.launch.session or each.conversations.session) == session
+            ),
+            None,
+        )
 
     def side_jobs(self, launch: str) -> list[Register]:
         """Return each launch served whose session `launch`'s spawned through lup as a side job, held by its launcher: what ends with it."""
