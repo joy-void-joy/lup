@@ -78,7 +78,7 @@ describe.each(ways)("the review by agent, %s", (_way, options) => {
         expect(lines.some((each) => each.startsWith("── @66 note"))).toBe(true);
         expect(lines.some((each) => each.startsWith("── @57 friction"))).toBe(true);
         // The message itself, in the sender's drawer and the recipient's, saying who's talking to whom: each opened in
-        // turn, what a closed drawer holds not being laid out, and closed again before it's on screen long enough to be read.
+        // turn, what a closed drawer holds not being laid out, and closed again.
         const told: string[] = [];
         for (const banner of [LUP_IMPL, EXPLORE_AUTH]) {
             await unfoldTheirs(review, banner, "messages");
