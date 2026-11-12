@@ -1498,14 +1498,20 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 "reaches them meanwhile, and what they send you after resumes you, "
                 f"with all you know so far.{running}"
             )
+        # Its title is free text, its spawner's where they opened it with the
+        # spawn: set apart as someone's words, never said in lup's voice.
+        titled = Tag(
+            name="title", attributes={"concern": handed.name}, parts=[handed.title]
+        )
         return (
             f"lup: {who} spawned you through lup's `spawn` and handed you "
-            f'@{handed.name}, "{handed.title}": it\'s yours, {where}. What you '
-            "send lands there, the operator reads it and talks with you directly, "
-            "so ask them what's theirs to decide, and land your own branch. "
+            f"@{handed.name}: it's yours, {where}. What you send lands there, the "
+            "operator reads it and talks with you directly, so ask them what's "
+            "theirs to decide, and land your own branch. "
             f"{who} hears when you end, not what you report; `send` to `parent` "
             "reaches them where their brief is wrong on what matters. Their brief "
-            f"comes as your first turn.{running}"
+            f"comes as your first turn.{running}\nIts title, in the words of "
+            f"whoever opened it:\n{titled.written()}"
         )
 
     async def closed(self, launch: Register) -> None:
