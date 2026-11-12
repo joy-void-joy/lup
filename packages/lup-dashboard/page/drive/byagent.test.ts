@@ -61,6 +61,10 @@ describe.each(ways)("the review by agent, %s", (_way, options) => {
     beforeAll(async () => {
         served = await demo(options);
         dashboard = await open(served.url);
+        // Nothing read by being on screen, the page told it hasn't the focus: what's read moves no mark here but Space d's.
+        await dashboard.page.evaluate(() => {
+            Document.prototype.hasFocus = () => false;
+        });
         review = await dashboard.review();
         await review.holds(DEMO_ITEM);
         await review.settled();

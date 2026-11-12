@@ -51,6 +51,11 @@ describe("the panes by agent", () => {
     beforeAll(async () => {
         served = await demo({ size: 0 });
         dashboard = await open(served.url);
+        // Nothing read by being on screen, the page told it hasn't the focus: what's new stays new however long it's in
+        // view here, which what's read by being on screen, below, measures.
+        await dashboard.page.evaluate(() => {
+            Document.prototype.hasFocus = () => false;
+        });
         review = await dashboard.review();
         await review.holds(THEIR_ITEM);
         await review.settled();
