@@ -14890,6 +14890,9 @@ def test_a_builder_s_opening_line_sets_its_concern_s_title_apart_as_someone_s_wo
         started = context(
             send(child, claude("SessionStart", source="startup", session_id="c1"))
         )
+        # The line handing it, which says its title in lup's voice, went to a
+        # session not yet heard, so it was never kept.
+        later = send(child, bash("b1", session_id="c1"))
     lups, _, theirs = started.partition("\n")
     # Its name, a handle made of the title's letters, is all of it in lup's line.
     assert f"handed you @{thread.name}: it's yours" in lups
@@ -14898,6 +14901,7 @@ def test_a_builder_s_opening_line_sets_its_concern_s_title_apart_as_someone_s_wo
         "Its title, in the words of whoever opened it:\n"
         f'<title concern="{thread.name}">{title}</title>'
     )
+    assert later == ""
 
 
 def test_a_side_job_ends_with_its_spawner_s_launch_and_a_builder_doesn_t(
