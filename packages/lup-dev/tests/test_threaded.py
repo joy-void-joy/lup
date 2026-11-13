@@ -1125,6 +1125,30 @@ def test_ctrl_enter_on_one_destination_sends_what_reaches_it_alone_the_rest_stay
     assert work.delivery.inbox.draft() == Draft()
 
 
+def test_one_repository_s_pile_not_opened_yet_is_sent_alone_the_other_s_called_alike_staying(
+    work: Work, clock: FakeClock
+) -> None:
+    elsewhere = Path("/work/zoetrope.git")
+    rendered = work.delivery.inbox.made(
+        Message(kind="note", text="Rendered."),
+        Conversation(repository=elsewhere, runtime="claude", session="z1"),
+        Operator(),
+        Path("/work/zoe"),
+        clock.now(),
+    )
+    ours = Destined(id="d1", item=work.note, to=Destination(pile="Later"))
+    theirs = Destined(id="d2", item=rendered.number, to=Destination(pile="Later"))
+    work.delivery.drafted(Draft(moves=[ours, theirs]))
+
+    dispatched = asyncio.run(
+        work.delivery.reviewed(Destination(pile="Later"), elsewhere)
+    )
+
+    assert [each.item for each in dispatched.moved] == [rendered.number]
+    assert work.delivery.concerns().piled(REPOSITORY, "Later") is None
+    assert work.delivery.inbox.draft() == Draft(moves=[ours])
+
+
 def test_concerns_sent_under_each_other_or_into_a_pile_titled_as_themselves_are_refused_moving_nothing(
     work: Work,
 ) -> None:

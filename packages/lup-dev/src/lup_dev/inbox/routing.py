@@ -170,6 +170,13 @@ class Went(Model):
     """Where it went, in a few words."""
 
 
+class Reached(Model):
+    """Where a thing reaches, as Ctrl+Enter groups what it sends alone (`Routing.reach`): the destination, and the repository it's of where it's a pile by its title or `No agent`, each a repository's own."""
+
+    to: Destination
+    repository: Path | None = None
+
+
 class Split(Model):
     """A draft split where Ctrl+Enter sends one destination alone (`Routing.split`): what reaches it, sent; and the rest, kept drafted."""
 
@@ -518,10 +525,10 @@ class Routing(Model, arbitrary_types_allowed=True):
 
         return [follows(each) for each in letters]
 
-    def reach(self, destination: Destination, repository: Path) -> Destination:
-        """Return where `destination`, of what's sent from `repository`, reaches, as the line under the review groups what Ctrl+Enter sends: an agent; whoever answers for a concern, or for a pile there already, else that concern; a pile not opened yet by its title; `No agent`."""
+    def reach(self, destination: Destination, repository: Path) -> Reached:
+        """Return where `destination`, of what's sent from `repository`, reaches, as the line under the review groups what Ctrl+Enter sends: an agent; whoever answers for a concern, or for a pile there already, else that concern; a pile not opened yet by its title, or `No agent`, each of `repository`."""
         if destination.to is not None:
-            return destination
+            return Reached(to=destination)
         thread = (
             self.concerns.at(destination.thread)
             if destination.thread is not None
@@ -530,10 +537,10 @@ class Routing(Model, arbitrary_types_allowed=True):
             else self.concerns.piled(repository, destination.pile.strip())
         )
         if thread is None:
-            return destination
+            return Reached(to=destination, repository=repository)
         answering = self.concerns.answering(thread)
-        return (
-            Destination(thread=thread.number)
+        return Reached(
+            to=Destination(thread=thread.number)
             if answering is None
             else Destination(to=answering)
         )
@@ -549,8 +556,8 @@ class Routing(Model, arbitrary_types_allowed=True):
             case _:
                 return None
 
-    def split(self, draft: Draft, only: Destination) -> Split:
-        """Split `draft` where Ctrl+Enter sends `only` alone, as the line under the review groups it (`reach`): what reaches it, sent, each comment, message, remark and move, a message on a concern sent somewhere with the concern, and each question of its marked read, which the reply answers; the rest, every other mark, and every mark the page applies, staying drafted."""
+    def split(self, draft: Draft, only: Destination, of: Path | None = None) -> Split:
+        """Split `draft` where Ctrl+Enter sends `only` alone, of the repository `of` where it's a pile by its title or `No agent`, as the line under the review groups it (`reach`): what reaches it, sent, each comment, message, remark and move, a message on a concern sent somewhere with the concern, and each question of its marked read, which the reply answers; the rest, every other mark, and every mark the page applies, staying drafted."""
 
         def item_repository(number: int) -> Path:
             item = self.concerns.inbox.items.get(number)
@@ -566,8 +573,9 @@ class Routing(Model, arbitrary_types_allowed=True):
         def reaching(destination: Destination | None, repository: Path) -> bool:
             if destination is None:
                 return False
-            reached = self.reach(destination, repository)
-            return reached == self.reach(only, repository)
+            return self.reach(destination, repository) == self.reach(
+                only, of or repository
+            )
 
         def commented(comment: Comment) -> bool:
             sent = going(draft, comment)
@@ -577,7 +585,9 @@ class Routing(Model, arbitrary_types_allowed=True):
             return reaching(self.reached(comment.item), repository)
 
         # A message on a concern sent somewhere goes with it, where it isn't sent elsewhere itself.
-        moving = {each.thread: each.to for each in draft.moves if each.thread is not None}
+        moving = {
+            each.thread: each.to for each in draft.moves if each.thread is not None
+        }
 
         def lettered(letter: Letter) -> bool:
             repository = letter_repository(letter)

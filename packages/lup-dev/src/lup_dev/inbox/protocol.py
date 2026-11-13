@@ -202,6 +202,9 @@ class SendDraft(Request, reads=False):
     """The one destination to send what reaches alone, as Ctrl+Enter on its
     line under the review does: an agent, a concern or a pile nobody answers
     for, or `No agent`; none sends it all."""
+    repository: Path | None = None
+    """The repository of the destination `only` names, where it's a pile by its
+    title or `No agent`, each a repository's own; none where it names its own."""
 
 
 class AskApproval(Request, reads=False):
@@ -1560,7 +1563,7 @@ class DraftSending(Model, Handler[SendDraft], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: SendDraft) -> Reply:
-        dispatched = await self.delivery.reviewed(request.only)
+        dispatched = await self.delivery.reviewed(request.only, request.repository)
         return Reviewed(
             items=dispatched.reviews,
             read=dispatched.read,

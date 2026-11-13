@@ -1949,7 +1949,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 )
                 raise InboxError(message)
 
-    async def reviewed(self, only: Destination | None = None) -> Dispatched:
+    async def reviewed(
+        self, only: Destination | None = None, of: Path | None = None
+    ) -> Dispatched:
         """Send the operator's draft as one reply: each concern and item it sends somewhere moved there first (`Routing`); then to each conversation with a comment on their messages or questions, a question among them, or a message to them, what they wrote elsewhere sent there among it, the whole of it; its items answered or done; each approval and held change it covers answered by its own rule; and the draft left with its marks, for the page to apply.
 
         Each conversation is told the operator's message to them and their own
@@ -1985,14 +1987,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         can't go (`Routing.planned`).
 
         With `only`, it sends what of the draft reaches that destination alone,
-        as Ctrl+Enter on its line does, the rest staying drafted
-        (`Routing.split`).
+        of the repository `of` where it's a pile by its title or `No agent`, as
+        Ctrl+Enter on its line does, the rest staying drafted (`Routing.split`).
         """
         drafted = self.inbox.draft()
         self.heard(drafted)
         roster = self.roster()
         routing = Routing(concerns=self.concerns(), roster=roster)
-        split = None if only is None else routing.split(drafted, only)
+        split = None if only is None else routing.split(drafted, only, of)
         whole = drafted if split is None else split.sending
         # A move dropped leaves what's written on its item going with the reply,
         # as if it were never sent anywhere.
