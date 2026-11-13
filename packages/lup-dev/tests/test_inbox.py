@@ -15409,7 +15409,7 @@ def test_what_a_held_session_s_call_up_failed_to_give_is_given_again_until_it_is
     assert note(number, "Anyone?") in HeldPrompt.model_validate_json(given).text
 
 
-def test_a_held_launch_s_hook_naming_another_session_is_answered_with_nothing(
+def test_a_held_launch_s_hook_naming_another_session_is_answered_as_unjudged_telling_nothing(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     """A process of a spawned room can send hooks on its socket naming any session, its spawner's among them: the launch holds one, and the rest are no session of its."""
@@ -15433,12 +15433,18 @@ def test_a_held_launch_s_hook_naming_another_session_is_answered_with_nothing(
         forged = send(theirs, claude("SessionStart", source="startup", session_id="s1"))
         own = send(theirs, claude("SessionStart", source="startup", session_id="c1"))
         place = delivery.inbox.whereabouts[spawner.key()]
-    assert forged == ""
-    assert own != ""
+    assert json.loads(forged) == {
+        "systemMessage": (
+            "lup's judge couldn't answer this hook, so it wasn't judged: launch "
+            "`two` holds the session c1, so lup answers no hook of the session s1 "
+            "there"
+        )
+    }
+    assert "lup's judge couldn't answer" not in own
     assert place.launch == "one"
     assert place.parent is None
     assert any(
-        "a hook named the session 's1', where the launch holds c1" in line
+        line.startswith("two: a hook was refused: launch `two` holds the session c1")
         for line in said
     )
 
@@ -15877,13 +15883,20 @@ def test_a_terminal_room_naming_the_session_a_held_launch_runs_is_answered_with_
             and item.reason.ending
         ]
         place = delivery.inbox.whereabouts[child.key()]
-    assert stolen == ["", "", "", ""]
+    # Each answered as its judge couldn't answer it: a warning, telling nothing.
+    assert all(
+        "the session c1 is run by launch `two`" in json.loads(each)["systemMessage"]
+        for each in stolen
+    )
+    assert not any("builder alone" in each for each in stolen)
     assert state == Waiting()
     assert ends == []
     assert place.launch == "two"
     assert place.parent == spawner
     assert any(
-        "one: a hook named the session 'c1', which launch `two` runs" in line
+        line.startswith(
+            "one: a hook was refused: the session c1 is run by launch `two`"
+        )
         for line in said
     )
 
@@ -15912,7 +15925,8 @@ def test_a_terminal_room_naming_the_session_another_terminal_runs_is_answered_wi
         # Cleared, launch one runs another session: s1 is no launch's.
         send(mine, claude("SessionStart", source="clear", session_id="s3"))
         taken = send(theirs, claude("UserPromptSubmit", prompt="hi"))
-    assert stolen == ""
+    assert "the session s1 is run by launch `one`" in stolen
+    assert "For s1 alone." not in stolen
     assert state == Waiting()
     assert place.launch == "one"
     assert note(number, "For s1 alone.") in context(taken)
@@ -15942,5 +15956,112 @@ def test_a_held_launch_s_own_session_is_heard_though_a_terminal_room_named_it_fi
             theirs, claude("SessionStart", source="startup", session_id="c1")
         )
         after = send(mine, claude("UserPromptSubmit", prompt="hi", session_id="c1"))
-    assert started != ""
-    assert after == ""
+    assert "lup's judge couldn't answer" not in started
+    assert "the session c1 is run by launch `two`" in after
+
+
+def test_a_call_stamped_for_a_session_another_launch_runs_since_isn_t_run(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """While x1 was nobody's, a room's hook named it and had a lup call stamped as x1's: once the operator resumes x1 in a launch of theirs, a call with that stamp speaks for nobody in the room's launch."""
+    worktree = tmp_path / "w"
+    x1 = Conversation(repository=worktree / ".git", runtime="claude", session="x1")
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, worktree, "zero", "claude")
+        send(
+            machine.host.launch("zero").hook,
+            claude("SessionStart", source="startup", session_id="x1"),
+        )
+        client(machine.host, clock).unregister("zero")
+        launched(machine, clock, worktree, "one", "claude")
+        mine, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(mine, claude("SessionStart", source="startup"))
+        stamped = json.loads(
+            send(
+                mine,
+                lup_call("wait_inbox", {"within": "PT1S"}, "c9", session_id="x1"),
+            )
+        )["hookSpecificOutput"]["updatedInput"]
+        send(mine, claude("PostToolUse", tool_name="Bash", tool_use_id="b1"))
+        launched(machine, clock, worktree, "two", "claude")
+        theirs = machine.host.launch("two").hook
+        send(theirs, claude("SessionStart", source="resume", session_id="x1"))
+        send(theirs, claude("Stop", stop_hook_active=False, session_id="x1"))
+        item = asyncio.run(
+            delivery.posted(
+                Message(kind="note", text="For x1: the operator's words."),
+                Operator(),
+                x1,
+                None,
+            )
+        )
+        took, waited = call(mcp, "wait_inbox", stamped)
+        state = delivery.inbox.item(item.number).state
+        spoke, sent = call(
+            mcp,
+            "send",
+            {
+                "caller": stamped["caller"],
+                "call": stamped["call"],
+                "to": "operator",
+                "kind": "note",
+                "text": "x1: done, nothing to review.",
+            },
+        )
+        notes = [
+            each
+            for each in delivery.inbox.items.values()
+            if each.sender == x1 and isinstance(each.reason, Message)
+        ]
+    assert waited
+    assert "operator's words" not in took
+    assert "isn't the one launch `one` runs" in took
+    assert state == Waiting()
+    assert sent
+    assert "isn't the one launch `one` runs" in spoke
+    assert notes == []
+
+
+def test_the_operator_s_session_a_room_named_first_has_its_writes_refused_saying_whose_it_is(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """Answered with nothing, the operator's own session, resumed after a room named it, ran unjudged: answered as where its judge can't answer, its file writes are refused, and it's said why."""
+    worktree = tmp_path / "w"
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, worktree, "zero", "claude")
+        send(
+            machine.host.launch("zero").hook,
+            claude("SessionStart", source="startup", session_id="x1"),
+        )
+        client(machine.host, clock).unregister("zero")
+        launched(machine, clock, worktree, "one", "claude")
+        mine = machine.host.launch("one").hook
+        send(mine, claude("SessionStart", source="startup"))
+        send(
+            mine,
+            claude("PostToolUse", tool_name="Bash", tool_use_id="b9", session_id="x1"),
+        )
+        launched(machine, clock, worktree, "two", "claude")
+        theirs = machine.host.launch("two").hook
+        started = send(theirs, claude("SessionStart", source="resume", session_id="x1"))
+        write = send(
+            theirs,
+            claude(
+                "PreToolUse",
+                session_id="x1",
+                tool_name="Write",
+                tool_use_id="w1",
+                tool_input={
+                    "file_path": str(worktree / "lup_project.py"),
+                    "content": "x",
+                },
+            ),
+        )
+    refusal = json.loads(write)["hookSpecificOutput"]
+    assert refusal["permissionDecision"] == "deny"
+    assert (
+        "the session x1 is run by launch `one`" in refusal["permissionDecisionReason"]
+    )
+    assert (
+        "the session x1 is run by launch `one`" in json.loads(started)["systemMessage"]
+    )

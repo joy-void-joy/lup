@@ -1303,21 +1303,24 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             # A held launch runs the one session its launcher named: a hook
             # naming another is a process of its room's speaking as another
             # session of the repository, its spawner's among them.
-            self.say(
-                f"{request.launch}: a hook named the session {heard.session!r}, where "
-                f"the launch holds {request.session}, so it's answered with nothing"
+            why = (
+                f"launch `{request.launch}` holds the session {request.session}, "
+                f"so lup answers no hook of the session {heard.session} there"
             )
-            return Spoken(answer="")
+            return self.refused(request, payload, why)
         runner = self.runner_of(request, heard.session)
         if runner is not None:
             # A process of this room speaking as a session another launch runs,
             # a held one the operator talks with directly among them: told
-            # nothing of theirs, and heard as none of them.
-            self.say(
-                f"{request.launch}: a hook named the session {heard.session!r}, "
-                f"which launch `{runner}` runs, so it's answered with nothing"
+            # nothing of theirs, and heard as none of them. Where it's the
+            # operator's own session, resumed here after a room named it, its
+            # writes are refused, as where the judge can't answer.
+            why = (
+                f"the session {heard.session} is run by launch `{runner}`, so lup "
+                f"answers its hooks there, not in launch `{request.launch}`: end "
+                "that launch, or work in it"
             )
-            return Spoken(answer="")
+            return self.refused(request, payload, why)
         if request.home is not None:
             kept(
                 self.layout,
@@ -1539,6 +1542,11 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         self.layout.conversations(launch).unlink(missing_ok=True)
         shutil.rmtree(self.layout.launch(launch).directory)
         self.say(f"{launch}: ended")
+
+    def refused(self, request: Register, payload: str, why: str) -> Spoken:
+        """Answer a hook naming a session this launch doesn't run, `why` saying whose it is, as one its judge couldn't answer (`Answerer.unanswered`): a file's write refused, the operator warned of any other call, nothing told, and none of it kept as that session's."""
+        self.say(f"{request.launch}: a hook was refused: {why}")
+        return Spoken(answer=self.answerer.unanswered(request.runtime, payload, why))
 
     def runner_of(self, request: Register, session: str) -> str | None:
         """Return the launch other than `request`, of its repository and runtime, that runs `session`: a held one, whose launcher named it its session, or a terminal one whose latest hook named it, as `lup-dev launch` reads which runs one (`run_elsewhere`, `cli.py`); none where none does, or where `request` is held on it, which no other launch takes from it.

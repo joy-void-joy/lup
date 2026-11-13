@@ -184,7 +184,10 @@ class LaunchTools(Model, Toolset, arbitrary_types_allowed=True):
         """Route the call to the module serving `name`, with the launch and the conversation its `caller` names.
 
         A call with no `caller` is taken as the launch's main conversation's, and
-        said; one whose `caller` no hook of the launch minted isn't run. A tool
+        said; one whose `caller` no hook of the launch minted isn't run, nor one
+        whose `caller` is of a session other than the one the launch runs: a
+        held launch's is the one its launcher named, a terminal's the one its
+        latest hook named, and another launch may run the earlier one. A tool
         that fails answers its failure (`answered`).
         """
         serving = [
@@ -216,6 +219,19 @@ class LaunchTools(Model, Toolset, arbitrary_types_allowed=True):
                     text=(
                         f"lup doesn't know the conversation `{stamp}` this call names, "
                         "so it wasn't run; calling it again names yours"
+                    ),
+                    error=True,
+                )
+            # A conversation the launch minted once a hook named its session:
+            # where the launch runs another since, as where another launch took
+            # that session over, a call stamped then speaks for nobody here.
+            running = launch.session or self.conversations.session
+            if caller.session != running:
+                return Answer(
+                    text=(
+                        f"this call names the session {caller.session}, which isn't "
+                        f"the one launch `{launch.launch}` runs, so it wasn't run; "
+                        "calling it again names yours"
                     ),
                     error=True,
                 )
