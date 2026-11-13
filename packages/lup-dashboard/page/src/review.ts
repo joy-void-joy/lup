@@ -2143,6 +2143,12 @@ export function laid(
             asides.push({ kind: "concern-nested", ...line });
             laidHere.items.push({ ...line, number: each.number });
         }
+        // The rest of what's in it counted, so one opened never reads as empty while it holds what's settled.
+        const shownHere = new Set([...(read.moved ?? []), ...(read.asks ?? []).map((each) => each.node), ...(read.new ?? [])]);
+        const rest = (read.members ?? 0) - shownHere.size - (read.passages ?? []).length;
+        if (rest > 0) {
+            asides.push({ kind: "concern-context", ...w.line(`${inner}${rest} more in it, none asking you or new`, `${id} rest`) });
+        }
         for (const child of allConcerns.filter((each) => (each.thread.parent ?? null) === number && !here.has(each.thread.number) && each.bare !== true && concernReads(each) !== "gone")) {
             // Who holds it, or who left it where nobody running answers for it, which its marks say.
             const owner = taskOwner(child);

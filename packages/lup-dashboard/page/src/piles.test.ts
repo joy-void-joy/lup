@@ -127,9 +127,10 @@ describe("a concern's block, laid out as an item", () => {
 
     it("says what landed there that asks or is new, a line each Enter follows to the item, and the passages it came from, Enter following each to what it was on", () => {
         const passages = [{ spot: { node: 90, part: 1 }, words: "Fix the cache.", answer: null, on: 53 }] as ThreadRead["passages"];
-        const read = concern(305, "The landed", LEAD, { asks: [{ node: 53, what: "a note", came: AT, holds: false }], new: [52], passages } as Partial<ThreadRead>);
+        const read = concern(305, "The landed", LEAD, { asks: [{ node: 53, what: "a note", came: AT, holds: false }], new: [52], passages, members: 7 } as Partial<ThreadRead>);
         const out = buffer({ kind: "agent", key: whose(LEAD) }, [read], undefined, null);
-        expect(out.text).toContain("  @53 note, asks you\n  @52 note, new\n");
+        // The rest of what's in it, counted: seven, less the passage, what asks and what's new.
+        expect(out.text).toContain("  @53 note, asks you\n  @52 note, new\n  4 more in it, none asking you or new\n");
         const [block] = out.concerns;
         expect(block?.items.map((each) => [each.number, out.text.slice(each.from, each.to).trim()])).toEqual([
             [53, "@53 note, asks you"],
