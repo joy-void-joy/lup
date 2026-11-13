@@ -1364,10 +1364,11 @@ def test_the_sweep_ends_each_side_job_whose_spawner_s_launch_isn_t_served(
 def test_the_sweep_removes_what_a_side_job_was_started_with_once_its_worktree_is_gone(
     layout: Layout, tmp_path: Path, clock: FakeClock
 ) -> None:
-    """Nothing resumes a side job whose worktree is gone, as `land` removes a landed branch's."""
-    kept, gone = tmp_path / "kept", tmp_path / "gone"
+    """Nothing resumes a side job whose worktree is gone, as `land` removes a landed branch's; one a room made a link is taken for gone, never followed."""
+    kept, gone, linked = tmp_path / "kept", tmp_path / "gone", tmp_path / "linked"
     kept.mkdir()
-    for session, worktree in [("c1", kept), ("c2", gone)]:
+    linked.symlink_to(kept)
+    for session, worktree in [("c1", kept), ("c2", gone), ("c4", linked)]:
         record = layout.side_job(session)
         record.parent.mkdir(parents=True, exist_ok=True)
         record.write_text(
@@ -1391,6 +1392,7 @@ def test_the_sweep_removes_what_a_side_job_was_started_with_once_its_worktree_is
     assert said == [
         f"What side job c2 was started with is removed: its worktree, {gone}, is gone.",
         "What side job c3 was started with is removed: it didn't read.",
+        f"What side job c4 was started with is removed: its worktree, {linked}, is gone.",
     ]
 
 

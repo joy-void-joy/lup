@@ -2462,13 +2462,17 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
         if self.reap is not None:
             await self.reap()
         await self.orphans_ended()
-        self.forgotten()
+        await asyncio.to_thread(self.forgotten)
         if self.rewake is not None:
             await self.rewake()
         self.woken()
 
     def forgotten(self) -> None:
-        """Remove what each side job was started with where its worktree is gone, so nothing resumes it again (`Layout.side_job`, `SpawnTools.resumed`), or where it doesn't read, saying each; what can't be read or removed is said, and the next sweep looks again."""
+        """Remove what each side job was started with where its worktree is gone, so nothing resumes it again (`Layout.side_job`, `SpawnTools.resumed`), or where it doesn't read, saying each; what can't be read or removed is said, and the next sweep looks again.
+
+        Run off the event loop: the worktrees are paths a room writes. One
+        that's a link is taken for gone, never followed.
+        """
         try:
             kept = sorted(self.layout.side_jobs.glob("*.json"))
         except OSError as unread:
@@ -2477,7 +2481,7 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
         for each in kept:
             try:
                 spec = HeldLaunch.model_validate_json(each.read_text())
-                gone = not spec.worktree.is_dir()
+                gone = not spec.worktree.is_dir(follow_symlinks=False)
             except ValueError, OSError:
                 gone = True
                 spec = None
