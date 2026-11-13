@@ -62,6 +62,7 @@ from lup_dev.inbox.store import (
     Answer,
     Approval,
     ChangedFile,
+    Destination,
     Draft,
     Flagged,
     HeldChange,
@@ -194,9 +195,13 @@ class KeepTalk(Request, reads=False):
 
 
 class SendDraft(Request, reads=False):
-    """Send the operator's draft reply: a review to each conversation whose items it covers or it writes to."""
+    """Send the operator's draft reply: a review to each conversation whose items it covers or it writes to; or what of it reaches one destination alone, the rest staying drafted."""
 
     kind: Literal["inbox-send-draft"] = "inbox-send-draft"
+    only: Destination | None = None
+    """The one destination to send what reaches alone, as Ctrl+Enter on its
+    line under the review does: an agent, a concern or a pile nobody answers
+    for, or `No agent`; none sends it all."""
 
 
 class AskApproval(Request, reads=False):
@@ -1555,7 +1560,7 @@ class DraftSending(Model, Handler[SendDraft], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: SendDraft) -> Reply:
-        dispatched = await self.delivery.reviewed()
+        dispatched = await self.delivery.reviewed(request.only)
         return Reviewed(
             items=dispatched.reviews,
             read=dispatched.read,

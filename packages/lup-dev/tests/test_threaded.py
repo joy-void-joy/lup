@@ -20,13 +20,13 @@ from lup_dev.inbox.store import (
     Approval,
     Comment,
     Destination,
+    Destined,
     Done,
     Draft,
     Inbox,
     InboxError,
     Letter,
     Message,
-    Destined,
     Quote,
     Review,
     Ruling,
@@ -843,7 +843,7 @@ def test_the_operator_s_comment_on_their_own_words_goes_on_their_thread_to_whoev
                 Comment(id="c2", item=elsewhere, text="Not yet."),
             ],
             declined=[elsewhere],
-            parked=[parked],
+            moves=[Destined(id="later", item=parked, to=Destination(pile="Later"))],
         )
     )
 
@@ -922,7 +922,9 @@ def moving(work: Work, *moves: Destined) -> Dispatched:
     return asyncio.run(work.delivery.reviewed())
 
 
-def into(number: int, *, thread: int | None = None, pile: str | None = None) -> Destined:
+def into(
+    number: int, *, thread: int | None = None, pile: str | None = None
+) -> Destined:
     """Move item `number` into `thread`, or the pile titled `pile`."""
     return Destined(item=number, to=Destination(thread=thread, pile=pile))
 
@@ -1073,6 +1075,39 @@ def test_moving_an_item_is_refused_saying_why_and_moves_nothing(
         moving(work, into(work.note, pile="Later"), move())
     assert "later" not in work.read()
     assert work.read()["home"].moved == []
+
+
+def test_ctrl_enter_on_one_destination_sends_what_reaches_it_alone_the_rest_staying_drafted(
+    work: Work, clock: FakeClock
+) -> None:
+    other = worker(work)
+    clock.sleep(60)
+    to_other = Letter(id="m1", to=other.party, text="Look at the cache.")
+    later = Destined(id="d1", item=work.friction, to=Destination(pile="Later"))
+    work.delivery.drafted(
+        Draft(
+            comments=[Comment(id="c1", item=work.note, text="Built where?")],
+            letters=[to_other],
+            moves=[later],
+        )
+    )
+
+    lead = asyncio.run(work.delivery.reviewed(Destination(to=LEAD)))
+
+    [review] = lead.reviews
+    assert review.recipient == LEAD
+    assert lead.moved == []
+    assert work.delivery.inbox.draft() == Draft(letters=[to_other], moves=[later])
+    # A pile not opened yet, by its title; then whoever's left.
+    piled = asyncio.run(work.delivery.reviewed(Destination(pile="Later")))
+    assert [(each.item, each.to) for each in piled.moved] == [
+        (work.friction, "into @later")
+    ]
+    assert piled.reviews == []
+    assert work.delivery.inbox.draft() == Draft(letters=[to_other])
+    rest = asyncio.run(work.delivery.reviewed(Destination(to=other.party)))
+    assert [each.recipient for each in rest.reviews] == [other.party]
+    assert work.delivery.inbox.draft() == Draft()
 
 
 def test_a_destination_names_one_place_at_most() -> None:

@@ -4,6 +4,7 @@
 // sending it did, are said from their parts as the page made them, never from their words, a line and its whole from
 // the same parts; anything else said, a refusal's prose among it, is cut at its first sentence. Pure.
 import { cited } from "./comments";
+import type { Destination } from "./review";
 
 /**
  * One part of the reply, or of what sending it did, as the page knows it: what's done, to what. The line under the
@@ -14,8 +15,8 @@ export type ReplyPart =
     | { kind: "items"; done: string; numbers: readonly number[]; then?: string }
     /** A concern marked, by what it's called, `The reader cleared`: read, cleared or declined. */
     | { kind: "thread"; name: string; done: string }
-    /** What reaches a party, `to lup-impl/parser: a message, comments on @62`. */
-    | { kind: "to"; who: string; what: readonly string[] }
+    /** What reaches a party, `to lup-impl/parser: a message, comments on @62`; where it reaches, which Ctrl+Enter on its line in `g<` sends alone. */
+    | { kind: "to"; who: string; what: readonly string[]; only?: Destination }
     /** What's said as it is, on one line as whole: a view's mark, what came of a switch, a refusal. */
     | { kind: "said"; text: string };
 

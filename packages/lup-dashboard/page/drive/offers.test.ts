@@ -20,6 +20,14 @@ const says = (dashboard: Dashboard, text: string) =>
 const said = (dashboard: Dashboard, text: string) =>
     dashboard.page.waitForFunction((text) => document.querySelector(".bar .said")?.textContent?.includes(text) === true, text);
 
+/** Choose `choice` in Space s's picker, once it's open, by typing it and Enter, and return once it's closed. */
+async function picks(dashboard: Dashboard, choice: string): Promise<void> {
+    await dashboard.page.waitForSelector(".picker");
+    await dashboard.page.keyboard.type(choice);
+    await dashboard.page.keyboard.press("Enter");
+    await dashboard.page.waitForSelector(".picker", { state: "detached" });
+}
+
 /** Return once the top bar says `text`. */
 const counted = (dashboard: Dashboard, text: string) =>
     dashboard.page.waitForFunction((text) => document.querySelector(".bar")?.textContent?.includes(text) === true, text);
@@ -59,26 +67,28 @@ describe("what's offered, in headless Chromium", () => {
         await review.goTo("── @54 approval");
         await offers(dashboard, "␣d approve");
         await offers(dashboard, "␣x decline");
-        await offers(dashboard, "␣s leave it for later");
+        await offers(dashboard, "␣s send it to a concern");
         await offers(dashboard, "␣c comment on it");
         await review.goTo("── @52 note");
         await offers(dashboard, "␣d mark it read");
-        await offers(dashboard, "␣s leave it for later");
+        await offers(dashboard, "␣s send it to a concern");
         expect(await dashboard.page.locator(".keys").first().innerText()).not.toContain("␣x decline");
         // How it felt, as a friction, is news as a note is.
         await review.goTo("── @58 how it felt");
         await offers(dashboard, "␣d mark it read");
-        await offers(dashboard, "␣s leave it for later");
+        await offers(dashboard, "␣s send it to a concern");
     });
 
-    it("counts an approval left for later as waiting no more", async () => {
+    it("counts an approval sent into Later as waiting no more, and sent nowhere as waiting again", async () => {
         const count = async () => Number(/◆ (\d+)/.exec(await dashboard.page.locator(".bar").first().innerText())?.[1]);
         const before = await count();
         await review.goTo("── @54 approval");
         await dashboard.keys.press([" ", "s"]);
+        await picks(dashboard, "Later");
         await counted(dashboard, `◆ ${before - 1}`);
         await review.goTo("── @54 approval");
         await dashboard.keys.press([" ", "s"]);
+        await picks(dashboard, "where it is");
         await counted(dashboard, `◆ ${before}`);
     });
 

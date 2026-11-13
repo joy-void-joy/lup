@@ -759,7 +759,9 @@ class Readings(Model, arbitrary_types_allowed=True):
         item = None if member.part is None else self.source.items().get(member.node)
         if item is None:
             return None
-        return next((each for each in spoken(item) if each.id.part == member.part), None)
+        return next(
+            (each for each in spoken(item) if each.id.part == member.part), None
+        )
 
     def about(self, thread: Thread, members: list[Joined]) -> str | None:
         """Return what `thread` is about where its title is no real one (`untitled`): the first line of the first thing in it with words, an item, a check or a part of the operator's words, cut short; none where its title says it, or nothing in it says anything."""

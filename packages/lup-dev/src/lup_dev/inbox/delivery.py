@@ -165,6 +165,7 @@ from lup_dev.inbox.store import (
     ChangedFile,
     Comment,
     Decided,
+    Destination,
     Done,
     Draft,
     Edit,
@@ -1948,7 +1949,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 )
                 raise InboxError(message)
 
-    async def reviewed(self) -> Dispatched:
+    async def reviewed(self, only: Destination | None = None) -> Dispatched:
         """Send the operator's draft as one reply: each concern and item it sends somewhere moved there first (`Routing`); then to each conversation with a comment on their messages or questions, a question among them, or a message to them, what they wrote elsewhere sent there among it, the whole of it; its items answered or done; each approval and held change it covers answered by its own rule; and the draft left with its marks, for the page to apply.
 
         Each conversation is told the operator's message to them and their own
@@ -1982,11 +1983,17 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         anywhere, declines what isn't an approval or a held change, writes to a
         conversation lup's inbox has never heard of, or sends something where it
         can't go (`Routing.planned`).
+
+        With `only`, it sends what of the draft reaches that destination alone,
+        as Ctrl+Enter on its line does, the rest staying drafted
+        (`Routing.split`).
         """
-        whole = self.inbox.draft()
-        self.heard(whole)
+        drafted = self.inbox.draft()
+        self.heard(drafted)
         roster = self.roster()
         routing = Routing(concerns=self.concerns(), roster=roster)
+        split = None if only is None else routing.split(drafted, only)
+        whole = drafted if split is None else split.sending
         unmoved = self.unmoved(whole, roster)
         plan = routing.planned(
             whole.model_copy(
@@ -2074,7 +2081,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         )
         for item in asked:
             dispatched = await self.answered_in(draft, item, dispatched)
-        left = draft.kept()
+        left = draft.kept() if split is None else split.staying
         staying = [each for each in draft.comments if each.item in dispatched.kept]
         self.inbox.drafted(
             left.model_copy(

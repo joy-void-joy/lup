@@ -2101,7 +2101,10 @@ export function laid(
             asides.push({ kind: "concern-context", ...line });
         }
         // What of what landed there asks the operator or is new to them, where it's laid out in its agent's group.
-        const landed = [...(read.asks ?? []).map((each) => ({ number: each.node, said: `${each.what}, asks you` })), ...(read.new ?? []).map((each) => ({ number: each, said: "new" }))].filter((each) => shown.items.has(each.number));
+        const landed = [...(read.asks ?? []).map((each) => ({ number: each.node, said: "asks you" })), ...(read.new ?? []).map((each) => ({ number: each, said: "new" }))].flatMap((each) => {
+            const item = shown.items.get(each.number);
+            return item === undefined ? [] : [{ ...each, said: `${itemKind(item)}, ${each.said}` }];
+        });
         for (const each of landed) {
             const line = w.line(`${inner}${cited(each.number)} ${each.said}`, `${id} landed ${each.number}`);
             asides.push({ kind: "concern-nested", ...line });
