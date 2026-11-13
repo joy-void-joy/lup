@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { holdingOn, toSend, waitingOn } from "./App";
 import { partSaid } from "./brief";
 import { itemStanding, outlineOf } from "./outline";
-import { EMPTY, NONE_PILED, countToRead, laid, UNSEEN, type Around, type Conversation, type Draft, type Item } from "./review";
+import { EMPTY, NONE_PILED, countToRead, laid, UNSEEN, type Around, type Conversation, type Draft, type Item, type ThreadRead } from "./review";
 import { agentNamed } from "./Review";
 import { sightsOf } from "./seeing";
 
@@ -134,8 +134,10 @@ describe("where what's written goes, on the line under the review", () => {
                 { id: "m2", to: null, thread: 303, text: "A note to myself." },
             ],
         };
-        const naming = { called: (party: Item["sender"]) => (party.party === "operator" ? "you" : called(party)), named: () => "", holder: () => null, thread: (number: number) => (number === 307 ? "The voice" : "The auth") };
-        expect(toSend(draft, [], naming).map(partSaid)).toEqual(["to s1/a1: a message on The voice", "to no one: a message on The auth"]);
+        // Kept on one nobody answers for, the line is the concern's, which Ctrl+Enter on it in g< sends alone.
+        const auth = { thread: { number: 303, title: "The auth", repository: "/r/lup.git" }, answering: null } as unknown as ThreadRead;
+        const naming = { called: (party: Item["sender"]) => (party.party === "operator" ? "you" : called(party)), named: () => "", holder: () => null, thread: (number: number) => (number === 307 ? "The voice" : "The auth"), concern: (number: number) => (number === 303 ? auth : undefined) };
+        expect(toSend(draft, [], naming).map(partSaid)).toEqual(["to s1/a1: a message on The voice", "to The auth: a message"]);
     });
 });
 

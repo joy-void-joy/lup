@@ -15,8 +15,8 @@ export type ReplyPart =
     | { kind: "items"; done: string; numbers: readonly number[]; then?: string }
     /** A concern marked, by what it's called, `The reader cleared`: read, cleared or declined. */
     | { kind: "thread"; name: string; done: string }
-    /** What reaches a party, `to lup-impl/parser: a message, comments on @62`; where it reaches, which Ctrl+Enter on its line in `g<` sends alone. */
-    | { kind: "to"; who: string; what: readonly string[]; only?: Destination }
+    /** What reaches a party, `to lup-impl/parser: a message, comments on @62`; where it reaches, which Ctrl+Enter on its line in `g<` sends alone, of the repository `of` where that's a pile by its title or `No agent`. */
+    | { kind: "to"; who: string; what: readonly string[]; only?: Destination; of?: string }
     /** What's said as it is, on one line as whole: a view's mark, what came of a switch, a refusal. */
     | { kind: "said"; text: string };
 

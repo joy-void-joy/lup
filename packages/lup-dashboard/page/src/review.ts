@@ -1763,9 +1763,14 @@ export function laid(
     const unowned: ThreadRead[] = [];
     const parties = arranging.parties ?? partiesOf([...allConcerns.map((each) => each.thread.repository), ...items.flatMap((each) => (each.sender.party === "conversation" ? [each.sender.repository] : []))]);
     const party = showing?.kind === "party" ? parties.find((each) => each.name === showing.name) : undefined;
-    // A concern holding an item moved there that asks the operator wants their eyes, as one done does, where someone
-    // answers for it: one in a pile is set aside.
-    const asking = (read: ThreadRead) => (read.answering ?? null) !== null && (read.moved ?? []).some((number) => shown.items.get(number)?.asks === true && !settling.has(number));
+    // A concern holding an item moved there that waits on the operator, asking them or news to read, wants their eyes,
+    // as one done does, where someone answers for it: one in a pile is set aside.
+    const asking = (read: ThreadRead) =>
+        (read.answering ?? null) !== null &&
+        (read.moved ?? []).some((number) => {
+            const item = shown.items.get(number);
+            return item !== undefined && !settling.has(number) && waits(item) && (item.asks || news(item));
+        });
     for (const each of concernsIn(allConcerns, showing, party, arranging.running ?? new Map(), asking)) {
         // A party's concerns are its own, nobody's, at its top; the rest under whoever answers for each, or who left it.
         const owner = showing?.kind === "agent" ? taskOwner(each) : showing?.kind === "settled" || showing?.kind === "party" ? null : keptUnder(each);
@@ -2078,7 +2083,10 @@ export function laid(
         const wants = within_.some((each) => concernReads(each) === "for your eyes" || (each.asks ?? []).length > 0 || asking(each));
         const onIt = letters.filter((each) => each.thread === number);
         const closed = deferring({ of: id, kind: "concern", name: "" }, !wants, false);
-        if (closed && !letters.some((each) => within_.some((one) => one.thread.number === each.thread))) {
+        // What's written on it, on one nested under it, or on an item moved into one of them keeps it laid out.
+        const movedHere = new Set(within_.flatMap((each) => each.moved ?? []));
+        const written_ = letters.some((each) => within_.some((one) => one.thread.number === each.thread)) || wrote.some((each) => "item" in each && movedHere.has(each.item));
+        if (closed && !written_) {
             w.line(UNLAID, `${id} unlaid`);
             return { block: laidHere, node, closed: true, unlaid: true };
         }

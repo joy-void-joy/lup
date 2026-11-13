@@ -235,7 +235,14 @@ function confirmingOf(key: string, reading: Pick<ListReading, "threads">): Threa
 
 /** Return what of the agent `group` is of asks the operator from what's nested under their row: their items, what stays stopped until they're answered apart from what only wants their eyes, their threads done, for them to confirm, among that. */
 function askedOf(group: Grouping, reading: ListReading): Pick<BlocksTally, "holds" | "flagged"> {
-    const asking = presentOf(group, reading).filter((each) => toAnswer(each, reading.draft, piledOf(reading)));
+    // What was moved into a concern they answer for asks them through it, counted with their own.
+    const moved = movedOf(reading);
+    const into = reading.items.filter((each) => {
+        const read = moved.get(each.number);
+        const owner = read === undefined ? null : taskOwner(read);
+        return owner !== null && whose(owner) === group.key;
+    });
+    const asking = [...presentOf(group, reading), ...into].filter((each) => toAnswer(each, reading.draft, piledOf(reading)));
     const holds = asking.filter((each) => each.holds).length;
     return { holds, flagged: asking.length - holds + confirmingOf(group.key, reading).length };
 }

@@ -45,6 +45,7 @@ import {
     covered,
     EMPTY,
     flag,
+    concernsSent,
     goesTo,
     isLetter,
     itemsSent,
@@ -324,8 +325,9 @@ export function App() {
     };
     // A concern as the host reads it, by its number: none where the host hasn't said it yet.
     const concernNumbered = (number: number) => threadsRead?.threads.find((each) => each.thread.number === number);
-    // A pile there already, by its title: a concern at the top nobody answers for, open to the operator.
-    const pileTitled = (title: string) => threadsRead?.threads.find((each) => (each.thread.parent ?? null) === null && each.thread.title === title && (each.answering ?? null) === null && (each.cleared ?? null) === null);
+    // A pile of a repository there already, by its title: a concern at its top nobody answers for, open to the operator.
+    const pileTitled = (title: string, repository: string) =>
+        threadsRead?.threads.find((each) => each.thread.repository === repository && (each.thread.parent ?? null) === null && each.thread.title === title && (each.answering ?? null) === null && (each.cleared ?? null) === null);
 
     // The conversations running, in the order the host lists them: the review gives each a group.
     const live = useMemo<Live[]>(
@@ -1076,7 +1078,7 @@ export function App() {
      * returned; where a mark is refused after, what came before is sent, and that mark stays drafted, said. Throws where
      * the dashboard or the host can't be reached.
      */
-    async function sent(only: Destination | null = null): Promise<string | null> {
+    async function sent(only: Destination | null = null, of: string | null = null): Promise<string | null> {
         if (keeping.current !== null) {
             clearTimeout(keeping.current);
             keeping.current = null;
@@ -1101,7 +1103,7 @@ export function App() {
         // What Space s sent somewhere goes with the inbox's part: a concern or an item moved, what's written sent elsewhere.
         const moving = (now.moves ?? []).length > 0 || written(now).some((each) => each.text.trim() !== "" && goesTo(now, each) !== null);
         if (covered(now).length > 0 || messages(now).length > 0 || remarks(now).length > 0 || moving) {
-            const answer = await ask({ kind: "inbox-send-draft", ...(only === null ? {} : { only }) });
+            const answer = await ask({ kind: "inbox-send-draft", ...(only === null ? {} : { only }), ...(of === null ? {} : { repository: of }) });
             if (answer.kind === "refused") {
                 return answer.error;
             }
@@ -1152,7 +1154,7 @@ export function App() {
      * nothing more; that nothing is drafted; and, where the host refuses it or can't be reached, as while lup restarts,
      * why, the draft kept, for the next Ctrl+Enter to send.
      */
-    async function sendReply(only: Destination | null = null) {
+    async function sendReply(only: Destination | null = null, of: string | null = null) {
         if (inFlight.current) {
             setSending({ state: "sending", text: "Still sending your reply: what came of it is said here once the host answers." });
             return;
@@ -1164,7 +1166,7 @@ export function App() {
         inFlight.current = true;
         setSending({ state: "sending", text: only === null ? "Sending your reply…" : "Sending what goes there…" });
         try {
-            const refused = await sent(only);
+            const refused = await sent(only, of);
             setSending(refused === null ? null : { state: "failed", text: notSent(refused) });
         } catch (error) {
             setSending({ state: "failed", text: notSent(unreached(error)) });
@@ -1227,11 +1229,12 @@ export function App() {
             lines: goingWhole,
             sends: going.map((part) => {
                 const only = part.kind === "to" ? part.only : undefined;
+                const of = part.kind === "to" ? (part.of ?? null) : null;
                 return only === undefined
                     ? null
                     : () => {
                           setWholeOpen(false);
-                          void sendReply(only);
+                          void sendReply(only, of);
                       };
             }),
         },
@@ -1475,8 +1478,8 @@ interface Naming {
     thread?: (number: number) => string | null;
     /** A concern as the host reads it, by its number; none where the page doesn't know it. */
     concern?: (number: number) => ThreadRead | undefined;
-    /** A pile there already, as the host reads it, by its title (`Concerns.piled`); none where there's none yet. */
-    pile?: (title: string) => ThreadRead | undefined;
+    /** A pile of a repository there already, as the host reads it, by its title (`Concerns.piled`); none where there's none yet. */
+    pile?: (title: string, repository: string) => ThreadRead | undefined;
     /** What the draft marks or comments on that's past waiting on the operator, as it stands: a comment on one of a kind a reply answers goes to its sender, leaving it there. */
     past?: readonly Item[];
     /** What sending the draft sets aside, part by part, as the host says it: each mark dropped, each comment written elsewhere or kept drafted. */
@@ -1498,12 +1501,12 @@ export function holdingOn(waiting: readonly Item[], aside: ReadonlySet<number> =
  * (`Routing.reach`; `docs/inbox.md`, *Threads in the review*): an agent, as they're called; a concern someone answers for,
  * them, and on which; one nobody answers for, a pile, as it's called, kept there; `No agent`.
  */
-export function reachSaid(to: Destination, naming: Pick<Naming, "called" | "concern" | "pile">): { who: string; on: string; only: Destination } {
+export function reachSaid(to: Destination, naming: Pick<Naming, "called" | "concern" | "pile">, repository: string): { who: string; on: string; only: Destination; of?: string } {
     if (to.to != null) {
         return { who: naming.called(to.to), on: "", only: to };
     }
-    // A pile there already is that concern, as the host reads it (`Routing.reach`).
-    const read = to.thread != null ? naming.concern?.(to.thread) : to.pile != null ? naming.pile?.(to.pile) : undefined;
+    // A pile there already is that concern, as the host reads it (`Routing.reach`): its repository's.
+    const read = to.thread != null ? naming.concern?.(to.thread) : to.pile != null ? naming.pile?.(to.pile, repository) : undefined;
     if (read !== undefined) {
         const answering = read.answering ?? null;
         if (answering !== null) {
@@ -1511,7 +1514,8 @@ export function reachSaid(to: Destination, naming: Pick<Naming, "called" | "conc
         }
         return { who: concernWords(read), on: "", only: { thread: read.thread.number } };
     }
-    return { who: to.thread != null ? `@${to.thread}` : (to.pile ?? "No agent"), on: "", only: to };
+    // A pile by its title, or No agent, is its repository's own.
+    return to.thread != null ? { who: `@${to.thread}`, on: "", only: to } : { who: to.pile ?? "No agent", on: "", only: to, of: repository };
 }
 
 /**
@@ -1532,36 +1536,58 @@ export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): 
     // Approved by the send: an approval or a held change marked done, or only read, and a held change commented on.
     const approving = items.filter((each) => asked(each) && !declined.includes(each) && (done(each) || each.reason.reason === "held" || !commented.includes(each.number)));
     const to = new Map<string, string[]>();
-    // Where each reaches, which Ctrl+Enter on its line in `g<` sends alone: the first said of it.
-    const reaches = new Map<string, Destination>();
-    const reaching = (who: string, what: string, only: Destination | null = null) => {
+    // Where each line reaches, which Ctrl+Enter on it in `g<` sends alone, grouped as the host groups it
+    // (`Routing.split`); two places called alike told apart by their repository.
+    const reaches = new Map<string, { only: Destination; of?: string }>();
+    const reaching = (said: string, what: string, only: Destination | null = null, repository: string = "", of?: string) => {
+        const where = only === null ? null : { only, ...(of === undefined ? {} : { of }) };
+        const was = reaches.get(said);
+        const who = where !== null && was !== undefined && JSON.stringify(was) !== JSON.stringify(where) ? `${said} in ${last(repository)}` : said;
         to.set(who, [...(to.get(who) ?? []), what]);
-        if (only !== null && !reaches.has(who)) {
-            reaches.set(who, only);
+        if (where !== null && !reaches.has(who)) {
+            reaches.set(who, where);
         }
     };
+    const repositoryOfItem = (number: number) => {
+        const item = [...waiting, ...(naming.past ?? [])].find((each) => each.number === number);
+        return item === undefined ? "" : item.sender.party === "conversation" ? item.sender.repository : item.reason.reason === "approval" ? item.reason.repository : "";
+    };
+    const repositoryOfThread = (number: number | null | undefined) => (number == null ? "" : (naming.concern?.(number)?.thread.repository ?? ""));
     // What goes elsewhere than where it was written, where Space s sent it, or a comment with its item; and what moves.
     const elsewhere = written(draft).filter((each) => each.text.trim() !== "" && goesTo(draft, each) !== null);
     for (const each of elsewhere) {
         const sent = goesTo(draft, each);
         if (sent !== null) {
-            const { who, on, only } = reachSaid(sent, naming);
-            reaching(who, `${isLetter(each) ? "a message" : "item" in each ? `a comment on ${cited(each.item)}` : "a remark"}${on}`, only);
+            const repository = "item" in each ? repositoryOfItem(each.item) : isLetter(each) ? repositoryOfThread(each.thread) || (each.to?.repository ?? "") : each.to.repository;
+            const { who, on, only, of } = reachSaid(sent, naming, repository);
+            reaching(who, `${isLetter(each) ? "a message" : "item" in each ? `a comment on ${cited(each.item)}` : "a remark"}${on}`, only, repository, of);
         }
     }
     for (const move of draft.moves ?? []) {
-        const { who, on, only } = reachSaid(move.to, naming);
+        const repository = move.item != null ? repositoryOfItem(move.item) : repositoryOfThread(move.thread);
+        const { who, on, only, of } = reachSaid(move.to, naming, repository);
         const moving = move.thread == null ? undefined : naming.concern?.(move.thread);
         const what = move.item != null ? cited(move.item) : `§ ${moving === undefined ? `@${move.thread}` : concernWords(moving)}`;
-        reaching(who, `${what}${move.thread != null && move.to.thread != null ? " nested" : ""}${on}`, only);
+        reaching(who, `${what}${move.thread != null && move.to.thread != null ? " nested" : ""}${on}`, only, repository, of);
     }
+    // Each message written where it goes: to an agent, or kept on a concern nobody answers for; one on a concern sent
+    // somewhere going with it, as the host sends it (`Routing.followed`).
+    const following = concernsSent(draft);
     const letters = messages(draft).filter((each) => goesTo(draft, each) === null);
-    // A message on a thread says which; one to no one stays there.
     const on = (each: (typeof letters)[number]) => (each.thread == null ? "" : ` on ${naming.thread?.(each.thread) ?? `@${each.thread}`}`);
-    for (const [said, count] of tallyOf(letters.map((each) => `${each.to == null ? "no one" : naming.called(each.to)}\n${on(each)}`))) {
-        const [who = "", where = ""] = said.split("\n");
-        const one = letters.find((each) => (each.to == null ? "no one" : naming.called(each.to)) === who);
-        reaching(who, `${count === 1 ? "a message" : `${count} messages`}${where}`, one?.to != null ? { to: one.to } : one?.thread != null ? { thread: one.thread } : null);
+    const lettered = letters.map((each) => {
+        const repository = repositoryOfThread(each.thread) || (each.to?.repository ?? "");
+        const going = each.thread != null && each.to != null ? following.get(each.thread) : undefined;
+        const reached = reachSaid(going ?? (each.to != null ? { to: each.to } : { thread: each.thread ?? null }), naming, repository);
+        // Kept on the concern it's written on, the line names it already.
+        const kept = reached.only.thread != null && reached.only.thread === each.thread;
+        return { ...reached, where: kept ? "" : on(each), repository };
+    });
+    for (const [said, count] of tallyOf(lettered.map((each) => `${each.who}\n${each.where}`))) {
+        const one = lettered.find((each) => `${each.who}\n${each.where}` === said);
+        if (one !== undefined) {
+            reaching(one.who, `${count === 1 ? "a message" : `${count} messages`}${one.where}`, one.only, one.repository, one.of);
+        }
     }
     const remarking = remarks(draft).filter((each) => goesTo(draft, each) === null);
     for (const [who, count] of tallyOf(remarking.map((each) => naming.called(each.to)))) {
@@ -1579,7 +1605,7 @@ export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): 
             // An approval's comments go to the session whose push asked it, unanswered where it's neither marked done nor declined.
             const pusher = item.reason.pushed_by ?? null;
             if (words && pusher !== null) {
-                reaching(naming.called(pusher), `comments on ${cited(item.number)}${done(item) || declined.includes(item) ? "" : ", left unanswered"}`);
+                reaching(naming.called(pusher), `comments on ${cited(item.number)}${done(item) || declined.includes(item) ? "" : ", left unanswered"}`, { to: pusher });
             }
         } else if (words || item.reason.reason === "question") {
             reaching(naming.named(item), words ? `comments on ${cited(item.number)}` : `answering ${cited(item.number)}`, item.sender.party === "conversation" ? { to: item.sender } : null);
@@ -1607,8 +1633,8 @@ export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): 
     const doing = (how: string, list: readonly Item[]): ReplyPart[] => (list.length === 0 ? [] : [{ kind: "items", done: how, numbers: list.map((each) => each.number) }]);
     return [
         ...[...to].map(([who, what]): ReplyPart => {
-            const only = reaches.get(who);
-            return only === undefined ? { kind: "to", who, what } : { kind: "to", who, what, only };
+            const where = reaches.get(who);
+            return where === undefined ? { kind: "to", who, what } : { kind: "to", who, what, ...where };
         }),
         ...doing("read", read),
         ...doing("approving", approving),

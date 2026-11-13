@@ -110,6 +110,21 @@ describe("a concern's block, laid out as an item", () => {
         expect(out.text).toContain("§ The cache · s1 · working\n── @53 ──");
     });
 
+    it("stays laid out closed where a comment is written on an item moved into it, so the operator's words stay in the text", () => {
+        const pile = concern(300, "Later", null, { moved: [52] });
+        const draft: Draft = { ...EMPTY, comments: [{ id: "c1", item: 52, text: "Later, then." }] };
+        const out = laid([NOTE, ASKS, BUILT], [LEAD, WORKER], banner, header, draft, NOTHING, [], new Map(), called, { showing: { kind: "party", name: NOBODY.name }, running, looks: adopted(), concerns: [pile], folds: new Map() });
+        expect(out.text).toContain("Later, then.");
+        expect(out.concerns[0]?.fold).toMatchObject({ closed: true });
+        expect(out.concerns[0]?.fold?.unlaid).toBeUndefined();
+    });
+
+    it("lays one holding news moved there out in what's for the operator, where someone answers for it", () => {
+        const held = concern(304, "The notes", LEAD, { moved: [52] });
+        const out = buffer({ kind: "for you" }, [held], undefined, null);
+        expect(out.text).toContain("§ The notes · s1 · working\n── @52 ──");
+    });
+
     it("says what landed there that asks or is new, a line each Enter follows to the item, and the passages it came from, Enter following each to what it was on", () => {
         const passages = [{ spot: { node: 90, part: 1 }, words: "Fix the cache.", answer: null, on: 53 }] as ThreadRead["passages"];
         const read = concern(305, "The landed", LEAD, { asks: [{ node: 53, what: "a note", came: AT, holds: false }], new: [52], passages } as Partial<ThreadRead>);
@@ -161,6 +176,31 @@ describe("No agent, a party per repository", () => {
     });
 });
 
+describe("what's counted of an item moved into a concern", () => {
+    it("counts one that asks under whoever answers for its concern, in their row and what's for the operator", () => {
+        const held = concern(304, "The cache", LEAD, { moved: [53] });
+        const reading: ListReading = {
+            items: [NOTE, ASKS, BUILT],
+            draft: EMPTY,
+            agents: [LEAD, WORKER],
+            parents: new Map([[whose(WORKER), whose(LEAD)]]),
+            called,
+            banner: (shown) => banner({ item: shown }),
+            drawers: new Map(),
+            looks: adopted(),
+            remote: new Map(),
+            running,
+            activities: new Map(),
+            states: new Map(),
+            threads: { read: { kind: "inbox-threads-read", threads: [held], paths: [], working: [] }, landing: new Map() } as Threading,
+        };
+        const lines = listLaid(listedByAgent(reading)).text.split("\n");
+        expect(lines[0]).toContain("◇1");
+        expect(lines.find((each) => each.trim().startsWith("▶ s1") || each.trim().startsWith("○ s1") || each.trim().startsWith("✕ s1") || each.includes(" s1 "))).toBeDefined();
+        expect(lines.find((each) => each.includes("The cache"))).toContain("◇1");
+    });
+});
+
 describe("Space s's picker", () => {
     const picking = (concerns: readonly ThreadRead[]) => ({ concerns, agents: [LEAD, WORKER, ZOE], running: new Map([...running, [whose(ZOE), { launch: "z", holding: false }]]), called });
     const READER = concern(301, "The reader", LEAD);
@@ -207,8 +247,28 @@ describe("what the reply sends, by where it goes", () => {
         named: (each: Item) => (each.sender.party === "conversation" ? called(each.sender) : "lup"),
         holder: () => null,
         concern: (number: number) => [concern(301, "The reader", LEAD)].find((each) => each.thread.number === number),
+        thread: (number: number) => (number === 301 ? "The reader" : null),
         pile: () => undefined,
     };
+
+    it("tells two repositories' piles called alike apart, each its own line", () => {
+        const zoe = { ...note(90, ZOE, "Render."), sender: ZOE } as Item;
+        const draft = sentTo(sentTo(EMPTY, { kind: "item", number: 52, repository: REPOSITORY }, { pile: "Later" }), { kind: "item", number: 90, repository: ELSEWHERE }, { pile: "Later" });
+        const parts = toSend(draft, [NOTE, zoe], naming).filter((each) => each.kind === "to");
+        expect(parts.map((each) => (each.kind === "to" ? [each.who, each.what] : null))).toEqual([
+            ["Later", ["@52"]],
+            ["Later in zoetrope", ["@90"]],
+        ]);
+    });
+
+    it("sends a message on a concern sent somewhere with the concern, on that line", () => {
+        const draft: Draft = {
+            ...sentTo(EMPTY, { kind: "concern", read: concern(301, "The reader", LEAD) }, { to: WORKER }),
+            letters: [{ id: "m1", to: LEAD, thread: 301, text: "Take the cache too." }],
+        };
+        const parts = toSend(draft, [], naming).filter((each) => each.kind === "to");
+        expect(parts).toEqual([{ kind: "to", who: "s1/a1", what: ["§ The reader", "a message on The reader"], only: { to: WORKER } }]);
+    });
 
     it("says what goes where, each with where it reaches, a comment going with the item it's on", () => {
         const sent = sentTo(sentTo(EMPTY, { kind: "item", number: 52, repository: REPOSITORY }, { pile: "Later" }), { kind: "item", number: 53, repository: REPOSITORY }, { thread: 301 });
@@ -216,7 +276,7 @@ describe("what the reply sends, by where it goes", () => {
         expect(sentWhere(draft, { kind: "item", number: 53, repository: REPOSITORY })).toEqual({ thread: 301 });
         const parts = toSend(draft, [NOTE, ASKS, BUILT], naming);
         expect(parts.filter((each) => each.kind === "to")).toEqual([
-            { kind: "to", who: "Later", what: ["a comment on @52", "@52"], only: { pile: "Later" } },
+            { kind: "to", who: "Later", what: ["a comment on @52", "@52"], only: { pile: "Later" }, of: REPOSITORY },
             { kind: "to", who: "s1", what: ["@53 on The reader", "comments on @70"], only: { to: LEAD } },
         ]);
     });
