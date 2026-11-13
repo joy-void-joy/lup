@@ -31,13 +31,14 @@ from lup_dev.inbox.roster import Roster
 from lup_dev.inbox.store import (
     Approval,
     Comment,
-    HeldChange,
     Destination,
     Destined,
     Draft,
+    HeldChange,
     InboxError,
     Item,
     Letter,
+    Question,
     Remark,
     cited,
 )
@@ -133,6 +134,14 @@ class WrittenRoute(Model, arbitrary_types_allowed=True):
     to: Bound
 
 
+class Shape(Model, arbitrary_types_allowed=True):
+    """The concerns of the repositories a draft moves concerns of, as every move leaves them (`Routing.shaped`): each one's parent and holder, by number, a pile opened by its title given a number of its own below zero."""
+
+    parents: dict[int, int | None] = {}
+    holders: dict[int, Conversation | None] = {}
+    piles: dict[Bound, int] = {}
+
+
 class Plan(Model):
     """What a draft sends somewhere, read before anything moves: each concern and item moved, and where, and each thing written that goes elsewhere than where it was written."""
 
@@ -216,8 +225,9 @@ class Routing(Model, arbitrary_types_allowed=True):
             for each in draft.moves
             if each.thread is not None
         ]
+        shape = self.shaped(concerns)
         items = [
-            self.itemed(each.item, each.to)
+            self.itemed(each.item, each.to, shape)
             for each in draft.moves
             if each.item is not None
         ]
@@ -243,12 +253,96 @@ class Routing(Model, arbitrary_types_allowed=True):
         self.nestable(thread, bound)
         return ConcernRoute(thread=thread, to=bound)
 
-    def itemed(self, number: int, to: Destination) -> ItemRoute:
-        """Return where item `number` goes, sent to `to`: a concern or a pile of its repository; say where it's none of those, or no item lup keeps."""
+    def shaped(self, routes: list[ConcernRoute]) -> Shape:
+        """Return the concerns as `routes` leave them, every one moved at once: each one's parent and holder, a pile opened by its title among them; say where they'd leave one under itself, as two sent under each other would, or one sent into a pile that's itself.
+
+        Each route is read against the concerns as they stand alone
+        (`nestable`); together, a swap or a pile named by a concern's own
+        title only shows once they all have moved, which this reads before
+        anything does, so a send refused moves nothing.
+        """
+        repositories = list(dict.fromkeys(each.thread.repository for each in routes))
+        threads = [
+            thread
+            for repository in repositories
+            for thread in self.concerns.threads.of(repository)
+        ]
+        parents: dict[int, int | None] = {each.number: each.parent for each in threads}
+        holders: dict[int, Conversation | None] = {
+            each.number: each.holder for each in threads
+        }
+        piles: dict[Bound, int] = {}
+
+        def place(bound: Bound) -> int | None:
+            if bound.thread is not None:
+                return bound.thread.number
+            if bound.pile is None:
+                return None
+            found = self.concerns.piled(bound.repository, bound.pile)
+            if found is not None:
+                return found.number
+            # A pile not opened yet: one of its own, at the top, nobody holding it.
+            if bound not in piles:
+                piles[bound] = -1 - len(piles)
+                parents[piles[bound]] = None
+                holders[piles[bound]] = None
+            return piles[bound]
+
+        for route in routes:
+            number = route.thread.number
+            if route.to.to is not None:
+                holders[number] = route.to.to
+                continue
+            parents[number] = place(route.to)
+            holders[number] = None
+        for route in routes:
+            above = parents.get(route.thread.number)
+            for _ in range(len(parents) + 1):
+                if above is None:
+                    break
+                if above == route.thread.number:
+                    message = f"@{route.thread.name} can't go under itself, nor under a concern nested under it, as what's sent with it would leave it"
+                    raise InboxError(message)
+                above = parents.get(above)
+        return Shape(parents=parents, holders=holders, piles=piles)
+
+    def answered(self, shape: Shape, number: int) -> Conversation | None:
+        """Return who answers for concern `number` once every concern's moved as `shape` says: its holder where they go on, else the holder of the nearest above it who does; none where nobody does."""
+
+        def moved(at: int) -> bool:
+            return at in shape.parents
+
+        def holder(at: int) -> Conversation | None:
+            # One no route moved stands as it does.
+            thread = None if moved(at) else self.concerns.at(at)
+            return shape.holders.get(at) if thread is None else thread.holder
+
+        def parent(at: int) -> int | None:
+            thread = None if moved(at) else self.concerns.at(at)
+            return shape.parents.get(at) if thread is None else thread.parent
+
+        def chain(at: int | None, passed: list[int]) -> Iterator[int]:
+            # Each once: `shaped` refuses a loop, and the ledger one of its own.
+            if at is None or at in passed:
+                return
+            yield at
+            yield from chain(parent(at), [*passed, at])
+
+        return next(
+            (
+                found
+                for each in chain(number, [])
+                if (found := holder(each)) is not None and self.concerns.live(found)
+            ),
+            None,
+        )
+
+    def itemed(self, number: int, to: Destination, shape: Shape) -> ItemRoute:
+        """Return where item `number` goes, sent to `to`: a concern or a pile of its repository, as every concern sent with it leaves them (`shape`); say where it's none of those, or no item lup keeps."""
         item = self.concerns.inbox.items.get(number)
         repository = None if item is None else repository_of(item)
-        if item is None or repository is None:
-            message = f"{cited(number)} isn't an item of a repository lup keeps"
+        if item is None or repository is None or not item.of(repository):
+            message = f"{cited(number)} isn't an item of one repository lup keeps"
             raise InboxError(message)
         bound = self.bound(to, repository)
         if bound.to is not None or bound.nobody:
@@ -260,12 +354,19 @@ class Routing(Model, arbitrary_types_allowed=True):
         if there is not None and self.concerns.holds(there, number):
             message = f"{cited(number)} is in @{there.name} already"
             raise InboxError(message)
+        landing = (
+            bound.thread.number
+            if bound.thread is not None
+            else there.number
+            if there is not None
+            else shape.piles.get(bound)
+        )
         if (
             isinstance(item.reason, Approval | HeldChange)
-            and there is not None
-            and self.concerns.answering(there) is not None
+            and landing is not None
+            and self.answered(shape, landing) is not None
         ):
-            message = f"{cited(number)} is {what(item)}, which only the operator answers: it goes into a pile nobody answers for, not into @{there.name}"
+            message = f"{cited(number)} is {what(item)}, which only the operator answers: it goes into a pile nobody answers for"
             raise InboxError(message)
         return ItemRoute(item=item, to=bound)
 
@@ -438,16 +539,18 @@ class Routing(Model, arbitrary_types_allowed=True):
         )
 
     def reached(self, number: int) -> Destination | None:
-        """Return where what's drafted on item `number` reaches with the reply, its sender; none where a conversation didn't send it, as an approval, whose answer goes its own way."""
+        """Return where what's drafted on item `number` reaches with the reply: its sender; an approval's comments the session whose push asked it; none where nobody's named, as the operator's own words."""
         item = self.concerns.inbox.items.get(number)
-        return (
-            Destination(to=item.sender)
-            if item is not None and isinstance(item.sender, Conversation)
-            else None
-        )
+        match item:
+            case Item(reason=Approval(pushed_by=Conversation() as pusher)):
+                return Destination(to=pusher)
+            case Item(sender=Conversation() as sender):
+                return Destination(to=sender)
+            case _:
+                return None
 
     def split(self, draft: Draft, only: Destination) -> Split:
-        """Split `draft` where Ctrl+Enter sends `only` alone, as the line under the review groups it (`reach`): what reaches it, sent, each comment, message, remark and move, and each item of its marked done or declined; the rest, and every mark the page applies, staying drafted."""
+        """Split `draft` where Ctrl+Enter sends `only` alone, as the line under the review groups it (`reach`): what reaches it, sent, each comment, message, remark and move, a message on a concern sent somewhere with the concern, and each question of its marked read, which the reply answers; the rest, every other mark, and every mark the page applies, staying drafted."""
 
         def item_repository(number: int) -> Path:
             item = self.concerns.inbox.items.get(number)
@@ -473,10 +576,15 @@ class Routing(Model, arbitrary_types_allowed=True):
                 return reaching(sent, repository)
             return reaching(self.reached(comment.item), repository)
 
+        # A message on a concern sent somewhere goes with it, where it isn't sent elsewhere itself.
+        moving = {each.thread: each.to for each in draft.moves if each.thread is not None}
+
         def lettered(letter: Letter) -> bool:
             repository = letter_repository(letter)
             if letter.sent is not None:
                 return reaching(letter.sent, repository)
+            if letter.thread in moving and letter.to is not None:
+                return reaching(moving[letter.thread], repository)
             if letter.to is not None:
                 return reaching(Destination(to=letter.to), repository)
             return reaching(Destination(thread=letter.thread), repository)
@@ -493,14 +601,19 @@ class Routing(Model, arbitrary_types_allowed=True):
             return thread is not None and reaching(move.to, thread.repository)
 
         def marked(number: int) -> bool:
-            return reaching(self.reached(number), item_repository(number))
+            # A question marked read is answered by the reply, which its line says; any other mark, its own part.
+            item = self.concerns.inbox.items.get(number)
+            return (
+                item is not None
+                and isinstance(item.reason, Question)
+                and reaching(self.reached(number), item_repository(number))
+            )
 
         sending = Draft(
             comments=[each for each in draft.comments if commented(each)],
             letters=[each for each in draft.letters if lettered(each)],
             remarks=[each for each in draft.remarks if remarked(each)],
             done=[each for each in draft.done if marked(each)],
-            declined=[each for each in draft.declined if marked(each)],
             moves=[each for each in draft.moves if moved(each)],
         )
         staying = Draft(

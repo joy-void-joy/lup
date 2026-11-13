@@ -1994,19 +1994,20 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         routing = Routing(concerns=self.concerns(), roster=roster)
         split = None if only is None else routing.split(drafted, only)
         whole = drafted if split is None else split.sending
+        # A move dropped leaves what's written on its item going with the reply,
+        # as if it were never sent anywhere.
         unmoved = self.unmoved(whole, roster)
-        plan = routing.planned(
-            whole.model_copy(
-                update={
-                    "moves": [
-                        each
-                        for each in whole.moves
-                        if each.item not in [one.number for one in unmoved]
-                    ]
-                }
-            )
+        routable = whole.model_copy(
+            update={
+                "moves": [
+                    each
+                    for each in whole.moves
+                    if each.item not in [one.number for one in unmoved]
+                ]
+            }
         )
-        answerable = self.answerable(unsent(whole), roster)
+        plan = routing.planned(routable)
+        answerable = self.answerable(unsent(routable), roster)
         draft = answerable.draft
         covered = [self.inbox.item(each) for each in draft.covered()]
         undeclinable = [

@@ -1125,6 +1125,123 @@ def test_ctrl_enter_on_one_destination_sends_what_reaches_it_alone_the_rest_stay
     assert work.delivery.inbox.draft() == Draft()
 
 
+def test_concerns_sent_under_each_other_or_into_a_pile_titled_as_themselves_are_refused_moving_nothing(
+    work: Work,
+) -> None:
+    later = work.delivery.concerns().pile(REPOSITORY, "Later")
+    before = work.read()
+    for moves in [
+        [
+            Destined(thread=work.docs.number, to=Destination()),
+            Destined(thread=later.number, to=Destination(pile="Later")),
+        ],
+        [
+            Destined(thread=work.docs.number, to=Destination()),
+            Destined(thread=work.lag.number, to=Destination(thread=work.voice.number)),
+            Destined(thread=work.voice.number, to=Destination(thread=work.lag.number)),
+        ],
+    ]:
+        work.delivery.drafted(Draft(moves=moves))
+        with pytest.raises(InboxError, match="can't go under itself"):
+            asyncio.run(work.delivery.reviewed())
+    read = work.read()
+    assert [read[each].thread for each in ["docs", "lag", "voice", "later"]] == [
+        before[each].thread for each in ["docs", "lag", "voice", "later"]
+    ]
+
+
+def test_an_approval_into_a_pile_given_to_an_agent_in_the_same_draft_is_refused(
+    work: Work,
+) -> None:
+    approval = work.delivery.inbox.made(
+        Approval(text="Approve?", summary="", repository=REPOSITORY, fingerprint="f"),
+        Operator(),
+        Operator(),
+        None,
+        work.clock.now(),
+    )
+    later = work.delivery.concerns().pile(REPOSITORY, "Later")
+    work.delivery.drafted(
+        Draft(
+            moves=[
+                Destined(thread=later.number, to=Destination(to=LEAD)),
+                Destined(item=approval.number, to=Destination(pile="Later")),
+            ]
+        )
+    )
+
+    with pytest.raises(InboxError, match="only the operator answers"):
+        asyncio.run(work.delivery.reviewed())
+    assert work.read()["later"].answering is None
+
+
+def test_a_comment_on_an_item_whose_move_is_dropped_goes_with_the_reply(
+    work: Work, clock: FakeClock
+) -> None:
+    clock.sleep(60)
+    work.delivery.done(work.note)
+    work.delivery.drafted(
+        Draft(
+            comments=[Comment(id="c1", item=work.note, text="One more thing.")],
+            moves=[Destined(item=work.note, to=Destination(pile="Later"))],
+        )
+    )
+
+    dispatched = asyncio.run(work.delivery.reviewed())
+
+    assert [each.part for each in dispatched.unanswerable] == ["moved"]
+    [review] = dispatched.reviews
+    assert review.recipient == LEAD
+    assert "later" not in work.read()
+
+
+def test_one_place_alone_sends_what_its_line_says_a_question_answered_and_a_message_on_a_concern_going_with_it(
+    work: Work, clock: FakeClock
+) -> None:
+    other = worker(work)
+    clock.sleep(60)
+    on_lag = Letter(
+        id="m1", to=LEAD, thread=work.lag.number, text="Take the cache too."
+    )
+    work.delivery.drafted(
+        Draft(
+            letters=[on_lag],
+            done=[work.question, work.note],
+            moves=[
+                Destined(
+                    id="d1", thread=work.lag.number, to=Destination(to=other.party)
+                )
+            ],
+        )
+    )
+
+    # The lead's line answers their question; the note marked read is a part of its own, staying.
+    lead = asyncio.run(work.delivery.reviewed(Destination(to=LEAD)))
+    [review] = lead.reviews
+    assert isinstance(review.reason, Review)
+    assert review.reason.covers == [work.question]
+    assert work.delivery.inbox.draft().done == [work.note]
+    # The worker's line moves the concern, the message on it going with it to them.
+    moved = asyncio.run(work.delivery.reviewed(Destination(to=other.party)))
+    [given] = moved.reviews
+    assert given.recipient == other.party
+    assert [each.thread for each in moved.moved] == [work.lag.number]
+    assert work.delivery.inbox.draft() == Draft(done=[work.note])
+
+
+def test_an_item_moved_into_another_concern_asks_there_alone(
+    work: Work, clock: FakeClock
+) -> None:
+    clock.sleep(60)
+    before = work.read()["lag"]
+    moving(work, into(work.question, thread=work.docs.number))
+
+    read = work.read()
+    assert [each.node for each in before.asks] == [work.question]
+    assert read["lag"].asks == []
+    assert read["docs"].moved == [work.question]
+
+
 def test_a_destination_names_one_place_at_most() -> None:
     with pytest.raises(ValueError, match="one of them"):
         Destination(thread=4, pile="Later")

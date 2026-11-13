@@ -654,13 +654,20 @@ class Readings(Model, arbitrary_types_allowed=True):
         status = ledgered.statuses.get(number)
         marks = ledgered.marks.get(number, Marks())
 
+        def elsewhere(member: Joined) -> bool:
+            # An item the operator moved into another concern asks and is new
+            # there, which lays it out, never where it landed too.
+            went = ledgered.went.get(member.node)
+            return went is not None and went != number
+
         def asked(member: Joined) -> Ask | None:
             # A part of the operator's words moved into a thread waits on its
             # holder, not on them: it shows open in the thread until an item
             # there cites it, and never keeps the operator from inbox zero. An
-            # item moved in whole asks where it landed, if anywhere. A check
-            # asks nothing: no call makes one, and those kept wait on nobody.
-            if member.part is not None or member.moved:
+            # item moved in whole asks where it was moved, which lays it out,
+            # and nowhere else. A check asks nothing: no call makes one, and
+            # those kept wait on nobody.
+            if member.part is not None or member.moved or elsewhere(member):
                 return None
             item = items.get(member.node)
             if item is None or not asks(item.recipient, item.reason, item.state):
@@ -679,7 +686,7 @@ class Readings(Model, arbitrary_types_allowed=True):
         def unread(member: Joined) -> Item | None:
             item = (
                 None
-                if member.part is not None or member.moved
+                if member.part is not None or member.moved or elsewhere(member)
                 else items.get(member.node)
             )
             if item is None:
