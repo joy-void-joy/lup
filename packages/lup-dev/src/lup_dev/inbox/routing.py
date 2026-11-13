@@ -2,7 +2,7 @@
 
 `docs/dashboard.md`, *The keys*; `docs/inbox.md`, *Threads in the review*. Space
 `s` on a thing in the review picks where it goes, and nothing moves until the
-draft is sent (`Destination`, `Moving`, `lup_dev.inbox.store`):
+draft is sent (`Destination`, `Destined`, `lup_dev.inbox.store`):
 - **a concern** goes to an agent, who holds it; under another concern, nested
   there; into a pile, nested in it; or to `No agent`, at the top, nobody
   holding it (`Concerns.given`);

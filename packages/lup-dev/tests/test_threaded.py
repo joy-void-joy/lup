@@ -26,7 +26,7 @@ from lup_dev.inbox.store import (
     InboxError,
     Letter,
     Message,
-    Moving,
+    Destined,
     Quote,
     Review,
     Ruling,
@@ -911,15 +911,15 @@ def test_a_thread_s_conversation_shows_the_latest_few_read_before_what_s_new_as_
     assert none.left == 6
 
 
-def moving(work: Work, *moves: Moving) -> Dispatched:
+def moving(work: Work, *moves: Destined) -> Dispatched:
     """Send a draft moving what `moves` name, as the operator does with Space s and Ctrl+Enter."""
     work.delivery.drafted(Draft(moves=list(moves)))
     return asyncio.run(work.delivery.reviewed())
 
 
-def into(number: int, *, thread: int | None = None, pile: str | None = None) -> Moving:
+def into(number: int, *, thread: int | None = None, pile: str | None = None) -> Destined:
     """Move item `number` into `thread`, or the pile titled `pile`."""
-    return Moving(item=number, to=Destination(thread=thread, pile=pile))
+    return Destined(item=number, to=Destination(thread=thread, pile=pile))
 
 
 def worker(work: Work) -> Speaker:
@@ -987,7 +987,7 @@ def test_the_operator_moves_frictions_and_how_it_felt_into_a_new_pile_at_the_top
         (each, gate.thread.number, "into @the-gate-hangs-silently")
         for each in [work.friction, rebuilt, felt]
     ]
-    # Moving says nothing of whether it waits on the operator: the pile is where they'll read it.
+    # Destined says nothing of whether it waits on the operator: the pile is where they'll read it.
     assert all(
         isinstance(work.delivery.inbox.item(each).state, Waiting)
         for each in [work.friction, rebuilt]
@@ -1052,7 +1052,7 @@ def test_an_item_moved_into_a_concern_done_reopens_it_and_one_moved_again_leaves
 def test_moving_an_item_is_refused_saying_why_and_moves_nothing(
     work: Work, what: str, said: str
 ) -> None:
-    def move() -> Moving:
+    def move() -> Destined:
         match what:
             case "home":
                 return into(work.friction, thread=work.home.number)
@@ -1060,9 +1060,9 @@ def test_moving_an_item_is_refused_saying_why_and_moves_nothing(
                 work.delivery.concerns().settled(work.docs)
                 return into(work.friction, thread=work.docs.number)
             case "agent":
-                return Moving(item=work.friction, to=Destination(to=LEAD))
+                return Destined(item=work.friction, to=Destination(to=LEAD))
             case _:
-                return Moving(item=work.friction, to=Destination())
+                return Destined(item=work.friction, to=Destination())
 
     with pytest.raises(InboxError, match=said):
         moving(work, into(work.note, pile="Later"), move())
@@ -1142,7 +1142,7 @@ def test_a_comment_sent_to_a_pile_stays_there_as_the_operator_s_words_waking_nob
     assert work.delivery.taken_words(LEAD) == []
 
     # Given to an agent, the pile goes whole: what the operator kept there among it.
-    moving(work, Moving(thread=later.thread.number, to=Destination(to=other.party)))
+    moving(work, Destined(thread=later.thread.number, to=Destination(to=other.party)))
     words = work.delivery.taken_words(other.party)
     assert words[0].startswith('lup: the operator handed you @later, "Later"')
     assert "Look at this once the parser lands." in words[1]
@@ -1156,7 +1156,7 @@ def test_a_message_on_a_concern_moved_to_another_agent_goes_with_it_to_them(
     work.delivery.drafted(
         Draft(
             letters=[Letter(id="m1", to=LEAD, thread=work.lag.number, text="Take it.")],
-            moves=[Moving(thread=work.lag.number, to=Destination(to=other.party))],
+            moves=[Destined(thread=work.lag.number, to=Destination(to=other.party))],
         )
     )
 
@@ -1195,8 +1195,8 @@ def test_sending_somewhere_it_can_t_go_is_refused_moving_nothing(
                 tabs = work.delivery.concerns().named(REPOSITORY, "tabs")
                 return Draft(
                     moves=[
-                        Moving(item=work.note, to=Destination(pile="Later")),
-                        Moving(
+                        Destined(item=work.note, to=Destination(pile="Later")),
+                        Destined(
                             thread=work.lag.number,
                             to=Destination(thread=tabs.number),
                         ),
@@ -1204,7 +1204,7 @@ def test_sending_somewhere_it_can_t_go_is_refused_moving_nothing(
                 )
             case _:
                 return Draft(
-                    moves=[Moving(item=work.note, to=Destination(pile="Later"))],
+                    moves=[Destined(item=work.note, to=Destination(pile="Later"))],
                     comments=[Comment(item=work.note, text="Hm.", sent=Destination())],
                 )
 

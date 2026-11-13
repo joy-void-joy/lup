@@ -630,7 +630,7 @@ class Destination(Model):
         return self
 
 
-class Moving(Model):
+class Destined(Model):
     """A concern or an item the operator sent somewhere with Space `s`, moved as the draft is sent (`Delivery.routed`): a concern moved with what's written on it, an item moved into a concern."""
 
     id: str = ""
@@ -1492,7 +1492,7 @@ class ParkedDraft(Model):
     """What a draft kept while the operator left items for later in a list of its own held of them: that list, and what it sent somewhere already (`Draft.unparked`)."""
 
     parked: list[int] = []
-    moves: list[Moving] = []
+    moves: list[Destined] = []
 
 
 class Draft(Model):
@@ -1515,7 +1515,7 @@ class Draft(Model):
     """What else is marked, each applied as the draft is sent, by the page
     (`docs/dashboard.md`, *The review*): kept drafted once the inbox's part is
     sent, until each is applied."""
-    moves: list[Moving] = []
+    moves: list[Destined] = []
     """Each concern and item the operator sent somewhere with Space `s`, moved
     as the draft is sent, before what's written reaches anyone, so what's
     written on a concern given to an agent reaches them (`Delivery.routed`)."""
@@ -1526,7 +1526,7 @@ class Draft(Model):
         """Read a draft kept while the operator left items for later in a list of its own (`parked`) as sending each into `Later`, the pile that list became, as they meant.
 
         >>> Draft.model_validate({"parked": [7]}).moves
-        [Moving(id='parked 7', thread=None, item=7, to=Destination(to=None, thread=None, pile='Later'))]
+        [Destined(id='parked 7', thread=None, item=7, to=Destination(to=None, thread=None, pile='Later'))]
         """
         match stored:
             case {"parked": list(), **rest}:
@@ -1539,7 +1539,7 @@ class Draft(Model):
                         for each in [
                             *kept.moves,
                             *(
-                                Moving(
+                                Destined(
                                     id=f"parked {number}",
                                     item=number,
                                     to=Destination(pile=LATER_PILE),
