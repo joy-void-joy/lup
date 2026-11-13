@@ -893,6 +893,10 @@ class Presence(MutableModel):
     """The launch whose hooks last set what this says: what an earlier launch's
     process left, a turn under way or a wake, says nothing of a process started
     since in another."""
+    ended: datetime | None = None
+    """When their last turn ended, as its end was let through, or the operator
+    interrupted it: what was given their held session before then and is still
+    unread a while after, it dropped (`Delivery.unread`)."""
 
 
 class Pushed(Model):
@@ -903,6 +907,8 @@ class Pushed(Model):
     launch: str | None = None
     """The held launch whose launcher it was given through, whose process
     reads it; none for a push, through lup's tool server."""
+    at: datetime | None = None
+    """When it was given."""
 
 
 class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
@@ -925,6 +931,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     patience: timedelta = timedelta(seconds=30)
     """How long a push waits for the turn's start carrying its token, after
     which what it told is put back and the session's messaging socket rings."""
+    unread: timedelta = timedelta(seconds=30)
+    """How long a held session may stay idle after a turn's end, or an
+    interrupt, with a turn given it before that still unread, before that turn
+    is taken for dropped and given again: an idle runtime starts a turn on
+    what waits on its input at once, and the one measured ran a message
+    waiting through an interrupt as its next turn (`docs/field-notes.md`, *A
+    session held with no terminal*), so it's a net for a runtime that drops
+    one."""
     queues: dict[str, Queues] = {}
     """What each runtime holds for a conversation while their call runs, by the
     runtime's name, which ends a held call (`held`); a runtime without, a gap
@@ -1053,6 +1067,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                             self.held_saying(party, heard.said)
                         return posted
                 presence.turning = False
+                if party.agent is None:
+                    presence.ended = self.clock.now()
                 if ended and party.agent is not None:
                     await self.ended(party, launch, conversation, heard)
                 if not ended and side_job(launch) and party.agent is None:
@@ -2779,6 +2795,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             and place is not None
             and presence.pushed.launch == place.launch
         )
+        if given and self.dropped(presence):
+            presence.pushed = None
+            given = False
         busy = presence.turning or presence.woken or presence.held or given
         loud = [item for item in waiting if not item.quiet]
         if party.agent is not None or busy or place is None or not loud:
@@ -2794,6 +2813,18 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         if self.pushed(party, place, waiting):
             return
         await self.rung(party, place, waiting)
+
+    def dropped(self, presence: Presence) -> bool:
+        """Say whether the turn given a held session, still unread, was dropped: given before their last turn ended, or the operator interrupted it, and they've been idle `unread` since, where an idle runtime would have started a turn on it at once. One given an idle session, never followed by an end, is never taken for dropped, so a runtime that reads nothing, stopped, isn't given it again and again."""
+        pushed, ended = presence.pushed, presence.ended
+        return (
+            pushed is not None
+            and pushed.at is not None
+            and ended is not None
+            and not presence.turning
+            and ended >= pushed.at
+            and self.clock.now() - ended >= self.unread
+        )
 
     async def given(
         self, party: Conversation, place: Whereabouts, waiting: list[Item]
@@ -2824,6 +2855,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             token=token,
             numbers=[item.number for item in waiting],
             launch=place.launch,
+            at=self.clock.now(),
         )
         presence.pushed = pushed
         who = self.roster().who(party)
@@ -2858,6 +2890,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         presence.held = []
         presence.turning = False
         presence.woken = False
+        presence.ended = self.clock.now()
         await self.wake(party)
 
     def pushed(

@@ -16101,3 +16101,70 @@ def test_the_operator_s_session_a_room_named_first_has_its_writes_refused_saying
     assert (
         "the session x1 is run by launch `one`" in json.loads(started)["systemMessage"]
     )
+
+
+def test_a_turn_given_and_dropped_at_an_interrupt_is_given_again_once_the_session_stayed_idle(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """Measured, a message waiting through an interrupt ran as the next turn, which takes it at once; one a runtime dropped would keep the idle session taken for busy until a new process."""
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        launcher = Launcher(machine.launch("one").held)
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        inbox("send", "one", "Anyone?")
+        number = newest(delivery)
+        given = launcher.ringing()[0]
+        asyncio.run(delivery.interrupted("one"))
+        asyncio.run(delivery.rewoken())
+        soon = len(launcher.frames)
+        clock.sleep(delivery.unread.total_seconds())
+        asyncio.run(delivery.rewoken())
+        frames = launcher.close()
+    assert soon == 1
+    [first, again] = frames
+    assert first == given
+    assert note(number, "Anyone?") in HeldPrompt.model_validate_json(again).text
+
+
+def test_a_turn_given_as_a_turn_ran_and_still_unread_once_it_ended_is_given_again_past_a_while(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        Socket(machine.host.launch("one").messages)
+        launcher = Launcher(machine.launch("one").held)
+        send(hook, claude("SessionStart", source="startup"))
+        inbox("send", "one", "Anyone?")
+        number = newest(delivery)
+        launcher.ringing()
+        send(hook, bash("b1"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        asyncio.run(delivery.rewoken())
+        soon = len(launcher.frames)
+        clock.sleep(delivery.unread.total_seconds())
+        asyncio.run(delivery.rewoken())
+        frames = launcher.close()
+    assert soon == 1
+    assert len(frames) == 2
+    assert note(number, "Anyone?") in HeldPrompt.model_validate_json(frames[1]).text
+
+
+def test_a_turn_given_an_idle_session_that_reads_nothing_is_never_given_again(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """A runtime a room stopped reads nothing, and no turn's end comes: what was given waits on its input, and giving it again would only pile copies there."""
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        launcher = Launcher(machine.launch("one").held)
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        inbox("send", "one", "Anyone?")
+        launcher.ringing()
+        clock.sleep(10 * delivery.unread.total_seconds())
+        asyncio.run(delivery.rewoken())
+        frames = launcher.close()
+    assert len(frames) == 1
