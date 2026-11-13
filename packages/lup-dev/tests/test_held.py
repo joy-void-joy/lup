@@ -1396,6 +1396,54 @@ def test_the_sweep_removes_what_a_side_job_was_started_with_once_its_worktree_is
     ]
 
 
+def test_the_sweep_s_look_at_side_jobs_worktrees_holds_it_no_longer_than_its_limit(
+    layout: Layout, tmp_path: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Any part of a worktree's path can be a link a room made, leading where a look waits: the sweep goes on past `forgetting`, and starts no other look while that one runs."""
+    host, _ = played(tmp_path, clock)
+    released = threading.Event()
+    looks: list[int] = []
+
+    def waiting(self: cli.Sweeping) -> None:
+        looks.append(1)
+        released.wait(20)
+
+    monkeypatch.setattr(cli.Sweeping, "forgotten", waiting)
+    said: list[str] = []
+    sweeping = cli.Sweeping(
+        layout=layout,
+        host=host,
+        podman=Podman(),
+        say=said.append,
+        running=list,
+        forgetting=timedelta(seconds=0.5),
+    )
+
+    async def swept() -> float:
+        began = time.monotonic()
+        try:
+            await sweeping.forgot()
+            await sweeping.forgot()
+        finally:
+            released.set()
+        return time.monotonic() - began
+
+    took = asyncio.run(swept())
+
+    assert took < 5
+    assert looks == [1]
+    assert said == [
+        (
+            "The look at what side jobs were started with ran past 0:00:00.500000: "
+            "the sweep goes on without it."
+        ),
+        (
+            "The look at what side jobs were started with still runs, so none starts "
+            "beside it."
+        ),
+    ]
+
+
 def test_side_jobs_the_sweep_ends_hold_none_of_the_threads_the_judge_s_hooks_wait_on(
     layout: Layout, tmp_path: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
