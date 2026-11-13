@@ -19,7 +19,7 @@
 // *The review*, *The drawers*).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { everyone, launches, ring, running, type Activity, type Agent, type Running } from "./agents";
+import { everyone, launches, parentsOf, ring, running, type Activity, type Running } from "./agents";
 import { ApiError, ask, type Asked, type OfCopy, type Replied } from "./api";
 import { cited } from "./comments";
 import { useNow, useSame, useViews, useWatched } from "./hooks";
@@ -332,25 +332,10 @@ export function App() {
             }),
         [served],
     );
-    // Each conversation's parent, by `whose` each is, as the host's tree has it: what nests a subagent's group under their parent's.
+    // Each conversation's parent, by `whose` each is, as the host has it: what nests a subagent's group under their
+    // parent's, and a session an agent spawned under that agent's.
     const parents = useSame(
-        useMemo(() => {
-            const found = new Map<string, string>();
-            for (const { launch, session } of served) {
-                const keyOf = (agent: Agent) =>
-                    whose({ party: "conversation", repository: launch.repository, runtime: launch.runtime, session: agent.talker.session, agent: agent.talker.agent ?? null });
-                const walk = (agent: Agent) => {
-                    for (const child of agent.children) {
-                        found.set(keyOf(child), keyOf(agent));
-                        walk(child);
-                    }
-                };
-                if (session !== null) {
-                    walk(session);
-                }
-            }
-            return found;
-        }, [served]),
+        useMemo(() => parentsOf(served, (each) => whose({ party: "conversation", ...each })), [served]),
         (map) => JSON.stringify([...map]),
     );
     // What each conversation running is doing, by `whose` they are, for the overview's marks.

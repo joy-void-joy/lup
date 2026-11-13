@@ -20,10 +20,13 @@ import asyncio
 import os
 import secrets
 import signal
-from collections.abc import Awaitable, Callable
+import traceback
+from collections.abc import Awaitable, Callable, Iterator
 from datetime import timedelta
 from pathlib import Path
 from typing import Literal, override
+
+from pydantic import ValidationError
 
 from lup.programs import Apart
 from lup.rooms.container import AbsolutePath
@@ -37,6 +40,7 @@ from lup_dev.host.protocol import (
     Refused,
     Reply,
     Request,
+    Spawner,
 )
 from lup_dev.host.service import Handler
 from lup_dev.layout import HostPaths, Layout
@@ -57,6 +61,24 @@ class HeldLaunch(Model):
     """The runtime's id for the session it resumes; none starts a new one."""
     arguments: list[str] = []
     """The runtime's own arguments, after lup's."""
+    session: str | None = None
+    """The runtime's id for the session it starts, minted by the host where an
+    agent spawned it, so its brief is addressed to it before it's up; none has
+    the launcher mint one, or resume `resume`."""
+    repository: AbsolutePath | None = None
+    """The repository's git directory as the host recorded the spawner's
+    launch, where an agent spawned it: the launcher refuses a worktree whose
+    git leads elsewhere, which a room can write. None for the operator's own,
+    whose worktree says it, as a launch's does."""
+    spawner: Spawner | None = None
+    """Who spawned it, where an agent did (`Register.spawner`)."""
+
+
+class SpawnedLauncher(Model):
+    """A launcher an agent's spawn started, as the service keeps it beside the launch's lock: what it was started with, and its process."""
+
+    spec: HeldLaunch
+    pid: int
 
 
 class Spawn(Request, reads=False):
@@ -141,16 +163,72 @@ class Launchers(MutableModel, arbitrary_types_allowed=True):
     started: dict[str, Apart] = {}
     """Each launcher started, by launch id, until it's seen to end, so none is
     left a zombie."""
+    specs: dict[str, HeldLaunch] = {}
+    """What each launcher in `started` was started with, by launch id: an
+    agent's spawn counts against the limit from its start, before its launch
+    registers."""
 
-    def reaped(self) -> None:
-        """Forget each launcher that has ended, its status collected so the OS frees it, and what it was waiting on; the sweep looks."""
+    def reaped(self) -> list[HeldLaunch]:
+        """Forget each launcher that has ended, its status collected so the OS frees it, and what it was waiting on; the sweep looks. Return what each whose session was never up was started with, so its spawner hears of it."""
         ended = [launch for launch, each in self.started.items() if each.ended()]
+        lost = [
+            self.specs[launch]
+            for launch in ended
+            if launch in self.specs
+            and not (launch in self.waiting and self.waiting[launch].done())
+        ]
         self.started = {
             launch: each for launch, each in self.started.items() if launch not in ended
+        }
+        self.specs = {
+            launch: each for launch, each in self.specs.items() if launch not in ended
         }
         self.waiting = {
             launch: up for launch, up in self.waiting.items() if launch not in ended
         }
+        return lost
+
+    def spawning(
+        self, layout: Layout, paths: HostPaths | None = None
+    ) -> list[HeldLaunch]:
+        """Return each launch an agent spawned whose launcher hasn't been seen to end: counted against the limits before its launch registers. Those this service started, and those a service before it started, kept beside their lock in `layout` while their launcher runs (`LaunchLayout.spawned`), by their process (`launching`); one kept whose launcher is gone is forgotten."""
+        mine = [
+            spec
+            for launch, spec in self.specs.items()
+            if spec.spawner is not None
+            and launch in self.started
+            and not self.started[launch].ended()
+        ]
+        looked = HostPaths() if paths is None else paths
+        kept = [
+            each
+            for each in kept_launchers(layout)
+            if each.spec.launch not in self.specs
+        ]
+        for each in kept:
+            if not launching(looked, each.pid, each.spec.launch):
+                layout.launch(each.spec.launch).spawned.unlink(missing_ok=True)
+        return [
+            *mine,
+            *(
+                each.spec
+                for each in kept
+                if launching(looked, each.pid, each.spec.launch)
+            ),
+        ]
+
+
+def kept_launchers(layout: Layout) -> list[SpawnedLauncher]:
+    """Return each launcher an agent's spawn started that a service kept beside its launch's lock; one that doesn't read left out."""
+
+    def read() -> Iterator[SpawnedLauncher]:
+        for each in sorted(layout.launches.glob("*.spawned.json")):
+            try:
+                yield SpawnedLauncher.model_validate_json(each.read_text())
+            except ValidationError, OSError:
+                continue
+
+    return list(read())
 
 
 def launching(paths: HostPaths, pid: int, launch: str) -> bool:
@@ -186,23 +264,33 @@ class Spawning(Model, Handler[Spawn], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: Spawn) -> Reply:
-        """Mint the launch's id and start its launcher, what its word that its session is up resolves made first."""
-        launch = secrets.token_hex(8)
-        spec = HeldLaunch(
-            launch=launch,
-            runtime=request.runtime,
-            worktree=request.worktree,
-            name=request.name,
-            profile=request.profile,
-            account=request.account,
-            resume=request.resume,
-            arguments=request.arguments,
+        """Start the launcher of the launch the operator asks for."""
+        return await self.started(
+            lambda launch: HeldLaunch(
+                launch=launch,
+                runtime=request.runtime,
+                worktree=request.worktree,
+                name=request.name,
+                profile=request.profile,
+                account=request.account,
+                resume=request.resume,
+                arguments=request.arguments,
+            )
         )
+
+    async def started(self, launching: Callable[[str], HeldLaunch]) -> Starting:
+        """Mint a launch's id, and start the launcher of the launch `launching` makes of it, what its word that its session is up resolves made first: the operator's `spawn`, and an agent's."""
+        launch = secrets.token_hex(8)
+        spec = launching(launch)
         log = self.layout.launch(launch).log
         up: asyncio.Future[CalledUp] = asyncio.get_running_loop().create_future()
         self.launchers.waiting = {**self.launchers.waiting, launch: up}
         launcher = await asyncio.to_thread(self.start, spec, log)
         self.launchers.started = {**self.launchers.started, launch: launcher}
+        self.launchers.specs = {**self.launchers.specs, launch: spec}
+        if spec.spawner is not None:
+            kept = SpawnedLauncher(spec=spec, pid=launcher.process.pid)
+            self.layout.launch(launch).spawned.write_text(kept.model_dump_json())
         return Starting(launch=launch, pid=launcher.process.pid, log=log)
 
 
@@ -294,9 +382,16 @@ class Abandoning(Model, Handler[Abandon], arbitrary_types_allowed=True):
 
 
 class CallingUp(Model, Handler[CalledUp], arbitrary_types_allowed=True):
-    """Answers `CalledUp`: the spawn waiting on it answered."""
+    """Answers `CalledUp`: the spawn waiting on it answered, and the session given what waits for it."""
 
     launchers: Launchers
+    up: Callable[[CalledUp], Awaitable[None]] | None = None
+    """Gives the session what waits for it as its first turn, which it wasn't
+    told as it started (`Delivery.called_up`, which `cli.py` gives); none gives
+    nothing."""
+    say: Callable[[str], None] = lambda _: None
+    """Where a failure giving it is said, which refuses nothing: the session
+    is up all the same, and what waits stays waiting for its next hook."""
 
     @override
     def request(self) -> type[CalledUp]:
@@ -304,13 +399,23 @@ class CallingUp(Model, Handler[CalledUp], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: CalledUp) -> Reply:
-        """Resolve what an await of the launch waits on, or will: a service started after the spawn, as an approval starts one, hears it before anyone awaits it again."""
+        """Resolve what an await of the launch waits on, or will: a service started after the spawn, as an approval starts one, hears it before anyone awaits it again. Then give the session what waits."""
         waiting = self.launchers.waiting.get(request.launch)
         if waiting is None:
             waiting = asyncio.get_running_loop().create_future()
             self.launchers.waiting = {**self.launchers.waiting, request.launch: waiting}
         if not waiting.done():
             waiting.set_result(request)
+        if self.up is None:
+            return Done()
+        try:
+            await self.up(request)
+        except Exception as failed:
+            told = "".join(traceback.format_exception(failed))
+            self.say(
+                f"{request.launch}: what waits for its held session wasn't given it "
+                f"as it came up, so it waits for the session's next hook:\n{told}"
+            )
         return Done()
 
 

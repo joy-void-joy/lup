@@ -17,12 +17,13 @@ at a terminal (`docs/judging-writes.md`, *Staging part of a file*).
 """
 
 import asyncio
+import itertools
 import secrets
 import shutil
 import sys
 import traceback
 import webbrowser
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Iterator, Mapping, Sequence
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
@@ -93,7 +94,8 @@ from lup_dev.gate import (
     report,
 )
 from lup_dev.gate import Ran as GateRan
-from lup_dev.git import Git, GitError, nul_separated, threaded
+from lup_dev.git import Git, GitError, link_file, nul_separated, threaded
+from lup_dev.git import Worktree as Checkout
 from lup_dev.host.client import FromRoom, HostClient, RoomClient, own_command
 from lup_dev.host.copying import Copying
 from lup_dev.host.courier import (
@@ -116,6 +118,7 @@ from lup_dev.host.held import (
     Abandoning,
     AwaitHeld,
     Awaiting,
+    CalledUp,
     CallingUp,
     End,
     HeldLaunch,
@@ -155,7 +158,15 @@ from lup_dev.host.protocol import (
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Called, Recorded
 from lup_dev.host.rooms import OwnLaunch, OwnLaunches, RoomRoute, ShowOwnLaunch
-from lup_dev.host.service import Answerer, Companion, HostService, Naming, Route
+from lup_dev.host.service import (
+    Answerer,
+    Companion,
+    HostService,
+    Naming,
+    Route,
+    recorded_launches,
+    side_job_ended,
+)
 from lup_dev.host.timings import (
     ShowTimings,
     Summary,
@@ -261,6 +272,7 @@ from lup_dev.launch.room import (
     unlent,
     vacated,
 )
+from lup_dev.launch.room import Repository as Found
 from lup_dev.launch.room import repository as repository_of
 from lup_dev.launch.secrets import RoomSecrets, Search, Tree, git_directory
 from lup_dev.launch.session import (
@@ -269,6 +281,7 @@ from lup_dev.launch.session import (
     hooked,
     terminal_settings,
 )
+from lup_dev.launch.spawning import SpawnTools
 from lup_dev.launch.trial import TerminalRun, Trial, scratched, taken_over_there
 from lup_dev.launch.trust import (
     Approving,
@@ -277,6 +290,7 @@ from lup_dev.launch.trust import (
     Outcome,
     Terminal,
     Unattended,
+    behind,
     machine_trust,
     trusted,
 )
@@ -566,8 +580,11 @@ def toplevel(directory: Path) -> Path:
     return Path(Git(cwd=directory).text("rev-parse", "--show-toplevel"))
 
 
-def branch_name(worktree: Path) -> str:
-    """Return a launch's name by default: the branch the worktree at `worktree` has checked out, in a name's shape (`feat/x` is `feat-x`), or the worktree's directory's where none is."""
+def branch_name(worktree: Path, listed: Checkout | None = None) -> str:
+    """Return a launch's name by default: the branch the worktree at `worktree` has checked out, as its repository lists it (`listed`) where it's given, in a name's shape (`feat/x` is `feat-x`), or the worktree's directory's where none is."""
+    if listed is not None:
+        branch = (listed.branch or "").removeprefix("refs/heads/")
+        return shaped(branch) or shaped(worktree.name) or "session"
     found = Git(cwd=worktree).run("symbolic-ref", "--short", "-q", "HEAD", ok=[0, 1])
     branch = found.output.decode().strip() if found.status == 0 else ""
     return shaped(branch) or shaped(worktree.name) or "session"
@@ -666,21 +683,40 @@ def control_routes(
     ]
 
 
-def held_routes(layout: Layout, holders: Holders, launchers: Launchers) -> list[Route]:
-    """Route what the operator asks of sessions held with no terminal, and their launchers' word that one is up: each launcher started from the `lup-dev` the service runs, in its worktree, what it prints in its launch's log (`lup_dev.host.held`)."""
+def launcher_started(spec: HeldLaunch, log: Path) -> Apart:
+    """Start a held launch's launcher from the `lup-dev` the service runs, in its worktree, what it prints in its launch's log, apart from the service."""
+    program, *rest = launcher_command(own_command(), spec)
+    return detached(program, *rest, log=log, cwd=spec.worktree)
 
-    def start(spec: HeldLaunch, log: Path) -> Apart:
-        program, *rest = launcher_command(own_command(), spec)
-        return detached(program, *rest, log=log, cwd=spec.worktree)
+
+def held_routes(
+    layout: Layout,
+    holders: Holders,
+    launchers: Launchers,
+    delivery: Delivery | None = None,
+) -> list[Route]:
+    """Route what the operator asks of sessions held with no terminal, and their launchers' word that one is up, which gives the session what waits for it through `delivery`, where it's given (`lup_dev.host.held`)."""
+
+    async def up(called: CalledUp) -> None:
+        launch = recorded_launch(layout.host, called.launch)
+        if delivery is not None and launch is not None:
+            await delivery.called_up(launch, called.session)
 
     return [
-        Route.to(Spawning(layout=layout, launchers=launchers, start=start)),
+        Route.to(Spawning(layout=layout, launchers=launchers, start=launcher_started)),
         Route.to(Awaiting(layout=layout, launchers=launchers)),
         Route.to(Abandoning(launchers=launchers)),
-        Route.to(CallingUp(launchers=launchers)),
+        Route.to(CallingUp(launchers=launchers, up=up, say=typer.echo)),
         Route.to(HeldInterrupting(holders=holders)),
         Route.to(HeldEnding(holders=holders)),
     ]
+
+
+def recorded_launch(layout: HostLayout, launch: str) -> Register | None:
+    """Return launch `launch` as the service recorded it; none where it isn't served, or its record doesn't read."""
+    return next(
+        (each for each in recorded_launches(layout) if each.launch == launch), None
+    )
 
 
 def trial_routes(
@@ -766,6 +802,13 @@ def host_serve(context: typer.Context) -> None:
     asking = WorkersAsking(workers=workers)
     coming = Coming(delivery=delivery, layout=layout, say=typer.echo)
     delivery.starting = coming.started
+    spawning = spawn_tools(delivery, layout, launchers, known)
+    delivery.resumer = spawning.resumed
+
+    async def reap() -> None:
+        for each in launchers.reaped():
+            await spawning.lost(each)
+
     sweeping = Sweeping(
         layout=layout,
         host=host_client(),
@@ -773,7 +816,9 @@ def host_serve(context: typer.Context) -> None:
         say=typer.echo,
         running=workers.commands,
         coming=None if rehearsing else coming,
-        reap=launchers.reaped,
+        reap=reap,
+        rewake=delivery.rewoken,
+        ended=partial(side_job_ended, holders, say=typer.echo),
     )
     turns = Turns()
     trying = Trying(
@@ -821,9 +866,9 @@ def host_serve(context: typer.Context) -> None:
                 trying=trying,
                 landing=landing,
             ),
-            *held_routes(layout, holders, launchers),
+            *held_routes(layout, holders, launchers, delivery),
         ],
-        tools=room_tools(delivery, layout, workers, landing=landing),
+        tools=room_tools(delivery, layout, workers, landing=landing, spawning=spawning),
         room_routes=[
             *remote_routes(remotes),
             *clipboard_routes(Desktop.of(settings)),
@@ -844,6 +889,7 @@ def host_serve(context: typer.Context) -> None:
         waker=wakers,
         pushes=pushes,
         holders=holders,
+        ended=delivery.closed,
         companions=[
             *(
                 []
@@ -1019,13 +1065,42 @@ def room_tools(
     modules: LaunchModules,
     *,
     landing: LandingTools,
+    spawning: SpawnTools,
 ) -> list[RoomTools]:
-    """List the core's tools the host service serves each launched session: the inbox's; the judge's, reading lup's state at `layout` by the delivery's clock, and running `quiet` in each launch's repository's process (`modules`); and `landing`'s, `land`."""
+    """List the core's tools the host service serves each launched session: the inbox's; the judge's, reading lup's state at `layout` by the delivery's clock, and running `quiet` in each launch's repository's process (`modules`); `landing`'s, `land`; and `spawning`'s, `spawn`."""
     return [
         InboxTools(delivery=delivery),
         JudgeTools(layout=layout, clock=delivery.clock, modules=modules),
         landing,
+        spawning,
     ]
+
+
+def spawn_tools(
+    delivery: Delivery, layout: Layout, launchers: Launchers, known: Adapters
+) -> SpawnTools:
+    """Return the `spawn` tool as the service serves it: launchers started as `lup-dev spawn`'s are, among `launchers`; the launches served read from their records; a session's id minted by its runtime's adapter, where it has a held session; and a worktree started from the integration branch the declaration approved for its repository names."""
+
+    def mint(runtime: str) -> str | None:
+        held = next(
+            (
+                each.holding
+                for each in known.known
+                if each.runtime.name() == runtime and each.holding is not None
+            ),
+            None,
+        )
+        return None if held is None else held.minted()
+
+    return SpawnTools(
+        delivery=delivery,
+        layout=layout,
+        spawning=Spawning(layout=layout, launchers=launchers, start=launcher_started),
+        launchers=launchers,
+        served=lambda: recorded_launches(layout.host),
+        mint=mint,
+        starting=lambda repository: approved_branches(layout, repository).integration,
+    )
 
 
 def served_tools(resolved: Resolved) -> list[ToolSpec]:
@@ -1045,6 +1120,7 @@ def served_tools(resolved: Resolved) -> list[ToolSpec]:
             Layout.model_construct(),
             Workers.model_construct(),
             landing=LandingTools.model_construct(),
+            spawning=SpawnTools.model_construct(),
         )
         for spec in tools.specs()
     ]
@@ -1358,20 +1434,63 @@ def sessions(
         typer.echo("No session runs.")
         return
     podman = Podman()
-    for launch in listed.launches:
+
+    def running(launch: Register) -> bool:
         container = launch.container
-        running = (
+        return (
             listed.running.get(launch.launch, False)
             if listed.running is not None
             else container is not None and podman.exists(container)
         )
-        typer.echo(
-            f"`{launch.name}`  {launch.runtime} in {launch.worktree}  "
-            f"({launch.launch})  container {container}, "
-            f"{'running' if running else 'not running'}"
+
+    for line in served_lines(listed, running, every=every):
+        typer.echo(line)
+
+
+def served_lines(
+    listed: Listed, running: Callable[[Register], bool], *, every: bool
+) -> Iterator[str]:
+    """Yield `lup-dev sessions`' lines: each launch, its conversations under it (`conversations`), and each launch an agent of it spawned through lup under those, set in, saying who spawned it and how; a launch whose spawner's launch isn't served where it would be at the top."""
+    served = {each.launch: each for each in listed.launches}
+
+    def above(launch: Register) -> str | None:
+        spawner = launch.spawner
+        return (
+            None if spawner is None or spawner.launch not in served else spawner.launch
         )
-        for line in conversations(listed.talkers.get(launch.launch, []), every=every):
-            typer.echo(line)
+
+    def spawned(launch: Register) -> str:
+        spawner = launch.spawner
+        if spawner is None:
+            return ""
+        by = spawner.conversation
+        path = next(
+            (
+                each.path
+                for each in listed.talkers.get(spawner.launch, [])
+                if each.session == by.session and each.agent == by.agent
+            ),
+            by.session,
+        )
+        kind = "a side job" if spawner.concern is None else "handed a concern"
+        return f"  spawned by `{path}`, {kind}"
+
+    def shown(launch: Register, depth: int) -> Iterator[str]:
+        set_in = "    " * depth
+        yield (
+            f"{set_in}`{launch.name}`  {launch.runtime} in {launch.worktree}  "
+            f"({launch.launch})  container {launch.container}, "
+            f"{'running' if running(launch) else 'not running'}{spawned(launch)}"
+        )
+        talkers = listed.talkers.get(launch.launch, [])
+        yield from (f"{set_in}{line}" for line in conversations(talkers, every=every))
+        for each in listed.launches:
+            if above(each) == launch.launch:
+                yield from shown(each, depth + 1)
+
+    for each in listed.launches:
+        if above(each) is None:
+            yield from shown(each, 0)
 
 
 def conversations(talkers: list[Talker], *, every: bool) -> list[str]:
@@ -2116,8 +2235,8 @@ class Launcher(Model, arbitrary_types_allowed=True):
     """What a launch reaches on this machine, each a seam a test stubs."""
 
     layout: Layout
-    trust: Callable[[Path], Outcome]
-    """Checks what the host runs for the repository at a worktree, asking where it changed."""
+    trust: Callable[[Path, Path], Outcome]
+    """Checks what the host runs for the repository of a worktree, whose git directory the launch found already, asking where it changed."""
     host: HostClient
     podman: Podman
     tools: Tools
@@ -2157,14 +2276,15 @@ def host_runtime(adapter: Adapter) -> HostRuntime:
     )
 
 
-def withheld_at_launch(launcher: Launcher, resolved: Resolved, worktree: Path) -> None:
-    """Build the list of values never published from the repository of `worktree`, where the declaration selects `Private`, and keep it where the module reads it; where it doesn't, remove the one kept.
+def withheld_at_launch(
+    launcher: Launcher, resolved: Resolved, repository: Path
+) -> None:
+    """Build the list of values never published from the repository whose git directory is `repository`, as the launch found it, where the declaration selects `Private`, and keep it where the module reads it; where it doesn't, remove the one kept.
 
     What the build couldn't read is said once, in the operator's terminal; no
     value is.
     """
-    project = repository_of(worktree)
-    made = asyncio.run(listed(resolved, project.git, launcher.facts, launcher.layout))
+    made = asyncio.run(listed(resolved, repository, launcher.facts, launcher.layout))
     for note in [] if made is None else made.notes:
         launcher.say(f"Private: {note}.")
 
@@ -2282,13 +2402,32 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
     coming: Coming | None = None
     """What wakes the threads parked until what the sweep sees come; none wakes
     none."""
-    reap: Callable[[], None] | None = None
+    rewake: Callable[[], Awaitable[None]] | None = None
+    """Gives each idle held session what waits for them that no hook would tell,
+    giving it having failed (`Delivery.rewoken`); none gives nothing."""
+    reap: Callable[[], Awaitable[None]] | None = None
     """Collects each held launch's launcher the service started that has
-    ended, so none is left a zombie (`Spawns.reaped`); none collects none."""
+    ended, so none is left a zombie, and tells the agent who spawned one whose
+    session never came up (`Launchers.reaped`, `SpawnTools.lost`); none
+    collects none."""
+    ended: Callable[[Register], Coroutine[None, None, None]] | None = None
+    """Ends a side job's session through its launcher, on the event loop, as
+    the end of its spawner's launch does (`side_job_ended`): an end is
+    answered once a turn under way finishes, minutes later, and a thread
+    waiting on each would hold asyncio's default ones, which the service's
+    hooks wait on too. None ends none."""
     pause: Callable[[float], Awaitable[None]] = asyncio.sleep
     """Waits the seconds between two sweeps; a test gives its own."""
     stopping: asyncio.Event = Field(default_factory=asyncio.Event)
     task: asyncio.Task[None] | None = None
+    ending: dict[str, asyncio.Task[None]] = {}
+    """Each side job whose spawner's launch the service doesn't serve, by
+    its launch, while its launcher is asked to end it."""
+    forgetting: timedelta = timedelta(seconds=30)
+    """How long the look at side jobs' worktrees may take (`forgot`), before
+    the sweep goes on without it."""
+    looking: asyncio.Future[None] | None = None
+    """That look, while it runs."""
 
     @override
     async def begin(self) -> None:
@@ -2326,8 +2465,84 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
             self.say(f"{failing}:\n{told}")
         await self.pruned()
         if self.reap is not None:
-            self.reap()
+            await self.reap()
+        await self.orphans_ended()
+        await self.forgot()
+        if self.rewake is not None:
+            await self.rewake()
         self.woken()
+
+    async def forgot(self) -> None:
+        """Remove what each side job was started with whose worktree is gone (`forgotten`), in a thread, waiting `forgetting` at most: a worktree is a path a room writes, any part of which can be a link leading where a look waits. Past it, the sweep goes on, and no other look starts while that one runs, so it holds one thread at most."""
+        if self.looking is not None and not self.looking.done():
+            self.say(
+                "The look at what side jobs were started with still runs, so "
+                "none starts beside it."
+            )
+            return
+        looking = asyncio.ensure_future(asyncio.to_thread(self.forgotten))
+        self.looking = looking
+        await asyncio.wait([looking], timeout=self.forgetting.total_seconds())
+        if not looking.done():
+            self.say(
+                "The look at what side jobs were started with ran past "
+                f"{self.forgetting}: the sweep goes on without it."
+            )
+
+    def forgotten(self) -> None:
+        """Remove what each side job was started with where its worktree is gone, so nothing resumes it again (`Layout.side_job`, `SpawnTools.resumed`), or where it doesn't read, saying each; what can't be read or removed is said, and the next sweep looks again.
+
+        Run off the event loop, for `forgetting` at most (`forgot`): the
+        worktrees are paths a room writes. One that's a link is taken for gone,
+        never followed.
+        """
+        try:
+            kept = sorted(self.layout.side_jobs.glob("*.json"))
+        except OSError as unread:
+            self.say(f"What side jobs were started with wasn't looked at: {unread}")
+            return
+        for each in kept:
+            try:
+                spec = HeldLaunch.model_validate_json(each.read_text())
+                gone = not spec.worktree.is_dir(follow_symlinks=False)
+            except ValueError, OSError:
+                gone = True
+                spec = None
+            if not gone:
+                continue
+            try:
+                each.unlink(missing_ok=True)
+            except OSError as failed:
+                self.say(f"{each} wasn't removed: {failed}")
+                continue
+            why = (
+                "it didn't read"
+                if spec is None
+                else f"its worktree, {spec.worktree}, is gone"
+            )
+            self.say(f"What side job {each.stem} was started with is removed: {why}.")
+
+    async def orphans_ended(self) -> None:
+        """Ask the launcher of each side job whose spawner's launch the service doesn't serve to end it, in the background, as that launch's end does (`Launches.close`): one that registered after its spawner ended, or whose spawner's end a restart cut short, would run on for nobody, its reports reaching someone gone. Where the launches can't be listed, say so; the next sweep looks again."""
+        self.ending = {
+            launch: task for launch, task in self.ending.items() if not task.done()
+        }
+        try:
+            launches = await asyncio.to_thread(self.host.launches)
+        except (HostError, OSError) as failed:
+            self.say(f"Side jobs whose spawner ended weren't looked for: {failed}")
+            return
+        ended = self.ended
+        if ended is None:
+            return
+        for each in orphaned(launches):
+            if each.launch not in self.ending:
+                self.say(
+                    f"{each.launch}: a side job whose spawner's launch "
+                    f"{each.spawner.launch if each.spawner else '?'} ended, so it's "
+                    "ended too"
+                )
+                self.ending[each.launch] = asyncio.create_task(ended(each))
 
     def woken(self) -> None:
         """Wake each thread parked until what the sweep sees come (`Coming.swept`), on the event loop, as the inbox is written; where it fails, say why, with its traceback, and the next sweep goes on."""
@@ -2432,12 +2647,10 @@ def launched(
     if traced is not None:
         message = f"no session is held on this machine: {traced}"
         raise LaunchError(message)
-    launcher.say(launcher.trust(worktree).report())
-    repository = Path(
-        Git(cwd=worktree).text(
-            "rev-parse", "--path-format=absolute", "--git-common-dir"
-        )
-    )
+    found = located(worktree, None if held is None else held.repository)
+    repository = found.git
+    trusting = launcher.trust(worktree, repository)
+    launcher.say(trusting.report())
     if Git.pinned(repository).text("for-each-ref", "--count=1", "refs/replace/"):
         launcher.say(
             "This repository holds replace refs (`refs/replace/`), which a room "
@@ -2450,7 +2663,7 @@ def launched(
         raise LaunchError(message)
     judge = launcher.layout.judge(repository).command(approval.tool.name)
     with approved_declaration(
-        worktree, approval.commit, local=approval.local
+        repository, approval.commit, local=approval.local
     ) as declared:
         choice = chosen(
             declared_profiles(approval.profiles, launcher.layout.profiles.declared),
@@ -2489,7 +2702,7 @@ def launched(
                 f"{runtime} {cached.version}, kept, runs: its release channel couldn't "
                 f"give the latest. {cached.fallback}"
             )
-        neighbours = related(declared.resolved.repositories, worktree)
+        neighbours = related(declared.resolved.repositories, found)
         for each in neighbours:
             if not each.mounted:
                 launcher.say(
@@ -2497,7 +2710,7 @@ def launched(
                     f"sessions to read isn't at {each.path}, so the room doesn't "
                     "mount it, and its guidance says it's missing."
                 )
-        withheld_at_launch(launcher, declared.resolved, worktree)
+        withheld_at_launch(launcher, declared.resolved, repository)
         editor = OperatorsEditor.of(launcher.terminal)
         if editor.program is not None and editor.known is None:
             launcher.say(
@@ -2538,7 +2751,12 @@ def launched(
             ),
         )
         environments = RoomEnvironments.of(
-            declared.resolved.runner, worktree, launcher.layout, launch, launcher.tools
+            declared.resolved.runner,
+            worktree,
+            launcher.layout,
+            launch,
+            launcher.tools,
+            held=found,
         )
         room = maintaining_room(
             declared.resolved,
@@ -2568,6 +2786,7 @@ def launched(
             shared=shared,
             lent=lending,
             rules=running,
+            main=found.main,
             home=homing.home,
         )
         compiled = (
@@ -2585,6 +2804,7 @@ def launched(
             [*room.mounts, *ages.mounts, *compiled.mounts],
             gating,
         )
+        naming = named_session(adapter, arguments, held)
         registered = Register(
             launch=launch,
             runtime=runtime,
@@ -2593,22 +2813,25 @@ def launched(
             judge=judge,
             limits=declared.resolved.limits,
             github=github,
-            name=name or branch_name(worktree),
+            name=name or branch_name(worktree, found.worktree),
             exact=name is not None,
             runner=declared.resolved.runner.command([]),
             environments=environments.own,
             home=homing.home.shared,
             own=homing.home.directory,
             held=held is not None,
+            spawner=None if held is None else held.spawner,
+            model=model_named([*arguments, *([] if held is None else held.arguments)]),
+            session=None if held is None else naming.session,
+            behind=behind(trusting),
         )
-        naming = named_session(adapter, arguments, held)
         session, arguments = naming.session, naming.arguments
         hiding = RoomSecrets.of(
             Search(
                 patterns=declared.resolved.paths.secret,
                 hidden=[each.path for each in environments.hidden.found],
             ),
-            Tree(path=environments.hidden.tree, git=environments.repository),
+            Tree(path=environments.hidden.tree, git=environments.held.git),
             [
                 Tree(path=each.path, git=git_directory(each.path))
                 for each in neighbours
@@ -2717,10 +2940,86 @@ def launched(
                             launcher.say(line)
                         if held is not None:
                             own.log.unlink(missing_ok=True)
+                            own.spawned.unlink(missing_ok=True)
         finally:
             own.lock.unlink(missing_ok=True)
             if writing is not None and writer is not None:
                 writing.let_go(writer)
+
+
+def located(worktree: Path, pinned: Path | None) -> Found:
+    """Return the repository the launch in `worktree` runs for, once, which every step of the launch then takes as given: the one whose git directory is `pinned`, where an agent spawned the launch and the host recorded the spawner's; else the one git finds through the worktree, the operator's starting point.
+
+    A room writes every worktree's `.git` file and the git directory's
+    `worktrees/`, so finding the repository again through the worktree at a
+    later step would let a room lead it elsewhere meanwhile, to another
+    repository approved on this machine, whose tree the room would mount
+    read-write. Refuse a worktree the repository doesn't name back
+    (`Git.listed`), which a room can't fake for a repository whose git
+    directory it doesn't write.
+    """
+    try:
+        found = repository_of(worktree, pinned)
+    except RoomError as unmountable:
+        raise LaunchError(str(unmountable)) from unmountable
+    if found.worktree is None:
+        raise LaunchError(unnamed(worktree, found.git))
+    return found
+
+
+def unnamed(worktree: Path, common: Path) -> str:
+    """Say why `worktree` isn't one of the repository's at `common` as it names them back, by what its `.git` file names: a submodule's checkout, a checkout whose git directory sits apart, or a linked worktree the repository's record of doesn't match, as one moved or recorded through a link."""
+    named = link_file(worktree / ".git")
+    gitdir = None if named is None else Path(named.strip().removeprefix("gitdir: "))
+    place = None if gitdir is None else worktree / gitdir
+    refused = "nothing launches in it"
+    if place is not None and "modules" in place.parts:
+        return (
+            f"{worktree} is a submodule's checkout, its git directory {place}: lup "
+            f"launches in a repository's own worktrees, not a submodule's, so "
+            f"{refused}"
+        )
+    if place is not None and not place.is_relative_to(common / "worktrees"):
+        return (
+            f"{worktree}'s git directory sits apart from it, at {place} "
+            "(`git init --separate-git-dir`), and isn't one a linked worktree "
+            f"names: lup launches in a repository whose worktrees its git "
+            f"directory names, so {refused}"
+        )
+    return (
+        f"{worktree} isn't one of the worktrees of {common}, as that repository "
+        "names them back: its `.git` file names another place, or the "
+        "repository's record of it does, as where it moved, or was recorded "
+        f"through a link. `git worktree repair` there mends it; {refused} until "
+        "then"
+    )
+
+
+def model_named(arguments: list[str]) -> str | None:
+    """Return the model a launch's runtime arguments name with `--model`, the last where they name it twice; none where they name none.
+
+    >>> model_named(["--resume", "s1", "--model", "haiku"]), model_named(["--model=opus"]), model_named([])
+    ('haiku', 'opus', None)
+    """
+    named = [
+        after if each == "--model" else each.removeprefix("--model=")
+        for each, after in itertools.pairwise([*arguments, ""])
+        if each == "--model" or each.startswith("--model=")
+    ]
+    return named[-1] if named and named[-1] else None
+
+
+def orphaned(launches: list[Register]) -> list[Register]:
+    """Return each held side job among `launches` whose spawner's launch isn't among them: what ends with its spawner (`Launches.side_jobs`)."""
+    served = {each.launch: each for each in launches}
+    return [
+        each
+        for each in launches
+        if each.held
+        and each.spawner is not None
+        and each.spawner.concern is None
+        and each.spawner.launch not in served
+    ]
 
 
 class NamedSession(Model):
@@ -2752,10 +3051,9 @@ def named_session(
         return NamedSession(
             session=an_id(adapter, adapter.resumed(arguments)), arguments=arguments
         )
+    fresh = held.session or holding.minted()
     try:
-        session = (
-            holding.minted() if held.resume is None else holding.normal(held.resume)
-        )
+        session = fresh if held.resume is None else holding.normal(held.resume)
         naming = (
             holding.fresh(session) if held.resume is None else holding.resuming(session)
         )
@@ -2876,20 +3174,30 @@ def released(podman: Podman, launch: LaunchLayout, say: Callable[[str], None]) -
         )
 
 
-def launching(say: Callable[[str], None], *, unattended: bool = False) -> Launcher:
+def launching(
+    say: Callable[[str], None], *, unattended: bool = False, asking: bool = True
+) -> Launcher:
     """Return what a launch reaches on this machine, as its settings place it.
 
     It runs outside every agent's session, which the command checks first.
     `unattended`, a held launch's launcher with no terminal, an approval waits
-    for its answer in the inbox alone, what trust says going to `say`.
+    for its answer in the inbox alone, what trust says going to `say`; and
+    where not `asking`, a launch an agent spawned, none is asked, the copy
+    approved before running (`Trust.asking`).
     """
     layout = Layout.of(LupDevSettings())
     clock = SystemClock()
 
-    def trust(root: Path) -> Outcome:
+    def trust(root: Path, found: Path) -> Outcome:
         if unattended:
-            return machine_trust(root, [], asker=Unattended(say_to=say)).ensure()
-        return trusted(root, [])
+            return machine_trust(
+                root,
+                [],
+                asker=Unattended(say_to=say),
+                found=found,
+                asking=asking,
+            ).ensure()
+        return trusted(root, [], found=found)
 
     def github(repository: Path) -> GitHubRepository:
         return asyncio.run(named(repository))
@@ -3068,7 +3376,7 @@ def spawned(
         raise LaunchError(message)
     root = worktree
     launcher = launching(typer.echo)
-    launcher.say(launcher.trust(root).report())
+    launcher.say(launcher.trust(root, located(root, None).git).report())
     launcher.say(
         "Starting the held session: the launcher sets its room up as a launch "
         "does, an image build taking minutes where one is missing."
@@ -3266,6 +3574,7 @@ def spawn_trial(
 
     scratch = scratched(root, f"spawn-trial-{secrets.token_hex(4)}", approved_commit)
     podman = Podman()
+    trial: Trial | None = None
     try:
 
         def spawning(worktree: Path, resume: str | None) -> HeldUp:
@@ -3299,6 +3608,8 @@ def spawn_trial(
         number = trial.filed(scratch.repository, runtime)
         typer.echo(f"The report is {cited(number)} in your inbox.")
     finally:
+        if trial is not None:
+            scratch.unspawned(trial.spawned, typer.echo)
         scratch.removed()
 
 
@@ -3318,7 +3629,7 @@ def spawn_launcher(
         adapter,
         [],
         held.worktree,
-        launching(said, unattended=True),
+        launching(said, unattended=True, asking=held.spawner is None),
         name=held.name,
         profile=held.profile,
         account=held.account,
@@ -3738,7 +4049,7 @@ def worktree_files(root: Path) -> list[Sent]:
     ]
 
 
-def withheld_here(root: Path, common: Path) -> Withheld | Read:
+def withheld_here(common: Path) -> Withheld | Read:
     """Return the list of values never published kept for the repository whose git directory is `common`, building it where none is kept, as a launch would; or, where it isn't read, what the gate says.
 
     It's built from the declaration at the commit approved for the repository on
@@ -3755,7 +4066,7 @@ def withheld_here(root: Path, common: Path) -> Withheld | Read:
         return Read(unchecked=UNAPPROVED)
     try:
         with approved_declaration(
-            root, approval.commit, local=approval.local
+            common, approval.commit, local=approval.local
         ) as declared:
             made = asyncio.run(listed(declared.resolved, common, HostFacts(), layout))
     except (LupDevError, OSError) as failed:
@@ -3795,7 +4106,7 @@ def private_check() -> None:
                 "rev-parse", "--path-format=absolute", "--git-common-dir"
             )
         )
-        match withheld_here(root, common):
+        match withheld_here(common):
             case Withheld() as held:
                 scan = read_for_values(files, head, common, held)
             case Read() as said:
@@ -4099,9 +4410,12 @@ def trust() -> None:
     Approved, it installs the tip's `lup-dev` as the host's, restarts the host
     service on it where one runs, and records the approval; declined, the copy you
     approved before keeps running. Where nothing changed, it says so and stops.
+    Its repository is found once, from this worktree, as a launch finds it,
+    refusing a worktree it doesn't name back (`located`).
     """
     inside = [runtime.name() for runtime in runtimes() if runtime.inside()]
-    trust = machine_trust(toplevel(Path.cwd()), inside)
+    root = toplevel(Path.cwd())
+    trust = machine_trust(root, inside, found=located(root, None).git)
     typer.echo(trust.ensure().report())
     kept = trust.kept_first()
     if kept is not None:
@@ -4459,7 +4773,7 @@ def module_commands_said() -> str:
             if approval is None:
                 return "Nothing is approved for this repository, so its modules' commands don't run here."
             with approved_declaration(
-                root, approval.commit, local=approval.local
+                repository, approval.commit, local=approval.local
             ) as declared:
                 served = declared.resolved.served
     except (LupDevError, LupError) as unread:

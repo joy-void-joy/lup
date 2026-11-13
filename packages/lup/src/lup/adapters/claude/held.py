@@ -198,6 +198,11 @@ class ClaudeHeld(MutableModel, HeldSession, arbitrary_types_allowed=True):
     """Where it says what the session does: each turn's start and end."""
     patience: timedelta = timedelta(seconds=10)
     """How long a request waits for its answer."""
+    unread: int = 4 * 1024 * 1024
+    """The most of what was put on the session's input, in bytes, that may
+    wait unread before a turn is refused: a runtime any process of its room
+    can stop reads nothing, and what's given it would pile up in the launcher
+    without end. A turn larger than it is given whole where nothing waits."""
     turning: bool = False
     """Whether a turn runs, as the session last said: from its `init` to its
     `result`."""
@@ -208,6 +213,15 @@ class ClaudeHeld(MutableModel, HeldSession, arbitrary_types_allowed=True):
 
     @override
     async def send(self, text: str) -> None:
+        """Put `text` on the session's input as a user turn; raise `HeldError` where more than `unread` bytes given it before wait unread."""
+        waiting = self.pipes.input.transport.get_write_buffer_size()
+        if waiting > self.unread:
+            message = (
+                f"{waiting:,} bytes given the session wait unread, past "
+                f"{self.unread:,}: its runtime isn't reading its input, so this "
+                "turn wasn't given"
+            )
+            raise HeldError(message)
         await self.written(UserTurn(message=Content(content=text)))
 
     @override
@@ -300,6 +314,15 @@ class ClaudeHeld(MutableModel, HeldSession, arbitrary_types_allowed=True):
                 pass
 
     async def written(self, line: Model) -> None:
-        """Write one line to the session's input, whole, and wait until it's taken."""
-        self.pipes.input.write(f"{line.model_dump_json()}\n".encode())
-        await self.pipes.input.drain()
+        """Put one line on the session's input, whole, and return at once, whether or not the runtime reads it; raise `HeldError` where its input is closed.
+
+        Never waiting for the runtime to read it: any process of the room can
+        stop the runtime, which then reads nothing, and a wait for its input to
+        drain would hold the launcher's answer to the host with it. What isn't
+        read yet waits in the launcher, the runtime reading it as it goes on.
+        """
+        writer = self.pipes.input
+        if writer.is_closing():
+            message = "the session's input is closed: its runtime has ended"
+            raise HeldError(message)
+        writer.write(f"{line.model_dump_json()}\n".encode())

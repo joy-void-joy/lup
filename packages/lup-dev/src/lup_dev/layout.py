@@ -753,6 +753,11 @@ class LaunchLayout(Model):
         return self.directory.with_name(f"{self.directory.name}.log")
 
     @property
+    def spawned(self) -> Path:
+        """What an agent's spawn started the launch's launcher with, and its process: kept while the launcher runs, so a service started again counts it against the limits before its launch registers (`Launchers.spawning`)."""
+        return self.directory.with_name(f"{self.directory.name}.spawned.json")
+
+    @property
     def gitconfig(self) -> Path:
         """The room's git configuration, in place of the operator's (`GIT_CONFIG_GLOBAL`), mounted read-only."""
         return self.directory / "gitconfig"
@@ -1116,6 +1121,15 @@ class Layout(Model):
     def launch(self, launch: str) -> LaunchLayout:
         """Say where launch `launch`'s own places are."""
         return LaunchLayout(directory=self.launches / launch)
+
+    def side_job(self, session: str) -> Path:
+        """Say where what a side job an agent spawned was started with is kept, by its session's id, which lup minted: what resumes it, its context kept, once it ended at its report and its spawner sends it more (`SpawnTools.resumed`)."""
+        return self.side_jobs / f"{session}.json"
+
+    @property
+    def side_jobs(self) -> Path:
+        """Where what each side job was started with is kept, until its worktree is gone (`side_job`)."""
+        return self.launches / "side-jobs"
 
     def writer(self, runtime: str, session: str) -> Path:
         """Say where the lock is that the one launch writing `runtime`'s session `session` holds while its runtime runs it, which the runtime itself doesn't refuse a second of (`docs/launch.md`, *A session held with no terminal*)."""

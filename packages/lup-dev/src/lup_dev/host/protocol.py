@@ -19,6 +19,7 @@ from lup.blocks import Drawer, FoldKind, Tone, Verb
 from lup.rooms.container import AbsolutePath
 from lup.types import Model
 from lup_dev.errors import LupDevError
+from lup_ledger.parties import Conversation
 
 
 class HostError(LupDevError):
@@ -273,6 +274,29 @@ class Request(Model):
         return cls.model_construct().kind
 
 
+class Spawner(Model):
+    """Who started a launch through lup's `spawn`, as the host recorded it from their call, never as a room names it: their launch, their conversation, and the concern they handed over with it (`docs/launch.md`, *An agent's spawn*)."""
+
+    launch: LaunchId
+    """The launch whose session called `spawn`, as the host served it."""
+    conversation: Conversation
+    """The conversation that called it, as the inbox keys them: the spawned
+    session's parent, who hears of it as a parent hears of a subagent."""
+    concern: int | None = None
+    """The thread handed to the spawned session with it, by its number, which it
+    holds and works in, and where its reports land: a concern handed over to
+    build. None for a side job, whose report comes back to its spawner."""
+
+
+class Behind(Model):
+    """The host code a launch an agent spawned runs, where the running branch's tip holds another nobody approved, which it asked nothing about (`Trust.asking`): the commit of each."""
+
+    running: str
+    """The commit of the copy approved, which judges its session."""
+    tip: str
+    """The commit of the tip's host zone, unapproved."""
+
+
 class Register(Request, reads=False):
     """Serve a launch: its socket directory, the hook socket inside, its record."""
 
@@ -341,6 +365,25 @@ class Register(Request, reads=False):
     through its launcher's socket, which an interrupt and its end go through
     too, and the sweep stops its room once its launcher is gone. False for a
     session in a terminal, and in a record from before launches were held."""
+    spawner: Spawner | None = None
+    """Who started it through lup's `spawn`, as the host recorded it from their
+    call: its session's own conversation is theirs, as a subagent is their
+    parent's. None for a launch the operator started, and in a record from
+    before agents spawned."""
+    model: str | None = None
+    """The model its runtime's arguments named (`--model`), as its launcher was
+    given them, never the room: what the sessions it spawns run on. None where
+    they named none, the profile's then choosing."""
+    session: str | None = None
+    """The runtime's id for a held launch's session, which its launcher named
+    up front: the one session its hooks may name, so a room's hook can't speak
+    as another session of the repository's, a spawner among them. None for a
+    terminal's, whose session the operator may clear and the runtime names."""
+    behind: Behind | None = None
+    """Where an agent spawned the launch, and the tip's host zone isn't the one
+    approved: the copy approved it runs, which its session is told as it
+    starts, so an agent needing the newer can ask the operator for it. None
+    where it runs the tip's."""
 
 
 class Rename(Request, reads=False):

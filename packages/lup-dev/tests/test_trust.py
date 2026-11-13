@@ -47,7 +47,7 @@ from lup_dev.declaration.requirements import (
 from lup_dev.declaration.resolve import resolve
 from lup_dev.git import Git, GitError
 from lup_dev.host.client import Detached, HostClient, Starter
-from lup_dev.host.protocol import Branches, HostError, Limits, Register, Stop
+from lup_dev.host.protocol import Behind, Branches, HostError, Limits, Register, Stop
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.service import HostService
 from lup_dev.host.workers import LaunchJudge
@@ -92,6 +92,7 @@ from lup_dev.launch.trust import (
     Unattended,
     Unchanged,
     UvToolchain,
+    behind,
     building,
     diffed,
     machine_trust,
@@ -408,10 +409,10 @@ class Recording(Toolchain):
         self.installed: list[Installed] = []
 
     def install(
-        self, tool: Tool, root: Path, commit: str, copy: CopyLayout, *, users: bool
+        self, tool: Tool, git: Git, commit: str, copy: CopyLayout, *, users: bool
     ) -> None:
         self.installed.append(
-            Installed(tool=tool, root=root, commit=commit, into=copy, users=users)
+            Installed(tool=tool, root=git.cwd, commit=commit, into=copy, users=users)
         )
         command = copy.command(tool.name)
         command.parent.mkdir(parents=True, exist_ok=True)
@@ -701,11 +702,11 @@ class Watching(Recording):
         self.linked: list[Path | None] = []
 
     def install(
-        self, tool: Tool, root: Path, commit: str, copy: CopyLayout, *, users: bool
+        self, tool: Tool, git: Git, commit: str, copy: CopyLayout, *, users: bool
     ) -> None:
         assert not copy.home.exists()
         self.linked.append(Copies(layout=self.copies).current())
-        super().install(tool, root, commit, copy, users=users)
+        super().install(tool, git, commit, copy, users=users)
 
 
 def test_an_approval_installs_beside_the_copy_that_judges_and_switches_once_its_whole(
@@ -2103,7 +2104,7 @@ def test_uv_builds_and_installs_the_commits_copy_held_to_its_lock(
     copy = CopyLayout(home=tmp_path / "judges" / "lup" / "copies" / "a1")
     host = Host({"node": "26.7.0", "uv": "0.12.5"})
     UvToolchain(executable=str(fake), tools=host).install(
-        tool, lup, head, copy, users=True
+        tool, Git(cwd=lup), head, copy, users=True
     )
     how, _, source = mark.read_text().partition(": ")
     ran, _, where = how.partition(" in ")
@@ -2180,7 +2181,7 @@ def test_uv_builds_nothing_where_the_host_lacks_what_the_declaration_requires(
         RequirementError,
         match=r"`pnpm`, for `building` \(installs the engine's packages\)",
     ):
-        toolchain.install(tool, lup, head, copy, users=False)
+        toolchain.install(tool, Git(cwd=lup), head, copy, users=False)
     assert not mark.exists()
     assert not log.exists()
 
@@ -2197,7 +2198,7 @@ def test_uv_installs_a_release_from_its_index_held_to_its_pins(
     )
     copy = CopyLayout(home=tmp_path / "judges" / "audiobook" / "copies" / "a1")
     UvToolchain(executable=str(fake)).install(
-        release, tmp_path, "unused", copy, users=False
+        release, Git(cwd=tmp_path), "unused", copy, users=False
     )
     install, *constraints = log.read_text().splitlines()
     assert install.startswith(
@@ -3443,8 +3444,9 @@ def test_lup_dev_trust_keeps_the_first_copy_and_says_so(
     head = shell.git(lup, "rev-parse", "dev")
     trust = trusting(lup, kit, unasked())
 
-    def stood_in(root: Path, inside: list[str]) -> Trust:
+    def stood_in(root: Path, inside: list[str], *, found: Path) -> Trust:
         del root, inside
+        assert found == lup / ".git"
         return trust
 
     monkeypatch.setattr(cli, "machine_trust", stood_in)
@@ -3477,3 +3479,45 @@ def test_a_launcher_with_no_terminal_gives_up_an_approval_no_answer_comes_to(
 
 def test_a_launcher_with_no_terminal_takes_the_answer_given_in_the_inbox() -> None:
     assert Unattended(say_to=lambda _: None).ask("Approve?", Arrived()) is None
+
+
+def test_a_spawn_s_trust_asks_nothing_keeps_the_copy_approved_and_reads_the_repository_it_was_given(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    """A launch found its repository already: trust's git is pinned to that git directory, never led through the worktree's `.git`; and an agent's spawn, which a room times, asks the operator nothing, running the copy approved as a decline would."""
+    common = Path(shell.git(lup, "rev-parse", "--absolute-git-dir"))
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    head = changed(lup, {"lup_project.py": DECLARED + "# changed\n"}, shell)
+    trust = trusting(lup, kit, yes()).model_copy(
+        update={"found": common, "asking": False}
+    )
+
+    outcome = trust.ensure()
+
+    assert trust.repository() == common
+    assert trust.git() == Git.pinned(common)
+    assert isinstance(trust.approvals, Here)
+    assert trust.approvals.asking == []
+    assert outcome == Kept(commit=head, approval=first.approval, asked=False)
+    assert behind(outcome) == Behind(running=first.approval.commit, tip=head)
+    assert outcome.report() == (
+        "Not asked, the launch being an agent's spawn, which never asks: the tip "
+        "isn't the code judging this session. The host keeps running `lup-dev` "
+        f"from {first.approval.commit}, which you approved; the host zone at "
+        f"{head} differs from it."
+    )
+    assert recording(trust).installed == []
+    assert approved(lup, kit, shell) == first.approval
+
+
+def test_a_spawn_s_trust_with_nothing_approved_launches_nothing_asking_nothing(
+    lup: Path, kit: Kit
+) -> None:
+    trust = trusting(lup, kit, yes()).model_copy(update={"asking": False})
+
+    with pytest.raises(TrustError, match="asks nothing, so nothing launches"):
+        trust.ensure()
+
+    assert isinstance(trust.approvals, Here)
+    assert trust.approvals.asking == []

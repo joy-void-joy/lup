@@ -6,11 +6,14 @@ from typing import TYPE_CHECKING, override
 
 import pytest
 
+from lup.events import TurnEnded
 from lup.sessions import results
 from lup.tools.tool import Refused
 from lup_dev import cli
+from lup_dev.host.courier import Heard
+from lup_dev.host.held import HeldLaunch
 from lup_dev.host.names import Names
-from lup_dev.host.protocol import Limits, Register
+from lup_dev.host.protocol import Limits, Register, Spawner
 from lup_dev.host.pushes import Pushes
 from lup_dev.inbox.bearings import Repository, RepositoryBearings
 from lup_dev.inbox.concerns import slugged
@@ -22,11 +25,13 @@ from lup_dev.inbox.reading import Narrowing, Reader
 from lup_dev.inbox.store import (
     KINDS,
     Comment,
+    Ended,
     Friction,
     Inbox,
     InboxError,
     Item,
     Letter,
+    Message,
     Review,
     Whereabouts,
     heard,
@@ -39,6 +44,7 @@ from lup_dev.inbox.tools import (
     Speaker,
     ThreadedRemark,
 )
+from lup_dev.launch.spawning import SpawnTools
 from lup_dev.layout import Layout
 from lup_ledger.environment.layout import LedgerLayout
 from lup_ledger.environment.store import Ledger
@@ -89,8 +95,10 @@ def delivery(tmp_path: Path, clock: FakeClock) -> Delivery:
     )
 
 
-def launched(delivery: Delivery, name: str, session: str) -> Register:
-    """Serve a launch named `name`, its session `session` heard in it: its record kept where the service keeps one, its name kept for the session."""
+def launched(
+    delivery: Delivery, name: str, session: str, spawner: Spawner | None = None
+) -> Register:
+    """Serve a launch named `name`, its session `session` heard in it: its record kept where the service keeps one, its name kept for the session; spawned through lup by `spawner`, where it's given, whose conversation their parent is."""
     register = Register(
         launch=name,
         runtime="claude",
@@ -99,12 +107,15 @@ def launched(delivery: Delivery, name: str, session: str) -> Register:
         judge=Path("/judge/lup-dev"),
         limits=Limits(actions=[], protected=[]),
         github=None,
+        spawner=spawner,
     )
     record = delivery.layout.record(name)
     record.parent.mkdir(parents=True, exist_ok=True)
     record.write_text(register.model_dump_json())
     Names(path=delivery.layout.names).keep(session, name)
-    delivery.heard_in(main(session), register, None)
+    delivery.heard_in(
+        main(session), register, None if spawner is None else spawner.conversation
+    )
     return register
 
 
@@ -1464,3 +1475,137 @@ def test_whereabouts_an_earlier_lup_kept_with_a_root_read_as_ever_and_where_they
 
     assert reopened.whereabouts[main("s1").key()] == place
     assert delivery.concerns().working(main("s1")) is None
+
+
+# Sessions an agent spawned through lup (`docs/launch.md`, *An agent's spawn*).
+
+
+def test_a_side_job_starts_quiet_on_its_spawner_s_concern_and_its_spawner_hears_nothing_it_says_there(
+    delivery: Delivery,
+) -> None:
+    register = launched(delivery, "dev", "s1")
+    lead = speaker(delivery, register, main("s1"))
+    said(lead.concern(Concerning(name="home", title="Home", hold=True)))
+    job = launched(
+        delivery, "measure", "c1", Spawner(launch="dev", conversation=main("s1"))
+    )
+
+    said(speaker(delivery, job, main("c1")).note(ThreadedRemark(remark="Measuring.")))
+    measuring = newest(delivery)
+    said(lead.note(ThreadedRemark(remark="Go on.")))
+    landed = thread_of(delivery, measuring)
+
+    assert landed is not None
+    assert landed.name == "home"
+    assert delivery.parent(main("c1")) == main("s1")
+    # Their spawner holds @home, yet what the side job says there is no more
+    # theirs than a subagent's, and the side job is no more on what their
+    # spawner says there than a subagent is.
+    assert told(delivery, main("s1")) == []
+    assert told(delivery, main("c1")) == []
+
+
+def test_a_builder_works_in_the_concern_handed_with_its_spawn_and_its_spawner_hears_nothing_of_it(
+    delivery: Delivery,
+) -> None:
+    register = launched(delivery, "dev", "s1")
+    lead = speaker(delivery, register, main("s1"))
+    said(lead.concern(Concerning(name="home", title="Home", hold=True)))
+    concerns = delivery.concerns()
+    revamp = concerns.opened(
+        main("s1"), "Revamp", REPOSITORY, concerns.named(REPOSITORY, "home")
+    )
+    revamp = concerns.handed(main("s1"), revamp, main("c1"))
+    brief = Message(kind="note", text="Revamp it.")
+    asyncio.run(delivery.copied(brief, main("c1"), main("s1"), None, thread=revamp))
+    builder = launched(
+        delivery,
+        "revamp",
+        "c1",
+        Spawner(launch="dev", conversation=main("s1"), concern=revamp.number),
+    )
+
+    said(speaker(delivery, builder, main("c1")).note(ThreadedRemark(remark="Built.")))
+    built = newest(delivery)
+    landed = thread_of(delivery, built)
+    working = concerns.working(main("c1"))
+
+    assert landed is not None
+    assert landed.number == revamp.number
+    assert working is not None
+    assert working.number == revamp.number
+    # Their spawner wrote its brief there, and holds the thread above: once
+    # handed, it's the builder's, not even a line of it theirs.
+    assert told(delivery, main("s1")) == []
+
+
+def test_a_spawn_whose_session_never_came_up_reaches_its_spawner_as_a_problem(
+    delivery: Delivery, tmp_path: Path
+) -> None:
+    launched(delivery, "dev", "s1")
+    layout = Layout(state=tmp_path / "state", runtime=tmp_path / "run")
+    log = layout.launch("h1").log
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("The room's image didn't build.\n")
+    tools = SpawnTools.model_construct(delivery=delivery, layout=layout)
+    spec = HeldLaunch(
+        launch="h1",
+        runtime="claude",
+        worktree=Path("/work/x"),
+        session="c1",
+        spawner=Spawner(launch="dev", conversation=main("s1")),
+    )
+
+    asyncio.run(tools.lost(spec))
+    item = delivery.inbox.item(newest(delivery))
+
+    assert (item.sender, item.recipient) == (main("c1"), main("s1"))
+    assert isinstance(item.reason, Message)
+    assert item.reason.kind == "problem"
+    # Not what the log says, which can name what's no room's to read.
+    assert item.reason.text == (
+        "lup: the session spawned in /work/x never came up, so it isn't running. "
+        f"Its launcher's log, the operator's to read, is {log}."
+    )
+    assert not item.quiet
+
+
+def test_a_side_job_s_report_to_a_subagent_who_ended_reaches_their_session(
+    delivery: Delivery, clock: FakeClock
+) -> None:
+    """What waited for a subagent goes to their session's own conversation as they end, and so does what comes for them after: a side job they spawned outlives them."""
+    register = launched(delivery, "dev", "s1")
+    worker = spawned(delivery, register, main("s1"), "a1", "fixer")
+    job = launched(
+        delivery, "measure", "c1", Spawner(launch="dev", conversation=worker)
+    )
+    place = delivery.inbox.whereabouts[worker.key()]
+    delivery.inbox.placed(place.model_copy(update={"ended": clock.now()}))
+
+    asyncio.run(
+        delivery.reported(
+            main("c1"),
+            job,
+            Heard(
+                event=TurnEnded(),
+                session="c1",
+                judged=False,
+                fits=10_000,
+                said="It takes four minutes.",
+            ),
+        )
+    )
+    item = delivery.inbox.item(newest(delivery))
+
+    assert item.recipient == main("s1")
+    assert item.reason == Ended(name="measure", said="It takes four minutes.")
+
+
+def test_parents_that_loop_are_walked_once(delivery: Delivery) -> None:
+    """A room's hook naming another session can make a session's parents loop: walking up stops where it comes round."""
+    register = launched(delivery, "dev", "s1")
+    worker = spawned(delivery, register, main("s1"), "a1", "fixer")
+    place = delivery.inbox.whereabouts[main("s1").key()]
+    delivery.inbox.placed(place.model_copy(update={"parent": worker}))
+
+    assert delivery.concerns().forebears(worker) == [main("s1")]

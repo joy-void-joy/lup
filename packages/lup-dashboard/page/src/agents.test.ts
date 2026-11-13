@@ -5,6 +5,7 @@ import {
     doing,
     everyone,
     launches,
+    parentsOf,
     repositories,
     repositoryName,
     ring,
@@ -159,5 +160,34 @@ describe("ring", () => {
         expect(ring(840, null)).toBe("840");
         expect(tokens(1_500_000)).toBe("1.5M");
         expect(tokens(12_000_000)).toBe("12M");
+    });
+});
+
+describe("parentsOf", () => {
+    it("puts each subagent under their parent, and a session an agent spawned under that agent", () => {
+        const spawned = {
+            ...registered("two", "x"),
+            spawner: {
+                launch: "one",
+                conversation: { party: "conversation" as const, repository: "/w/.git", runtime: "claude", session: "s1", agent: "a1" },
+                concern: null,
+            },
+        };
+        const listed = {
+            kind: "listed" as const,
+            launches: [registered("one", "w"), spawned],
+            sessions: {},
+            looks: {},
+            standing: { folds: [], tones: [], drawers: [], banners: [], verbs: [] },
+            talkers: {
+                one: [talker("w", null, 0), talker("w/a1", "w", 1)],
+                two: [{ ...talker("x", null, 0), session: "s2" }],
+            },
+        };
+        const key = (each: { session: string; agent: string | null }) => `${each.session}/${each.agent ?? ""}`;
+        expect([...parentsOf(launches(listed), key)]).toEqual([
+            ["s1/a1", "s1/"],
+            ["s2/", "s1/a1"],
+        ]);
     });
 });

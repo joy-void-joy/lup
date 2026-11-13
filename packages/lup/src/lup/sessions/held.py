@@ -31,7 +31,7 @@ class HeldSession(ABC):
 
     @abstractmethod
     async def send(self, text: str) -> None:
-        """Give the session `text` as a user turn: an idle session starts a turn on it, and a busy one reads it in the turn under way, once its running call ends."""
+        """Give the session `text` as a user turn: an idle session starts a turn on it, and a busy one reads it in the turn under way, once its running call ends. Return once it's on the session's input, never waiting for the runtime to read it, which a process of its room can stop."""
 
     @abstractmethod
     async def interrupt(self) -> None:

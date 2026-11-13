@@ -63,6 +63,43 @@ function under(talker: Talker, talkers: Talker[]): Agent {
     return { talker, children };
 }
 
+/** A conversation by the runtime's ids, as the host keys them. */
+export interface Keyed {
+    repository: string;
+    runtime: string;
+    session: string;
+    agent: string | null;
+}
+
+/**
+ * Return each conversation's parent, both by `key`: a subagent's, the conversation that spawned them, as the host's tree
+ * has it; and a session's own whom an agent spawned through lup, that agent, as the host recorded their launch's spawner.
+ * What nests a group under its parent's in the review.
+ */
+export function parentsOf(served: Launch[], key: (conversation: Keyed) => string): Map<string, string> {
+    const found = new Map<string, string>();
+    for (const { launch, session } of served) {
+        const keyOf = (agent: Agent) =>
+            key({ repository: launch.repository, runtime: launch.runtime, session: agent.talker.session, agent: agent.talker.agent ?? null });
+        const walk = (agent: Agent) => {
+            for (const child of agent.children) {
+                found.set(keyOf(child), keyOf(agent));
+                walk(child);
+            }
+        };
+        if (session === null) {
+            continue;
+        }
+        walk(session);
+        const spawner = launch.spawner;
+        if (spawner != null) {
+            const by = spawner.conversation;
+            found.set(keyOf(session), key({ repository: by.repository, runtime: by.runtime, session: by.session, agent: by.agent ?? null }));
+        }
+    }
+    return found;
+}
+
 /** Every conversation of every launch, a session's before its subagents: what the palette goes to. */
 export function everyone(served: Launch[]): Agent[] {
     function within(agent: Agent): Agent[] {

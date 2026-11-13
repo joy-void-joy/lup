@@ -57,6 +57,7 @@ A project's declaration names two branches (`docs/declaration.md`, *The branches
 - **The judge's reading comes in two passes** after a first approval, so a type check, seconds on lup's zone, doesn't hold the question up. Before it's asked, each file is read from its parse alone; once it's in the inbox, the host service reads its types and replaces the reading.
 - **A push's approval has its types read in a checkout:** of the running branch, or where it has none of the integration branch, or else the repository's main worktree. A bare repository's own directory, trust's root for a push, holds no project, so from there nothing it imports resolves, which reads as findings the change doesn't have and hides those it does. Trust's own git stays in that directory, and git in the reading is pinned to the repository, since a room writes a worktree's `.git` and its push sets this off (`docs/credentials.md`, *Running git on the host*). A bare repository with neither checkout keeps the reading without its imports.
 - **Two launches asking about the same zone** wait on one approval, and either answer, or the inbox's, reaches both.
+- **A launch an agent spawned asks nothing:** it runs the copy approved before, as a decline leaves it, and launches nothing where none was (`docs/launch.md`, *An agent's spawn*).
 
 ## What the host runs while it's on trial
 

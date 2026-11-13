@@ -41,7 +41,7 @@ declining and reopening are the operator's (`settled`, `declined`,
 """
 
 import textwrap
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Literal
 
 from lup.types import Model
@@ -331,10 +331,11 @@ class Concerns(Model, arbitrary_types_allowed=True):
         They're on it by working there and by what they send landing there,
         yet nothing their parent is told there, nor their siblings' notes, is
         for them: what is reaches them sent to them, or in a thread they chose.
+        A session an agent spawned as a side job is heard as their subagent is.
         """
-        if party.agent is None:
-            return False
         place = self.inbox.whereabouts.get(party.key())
+        if party.agent is None and (place is None or place.parent is None):
+            return False
         return (
             place is not None
             and not place.chose_start
@@ -451,23 +452,30 @@ class Concerns(Model, arbitrary_types_allowed=True):
                 return []
 
     def forebears(self, party: Conversation) -> list[Conversation]:
-        """Return the conversations above `party`: the one that spawned them, theirs, and so on up to their session's own; none for a session's own.
+        """Return the conversations above `party`: the one that spawned them, theirs, and so on up to their session's own, and where an agent spawned that session through lup, that agent and those above them; none for a session's own nobody spawned.
 
         They hear `party` through their runtime, `party`'s result and end, and
         through what `party` sends them, so what `party` sends the operator is
-        told to none of them.
+        told to none of them. A spawner let go of what they handed over, so
+        what lands of it isn't told them either, not even in a line.
         """
-        if party.agent is None:
-            return []
 
-        def above(each: Conversation, depth: int) -> list[Conversation]:
-            place = self.inbox.whereabouts.get(each.key())
+        def above() -> Iterator[Conversation]:
+            # Each once: a room's hook naming another session can make the
+            # parents loop.
+            passed = [party]
+            place = self.inbox.whereabouts.get(party.key())
             parent = None if place is None else place.parent
-            if parent is None or depth > len(self.inbox.whereabouts):
-                return []
-            return [parent, *above(parent, depth + 1)]
+            while parent is not None and parent not in passed:
+                passed.append(parent)
+                yield parent
+                yield parent.main()
+                place = self.inbox.whereabouts.get(parent.key())
+                parent = None if place is None else place.parent
 
-        return list(dict.fromkeys([*above(party, 0), party.main()]))
+        return [
+            each for each in dict.fromkeys([*above(), party.main()]) if each != party
+        ]
 
     def referred(
         self, item: Item, repository: Path, landing: Thread | None

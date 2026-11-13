@@ -83,7 +83,6 @@ from lup_dev.errors import LupDevError
 from lup_dev.git import Git
 from lup_dev.host.rooms import SERVER
 from lup_dev.launch.guidance import render
-from lup_dev.launch.room import repository
 from lup_dev.layout import CheckoutLayout, LaunchSockets, RoomPaths
 
 if TYPE_CHECKING:
@@ -110,9 +109,12 @@ class Approved(Model):
 
 @contextmanager
 def approved_declaration(
-    worktree: Path, commit: str, *, local: str | None
+    repository: Path, commit: str, *, local: str | None
 ) -> Generator[Approved]:
-    """Read the declaration at `commit` in the repository of `worktree`, with `local` on top, and resolve it.
+    """Read the declaration at `commit` in the repository whose git directory is `repository`, with `local` on top, and resolve it.
+
+    git is pinned there (`Git.pinned`), never led through a worktree's `.git`
+    file, which a room writes.
 
     The commit's Python modules and project files are exported from git's
     objects into a scratch directory, `local`, the person's own layer approved
@@ -121,7 +123,7 @@ def approved_declaration(
     guidance sections. The directory is removed when the context ends. Raise
     `ProjectError` where the declaration doesn't load or resolve.
     """
-    git = Git(cwd=worktree)
+    git = Git.pinned(repository)
     with tempfile.TemporaryDirectory(prefix="lup-launch-") as scratch:
         root = Path(scratch)
         git.export(commit, root, read_by_import)
@@ -318,9 +320,9 @@ def session_settings(choices: SessionChoices) -> SessionParts:
     )
 
 
-def trusted(worktree: Path) -> list[Path]:
-    """Return the paths a launch in `worktree` trusts: the worktree, and its repository's main worktree."""
-    return list(dict.fromkeys([worktree, repository(worktree).main]))
+def trusted(worktree: Path, main: Path) -> list[Path]:
+    """Return the paths a launch in `worktree` trusts: the worktree, and its repository's main worktree, `main`."""
+    return list(dict.fromkeys([worktree, main]))
 
 
 def terminal_settings(
@@ -334,10 +336,11 @@ def terminal_settings(
     neighbours: list[RelatedRepository],
     shared: dict[str, Path],
     rules: list[Rule],
+    main: Path,
     lent: list[Lent] | None = None,
     home: RuntimeHome | None = None,
 ) -> TerminalSettings:
-    """Return what lup adds to the session launched in `worktree`, its files compiled into `directory`, on `home`.
+    """Return what lup adds to the session launched in `worktree`, its files compiled into `directory`, on `home`; `main` is its repository's main worktree, as the launch found the repository, which it trusts too.
 
     `tools` are lup's tools the host service serves it, `neighbours` the other
     repositories named for it, as the launch found them, and `lent` the
@@ -367,6 +370,6 @@ def terminal_settings(
         ),
         session=session.declared,
         defaults=session.defaults,
-        trusted=trusted(worktree),
+        trusted=trusted(worktree, main),
         home=home,
     )

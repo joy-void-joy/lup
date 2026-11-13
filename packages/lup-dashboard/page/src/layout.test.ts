@@ -106,6 +106,26 @@ describe("subagents nested under their parent", () => {
             [whose(PARENT), 0],
             [whose(GRANDCHILD), 1],
         ]);
+        // A room's hook naming another session as its own can make the host's tree loop: each group is laid once.
+        const looping = new Map([
+            [whose(PARENT), whose(CHILD)],
+            [whose(CHILD), whose(PARENT)],
+            [whose(GRANDCHILD), whose(OTHER)],
+            [whose(OTHER), whose(GRANDCHILD)],
+        ]);
+        const looped = nested(
+            [
+                { key: whose(PARENT), conversation: PARENT, head: { conversation: PARENT }, items: [] },
+                { key: whose(CHILD), conversation: CHILD, head: { conversation: CHILD }, items: [] },
+                { key: whose(GRANDCHILD), conversation: GRANDCHILD, head: { conversation: GRANDCHILD }, items: [] },
+            ],
+            looping,
+        );
+        expect(looped.map((each) => [each.group.key, each.depth])).toEqual([
+            [whose(GRANDCHILD), 0],
+            [whose(PARENT), 0],
+            [whose(CHILD), 1],
+        ]);
     });
 });
 

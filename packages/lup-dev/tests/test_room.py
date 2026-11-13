@@ -149,7 +149,14 @@ def room_for(
         resolved,
         worktree,
         terminal,
-        RoomEnvironments.of(resolved.runner, worktree, layout, LAUNCH, tools),
+        RoomEnvironments.of(
+            resolved.runner,
+            worktree,
+            layout,
+            LAUNCH,
+            tools,
+            held=repository(worktree),
+        ),
         neighbours=neighbours,
         shared=shared,
         lent=lent,
@@ -612,7 +619,12 @@ def test_a_launch_s_environments_are_its_own_and_go_with_it(
     launch = machine.layout.launch(LAUNCH)
 
     made = RoomEnvironments.of(
-        resolve(Project()).runner, worktree, machine.layout, LAUNCH, machine.tools()
+        resolve(Project()).runner,
+        worktree,
+        machine.layout,
+        LAUNCH,
+        machine.tools(),
+        held=repository(worktree),
     )
     made.write()
 
@@ -652,7 +664,12 @@ def test_the_end_removes_no_environment_a_room_names_outside_the_tree(
     theirs = repo / ".venv"
     (theirs / "bin").mkdir(parents=True)
     made = RoomEnvironments.of(
-        resolve(Project()).runner, worktree, machine.layout, LAUNCH, machine.tools()
+        resolve(Project()).runner,
+        worktree,
+        machine.layout,
+        LAUNCH,
+        machine.tools(),
+        held=repository(worktree),
     )
     made.write()
     # While the room runs, an entry naming another repository's directory as a
@@ -677,6 +694,7 @@ def test_a_plain_runner_s_room_has_no_environments_of_its_own(
         layout,
         LAUNCH,
         AskedUv(tmp_path / "none", tmp_path / "none"),
+        held=repository(worktree),
     )
     made.write()
     assert made.own is None
@@ -884,7 +902,7 @@ def test_a_relative_path_is_from_the_directory_holding_a_bare_repository(
     (tmp_path / "notes.git").mkdir()
     named = naming(Path("notes.git"), Path("gone.git"))
 
-    found = related(named, bare / "tree" / "main")
+    found = related(named, repository(bare / "tree" / "main"))
 
     assert found == [
         RelatedRepository(
@@ -910,7 +928,7 @@ def test_a_relative_path_is_from_the_directory_holding_a_clone_s_working_tree(
     git(repo, "worktree", "add", "-q", "-b", "feat", ".worktrees/feat")
     (tmp_path / "notes").mkdir()
 
-    [found] = related(naming(Path("notes")), repo / ".worktrees" / "feat")
+    [found] = related(naming(Path("notes")), repository(repo / ".worktrees" / "feat"))
 
     assert found.path == (tmp_path / "notes").resolve()
     assert found.mounted
@@ -922,7 +940,9 @@ def test_an_absolute_path_and_one_from_the_home_are_where_they_say(
     (home / "src" / "x.git").mkdir(parents=True)
     elsewhere = tmp_path / "elsewhere" / "y.git"
 
-    found = related(naming(Path("~/src/x.git"), elsewhere), bare / "tree" / "main")
+    found = related(
+        naming(Path("~/src/x.git"), elsewhere), repository(bare / "tree" / "main")
+    )
 
     assert [(each.path, each.mounted) for each in found] == [
         ((home / "src" / "x.git").resolve(), True),
@@ -935,7 +955,7 @@ def test_each_repository_there_is_mounted_read_only_at_its_host_path_after_the_p
 ) -> None:
     worktree = bare / "tree" / "main"
     layout = scratch(tmp_path)
-    neighbours = related(naming(Path("work"), Path("gone.git")), worktree)
+    neighbours = related(naming(Path("work"), Path("gone.git")), repository(worktree))
 
     room = room_for(
         resolve(plain()),
@@ -1031,7 +1051,7 @@ def test_a_repository_overlapping_the_room_s_own_mounts_is_refused(
             layout,
             terminal(),
             AskedUv(tmp_path / "none", tmp_path / "none"),
-            neighbours=related(naming(named), worktree),
+            neighbours=related(naming(named), repository(worktree)),
         )
     assert str((tmp_path / named).resolve()) in str(refused.value)
 

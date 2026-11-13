@@ -126,7 +126,7 @@ import asyncio
 import difflib
 import secrets
 import textwrap
-from collections.abc import Callable, Coroutine, Generator, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Generator, Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, override
@@ -145,7 +145,7 @@ from lup.events import (
 from lup.types import Model, MutableModel
 from lup_dev.clock import Clock
 from lup_dev.host.courier import Failure, Heard, Post, Posted, Waker
-from lup_dev.host.holders import HeldPrompt, Holders
+from lup_dev.host.holders import HeldEnd, HeldPrompt, Holders
 from lup_dev.host.names import Names
 from lup_dev.host.protocol import HostError, Register
 from lup_dev.host.pushes import Pushes
@@ -764,6 +764,20 @@ conversation started in the background, a command ending or a Monitor's
 event."""
 
 
+def started_anew(presence: Presence, launch: str) -> None:
+    """Note that a held session's process started anew in `launch`: what was given an earlier process and never taken went with it, and is told this one as anything waiting is; what this launch's own call-up gave it already, come before this hook, its first turn takes, so nothing's told or given again meanwhile. A clear or a compaction keeps the process, and its input with it, so it isn't this."""
+    pushed = presence.pushed
+    if pushed is not None and pushed.launch == launch:
+        presence.woken = True
+        return
+    presence.pushed = None
+
+
+def side_job(launch: Register) -> bool:
+    """Say whether `launch` is a side job an agent spawned through lup, whose report goes back to them, rather than a concern handed over to build, whose reports land in it (`Register.spawner`)."""
+    return launch.spawner is not None and launch.spawner.concern is None
+
+
 def whose(item: Item) -> Waking:
     """Say whose news `item` is, for what ends a held call: another agent's, where a conversation other than the one it's for sent it; else the operator's, lup's own word to the conversation among it.
 
@@ -875,13 +889,29 @@ class Presence(MutableModel):
     pushed: Pushed | None = None
     """What was last pushed to their session, until a turn's start carries its
     token, or its wait runs out."""
+    launch: str | None = None
+    """The launch whose hooks last set what this says: what an earlier launch's
+    process left, a turn under way or a wake, says nothing of a process started
+    since in another."""
+    ended: datetime | None = None
+    """When their last turn ended, as its end was let through, or the operator
+    interrupted it: what was given their held session before then and is still
+    unread a while after, it dropped (`Delivery.unread`)."""
 
 
 class Pushed(Model):
-    """What was pushed to an idle session through lup's tool server: the token their turn's prompt carries, and the items it told."""
+    """What was pushed to an idle session through lup's tool server, or given their held session through its launcher: the token their turn's prompt carries, the items it told, and the launch it went through."""
 
     token: str
     numbers: list[int]
+    launch: str | None = None
+    """The held launch whose launcher it was given through, whose process
+    reads it; none for a push, through lup's tool server."""
+    at: datetime | None = None
+    """When it was given."""
+    again: bool = False
+    """Whether it's given again, one before it taken for dropped
+    (`Delivery.dropped`): never taken for dropped itself."""
 
 
 class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
@@ -904,6 +934,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     patience: timedelta = timedelta(seconds=30)
     """How long a push waits for the turn's start carrying its token, after
     which what it told is put back and the session's messaging socket rings."""
+    unread: timedelta = timedelta(seconds=30)
+    """How long a held session may stay idle after a turn's end, or an
+    interrupt, with a turn given it before that still unread, before that turn
+    is taken for dropped and given again: an idle runtime starts a turn on
+    what waits on its input at once, and the one measured ran a message
+    waiting through an interrupt as its next turn (`docs/field-notes.md`, *A
+    session held with no terminal*), so it's a net for a runtime that drops
+    one."""
     queues: dict[str, Queues] = {}
     """What each runtime holds for a conversation while their call runs, by the
     runtime's name, which ends a held call (`held`); a runtime without, a gap
@@ -944,6 +982,17 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     (`lup_dev.policy.coming`); none looks at nothing."""
     looks: list[asyncio.Task[None]] = []
     """Each look `starting` began, kept until it's done."""
+    resumer: Callable[[Conversation, Conversation, Register], Awaitable[str]] | None = (
+        None
+    )
+    """Resumes a side job that ended, its session held again with its context,
+    where its spawner sends it a message: the side job, the spawner, and their
+    launch in; what to add to `send`'s answer out, empty where it's none of the
+    spawner's to resume (`SpawnTools.resumed`, which `cli.py` gives). None
+    resumes nothing."""
+    ending: list[asyncio.Task[None]] = []
+    """Each side job's end asked of its launcher at its report, kept until it's
+    answered."""
 
     def presence(self, conversation: Conversation) -> Presence:
         """Return what the service knows of `conversation` while it serves."""
@@ -990,10 +1039,16 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         self.heard_in(
             party,
             launch,
-            None if parent is None else self.party(launch, parent),
+            self.parent_of(launch, conversation, parent),
             conversation.name,
         )
         presence = self.presence(party)
+        pushed = presence.pushed
+        if pushed is not None and pushed.launch not in [None, launch.launch]:
+            # Given through another launch's launcher, to a process this hook's
+            # isn't, as one a terminal took over: it went with that process.
+            presence.pushed = None
+        presence.launch = launch.launch
         presence.woken = False
         match heard.event:
             case TurnEnded() | ConversationEnded():
@@ -1011,32 +1066,57 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 if not unread and holding(fresh, [], after_block=heard.after_block):
                     posted = self.told(party, room, heard.fits, "turn's end")
                     if posted.items:
-                        if ended:
+                        if ended or (side_job(launch) and party.agent is None):
                             self.held_saying(party, heard.said)
                         return posted
                 presence.turning = False
+                if party.agent is None:
+                    presence.ended = self.clock.now()
                 if ended and party.agent is not None:
                     await self.ended(party, launch, conversation, heard)
+                if not ended and side_job(launch) and party.agent is None:
+                    await self.reported(party, launch, heard)
                 return Posted()
             case SessionStarted():
                 presence.turning = False
-                if (
+                held = (
                     heard.anew
+                    and party.agent is None
                     and self.holders is not None
                     and self.holders.holds(launch.launch)
-                ):
-                    # What was given an earlier process of a held session's and
-                    # never taken went with it: it's told this one as anything
-                    # waiting is. A clear or a compaction keeps the process, and
-                    # its input with it.
-                    presence.pushed = None
+                )
+                if held:
+                    started_anew(presence, launch.launch)
                 if party.agent is None and self.starting is not None:
                     task = asyncio.create_task(self.starting(launch))
                     self.looks = [
                         *(each for each in self.looks if not each.done()),
                         task,
                     ]
-                return self.worded(party, self.told(party, room, heard.fits, "start"))
+                spawned = (
+                    [self.introduced(launch)]
+                    if heard.fresh
+                    and party.agent is None
+                    and launch.spawner is not None
+                    else []
+                )
+                # A held session's new process takes no turn on what it's told
+                # as it starts: what waits is given it as its first turn once
+                # its launcher calls it up (`called_up`), an agent's brief
+                # among it.
+                told = (
+                    Posted()
+                    if held
+                    else self.told(
+                        party,
+                        room - sum(len(each.encode()) for each in spawned),
+                        heard.fits,
+                        "start",
+                    )
+                )
+                return self.worded(
+                    party, told.model_copy(update={"items": [*spawned, *told.items]})
+                )
             case TurnStarted():
                 presence.turning = True
                 taken = presence.pushed
@@ -1074,7 +1154,13 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 text = said
             case _:
                 return
-        await self.ended_saying(self.party(launch, conversation), text, launch.worktree)
+        party = self.party(launch, conversation)
+        if side_job(launch) and not self.answering(party):
+            # A side job's report is its spawner's (`reported`), as a
+            # subagent's last words are their parent's: before the operator only
+            # where it answers words of theirs.
+            return
+        await self.ended_saying(party, text, launch.worktree)
 
     async def ended_saying(
         self,
@@ -1208,10 +1294,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
         Heard again in another launch, or after they ended, as a session
         resumed, they keep the threads they work in and started on, and whether
-        they chose the one they started on. A subagent
-        heard the first time starts on the thread their parent works in
-        (`Whereabouts.thread`), hearing only what's addressed to them there
-        until they choose it (`Whereabouts.chose_start`).
+        they chose the one they started on. A subagent, or a session an agent
+        spawned as a side job, heard the first time starts on the thread their
+        parent works in (`Whereabouts.thread`), hearing only what's addressed to
+        them there until they choose it (`Whereabouts.chose_start`); a session
+        handed a concern with their spawn starts in it, theirs
+        (`Spawner.concern`).
         """
         place = self.inbox.whereabouts.get(party.key())
         if place is not None and place.launch == launch.launch and place.ended is None:
@@ -1221,7 +1309,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 )
             return
         above = None if parent is None else self.inbox.whereabouts.get(parent.key())
-        starting = None if above is None else above.thread
+        handed = (
+            None
+            if party.agent is not None or launch.spawner is None
+            else launch.spawner.concern
+        )
+        starting = handed or (None if above is None else above.thread)
         self.inbox.placed(
             Whereabouts(
                 conversation=party,
@@ -1234,26 +1327,223 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 felt_asked=place is not None and place.felt_asked,
                 thread=starting if place is None else place.thread,
                 started=starting if place is None else place.started,
-                chose_start=place is not None and place.chose_start,
+                chose_start=handed is not None
+                or (place is not None and place.chose_start),
             )
         )
 
     def parent(self, party: Conversation) -> Conversation | None:
-        """Return the conversation that spawned `party`, where they're a subagent a conversation spawned; none else."""
+        """Return the conversation that spawned `party`, where they're a subagent a conversation spawned, or a session an agent spawned through lup; none else."""
         place = self.inbox.whereabouts.get(party.key())
         return None if place is None else place.parent
 
+    def parent_of(
+        self, launch: Register, conversation: Caller, spawner: Caller | None
+    ) -> Conversation | None:
+        """Return the conversation that spawned `conversation` of `launch`: for a subagent, `spawner`, as their runtime recorded the spawn; for a session's own, the agent who spawned their launch through lup, as the host recorded it (`Register.spawner`), never as the room says, nor as the inbox kept it from an earlier launch, which a room's hook naming another session could have set."""
+        if conversation.agent is not None:
+            return None if spawner is None else self.party(launch, spawner)
+        return self.spawner_of(launch, self.party(launch, conversation))
+
     def subagents(self, party: Conversation) -> list[Whereabouts]:
-        """Return where each subagent `party` spawned was last heard, those heard in the launch `party` was last heard in alone, in the order each was first heard there: those that ended among them."""
+        """Return where each subagent `party` spawned was last heard, those heard in the launch `party` was last heard in alone, and each session they spawned through lup, whatever launch it runs in, in the order each was first heard: those that ended among them."""
         place = self.inbox.whereabouts.get(party.key())
         if place is None:
             return []
         spawned = [
             each
             for each in self.inbox.whereabouts.values()
-            if each.parent == party and each.launch == place.launch
+            if each.parent == party
+            and (each.launch == place.launch or each.conversation.agent is None)
         ]
         return sorted(spawned, key=lambda each: each.since)
+
+    async def reported(
+        self, party: Conversation, launch: Register, heard: Heard
+    ) -> None:
+        """Hand a side job's report to the agent who spawned it, as a subagent's end is handed (`Ended`): its turn's last words, or how it was stopped or failed, with what it said at each end lup held, which nothing else hands on.
+
+        Not quiet, as a subagent's end is: no runtime wakes the spawner for
+        it, so it holds their turn's end once, wakes them idle, and returns
+        their `wait_inbox`. Then the side job ends, its launcher asked to end
+        it once this hook is answered, so none waits idle, counted against the
+        limits; what its spawner sends it after resumes it, its context kept
+        (`resumer`).
+        """
+        place = self.inbox.whereabouts.get(party.key())
+        if place is None or place.parent is None:
+            return
+        self.inbox.placed(place.model_copy(update={"held": []}))
+        spawner = self.reaching(place.parent)
+        news = Ended(
+            name=launch.name or launch.launch,
+            stopped=heard.stopped,
+            failed=None if heard.failed is None else heard.failed.kind,
+            said=heard.said,
+            held=place.held,
+        )
+        await self.posted(news, party, spawner, launch.worktree)
+        holders = self.holders
+        if holders is not None and holders.holds(launch.launch):
+            # Asked apart: its end comes once this turn's end is answered.
+            self.ending = [
+                *(each for each in self.ending if not each.done()),
+                asyncio.create_task(self.side_job_ended(launch)),
+            ]
+
+    async def side_job_ended(self, launch: Register) -> None:
+        """Ask the launcher of `launch`, a side job that reported, to end it; where it can't, say so."""
+        if self.holders is None:
+            return
+        try:
+            await self.holders.asked(launch.launch, HeldEnd())
+        except HostError as failed:
+            self.say(
+                f"{launch.launch}: the side job didn't end at its report: {failed}"
+            )
+
+    async def told_spawner(self, launch: Register, text: str) -> None:
+        """Tell the agent who spawned `launch` through lup `text`, lup's line of it, as a quiet message from its session: no wake, no turn's end held, but their `wait_inbox` returns on it. Nothing where no agent spawned it, or no session of it was heard."""
+        spawner = launch.spawner
+        if spawner is None:
+            return
+        party = self.inbox.running(launch.launch) or (
+            None
+            if launch.session is None
+            else Conversation(
+                repository=launch.repository,
+                runtime=launch.runtime,
+                session=launch.session,
+            )
+        )
+        if party is None:
+            return
+        await self.posted(
+            Message(kind="note", text=text),
+            party,
+            self.reaching(spawner.conversation),
+            launch.worktree,
+            quiet=True,
+        )
+
+    def reaching(self, party: Conversation) -> Conversation:
+        """Return whom an item for `party`, an agent who spawned a session through lup, reaches: them; their session's main conversation where they're a subagent who ended, as what waited for them goes there as they end (`ended`); and where that session was cleared in its launch, the one that took its place there, whom a push or a doorbell of the launch reaches, as `party` it would never be taken."""
+        place = self.inbox.whereabouts.get(party.key())
+        if party.agent is not None and place is not None and place.ended is not None:
+            return self.reaching(party.main())
+        if party.agent is not None or place is None or self.inbox.live(party):
+            return party
+        successor = self.running(place.launch)
+        return party if successor is None else successor
+
+    async def called_up(self, launch: Register, session: str) -> None:
+        """Give a held session what waits for them as their first turn, once their launcher calls them up: what an agent's spawn addressed to them, their brief among it, and what came for them while they were away; not told as they started, where no turn would begin on it.
+
+        Their launcher calls them up once the host heard their first hook named,
+        which may be before that hook is answered: so they're noted in this
+        launch here too, as their hook notes them (`heard_in`), whichever comes
+        first, and what's given is tagged with this launch, which their start
+        then leaves be (`telling`). Given once, whatever the order.
+        """
+        party = Conversation(
+            repository=launch.repository, runtime=launch.runtime, session=session
+        )
+        self.heard_in(party, launch, self.spawner_of(launch, party))
+        presence = self.presence(party)
+        if presence.launch != launch.launch:
+            # What an earlier launch's process left says nothing of this one,
+            # which no hook of its own has set yet: idle, given nothing.
+            presence.launch = launch.launch
+            presence.turning = False
+            presence.woken = False
+            presence.pushed = None
+        await self.wake(party)
+
+    async def rewoken(self) -> None:
+        """Give each idle held session what waits for them that nothing would tell, at the sweep: where giving it failed, as at their call-up, an idle held session sends no hook that would tell it, so it's given again until it's given (`wake`).
+
+        Each is given at once, apart from the others, so a launcher slow to
+        answer holds no other session's, nor the sweep past its own limit
+        (`Holders.answering`).
+        """
+        if self.holders is None:
+            return
+        parties = [
+            party
+            for launch in self.holders.held
+            if (party := self.running(launch)) is not None
+        ]
+        await asyncio.gather(*(self.wake(each) for each in parties))
+
+    @staticmethod
+    def spawner_of(launch: Register, party: Conversation) -> Conversation | None:
+        """Return the agent who spawned `party`'s session through lup, as the host recorded `launch`, theirs: where they're its own conversation and an agent spawned it; none else."""
+        if party.agent is not None or launch.spawner is None:
+            return None
+        spawner = launch.spawner.conversation
+        return None if spawner == party else spawner
+
+    def introduced(self, launch: Register) -> str:
+        """Say, in lup's words, what a session an agent spawned through lup is, as their session starts: whose they are, where they work, and where what they say goes, a side job's report back to their spawner, a builder's into the concern handed them, theirs; and where its host code is the copy approved, not the tip's, which a spawn never asks about (`Register.behind`), both, so they can ask the operator for the newer."""
+        spawner = launch.spawner
+        if spawner is None:
+            return ""
+        who = self.roster().who(spawner.conversation)
+        where = (
+            f"in a room and a worktree of your own, {launch.worktree}, on its "
+            "own branch"
+        )
+        handed = (
+            None if spawner.concern is None else self.concerns().at(spawner.concern)
+        )
+        behind = launch.behind
+        running = (
+            ""
+            if behind is None
+            else (
+                f" lup's host code judging you is `lup-dev` from {behind.running}, "
+                "the copy the operator approved, not the running branch's tip, "
+                f"whose host zone at {behind.tip} nobody approved yet: a session an "
+                "agent spawns never asks. Where you need the newer, say so to the "
+                "operator, who approves it from their own terminal."
+            )
+        )
+        if handed is None:
+            return (
+                f"lup: {who} spawned you through lup's `spawn`, as a side job for "
+                f"them, {where}. Their brief comes as your first turn. What you end "
+                "your turn saying is your report, handed to them whole, and you end "
+                "there, so end it with what they asked for. `send` to `parent` "
+                "reaches them meanwhile, and what they send you after resumes you, "
+                f"with all you know so far.{running}"
+            )
+        # Its title is free text, its spawner's where they opened it with the
+        # spawn: set apart as someone's words, never said in lup's voice.
+        titled = Tag(
+            name="title", attributes={"concern": handed.name}, parts=[handed.title]
+        )
+        return (
+            f"lup: {who} spawned you through lup's `spawn` and handed you "
+            f"@{handed.name}: it's yours, {where}. What you send lands there, the "
+            "operator reads it and talks with you directly, so ask them what's "
+            "theirs to decide, and land your own branch. "
+            f"{who} hears when you end, not what you report; `send` to `parent` "
+            "reaches them where their brief is wrong on what matters. Their brief "
+            f"comes as your first turn.{running}\nIts title, in the words of "
+            f"whoever opened it:\n{titled.written()}"
+        )
+
+    async def closed(self, launch: Register) -> None:
+        """Tell the agent who spawned `launch` through lup, handing a concern with it, in a line, that it ended, and where its reports are (`told_spawner`). A side job's end isn't told: it ends at each report, which says it."""
+        spawner = launch.spawner
+        if spawner is None or spawner.concern is None:
+            return
+        handed = self.concerns().at(spawner.concern)
+        where = "" if handed is None else f": its reports are in @{handed.name}"
+        await self.told_spawner(
+            launch,
+            f"lup: `{launch.name or launch.launch}`, whom you spawned, ended{where}.",
+        )
 
     async def ended(
         self, party: Conversation, launch: Register, conversation: Caller, heard: Heard
@@ -2487,8 +2777,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         and never for quiet items alone (`Item.quiet`), which a wake for another
         carries with it. One in their turn (`Presence.turning`) is told at their
         next call, or their turn's end; a call they hold is given it; a wake
-        since their last hook started a turn whose first call tells it; and a
-        runtime with no way waits for their next hook. An idle session starts a
+        since their last hook started a turn whose first call tells it; a turn
+        given their held session and not yet taken carries it, the next given
+        once that's taken, or where a new process voids it, so nothing is given
+        twice; and a runtime with no way waits for their next hook. An idle session starts a
         turn with it; one the service took for idle, unknown since the service
         started again or since the operator interrupted them, takes it at their
         next boundary, as measured on the runtime that has a way
@@ -2497,19 +2789,65 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         presence = self.presence(party)
         place = self.inbox.whereabouts.get(party.key())
         waiting = self.inbox.waiting(party)
-        busy = presence.turning or presence.woken or presence.held
+        # A turn given their held session and not yet taken is on its input,
+        # which its runtime reads at its next boundary, however many hooks come
+        # first: a compaction's start, or the end of a turn under way.
+        given = (
+            presence.pushed is not None
+            and presence.pushed.launch is not None
+            and place is not None
+            and presence.pushed.launch == place.launch
+        )
+        dropped = given and self.dropped(presence)
+        if dropped:
+            presence.pushed = None
+            given = False
+        busy = presence.turning or presence.woken or presence.held or given
         loud = [item for item in waiting if not item.quiet]
         if party.agent is not None or busy or place is None or not loud:
             return
+        if not self.inbox.live(party):
+            # Cleared in their launch, or ended: a push or a doorbell of the
+            # launch reaches whoever runs there in their place, who'd never take it as
+            # theirs, and the launch would be rung from then on.
+            return
         if self.holders is not None and self.holders.holds(place.launch):
-            await self.given(party, place, waiting)
+            await self.given(party, place, waiting, again=dropped)
             return
         if self.pushed(party, place, waiting):
             return
         await self.rung(party, place, waiting)
 
+    def dropped(self, presence: Presence) -> bool:
+        """Say whether the turn given a held session, still unread, is taken for dropped, to be given again: given before their last turn ended, or the operator interrupted it, and they've been idle `unread` since, where an idle runtime would have started a turn on it at once; and not itself given again so.
+
+        Hooks prove no drop: a room sends any hook of its own session's, a
+        turn's end among it, its runtime paused. So a turn is given again once
+        at most, until it's taken or a new process voids it, and the launcher
+        refuses a turn while what it gave is unread past its own limit, its
+        held session's (`lup.sessions.held`): what a room can pile on its
+        input is bounded.
+        One given an idle session, never followed by an end, is never taken
+        for dropped.
+        """
+        pushed, ended = presence.pushed, presence.ended
+        return (
+            pushed is not None
+            and not pushed.again
+            and pushed.at is not None
+            and ended is not None
+            and not presence.turning
+            and ended >= pushed.at
+            and self.clock.now() - ended >= self.unread
+        )
+
     async def given(
-        self, party: Conversation, place: Whereabouts, waiting: list[Item]
+        self,
+        party: Conversation,
+        place: Whereabouts,
+        waiting: list[Item],
+        *,
+        again: bool = False,
     ) -> None:
         """Give what waits for idle `party` to their held session as its next turn, through its launcher, each item whole, as a push carries them (`pushed`).
 
@@ -2533,7 +2871,13 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             return
         presence = self.presence(party)
         presence.woken = True
-        pushed = Pushed(token=token, numbers=[item.number for item in waiting])
+        pushed = Pushed(
+            token=token,
+            numbers=[item.number for item in waiting],
+            launch=place.launch,
+            at=self.clock.now(),
+            again=again,
+        )
         presence.pushed = pushed
         who = self.roster().who(party)
         try:
@@ -2567,6 +2911,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         presence.held = []
         presence.turning = False
         presence.woken = False
+        presence.ended = self.clock.now()
         await self.wake(party)
 
     def pushed(

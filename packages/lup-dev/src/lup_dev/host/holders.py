@@ -1,6 +1,8 @@
 """The launches whose session a launcher holds with no terminal, and the requests the host service makes of each launcher, on the socket beside its lock (`lup_dev.host.held`)."""
 
+import asyncio
 from collections.abc import Awaitable, Callable
+from datetime import timedelta
 from typing import Literal
 
 from lup.types import MutableModel
@@ -43,6 +45,17 @@ class Holders(MutableModel, arbitrary_types_allowed=True):
     """What follows an interrupt that went through, by launch id: its session
     taken for idle, since an interrupted turn runs no turn's end, and woken for
     what waits (`Delivery.interrupted`); none does nothing."""
+    answering: timedelta = timedelta(seconds=30)
+    """How long a launcher may take to answer a turn given or an interrupt,
+    before the host gives up on it: it answers a turn once it's on the
+    session's input, at once, and an interrupt once the runtime answers it, or
+    past its own patience of 10 seconds. One that never answered would hold
+    whatever asked it, the sweep's gives to every held session among them."""
+    ending: timedelta = timedelta(minutes=6)
+    """How long a launcher may take to answer a session's end, which it answers
+    once the session has ended: a turn under way given two minutes to finish
+    and two more before its runtime is made to end (`Holder.finishing`), then
+    its room stopped."""
 
     def opened(self, launch: Register) -> None:
         """Keep `launch` where it's held, once it's served."""
@@ -58,13 +71,21 @@ class Holders(MutableModel, arbitrary_types_allowed=True):
         return launch in self.held
 
     async def asked(self, launch: str, request: Request) -> Done:
-        """Ask `launch`'s launcher `request`, and return its answer; raise `HostError` where the launch isn't held, its launcher can't be reached, or refuses, saying why."""
+        """Ask `launch`'s launcher `request`, and return its answer, waiting `ending` at most for an end, `answering` for anything else; raise `HostError` where the launch isn't held, its launcher can't be reached, refuses, or doesn't answer in time, saying why."""
         if not self.holds(launch):
             message = f"launch `{launch}` isn't a held session: its terminal is its own"
             raise HostError(message)
         socket = self.layout.launch(launch).held
+        within = self.ending if isinstance(request, HeldEnd) else self.answering
         try:
-            return await requested(socket, request, Done)
+            async with asyncio.timeout(within.total_seconds()):
+                return await requested(socket, request, Done)
+        except TimeoutError as late:
+            message = (
+                f"launch `{launch}`'s launcher, on {socket}, didn't answer within "
+                f"{within}, so it was given up on"
+            )
+            raise HostError(message) from late
         except HostError as failed:
             message = f"launch `{launch}`'s launcher, on {socket}: {failed}"
             raise HostError(message) from failed
