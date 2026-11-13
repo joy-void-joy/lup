@@ -34,8 +34,10 @@ nothing writes waits in `open` until it's killed (`docs/field-notes.md`,
 program as the leader of a process group of its own, and kills the group:
 asyncio's wait for a program returns only once every pipe it was given has
 closed, so a child it left holding one, as git leaves `ssh` for a push, would
-hold the wait past the program's own end. `run` kills the program alone, and
-returns at once: `subprocess` waits for it, not for its pipes.
+hold the wait past the program's own end; one that left the group, which the
+kill doesn't reach, is left holding them past `letting`. `run` kills the
+program alone, and returns at once: `subprocess` waits for it, not for its
+pipes.
 """
 
 import asyncio
@@ -189,6 +191,7 @@ async def awaited(
     limit: int | None = None,
     kept: int | None = None,
     within: timedelta | None = None,
+    letting: timedelta = timedelta(seconds=10),
 ) -> Ran:
     """Run `program` with `arguments` to its end on the event loop, which goes on meanwhile, and return how it ended.
 
@@ -204,6 +207,9 @@ async def awaited(
       and said in a line first; it runs on. For a program another chose, whose
       output would be held whole otherwise, as a room's command is. `limit`
       takes its standard output where both are given.
+    - `letting`: once it's killed, how long its pipes may take to close, read
+      to their end, before they're left to whatever holds them: a process
+      that left its group, which the kill doesn't reach.
 
     It runs as the leader of a process group of its own, and where it's killed,
     past `within` or `limit` or as the wait is cancelled, the whole group is,
@@ -304,9 +310,14 @@ async def awaited(
         return f"[{dropped:,} bytes before this left out]\n".encode() + said
 
     async def ended() -> None:
-        """Kill it and its group, and wait for them, their pipes read to their end."""
+        """Kill it and its group, and wait for them, their pipes read to their end, `letting` at most: past it, a process outside the group holding one, it's left to that."""
         kill()
-        await asyncio.gather(emptied(process.stdout), emptied(process.stderr))
+        draining = asyncio.ensure_future(
+            asyncio.gather(emptied(process.stdout), emptied(process.stderr))
+        )
+        await asyncio.wait([draining], timeout=letting.total_seconds())
+        # Still open past it: held by a process the kill didn't reach.
+        draining.cancel()
         await process.wait()
 
     try:

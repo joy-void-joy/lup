@@ -10,6 +10,7 @@ import os
 import select
 import signal
 import sys
+import time
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
@@ -72,6 +73,27 @@ def test_awaited_kills_a_program_printing_past_its_limit() -> None:
         asyncio.run(awaited("yes", limit=10))
     printed = asyncio.run(awaited("printf", "0123456789", limit=10))
     assert printed.output == b"0123456789"
+
+
+def test_a_program_killed_past_its_limit_is_left_to_a_process_outside_its_group_holding_its_output(
+    tmp_path: Path,
+) -> None:
+    """Its group killed, its pipes are read to their end, which a process that left the group, holding one, keeps from coming: the wait gives that up past `letting`."""
+    leaving = "python3 -c 'import os, time; os.setsid(); time.sleep(15)' & sleep 30"
+    began = time.monotonic()
+    with pytest.raises(ProgramOverdueError):
+        asyncio.run(
+            awaited(
+                "sh",
+                "-c",
+                leaving,
+                within=timedelta(seconds=0.5),
+                letting=timedelta(seconds=1),
+            )
+        )
+    took = time.monotonic() - began
+
+    assert took < 8
 
 
 def test_a_program_saying_more_than_kept_keeps_its_end_and_says_how_much_went() -> None:
