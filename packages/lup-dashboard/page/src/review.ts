@@ -1985,12 +1985,35 @@ export function laid(
         };
         for (const entry of concernsNested(solid, allConcerns)) {
             close(entry.depth);
+            // Under one closed and laid out closed, what's nested waits for it to open, as what a closed drawer holds does.
+            if (open.at(-1)?.laid.unlaid === true) {
+                continue;
+            }
             const laidHere = layConcern(entry, open.at(-1)?.laid.node.children ?? within, at, here);
             if (laidHere !== null) {
                 open.push({ depth: entry.depth, laid: laidHere });
             }
         }
         close(0);
+    }
+
+    /** Return concern `number` as the host reads it and each nested under it, at any depth, but one gone or nothing to list. */
+    function nestedIn(number: number): ThreadRead[] {
+        const all: ThreadRead[] = [];
+        const walk = (at: number) => {
+            for (const each of allConcerns) {
+                if (each.thread.number === at) {
+                    all.push(each);
+                }
+            }
+            for (const each of allConcerns) {
+                if ((each.thread.parent ?? null) === at && each.bare !== true && concernReads(each) !== "gone") {
+                    walk(each.thread.number);
+                }
+            }
+        };
+        walk(number);
+        return all;
     }
 
     /** End `laid`, a concern's block, at the text's end now: it, its part and its fold reach there, what's nested under it among it. */
@@ -2049,11 +2072,13 @@ export function laid(
         concernLines.push(laidHere);
         const node = part(id, "frame", header.from, header.to, { children });
         within.push(node);
-        // Open where it wants the operator's eyes; what's written on it keeps it laid out, closed or not.
-        const wants = concernReads(read) === "for your eyes" || (read.asks ?? []).length > 0 || asking(read);
+        // Open where it, or one nested under it, wants the operator's eyes; what's written on it, or on one nested under
+        // it, keeps it laid out, closed or not.
+        const within_ = nestedIn(number);
+        const wants = within_.some((each) => concernReads(each) === "for your eyes" || (each.asks ?? []).length > 0 || asking(each));
         const onIt = letters.filter((each) => each.thread === number);
         const closed = deferring({ of: id, kind: "concern", name: "" }, !wants, false);
-        if (closed && onIt.length === 0) {
+        if (closed && !letters.some((each) => within_.some((one) => one.thread.number === each.thread))) {
             w.line(UNLAID, `${id} unlaid`);
             return { block: laidHere, node, closed: true, unlaid: true };
         }
