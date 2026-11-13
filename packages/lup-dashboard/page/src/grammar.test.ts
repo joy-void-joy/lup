@@ -193,7 +193,8 @@ describe("what the host offers on an item", () => {
         expect(acts("done")).toEqual([{ kind: "item", number: 7, list: "done" }]);
         expect(acts("decline")).toEqual([{ kind: "item", number: 7, list: "declined" }]);
         // Sent somewhere, the picker says where, into its own repository's concerns and piles.
-        expect(acts("send")).toEqual([{ kind: "send", what: { kind: "item", number: 7, repository: item.reason.reason === "approval" ? (item.reason.repository ?? "") : "" } }]);
+        // An approval, which only the operator answers, into a pile alone.
+        expect(acts("send")).toEqual([{ kind: "send", what: { kind: "item", number: 7, repository: item.reason.reason === "approval" ? (item.reason.repository ?? "") : "", piles: true } }]);
         expect(acts("comment")).toEqual([{ kind: "comment" }]);
     });
 });

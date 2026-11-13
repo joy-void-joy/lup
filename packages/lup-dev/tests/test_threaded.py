@@ -1054,6 +1054,7 @@ def test_an_item_moved_into_a_concern_done_reopens_it_and_one_moved_again_leaves
         ("settled", "is settled: reopen it"),
         ("agent", "goes into a concern or a pile, not to an agent"),
         ("nobody", "goes into a concern or a pile, not to an agent"),
+        ("approval", "which only the operator answers"),
     ],
 )
 def test_moving_an_item_is_refused_saying_why_and_moves_nothing(
@@ -1068,6 +1069,20 @@ def test_moving_an_item_is_refused_saying_why_and_moves_nothing(
                 return into(work.friction, thread=work.docs.number)
             case "agent":
                 return Destined(item=work.friction, to=Destination(to=LEAD))
+            case "approval":
+                approval = work.delivery.inbox.made(
+                    Approval(
+                        text="Approve?",
+                        summary="",
+                        repository=REPOSITORY,
+                        fingerprint="f",
+                    ),
+                    Operator(),
+                    Operator(),
+                    None,
+                    work.clock.now(),
+                )
+                return into(approval.number, thread=work.home.number)
             case _:
                 return Destined(item=work.friction, to=Destination())
 

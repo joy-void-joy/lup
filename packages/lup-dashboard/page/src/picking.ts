@@ -74,8 +74,11 @@ export function choicesFor(what: Sendable, picking: Picking, sent: Destination |
     const places = placesFor(what, picking.concerns);
     const pile = (read: ThreadRead) => (read.answering ?? null) === null;
     const later = places.some((each) => pile(each) && (each.thread.parent ?? null) === null && each.thread.title === LATER);
+    // An approval or a held change, which only the operator answers, goes into a pile nobody answers for alone.
+    const piles = what.kind === "item" && what.piles === true;
     const concerns: Choice[] = places
         .filter((each) => !(later && pile(each) && (each.thread.parent ?? null) === null && each.thread.title === LATER))
+        .filter((each) => !piles || pile(each))
         .map((each) => {
             const answering = each.answering ?? null;
             return { key: `concern ${each.thread.number}`, label: concernWords(each), kind: answering === null ? "pile" : `held by ${picking.called(answering)}`, to: { thread: each.thread.number } };

@@ -31,6 +31,7 @@ from lup_dev.inbox.roster import Roster
 from lup_dev.inbox.store import (
     Approval,
     Comment,
+    HeldChange,
     Destination,
     Destined,
     Draft,
@@ -40,7 +41,7 @@ from lup_dev.inbox.store import (
     Remark,
     cited,
 )
-from lup_dev.inbox.texts import body
+from lup_dev.inbox.texts import body, what
 from lup_dev.inbox.threads import located, parts_of
 from lup_ledger.parties import Conversation
 from lup_ledger.threads import Thread
@@ -206,7 +207,9 @@ class Routing(Model, arbitrary_types_allowed=True):
         `No agent`, which they don't go to; an item sent to an agent; a
         concern or an item sent to one of another repository, or to one the
         operator cleared; an item sent into a concern or a pile holding it
-        already; a concern sent under itself, or under one nested under it.
+        already; an approval or a held change sent into a concern someone
+        answers for, which only the operator answers; a concern sent under
+        itself, or under one nested under it.
         """
         concerns = [
             self.concerned(each.thread, each.to)
@@ -256,6 +259,13 @@ class Routing(Model, arbitrary_types_allowed=True):
         )
         if there is not None and self.concerns.holds(there, number):
             message = f"{cited(number)} is in @{there.name} already"
+            raise InboxError(message)
+        if (
+            isinstance(item.reason, Approval | HeldChange)
+            and there is not None
+            and self.concerns.answering(there) is not None
+        ):
+            message = f"{cited(number)} is {what(item)}, which only the operator answers: it goes into a pile nobody answers for, not into @{there.name}"
             raise InboxError(message)
         return ItemRoute(item=item, to=bound)
 

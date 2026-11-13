@@ -177,6 +177,11 @@ describe("Space s's picker", () => {
         ]);
     });
 
+    it("sends an approval or a held change into a pile alone, only the operator answering it", () => {
+        const choices = choicesFor({ kind: "item", number: 54, repository: REPOSITORY, piles: true }, picking([READER, concern(300, "Followups", null)]), null);
+        expect(choices.map((each) => each.label)).toEqual(["Later", "Followups", "new agent"]);
+    });
+
     it("sends a concern to an agent of its repository, under another, never itself or one under it, or to No agent", () => {
         const choices = choicesFor({ kind: "concern", read: READER }, picking([READER, PART]), null);
         expect(choices.map((each) => each.label)).toEqual(["s1", "s1/a1", "Later", "No agent", "new agent"]);

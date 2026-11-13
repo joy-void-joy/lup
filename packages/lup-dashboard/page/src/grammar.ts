@@ -29,7 +29,7 @@ export type Listed = "done" | "declined";
  * a concern or a pile. Each with the repository whose concerns and piles it may go to.
  */
 export type Sendable =
-    | { kind: "item"; number: number; repository: string }
+    | { kind: "item"; number: number; repository: string; piles?: boolean }
     | { kind: "concern"; read: ThreadRead }
     | { kind: "written"; id: string; repository: string };
 
@@ -433,8 +433,11 @@ function itemReach(region: Region, node: Placed, verb: Verb): Reach | null {
     const offered = answering(region.item.offers, verb)[0];
     if (offered !== undefined) {
         const act = actOf(offered, region.body.id, null, null);
-        // Sent somewhere, it goes into its own repository's concerns and piles.
-        const acts = act.kind === "send" && act.what.kind === "item" ? [{ ...act, what: { ...act.what, repository: repositoryOfItem(region.item) } }] : [act];
+        // Sent somewhere, it goes into its own repository's concerns and piles; an approval or a held change, which only
+        // the operator answers, into a pile nobody answers for alone.
+        const reason = region.item.reason.reason;
+        const piles = reason === "approval" || reason === "held";
+        const acts = act.kind === "send" && act.what.kind === "item" ? [{ ...act, what: { ...act.what, repository: repositoryOfItem(region.item), ...(piles ? { piles } : {}) } }] : [act];
         return { on, node, says: offered.says, acts };
     }
     const spent = region.item.spent.find((each) => each.verb === verb.name);
