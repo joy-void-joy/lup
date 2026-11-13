@@ -232,7 +232,8 @@ class Concerning(Model, title="Concern", extra="forbid"):
         description=(
             "Items, or parts of the operator's words, to put in it, by id as their "
             "tags cite them: `2159` an item, `2159.3` a part. Whoever answers for "
-            "it is told each whole, and others on it a line."
+            "it is told each whole, and others on it a line. A concern you open "
+            "with them takes a `title`."
         ),
     )
     join: bool = Field(
@@ -596,7 +597,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
           operator reads with it and comments on line by line, kept current
           by whoever answers for it;
         - `move` puts the operator's words in it, a concern made from a
-          passage;
+          passage, which takes a `title` where you open it;
         - `join` works in it, where what you send without `thread` lands;
           `hold` takes it; `hand` passes it on to another agent, whose it is
           from then on;
@@ -1065,7 +1066,8 @@ class Speaker(Model, arbitrary_types_allowed=True):
         It's new where `name` names none: titled `title`, else after the first
         line of `text`, and named `name`, else after its title. Raise
         `InboxError` where something can't be: a new one with neither a title
-        nor words to name it by, a title for one there already, a holder and a
+        nor words to name it by, a new one made from the operator's words
+        (`move`) with no title, a title for one there already, a holder and a
         hand at once, parked and done at once, a park with nothing it waits
         for, an agent nobody is, a body another answers for, which a call taking
         it with `hold` may rewrite.
@@ -1094,6 +1096,11 @@ class Speaker(Model, arbitrary_types_allowed=True):
                 answering = self.party if said.hold else concerns.answering(thread)
                 concerns.keeps_body(self.party, thread, answering)
             return Planned(thread=thread, to=to, until=until)
+        if said.move and not said.title.strip():
+            # What's moved is no title: its first words read as a quote on the
+            # operator's list, not as what the concern is about.
+            message = "a concern opened with `move` takes a `title`: a few words of yours saying what it's about, which the operator's list shows"
+            raise InboxError(message)
         title = said.title.strip() or cue(said.text or "")
         if not title:
             message = (

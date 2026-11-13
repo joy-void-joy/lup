@@ -814,8 +814,10 @@ def test_the_concern_tool_refuses_before_doing_anything(delivery: Delivery) -> N
     lead = speaker(delivery, register, main("s1"))
     said(lead.concern(Concerning(name="lag", title="Lag")))
     lag = delivery.concerns().named(REPOSITORY, "lag").number
+    said(lead.note(ThreadedRemark(remark="The cursor jumps.")))
+    note = newest(delivery)
     # Past every number given out, so nothing holds it.
-    nothing = lag + 100
+    nothing = note + 100
 
     refusals = [
         said(lead.concern(Concerning(name="lagg", join=True))),
@@ -826,6 +828,7 @@ def test_the_concern_tool_refuses_before_doing_anything(delivery: Delivery) -> N
         said(lead.concern(Concerning(name="lag", hand="nobody"))),
         said(lead.concern(Concerning(name="2025", title="Digits"))),
         said(lead.concern(Concerning(name="lag", move=[str(nothing)]))),
+        said(lead.concern(Concerning(text="It jumps.", move=[str(note)]))),
     ]
 
     assert refusals == [
@@ -837,8 +840,10 @@ def test_the_concern_tool_refuses_before_doing_anything(delivery: Delivery) -> N
         "Nothing done: no conversation of this repository is `nobody`",
         "Nothing done: `2025` can't be a concern's name: letters, digits, `-`, `_` and `.`, a letter among them",
         f"Nothing done: @{nothing} isn't an item of this repository",
+        "Nothing done: a concern opened with `move` takes a `title`: a few words of yours saying what it's about, which the operator's list shows",
     ]
     assert delivery.inbox.whereabouts[main("s1").key()].thread is None
+    assert [each.name for each in delivery.concerns().threads.of(REPOSITORY)] == ["lag"]
 
 
 def test_join_moves_where_an_agent_works_and_hold_takes_it_from_whoever_held_it(
