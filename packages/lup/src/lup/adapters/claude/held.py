@@ -198,6 +198,11 @@ class ClaudeHeld(MutableModel, HeldSession, arbitrary_types_allowed=True):
     """Where it says what the session does: each turn's start and end."""
     patience: timedelta = timedelta(seconds=10)
     """How long a request waits for its answer."""
+    unread: int = 4 * 1024 * 1024
+    """The most of what was put on the session's input, in bytes, that may
+    wait unread before a turn is refused: a runtime any process of its room
+    can stop reads nothing, and what's given it would pile up in the launcher
+    without end. A turn larger than it is given whole where nothing waits."""
     turning: bool = False
     """Whether a turn runs, as the session last said: from its `init` to its
     `result`."""
@@ -208,6 +213,15 @@ class ClaudeHeld(MutableModel, HeldSession, arbitrary_types_allowed=True):
 
     @override
     async def send(self, text: str) -> None:
+        """Put `text` on the session's input as a user turn; raise `HeldError` where more than `unread` bytes given it before wait unread."""
+        waiting = self.pipes.input.transport.get_write_buffer_size()
+        if waiting > self.unread:
+            message = (
+                f"{waiting:,} bytes given the session wait unread, past "
+                f"{self.unread:,}: its runtime isn't reading its input, so this "
+                "turn wasn't given"
+            )
+            raise HeldError(message)
         await self.written(UserTurn(message=Content(content=text)))
 
     @override

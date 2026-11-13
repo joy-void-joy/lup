@@ -909,6 +909,9 @@ class Pushed(Model):
     reads it; none for a push, through lup's tool server."""
     at: datetime | None = None
     """When it was given."""
+    again: bool = False
+    """Whether it's given again, one before it taken for dropped
+    (`Delivery.dropped`): never taken for dropped itself."""
 
 
 class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
@@ -2795,7 +2798,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             and place is not None
             and presence.pushed.launch == place.launch
         )
-        if given and self.dropped(presence):
+        dropped = given and self.dropped(presence)
+        if dropped:
             presence.pushed = None
             given = False
         busy = presence.turning or presence.woken or presence.held or given
@@ -2808,17 +2812,28 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             # theirs, and the launch would be rung from then on.
             return
         if self.holders is not None and self.holders.holds(place.launch):
-            await self.given(party, place, waiting)
+            await self.given(party, place, waiting, again=dropped)
             return
         if self.pushed(party, place, waiting):
             return
         await self.rung(party, place, waiting)
 
     def dropped(self, presence: Presence) -> bool:
-        """Say whether the turn given a held session, still unread, was dropped: given before their last turn ended, or the operator interrupted it, and they've been idle `unread` since, where an idle runtime would have started a turn on it at once. One given an idle session, never followed by an end, is never taken for dropped, so a runtime that reads nothing, stopped, isn't given it again and again."""
+        """Say whether the turn given a held session, still unread, is taken for dropped, to be given again: given before their last turn ended, or the operator interrupted it, and they've been idle `unread` since, where an idle runtime would have started a turn on it at once; and not itself given again so.
+
+        Hooks prove no drop: a room sends any hook of its own session's, a
+        turn's end among it, its runtime paused. So a turn is given again once
+        at most, until it's taken or a new process voids it, and the launcher
+        refuses a turn while what it gave is unread past its own limit, its
+        held session's (`lup.sessions.held`): what a room can pile on its
+        input is bounded.
+        One given an idle session, never followed by an end, is never taken
+        for dropped.
+        """
         pushed, ended = presence.pushed, presence.ended
         return (
             pushed is not None
+            and not pushed.again
             and pushed.at is not None
             and ended is not None
             and not presence.turning
@@ -2827,7 +2842,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         )
 
     async def given(
-        self, party: Conversation, place: Whereabouts, waiting: list[Item]
+        self,
+        party: Conversation,
+        place: Whereabouts,
+        waiting: list[Item],
+        *,
+        again: bool = False,
     ) -> None:
         """Give what waits for idle `party` to their held session as its next turn, through its launcher, each item whole, as a push carries them (`pushed`).
 
@@ -2856,6 +2876,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             numbers=[item.number for item in waiting],
             launch=place.launch,
             at=self.clock.now(),
+            again=again,
         )
         presence.pushed = pushed
         who = self.roster().who(party)

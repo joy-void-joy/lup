@@ -16156,6 +16156,27 @@ def test_a_turn_given_as_a_turn_ran_and_still_unread_once_it_ended_is_given_agai
     assert note(number, "Anyone?") in HeldPrompt.model_validate_json(frames[1]).text
 
 
+def test_a_turn_given_again_as_dropped_is_never_given_again_whatever_ends_a_room_sends(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """A room can pause its runtime and send its own session's turn's end, again and again: each would have its whole waiting set given again, piling up on the input."""
+    with inboxed(machine, clock, notices, said, holding=True) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude", held=True)
+        hook = machine.host.launch("one").hook
+        launcher = Launcher(machine.launch("one").held)
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        inbox("send", "one", "Anyone?")
+        launcher.ringing()
+        for _ in range(4):
+            send(hook, claude("Stop", stop_hook_active=False))
+            clock.sleep(delivery.unread.total_seconds())
+            asyncio.run(delivery.rewoken())
+        frames = launcher.close()
+    # Given, then given again once as dropped, and no more.
+    assert len(frames) == 2
+
+
 def test_a_turn_given_an_idle_session_that_reads_nothing_is_never_given_again(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
