@@ -53,7 +53,6 @@ from lup_dev.inbox.roster import Roster
 from lup_dev.inbox.store import (
     Carried,
     Flagged,
-    Friction,
     HeldChange,
     HowItFelt,
     Inbox,
@@ -99,13 +98,6 @@ if TYPE_CHECKING:
 
 type Telling = Literal["whole", "line", "none"]
 """How an item landing in a thread is told: whole, in a line, or not at all."""
-
-
-class Gathered(Model):
-    """Frictions and how it felt the operator moved into a thread from the pile to read (`Concerns.gathered`): the thread, opened for them where it's new, and the items moved."""
-
-    thread: Thread
-    items: list[Item]
 
 
 class Reach(Model):
@@ -702,92 +694,153 @@ class Concerns(Model, arbitrary_types_allowed=True):
         self.telling(thread, [party], whole=whole, line=line, carries=carried)
         return wanted.cited()
 
-    def gathered(
-        self, numbers: list[int], thread: Thread | None, title: str | None
-    ) -> Gathered:
-        """Move the frictions and how it felt `numbers` whole into `thread`, or one the operator opens titled `title`, as they gather what got in agents' way, and how the work was for them, into one concern from the pile to read: each stays in the thread it landed in, a member of this one too (`Moved`); whoever answers for this one is told each whole, everyone else on it a line. Return the thread and the items moved.
+    def piled(self, repository: Path, title: str) -> Thread | None:
+        """Return `repository`'s pile titled `title`: the concern at the top, nobody running answering for it and the operator's mark open, titled so, the first opened; none where there's none."""
+        return next(
+            (
+                each
+                for each in self.threads.of(repository)
+                if each.parent is None
+                and each.title == title
+                and self.answering(each) is None
+                and self.standing(each).marks.operator is None
+            ),
+            None,
+        )
 
-        How it felt is told as a friction is, though it reaches nobody as it
-        lands: the operator, its one reader, passes it on.
+    def pile(self, repository: Path, title: str) -> Thread:
+        """Return `repository`'s pile titled `title`, as the operator sends something to it by its title (`piled`); else one the operator opens there, at the top, nobody holding it."""
+        return self.piled(repository, title) or self.opened(
+            Operator(), title, repository
+        )
 
-        A new thread opens under the top of the thread the first landed in,
-        where it landed in one, held by nobody, so whoever holds that thread
-        answers for it; else at the top, where nobody does, until an agent takes
-        it.
+    def holds(self, thread: Thread, number: int) -> bool:
+        """Say whether `thread` holds node `number`, landed or moved in."""
+        return any(
+            each.node.number == number for each in self.threads.members(thread.number)
+        )
 
-        Say where one is neither; where they're of several repositories, or of
-        another than the thread's; where one is in this one already; and where
-        the thread is settled or declined, where nobody would look.
+    def given(
+        self, thread: Thread, to: Conversation | None, under: Thread | None
+    ) -> Thread:
+        """Move `thread` as the operator sends it, with what's in it: to `to`, an agent, who holds it and works in it from then on, where it's nested kept; else under `under`, nested there with nobody holding it, so whoever answers for `under` answers for it, as a concern opened there is; else to `No agent`, at the top, nobody holding it. Return it as it stands.
+
+        Whoever answered for it before and goes on is told in a line where
+        someone else answers for it after; whoever answers for it after is told
+        in a line where they didn't before, and an agent given it what's open
+        in it whole too, the parts of the operator's words nothing answers yet
+        and the items moved into it, so it's handed over whole. Say where `under` is another
+        repository's, or would put it under itself.
         """
-        items = [self.inbox.item(each) for each in dict.fromkeys(numbers)]
-        if not items:
-            message = "name the frictions to move"
+        before = self.answering(thread)
+        if under is not None and under.repository != thread.repository:
+            message = f"@{under.name} is another repository's than @{thread.name}"
             raise InboxError(message)
-        for item in items:
-            match item.reason:
-                case Friction() | HowItFelt():
-                    pass
-                case _:
-                    message = f"{cited(item.number)} is {what(item)}: only frictions and how it felt are moved from the pile to read"
-                    raise InboxError(message)
-        repositories = list(
-            dict.fromkeys(
-                each.sender.repository
-                for each in items
-                if isinstance(each.sender, Conversation)
+        moved = self.kept(
+            thread.model_copy(
+                update={
+                    "holder": to,
+                    "parent": thread.parent
+                    if to is not None
+                    else None
+                    if under is None
+                    else under.number,
+                    "at": self.now(thread.at),
+                }
             )
         )
-        if len(repositories) != 1:
-            message = f"the frictions are of {len(repositories)} repositories: move each repository's apart"
-            raise InboxError(message)
-        [repository] = repositories
-        landed = {each.number: self.containing(each.number) for each in items}
-        if thread is None:
-            if title is None or not title.strip():
-                message = "name a thread, or a title to open one with"
-                raise InboxError(message)
-            first = landed[items[0].number]
-            thread = self.opened(
-                Operator(),
-                title.strip(),
-                repository,
-                None if first is None else self.top(first),
+        after = self.answering(moved)
+        where = (
+            f"to {self.roster.who(to)}"
+            if to is not None
+            else "to `No agent`, nobody holding it"
+            if under is None
+            else f"under @{under.name}"
+        )
+        if before is not None and before != after:
+            self.left(
+                before,
+                f"lup: the operator moved @{moved.name}, which you answered for, {where}.",
             )
-        if thread.repository != repository:
-            message = f"@{thread.name} is another repository's than the frictions'"
-            raise InboxError(message)
-        state = self.standing(thread).state
-        if state in ("settled", "declined"):
-            message = f"@{thread.name} is {state}: reopen it, or move them into another"
-            raise InboxError(message)
-        home = [
-            number
-            for number, found in landed.items()
-            if found is not None and found.number == thread.number
-        ]
-        if home:
-            message = f"{cited(home[0])} landed in @{thread.name} already"
-            raise InboxError(message)
-        for item in items:
-            self.drawn(
-                Moved(
-                    source=item.number,
-                    target=thread.number,
-                    repository=thread.repository,
-                    by=Operator(),
-                    at=self.now(),
-                )
+        if after is None or after == before:
+            return moved
+        if to is None:
+            self.left(
+                after,
+                f"lup: the operator moved @{moved.name} {where}, which you answer for: "
+                "you answer for it too.",
             )
-            self.telling(
-                thread,
-                [item.sender] if isinstance(item.sender, Conversation) else [],
-                whole=self.whole(item, thread, by=Operator()),
-                line=self.line(item, thread, by=Operator()),
-                carries=Carried(
-                    item=item.number, thread=thread.number, moved=Operator()
-                ),
+            return moved
+        self.joined(to, moved)
+        self.left(
+            to,
+            f'lup: the operator handed you @{moved.name}, "{moved.title}": you hold '
+            "it, and what you send lands there. What's open in it follows.",
+        )
+        self.handing(moved, to)
+        return moved
+
+    def handing(self, thread: Thread, to: Conversation) -> None:
+        """Tell `to`, given `thread`, what's open in it whole: each part of the operator's words moved in that nothing in it answers yet; then each item moved into it whole, and the operator's words kept there for whoever took it, in the order they came."""
+        standing = self.standing(thread)
+        for member in standing.unanswered:
+            item = self.inbox.items.get(member.node.number)
+            part = member.part
+            if item is None or part is None:
+                continue
+            anchor = next((each for each in spoken(item) if each.id.part == part), None)
+            if anchor is None:
+                continue
+            self.left(
+                to,
+                Tag(
+                    name="moved",
+                    attributes={
+                        "thread": thread.name,
+                        "part": anchor.id.said(),
+                        "by": self.roster.called(Operator()),
+                    },
+                    parts=[anchor.text],
+                ).written(),
+                Carried(item=item.number, part=part, thread=thread.number),
             )
-        return Gathered(thread=thread, items=items)
+        for member in self.threads.members(thread.number):
+            item = self.inbox.items.get(member.node.number)
+            kept = item is not None and item.sender == Operator() and not member.moved
+            if item is None or member.part is not None or not (member.moved or kept):
+                continue
+            self.left(
+                to,
+                self.whole(item, thread, by=Operator()),
+                Carried(item=item.number, thread=thread.number, moved=Operator()),
+            )
+
+    def into(self, item: Item, thread: Thread) -> None:
+        """Move `item` whole into `thread`, as the operator sends it there: it stays in the thread it landed in, a member of this one too (`Moved`), which the review lays it out in rather than in its agent's group; whoever answers for the thread is told it whole, everyone else on it a line, but its sender. Say where it's another repository's, or in `thread` already."""
+        if not item.of(thread.repository):
+            message = (
+                f"{cited(item.number)} is another repository's than @{thread.name}"
+            )
+            raise InboxError(message)
+        if self.holds(thread, item.number):
+            message = f"{cited(item.number)} is in @{thread.name} already"
+            raise InboxError(message)
+        self.drawn(
+            Moved(
+                source=item.number,
+                target=thread.number,
+                repository=thread.repository,
+                by=Operator(),
+                at=self.now(),
+            )
+        )
+        self.telling(
+            thread,
+            [item.sender] if isinstance(item.sender, Conversation) else [],
+            whole=self.whole(item, thread, by=Operator()),
+            line=self.line(item, thread, by=Operator()),
+            carries=Carried(item=item.number, thread=thread.number, moved=Operator()),
+        )
 
     def top(self, thread: Thread) -> Thread:
         """Return the thread at the top of its repository `thread` is under, or itself where it's one."""

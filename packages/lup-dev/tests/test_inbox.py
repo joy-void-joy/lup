@@ -5737,10 +5737,8 @@ def test_a_draft_sent_gives_every_agent_it_covers_the_whole_reply_its_own_items_
                         text="Yes.",
                     ),
                     Comment(item=assumed, text="Fine by me."),
-                    Comment(item=another, text="Later."),
                 ],
                 done=[reading],
-                parked=[another],
             )
             kept = drafting(machine, clock, draft)
             shown = HostClient(
@@ -5763,7 +5761,7 @@ def test_a_draft_sent_gives_every_agent_it_covers_the_whole_reply_its_own_items_
     assert shown.draft == kept == draft
     # Each session's items land in no thread.
     assert threads == []
-    whole = Review(covers=[asked, assumed, reading], comments=draft.comments[:2])
+    whole = Review(covers=[asked, assumed, reading], comments=draft.comments)
     assert [(each.number, each.reason) for each in reviews] == [
         (to_one, whole),
         (to_two, whole),
@@ -5771,7 +5769,7 @@ def test_a_draft_sent_gives_every_agent_it_covers_the_whole_reply_its_own_items_
     assert isinstance(states[0], Answered)
     assert states[0].answer == to_one
     assert [type(each) for each in states[1:]] == [Done, Done, Waiting]
-    assert left == Draft(comments=[draft.comments[2]], parked=[another])
+    assert left == Draft()
     assert returned[0] == (
         f'<review item="{to_one}" from="operator" '
         f'covers="{asked} {assumed} {reading}">\n'
@@ -8052,8 +8050,9 @@ def test_a_draft_that_answers_nothing_is_refused_and_a_mark_on_the_operator_s_ow
         own = client(machine.host, clock).ask(SendDraft(), Reviewed)
         left = delivery.inbox.draft()
     assert empty == (
-        "the draft answers no item and writes to no agent: comment on an item, take "
-        "one off the list, or write to an agent under their banner"
+        "the draft answers no item, writes to no agent and sends nothing anywhere: "
+        "comment on an item, take one off the list, write to an agent under their "
+        "banner, or send something somewhere with Space s"
     )
     # A mark on the operator's own message is dropped, said, never refusing the reply.
     [dropped] = own.unanswerable

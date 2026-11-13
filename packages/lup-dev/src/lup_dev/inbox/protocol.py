@@ -57,6 +57,7 @@ from lup_dev.inbox.marks import CORE
 from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.reading import Narrowing, Reader, Spelling
 from lup_dev.inbox.roster import Roster, ids
+from lup_dev.inbox.routing import Went
 from lup_dev.inbox.store import (
     Answer,
     Approval,
@@ -467,6 +468,9 @@ class Reviewed(Reply):
     decided or replaced since, rather than refuse the reply whole or say it did
     it: each mark dropped, each comment written to who it reaches or kept drafted,
     and why."""
+    moved: list[Went] = []
+    """Each concern and item it moved where the operator sent it with Space
+    `s`, and where."""
 
 
 class Gathering(Reply):
@@ -1560,6 +1564,7 @@ class DraftSending(Model, Handler[SendDraft], arbitrary_types_allowed=True):
             noted=dispatched.noted,
             kept=dispatched.kept,
             unanswerable=dispatched.unanswerable,
+            moved=dispatched.moved,
         )
 
 

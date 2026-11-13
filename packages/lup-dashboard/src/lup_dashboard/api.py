@@ -57,8 +57,6 @@ from lup_dev.inbox.protocol import (
 from lup_dev.inbox.threaded import (
     DeclineThread,
     ListThreads,
-    MovedIntoThread,
-    MoveIntoThread,
     ReopenThread,
     SettleThread,
     ShowThread,
@@ -99,7 +97,6 @@ type Asked = Annotated[
     | SettleThread
     | DeclineThread
     | ReopenThread
-    | MoveIntoThread
     | Viewing
     | Acting
     | KeepTimings
@@ -148,7 +145,6 @@ type Replied = Annotated[
     | ThreadsRead
     | ThreadShown
     | ThreadStated
-    | MovedIntoThread
     | Viewed
     | Acted
     | TimingsKept

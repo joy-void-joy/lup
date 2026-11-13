@@ -108,8 +108,6 @@ from lup_dev.inbox.store import (
 from lup_dev.inbox.threaded import (
     DeclineThread,
     ListThreads,
-    MovedIntoThread,
-    MoveIntoThread,
     ReopenThread,
     SettleThread,
     ShowThread,
@@ -693,8 +691,6 @@ def test_every_request_the_page_may_send_acts_on_the_copy_alone(tmp_path: Path) 
         assert reopened.read.state != "settled"
         declined = ask(DeclineThread(number=first, why="no"), ThreadStated)
         assert declined.read.state == "declined"
-        unmoved = ask(MoveIntoThread(numbers=[standing.note], thread=first), Refused)
-        assert "only frictions and how it felt" in unmoved.error
         rulings = [Ruling(decision=1, verdict="leaning")]
         ask(AnswerItem(number=standing.question, rulings=rulings), Shown)
         ask(FinishItem(number=standing.note), Shown)
@@ -844,7 +840,6 @@ def test_every_request_the_page_may_send_acts_on_the_stand_in_demo_alone() -> No
         ask(SettleThread(number=first), ThreadStated)
         ask(ReopenThread(number=first, why="again"), ThreadStated)
         ask(DeclineThread(number=first, why="no"), ThreadStated)
-        ask(MoveIntoThread(numbers=[57], title="The gate"), MovedIntoThread)
         rulings = [
             Ruling(decision=1, verdict="leaning"),
             Ruling(decision=2, verdict="leaning"),

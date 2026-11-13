@@ -32,10 +32,6 @@ it, every repository's, and the operator settles, declines and reopens them:
   words with what they said there (`ThreadEntry.said`); with the items, the checks,
   the items of other threads that name it, and who's on it, whose places the
   thread's code is read from.
-- **`inbox-move-into-thread`** (`MoveIntoThread`) moves frictions and how it
-  felt from the pile into a thread, one the operator names or opens with a
-  title, each staying where it landed and marked read, whoever answers for the
-  thread told each whole (`Concerns.gathered`).
 - **`inbox-settle-thread`**, **`inbox-decline-thread`** and
   **`inbox-reopen-thread`** are the operator's, on any thread, its holder
   going on or ended, as Space `d` and Space `x` on a thread's banner are, and
@@ -58,9 +54,9 @@ hook any agent makes.
 """
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Annotated, Literal, Self, override
+from typing import TYPE_CHECKING, Annotated, Literal, override
 
-from pydantic import Field, model_validator
+from pydantic import Field
 
 from lup.types import Model, MutableModel
 from lup_dev.host.names import Names
@@ -346,6 +342,10 @@ class ThreadRead(Model):
     passages: list[Passage] = []
     """Each part of the operator's words moved into it, in the order they came,
     with what became of it: the passages it came from."""
+    moved: list[int] = []
+    """Each item the operator moved into it whole, in the order they came, by
+    number, which the review lays out in its block rather than in its agent's
+    group (`Concerns.into`)."""
     checks: list[CheckRead] = []
     """Each check in it, in the order it came, with the operator's answer where
     they gave one."""
@@ -490,35 +490,6 @@ class ReopenThread(Request, reads=False):
     kind: Literal["inbox-reopen-thread"] = "inbox-reopen-thread"
     number: int
     why: str = ""
-
-
-class MoveIntoThread(Request, reads=False):
-    """Move frictions and how it felt into a thread, as the operator does from the pile to read: one they name by `thread`, or one opened titled `title` under the top of where the first landed, where it landed in one; each marked read, staying in the thread it landed in, and whoever answers for the thread told each whole (`Concerns.gathered`)."""
-
-    kind: Literal["inbox-move-into-thread"] = "inbox-move-into-thread"
-    numbers: list[int] = Field(min_length=1)
-    thread: int | None = None
-    """The thread to move them into, by number; none to open one."""
-    title: str | None = None
-    """What a thread opened for them is about, in a line, where `thread` is none."""
-
-    @model_validator(mode="after")
-    def one(self) -> Self:
-        """Refuse naming both a thread and a title, or neither."""
-        if (self.thread is None) == (self.title is None):
-            message = "name a thread, or a title to open one with: one of them"
-            raise ValueError(message)
-        return self
-
-
-class MovedIntoThread(Reply):
-    """Frictions and how it felt the operator moved into a thread: the thread as it stands, whether it was opened for them, the items moved, and who answers for it, by their path."""
-
-    kind: Literal["inbox-moved-into-thread"] = "inbox-moved-into-thread"
-    read: ThreadRead
-    opened: bool = False
-    moved: list[int]
-    paths: list[Pathed] = []
 
 
 class ThreadStated(Reply):
@@ -754,6 +725,7 @@ class Readings(Model, arbitrary_types_allowed=True):
             pile=piled,
             unanswered=beside.unanswered,
             passages=passages,
+            moved=[each.node for each in members if each.moved],
             checks=[
                 CheckRead(check=check, answer=ledgered.answers.get(check.number))
                 for each in members
@@ -1207,38 +1179,8 @@ class ThreadReopening(Model, Handler[ReopenThread], arbitrary_types_allowed=True
         return self.reading.stated(request.number)
 
 
-class ThreadMoving(Model, Handler[MoveIntoThread], arbitrary_types_allowed=True):
-    """Answers `MoveIntoThread`: the frictions and how it felt moved into the thread, opened for them where it's new, each marked read, whoever answers for it told; a thread done, to confirm, reopened, as writing there does (`Delivery.reopening`)."""
-
-    reading: ThreadReading
-
-    @override
-    def request(self) -> type[MoveIntoThread]:
-        return MoveIntoThread
-
-    @override
-    async def answer(self, request: MoveIntoThread) -> Reply:
-        delivery = self.reading.delivery
-        concerns = delivery.concerns()
-        thread = None if request.thread is None else concerns.thread(request.thread)
-        gathered = concerns.gathered(request.numbers, thread, request.title)
-        for item in gathered.items:
-            if isinstance(item.state, Waiting):
-                delivery.done(item.number)
-        if thread is not None:
-            delivery.reopening([], [thread.number])
-        number = gathered.thread.number
-        stated = self.reading.stated(number)
-        return MovedIntoThread(
-            read=stated.read,
-            opened=thread is None,
-            moved=[each.number for each in gathered.items],
-            paths=stated.paths,
-        )
-
-
 def routes(delivery: Delivery) -> list[Route]:
-    """Route reading the review's threads, and settling, declining, reopening one and moving frictions into one, over `delivery`, each reading shared."""
+    """Route reading the review's threads, and settling, declining and reopening one, over `delivery`, each reading shared."""
     reading = ThreadReading(delivery=delivery)
     return [
         Route.reading(ThreadsListing(reading=reading)),
@@ -1246,5 +1188,4 @@ def routes(delivery: Delivery) -> list[Route]:
         Route.to(ThreadStating(reading=reading)),
         Route.to(ThreadDeclining(reading=reading)),
         Route.to(ThreadReopening(reading=reading)),
-        Route.to(ThreadMoving(reading=reading)),
     ]

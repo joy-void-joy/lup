@@ -43,18 +43,18 @@ from lup_dev.inbox.protocol import (
     Files,
     Items,
     ItemsListing,
+    KeepDraft,
     ListInbox,
     ListItems,
     Reviewed,
+    SendDraft,
     SendItem,
     Settled,
     ShowConversation,
 )
-from lup_dev.inbox.store import Approval, Decided, Item, Message, Text
+from lup_dev.inbox.store import Approval, Decided, Draft, Item, Message, Text
 from lup_dev.inbox.threaded import (
     ListThreads,
-    MovedIntoThread,
-    MoveIntoThread,
     SettleThread,
     ShowThread,
     ThreadRead,
@@ -646,7 +646,7 @@ def test_the_demo_reads_a_conversations_steps_each_call_a_line_saying_what_it_di
     assert all(each.gist is not None for each in called)
 
 
-def test_the_demo_keeps_a_draft_and_sends_it_taking_what_it_covers_off_the_list_but_whats_parked(
+def test_the_demo_keeps_a_draft_and_sends_it_taking_what_it_covers_off_the_list_and_what_it_left_for_later_into_later(
     page: Path,
 ) -> None:
     served = client(Demo(clock=Fixed()), page)
@@ -679,7 +679,10 @@ def test_the_demo_keeps_a_draft_and_sends_it_taking_what_it_covers_off_the_list_
     [review] = reply["items"]
     assert review["recipient"]["agent"] == "a02"
     assert review["reason"]["covers"] == [51, 52]
-    assert reply | {"items": []} == {
+    # A draft an earlier page kept leaving @53 for later sends it into `Later`, its comment with it.
+    [moved] = reply["moved"]
+    assert (moved["item"], moved["to"]) == (53, "into @later")
+    assert reply | {"items": [], "moved": []} == {
         "kind": "inbox-reviewed",
         "items": [],
         "read": [52],
@@ -688,17 +691,16 @@ def test_the_demo_keeps_a_draft_and_sends_it_taking_what_it_covers_off_the_list_
         "noted": [],
         "kept": [],
         "unanswerable": [],
+        "moved": [],
     }
     assert left.json()["draft"] == {
-        "comments": [
-            {"id": "", "item": 53, "quote": None, "on": None, "text": "Later."}
-        ],
+        "comments": [],
         "letters": [],
         "remarks": [],
         "done": [],
         "declined": [],
-        "parked": [53],
         "marks": [],
+        "moves": [],
     }
 
 
@@ -824,7 +826,7 @@ def test_the_demo_reads_its_threads_as_the_host_does_and_the_operator_settles_on
     }
 
 
-def test_the_demo_moves_frictions_and_how_it_felt_from_the_pile_into_a_thread_as_the_host_does(
+def test_the_demo_moves_frictions_and_how_it_felt_into_a_pile_as_the_draft_is_sent_as_the_host_does(
     page: Path,
 ) -> None:
     served = client(Demo(clock=Fixed(), size=0), page)
@@ -842,20 +844,29 @@ def test_the_demo_moves_frictions_and_how_it_felt_from_the_pile_into_a_thread_as
     # The parser's friction stays in the pile, though it came before where the operator read its thread.
     assert before["transcript-reader"].pile == [57]
     assert before["the-voice"].pile == [58]
-    moved = MovedIntoThread.model_validate(
-        asked(MoveIntoThread(numbers=[57, 58], title="The gate's silent rebuild"))
+    pile = {"pile": "The gate's silent rebuild"}
+    asked(
+        KeepDraft(
+            draft=Draft.model_validate(
+                {"moves": [{"item": 57, "to": pile}, {"item": 58, "to": pile}]}
+            )
+        )
     )
-    gate = moved.read.thread
-    assert (moved.opened, moved.moved, gate.name, gate.parent) == (
-        True,
-        [57, 58],
-        "the-gate-s-silent-rebuild",
-        before["the-build"].thread.number,
-    )
+    reply = Reviewed.model_validate(asked(SendDraft()))
+
     after = threads()
-    assert (after["transcript-reader"].pile, after["the-voice"].pile) == ([], [])
+    gate = after["the-gate-s-silent-rebuild"]
+    assert [(each.item, each.to) for each in reply.moved] == [
+        (57, "into @the-gate-s-silent-rebuild"),
+        (58, "into @the-gate-s-silent-rebuild"),
+    ]
+    assert (gate.thread.parent, gate.thread.holder, gate.moved) == (
+        None,
+        None,
+        [57, 58],
+    )
     gathered = ThreadShown.model_validate(
-        asked(ShowThread(number=gate.number, whole=True))
+        asked(ShowThread(number=gate.thread.number, whole=True))
     )
     assert [(each.spot.node, each.moved) for each in gathered.entries] == [
         (57, True),
@@ -865,16 +876,8 @@ def test_the_demo_moves_frictions_and_how_it_felt_from_the_pile_into_a_thread_as
         asked(ShowThread(number=before["transcript-reader"].thread.number, whole=True))
     )
     assert [each.went for each in landed.entries if each.spot.node == 57] == [
-        gate.number
+        gate.thread.number
     ]
-    refused = asked(MoveIntoThread(numbers=[51], thread=gate.number))
-    assert refused == {
-        "kind": "refused",
-        "error": (
-            "@51 is a question: only frictions and how it felt are moved from the "
-            "pile to read"
-        ),
-    }
 
 
 def test_the_demo_keeps_one_order_of_the_reviews_groups_for_every_page(

@@ -11,7 +11,7 @@ from lup_dev import cli
 from lup_dev.host.names import Names
 from lup_dev.host.protocol import Limits, Register
 from lup_dev.host.pushes import Pushes
-from lup_dev.inbox.delivery import Delivery, Unanswerable
+from lup_dev.inbox.delivery import Delivery, Dispatched, Unanswerable
 from lup_dev.inbox.marks import CORE, ReviewMark, on_node
 from lup_dev.inbox.notices import Notices
 from lup_dev.inbox.protocol import Exchanged, ItemsListing, ListItems
@@ -19,12 +19,14 @@ from lup_dev.inbox.store import (
     KINDS,
     Approval,
     Comment,
+    Destination,
     Done,
     Draft,
     Inbox,
     InboxError,
     Letter,
     Message,
+    Moving,
     Quote,
     Review,
     Ruling,
@@ -33,15 +35,12 @@ from lup_dev.inbox.store import (
 from lup_dev.inbox.threaded import (
     DeclineThread,
     ListThreads,
-    MovedIntoThread,
-    MoveIntoThread,
     Passage,
     ReopenThread,
     SettleThread,
     ShowThread,
     Spot,
     ThreadDeclining,
-    ThreadMoving,
     ThreadRead,
     ThreadReading,
     ThreadReopening,
@@ -862,7 +861,7 @@ def test_the_operator_s_comment_on_their_own_words_goes_on_their_thread_to_whoev
         f"the comment on @{own} sent on @lag to `lead`, as a message there: {why}",
         f"@{elsewhere} not declined: {why}",
         f"the comment on @{elsewhere} kept drafted: {why}, and it's in no thread",
-        f"@{parked} not left for later: {why}",
+        f"@{parked} not moved: {why}",
     ]
     # It shows in the thread as a message written there, open until the lead answers.
     assert [each.node for each in work.read()["lag"].unanswered] == [review.number]
@@ -912,11 +911,15 @@ def test_a_thread_s_conversation_shows_the_latest_few_read_before_what_s_new_as_
     assert none.left == 6
 
 
-def moving(work: Work, request: MoveIntoThread) -> MovedIntoThread:
-    """Move what `request` names as the operator does from the pile to read."""
-    moved = asyncio.run(ThreadMoving(reading=work.reading()).answer(request))
-    assert isinstance(moved, MovedIntoThread)
-    return moved
+def moving(work: Work, *moves: Moving) -> Dispatched:
+    """Send a draft moving what `moves` name, as the operator does with Space s and Ctrl+Enter."""
+    work.delivery.drafted(Draft(moves=list(moves)))
+    return asyncio.run(work.delivery.reviewed())
+
+
+def into(number: int, *, thread: int | None = None, pile: str | None = None) -> Moving:
+    """Move item `number` into `thread`, or the pile titled `pile`."""
+    return Moving(item=number, to=Destination(thread=thread, pile=pile))
 
 
 def worker(work: Work) -> Speaker:
@@ -948,7 +951,7 @@ def test_the_pile_holds_each_friction_still_waiting_wherever_the_thread_s_mark_i
     assert work.read()["home"].pile == []
 
 
-def test_the_operator_moves_frictions_and_how_it_felt_into_a_new_thread_under_the_top_of_where_the_first_landed_each_read_and_staying_where_it_landed(
+def test_the_operator_moves_frictions_and_how_it_felt_into_a_new_pile_at_the_top_each_staying_where_it_landed_as_it_stood(
     work: Work, clock: FakeClock
 ) -> None:
     sub = worker(work)
@@ -962,102 +965,253 @@ def test_the_operator_moves_frictions_and_how_it_felt_into_a_new_thread_under_th
     )
     felt = work.ran(sub.how_it_felt(HowItFelt(text="Steady, but the gate wore.")))
     clock.sleep(60)
-    moved = moving(
+    pile = "The gate hangs, silently"
+    sent = moving(
         work,
-        MoveIntoThread(
-            numbers=[work.friction, rebuilt, felt], title="The gate hangs, silently"
-        ),
+        into(work.friction, pile=pile),
+        into(rebuilt, pile=pile),
+        into(felt, pile=pile),
     )
 
-    assert moved.opened
-    assert moved.moved == [work.friction, rebuilt, felt]
-    gate = moved.read.thread
-    assert (gate.name, gate.title, gate.parent, gate.holder, gate.by) == (
-        "the-gate-hangs-silently",
-        "The gate hangs, silently",
-        work.home.number,
-        None,
-        Operator(),
-    )
-    assert moved.read.answering == LEAD
-    assert [each.path for each in moved.paths] == ["lead"]
-    assert all(
-        isinstance(work.delivery.inbox.item(each).state, Done) for each in moved.moved
-    )
-    # Each reads where it landed, saying where it went; and in the thread it went to, as moved there.
     read = work.read()
-    assert read["home"].pile == []
+    gate = read["the-gate-hangs-silently"]
+    assert (gate.thread.title, gate.thread.parent, gate.thread.holder) == (
+        pile,
+        None,
+        None,
+    )
+    assert gate.thread.by == Operator()
+    assert gate.answering is None
+    assert gate.moved == [work.friction, rebuilt, felt]
+    assert [(each.item, each.into, each.to) for each in sent.moved] == [
+        (each, gate.thread.number, "into @the-gate-hangs-silently")
+        for each in [work.friction, rebuilt, felt]
+    ]
+    # Moving says nothing of whether it waits on the operator: the pile is where they'll read it.
+    assert all(
+        isinstance(work.delivery.inbox.item(each).state, Waiting)
+        for each in [work.friction, rebuilt]
+    )
+    # Each reads where it landed, saying where it went; and in the pile, as moved there.
     landed = {
         each.spot.node: each for each in work.shown(work.home, whole=True).entries
     }
-    assert [landed[each].went for each in moved.moved] == [gate.number] * 3
-    gathered = work.shown(gate, whole=True)
+    assert [landed[each].went for each in [work.friction, rebuilt, felt]] == [
+        gate.thread.number
+    ] * 3
+    gathered = work.shown(gate.thread, whole=True)
     assert [(each.spot.node, each.moved) for each in gathered.entries] == [
-        (each, True) for each in moved.moved
+        (each, True) for each in [work.friction, rebuilt, felt]
     ]
-    assert (gathered.read.pile, gathered.read.new, gathered.read.asks) == ([], [], [])
     assert gathered.on == []
-    # Whoever answers for it is told each whole, how it felt among them, as the operator moved it.
+
+
+def test_an_item_moved_into_a_concern_someone_answers_for_is_told_them_whole_by_the_operator(
+    work: Work, clock: FakeClock
+) -> None:
+    sub = worker(work)
+    felt = work.ran(sub.how_it_felt(HowItFelt(text="Steady, but the gate wore.")))
+    clock.sleep(60)
+    moving(work, into(felt, thread=work.docs.number))
+
     words = work.delivery.taken_words(LEAD)
     assert any(
-        f'<moved thread="the-gate-hangs-silently" item="{felt}" kind="how it felt" from="lead/a1" by="operator">'
+        f'<moved thread="docs" item="{felt}" kind="how it felt" from="lead/a1" by="operator">'
         in each
         for each in words
     )
-    assert any(f'item="{rebuilt}" kind="concern"' in each for each in words)
+    assert work.read()["docs"].moved == [felt]
 
 
-def test_frictions_moved_into_a_thread_done_reopen_it_and_one_moved_again_leaves_the_last(
+def test_an_item_moved_into_a_concern_done_reopens_it_and_one_moved_again_leaves_the_last(
     work: Work, clock: FakeClock
 ) -> None:
     clock.sleep(60)
-    into_voice = moving(
-        work, MoveIntoThread(numbers=[work.friction], thread=work.voice.number)
-    )
+    moving(work, into(work.friction, thread=work.voice.number))
     clock.sleep(60)
-    moving(work, MoveIntoThread(numbers=[work.friction], thread=work.docs.number))
+    moving(work, into(work.friction, thread=work.docs.number))
 
-    assert isinstance(into_voice.read.status, Reopened)
-    assert not into_voice.opened
+    read = work.read()
+    assert isinstance(read["voice"].status, Reopened)
+    assert read["voice"].moved == []
     assert [each.spot.node for each in work.shown(work.voice, whole=True).entries] == [
         work.voiced
     ]
-    assert [
-        each.spot.node
-        for each in work.shown(work.docs, whole=True).entries
-        if each.moved
-    ] == [work.friction]
+    assert read["docs"].moved == [work.friction]
 
 
 @pytest.mark.parametrize(
     ("what", "said"),
     [
-        ("note", "only frictions and how it felt"),
-        ("home", "landed in @home already"),
+        ("home", "is in @home already"),
         ("settled", "is settled: reopen it"),
-        ("both", "one of them"),
+        ("agent", "goes into a concern or a pile, not to an agent"),
+        ("nobody", "goes into a concern or a pile, not to an agent"),
     ],
 )
-def test_moving_into_a_thread_is_refused_saying_why(
+def test_moving_an_item_is_refused_saying_why_and_moves_nothing(
     work: Work, what: str, said: str
 ) -> None:
-    def request() -> MoveIntoThread:
+    def move() -> Moving:
         match what:
-            case "note":
-                return MoveIntoThread(numbers=[work.note], thread=work.lag.number)
             case "home":
-                return MoveIntoThread(numbers=[work.friction], thread=work.home.number)
+                return into(work.friction, thread=work.home.number)
             case "settled":
                 work.delivery.concerns().settled(work.docs)
-                return MoveIntoThread(numbers=[work.friction], thread=work.docs.number)
+                return into(work.friction, thread=work.docs.number)
+            case "agent":
+                return Moving(item=work.friction, to=Destination(to=LEAD))
             case _:
-                return MoveIntoThread(
-                    numbers=[work.friction], thread=work.lag.number, title="Both"
+                return Moving(item=work.friction, to=Destination())
+
+    with pytest.raises(InboxError, match=said):
+        moving(work, into(work.note, pile="Later"), move())
+    assert "later" not in work.read()
+    assert work.read()["home"].moved == []
+
+
+def test_a_destination_names_one_place_at_most() -> None:
+    with pytest.raises(ValueError, match="one of them"):
+        Destination(thread=4, pile="Later")
+
+
+def test_a_comment_sent_to_another_agent_reaches_them_quoting_its_passage_and_leaves_its_item_waiting(
+    work: Work, clock: FakeClock
+) -> None:
+    other = worker(work)
+    clock.sleep(60)
+    work.delivery.drafted(
+        Draft(
+            comments=[
+                Comment(
+                    id="c1",
+                    item=work.note,
+                    quote=Quote(text="Built.", start=0, end=6),
+                    text="Check it builds on the phone.",
+                    sent=Destination(to=other.party),
+                )
+            ]
+        )
+    )
+
+    dispatched = asyncio.run(work.delivery.reviewed())
+
+    [review] = dispatched.reviews
+    assert review.recipient == other.party
+    assert isinstance(review.reason, Review)
+    assert review.reason.covers == []
+    [letter] = review.reason.letters
+    assert (letter.to, letter.thread) == (other.party, None)
+    assert letter.text == (
+        f"On @{work.note}.1:\n\n> Built.\n\nCheck it builds on the phone."
+    )
+    assert isinstance(work.delivery.inbox.item(work.note).state, Waiting)
+    assert work.delivery.inbox.draft() == Draft()
+
+
+def test_a_comment_sent_to_a_pile_stays_there_as_the_operator_s_words_waking_nobody_until_someone_takes_it(
+    work: Work, clock: FakeClock
+) -> None:
+    other = worker(work)
+    clock.sleep(60)
+    work.delivery.drafted(
+        Draft(
+            comments=[
+                Comment(
+                    id="c1",
+                    item=work.note,
+                    text="Look at this once the parser lands.",
+                    sent=Destination(pile="Later"),
+                )
+            ]
+        )
+    )
+    work.delivery.taken_words(LEAD)
+
+    dispatched = asyncio.run(work.delivery.reviewed())
+
+    assert dispatched.reviews == []
+    later = work.read()["later"]
+    assert later.answering is None
+    [kept] = [
+        each for each in work.shown(later.thread, whole=True).entries if each.member
+    ]
+    note = work.delivery.inbox.item(kept.spot.node)
+    assert note.sender == Operator()
+    assert isinstance(note.state, Done)
+    assert work.delivery.taken_words(LEAD) == []
+
+    # Given to an agent, the pile goes whole: what the operator kept there among it.
+    moving(work, Moving(thread=later.thread.number, to=Destination(to=other.party)))
+    words = work.delivery.taken_words(other.party)
+    assert words[0].startswith('lup: the operator handed you @later, "Later"')
+    assert "Look at this once the parser lands." in words[1]
+
+
+def test_a_message_on_a_concern_moved_to_another_agent_goes_with_it_to_them(
+    work: Work, clock: FakeClock
+) -> None:
+    other = worker(work)
+    clock.sleep(60)
+    work.delivery.drafted(
+        Draft(
+            letters=[Letter(id="m1", to=LEAD, thread=work.lag.number, text="Take it.")],
+            moves=[Moving(thread=work.lag.number, to=Destination(to=other.party))],
+        )
+    )
+
+    dispatched = asyncio.run(work.delivery.reviewed())
+
+    [review] = dispatched.reviews
+    assert review.recipient == other.party
+    assert isinstance(review.reason, Review)
+    assert [(each.to, each.thread) for each in review.reason.letters] == [
+        (other.party, work.lag.number)
+    ]
+    assert [(each.thread, each.to) for each in dispatched.moved] == [
+        (work.lag.number, "to lead/a1")
+    ]
+    assert work.read()["lag"].answering == other.party
+
+
+@pytest.mark.parametrize(
+    ("where", "said"),
+    [
+        ("itself", "can't go under itself"),
+        ("nobody", "not to `No agent`"),
+    ],
+)
+def test_sending_somewhere_it_can_t_go_is_refused_moving_nothing(
+    work: Work, where: str, said: str
+) -> None:
+    def draft() -> Draft:
+        match where:
+            case "itself":
+                work.ran(
+                    work.lead.concern(
+                        Concerning(name="tabs", title="Tabs", under="lag")
+                    )
+                )
+                tabs = work.delivery.concerns().named(REPOSITORY, "tabs")
+                return Draft(
+                    moves=[
+                        Moving(item=work.note, to=Destination(pile="Later")),
+                        Moving(
+                            thread=work.lag.number,
+                            to=Destination(thread=tabs.number),
+                        ),
+                    ]
+                )
+            case _:
+                return Draft(
+                    moves=[Moving(item=work.note, to=Destination(pile="Later"))],
+                    comments=[Comment(item=work.note, text="Hm.", sent=Destination())],
                 )
 
-    with pytest.raises((InboxError, ValueError), match=said):
-        moving(work, request())
-    assert isinstance(work.delivery.inbox.item(work.friction).state, Waiting)
+    work.delivery.drafted(draft())
+    with pytest.raises(InboxError, match=said):
+        asyncio.run(work.delivery.reviewed())
+    assert "later" not in work.read()
 
 
 def ended(work: Work) -> None:
@@ -1104,7 +1258,7 @@ def test_a_nested_thread_whose_holder_ended_is_answered_for_by_who_holds_above_i
 def test_a_thread_opened_by_whom_nobody_running_answers_for_says_its_opener_left_it_and_the_operator_s_nobody(
     work: Work,
 ) -> None:
-    moving(work, MoveIntoThread(numbers=[work.friction], title="The gate"))
+    moving(work, into(work.friction, pile="The gate"))
     ended(work)
 
     read = work.read()
