@@ -68,7 +68,9 @@ import { DRAFTED, GLYPHS } from "./Outline";
 import { linesOver, stickies, type Sticky } from "./stack";
 import { depths, levelled } from "./folds";
 import { ask } from "./api";
-import { ACT, carried, chainAt, implied, isMarked, marking, marksOn, placedBy, reachOf, reachedIn, type Act, type Acting, type Marked } from "./grammar";
+import { ACT, carried, chainAt, implied, isMarked, marking, marksOn, placedBy, reachOf, reachedIn, sentTo, sentWhere, type Act, type Acting, type Marked, type Sendable } from "./grammar";
+import { choicesFor, repositoryOf, sentSaid } from "./picking";
+import { Picker } from "./Picker";
 import { Listing, type ListHandle, type Viewed as ListViewed } from "./Panes";
 import { arrivalIn, bufferKey, bufferSpans, conversationNamed, listedByAgent, marginFolds, spanAt, titled, type Showing } from "./panes";
 import type { DrawerKind, FoldKind, Here } from "./keys";
@@ -104,6 +106,10 @@ import {
     concernHome,
     concernNamedAt,
     concernWords,
+    concernsSent,
+    movedInto,
+    goesTo,
+    itemsSent,
     groupAround,
     groupAt,
     heading,
@@ -139,6 +145,7 @@ import {
     type Aside,
     type Cited,
     type Conversation,
+    type Destination,
     type Draft,
     type Drawer,
     type Drawers,
@@ -484,15 +491,35 @@ function decorations(
     seeing: Seeing,
     to: ((written: Written) => string) | null = null,
     ends: Ends = () => "",
+    sent: ((to: Destination) => string) | null = null,
 ): DecorationSet {
     const marks: { from: number; to: number; value: Decoration }[] = [...endings(laidOut, ends)];
     const comments = new Map(laidOut.written.map((each) => [writtenId(each), each]));
+    // Whom each reaches, or where Space s sent it, in the draft's colour, as a mark says what Ctrl+Enter does.
     const reaching = (block: Block) => {
         const comment = comments.get(block.comment);
         if (to !== null && comment !== undefined) {
-            marks.push({ from: block.from, to: block.from, value: Decoration.line({ class: "remark-to", attributes: { "data-to": to(comment) } }) });
+            const going = goesTo(draft, comment) === null ? "" : " remark-sent";
+            marks.push({ from: block.from, to: block.from, value: Decoration.line({ class: `remark-to${going}`, attributes: { "data-to": to(comment) } }) });
         }
     };
+    // Each item and concern the draft sends somewhere, its header saying where, in the draft's colour (`sentSaid`).
+    if (sent !== null) {
+        const items = itemsSent(draft);
+        for (const region of laidOut.regions) {
+            const going = items.get(region.item.number);
+            if (going !== undefined) {
+                marks.push({ from: region.header.from, to: region.header.from, value: Decoration.line({ class: "is-sent", attributes: { "data-sent": sent(going) } }) });
+            }
+        }
+        const concernsGoing = concernsSent(draft);
+        for (const concern of laidOut.concerns) {
+            const going = concern.dim ? undefined : concernsGoing.get(concern.read.thread.number);
+            if (going !== undefined) {
+                marks.push({ from: concern.header.from, to: concern.header.from, value: Decoration.line({ class: "is-sent", attributes: { "data-sent": sent(going) } }) });
+            }
+        }
+    }
     for (const group of laidOut.groups) {
         marks.push({ from: group.banner.from, to: group.banner.from, value: Decoration.line({ class: bannerClasses(group.depth) }) });
         marks.push(...group.blocks.flatMap((block) => remarks(laidOut, block)));
@@ -875,6 +902,8 @@ export function Review({
 }: Props) {
     // In panes, the one buffer on screen, and where the keyboard is: in a pane, or, in Pane mode, nowhere, a pane selected.
     const [showing, setShowing] = useState<Showing>({ kind: "for you" });
+    // What Space s sends somewhere, while its picker's open: each thing, and what the line of keys names it by.
+    const [picking, setPicking] = useState<{ whats: Sendable[]; on: string } | null>(null);
     const [paneMode, setPaneMode] = useState(false);
     const [paneSelected, setPane] = useState<"list" | "buffer">("buffer");
     const narrow = useNarrow();
@@ -925,8 +954,8 @@ export function Review({
     // The same object while what it holds is the same, as the rest of what's taken is.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     const arranging = useMemo(() => ({ ...arrangedBy }), [arrangedBy.parents, arrangedBy.looks, arrangedBy.running, arrangedBy.landings, arrangedBy.remote]);
-    /** The words a group's banner says: `banner`'s, its parts' after them, and whether it's what's left for later. */
-    const bannerLine = (head: Head, later: boolean, parts: string) => `━━ ${banner(head)}${parts === "" ? "" : ` · ${parts}`}${later ? " · later" : ""} ━━`;
+    /** The words a group's banner says: `banner`'s, and its parts' after them. */
+    const bannerLine = (head: Head, parts: string) => `━━ ${banner(head)}${parts === "" ? "" : ` · ${parts}`} ━━`;
     // The review as it was last laid out into the editor, which each comment is followed from (`Arranging.previous`):
     // in panes, as each comment's block was last laid out, whichever buffer that was in.
     const before = useRef<Laid | null>(null);
@@ -949,7 +978,7 @@ export function Review({
             agents,
             bannerLine,
             // What the item's kind says of it, then what the core says of how it stands.
-            (item, later, said) => {
+            (item, said) => {
                 // One no longer waiting says where it stands: answered, done, decided, superseded.
                 const stands = !waits(item) ? [item.state.state] : [];
                 const told = [
@@ -958,7 +987,6 @@ export function Review({
                     ...((item.edits ?? []).length > 0 ? ["edited"] : []),
                     ...(fresh(item, seeing) ? ["new"] : []),
                     when(item.made),
-                    ...(later ? ["later"] : []),
                 ];
                 return `── ${told.join(" · ")} ──`;
             },
@@ -1004,7 +1032,7 @@ export function Review({
             blocks: blocksOf(laidOut),
             // In the text's order, as CodeMirror takes the folds a transaction makes: a fold over others, as an
             // automatic file's or an item's marked read, is laid out after them.
-            folds: [...scopesOf(laidOut).flatMap((each) => each.folds), ...laidOut.groups.flatMap((each) => (each.fold === null ? [] : [each.fold]))]
+            folds: [...scopesOf(laidOut).flatMap((each) => each.folds), ...laidOut.groups.flatMap((each) => (each.fold === null ? [] : [each.fold])), ...laidOut.concerns.flatMap((each) => (each.fold === null ? [] : [each.fold]))]
                 .map((each) => ({ ...each, key: foldKey(each) }))
                 .sort((a, b) => a.from - b.from || b.to - a.to),
             sources: sourcesOf(laidOut),
@@ -1220,8 +1248,15 @@ export function Review({
     // What each group's end says of whose it is.
     const ends: Ends = (group) => (group.conversation === null ? "lup's approvals" : (called(group.conversation).split("/").at(-1) ?? ""));
 
-    /** Say whom what's written reaches, on its first line, where the header no longer says it: the stack's. */
+    /** Say where Space s sends a thing, on its header: `→ dev/parser`, `→ Later`. */
+    const sentOf = (to: Destination): string => sentSaid(to, { concerns, called });
+
+    /** Say whom what's written reaches, on its first line, where the header no longer says it: the stack's; where Space s sent it, there. */
     const reachesOf = (each: Written): string => {
+        const sent = goesTo(draft, each);
+        if (sent !== null) {
+            return sentSaid(sent, { concerns, called });
+        }
         if (isLetter(each) || isRemark(each)) {
             return reachedBy(laidOut, each, each.to ?? null, called);
         }
@@ -1283,7 +1318,7 @@ export function Review({
         // another text, one past the editor's end would throw as the next change is mapped, and the page with it.
         queueMicrotask(() => {
             if (before.current === laidOut) {
-                editor.draw(decorations(laidOut, withImplied, seeing, reachesOf, ends));
+                editor.draw(decorations(laidOut, withImplied, seeing, reachesOf, ends, sentOf));
             }
         });
     }
@@ -1474,7 +1509,7 @@ export function Review({
             places.current = panes ? [...places.current, ...shown.filter((each) => !places.current.includes(each))] : shown;
         }
         landing.current = null;
-        editor.draw(decorations(laidOut, withImplied, seeing, reachesOf, ends));
+        editor.draw(decorations(laidOut, withImplied, seeing, reachesOf, ends, sentOf));
         // The margin says what's drawn now.
         current.dispatch({ effects: redrawn.of(null) });
         follower.tell();
@@ -1543,7 +1578,7 @@ export function Review({
             openBuffer({ kind: "agent", key }, "in");
             return;
         }
-        const group = laidOut.groups.find((each) => each.conversation !== null && whose(each.conversation) === key && !each.later);
+        const group = laidOut.groups.find((each) => each.conversation !== null && whose(each.conversation) === key);
         if (group !== undefined) {
             current.dispatch({ selection: { anchor: group.banner.from }, effects: EditorView.scrollIntoView(group.banner.from, { y: "start" }) });
             current.focus();
@@ -1564,9 +1599,13 @@ export function Review({
         send();
     }
 
-    /** Return the concern what's at `at` is of: a concern's own line, or one dim or nested naming another, an item's as the threads read say. */
+    /** Return the concern what's at `at` is of: a concern's own line, or one dim or nested naming another, the line an item moved into one leaves, an item's as the threads read say. */
     function taskAt(at: number): ThreadRead | null {
         const reads = threadsAll?.read.threads ?? [];
+        const away = laidOut.away.find((each) => at >= each.from && at <= each.to)?.into;
+        if (away !== undefined) {
+            return away;
+        }
         const told = concernNamedAt(laidOut, at)?.read;
         const number = regionAt(laidOut, at)?.item.number;
         const held = (each: ThreadRead) => number !== undefined && ((each.asks ?? []).some((ask) => ask.node === number) || (each.new ?? []).includes(number) || (each.pile ?? []).includes(number));
@@ -1583,6 +1622,58 @@ export function Review({
         }
         crossed.current.push(showing);
         openBuffer(home, "in", read.thread.number);
+    }
+
+    /**
+     * Go to item `number` where it's laid out: there, where the buffer on screen holds it; else in its buffer, shown, the
+     * concern it's moved into's or its agent's own; or say it's no longer waiting, where the page lays it out nowhere.
+     */
+    function goToItem(number: number) {
+        const here = laidOut.regions.find((each) => each.item.number === number);
+        if (here !== undefined) {
+            jumpTo(here.header.from);
+            return;
+        }
+        const item = items.find((each) => each.number === number);
+        if (item === undefined) {
+            say(`${cited(number)} waits on you no more: its agent's messages hold it.`);
+            return;
+        }
+        const into = movedInto(concerns).get(number);
+        const home: Showing = into !== undefined ? concernHome(into, arrangedBy.running) : item.sender.party === "conversation" ? { kind: "agent", key: whose(item.sender) } : { kind: "for you" };
+        crossed.current.push(showing);
+        openBuffer(home, "in", number);
+    }
+
+    /**
+     * Do what Enter does on a concern's line where it isn't vim's: on a passage of the operator's it came from, go to what
+     * it was on; on what landed there, to the item; on the line an item moved into one leaves, to the concern. Say whether
+     * it took it.
+     */
+    function entered(): boolean {
+        const at = editor.toLaid(editor.head());
+        const away = laidOut.away.find((each) => at >= each.from && at <= each.to);
+        if (away !== undefined) {
+            goToConcern(away.into);
+            return true;
+        }
+        const concern = concernAt(laidOut, at);
+        const landed = concern?.items.find((each) => at >= each.from && at <= each.to);
+        if (landed !== undefined) {
+            goToItem(landed.number);
+            return true;
+        }
+        const passage = concern?.passages.find((each) => at >= each.from && at <= each.to)?.passage;
+        if (passage === undefined) {
+            return false;
+        }
+        const on = passage.on ?? null;
+        if (on === null) {
+            say(`${cited(passage.spot.node)}.${passage.spot.part ?? 0} is your words on nothing of an agent's: what it says is under its line.`);
+            return true;
+        }
+        goToItem(on);
+        return true;
     }
 
     /** Say whether the keyboard is in the buffer, what the line of keys says of it: as the review always is, outside panes. */
@@ -1780,6 +1871,12 @@ export function Review({
                 act(each.offer, each.conversation);
             }
         }
+        // Sent somewhere, it's the picker's to say where.
+        const sending = reach.acts.flatMap((each) => (each.kind === "send" ? [each.what] : []));
+        if (sending.length > 0) {
+            setPicking({ whats: sending, on: reach.on });
+            return;
+        }
         const now = editor.latest.current;
         const next = marking(now, reach.acts, name);
         if (next === now) {
@@ -1787,12 +1884,6 @@ export function Review({
         }
         for (const each of reach.acts) {
             unkeep(each);
-        }
-        const leaving = reach.acts.find((each) => each.kind === "item" && each.list === "parked" && !isMarked(now, each, name));
-        if (leaving !== undefined && leaving.kind === "item") {
-            const at = laidOut.regions.findIndex((each) => each.item.number === leaving.number);
-            const after = laidOut.regions.slice(at + 1).find((each) => !(next.parked ?? []).includes(each.item.number));
-            landing.current = after === undefined ? null : { item: after.item.number };
         }
         // A file of "since you approved" marked reviewed, the cursor goes on to the next one to review there.
         const marks = reach.acts.flatMap((each) => (each.kind === "mark" && !isMarked(now, each, name) ? [each.block] : []));
@@ -1815,6 +1906,17 @@ export function Review({
         const acts = reachedIn(laidOut, folds, known, { called, fresh: isFresh, draft: editor.latest.current });
         if (acts.length === 0) {
             say(`␣${known.key} ${known.called}: nothing selected takes it.`);
+            return;
+        }
+        // Each sent somewhere, one place for them all, of one repository, the picker's to say.
+        const sending = acts.flatMap((each) => (each.kind === "send" ? [each.what] : []));
+        if (sending.length > 0) {
+            const repositories = new Set(sending.map(repositoryOf));
+            if (repositories.size > 1) {
+                say(`␣${known.key} ${known.called}: what's selected is of ${repositories.size} repositories, which go to concerns of their own: send each repository's apart.`);
+                return;
+            }
+            setPicking({ whats: sending, on: sending.length === 1 ? "it" : `${sending.length} things` });
             return;
         }
         for (const each of acts) {
@@ -2026,7 +2128,7 @@ export function Review({
                 if (region === undefined) {
                     return null;
                 }
-                const standing = itemStanding(region, draft, seeing);
+                const standing = itemStanding(region, draft, seeing, laidOut.piled);
                 const mark = standing.marks[0];
                 return {
                     text: cited(region.item.number),
@@ -2264,7 +2366,8 @@ export function Review({
                     openBuffer({ kind: "agent", key: whose(conversation) }, "in", null, true);
                     return;
                 }
-                const named = partyNamed(laidOut.text, at, [...agents, ...items.flatMap((each) => (each.sender.party === "conversation" ? [each.sender] : []))], called);
+                const holders = laidOut.concerns.flatMap((each) => (each.holder === null ? [] : [each.holder.conversation]));
+                const named = partyNamed(laidOut.text, at, [...agents, ...items.flatMap((each) => (each.sender.party === "conversation" ? [each.sender] : [])), ...holders], called);
                 if (named !== undefined) {
                     crossed.current.push(showing);
                     openBuffer({ kind: "agent", key: whose(named) }, "in");
@@ -2292,6 +2395,7 @@ export function Review({
             current.dispatch({ effects: EditorView.scrollIntoView(target, { y: "nearest" }) });
             recordJump(current, head, target);
         },
+        enter: entered,
         thread: () => {
             // From a concern's line, one dim or nested naming another, or an item in a concern, to the concern's block
             // where it's held.
@@ -2347,7 +2451,12 @@ export function Review({
     }
 
     // What the overview reads beside the review as it's laid out.
-    const reading = useMemo(() => ({ draft, seeing, states, called }), [draft, seeing, states, called]);
+    const reading = useMemo(() => ({ draft, seeing, states, called, piled: laidOut.piled }), [draft, seeing, states, called, laidOut.piled]);
+    // Where Space s may send what it's sending, the draft saying where it sends the first already.
+    const pickChoices = useMemo(() => {
+        const first = picking?.whats[0];
+        return first === undefined ? [] : choicesFor(first, { concerns, agents, running: arrangedBy.running, called }, picking?.whats.length === 1 ? sentWhere(draft, first) : null);
+    }, [picking, concerns, agents, arrangedBy.running, called, draft]);
     const focusing = useCallback((focus: (() => void) | null) => setOutlineFocus(focus), []);
     // In panes, `gO` goes into the list, which `\` hides or shows, the keyboard going to the buffer as it's hidden.
     useEffect(() => {
@@ -2374,7 +2483,7 @@ export function Review({
     }, [narrow]);
     // In panes, the list, read from what the review is laid out from: it lays out one buffer of it at a time.
     const listReading = useMemo(
-        () => ({ items, draft, agents, parents: arrangedBy.parents, called, banner: (item: Item) => bannerLine({ item }, false, ""), drawers, looks: arrangedBy.looks, remote: arrangedBy.remote, running: arrangedBy.running, activities, states, threads: threadsAll, landings: arrangedBy.landings, seeing: seenGiven, showing }),
+        () => ({ items, draft, agents, parents: arrangedBy.parents, called, banner: (item: Item) => bannerLine({ item }, ""), drawers, looks: arrangedBy.looks, remote: arrangedBy.remote, running: arrangedBy.running, activities, states, threads: threadsAll, landings: arrangedBy.landings, seeing: seenGiven, showing }),
         // `bannerLine` says what `banner` does.
         // eslint-disable-next-line react-hooks/exhaustive-deps
         [items, draft, agents, arrangedBy.parents, called, banner, drawers, arrangedBy.looks, arrangedBy.remote, arrangedBy.running, activities, states, threadsAll, arrangedBy.landings, seenGiven, showing],
@@ -2440,7 +2549,7 @@ export function Review({
     const where = (
         <Heading
             parts={panes && showing.kind === "agent" ? whereParts.filter((each) => each.kind !== "group") : whereParts}
-            tally={panes && showing.kind !== "for you" ? "" : tallied(items, draft, seeing)}
+            tally={panes && showing.kind !== "for you" ? "" : tallied(items, draft, seeing, laidOut.piled)}
             title={title}
             paneMode={paneMode}
         />
@@ -2550,6 +2659,21 @@ export function Review({
                         <Stack following={follower} roots={roots} text={laidOut.text} classesOf={classesOf} markOf={markOf} hintOf={hintOf} narrow={narrow} jump={jumpTo} />
                     </div>
                 </section>
+                <Picker
+                    on={picking?.on ?? null}
+                    choices={pickChoices}
+                    choose={(to) => {
+                        const whats = picking?.whats ?? [];
+                        setPicking(null);
+                        editor.record(whats.reduce((drafted, what) => sentTo(drafted, what, to), editor.latest.current));
+                        requestAnimationFrame(() => view.current?.focus());
+                    }}
+                    close={() => {
+                        setPicking(null);
+                        requestAnimationFrame(() => view.current?.focus());
+                    }}
+                    say={say}
+                />
             </div>
         );
     }
@@ -2573,6 +2697,21 @@ export function Review({
                     <Stack following={follower} roots={roots} text={laidOut.text} classesOf={classesOf} markOf={markOf} hintOf={hintOf} narrow={narrow} jump={jumpTo} />
                 </div>
             </div>
+            <Picker
+                on={picking?.on ?? null}
+                choices={pickChoices}
+                choose={(to) => {
+                    const whats = picking?.whats ?? [];
+                    setPicking(null);
+                    editor.record(whats.reduce((drafted, what) => sentTo(drafted, what, to), editor.latest.current));
+                    requestAnimationFrame(() => view.current?.focus());
+                }}
+                close={() => {
+                    setPicking(null);
+                    requestAnimationFrame(() => view.current?.focus());
+                }}
+                say={say}
+            />
         </>
     );
 }

@@ -5,7 +5,7 @@
 // been in view, while the operator was there to see it, and which marks that lets move. Pure, with the time given, so a
 // test moves its own clock; `useSeeing.ts` gives it the view.
 import { CORE_MODULE, findNode, type Moved } from "./grammar";
-import { fresh, type Conversation, type Draft, type Laid, type Placed, type Seeing, type ThreadRead } from "./review";
+import { fresh, marked as markedIn, type Conversation, type Draft, type Laid, type Placed, type Seeing, type ThreadRead } from "./review";
 import { blockId, instanceOf, type Instance, type Remote } from "./views";
 
 /** How long a thing has to be in view at least. */
@@ -222,7 +222,7 @@ export function sightsOf(laidOut: Laid, seeing: Seeing, draft: Draft, remote: Re
     const written = new Set((draft.comments ?? []).filter((each) => each.text.trim() !== "").map((each) => each.item));
     const remarked = new Set((draft.remarks ?? []).filter((each) => each.text.trim() !== "").map((each) => each.quote.block ?? ""));
     const holdsRemark = (part: Placed): boolean => remarked.has(part.id) || part.children.some(holdsRemark);
-    const marked = new Set([...(draft.done ?? []), ...(draft.declined ?? []), ...(draft.parked ?? [])]);
+    const marked = markedIn(draft);
     const regions = new Map(laidOut.regions.map((each) => [each.item.number, each]));
 
     /** Each part of `parts`, those within among them, by its id. */

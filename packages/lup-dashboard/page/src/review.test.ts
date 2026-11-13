@@ -11,6 +11,7 @@ import { reconcile, runsOf } from "./reconcile";
 import { findNode, implied, marking, reachOf } from "./grammar";
 import {
     EMPTY,
+    NONE_PILED,
     aboutAt,
     answer,
     answerAfter,
@@ -72,12 +73,14 @@ import {
     type Comment,
     type Context,
     type Conversation,
+    type Destined,
     type Draft,
     type Drawers,
     type Fold,
     type Head,
     type Item,
     type Laid,
+    type ThreadRead,
     type Naming,
     type Quote,
     type Remark,
@@ -210,11 +213,27 @@ const CONTEXT: Context = {
 
 const NOTHING: Around = { contexts: new Map(), files: new Map(), answers: [], commented: [] };
 
-const header = (item: Item, parked: boolean) => `── #${item.number}${parked ? " · later" : ""} ──`;
-const banner = (head: Head, parked: boolean) => {
+const header = (item: Item) => `── #${item.number} ──`;
+const banner = (head: Head) => {
     const party = "item" in head ? head.item.sender : head.conversation;
-    return `━━ ${party.party === "conversation" ? party.session : "lup"}${parked ? " · later" : ""} ━━`;
+    return `━━ ${party.party === "conversation" ? party.session : "lup"} ━━`;
 };
+
+/** Return a concern as the host reads it, `number`, titled `title`, of the questions' repository, nobody answering for it, holding what `moved` names, moved in whole. */
+function concernOf(read: { number: number; title: string; moved?: number[] }): ThreadRead {
+    const repository = QUESTION.sender.party === "conversation" ? QUESTION.sender.repository : "";
+    return {
+        thread: { kind: "ledger:thread", number: read.number, name: read.title.toLowerCase(), title: read.title, repository, by: { party: "operator" }, at: "2026-10-17T12:00:00Z", parent: null, holder: null },
+        state: "nobody running",
+        section: "every thread",
+        since: "2026-10-17T12:00:00Z",
+        moved: read.moved ?? [],
+        answering: null,
+    } as ThreadRead;
+}
+
+/** Send item `number` into the pile `Later`, as Space s does. */
+const toLater = (number: number): Destined => ({ id: `later ${number}`, item: number, to: { pile: "Later" } });
 
 /** What's written at a line, as a comment on an item: none where it's a message to an agent. */
 /** A quote of `text`, at offsets `start` to `end` of its item's text whole, naming no block: as one kept from before quotes named theirs, which the host gives with its fields' defaults. */
@@ -255,17 +274,17 @@ describe("laid", () => {
         expect(out.text.slice(read!.from, read!.to)).toBe("\nI assumed UTF-8.");
     });
 
-    it("folds an item left for later whole under its header, as one marked read, landing on its header", () => {
-        const out = laid([QUESTION, NOTE], [], banner, header, { ...EMPTY, parked: [51] }, NOTHING);
+    it("folds an item the draft sends somewhere whole under its header, as one marked read, landing on its header", () => {
+        const out = laid([QUESTION, NOTE], [], banner, header, { ...EMPTY, moves: [toLater(51)] }, NOTHING);
         const question = out.regions.find((each) => each.item.number === 51)!;
         const [later] = question.folds;
         expect(later).toMatchObject({ kind: "item", closed: true });
-        expect(out.text.slice(later!.summary.from, later!.summary.to)).toBe("── #51 · later ──");
+        expect(out.text.slice(later!.summary.from, later!.summary.to)).toBe("── #51 ──");
         expect(out.text.slice(later!.from, later!.to)).toMatch(/^\nWhich parser\?\n.*lean: no$/s);
         expect(arrival(question)).toBe(question.header.from);
         const back = laid([QUESTION, NOTE], [], banner, header, EMPTY, NOTHING);
         expect(back.regions.flatMap((each) => each.folds).map((each) => each.closed)).toEqual([false, false]);
-        // Its own fold is named the same, read, left for later or neither, which says how it's folded.
+        // Its own fold is named the same, read, sent somewhere or neither, which says how it's folded.
         expect(back.regions.map((each) => foldKey(each.folds[0]!))).toEqual(["51 item ", "52 item "]);
     });
 
@@ -342,19 +361,15 @@ describe("laid", () => {
         const changed = laid([later, ninth, QUESTION, { ...NOTE, rank: NEWS }], [], banner, header, { ...EMPTY, done: [51] }, NOTHING);
         expect(heads(changed)).toEqual(heads(more));
         expect(changed.regions[0]?.folds.find((each) => each.kind === "item")?.closed).toBe(true);
-        // Parked, the question goes to the end, its group staying where it was this sitting.
+        // Moved into a concern, the question leaves its group, a dim line where it was, its group staying where it was.
         const places = more.groups.map((each) => each.place);
-        const parked = laid([later, ninth, QUESTION, NOTE], [], banner, header, { ...EMPTY, parked: [51] }, NOTHING, places);
-        expect(heads(parked)).toEqual([
-            "━━ s1 ━━",
-            "── #53 ──",
-            "━━ s2 ━━",
-            "── #52 ──",
-            "━━ s9 ━━",
-            "── #54 ──",
-            "━━ s1 · later ━━",
-            "── #51 · later ──",
-        ]);
+        const pile = concernOf({ number: 300, title: "Later", moved: [51] });
+        const moved = laid([later, ninth, QUESTION, NOTE], [], banner, header, EMPTY, NOTHING, places, undefined, undefined, { concerns: [pile] });
+        expect(heads(moved)).toEqual(["━━ s1 ━━", "── #53 ──", "━━ s2 ━━", "── #52 ──", "━━ s9 ━━", "── #54 ──"]);
+        expect(moved.text).toContain("━━ s1 ━━\n@51 question → Later\n── #53 ──");
+        expect(moved.away.map((each) => [each.item.number, each.into.thread.number])).toEqual([[51, 300]]);
+        // In a pile nobody answers for, it's set aside, counting nowhere.
+        expect([...moved.piled]).toEqual([51]);
     });
 
     it("walks to what's to answer with ]a and [a, in the order it came, passing over news, flags and what's settled", () => {
@@ -363,7 +378,7 @@ describe("laid", () => {
         expect(heads(out)).toEqual(["━━ s1 ━━", "── #51 ──", "── #60 ──", "━━ s2 ━━", "── #52 ──", "── #70 ──", "━━ lup ━━", "── #54 ──"]);
         const at = (text: string) => out.text.indexOf(text);
         const number = (region: ReturnType<typeof answerAfter>) => region?.item.number;
-        expect([toAnswer(QUESTION, EMPTY), toAnswer(PROBLEM, EMPTY), toAnswer(friction, EMPTY), toAnswer(FLAGGED, EMPTY), toAnswer(APPROVAL, EMPTY)]).toEqual([
+        expect([toAnswer(QUESTION, EMPTY, NONE_PILED), toAnswer(PROBLEM, EMPTY, NONE_PILED), toAnswer(friction, EMPTY, NONE_PILED), toAnswer(FLAGGED, EMPTY, NONE_PILED), toAnswer(APPROVAL, EMPTY, NONE_PILED)]).toEqual([
             true,
             true,
             false,
@@ -387,10 +402,11 @@ describe("laid", () => {
         // From a banner, the first item laid out after it counts, as the top's does.
         expect(number(answerAfter(out, EMPTY, at("━━ s2"), true))).toBe(52);
         expect(number(answerAfter(out, EMPTY, at("━━ lup"), true))).toBe(54);
-        // Marked read or left for later, an item is passed over, as the draft settles it.
+        // Marked read or sent somewhere, an item is passed over, as the draft settles it; and one in a pile.
         expect(number(answerAfter(out, { ...EMPTY, done: [52] }, at("── #51"), true))).toBe(54);
-        expect(number(answerAfter(out, { ...EMPTY, parked: [54] }, at("── #52"), true))).toBeUndefined();
-        expect(toAnswer(NOTE, { ...EMPTY, done: [52] })).toBe(false);
+        expect(number(answerAfter(out, { ...EMPTY, moves: [toLater(54)] }, at("── #52"), true))).toBeUndefined();
+        expect(toAnswer(NOTE, { ...EMPTY, done: [52] }, NONE_PILED)).toBe(false);
+        expect(toAnswer(QUESTION, EMPTY, new Set([51]))).toBe(false);
     });
 
     it("counts what's to answer and what's only to read apart for the header over the review, those settled in the draft left out", () => {
@@ -398,13 +414,14 @@ describe("laid", () => {
         const items = [QUESTION, PROBLEM, friction, FLAGGED];
         // Each group seen up to an item, as the operator marked it with Space d on its banner.
         const seen = (upTo: number): Seeing => ({ groups: new Map([[whose(from("s1", "a1")), upTo], [whose(from("s2")), upTo]]), commented: new Set() });
-        expect(tallied(items, EMPTY, UNSEEN)).toBe("2 to answer · 1 to read");
+        expect(tallied(items, EMPTY, UNSEEN, NONE_PILED)).toBe("2 to answer · 1 to read");
         // Seen, it's no longer to read, though it stays where it is, and what asks them is counted all the same.
-        expect(tallied(items, EMPTY, seen(100))).toBe("2 to answer");
-        expect(tallied(items, EMPTY, seen(55))).toBe("2 to answer · 1 to read");
-        expect(tallied(items, { ...EMPTY, done: [51], parked: [70] }, UNSEEN)).toBe("1 to answer · 1 to read");
-        expect(tallied([friction], EMPTY, seen(60))).toBe("0 to answer");
-        expect(tallied([], EMPTY, UNSEEN)).toBe("");
+        expect(tallied(items, EMPTY, seen(100), NONE_PILED)).toBe("2 to answer");
+        expect(tallied(items, EMPTY, seen(55), NONE_PILED)).toBe("2 to answer · 1 to read");
+        expect(tallied(items, { ...EMPTY, done: [51], moves: [toLater(70)] }, UNSEEN, NONE_PILED)).toBe("1 to answer · 1 to read");
+        expect(tallied(items, EMPTY, UNSEEN, new Set([52, 60]))).toBe("1 to answer");
+        expect(tallied([friction], EMPTY, seen(60), NONE_PILED)).toBe("0 to answer");
+        expect(tallied([], EMPTY, UNSEEN, NONE_PILED)).toBe("");
     });
 
     it("shows a friction, how it felt and a stop as written", () => {
@@ -424,7 +441,7 @@ describe("laid", () => {
         expect(body(stopped)).toBe("Nothing more is worth doing.");
     });
 
-    it("lays each item under its header in its sender's group, the parked ones last, each comment under its line", () => {
+    it("lays each item under its header in its sender's group, one sent somewhere among them, each comment under its line", () => {
         const draft: Draft = {
             ...EMPTY,
             comments: [
@@ -434,12 +451,12 @@ describe("laid", () => {
             ],
             letters: [],
             done: [],
-            parked: [52],
+            moves: [toLater(52)],
         };
         const out = laid([QUESTION, NOTE], [], banner, header, draft, NOTHING);
         expect(out.text).toBe(
             "━━ s1 ━━\n── #51 ──\nOn the whole: fine.\nWhich parser?\n1. Use lark\nYes.\n   lean: yes\n2. Keep the cache\n   lean: no\n\n" +
-                "━━ s2 · later ━━\n── #52 · later ──\nNoted.\nI assumed UTF-8.\n\n",
+                "━━ s2 ━━\n── #52 ──\nNoted.\nI assumed UTF-8.\n\n",
         );
         const [question] = out.regions;
         expect(question!.blocks.map((each) => out.text.slice(each.from, each.to))).toEqual([
@@ -514,7 +531,7 @@ describe("laid", () => {
         expect(reaches(out, at("Fine."), "done")).toBe("@51 question: mark it read");
         expect(reaches(out, at("Keep the cache"), "done")).toBe("@51 question: mark it read");
         expect(reaches(out, at("Keep the cache"), "decline")).toBeNull();
-        expect(reaches(out, at("Keep the cache"), "send")).toBe("@51 question: leave it for later");
+        expect(reaches(out, at("Keep the cache"), "send")).toBe("@51 question: send it to a concern");
         expect(reaches(out, at("context ·"), "done")).toBe("@51 question: mark it read");
         expect(reaches(out, at("Approve?"), "done")).toBe("@54 approval: approve");
         expect(reaches(out, at("Approve?"), "decline")).toBe("@54 approval: decline");
@@ -1026,20 +1043,14 @@ describe("every agent's group, and the messages under its banner", () => {
     const S3 = from("s3");
     const S4 = from("s4");
 
-    it("gives each agent running a group, empty after those with items in the agents' order, and the parked ones last", () => {
-        const out = laid([QUESTION, NOTE], [S3, from("s2"), S4, from("s1", "a1")], banner, header, { ...EMPTY, parked: [52] }, NOTHING);
+    it("gives each agent running a group, empty after those with items in the agents' order", () => {
+        const out = laid([QUESTION, NOTE], [S3, from("s2"), S4, from("s1", "a1")], banner, header, EMPTY, NOTHING);
         expect(out.text).toBe(
             "━━ s1 ━━\n── #51 ──\nWhich parser?\n1. Use lark\n   lean: yes\n2. Keep the cache\n   lean: no\n\n" +
-                "━━ s3 ━━\n━━ s2 ━━\n━━ s4 ━━\n" +
-                "━━ s2 · later ━━\n── #52 · later ──\nI assumed UTF-8.\n\n",
+                "━━ s2 ━━\n── #52 ──\nI assumed UTF-8.\n\n" +
+                "━━ s3 ━━\n━━ s4 ━━\n",
         );
-        expect(out.groups.map((each) => [each.conversation?.session ?? null, each.later])).toEqual([
-            ["s1", false],
-            ["s3", false],
-            ["s2", false],
-            ["s4", false],
-            ["s2", true],
-        ]);
+        expect(out.groups.map((each) => each.conversation?.session ?? null)).toEqual(["s1", "s2", "s3", "s4"]);
         const approvals = laid([APPROVAL], [], banner, header, EMPTY, NOTHING);
         expect(approvals.groups.map((each) => each.conversation)).toEqual([null]);
     });
@@ -1071,16 +1082,16 @@ describe("every agent's group, and the messages under its banner", () => {
         expect(written(draft).map((each) => each.text)).toEqual(["Noted.", "Look at the cache too.", "And rename it.", "Still there?"]);
     });
 
-    it("opens a message to a group's agent on its banner, a parked group's among them, but none to lup's approvals", () => {
-        const draft: Draft = { ...EMPTY, parked: [51], letters: [{ id: "hi", to: S3, text: "Hi." }] };
+    it("opens a message to a group's agent on its banner, but none to lup's approvals", () => {
+        const draft: Draft = { ...EMPTY, moves: [toLater(51)], letters: [{ id: "hi", to: S3, text: "Hi." }] };
         const out = laid([QUESTION, APPROVAL], [S3], banner, header, draft, NOTHING);
         const at = (line: string) => out.text.indexOf(line);
         expect(opened(out, at("━━ s3"))).toEqual({ id: "", to: S3, text: "" });
         expect(opened(out, at("Hi."))).toEqual({ id: "", to: S3, text: "" });
-        expect(opened(out, at("━━ s1 · later"))).toEqual({ id: "", to: from("s1", "a1"), text: "" });
+        expect(opened(out, at("━━ s1"))).toEqual({ id: "", to: from("s1", "a1"), text: "" });
         expect(opened(out, at("━━ lup"))).toBeUndefined();
         expect(quoted(out, at("━━ s3"), at("━━ s3") + 4)).toEqual({ id: "", to: S3, text: "" });
-        expect(quoted(out, at("━━ s1 · later"), at("Which parser?") + 5)).toBeUndefined();
+        expect(quoted(out, at("━━ s1"), at("Which parser?") + 5)).toBeUndefined();
         expect(regionAt(out, at("━━ s3"))).toBeUndefined();
         expect(regionAt(out, at("── #51"))?.item.number).toBe(51);
         expect(regionAt(out, at("Approve?"))?.item.number).toBe(54);
@@ -1110,9 +1121,9 @@ describe("every agent's group, and the messages under its banner", () => {
         const third: Item = hosted({ ...QUESTION, number: 53 });
         expect(heads(laid([third, NOTE], [S1], banner, header, EMPTY, NOTHING, places))).toEqual(["━━ s1 ━━", "━━ s2 ━━"]);
         expect(heads(laid([third, NOTE], [S1], banner, header, EMPTY, NOTHING))).toEqual(["━━ s2 ━━", "━━ s1 ━━"]);
-        // What's left for later has places of its own.
-        const parked = laid([QUESTION, NOTE], [S1, S3], banner, header, { ...EMPTY, parked: [52] }, NOTHING, places);
-        expect(heads(parked)).toEqual(["━━ s1 ━━", "━━ s3 ━━", "━━ s2 · later ━━"]);
+        // What the draft sends somewhere stays in its group, in its place, until it's sent.
+        const sending = laid([QUESTION, NOTE], [S1, S3], banner, header, { ...EMPTY, moves: [toLater(52)] }, NOTHING, places);
+        expect(heads(sending)).toEqual(["━━ s1 ━━", "━━ s2 ━━", "━━ s3 ━━"]);
     });
 
     it("keeps each group where the operator saw it across a reload, from the order the host keeps, telling it what's gone", () => {
@@ -1409,10 +1420,12 @@ describe("an answer in a turn's last words", () => {
 });
 
 describe("the draft", () => {
-    it("says what it covers, items marked done or declined among it, but those parked, and drops comments that say nothing", () => {
+    it("says what it covers, items marked done or declined among it, but those whose comment goes elsewhere, and drops comments that say nothing", () => {
         const draft: Draft = { ...EMPTY, done: [52], declined: [55], comments: [{ id: "x", item: 53, text: "x" }, { id: "blank", item: 54, text: "  " }] };
         expect(covered(draft)).toEqual([52, 53, 55]);
-        expect(covered({ ...draft, parked: [53] })).toEqual([52, 55]);
+        // A comment on an item sent into a pile goes with it; one sent elsewhere with Space s goes there.
+        expect(covered({ ...draft, moves: [toLater(53)] })).toEqual([52, 55]);
+        expect(covered({ ...draft, comments: [{ id: "x", item: 53, text: "x", sent: { pile: "Later" } }] })).toEqual([52, 55]);
         expect(pruned(draft).comments).toEqual([{ id: "x", item: 53, text: "x" }]);
         expect(pruned({ ...draft, comments: [{ id: "x", item: 53, text: "x \n\n" }] }).comments).toEqual([{ id: "x", item: 53, text: "x" }]);
     });
@@ -1790,7 +1803,7 @@ describe("the drawers under each agent's banner", () => {
 
     it("draws what measures on a banner beside its words, never writing it in the text, where it goes among its parts", () => {
         const running = new Map([[whose(S1), { launch: "l1", holding: false }]]);
-        const withParts = (head: Head, parked: boolean, parts: string) => `━━ ${"item" in head ? "?" : head.conversation.session}${parts === "" ? "" : ` · ${parts}`} ━━`;
+        const withParts = (head: Head, parts: string) => `━━ ${"item" in head ? "?" : head.conversation.session}${parts === "" ? "" : ` · ${parts}`} ━━`;
         const out = laid([], [S1], withParts, header, EMPTY, NOTHING, [], drawers, undefined, { running });
         const [group] = out.groups;
         expect(out.text.slice(group!.banner.from, group!.banner.to)).toBe("━━ s1 · ▶ Writing the models ·  ━━");

@@ -287,6 +287,10 @@ class Passage(Model):
     answer: int | None = None
     """The item in the thread that answered it, by its number, citing it or
     answering the whole of what it's of; none while nothing does."""
+    on: int | None = None
+    """The agent's item the operator's words were on, by its number, which the
+    review goes to from the passage: what a comment or a ruling was on; none for
+    words on nothing of an agent's, as a message whole (`Anchor.item`)."""
 
 
 class CheckRead(Model):
@@ -702,10 +706,15 @@ class Readings(Model, arbitrary_types_allowed=True):
             thread, asking=asking, marks=marks, new=new, members=members
         )
         passages = [
-            Passage(spot=spot, words=words, answer=beside.answered.get(spot))
+            Passage(
+                spot=spot,
+                words=anchor.text,
+                answer=beside.answered.get(spot),
+                on=anchor.item,
+            )
             for each in members
             if each.part is not None
-            and (words := self.words(each)) is not None
+            and (anchor := self.anchor(each)) is not None
             and (spot := Spot(node=each.node, part=each.part))
         ]
         return ThreadRead(
@@ -742,12 +751,15 @@ class Readings(Model, arbitrary_types_allowed=True):
 
     def words(self, member: Joined) -> str | None:
         """Return the operator's words of `member`, a part of an item of theirs moved into a thread, as they wrote them; none where it's no part, or its item is gone."""
+        anchor = self.anchor(member)
+        return None if anchor is None else anchor.text
+
+    def anchor(self, member: Joined) -> Anchor | None:
+        """Return the part of the operator's words `member` is, a part of an item of theirs moved into a thread: their words there, and what of an agent's they were on; none where it's no part, or its item is gone."""
         item = None if member.part is None else self.source.items().get(member.node)
         if item is None:
             return None
-        return next(
-            (each.text for each in spoken(item) if each.id.part == member.part), None
-        )
+        return next((each for each in spoken(item) if each.id.part == member.part), None)
 
     def about(self, thread: Thread, members: list[Joined]) -> str | None:
         """Return what `thread` is about where its title is no real one (`untitled`): the first line of the first thing in it with words, an item, a check or a part of the operator's words, cut short; none where its title says it, or nothing in it says anything."""

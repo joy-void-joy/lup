@@ -6,33 +6,44 @@
 // said before it's pressed, on the line of keys, in the palette and the stack, from the same walk (`reachOf`).
 //
 // Only the view changes at once. Everything that reaches an agent or the host is a mark in the draft (`marking`):
-// an item done, declined or left for later, the inbox's own; anything else a block offers, recorded as the offer
+// an item done or declined, the inbox's own; where Space s sent something, an item, a concern or what was written
+// (`sentTo`), which the picker it opens chooses (`Picker.tsx`); anything else a block offers, recorded as the offer
 // (`Marked`), which the page applies as the draft is sent (`App.tsx`). Undone with `u`, as any change to the draft. An
 // offer that runs at once (`Offer.runs`), a module's view key, is run as it's pressed. Pure.
 import { newId } from "./anchors";
 import { partSaid, type ReplyPart } from "./brief";
 import type { components } from "./generated/api";
 import { cited } from "./comments";
-import { concernReads, concernWords, cutAt, EMPTY, isLetter, isNobody, news, toAnswer, waits, writtenId, type Conversation, type Draft, type Group, type Item, type Laid, type Placed, type Region, type ThreadRead } from "./review";
+import { concernReads, concernsSent, concernWords, cutAt, EMPTY, goesTo, isLetter, isNobody, itemsSent, news, toAnswer, waits, writtenId, written, type Conversation, type Destination, type Draft, type Group, type Item, type Laid, type Placed, type Region, type ThreadRead, type Written } from "./review";
 import type { Block as ViewBlock, Offer } from "./views";
 
 export type Verb = components["schemas"]["Verb"];
 export type Marked = components["schemas"]["Marked"];
 
-/** Which of the draft's lists of items an item is marked in: done, declined, or left for later. */
-export type Listed = "done" | "declined" | "parked";
+/** Which of the draft's lists of items an item is marked in: done or declined. */
+export type Listed = "done" | "declined";
+
+/**
+ * What Space s sends somewhere, choosing where in its picker (`Picker.tsx`): an item, into a concern or a pile; a concern,
+ * to an agent, under another concern, into a pile or to `No agent`; or what the operator wrote, by its id, to an agent,
+ * a concern or a pile. Each with the repository whose concerns and piles it may go to.
+ */
+export type Sendable =
+    | { kind: "item"; number: number; repository: string }
+    | { kind: "concern"; read: ThreadRead }
+    | { kind: "written"; id: string; repository: string };
 
 /**
  * One thing a verb does where it lands: an item marked in one of the draft's lists; an offer marked in the draft, on
- * the block it's shown on, at the version that block shows; an offer run at once, on what's of `conversation`; or a
- * comment opened on the thing whole, which the editor opens.
+ * the block it's shown on, at the version that block shows; an offer run at once, on what's of `conversation`; a
+ * comment opened on the thing whole, which the editor opens; or the picker opened for what Space s sends somewhere.
  */
 export type Act =
     | { kind: "item"; number: number; list: Listed }
     | { kind: "mark"; offer: Offer; block: string; version: string | null }
     | { kind: "once"; offer: Offer; conversation: Conversation | null }
     | { kind: "comment" }
-    | { kind: "readdress"; id: string; to: Conversation | null };
+    | { kind: "send"; what: Sendable };
 
 /**
  * Where a verb lands at the cursor: what it's on, as the line of keys names it, the part of the review it is, what it
@@ -106,7 +117,7 @@ function whyNot(verb: Verb): string {
         case CORE.decline:
             return "only an approval, a held change, a file held at landing or a thread is declined";
         case CORE.send:
-            return "only an item is left for later";
+            return "only an item, a concern or what you wrote is sent somewhere";
         case CORE.comment:
             return "nothing here takes a comment";
         default:
@@ -115,24 +126,40 @@ function whyNot(verb: Verb): string {
 }
 
 /**
- * Return where send lands on a message written on a thread, laid out at `node`, in `laidOut`: switching whom it goes to
- * between whoever answers for the thread and no one, where it stays as the operator's; none on anything else written,
- * nor for another verb.
+ * Return where send lands on what the operator wrote, laid out at `node`, in `laidOut`: the picker, sending it to an
+ * agent, a concern or a pile; none for another verb.
  */
-function writtenReach(laidOut: Laid, node: Placed, verb: Verb, naming: Naming): Reach | null {
+function writtenReach(laidOut: Laid, node: Placed, verb: Verb): Reach | null {
     if (verb.name !== CORE.send) {
         return null;
     }
-    const letter = laidOut.written.find((each) => `written ${writtenId(each)}` === node.id);
-    if (letter === undefined || !isLetter(letter) || letter.thread == null) {
+    const each = laidOut.written.find((one) => `written ${writtenId(one)}` === node.id);
+    if (each === undefined) {
         return null;
     }
-    const concern = laidOut.concerns.find((each) => !each.dim && each.read.thread.number === letter.thread)?.read;
-    const answering = concern?.answering ?? null;
-    if (letter.to != null) {
-        return { on: "your message", node, says: "send it to no one: it stays on the concern, waking nobody", acts: [{ kind: "readdress", id: writtenId(letter), to: null }] };
+    const on = isLetter(each) ? "your message" : "comment" in each || "item" in each ? "your comment" : "your remark";
+    return { on, node, says: "send it to an agent, a concern or a pile", acts: [{ kind: "send", what: { kind: "written", id: writtenId(each), repository: repositoryOfWritten(laidOut, each) } }] };
+}
+
+/** Return the repository what the operator wrote is of: its item's, its concern's, or whom it's to. */
+function repositoryOfWritten(laidOut: Laid, each: Written): string {
+    if ("item" in each) {
+        const item = laidOut.regions.find((region) => region.item.number === each.item)?.item;
+        return item === undefined ? "" : repositoryOfItem(item);
     }
-    return answering === null ? null : { on: "your message", node, says: `send it to ${naming.called(answering)}`, acts: [{ kind: "readdress", id: writtenId(letter), to: answering }] };
+    const concern = "thread" in each && each.thread != null ? laidOut.concerns.find((one) => one.read.thread.number === each.thread)?.read : undefined;
+    return concern?.thread.repository ?? each.to?.repository ?? "";
+}
+
+/** Return the repository an item is of: its sender's, else whom it's for, else what an approval's about. */
+export function repositoryOfItem(item: Item): string {
+    if (item.sender.party === "conversation") {
+        return item.sender.repository;
+    }
+    if (item.recipient.party === "conversation") {
+        return item.recipient.repository;
+    }
+    return item.reason.reason === "approval" ? (item.reason.repository ?? "") : "";
 }
 
 /**
@@ -227,6 +254,7 @@ export function actionsToRun<M extends Pick<Marked, "action" | "argument" | "run
 /** The actions of what an item offers (`lup_dev.inbox.store`): an answer marked in one of the draft's lists, and a comment on it whole, which the editor opens. */
 const ITEM_MARKED = "inbox-mark";
 const ITEM_COMMENTED = "inbox-comment";
+const ITEM_SENT = "inbox-send-to";
 
 /**
  * Return what an offer does as an act, marked on `block` at `version`, or run at once on `conversation`: an item's
@@ -241,6 +269,10 @@ function actOf(offer: Offer, block: string, version: string | null, conversation
         }
         case ITEM_COMMENTED:
             return { kind: "comment" };
+        case ITEM_SENT: {
+            const argument = offer.argument as { number: number };
+            return { kind: "send", what: { kind: "item", number: argument.number, repository: "" } };
+        }
         default:
             return offer.runs === "once" ? { kind: "once", offer, conversation } : { kind: "mark", offer, block, version };
     }
@@ -313,7 +345,7 @@ export function reachOf(laidOut: Laid, at: number, verb: Verb, naming: Naming): 
     for (const node of chain.toReversed()) {
         switch (node.kind) {
             case "written": {
-                const found = writtenReach(laidOut, node, verb, naming);
+                const found = writtenReach(laidOut, node, verb);
                 if (found !== null) {
                     return found;
                 }
@@ -400,7 +432,10 @@ function itemReach(region: Region, node: Placed, verb: Verb): Reach | null {
     const on = region.named;
     const offered = answering(region.item.offers, verb)[0];
     if (offered !== undefined) {
-        return { on, node, says: offered.says, acts: [actOf(offered, region.body.id, null, null)] };
+        const act = actOf(offered, region.body.id, null, null);
+        // Sent somewhere, it goes into its own repository's concerns and piles.
+        const acts = act.kind === "send" && act.what.kind === "item" ? [{ ...act, what: { ...act.what, repository: repositoryOfItem(region.item) } }] : [act];
+        return { on, node, says: offered.says, acts };
     }
     const spent = region.item.spent.find((each) => each.verb === verb.name);
     return spent === undefined ? null : { on, node, says: spent.says, acts: [] };
@@ -491,6 +526,8 @@ function concernReach(read: ThreadRead, node: Placed, verb: Verb, naming: Naming
             const answering = read.answering ?? null;
             return { on, node, says: answering === null ? "write on it, to no one" : `write on it, to ${naming.called(answering)}`, acts: [{ kind: "comment" }] };
         }
+        case CORE.send:
+            return { on, node, says: "send it to an agent, under a concern, into a pile or to No agent", acts: [{ kind: "send", what: { kind: "concern", read } }] };
         default:
             return null;
     }
@@ -557,17 +594,6 @@ export function isMarked(draft: Draft, act: Act, verb: string): boolean {
  * left for later. Acts that mark nothing, a comment or what runs at once, leave it as it is.
  */
 export function marking(draft: Draft, acts: readonly Act[], verb: string): Draft {
-    // A message readdressed, to whoever answers for its thread or to no one, as send on it does.
-    const readdressed = acts.flatMap((each) => (each.kind === "readdress" ? [each] : []));
-    if (readdressed.length > 0) {
-        return {
-            ...draft,
-            letters: (draft.letters ?? []).map((letter) => {
-                const act = readdressed.find((each) => each.id === letter.id);
-                return act === undefined ? letter : { ...letter, to: act.to };
-            }),
-        };
-    }
     const marks = acts.filter((each) => each.kind === "item" || each.kind === "mark");
     if (marks.length === 0) {
         return draft;
@@ -583,11 +609,49 @@ export function marking(draft: Draft, acts: readonly Act[], verb: string): Draft
     return next;
 }
 
-/** Return `draft` with item `number` in `list`, out of the others; or in none, `list` none. */
+/** Return `draft` with item `number` in `list`, out of the others; or in none, `list` none. An item marked so is sent nowhere. */
 export function listed(draft: Draft, number: number, list: Listed | null): Draft {
     const without = (each: Listed) => (draft[each] ?? []).filter((one) => one !== number);
     const put = (each: Listed) => (each === list ? [...without(each), number] : without(each));
-    return { ...draft, done: put("done"), declined: put("declined"), parked: put("parked") };
+    const moves = list === null ? (draft.moves ?? []) : (draft.moves ?? []).filter((each) => each.item !== number);
+    return { ...draft, done: put("done"), declined: put("declined"), moves };
+}
+
+/**
+ * Return `draft` with `what` sent to `to`, as the picker chose, or sent nowhere, `to` none, where it goes where it is:
+ * an item into a concern or a pile, marked neither done nor declined then; a concern where it goes; what's written
+ * where it's sent. One sent again goes where it was sent last.
+ */
+export function sentTo(draft: Draft, what: Sendable, to: Destination | null): Draft {
+    switch (what.kind) {
+        case "item": {
+            const others = (draft.moves ?? []).filter((each) => each.item !== what.number);
+            return to === null ? { ...draft, moves: others } : { ...listed(draft, what.number, null), moves: [...others, { id: newId(), item: what.number, to }] };
+        }
+        case "concern": {
+            const number = what.read.thread.number;
+            const others = (draft.moves ?? []).filter((each) => each.thread !== number);
+            return { ...draft, moves: to === null ? others : [...others, { id: newId(), thread: number, to }] };
+        }
+        case "written": {
+            const resent = <W extends Written>(list: readonly W[] | undefined) => (list ?? []).map((each) => (writtenId(each) === what.id ? { ...each, sent: to } : each));
+            return { ...draft, comments: resent(draft.comments), letters: resent(draft.letters), remarks: resent(draft.remarks) };
+        }
+    }
+}
+
+/** Return where `draft` sends `what`, as Space s chose; none where it goes where it is. */
+export function sentWhere(draft: Draft, what: Sendable): Destination | null {
+    switch (what.kind) {
+        case "item":
+            return itemsSent(draft).get(what.number) ?? null;
+        case "concern":
+            return concernsSent(draft).get(what.read.thread.number) ?? null;
+        case "written": {
+            const each = written(draft).find((one) => writtenId(one) === what.id);
+            return each === undefined ? null : goesTo(draft, each);
+        }
+    }
 }
 
 /**

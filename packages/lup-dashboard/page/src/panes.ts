@@ -16,9 +16,15 @@ import {
     concernWords,
     cutAt,
     grouped,
+    itemKind,
     keptUnder,
+    LATER,
+    marked,
+    movedInto,
     nested,
-    PARTIES,
+    partiesOf,
+    piledIn,
+    repositoryCalled,
     taskOwner,
     toAnswer,
     toRead,
@@ -174,8 +180,36 @@ export interface ListReading {
     seeing?: Seeing;
     /** The buffer on screen: an agent's row keeps their nest open while it's theirs, however little of it waits. */
     showing?: Showing;
-    /** The parties listed beside the agents; unsaid, those declared (`PARTIES`). */
+    /** The parties listed beside the agents; unsaid, `No agent` of each repository a concern or an agent is of (`partiesOf`). */
     parties?: readonly Party[];
+}
+
+/** Return the parties the list lists, as `reading` says them, else `No agent` of each repository a concern or an agent it names is of. */
+function partiesIn(reading: Pick<ListReading, "parties" | "threads" | "agents" | "items">): readonly Party[] {
+    return (
+        reading.parties ??
+        partiesOf([
+            ...reading.agents.map((each) => each.repository),
+            ...reading.items.flatMap((each) => (each.sender.party === "conversation" ? [each.sender.repository] : [])),
+            ...(reading.threads?.read.threads ?? []).map((each) => each.thread.repository),
+        ])
+    );
+}
+
+/** Return the items moved into a concern, by number, with it (`movedInto`), which the list shows under its concern rather than its agent. */
+function movedOf(reading: Pick<ListReading, "threads">): Map<number, ThreadRead> {
+    return movedInto(reading.threads?.read.threads ?? []);
+}
+
+/** Return the items set aside in a pile (`piledIn`), which count as waiting nowhere. */
+function piledOf(reading: Pick<ListReading, "threads">): ReadonlySet<number> {
+    return piledIn(reading.threads?.read.threads ?? []);
+}
+
+/** Return what of the agent `group` is of the list shows under them: their items, but those moved into a concern. */
+function presentOf(group: Grouping, reading: Pick<ListReading, "threads">): Item[] {
+    const moved = movedOf(reading);
+    return group.items.filter((each) => !moved.has(each.number));
 }
 
 /** Return each concern the agent named `key` answers for, as the list shows it under them (`taskOwner`, `taskShown`). */
@@ -201,8 +235,7 @@ function confirmingOf(key: string, reading: Pick<ListReading, "threads">): Threa
 
 /** Return what of the agent `group` is of asks the operator from what's nested under their row: their items, what stays stopped until they're answered apart from what only wants their eyes, their threads done, for them to confirm, among that. */
 function askedOf(group: Grouping, reading: ListReading): Pick<BlocksTally, "holds" | "flagged"> {
-    const parked = reading.draft.parked ?? [];
-    const asking = group.items.filter((each) => !parked.includes(each.number) && toAnswer(each, reading.draft));
+    const asking = presentOf(group, reading).filter((each) => toAnswer(each, reading.draft, piledOf(reading)));
     const holds = asking.filter((each) => each.holds).length;
     return { holds, flagged: asking.length - holds + confirmingOf(group.key, reading).length };
 }
@@ -211,10 +244,9 @@ function askedOf(group: Grouping, reading: ListReading): Pick<BlocksTally, "hold
 function agentTally(group: Grouping, reading: ListReading): Tally {
     const { draft, drawers, looks, remote, called } = reading;
     const conversation = group.conversation;
-    const parked = draft.parked ?? [];
-    const open = group.items.filter((each) => !parked.includes(each.number));
+    const open = presentOf(group, reading).filter((each) => !marked(draft).has(each.number));
     const asked = askedOf(group, reading);
-    const newsCount = open.filter((each) => toRead(each, draft, reading.seeing ?? UNSEEN)).length;
+    const newsCount = open.filter((each) => toRead(each, draft, reading.seeing ?? UNSEEN, piledOf(reading))).length;
     const numbers = new Set(group.items.map((each) => each.number));
     const comments = (draft.comments ?? []).filter((each) => numbers.has(each.item) && each.text.trim() !== "").length;
     const letters = conversation === null ? 0 : (draft.letters ?? []).filter((each) => each.to != null && whose(each.to) === group.key && each.text.trim() !== "").length;
@@ -326,10 +358,10 @@ function agentRow(group: Grouping, depth: number, reading: ListReading, nesting:
  */
 function nestOf(group: Grouping, depth: number, reading: ListReading): Row["under"] {
     const set = "  ".repeat(depth + 1);
-    const items = group.items.map((each) => itemRow(each, group, set, reading));
+    const items = presentOf(group, reading).map((each) => itemRow(each, group, set, reading));
     const tasks = tasksOf(group.key, reading);
     const threads = reading.threads;
-    const rows = [...items, ...(threads === null ? [] : concernsNested(tasks, threads.read.threads).map((each) => taskRow(each, set, threads, reading, group.key)))];
+    const rows = [...items, ...(threads === null ? [] : concernRows(concernsNested(tasks, threads.read.threads), set, threads, reading, group.key))];
     if (rows.length === 0) {
         return undefined;
     }
@@ -346,12 +378,6 @@ function itemWords(item: Item): string {
     return text.split("\n").find((each) => each.trim() !== "")?.trim() ?? "";
 }
 
-/** Say what kind of item it is, as a word: a message by its own kind, or as a turn's end. */
-function itemKind(item: Item): string {
-    const reason = item.reason;
-    return reason.reason === "message" ? (reason.ending ? "turn ended" : reason.kind) : reason.reason;
-}
-
 /** Return the last part of what `called` calls `conversation`: a subagent by their own name, which a row has room for. */
 function shortly(conversation: Conversation, reading: Pick<ListReading, "called">): string {
     const name = reading.called(conversation);
@@ -360,7 +386,7 @@ function shortly(conversation: Conversation, reading: Pick<ListReading, "called"
 
 /** Return the row of `item`, of the group `group`, set in by `set`: how it stands, as the overview marks it, its number, what it is, who left it, in a party (`left`), and how it begins, what's drafted on it at its end. */
 function itemRow(item: Item, group: Grouping, set: string, reading: ListReading, left: boolean = false): Row {
-    const standing = itemStanding({ item }, reading.draft, reading.seeing ?? UNSEEN);
+    const standing = itemStanding({ item }, reading.draft, reading.seeing ?? UNSEEN, piledOf(reading));
     const mark = standing.marks[0];
     const glyph = mark === undefined ? " " : (GLYPHS[mark] ?? " ");
     const drafted = standing.draft.filter((each) => each !== "comment").map((each) => DRAFTED[each].glyph).join("");
@@ -382,6 +408,63 @@ function itemRow(item: Item, group: Grouping, set: string, reading: ListReading,
 /** Return `left` cut at the list's width, as a row with no tally. */
 function fitted(left: readonly Stretch[]): Stretch[] {
     return padded(left, NOTHING);
+}
+
+/** A concern's row with what's nested under it, as `concernsNested` lays them out in order: each with its own. */
+interface Tree {
+    entry: Nested;
+    under: Tree[];
+}
+
+/** Return `entries`, as `concernsNested` returns them, in order and set in by depth, as a tree: each under the last before it less deep. */
+function treeOf(entries: readonly Nested[]): Tree[] {
+    const roots: Tree[] = [];
+    const path: Tree[] = [];
+    for (const entry of entries) {
+        const tree: Tree = { entry, under: [] };
+        while ((path.at(-1)?.entry.depth ?? -1) >= entry.depth) {
+            path.pop();
+        }
+        (path.at(-1)?.under ?? roots).push(tree);
+        path.push(tree);
+    }
+    return roots;
+}
+
+/**
+ * Return the rows of `entries`, the concerns of a nest as `concernsNested` lays them out, each a row (`taskRow`) folding
+ * what's in it under it: each item moved into it, a row each, then the concerns nested under it, each the same; closed
+ * where nothing under it asks the operator. `at` names the nest, which a dim row is named by.
+ */
+function concernRows(entries: readonly Nested[], set: string, threads: Threading, reading: ListReading, at: string): Row[] {
+    const moved = movedOf(reading);
+    const byNumber = new Map(reading.items.map((each) => [each.number, each]));
+    // A dim row, context, folds nothing: what's nested under it follows it, as its own rows.
+    const rowsOf = (tree: Tree): Row[] => {
+        const made = taskRow(tree.entry, set, threads, reading, at);
+        const read = tree.entry.read;
+        if (tree.entry.dim) {
+            return [made, ...tree.under.flatMap(rowsOf)];
+        }
+        const inset = `${set}${"  ".repeat(tree.entry.depth + 1)}`;
+        const items = (read.moved ?? []).flatMap((number) => {
+            const item = byNumber.get(number);
+            return item === undefined || moved.get(number)?.thread.number !== read.thread.number ? [] : [movedRow(item, read, inset, reading)];
+        });
+        const rows = [...items, ...tree.under.flatMap(rowsOf)];
+        if (rows.length === 0) {
+            return [made];
+        }
+        const asks = threadTally(read, threads, reading);
+        return [{ ...made, under: { key: `nest thread ${read.thread.number} ${at}`, closed: asks.holds + asks.flagged === 0, kind: "section", rows } }];
+    };
+    return treeOf(entries).flatMap(rowsOf);
+}
+
+/** Return the row of `item`, moved into `read`, under its concern's row, set in by `set`: as an item's row, opening the concern's buffer on it. */
+function movedRow(item: Item, read: ThreadRead, set: string, reading: ListReading): Row {
+    const group: Grouping = { key: item.sender.party === "conversation" ? whose(item.sender) : `item ${item.number}`, conversation: item.sender.party === "conversation" ? item.sender : null, head: { item }, items: [item] };
+    return { ...itemRow(item, group, set, reading, group.conversation !== null), opens: concernHome(read, reading.running) };
 }
 
 /**
@@ -411,7 +494,7 @@ function taskRow(entry: Nested, set: string, threads: Threading, reading: ListRe
     const reads = concernReads(read);
     const quiet = reads === "quiet" || reads === "gone";
     // What asks them alone: what's new is on the item's row under who sent it, read by being seen there, as a thread's mark isn't.
-    const tally = quiet ? NOTHING : { ...threadTally(read, threads, reading.draft), news: 0 };
+    const tally = quiet ? NOTHING : { ...threadTally(read, threads, reading), news: 0 };
     const waiting = tally.holds + tally.flagged > 0;
     // Working in the ledger's word, though whoever held it has ended and someone else answers for it: nobody is.
     const holder = read.thread.holder ?? null;
@@ -420,26 +503,30 @@ function taskRow(entry: Nested, set: string, threads: Threading, reading: ListRe
     const leaver = read.left_by ?? null;
     const whoLeft = leaver === null ? null : `left by ${shortly(leaver, reading)}`;
     const stands = fell ? { text: "holder ended", look: "list-sub" } : concernState(read);
-    // Being left says nobody's running.
-    const word = whoLeft !== null && read.state === "nobody running" ? { ...stands, text: "" } : stands;
+    // Being left says nobody's running, as being in `No agent` does.
+    const word = (whoLeft !== null || at.startsWith("party ")) && read.state === "nobody running" ? { ...stands, text: "" } : stands;
     const says = whoLeft === null ? word.text : word.text === "" ? whoLeft : `${word.text}, ${whoLeft}`;
     const nested = threads.read.threads.filter((each) => (each.thread.parent ?? null) === number && each.bare !== true);
     const finished = nested.filter((each) => (each.done ?? null) !== null || cleared(each)).length;
     const progress = nested.length === 0 ? "" : `${finished} of ${nested.length}`;
-    const after = [says, progress].filter((each) => each !== "");
+    // How many items were moved into it, as a pile counts what's in it: `later · 8`.
+    const moved = (read.moved ?? []).length;
+    const holding = moved === 0 ? "" : `· ${moved}`;
+    const after = [holding, says, progress].filter((each) => each !== "");
     const afterWidth = after.reduce((sum, each) => sum + each.length + 1, 0);
     const room = Math.max(COLUMNS - tallied(tally).reduce((sum, each) => sum + each.text.length, 0) - inset.length - afterWidth - 2, 14);
     const look = quiet ? "list-concern list-quiet" : "list-concern";
     const left: Stretch[] = [
         { text: inset },
         { text: cutName(words, room), look },
+        ...(holding === "" ? [] : [{ text: " " }, { text: holding, look: "list-count" }]),
         ...(says === "" ? [] : [{ text: " " }, { text: says, look: waiting || reads === "for your eyes" ? word.look : "list-sub" }]),
         ...(progress === "" ? [] : [{ text: " " }, { text: progress, look: "list-sub" }]),
     ];
     return {
         id: `thread ${number}`,
         lines: [{ stretches: padded(left, tally) }],
-        opens: concernHome(read, reading.running, reading.parties ?? PARTIES),
+        opens: concernHome(read, reading.running),
         says: [words, word.text, ...(leaver === null ? [] : [`left by ${reading.called(leaver)}`])].filter((each) => each !== "").join(", "),
         writes: false,
         node: number,
@@ -473,9 +560,9 @@ function repositoryNamed(path: string): string {
     return name.endsWith(".git") ? name.slice(0, -".git".length) : name;
 }
 
-/** Return `party`'s row, opening its buffer, with `count` of what's in it. */
-function partyRow(party: Party, count: number, tally: Tally): Row {
-    return heading(`party ${party.name}`, party.called, `${count}`, { kind: "party", name: party.name }, party.says, tally);
+/** Return `party`'s row, opening its buffer, saying its repository's name. */
+function partyRow(party: Party, tally: Tally): Row {
+    return heading(`party ${party.name}`, party.called, repositoryCalled(party.repository), { kind: "party", name: party.name }, party.says, tally);
 }
 
 /**
@@ -490,7 +577,7 @@ export function listedByAgent(reading: ListReading): Row[] {
     const tallyOf = (group: Grouping) => counted.find((each) => each.group === group)?.tally ?? NOTHING;
     // What runs comes straight under what's for the operator, always in sight however long the list gets.
     const rows: Row[] = [forYouRow(added(counted.map((each) => each.tally))), ...viewRows(reading)];
-    const parties = reading.parties ?? PARTIES;
+    const parties = partiesIn(reading);
     // Each agent under the first party holding them; the rest, running, on their own.
     const partyOf = (group: Grouping) => parties.find((each) => each.holds(group, reading.running));
     const runningGroups = groups.filter((each) => each.conversation !== null && reading.running.has(each.key) && partyOf(each) === undefined);
@@ -510,12 +597,12 @@ export function listedByAgent(reading: ListReading): Row[] {
         const held = byName(groups.filter((each) => partyOf(each) === party), reading.called);
         const tasks = threads === null ? [] : threads.read.threads.filter((each) => taskShown(each) && party.holdsTask(each, reading.running));
         const within: Row[] = [
-            ...(threads === null ? [] : concernsNested(tasks, threads.read.threads).map((each) => taskRow(each, "", threads, reading, `party ${party.name}`))),
-            ...held.flatMap((group) => group.items.map((item) => ({ item, group }))).toSorted((a, b) => a.item.number - b.item.number).map(({ item, group }) => itemRow(item, group, "", reading, true)),
+            ...(threads === null ? [] : concernRows(concernsNested(tasks, threads.read.threads), "", threads, reading, `party ${party.name}`)),
+            ...held.flatMap((group) => presentOf(group, reading).map((item) => ({ item, group }))).toSorted((a, b) => a.item.number - b.item.number).map(({ item, group }) => itemRow(item, group, "", reading, true)),
             ...held.filter((group) => reading.agents.some((each) => whose(each) === group.key)).map((group) => agentRow(group, 0, reading, false)),
         ];
         if (within.length > 0) {
-            rows.push(partyRow(party, within.length, added(held.map(tallyOf))), ...within);
+            rows.push(partyRow(party, added(held.map(tallyOf))), ...within);
         }
     }
     for (const group of byName(groups.filter((each) => each.conversation === null), reading.called)) {
@@ -576,12 +663,19 @@ function concernState(read: ThreadRead): { text: string; look: string } {
     }
 }
 
-/** Return how thread `read` stands: what stays stopped on the operator in it, the files a landing waits on among that; what's flagged for their eyes, its being done for them to confirm among that; what's news; and what's drafted on it. */
-function threadTally(read: ThreadRead, threads: Threading, draft: Draft): Tally {
+/**
+ * Return how thread `read` stands: what stays stopped on the operator in it, the files a landing waits on among that, and
+ * what moved into it that asks them where someone answers for it, set aside in a pile else; what's flagged for their
+ * eyes, its being done for them to confirm among that; what's news; and what's drafted on it.
+ */
+function threadTally(read: ThreadRead, threads: Threading, reading: Pick<ListReading, "draft" | "items" | "threads">): Tally {
+    const draft = reading.draft;
     const written = (draft.letters ?? []).filter((each) => each.thread === read.thread.number && each.text.trim() !== "").length;
-    const settled = new Set([...(draft.done ?? []), ...(draft.declined ?? []), ...(draft.parked ?? [])]);
-    const asking = (read.asks ?? []).filter((each) => !settled.has(each.node));
-    const holds = asking.filter((each) => each.holds).length;
+    const settled = marked(draft);
+    const piled = piledOf(reading);
+    const movedAsking = reading.items.filter((each) => (read.moved ?? []).includes(each.number) && toAnswer(each, draft, piled)).map((each) => ({ node: each.number, holds: each.holds }));
+    const asking = [...(read.asks ?? []).filter((each) => !settled.has(each.node)), ...movedAsking];
+    const holds = asking.filter((each) => each.holds === true).length;
     return {
         holds: holds + (threads.landing.get(read.thread.number) ?? 0),
         flagged: asking.length - holds + (concernReads(read) === "for your eyes" ? 1 : 0),
@@ -631,7 +725,7 @@ export function bufferSpans(laid: Laid, showing: Showing): BufferSpan[] {
     }
     return [
         ...laid.groups.map((each) => ({
-            id: `agent ${each.place.replace(/^(now|later) /, "")}`,
+            id: `agent ${each.place.replace(/^now /, "")}`,
             from: each.banner.from,
             to: each.end,
             depth: each.depth,
@@ -742,8 +836,8 @@ export function titled(showing: Showing, reading: Pick<ListReading, "agents" | "
         case "for you":
             return { name: "what's for you", whom: "a comment reaches who sent the item" };
         case "party": {
-            const party = (reading.parties ?? PARTIES).find((each) => each.name === showing.name);
-            return { name: party?.called ?? showing.name, whom: party?.whom ?? "" };
+            const party = partiesIn(reading).find((each) => each.name === showing.name);
+            return { name: party === undefined ? showing.name : `${party.called} · ${repositoryCalled(party.repository)}`, whom: party?.whom ?? "" };
         }
         case "view":
             return { name: showing.called, whom: "a comment reaches whom its first line says" };
@@ -765,7 +859,7 @@ export function titled(showing: Showing, reading: Pick<ListReading, "agents" | "
  * written to them is written under, at its end, the latest of what's live just above it; else on what's first there.
  */
 export function arrivalIn(laid: Laid, draft: Draft): number {
-    const asking = laid.regions.find((each) => toAnswer(each.item, draft))?.header.from;
+    const asking = laid.regions.find((each) => toAnswer(each.item, draft, laid.piled))?.header.from;
     const writing = laid.groups.find((each) => each.writing !== undefined)?.writing?.from;
     return asking ?? writing ?? laid.regions[0]?.header.from ?? 0;
 }

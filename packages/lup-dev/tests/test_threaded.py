@@ -503,9 +503,14 @@ def test_a_part_moved_in_stands_open_until_an_item_there_cites_it_never_asking_t
     docs = work.read()["docs"]
     assert docs.unanswered == [part]
     assert (docs.section, docs.asks) == ("every thread", [])
-    # The passage it came from, open.
+    # The passage it came from, open, on the question it answered.
     assert docs.passages == [
-        Passage(spot=part, words="And write it up in the docs.", answer=None)
+        Passage(
+            spot=part,
+            words="And write it up in the docs.",
+            answer=None,
+            on=work.question,
+        )
     ]
     [moved] = [
         each

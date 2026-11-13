@@ -998,6 +998,16 @@ SHELL_FOLDS = [
         whole=True,
     ),
     FoldKind(
+        name="concern",
+        letter="C",
+        called="concerns",
+        one="the concern",
+        level=0,
+        colour="link",
+        chord=False,
+        whole=True,
+    ),
+    FoldKind(
         name="file", letter="f", called="files", one="the file", level=1, colour="info"
     ),
     FoldKind(
@@ -1032,7 +1042,8 @@ module's letter may take: what's nested under a row of the dashboard's list; a
 group whole under its banner, a thread's or an agent's; what of a thread came
 before where the operator last read it, which no buffer lays out; several
 checks of a thread under the row counting them; an item
-whole under its header, and an item's context, the core's; a file, a body and
+whole under its header, a concern whole under its own, and an item's context,
+the core's; a file, a body and
 a run of unchanged lines, which `Diff` and `Code` fold under. `Core` declares
 them (`Core.folds`), so a person's layer changes how each starts and whether
 `zR` and `zM` reach it."""

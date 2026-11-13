@@ -3,7 +3,7 @@ import "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
 import { cursorRow, itemStanding, outlineOf, type Reading } from "./outline";
-import { EMPTY, barsOf, holderOf, laid, nested, opened, ownerOf, quoted, rowLabel, whose, UNREAD, UNSEEN, type AgentDrawers, type Around, type Conversation, type Draft, type Head, type Item, type Placed, type Remark } from "./review";
+import { EMPTY, NONE_PILED, barsOf, holderOf, laid, nested, opened, ownerOf, quoted, rowLabel, whose, UNREAD, UNSEEN, type AgentDrawers, type Around, type Conversation, type Draft, type Head, type Item, type Placed, type Remark } from "./review";
 import { sightsOf } from "./seeing";
 import { around, linesOver, pinned, stickies, type Geometry } from "./stack";
 import { STANDING } from "./fixtures/looks";
@@ -35,7 +35,7 @@ function note(number: number, sender: Conversation, rank: Item["rank"] = NEWS): 
 }
 
 const NOTHING: Around = { contexts: new Map(), files: new Map(), answers: [], commented: [] };
-const header = (item: Item, parked: boolean) => `── @${item.number} note${parked ? " · later" : ""} ──`;
+const header = (item: Item) => `── @${item.number} note ──`;
 const banner = (head: Head) => {
     const party = "item" in head ? head.item.sender : head.conversation;
     return `━━ ${party.party === "conversation" ? (party.agent ?? party.session) : "lup"} ━━`;
@@ -474,6 +474,7 @@ describe("the overview", () => {
         seeing: UNSEEN,
         states: new Map([[whose(PARENT), "calling"]]),
         called: (party) => (party.agent === null ? party.session : `${party.session}/${party.agent}`),
+        piled: NONE_PILED,
     };
     const said = (rows: ReturnType<typeof outlineOf>) =>
         rows.map((each) => `${"  ".repeat(each.depth)}${each.text} [${each.marks.join(",")}]${each.draft.length === 0 ? "" : ` {${each.draft.join(",")}}`}`);
@@ -496,7 +497,10 @@ describe("the overview", () => {
         // The cursor's entry is the deepest holding it.
         expect(cursorRow(rows, out.text.indexOf("Note 1."))?.text).toBe("@1 problem");
         expect(cursorRow(rows, out.text.indexOf("━━ s1"))?.text).toBe("s1");
-        expect(itemStanding(out.regions.find((each) => each.item.number === 1)!, { ...EMPTY, parked: [1], comments: [{ id: "x", item: 1, text: "x" }] }, { groups: new Map([[whose(CHILD), 1]]), commented: new Set() })).toEqual({ marks: ["parked"], draft: [], fresh: false });
+        const seen = { groups: new Map([[whose(CHILD), 1]]), commented: new Set<number>() };
+        // Sent somewhere, the draft says so; in a pile, it's set aside.
+        expect(itemStanding(out.regions.find((each) => each.item.number === 1)!, { ...EMPTY, moves: [{ id: "m", item: 1, to: { pile: "Later" } }], comments: [{ id: "x", item: 1, text: "x" }] }, seen, NONE_PILED)).toEqual({ marks: [], draft: ["comment", "send"], fresh: false });
+        expect(itemStanding(out.regions.find((each) => each.item.number === 1)!, EMPTY, seen, new Set([1]))).toEqual({ marks: ["parked"], draft: [], fresh: false });
     });
 
     it("follows the review where it doesn't nest, a subagent's group where its first item put it", () => {

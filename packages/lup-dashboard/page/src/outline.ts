@@ -2,13 +2,14 @@
 // review*), read from the review as it's laid out, never a second source, in
 // its order: each agent, a subagent under their parent as the review nests them,
 // and each agent's items, a repository named where it changes, each with a mark of how it stands (waiting on the operator, news,
-// parked) and apart, in the draft's colour, what the next Ctrl+Enter does with
-// it (a comment goes, it's read, it's approved); what an agent's "since you
+// set aside in a pile) and apart, in the draft's colour, what the next Ctrl+Enter does with
+// it (a comment goes, it's read, it's approved, it's sent somewhere); what an agent's "since you
 // approved" holds counted beside them. What's in view is bracketed and
 // the cursor's entry highlighted as the view moves. Pure.
 import type { Span } from "./comments";
 import {
     fresh,
+    itemsSent,
     type Seeing,
     toAnswer,
     toRead,
@@ -28,17 +29,17 @@ export type OutlineKind = "repository" | "agent" | "approvals" | "item";
 /**
  * How an entry stands, the state it's in, each in its own colour: what stays stopped until the operator answers it;
  * what asks for their eyes with nothing stopped, as what's flagged, or to review with nothing holding it; news to read,
- * or parked; a file with a line that matters, or one folded whole as a test or data, in the margin; an agent calling,
+ * or set aside in a pile (`parked`); a file with a line that matters, or one folded whole as a test or data, in the margin; an agent calling,
  * between calls or ended. What's settled, a file reviewed, isn't shown at all.
  */
 export type OutlineMark = "waiting" | "asking" | "news" | "parked" | "to-review" | "flagged" | "folded" | "calling" | "idle" | "ended";
 
 /**
  * What the draft does with an item on the next Ctrl+Enter, all in the draft's colour: comments on it go, it's marked
- * read, it's approved, an approval or a held change marked done or read alone, or a held change commented on, or it's
- * declined.
+ * read, it's approved, an approval or a held change marked done or read alone, or a held change commented on, it's
+ * declined, or it's sent into a concern or a pile.
  */
-export type DraftMark = "comment" | "read" | "approve" | "decline";
+export type DraftMark = "comment" | "read" | "approve" | "decline" | "send";
 
 /** One entry: what it is, how deep it's set in, what it says, how it stands, what the draft does with it, where it is in the review, and where going to it lands. */
 export interface OutlineRow extends Span {
@@ -65,6 +66,8 @@ export interface Counts extends BlocksTally {
 export interface Reading {
     draft: Draft;
     seeing: Seeing;
+    /** The items set aside in a pile (`piledIn`). */
+    piled: ReadonlySet<number>;
     /** What each conversation running is doing, by `whose` they are. */
     states: ReadonlyMap<string, string | null>;
     called: (party: Conversation) => string;
@@ -101,25 +104,26 @@ export function drawerMark(tally: BlocksTally): OutlineMark {
 }
 
 /**
- * Return how an item stands: parked, asking the operator or only to read, each but where the draft settles it; what the
- * draft does with it on the next Ctrl+Enter, as the reply does: comments on it go, it's marked read, or approved, an
- * approval marked read alone, one commented on left unanswered, a held change marked read or commented on approved, a
- * mark on one past waiting doing nothing, which the host drops; and whether it's new.
+ * Return how an item stands: set aside in a pile, asking the operator or only to read, each but where the draft settles
+ * it; what the draft does with it on the next Ctrl+Enter, as the reply does: comments on it go, it's marked read, or
+ * approved, an approval marked read alone, one commented on left unanswered, a held change marked read or commented on
+ * approved, it's sent into a concern or a pile, a mark on one past waiting doing nothing, which the host drops; and
+ * whether it's new.
  */
-export function itemStanding(region: Pick<Region, "item">, draft: Draft, seeing: Seeing): Standing {
+export function itemStanding(region: Pick<Region, "item">, draft: Draft, seeing: Seeing, piled: ReadonlySet<number>): Standing {
     const item = region.item;
     const number = item.number;
     const commented = (draft.comments ?? []).some((each) => each.item === number && each.text.trim() !== "");
     const open = waits(item);
     const done = open && (draft.done ?? []).includes(number);
     const declined = open && (draft.declined ?? []).includes(number);
-    const parked = open && (draft.parked ?? []).includes(number);
+    const sent = open && itemsSent(draft).has(number);
     const reason = item.reason.reason;
     // Marked done, an approval or a held change is approved, its comments going with the yes; a held change commented on is too.
     const approved = open && !declined && ((reason === "approval" && done) || (reason === "held" && (done || commented)));
-    const answered: DraftMark[] = declined ? ["decline"] : approved ? ["approve"] : done && reason !== "approval" ? ["read"] : [];
-    const drafted: DraftMark[] = parked ? [] : [...(commented ? ["comment" as const] : []), ...answered];
-    const marks: OutlineMark[] = parked ? ["parked"] : toAnswer(item, draft) ? [item.holds ? "waiting" : "asking"] : toRead(item, draft, seeing) ? ["news"] : [];
+    const answered: DraftMark[] = sent ? ["send"] : declined ? ["decline"] : approved ? ["approve"] : done && reason !== "approval" ? ["read"] : [];
+    const drafted: DraftMark[] = [...(commented ? ["comment" as const] : []), ...answered];
+    const marks: OutlineMark[] = piled.has(number) ? ["parked"] : toAnswer(item, draft, piled) ? [item.holds ? "waiting" : "asking"] : toRead(item, draft, seeing, piled) ? ["news"] : [];
     return { marks, draft: drafted, fresh: fresh(item, seeing) };
 }
 
@@ -142,11 +146,10 @@ function withDrawers(counts: Counts, drawers: BlocksTally): Counts {
 
 /**
  * Return the overview of `laidOut`, in the review's order, so the two never disagree: each group's agent, set in as
- * the review nests it, then its items; a repository named before the first group of it after one of another, and
- * what's left for later after a line saying so.
+ * the review nests it, then its items; a repository named before the first group of it after one of another.
  */
 export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
-    const { draft, seeing, states, called } = reading;
+    const { draft, seeing, states, called, piled } = reading;
     const text = laidOut.text;
     const ends = ownEnds(laidOut);
     const rows: OutlineRow[] = [];
@@ -164,13 +167,9 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
         at,
     });
     let repository: string | null = null;
-    let later = false;
     laidOut.groups.forEach((group, at) => {
         const from = group.banner.from;
-        if (group.later && !later) {
-            later = true;
-            rows.push(heading("later", "later", "left for later", from));
-        } else if (!group.later && group.depth === 0 && repositoryOf(group) !== repository) {
+        if (group.depth === 0 && repositoryOf(group) !== repository) {
             repository = repositoryOf(group);
             rows.push(heading(`repository ${repository} ${at}`, last(repository), repository, from));
         }
@@ -195,9 +194,9 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
             counts: withDrawers(
                 {
                     ...NOTHING_WAITS,
-                    holds: own.filter((each) => toAnswer(each.item, draft) && each.item.holds).length,
-                    flagged: own.filter((each) => toAnswer(each.item, draft) && !each.item.holds).length,
-                    toRead: own.filter((each) => toRead(each.item, draft, seeing)).length,
+                    holds: own.filter((each) => toAnswer(each.item, draft, piled) && each.item.holds).length,
+                    flagged: own.filter((each) => toAnswer(each.item, draft, piled) && !each.item.holds).length,
+                    toRead: own.filter((each) => toRead(each.item, draft, seeing, piled)).length,
                 },
                 inDrawers(group),
             ),
@@ -209,7 +208,7 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
                 depth: depth + 1,
                 text: region.named,
                 title: text.slice(region.header.from, region.header.to),
-                ...itemStanding(region, draft, seeing),
+                ...itemStanding(region, draft, seeing, piled),
                 from: region.header.from,
                 to: Math.min((own[index + 1]?.header.from ?? to + 1) - 1, to),
                 at: region.header.from,

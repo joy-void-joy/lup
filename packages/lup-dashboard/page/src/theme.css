@@ -411,8 +411,10 @@ kbd {
     color: var(--muted);
 }
 
-.review-header.is-parked {
-    color: var(--muted);
+/* What Space s sends somewhere, an item or a concern: its header says where, in the draft's colour, until it's sent. */
+.buffer .cm-line.is-sent::after {
+    content: "  " attr(data-sent);
+    color: var(--warn);
 }
 
 /* Declined: struck through in the error colour, until it's sent. */
@@ -1543,6 +1545,11 @@ kbd {
     content: "  " attr(data-to);
     color: var(--muted);
     font-style: italic;
+}
+
+/* Where Space s sent it, in the draft's colour. */
+.buffer .cm-line.remark-to.remark-sent::after {
+    color: var(--warn);
 }
 
 /* The overview: a narrow pane beside the review, each entry a row, set in by how deep it is; what's in view
