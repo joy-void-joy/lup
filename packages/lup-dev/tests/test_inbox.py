@@ -15520,13 +15520,13 @@ def test_a_launch_whose_room_commands_were_killed_past_their_limit_a_few_times_s
     assert spawned.launches == []
 
 
-def test_spawns_under_way_at_once_run_no_room_command_once_a_launch_s_kills_reach_the_cap(
+def test_a_launch_s_room_commands_running_count_against_its_cap_as_killed_ones_do(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    """Each passed the count at its start, at 0: the count is read again before each command, so the removals that would follow each kill, which could be killed too, aren't run."""
+    """Spawns under way at once each passed the count of those killed, at 0, and each command running could be killed, leaving one more: those running count too, so a launch leaves no more than `killing`."""
     worktree = tmp_path / "w"
     spawnable(worktree)
-    spawned = SpawnsMade(hung=True, making=timedelta(seconds=1), killing=1)
+    spawned = SpawnsMade(hung=True, making=timedelta(seconds=1), killing=2)
     with inboxed(
         machine,
         clock,
@@ -15539,21 +15539,36 @@ def test_spawns_under_way_at_once_run_no_room_command_once_a_launch_s_kills_reac
         launched(machine, clock, worktree, "one", "claude")
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         send(hook, claude("SessionStart", source="startup"))
-        with ThreadPoolExecutor(max_workers=2) as pool:
+        with ThreadPoolExecutor(max_workers=3) as pool:
             calls = [
                 pool.submit(call, mcp, "spawn", {"name": each, "brief": "Do it."})
-                for each in ["x", "y"]
+                for each in ["x", "y", "z"]
             ]
             answers = [each.result(timeout=60)[0] for each in calls]
     root = worktree / ".git" / "tree"
-    # The two worktrees' making, each killed, and no removal after.
-    assert sorted(each.command[-3] for each in spawned.programs) == ["x", "y"]
-    assert sorted(answers) == [
-        f"Not spawned: its worktree, {root / name}, wasn't made in your room within "
-        f"0:00:01, so its git was stopped; its worktree, {root / name}, and branch "
-        f"`{name}` stay"
-        for name in ["x", "y"]
-    ]
+    # Two worktrees' making, each killed; neither the third's nor a removal.
+    assert len(spawned.programs) == 2
+    made = sorted(each.command[-3] for each in spawned.programs)
+    [refused] = [name for name in ["x", "y", "z"] if name not in made]
+    assert sorted(answers) == sorted(
+        [
+            *(
+                f"Not spawned: its worktree, {root / name}, wasn't made in your room "
+                f"within 0:00:01, so its git was stopped; its worktree, {root / name}, "
+                f"and branch `{name}` stay"
+                for name in made
+            ),
+            (
+                "Not spawned: 2 commands lup runs in your room for spawns are under "
+                "way, and 0 ran past 0:00:01 and were killed: each can be killed, "
+                "leaving your room's git running, and a process of podman's on the "
+                "host with it, so no more than 2 run or were killed at once; spawn "
+                "again once one ends"
+            ),
+        ]
+    )
+    # The one refused took no branch of its own.
+    assert not (root / refused).exists()
 
 
 def test_a_room_git_killed_past_its_limit_has_what_it_may_make_removed(
