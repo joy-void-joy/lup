@@ -241,10 +241,13 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
     into the service's memory (`Program.kept`)."""
     killing: int = 3
     """How many of a launch's commands in its room, making or removing a
-    spawn's worktree, may be killed past `making` before its further spawns
-    are refused: killing `podman exec` can leave the room's git running, a
-    room able to make it wait for good, and with it a process of podman's on
-    the host (conmon), until the room stops."""
+    spawn's worktree, may be killed past `making` before it runs no more for a
+    spawn: killing `podman exec` can leave the room's git running, a room able
+    to make it wait for good, and with it a process of podman's on the host
+    (conmon), until the room stops. Read before each command, so spawns under
+    way at once run none past it. Another room of the repository can make this
+    one's git wait too, through the refs they share, using up its count:
+    bounded, and refusing is the safe way to err."""
     killed: dict[str, int] = {}
     """By launch, how many of its commands in its room were killed past
     `making`: kept while the service runs."""
@@ -313,16 +316,9 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
         if not spawn.brief.strip():
             message = "its brief is empty: it would start with nothing to do"
             raise SpawnError(message)
-        killed = self.killed.get(launch.launch, 0)
-        if killed >= self.killing:
-            message = (
-                f"{killed} commands lup ran in your room to make or remove a "
-                f"spawn's worktree ran past {self.making} and were killed, each of "
-                "which can leave your room's git running, and a process of "
-                "podman's on the host with it, so your launch spawns no more: a "
-                "launch started afresh does"
-            )
-            raise SpawnError(message)
+        capped = self.capped(launch)
+        if capped is not None:
+            raise SpawnError(capped)
         reserved = self.limited(launch.repository)
         try:
             return await self.started(bound, spawn, wanted, session, reserved)
@@ -484,6 +480,9 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
             ["branch", "-D", made.branch],
         ]
         for step in steps:
+            if self.capped(launch) is not None:
+                # Another command run here could be killed too, leaving one more.
+                return f"; its worktree, {made.root}, and branch `{made.branch}` stay"
             program = Program(
                 command=[
                     "podman",
@@ -598,6 +597,11 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
         if container is None:
             message = "your launch names no room to make its worktree in"
             raise SpawnError(message)
+        # Read again as the command is to run: calls under way at once each
+        # passed the count at their start.
+        capped = self.capped(launch)
+        if capped is not None:
+            raise SpawnError(capped)
         program = Program(
             command=[
                 "podman",
@@ -637,6 +641,18 @@ class SpawnTools(MutableModel, RoomTools, arbitrary_types_allowed=True):
             message = f"its worktree, {root}, wasn't made in your room: {said}"
             raise SpawnError(message)
         return made
+
+    def capped(self, launch: Register) -> str | None:
+        """Say why `launch` runs no more commands in its room for a spawn, where `killing` of them were killed past `making`; none where fewer were."""
+        killed = self.killed.get(launch.launch, 0)
+        if killed < self.killing:
+            return None
+        return (
+            f"{killed} commands lup ran in your room to make or remove a spawn's "
+            f"worktree ran past {self.making} and were killed, each of which can "
+            "leave your room's git running, and a process of podman's on the host "
+            "with it, so your launch spawns no more: a launch started afresh does"
+        )
 
     def counted(self, launch: Register, ran: Ran) -> Ran:
         """Count `ran`, a command of `launch`'s in its room, among those killed past `making` where it was (`executed`'s status 124), and return it."""
