@@ -226,26 +226,32 @@ def test_an_approval_answered_before_isn_t_installed_again_by_answering_it_again
     assert served.demo.host.withheld.settled == []
 
 
-def test_an_approval_left_for_later_is_cleared_as_it_s_superseded_its_successor_waiting(
-    served: Served,
-) -> None:
-    served.drafted({"parked": [APPROVAL]})
-    later = served.superseded(APPROVAL)
-
-    assert served.demo.host.inbox.draft().parked == []
-    assert isinstance(served.item(later).state, Waiting)
-
-
-def test_what_s_left_for_later_and_no_longer_waits_clears_as_the_draft_is_sent_saying_nothing(
+def test_an_item_sent_somewhere_that_no_longer_waits_is_left_where_it_is_as_the_draft_is_sent_said(
     served: Served,
 ) -> None:
     served.asked({"kind": "inbox-answer-approval", "number": HELD, "approved": True})
-    served.drafted({"parked": [HELD], "done": [NOTE]})
+    served.drafted({"moves": [{"item": HELD, "to": {"pile": "Later"}}], "done": [NOTE]})
 
     reply = served.sent()
 
-    assert said(reply) == []
-    assert served.demo.host.inbox.draft().parked == []
+    [(number, part, words)] = said(reply)
+    assert (number, part) == (HELD, "moved")
+    assert words.startswith(f"@{HELD} not moved: it's approved at ")
+    assert reply.moved == []
+    assert served.demo.host.inbox.draft().moves == []
+
+
+def test_an_item_sent_into_later_moves_there_as_the_draft_is_sent_waiting_as_it_stood(
+    served: Served,
+) -> None:
+    served.drafted({"moves": [{"item": NOTE, "to": {"pile": "Later"}}]})
+
+    reply = served.sent()
+
+    [went] = reply.moved
+    assert (went.item, went.to) == (NOTE, "into @later")
+    assert isinstance(served.item(NOTE).state, Waiting)
+    assert reply.items == []
 
 
 def test_every_answer_the_demo_offers_is_taken_and_leaves_what_it_answered_offering_none(
@@ -261,7 +267,7 @@ def test_every_answer_the_demo_offers_is_taken_and_leaves_what_it_answered_offer
     ]
     done = [number for number, listed in offered if listed == "done"]
     assert len(done) > 10
-    # Each has `done` and `parked` on offer, one declined too: done, for all of them.
+    # Each has `done` on offer, one declined too: done, for all of them.
     served.drafted({"done": list(done)})
 
     reply = served.sent()

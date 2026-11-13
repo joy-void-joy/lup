@@ -4,11 +4,13 @@
 // part whole; and what's left for later, by number. Esc closes it, the keyboard back in the review (`docs/dashboard.md`,
 // *The keys*).
 import { Command } from "cmdk";
+import { useEffect } from "react";
 
-/** One part of what was said, whole: where it was said, and its lines, each whole. */
+/** One part of what was said, whole: where it was said, and its lines, each whole; and, line by line, what Ctrl+Enter on one sends alone, none where it sends nothing apart. */
 export interface Said {
     heading: string;
     lines: string[];
+    sends?: readonly ((() => void) | null)[];
 }
 
 interface Props {
@@ -29,14 +31,42 @@ export function Whole({ open, setOpen, said, back }: Props) {
         }
     }
     const shown = said.filter((each) => each.lines.length > 0);
+    // Ctrl+Enter on a line that sends what goes there alone sends it, wherever the panel holds the keyboard: its
+    // dialog takes keys before the list inside it does.
+    useEffect(() => {
+        if (!open) {
+            return;
+        }
+        const pressed = (event: KeyboardEvent) => {
+            if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey)) {
+                return;
+            }
+            const selected = document.querySelector<HTMLElement>(".whole-palette [cmdk-item][data-selected='true']");
+            const send = shown[Number(selected?.dataset.part ?? -1)]?.sends?.[Number(selected?.dataset.index ?? -1)] ?? null;
+            if (send !== null) {
+                event.preventDefault();
+                event.stopPropagation();
+                send();
+                requestAnimationFrame(back);
+            }
+        };
+        document.addEventListener("keydown", pressed, true);
+        return () => document.removeEventListener("keydown", pressed, true);
+    }, [open, shown, back]);
     return (
-        <Command.Dialog open={open} onOpenChange={closing} label="What was said, whole" overlayClassName="palette-overlay" contentClassName="palette keys-palette whole-palette">
+        <Command.Dialog
+            open={open}
+            onOpenChange={closing}
+            label="What was said, whole"
+            overlayClassName="palette-overlay"
+            contentClassName="palette keys-palette whole-palette"
+        >
             <Command.List>
                 {shown.length === 0 ? <div className="whole-none">Nothing said.</div> : null}
-                {shown.map((part) => (
+                {shown.map((part, at) => (
                     <Command.Group key={part.heading} heading={part.heading}>
                         {part.lines.map((line, index) => (
-                            <Command.Item key={`${part.heading} ${index}`} value={`${part.heading} ${index} ${line}`} onSelect={() => closing(false)}>
+                            <Command.Item key={`${part.heading} ${index}`} value={`${part.heading} ${index} ${line}`} data-part={at} data-index={index} onSelect={() => closing(false)}>
                                 <span className="whole-line">{line}</span>
                             </Command.Item>
                         ))}

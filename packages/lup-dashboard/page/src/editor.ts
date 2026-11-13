@@ -1729,8 +1729,8 @@ export interface Own<C> {
     chooseIn?: (position: number) => { from: number; to: number } | undefined;
     /** Do what the verb named `name` does on each of `folds`, a visual selection's, as one mark; none where the view has no verbs. */
     verbOn?: (name: string, folds: readonly Folding[]) => void;
-    /** What Enter does in normal mode where it isn't vim's; none leaves it vim's. */
-    enter?: () => void;
+    /** What Enter does in normal mode where it isn't vim's, saying whether it took it, else vim's; none leaves it vim's. */
+    enter?: () => boolean;
     /** What Ctrl+O does where the last jump crossed to another buffer, vim's list of jumps being this one's alone: go back, and say so; none, or false, leaves it vim's. */
     back?: () => boolean;
 }
@@ -2344,13 +2344,7 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
             window: (how) => config.window?.(how),
             windows: () => config.window !== undefined,
             jumpedBack: () => own.back?.() ?? false,
-            pressedEnter: () => {
-                if (own.enter === undefined) {
-                    return false;
-                }
-                own.enter();
-                return true;
-            },
+            pressedEnter: () => own.enter?.() ?? false,
             paint: (from, to) => {
                 const painted = own.paint?.(toLaid(from), toLaid(to)) ?? [];
                 const changes = changesNow();

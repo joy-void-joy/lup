@@ -117,7 +117,7 @@ describe("every line of the page on one row, at the demo's width, in headless Ch
         await dashboard.page.waitForSelector(".keys-palette", { state: "detached" });
     });
 
-    it("counts what the reply marks and what's left for later on one row, and shows each by its number with g<", async () => {
+    it("counts what the reply marks and says where Space s sends what on one row, and shows each by its number with g<", async () => {
         // One item read is named; more are counted.
         for (const [header, read] of [
             ["── @52 note", "read @52"],
@@ -130,7 +130,11 @@ describe("every line of the page on one row, at the demo's width, in headless Ch
         }
         await review.goTo("── @62 note");
         await dashboard.keys.press([" ", "s"]);
-        await says("1 for later");
+        await dashboard.page.waitForSelector(".picker");
+        await dashboard.page.keyboard.type("Later");
+        await dashboard.page.keyboard.press("Enter");
+        await dashboard.page.waitForSelector(".picker", { state: "detached" });
+        await says("to Later: @62");
         expect(await status()).toContain("read 3 items");
         expect(await overrun()).toEqual([]);
         // What's left out is a key away, and the line of keys says so.
@@ -139,17 +143,17 @@ describe("every line of the page on one row, at the demo's width, in headless Ch
         await dashboard.page.waitForSelector(".whole-palette");
         const whole = (await dashboard.page.locator(".whole-palette").innerText()).replace(/\s+/g, " ");
         expect(whole).toContain("read @52, @56, @66");
-        expect(whole).toContain("Left for later @62");
+        expect(whole).toContain("to Later: @62");
         await dashboard.keys.press(["Escape"]);
         await dashboard.page.waitForSelector(".whole-palette", { state: "detached" });
         // The keyboard back in the review, its keys doing what they do there; the draft kept on the host after, so
         // nothing of this test's is still being kept as the next one refuses the keeping.
         const kept = dashboard.page.waitForResponse((response) => {
-            const asked = JSON.parse(response.request().postData() ?? "null") as { kind?: string; draft?: { parked?: number[] } } | null;
-            return asked?.kind === "inbox-keep-draft" && !(asked.draft?.parked ?? []).includes(62);
+            const asked = JSON.parse(response.request().postData() ?? "null") as { kind?: string; draft?: { moves?: { item?: number | null }[] } } | null;
+            return asked?.kind === "inbox-keep-draft" && !(asked.draft?.moves ?? []).some((each) => each.item === 62);
         });
         await dashboard.keys.press(["u"]);
-        await dashboard.page.waitForFunction(() => document.querySelector(".status")?.textContent?.includes("for later") === false);
+        await dashboard.page.waitForFunction(() => document.querySelector(".status")?.textContent?.includes("to Later") === false);
         await kept;
     });
 

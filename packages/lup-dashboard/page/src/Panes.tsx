@@ -224,7 +224,10 @@ export function Listing({ rows, showing, viewed, open, send, say, escaped, windo
             }
         },
         send,
-        enter: () => openAt.current(editor.head(), "in"),
+        enter: () => {
+            openAt.current(editor.head(), "in");
+            return true;
+        },
         verb: () => say("␣ and a key marks what's in the second pane: Enter goes into this row's buffer."),
     });
     return <div className="buffer list-buffer" ref={editor.parent} />;

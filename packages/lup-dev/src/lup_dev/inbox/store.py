@@ -592,6 +592,64 @@ class Quote(Model):
     """Where it ends, counted in those lines joined."""
 
 
+LATER_PILE = "Later"
+"""The title of the pile the operator leaves things for later in, one at the top of
+each repository, nobody holding it: opened the first time something is sent to
+it there (`Destination.pile`)."""
+
+
+class Destination(Model):
+    """Where the operator sends a thing with Space `s` (`docs/dashboard.md`, *The keys*): an agent; a concern, by its number; a pile, by its title; or, none of them, `No agent`.
+
+    Nothing moves until the draft is sent. A concern goes to any of them: to
+    an agent, who holds it; under another concern, nested there; to a pile,
+    nested in it; or to `No agent`, at the top, nobody holding it. An item
+    goes into a concern or a pile. What the operator wrote goes to an agent, a
+    concern or a pile, never to `No agent`.
+    """
+
+    to: Conversation | None = None
+    """The agent it goes to; none where it goes to a concern, a pile or `No agent`."""
+    thread: int | None = None
+    """The concern it goes to, by number."""
+    pile: str | None = None
+    """The pile it goes to, by its title: the concern of its repository at the
+    top, nobody holding it, open, titled so, opened as the draft is sent
+    where there's none, `Later` (`LATER_PILE`) or the operator's own words."""
+
+    @model_validator(mode="after")
+    def one(self) -> Self:
+        """Refuse more than one place at once."""
+        given = [each for each in (self.to, self.thread, self.pile) if each is not None]
+        if len(given) > 1:
+            message = "a destination is an agent, a concern or a pile: one of them"
+            raise ValueError(message)
+        if self.pile is not None and not self.pile.strip():
+            message = "a pile is named by its title, which says something"
+            raise ValueError(message)
+        return self
+
+
+class Destined(Model):
+    """A concern or an item the operator sent somewhere with Space `s`, moved as the draft is sent (`Delivery.routed`): a concern moved with what's written on it, an item moved into a concern."""
+
+    id: str = ""
+    """What names it among what's drafted, as the page gave it."""
+    thread: int | None = None
+    """The concern moved, by number; none where it's an item."""
+    item: int | None = None
+    """The item moved, by number; none where it's a concern."""
+    to: Destination
+
+    @model_validator(mode="after")
+    def one(self) -> Self:
+        """Refuse a move of both a concern and an item, or of neither."""
+        if (self.thread is None) == (self.item is None):
+            message = "a move is of a concern or an item: one of them"
+            raise ValueError(message)
+        return self
+
+
 class Comment(Model):
     """A comment of the operator's on an item: on a passage of it, one of its decisions among them, or on it whole; or, in a thread, on a reply the agent made to an earlier comment."""
 
@@ -608,6 +666,10 @@ class Comment(Model):
     copies before kept on a reply made with `reply` (`Reply`); none for a
     comment on the item's own text, as the dashboard writes every one."""
     text: str
+    sent: Destination | None = None
+    """Where the operator sent it with Space `s`: an agent, a concern or a pile,
+    reached as a message there quoting what it's on (`Delivery.routed`); none
+    where it goes with the reply to whoever sent its item."""
 
 
 class Letter(Model):
@@ -626,6 +688,10 @@ class Letter(Model):
     commented on them, told quoted before their words; none for a message on the
     thread whole, or under an agent's banner."""
     text: str
+    sent: Destination | None = None
+    """Where the operator sent it with Space `s`: an agent, a concern or a pile,
+    reached as a message there quoting what it's on (`Delivery.routed`); none
+    where it goes where it was written."""
 
 
 class Quoted(Model):
@@ -659,6 +725,10 @@ class Remark(Model):
     code: Quoted | None = None
     """The lines of the file the passage is, and their version, for a comment
     on code; none for one on the conversation's words."""
+    sent: Destination | None = None
+    """Where the operator sent it with Space `s`: an agent, a concern or a pile,
+    reached as a message there quoting what it's on (`Delivery.routed`); none
+    where it goes to the agent whose drawer it's in."""
 
 
 class Review(Model):
@@ -949,8 +1019,8 @@ NEWS = Rank(name="news", order=1, notifies=False)
 FLAG = Rank(name="flag", order=2, notifies=False)
 
 
-type Listed = Literal["done", "declined", "parked"]
-"""Which of the draft's lists of items an item is marked in: done, declined, or left for later."""
+type Listed = Literal["done", "declined"]
+"""Which of the draft's lists of items an item is marked in: done or declined."""
 
 
 MARKED = "inbox-mark"
@@ -961,6 +1031,11 @@ answers are its module's actions (#113)."""
 COMMENTED = "inbox-comment"
 """The action of a comment on an item whole, which the page opens where it's
 offered; the comment is sent with the reply."""
+
+SENT_TO = "inbox-send-to"
+"""The action of sending an item into a concern or a pile with Space `s`, `Later`
+among them, which the page opens its picker for: the choice is kept in the draft
+(`Draft.moves`) and the item moved there as it's sent."""
 
 
 class Answering(Model):
@@ -984,9 +1059,6 @@ class Answering(Model):
 
 
 READ = Answering(verb="done", marks="done", says="mark it read", did="marked done")
-LATER = Answering(
-    verb="send", marks="parked", says="leave it for later", did="left for later"
-)
 APPROVE = Answering(verb="done", marks="done", says="approve", did="approved")
 DECLINE = Answering(verb="decline", marks="declined", says="decline", did="declined")
 
@@ -1015,14 +1087,17 @@ def kind_of(reason: Reason) -> ItemKind:
 
     | Kinds | Rank | Asks | Holds | Answers |
     |---|---|---|---|---|
-    | an approval | waiting on you | yes | yes | approve, decline, leave for later, whoever asked |
+    | an approval | waiting on you | yes | yes | approve, decline, whoever asked |
     | a held change | waiting on you | yes | yes | as an approval's, a comment on it approving it |
-    | a question, a problem (`blocked`) | waiting on you | yes | yes | mark read, leave for later |
-    | a disagreement, a question sent as a message | waiting on you | yes | no | mark read, leave for later |
-    | a note, a turn's last words among them, a concern's words, how it felt, a stop by choice, the operator's copy of a message between conversations, done as it's made | news | no | no | mark read, leave for later |
+    | a question, a problem (`blocked`) | waiting on you | yes | yes | mark read |
+    | a disagreement, a question sent as a message | waiting on you | yes | no | mark read |
+    | a note, a turn's last words among them, a concern's words, how it felt, a stop by choice, the operator's copy of a message between conversations, done as it's made | news | no | no | mark read |
     | a subagent's end, lup's word on citations that didn't resolve | news | no | no | none |
-    | a write that landed flagged | flag | no | no | mark read, leave for later |
+    | a write that landed flagged | flag | no | no | mark read |
     | the operator's own answer or review | waiting on you | no | no | none |
+
+    Whatever answers a kind, the operator sends one of it into a concern or a
+    pile while it waits on them (`Item.offers`).
 
     The rank says where the review shows a kind among the rest, and whether one
     raises a desktop notice as it reaches them. A message to the operator ranks by
@@ -1043,7 +1118,7 @@ def kind_of(reason: Reason) -> ItemKind:
     >>> [kind_of(each).holds for each in (Question(text="?"), Message(kind="question", text="?"))]
     [True, False]
     >>> [each.says for each in kind_of(Question(text="Which?")).answers]
-    ['mark it read', 'leave it for later']
+    ['mark it read']
     """
     match reason:
         case Approval():
@@ -1051,7 +1126,7 @@ def kind_of(reason: Reason) -> ItemKind:
                 rank=WAITS_ON_YOU,
                 asks=True,
                 holds=True,
-                answers=[APPROVE, DECLINE, LATER],
+                answers=[APPROVE, DECLINE],
                 whoever=True,
             )
         case HeldChange():
@@ -1060,7 +1135,7 @@ def kind_of(reason: Reason) -> ItemKind:
                 rank=WAITS_ON_YOU,
                 asks=True,
                 holds=True,
-                answers=[approving, DECLINE, LATER],
+                answers=[approving, DECLINE],
                 whoever=True,
             )
         case (
@@ -1070,17 +1145,15 @@ def kind_of(reason: Reason) -> ItemKind:
             | HowItFelt()
             | Stop()
         ):
-            return ItemKind(rank=NEWS, asks=False, answers=[READ, LATER])
+            return ItemKind(rank=NEWS, asks=False, answers=[READ])
         case Ended() | Unresolved():
             return ItemKind(rank=NEWS, asks=False)
         case Flagged():
-            return ItemKind(rank=FLAG, asks=False, answers=[READ, LATER])
+            return ItemKind(rank=FLAG, asks=False, answers=[READ])
         case Message(kind="problem") | Question():
-            return ItemKind(
-                rank=WAITS_ON_YOU, asks=True, holds=True, answers=[READ, LATER]
-            )
+            return ItemKind(rank=WAITS_ON_YOU, asks=True, holds=True, answers=[READ])
         case Message():
-            return ItemKind(rank=WAITS_ON_YOU, asks=True, answers=[READ, LATER])
+            return ItemKind(rank=WAITS_ON_YOU, asks=True, answers=[READ])
         case Answer() | Review():
             return ItemKind(rank=WAITS_ON_YOU, asks=False)
 
@@ -1212,7 +1285,7 @@ class Item(Model):
     @computed_field
     @property
     def offers(self) -> list[Offer]:
-        """What the operator can do with it, which the page's keys read and nothing else: each answer of its kind while it waits on them, so no view can go on offering approve on what's answered; and a comment on it whole, whatever it stands at, since anything shown can be commented on and what's said on it reaches an agent (`Delivery.reviewed`)."""
+        """What the operator can do with it, which the page's keys read and nothing else: each answer of its kind while it waits on them, so no view can go on offering approve on what's answered, and sending it into a concern or a pile beside them; and a comment on it whole, whatever it stands at, since anything shown can be commented on and what's said on it reaches an agent (`Delivery.reviewed`)."""
         comment = Offer(
             action=COMMENTED,
             argument={"number": self.number},
@@ -1220,7 +1293,17 @@ class Item(Model):
             says="comment on it",
         )
         answers = self.answers if self.waits else []
-        return [*(each.offer(self.number) for each in answers), comment]
+        sending = Offer(
+            action=SENT_TO,
+            argument={"number": self.number},
+            verb="send",
+            says="send it to a concern",
+        )
+        return [
+            *(each.offer(self.number) for each in answers),
+            *([sending] if answers else []),
+            comment,
+        ]
 
     @computed_field
     @property
@@ -1405,16 +1488,22 @@ class Marked(Model):
     (`Offer.draws`); none draws it as its verb's."""
 
 
+class ParkedDraft(Model):
+    """What a draft kept while the operator left items for later in a list of its own held of them: that list, and what it sent somewhere already (`Draft.unparked`)."""
+
+    parked: list[int] = []
+    moves: list[Destined] = []
+
+
 class Draft(Model):
-    """The operator's reply as they build it while reading: their comments, their messages to agents, the items they marked done, declined, or parked, and what else they marked; kept until it's sent."""
+    """The operator's reply as they build it while reading: their comments, their messages to agents, the items they marked done or declined, where they sent each thing they sent somewhere, and what else they marked; kept until it's sent."""
 
     comments: list[Comment] = []
     letters: list[Letter] = []
-    """Messages to agents, each written under its agent's banner, sent with the
-    rest of the reply whatever's parked."""
+    """Messages to agents, each written under its agent's banner or on a
+    concern."""
     remarks: list[Remark] = []
-    """Comments written in the agents' drawers, each to its agent, sent with
-    the rest of the reply whatever's parked."""
+    """Comments written in the agents' drawers, each to its agent."""
     done: list[int] = []
     """Items marked done, taken off the list when the draft is sent: read, for
     news; approved, for an approval or a held change, the comments under it
@@ -1422,13 +1511,47 @@ class Draft(Model):
     declined: list[int] = []
     """Approvals and held changes marked declined, answered no when the draft
     is sent, the comments under each going with the no."""
-    parked: list[int] = []
-    """Items left for a later reply: what's drafted on them stays drafted when
-    the rest is sent."""
     marks: list[Marked] = []
     """What else is marked, each applied as the draft is sent, by the page
     (`docs/dashboard.md`, *The review*): kept drafted once the inbox's part is
     sent, until each is applied."""
+    moves: list[Destined] = []
+    """Each concern and item the operator sent somewhere with Space `s`, moved
+    as the draft is sent, before what's written reaches anyone, so what's
+    written on a concern given to an agent reaches them (`Delivery.routed`)."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def unparked(cls, stored: JsonValue) -> JsonValue:
+        """Read a draft kept while the operator left items for later in a list of its own (`parked`) as sending each into `Later`, the pile that list became, as they meant.
+
+        >>> Draft.model_validate({"parked": [7]}).moves
+        [Destined(id='parked 7', thread=None, item=7, to=Destination(to=None, thread=None, pile='Later'))]
+        """
+        match stored:
+            case {"parked": list(), **rest}:
+                kept = ParkedDraft.model_validate(stored)
+                sent = [each.item for each in kept.moves]
+                return {
+                    **rest,
+                    "moves": [
+                        each.model_dump(mode="json")
+                        for each in [
+                            *kept.moves,
+                            *(
+                                Destined(
+                                    id=f"parked {number}",
+                                    item=number,
+                                    to=Destination(pile=LATER_PILE),
+                                )
+                                for number in kept.parked
+                                if number not in sent
+                            ),
+                        ]
+                    ],
+                }
+            case _:
+                return stored
 
     def written(self) -> list[Letter]:
         """Return the messages that say something, in order: those the draft sends."""
@@ -1447,22 +1570,17 @@ class Draft(Model):
         return [each for each in self.remarks if each.text.strip()]
 
     def covered(self) -> list[int]:
-        """Return the items the draft answers, in order: each with a comment, marked done or declined, but for the parked ones."""
+        """Return the items the draft answers, in order: each with a comment going to whoever sent it, marked done or declined."""
         mentioned = [
-            *(each.item for each in self.comments),
+            *(each.item for each in self.comments if each.sent is None),
             *self.done,
             *self.declined,
         ]
-        wanted = [each for each in mentioned if each not in self.parked]
-        return sorted(dict.fromkeys(wanted))
+        return sorted(dict.fromkeys(mentioned))
 
     def kept(self) -> Draft:
-        """Return what stays drafted once the inbox's part of the draft is sent: what's on the parked items, and the marks, which the page applies after."""
-        return Draft(
-            comments=[each for each in self.comments if each.item in self.parked],
-            parked=self.parked,
-            marks=self.marks,
-        )
+        """Return what stays drafted once the inbox's part of the draft is sent: the marks, which the page applies after."""
+        return Draft(marks=self.marks)
 
 
 class Order(Model):

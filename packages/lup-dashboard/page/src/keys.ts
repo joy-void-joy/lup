@@ -103,7 +103,8 @@ const MARKS: Part[] = [
             { keys: "⚑", does: "a file with a line that matters, held or flagged; lup's approvals in the overview", short: "matters" },
             { keys: "·", does: "a file folded whole: automatic, a test, data, a first approval's", short: "folded" },
             { keys: "•", does: "news, to read rather than answer: a note, a turn's last words, a friction, a concern's words, how it felt, a stop", short: "news" },
-            { keys: "‖", does: "an item left for later", short: "parked" },
+            { keys: "‖", does: "an item in a pile nobody answers for, Later among them, set aside: it counts nowhere", short: "in a pile" },
+            { keys: "→", does: "in yellow, where Space s sends it with your next Ctrl+Enter: an item into a concern or a pile, a concern to an agent or under another, what you wrote to an agent or a concern", short: "sent somewhere" },
             { keys: "new", does: "an item that came after you marked its agent seen, Space d on its banner, and that you haven't commented on", short: "new" },
             { keys: "▶ ○ ✕", does: "an agent calling a tool, between calls, ended", short: "agents" },
             { keys: "¶", does: "your own words drafted there, unsent: a comment, a message, a remark; muted beside an agent in the list, how many, and no status (¶2)", short: "your draft" },
@@ -120,7 +121,7 @@ const LIST: Part[] = [
             { keys: "g?", does: "open it, every key searchable, what applies where the cursor is first; ⏎ does the one chosen, Esc closes it", short: "all keys" },
             {
                 keys: "g<",
-                does: "what was said, whole, as vim's g< shows the last message: the top bar's last words, an error's whole text among them, what your reply sends with every item's number, and what's left for later; each line of the page says a sentence of it; Esc closes it",
+                does: "what was said, whole, as vim's g< shows the last message: the top bar's last words, an error's whole text among them, what your reply sends with every item's number, by where each goes, Ctrl+Enter on one of those sending what goes there alone; each line of the page says a sentence of it; Esc closes it",
                 short: "in full",
             },
         ],
@@ -135,7 +136,7 @@ const LIST: Part[] = [
 const VERBS: Readonly<Record<string, string>> = {
     done: "mark it done: an item read; an approval or a held change approved, the comments under it going with it; a file of \"since you approved\" reviewed at the version shown, approving its flagged writes where it still stands so; on the drawer's line, every file it shows; a conversation read up to its last step; on a concern, it cleared, any concern, whoever's on it going on or ended, what waits on you in it staying where it is; on an agent's banner, the agent seen, their own items and drawers, their subagents' left as they are",
     decline: "decline an approval or a held change, the comments under it going with it; on a concern, it declined, nothing more to be done, what waits on you in it staying where it is; a comment never declines",
-    send: "leave the item for later, folded, with what else is left for later, what's drafted on it staying drafted as the rest is sent; on one left for later, bring it back; on a message written on a concern, send it to no one, kept there as yours, or back to whoever answers for it",
+    send: "pick where it goes with your next Ctrl+Enter: an item into a concern or a pile, Later among them, or a new pile by the words you type; a concern to an agent, who then holds it, under another concern, into a pile, or to No agent; what you wrote to an agent, a concern or a pile; on one sent somewhere, where it is takes it back",
     comment: "comment on it whole: an item; on a concern, from its body too, a message on it whole to whoever answers for it; on an agent's banner, a message to them, which their drawers' remarks go with; in a drawer, a remark on the line",
     hold: "from anywhere in an agent's group, hold each flagged write of the agent and their subagents for your answer, or let them land again",
 };
@@ -217,7 +218,7 @@ export function reviewKeys(kinds: readonly Kind[], verbs: readonly Verb[] = [], 
             },
             {
                 keys: "]a [a",
-                does: "next and previous item to answer, in the order they came: a question, a held change, an approval, a hold at landing; news and what's marked read or left for later are passed over; the folds hiding where it lands open, said under the review; the view stays where it's in view, else it comes in a third of the view from the edge",
+                does: "next and previous item to answer, in the order they came: a question, a held change, an approval, a hold at landing; news, what's marked read or sent somewhere and what's in a pile are passed over; the folds hiding where it lands open, said under the review; the view stays where it's in view, else it comes in a third of the view from the edge",
                 short: "to answer",
             },
             {

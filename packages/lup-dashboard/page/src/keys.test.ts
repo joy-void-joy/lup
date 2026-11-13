@@ -87,6 +87,7 @@ describe("what may follow a chord", () => {
             "w the section",
             "a the group",
             "i the item",
+            "C the concern",
             "t the tasks",
             "s since you approved",
             "M the messages",

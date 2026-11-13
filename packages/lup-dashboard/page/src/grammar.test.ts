@@ -2,20 +2,26 @@ import { describe, expect, it } from "vitest";
 
 import { hosted, KINDS, type Said } from "./fixtures/kinds";
 import "./fixtures/looks";
-import { actionsToRun, chainAt, isMarked, listed, marking, markedPart, reachOf, seenAct, type Act, type Marked, type Verb } from "./grammar";
+import { actionsToRun, chainAt, isMarked, listed, marking, markedPart, reachOf, seenAct, sentTo, type Act, type Marked, type Verb } from "./grammar";
 import { EMPTY, laid, type Around, type Conversation, type Item, type Placed } from "./review";
 import type { Offer } from "./views";
 
 const HOLD: Offer = { action: "set-holding", argument: { launch: "l1", session: "s1", agent: null, on: true }, verb: "hold", chord: null, runs: "send", commented: false, says: "hold their writes" };
 
 describe("marking the draft", () => {
-    it("puts an item in one list of the draft at most, done, declined or left for later, and takes it out of every one", () => {
-        const done = listed(EMPTY, 51, "done");
-        expect([done.done, done.declined, done.parked]).toEqual([[51], [], []]);
+    it("puts an item in one list of the draft at most, done or declined, and takes it out of every one, sent nowhere then", () => {
+        const sent = sentTo(EMPTY, { kind: "item", number: 51, repository: "/r" }, { pile: "Later" });
+        expect(sent.moves?.map((each) => [each.item, each.to])).toEqual([[51, { pile: "Later" }]]);
+        const done = listed(sent, 51, "done");
+        expect([done.done, done.declined, done.moves]).toEqual([[51], [], []]);
         const declined = listed(done, 51, "declined");
-        expect([declined.done, declined.declined, declined.parked]).toEqual([[], [51], []]);
+        expect([declined.done, declined.declined]).toEqual([[], [51]]);
         const none = listed(declined, 51, null);
-        expect([none.done, none.declined, none.parked]).toEqual([[], [], []]);
+        expect([none.done, none.declined]).toEqual([[], []]);
+        // Sent somewhere, it's marked neither done nor declined; sent nowhere, it's where it was.
+        const again = sentTo(declined, { kind: "item", number: 51, repository: "/r" }, { thread: 300 });
+        expect([again.declined, again.moves?.map((each) => each.to)]).toEqual([[], [{ thread: 300 }]]);
+        expect(sentTo(again, { kind: "item", number: 51, repository: "/r" }, null).moves).toEqual([]);
     });
 
     it("marks what a key reaches, and pressed again where it's all marked, takes the marks off", () => {
@@ -186,7 +192,9 @@ describe("what the host offers on an item", () => {
         };
         expect(acts("done")).toEqual([{ kind: "item", number: 7, list: "done" }]);
         expect(acts("decline")).toEqual([{ kind: "item", number: 7, list: "declined" }]);
-        expect(acts("send")).toEqual([{ kind: "item", number: 7, list: "parked" }]);
+        // Sent somewhere, the picker says where, into its own repository's concerns and piles.
+        // An approval, which only the operator answers, into a pile alone.
+        expect(acts("send")).toEqual([{ kind: "send", what: { kind: "item", number: 7, repository: item.reason.reason === "approval" ? (item.reason.repository ?? "") : "", piles: true } }]);
         expect(acts("comment")).toEqual([{ kind: "comment" }]);
     });
 });

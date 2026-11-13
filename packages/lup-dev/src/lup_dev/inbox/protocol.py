@@ -57,10 +57,12 @@ from lup_dev.inbox.marks import CORE
 from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.reading import Narrowing, Reader, Spelling
 from lup_dev.inbox.roster import Roster, ids
+from lup_dev.inbox.routing import Went
 from lup_dev.inbox.store import (
     Answer,
     Approval,
     ChangedFile,
+    Destination,
     Draft,
     Flagged,
     HeldChange,
@@ -193,9 +195,16 @@ class KeepTalk(Request, reads=False):
 
 
 class SendDraft(Request, reads=False):
-    """Send the operator's draft reply: a review to each conversation whose items it covers or it writes to."""
+    """Send the operator's draft reply: a review to each conversation whose items it covers or it writes to; or what of it reaches one destination alone, the rest staying drafted."""
 
     kind: Literal["inbox-send-draft"] = "inbox-send-draft"
+    only: Destination | None = None
+    """The one destination to send what reaches alone, as Ctrl+Enter on its
+    line under the review does: an agent, a concern or a pile nobody answers
+    for, or `No agent`; none sends it all."""
+    repository: Path | None = None
+    """The repository of the destination `only` names, where it's a pile by its
+    title or `No agent`, each a repository's own; none where it names its own."""
 
 
 class AskApproval(Request, reads=False):
@@ -467,6 +476,9 @@ class Reviewed(Reply):
     decided or replaced since, rather than refuse the reply whole or say it did
     it: each mark dropped, each comment written to who it reaches or kept drafted,
     and why."""
+    moved: list[Went] = []
+    """Each concern and item it moved where the operator sent it with Space
+    `s`, and where."""
 
 
 class Gathering(Reply):
@@ -1551,7 +1563,7 @@ class DraftSending(Model, Handler[SendDraft], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: SendDraft) -> Reply:
-        dispatched = await self.delivery.reviewed()
+        dispatched = await self.delivery.reviewed(request.only, request.repository)
         return Reviewed(
             items=dispatched.reviews,
             read=dispatched.read,
@@ -1560,6 +1572,7 @@ class DraftSending(Model, Handler[SendDraft], arbitrary_types_allowed=True):
             noted=dispatched.noted,
             kept=dispatched.kept,
             unanswerable=dispatched.unanswerable,
+            moved=dispatched.moved,
         )
 
 

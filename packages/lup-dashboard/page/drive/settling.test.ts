@@ -1,6 +1,6 @@
 // Clearing is the operator's, on any concern (`docs/dashboard.md`, *The panes*): on its block, in its holder's own
 // buffer, its party's or what's for them, Space d clears it and Space x declines it, whatever waits on them in it; a message
-// is written on it, Space s sending that to no one and back, and on a line of its body, quoting it; and it's all sent
+// is written on it, Space s sending that into Later and back, and on a line of its body, quoting it; and it's all sent
 // with Ctrl+Enter.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
@@ -37,6 +37,14 @@ const says = (text: string) =>
 /** Return once the line of keys says `text`, the cursor where it is. */
 const offers = (text: string) =>
     dashboard.page.waitForFunction((text) => document.querySelector(".keys")?.textContent?.includes(text) === true, text);
+
+/** Choose `choice` in Space s's picker, once it's open, by typing it and Enter, and return once it's closed. */
+async function picks(choice: string): Promise<void> {
+    await dashboard.page.waitForSelector(".picker");
+    await dashboard.page.keyboard.type(choice);
+    await dashboard.page.keyboard.press("Enter");
+    await dashboard.page.waitForSelector(".picker", { state: "detached" });
+}
 
 /** Return once the top bar says `text`. */
 const said = (text: string) => dashboard.page.waitForFunction((text) => document.querySelector(".bar .said")?.textContent?.includes(text) === true, text);
@@ -75,9 +83,9 @@ describe("clearing any concern, in headless Chromium", () => {
         await dashboard.page.waitForFunction(() => document.querySelector(".status")?.textContent?.includes("The transcript reader") === false);
     });
 
-    it("clears one said done from its block in what's for the operator, and writes on a concern, Space s sending that to no one and back", async () => {
+    it("clears one said done from its block in what's for the operator, and writes on a concern, Space s sending that into Later and back", async () => {
         await dashboard.openRow("what's for you");
-        await review.goTo("§ The guidance's voice · done, for you to clear");
+        await review.goTo("§ The guidance's voice · guidance-voice · done, for you to clear");
         await review.settled(300, 0);
         await offers("␣d clear it: it's done");
         await dashboard.keys.press([" ", "d"]);
@@ -90,8 +98,10 @@ describe("clearing any concern, in headless Chromium", () => {
         await review.inMode("normal");
         await says("to lup-impl/explore-auth: a message on Where auth is checked");
         await dashboard.keys.press([" ", "s"]);
-        await says("to no one: a message on Where auth is checked");
+        await picks("Later");
+        await says("to Later: a message");
         await dashboard.keys.press([" ", "s"]);
+        await picks("where it is");
         await says("to lup-impl/explore-auth: a message on Where auth is checked");
     });
 
@@ -126,6 +136,6 @@ describe("clearing any concern, in headless Chromium", () => {
         await dashboard.page.waitForFunction(() => ![...document.querySelectorAll(".list-buffer .cm-line")].some((each) => (each.textContent ?? "").includes("The guidance's voice")), undefined, { polling: 50 });
         expect((await listed()).some((each) => each.startsWith("settled · "))).toBe(true);
         await dashboard.openRow("settled · ");
-        await review.holds("§ The guidance's voice · done, cleared");
+        await review.holds("§ The guidance's voice · guidance-voice · done, cleared");
     });
 });

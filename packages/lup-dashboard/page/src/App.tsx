@@ -45,7 +45,13 @@ import {
     covered,
     EMPTY,
     flag,
+    concernsSent,
+    goesTo,
+    isLetter,
+    itemsSent,
     messages,
+    piledIn,
+    written,
     pruned,
     remarks,
     withWrittenDuring,
@@ -60,6 +66,7 @@ import {
     type ChangedFile,
     type Context,
     type Conversation as InboxConversation,
+    type Destination,
     type Draft,
     type Drawers,
     type Head,
@@ -316,6 +323,11 @@ export function App() {
         const read = threadsRead?.threads.find((each) => each.thread.number === number);
         return read === undefined ? null : cutAt(concernWords(read), 40);
     };
+    // A concern as the host reads it, by its number: none where the host hasn't said it yet.
+    const concernNumbered = (number: number) => threadsRead?.threads.find((each) => each.thread.number === number);
+    // A pile of a repository there already, by its title: a concern at its top nobody answers for, open to the operator.
+    const pileTitled = (title: string, repository: string) =>
+        threadsRead?.threads.find((each) => each.thread.repository === repository && (each.thread.parent ?? null) === null && each.thread.title === title && (each.answering ?? null) === null && (each.cleared ?? null) === null);
 
     // The conversations running, in the order the host lists them: the review gives each a group.
     const live = useMemo<Live[]>(
@@ -455,9 +467,12 @@ export function App() {
     );
     // What's only to read, which the top bar counts apart from what asks the operator; and of what asks them, what holds
     // something stopped until they answer it, apart from what only wants their eyes.
-    const toReadCount = countToRead(waiting, draft, seeing);
-    const stoppedOnYou = holdingOn(waiting, draft.parked ?? []);
-    const flaggedForYou = waitingOn(waiting, draft.parked ?? []) + (threadsRead?.threads ?? []).filter((each) => concernReads(each) === "for your eyes").length - stoppedOnYou;
+    // What's in a pile counts nowhere, as what the draft sends somewhere doesn't, the operator having said not now.
+    const piled = useMemo(() => piledIn(threadsRead?.threads ?? []), [threadsRead]);
+    const aside = useMemo(() => new Set([...itemsSent(draft).keys(), ...piled]), [draft, piled]);
+    const toReadCount = countToRead(waiting, draft, seeing, piled);
+    const stoppedOnYou = holdingOn(waiting, aside);
+    const flaggedForYou = waitingOn(waiting, aside) + (threadsRead?.threads ?? []).filter((each) => concernReads(each) === "for your eyes").length - stoppedOnYou;
 
     // What the draft marks or comments on that's past waiting, answered or replaced since it was written: laid out with
     // what's drafted on it, which stays in view, saying so, until it's sent.
@@ -1063,7 +1078,7 @@ export function App() {
      * returned; where a mark is refused after, what came before is sent, and that mark stays drafted, said. Throws where
      * the dashboard or the host can't be reached.
      */
-    async function sent(): Promise<string | null> {
+    async function sent(only: Destination | null = null, of: string | null = null): Promise<string | null> {
         if (keeping.current !== null) {
             clearTimeout(keeping.current);
             keeping.current = null;
@@ -1085,8 +1100,10 @@ export function App() {
             return kept.error;
         }
         const told: ReplyPart[] = [];
-        if (covered(now).length > 0 || messages(now).length > 0 || remarks(now).length > 0) {
-            const answer = await ask({ kind: "inbox-send-draft" });
+        // What Space s sent somewhere goes with the inbox's part: a concern or an item moved, what's written sent elsewhere.
+        const moving = (now.moves ?? []).length > 0 || written(now).some((each) => each.text.trim() !== "" && goesTo(now, each) !== null);
+        if (covered(now).length > 0 || messages(now).length > 0 || remarks(now).length > 0 || moving) {
+            const answer = await ask({ kind: "inbox-send-draft", ...(only === null ? {} : { only }), ...(of === null ? {} : { repository: of }) });
             if (answer.kind === "refused") {
                 return answer.error;
             }
@@ -1096,7 +1113,8 @@ export function App() {
         }
         const after = await ask({ kind: "inbox-draft" });
         let left = after.kind === "inbox-drafted" ? after.draft : now;
-        const marks = left.marks ?? [];
+        // Sent to one destination alone, what the page applies stays drafted, for the reply whole.
+        const marks = only === null ? (left.marks ?? []) : [];
         if (marks.length > 0) {
             const { applied, said: came } = await applying(marks, left);
             told.push(...came);
@@ -1136,7 +1154,7 @@ export function App() {
      * nothing more; that nothing is drafted; and, where the host refuses it or can't be reached, as while lup restarts,
      * why, the draft kept, for the next Ctrl+Enter to send.
      */
-    async function sendReply() {
+    async function sendReply(only: Destination | null = null, of: string | null = null) {
         if (inFlight.current) {
             setSending({ state: "sending", text: "Still sending your reply: what came of it is said here once the host answers." });
             return;
@@ -1146,9 +1164,9 @@ export function App() {
             return;
         }
         inFlight.current = true;
-        setSending({ state: "sending", text: "Sending your reply…" });
+        setSending({ state: "sending", text: only === null ? "Sending your reply…" : "Sending what goes there…" });
         try {
-            const refused = await sent();
+            const refused = await sent(only, of);
             setSending(refused === null ? null : { state: "failed", text: notSent(refused) });
         } catch (error) {
             setSending({ state: "failed", text: notSent(unreached(error)) });
@@ -1182,6 +1200,8 @@ export function App() {
         named,
         holder: (argument) => holderOf(argument)?.talker.path ?? null,
         thread: threadNamed,
+        concern: concernNumbered,
+        pile: pileTitled,
         past,
         setAside,
     });
@@ -1189,7 +1209,7 @@ export function App() {
     const goingWhole = going.map(partSaid);
     // Whether a line of the page is cut at the window's edge, its whole in `g<`: read as what it says changes, and as the
     // window's size does, never at each render.
-    const shownText = [reply?.kind === "refused" ? reply.error : "", said, sending?.text, goingWhole.join("\n"), draft.parked?.length].join("\n");
+    const shownText = [reply?.kind === "refused" ? reply.error : "", said, sending?.text, goingWhole.join("\n")].join("\n");
     useLayoutEffect(() => {
         const lines = [statusLine.current, saidLine.current, errorLine.current].filter((each) => each !== null);
         const measure = () => setOverflowing(lines.some((each) => each.scrollWidth > each.clientWidth + 1));
@@ -1200,17 +1220,27 @@ export function App() {
         }
         return () => observer.disconnect();
     }, [shownText]);
-    // The items left for later that still wait, by number: what the line under the review counts, and `g<` names.
-    const later = (draft.parked ?? []).filter((number) => waiting.some((each) => each.number === number));
     // What was said, whole, where it was said, as `g<` shows it: each line of the page says a sentence of it.
     const wholeSaid: Said[] = [
         { heading: "The top bar", lines: [...(reply?.kind === "refused" ? [reply.error] : []), ...(said === null ? [] : [said])] },
         { heading: "Under the review", lines: sending === null ? [] : [sending.text] },
-        { heading: "Your reply, as Ctrl+Enter sends it", lines: goingWhole },
-        { heading: "Left for later", lines: later.length === 0 ? [] : [later.map(cited).join(" ")] },
+        {
+            heading: "Your reply, as Ctrl+Enter sends it; Ctrl+Enter on a line sends what goes there alone",
+            lines: goingWhole,
+            sends: going.map((part) => {
+                const only = part.kind === "to" ? part.only : undefined;
+                const of = part.kind === "to" ? (part.of ?? null) : null;
+                return only === undefined
+                    ? null
+                    : () => {
+                          setWholeOpen(false);
+                          void sendReply(only, of);
+                      };
+            }),
+        },
     ];
     // Whether a line of the page leaves out what was said: a sentence or a list of numbers, or cut at the window's edge.
-    const cut = overflowing || (saying !== null && saying.line !== saying.whole) || [reply?.kind === "refused" ? reply.error : "", sending?.text ?? ""].some(shortened) || partsCounted(going) || later.length > 0;
+    const cut = overflowing || (saying !== null && saying.line !== saying.whole) || [reply?.kind === "refused" ? reply.error : "", sending?.text ?? ""].some(shortened) || partsCounted(going);
     return (
         <div className="layout">
             <header className="bar">
@@ -1308,10 +1338,15 @@ export function App() {
                             <span className="muted">No reply drafted.</span>
                         ) : (
                             <span>
-                                Your reply: {partsSaid(going)}. <kbd>Ctrl</kbd> <kbd>Enter</kbd> sends.
+                                Your reply: {partsSaid(going)}. <kbd>Ctrl</kbd> <kbd>Enter</kbd> sends
+                                {going.filter((part) => part.kind === "to" && part.only !== undefined).length > 1 ? (
+                                    <>
+                                        , <kbd>g&lt;</kbd> one place alone
+                                    </>
+                                ) : null}
+                                .
                             </span>
                         )}
-                        {later.length === 0 ? null : <span className="muted"> {later.length} for later.</span>}
                     </div>
                     <Keys
                         parts={parts}
@@ -1441,28 +1476,55 @@ interface Naming {
     holder: (argument: { launch?: string; session?: string; agent?: string | null }) => string | null;
     /** A thread's name, by its number; none where the page doesn't know it. */
     thread?: (number: number) => string | null;
+    /** A concern as the host reads it, by its number; none where the page doesn't know it. */
+    concern?: (number: number) => ThreadRead | undefined;
+    /** A pile of a repository there already, as the host reads it, by its title (`Concerns.piled`); none where there's none yet. */
+    pile?: (title: string, repository: string) => ThreadRead | undefined;
     /** What the draft marks or comments on that's past waiting on the operator, as it stands: a comment on one of a kind a reply answers goes to its sender, leaving it there. */
     past?: readonly Item[];
     /** What sending the draft sets aside, part by part, as the host says it: each mark dropped, each comment written elsewhere or kept drafted. */
     setAside?: readonly { said: string }[];
 }
 
-/** Say how many items wait on the operator. What's left for later, `parked`, doesn't count: the operator said not now, and it comes back as it's unparked. */
-export function waitingOn(waiting: readonly Item[], parked: readonly number[] = []): number {
-    return waiting.filter((each) => each.asks && !parked.includes(each.number)).length;
+/** Say how many items wait on the operator. What's set `aside`, sent somewhere by the draft or in a pile, doesn't count: the operator said not now. */
+export function waitingOn(waiting: readonly Item[], aside: ReadonlySet<number> = new Set()): number {
+    return waiting.filter((each) => each.asks && !aside.has(each.number)).length;
 }
 
 /** Say how many of what `waitingOn` counts hold something stopped until the operator answers (`Item.holds`). */
-export function holdingOn(waiting: readonly Item[], parked: readonly number[] = []): number {
-    return waiting.filter((each) => each.holds && !parked.includes(each.number)).length;
+export function holdingOn(waiting: readonly Item[], aside: ReadonlySet<number> = new Set()): number {
+    return waiting.filter((each) => each.holds && !aside.has(each.number)).length;
+}
+
+/**
+ * Return where `to`, a destination of Space s, reaches, as the line under the review says it and the host groups it
+ * (`Routing.reach`; `docs/inbox.md`, *Threads in the review*): an agent, as they're called; a concern someone answers for,
+ * them, and on which; one nobody answers for, a pile, as it's called, kept there; `No agent`.
+ */
+export function reachSaid(to: Destination, naming: Pick<Naming, "called" | "concern" | "pile">, repository: string): { who: string; on: string; only: Destination; of?: string } {
+    if (to.to != null) {
+        return { who: naming.called(to.to), on: "", only: to };
+    }
+    // A pile there already is that concern, as the host reads it (`Routing.reach`): its repository's.
+    const read = to.thread != null ? naming.concern?.(to.thread) : to.pile != null ? naming.pile?.(to.pile, repository) : undefined;
+    if (read !== undefined) {
+        const answering = read.answering ?? null;
+        if (answering !== null) {
+            return { who: naming.called(answering), on: ` on ${concernWords(read)}`, only: { to: answering } };
+        }
+        return { who: concernWords(read), on: "", only: { thread: read.thread.number } };
+    }
+    // A pile by its title, or No agent, is its repository's own.
+    return to.thread != null ? { who: `@${to.thread}`, on: "", only: to } : { who: to.pile ?? "No agent", on: "", only: to, of: repository };
 }
 
 /**
  * Return what the next Ctrl+Enter sends, part by part, by where each goes (#264, as the page knows it): to each agent
- * the reply reaches, what reaches them, a message, a remark, the comments on their items, a question answered; then
- * what's marked, each item read, approved and declined, each agent's files of "since you approved" reviewed and their
- * writes held; and what the host says it sets aside, each mark on what's past waiting dropped.
- * Nothing where nothing's drafted.
+ * the reply reaches, or concern or pile what's sent there is kept on, what reaches them, a message, a remark, the
+ * comments on their items, a question answered, what's sent to them with Space s, a concern given them, an item moved
+ * into what they answer for; then what's marked, each item read, approved and declined, each agent's files of "since
+ * you approved" reviewed and their writes held; and what the host says it sets aside, each mark on what's past waiting
+ * dropped. Nothing where nothing's drafted.
  */
 export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): ReplyPart[] {
     const numbers = covered(draft);
@@ -1474,21 +1536,68 @@ export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): 
     // Approved by the send: an approval or a held change marked done, or only read, and a held change commented on.
     const approving = items.filter((each) => asked(each) && !declined.includes(each) && (done(each) || each.reason.reason === "held" || !commented.includes(each.number)));
     const to = new Map<string, string[]>();
-    const reaching = (who: string, what: string) => to.set(who, [...(to.get(who) ?? []), what]);
-    const letters = messages(draft);
-    // A message on a thread says which; one to no one stays there.
-    const on = (each: (typeof letters)[number]) => (each.thread == null ? "" : ` on ${naming.thread?.(each.thread) ?? `@${each.thread}`}`);
-    for (const [said, count] of tallyOf(letters.map((each) => `${each.to == null ? "no one" : naming.called(each.to)}\n${on(each)}`))) {
-        const [who = "", where = ""] = said.split("\n");
-        reaching(who, `${count === 1 ? "a message" : `${count} messages`}${where}`);
+    // Where each line reaches, which Ctrl+Enter on it in `g<` sends alone, grouped as the host groups it
+    // (`Routing.split`); two places called alike told apart by their repository.
+    const reaches = new Map<string, { only: Destination; of?: string }>();
+    const reaching = (said: string, what: string, only: Destination | null = null, repository: string = "", of?: string) => {
+        const where = only === null ? null : { only, ...(of === undefined ? {} : { of }) };
+        const was = reaches.get(said);
+        const who = where !== null && was !== undefined && JSON.stringify(was) !== JSON.stringify(where) ? `${said} in ${last(repository)}` : said;
+        to.set(who, [...(to.get(who) ?? []), what]);
+        if (where !== null && !reaches.has(who)) {
+            reaches.set(who, where);
+        }
+    };
+    const repositoryOfItem = (number: number) => {
+        const item = [...waiting, ...(naming.past ?? [])].find((each) => each.number === number);
+        return item === undefined ? "" : item.sender.party === "conversation" ? item.sender.repository : item.reason.reason === "approval" ? item.reason.repository : "";
+    };
+    const repositoryOfThread = (number: number | null | undefined) => (number == null ? "" : (naming.concern?.(number)?.thread.repository ?? ""));
+    // What goes elsewhere than where it was written, where Space s sent it, or a comment with its item; and what moves.
+    const elsewhere = written(draft).filter((each) => each.text.trim() !== "" && goesTo(draft, each) !== null);
+    for (const each of elsewhere) {
+        const sent = goesTo(draft, each);
+        if (sent !== null) {
+            const repository = "item" in each ? repositoryOfItem(each.item) : isLetter(each) ? repositoryOfThread(each.thread) || (each.to?.repository ?? "") : each.to.repository;
+            const { who, on, only, of } = reachSaid(sent, naming, repository);
+            reaching(who, `${isLetter(each) ? "a message" : "item" in each ? `a comment on ${cited(each.item)}` : "a remark"}${on}`, only, repository, of);
+        }
     }
-    for (const [who, count] of tallyOf(remarks(draft).map((each) => naming.called(each.to)))) {
-        reaching(who, count === 1 ? "a remark" : `${count} remarks`);
+    for (const move of draft.moves ?? []) {
+        const repository = move.item != null ? repositoryOfItem(move.item) : repositoryOfThread(move.thread);
+        const { who, on, only, of } = reachSaid(move.to, naming, repository);
+        const moving = move.thread == null ? undefined : naming.concern?.(move.thread);
+        const what = move.item != null ? cited(move.item) : `§ ${moving === undefined ? `@${move.thread}` : concernWords(moving)}`;
+        reaching(who, `${what}${move.thread != null && move.to.thread != null ? " nested" : ""}${on}`, only, repository, of);
+    }
+    // Each message written where it goes: to an agent, or kept on a concern nobody answers for; one on a concern sent
+    // somewhere going with it, as the host sends it (`Routing.followed`).
+    const following = concernsSent(draft);
+    const letters = messages(draft).filter((each) => goesTo(draft, each) === null);
+    const on = (each: (typeof letters)[number]) => (each.thread == null ? "" : ` on ${naming.thread?.(each.thread) ?? `@${each.thread}`}`);
+    const lettered = letters.map((each) => {
+        const repository = repositoryOfThread(each.thread) || (each.to?.repository ?? "");
+        const going = each.thread != null && each.to != null ? following.get(each.thread) : undefined;
+        const reached = reachSaid(going ?? (each.to != null ? { to: each.to } : { thread: each.thread ?? null }), naming, repository);
+        // Kept on the concern it's written on, the line names it already.
+        const kept = reached.only.thread != null && reached.only.thread === each.thread;
+        return { ...reached, where: kept ? "" : on(each), repository };
+    });
+    for (const [said, count] of tallyOf(lettered.map((each) => `${each.who}\n${each.where}`))) {
+        const one = lettered.find((each) => `${each.who}\n${each.where}` === said);
+        if (one !== undefined) {
+            reaching(one.who, `${count === 1 ? "a message" : `${count} messages`}${one.where}`, one.only, one.repository, one.of);
+        }
+    }
+    const remarking = remarks(draft).filter((each) => goesTo(draft, each) === null);
+    for (const [who, count] of tallyOf(remarking.map((each) => naming.called(each.to)))) {
+        const one = remarking.find((each) => naming.called(each.to) === who);
+        reaching(who, count === 1 ? "a remark" : `${count} remarks`, one === undefined ? null : { to: one.to });
     }
     // A comment on what's past waiting goes to its sender, leaving it there; on an approval or a held change, the host
     // says where it goes (`setAside`).
     for (const item of (naming.past ?? []).filter((each) => commented.includes(each.number) && !asked(each))) {
-        reaching(naming.named(item), `comments on ${cited(item.number)}`);
+        reaching(naming.named(item), `comments on ${cited(item.number)}`, item.sender.party === "conversation" ? { to: item.sender } : null);
     }
     for (const item of items) {
         const words = commented.includes(item.number);
@@ -1496,10 +1605,10 @@ export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): 
             // An approval's comments go to the session whose push asked it, unanswered where it's neither marked done nor declined.
             const pusher = item.reason.pushed_by ?? null;
             if (words && pusher !== null) {
-                reaching(naming.called(pusher), `comments on ${cited(item.number)}${done(item) || declined.includes(item) ? "" : ", left unanswered"}`);
+                reaching(naming.called(pusher), `comments on ${cited(item.number)}${done(item) || declined.includes(item) ? "" : ", left unanswered"}`, { to: pusher });
             }
         } else if (words || item.reason.reason === "question") {
-            reaching(naming.named(item), words ? `comments on ${cited(item.number)}` : `answering ${cited(item.number)}`);
+            reaching(naming.named(item), words ? `comments on ${cited(item.number)}` : `answering ${cited(item.number)}`, item.sender.party === "conversation" ? { to: item.sender } : null);
         }
     }
     const read = items.filter((each) => !asked(each) && !commented.includes(each.number) && each.reason.reason !== "question");
@@ -1523,7 +1632,10 @@ export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): 
     }
     const doing = (how: string, list: readonly Item[]): ReplyPart[] => (list.length === 0 ? [] : [{ kind: "items", done: how, numbers: list.map((each) => each.number) }]);
     return [
-        ...[...to].map(([who, what]): ReplyPart => ({ kind: "to", who, what })),
+        ...[...to].map(([who, what]): ReplyPart => {
+            const where = reaches.get(who);
+            return where === undefined ? { kind: "to", who, what } : { kind: "to", who, what, ...where };
+        }),
         ...doing("read", read),
         ...doing("approving", approving),
         ...doing("declining", declined),
@@ -1560,6 +1672,7 @@ function reviewSaid(answer: Extract<Replied, { kind: "inbox-reviewed" }>, called
         ...(answer.noted ?? []).map((each): ReplyPart => ({ kind: "said", text: `comments to ${called(each.recipient)} as ${cited(each.number)}` })),
         ...doing("comments on", answer.kept ?? [], " kept: no session's push asked it"),
         ...(answer.unanswerable ?? []).map((each): ReplyPart => ({ kind: "said", text: each.said })),
+        ...(answer.moved ?? []).map((each): ReplyPart => ({ kind: "said", text: `${each.item == null ? `@${each.name}` : cited(each.item)} ${each.to}` })),
     ];
 }
 

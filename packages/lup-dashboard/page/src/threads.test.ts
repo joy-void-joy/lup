@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { holdingOn, toSend, waitingOn } from "./App";
 import { partSaid } from "./brief";
 import { itemStanding, outlineOf } from "./outline";
-import { EMPTY, countToRead, laid, UNSEEN, type Around, type Conversation, type Draft, type Item } from "./review";
+import { EMPTY, NONE_PILED, countToRead, laid, UNSEEN, type Around, type Conversation, type Draft, type Item, type ThreadRead } from "./review";
 import { agentNamed } from "./Review";
 import { sightsOf } from "./seeing";
 
@@ -61,7 +61,7 @@ const called = (party: Conversation) => (party.agent === null || party.agent ===
 const seenUpTo = (number: number) => ({ ...UNSEEN, groups: new Map([[JSON.stringify([REPOSITORY, "claude", "s1", "a1"]), number]]) });
 
 describe("what asks the operator, and what's only to read, in the overview and the top bar", () => {
-    const reading = (draft: Draft = EMPTY) => ({ draft, seeing: UNSEEN, states: new Map(), called });
+    const reading = (draft: Draft = EMPTY) => ({ draft, seeing: UNSEEN, states: new Map(), called, piled: NONE_PILED });
 
     it("says so of each item, by the host's asks, a seen one saying neither", () => {
         const out = laid([QUESTION, LATE], [LEAD], banner, header, EMPTY, NOTHING, [], new Map(), called);
@@ -69,39 +69,41 @@ describe("what asks the operator, and what's only to read, in the overview and t
         expect(rows.find((each) => each.text.startsWith("@51"))?.marks).toEqual(["waiting"]);
         const seen = seenUpTo(70);
         const region = out.regions.find((each) => each.item.number === 70);
-        expect(region === undefined ? null : itemStanding(region, EMPTY, UNSEEN).marks).toEqual(["news"]);
-        expect(region === undefined ? null : itemStanding(region, EMPTY, seen).marks).toEqual([]);
+        expect(region === undefined ? null : itemStanding(region, EMPTY, UNSEEN, NONE_PILED).marks).toEqual(["news"]);
+        expect(region === undefined ? null : itemStanding(region, EMPTY, seen, NONE_PILED).marks).toEqual([]);
         // What a kind asks is the host's word, whatever its rank says.
         const asking = { ...LATE, asks: true } as Item;
-        expect(region === undefined ? null : itemStanding({ ...region, item: asking }, EMPTY, seen).marks).toEqual(["asking"]);
-        expect(region === undefined ? null : itemStanding({ ...region, item: { ...asking, holds: true } }, EMPTY, seen).marks).toEqual(["waiting"]);
+        expect(region === undefined ? null : itemStanding({ ...region, item: asking }, EMPTY, seen, NONE_PILED).marks).toEqual(["asking"]);
+        expect(region === undefined ? null : itemStanding({ ...region, item: { ...asking, holds: true } }, EMPTY, seen, NONE_PILED).marks).toEqual(["waiting"]);
     });
 
     it("counts an agent's own apart", () => {
         const out = laid([QUESTION, LATE, NOTE], [WORKER], banner, header, EMPTY, NOTHING, [], new Map(), called);
         const row = outlineOf(out, reading()).find((each) => each.kind === "agent");
         expect(row?.counts).toEqual({ holds: 1, flagged: 0, review: 0, toRead: 2 });
-        const later = outlineOf(out, reading({ ...EMPTY, parked: [51], done: [47] })).find((each) => each.kind === "agent");
+        const later = outlineOf(out, reading({ ...EMPTY, moves: [{ id: "m", item: 51, to: { pile: "Later" } }], done: [47] })).find((each) => each.kind === "agent");
         expect(later?.counts).toEqual({ holds: 0, flagged: 0, review: 0, toRead: 1 });
     });
 
     it("counts what's only to read", () => {
         const felt = item(83, LEAD, { reason: "how it felt", text: "Fine." } as unknown as Item["reason"]);
         const items = [QUESTION, LATE, felt];
-        expect(countToRead(items, EMPTY, UNSEEN)).toBe(2);
-        expect(countToRead(items, EMPTY, { ...UNSEEN, commented: new Set([70]) })).toBe(1);
+        expect(countToRead(items, EMPTY, UNSEEN, NONE_PILED)).toBe(2);
+        expect(countToRead(items, EMPTY, { ...UNSEEN, commented: new Set([70]) }, NONE_PILED)).toBe(1);
+        // In a pile, it's set aside.
+        expect(countToRead(items, EMPTY, UNSEEN, new Set([70]))).toBe(1);
     });
 
-    it("counts what waits on the operator, what's left for later not among it: they said not now", () => {
+    it("counts what waits on the operator, what's set aside not among it: they said not now", () => {
         const approval = { ...QUESTION, number: 54, sender: { party: "operator" } } as Item;
         expect(waitingOn([QUESTION, approval])).toBe(2);
-        expect(waitingOn([QUESTION, approval], [approval.number])).toBe(1);
+        expect(waitingOn([QUESTION, approval], new Set([approval.number]))).toBe(1);
     });
 
     it("says of what it counts what holds something stopped, the rest wanting the operator's eyes alone", () => {
         const flagged = { ...QUESTION, number: 54, asks: true, holds: false } as Item;
         expect(holdingOn([QUESTION, flagged])).toBe(1);
-        expect(holdingOn([QUESTION, flagged], [QUESTION.number])).toBe(0);
+        expect(holdingOn([QUESTION, flagged], new Set([QUESTION.number]))).toBe(0);
         expect(waitingOn([QUESTION, flagged])).toBe(2);
     });
 });
@@ -132,8 +134,10 @@ describe("where what's written goes, on the line under the review", () => {
                 { id: "m2", to: null, thread: 303, text: "A note to myself." },
             ],
         };
-        const naming = { called: (party: Item["sender"]) => (party.party === "operator" ? "you" : called(party)), named: () => "", holder: () => null, thread: (number: number) => (number === 307 ? "The voice" : "The auth") };
-        expect(toSend(draft, [], naming).map(partSaid)).toEqual(["to s1/a1: a message on The voice", "to no one: a message on The auth"]);
+        // Kept on one nobody answers for, the line is the concern's, which Ctrl+Enter on it in g< sends alone.
+        const auth = { thread: { number: 303, title: "The auth", repository: "/r/lup.git" }, answering: null } as unknown as ThreadRead;
+        const naming = { called: (party: Item["sender"]) => (party.party === "operator" ? "you" : called(party)), named: () => "", holder: () => null, thread: (number: number) => (number === 307 ? "The voice" : "The auth"), concern: (number: number) => (number === 303 ? auth : undefined) };
+        expect(toSend(draft, [], naming).map(partSaid)).toEqual(["to s1/a1: a message on The voice", "to The auth: a message"]);
     });
 });
 

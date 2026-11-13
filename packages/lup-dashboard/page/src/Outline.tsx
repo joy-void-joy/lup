@@ -160,6 +160,7 @@ export const DRAFTED: Record<DraftMark, { glyph: string; word: string }> = {
     read: { glyph: "✓", word: "read" },
     approve: { glyph: "✔", word: "approve" },
     decline: { glyph: "✗", word: "decline" },
+    send: { glyph: "→", word: "send somewhere" },
 };
 
 /** Return the glyph an entry is marked with, by what it is and its first mark that has one. */

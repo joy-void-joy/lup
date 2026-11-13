@@ -20,6 +20,8 @@ from lup_dev.inbox.store import (
     Citation,
     Cites,
     Decided,
+    Destination,
+    Destined,
     Diff,
     Done,
     Draft,
@@ -30,6 +32,7 @@ from lup_dev.inbox.store import (
     ItemNode,
     Message,
     Order,
+    ParkedDraft,
     Question,
     Replies,
     Stands,
@@ -176,7 +179,8 @@ def stored(home: Path) -> InboxLayout:
         ),
     ]:
         write_model(layout.party(place.conversation.key()), place)
-    write_model(layout.draft, Draft(done=[3], parked=[4]))
+    # As an earlier lup kept it, items left for later in a list of their own.
+    write_model(layout.draft, ParkedDraft(parked=[4]))
     write_model(layout.order, Order(places=["agent:s1"]))
     write_model(
         layout.talk(MAIN.key()), Talk(comments=[TalkComment(step=1, text="Hm.")])
@@ -209,7 +213,10 @@ def test_the_files_are_converted_once_each_item_keeping_its_number_and_where_it_
     assert inbox.whereabouts[WORKER.key()].name == "parser"
     # Past every number an item kept, so none is given out again.
     assert ledger.numbered() > max(inbox.items)
-    assert inbox.draft() == Draft(done=[3], parked=[4])
+    # What it left for later goes into `Later` with the next send, as the operator meant.
+    assert inbox.draft() == Draft(
+        moves=[Destined(id="parked 4", item=4, to=Destination(pile="Later"))]
+    )
     assert inbox.order() == Order(places=["agent:s1"])
     assert inbox.talk(MAIN) == Talk(comments=[TalkComment(step=1, text="Hm.")])
     assert inbox.diff(6) == "+ line 6"

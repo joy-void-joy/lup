@@ -156,6 +156,7 @@ from lup_dev.inbox.edits import replaced
 from lup_dev.inbox.ends import holding
 from lup_dev.inbox.notices import Notices
 from lup_dev.inbox.roster import Roster
+from lup_dev.inbox.routing import Routing, Went, quoting, unsent
 from lup_dev.inbox.store import (
     Answer,
     Answered,
@@ -164,6 +165,7 @@ from lup_dev.inbox.store import (
     ChangedFile,
     Comment,
     Decided,
+    Destination,
     Done,
     Draft,
     Edit,
@@ -393,33 +395,6 @@ def past_waiting(item: Item, roster: Roster) -> str | None:
     return f"it's {standing(item)}"
 
 
-def quoting(item: Item, comment: Comment) -> str:
-    r"""Say the operator's comment on their own words, `item`, as a message written on a thread carries it: on the part of `item` the passage starts in, by its id, the passage quoted under it, then the comment; on the item whole, by its number.
-
-    >>> from datetime import UTC, datetime
-    >>> from lup_dev.inbox.store import Quote
-    >>> own = Item(number=7, reason=Message(kind="note", text="One.\n\nTwo."),
-    ...     sender=Operator(), recipient=Operator(), made=datetime(2026, 1, 1, tzinfo=UTC))
-    >>> print(quoting(own, Comment(item=7, quote=Quote(text="Two.", start=6, end=10), text="Or three.")))
-    On @7.2:
-    <BLANKLINE>
-    > Two.
-    <BLANKLINE>
-    Or three.
-    >>> print(quoting(own, Comment(item=7, text="All of it.")))
-    On @7:
-    <BLANKLINE>
-    All of it.
-    """
-    if comment.quote is None:
-        return f"On {cited(item.number)}:\n\n{comment.text}"
-    text = body(item)
-    part = located(parts_of(item, text), text, comment.quote)
-    on = cited(item.number) if part is None else part.id.cited()
-    quoted = "\n".join(f"> {line}" for line in comment.quote.text.splitlines())
-    return f"On {on}:\n\n{quoted}\n\n{comment.text}"
-
-
 def remark(comment: Comment) -> str:
     """Say one of the operator's comments on an item, as a line of text where an answer carries it: on its passage, quoted, or on the item whole."""
     if comment.quote is None:
@@ -643,16 +618,14 @@ def rewritten(reason: Reason, text: str) -> Reason:
 def marked(listed: Listed) -> str:
     """Say what an item marked in one of the draft's lists is, as a sentence says it.
 
-    >>> marked("parked")
-    'left for later'
+    >>> marked("declined")
+    'declined'
     """
     match listed:
         case "done":
             return "marked done"
         case "declined":
             return "declined"
-        case "parked":
-            return "left for later"
 
 
 class Unanswerable(Model):
@@ -660,8 +633,9 @@ class Unanswerable(Model):
 
     number: int
     """The item it's on."""
-    part: Listed | Literal["comment"]
-    """What it is: the item marked in one of the draft's lists, or a comment on it."""
+    part: Listed | Literal["comment", "moved"]
+    """What it is: the item marked in one of the draft's lists, a comment on
+    it, or it sent into a concern or a pile."""
     said: str
     """What became of it and why, as the line under the review says it."""
 
@@ -706,6 +680,8 @@ class Dispatched(Model):
     """The approvals commented on whose push no known session made: their comments stay drafted."""
     unanswerable: list[Unanswerable] = []
     """What it did with each part on an item a reply doesn't answer, the operator's own words among them, or one past waiting on them, rather than refuse the reply whole."""
+    moved: list[Went] = []
+    """Each concern and item it moved where the operator sent it with Space `s`, and where (`Routing.routed`)."""
 
 
 def settled(
@@ -1953,24 +1929,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         )
 
     def drafted(self, draft: Draft) -> Draft:
-        """Keep the operator's draft reply, and return it, without what it leaves for later that's past waiting on them, but where it holds their words (`unparked`); refused where a message in it is for a conversation lup's inbox has never heard of (`heard`)."""
+        """Keep the operator's draft reply, and return it; refused where a message in it is for a conversation lup's inbox has never heard of (`heard`)."""
         self.heard(draft)
-        return self.inbox.drafted(self.unparked(draft))
-
-    def unparked(self, draft: Draft) -> Draft:
-        """Return `draft` with nothing left for later that there's nothing to come back to: each it parks standing past waiting on the operator goes, unsaid, so a park never outlives what it's on, but for one with their words on it, which the next send takes (`past`)."""
-        worded = [each.item for each in draft.comments if each.text.strip()]
-        parked = [
-            each
-            for each in draft.parked
-            if each in worded
-            or ((item := self.inbox.items.get(each)) is not None and item.waits)
-        ]
-        return (
-            draft
-            if parked == draft.parked
-            else draft.model_copy(update={"parked": parked})
-        )
+        return self.inbox.drafted(draft)
 
     def heard(self, draft: Draft) -> None:
         """Refuse a draft with a message, or a remark, for a conversation lup's inbox has never heard of, which no reply could reach: it's known once one of its hooks is heard; and a message on a thread lup doesn't keep, of another repository than whom it's to, or to no one on none."""
@@ -1988,8 +1949,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 )
                 raise InboxError(message)
 
-    async def reviewed(self) -> Dispatched:
-        """Send the operator's draft as one reply: to each conversation with a comment on their messages or questions, a question among them, or a message to them, the whole of it; its items answered or done; each approval and held change it covers answered by its own rule; and the draft left with what's parked.
+    async def reviewed(
+        self, only: Destination | None = None, of: Path | None = None
+    ) -> Dispatched:
+        """Send the operator's draft as one reply: each concern and item it sends somewhere moved there first (`Routing`); then to each conversation with a comment on their messages or questions, a question among them, or a message to them, what they wrote elsewhere sent there among it, the whole of it; its items answered or done; each approval and held change it covers answered by its own rule; and the draft left with its marks, for the page to apply.
 
         Each conversation is told the operator's message to them and their own
         items first, with the comments on them or read with nothing to add,
@@ -2017,14 +1980,36 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         What's drafted on an item a reply doesn't answer, as the operator's own
         words a thread shows, or on one past waiting on them, answered, decided
         or replaced since it was marked, never keeps the rest from going: its marks are
-        dropped and each said (`answerable`, `past`). Refused where the draft
-        covers no item and writes to no agent, declines what isn't an approval or
-        a held change, or writes to a conversation lup's inbox has never heard of.
+        dropped and each said (`answerable`, `past`). Refused, moving nothing,
+        where the draft covers no item, writes to no agent and sends nothing
+        anywhere, declines what isn't an approval or a held change, writes to a
+        conversation lup's inbox has never heard of, or sends something where it
+        can't go (`Routing.planned`).
+
+        With `only`, it sends what of the draft reaches that destination alone,
+        of the repository `of` where it's a pile by its title or `No agent`, as
+        Ctrl+Enter on its line does, the rest staying drafted (`Routing.split`).
         """
-        whole = self.inbox.draft()
-        self.heard(whole)
+        drafted = self.inbox.draft()
+        self.heard(drafted)
         roster = self.roster()
-        answerable = self.answerable(whole, roster)
+        routing = Routing(concerns=self.concerns(), roster=roster)
+        split = None if only is None else routing.split(drafted, only, of)
+        whole = drafted if split is None else split.sending
+        # A move dropped leaves what's written on its item going with the reply,
+        # as if it were never sent anywhere.
+        unmoved = self.unmoved(whole, roster)
+        routable = whole.model_copy(
+            update={
+                "moves": [
+                    each
+                    for each in whole.moves
+                    if each.item not in [one.number for one in unmoved]
+                ]
+            }
+        )
+        plan = routing.planned(routable)
+        answerable = self.answerable(unsent(routable), roster)
         draft = answerable.draft
         covered = [self.inbox.item(each) for each in draft.covered()]
         undeclinable = [
@@ -2047,12 +2032,24 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             and not draft.written()
             and not draft.remarked()
             and not answerable.unanswerable
+            and not unmoved
+            and plan.empty
         ):
             message = (
-                "the draft answers no item and writes to no agent: comment on an "
-                "item, take one off the list, or write to an agent under their banner"
+                "the draft answers no item, writes to no agent and sends nothing "
+                "anywhere: comment on an item, take one off the list, write to an "
+                "agent under their banner, or send something somewhere with Space s"
             )
             raise InboxError(message)
+        routed = routing.routed(plan)
+        draft = draft.model_copy(
+            update={
+                "letters": [
+                    *routing.followed(draft.letters, routed.went),
+                    *routed.letters,
+                ]
+            }
+        )
         asked = [
             item for item in covered if isinstance(item.reason, Approval | HeldChange)
         ]
@@ -2068,7 +2065,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     if isinstance(each.reason, Question)
                 ),
             ],
-            [each.thread for each in draft.written() if each.thread is not None],
+            [
+                *(each.thread for each in draft.written() if each.thread is not None),
+                *(each.into for each in routed.went if each.into is not None),
+            ],
         )
         self.threaded(draft, reviews)
         dispatched = Dispatched(
@@ -2079,11 +2079,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 if item.number not in commented
                 and not isinstance(item.reason, Question)
             ],
-            unanswerable=answerable.unanswerable,
+            unanswerable=[*answerable.unanswerable, *unmoved],
+            moved=routed.went,
         )
         for item in asked:
             dispatched = await self.answered_in(draft, item, dispatched)
-        left = draft.kept()
+        left = draft.kept() if split is None else split.staying
         staying = [each for each in draft.comments if each.item in dispatched.kept]
         self.inbox.drafted(
             left.model_copy(
@@ -2094,10 +2095,28 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             await self.delivered(each)
         return dispatched
 
+    def unmoved(self, draft: Draft, roster: Roster) -> list[Unanswerable]:
+        """Return each item `draft` sends into a concern or a pile that doesn't take it as it stands, said rather than refusing the reply whole: one the reply doesn't answer, as the operator's own words (`unanswerable`), or past waiting on them, answered, decided or replaced since it was marked (`past_waiting`); it's dropped, as a mark on it is."""
+
+        def why(item: Item) -> str | None:
+            return unanswerable(item, roster) or past_waiting(item, roster)
+
+        return [
+            Unanswerable(
+                number=item.number,
+                part="moved",
+                said=f"{cited(item.number)} not moved: {said}",
+            )
+            for each in draft.moves
+            if each.item is not None
+            and (item := self.inbox.items.get(each.item)) is not None
+            and (said := why(item)) is not None
+        ]
+
     def answerable(self, draft: Draft, roster: Roster) -> Answerable:
         """Return `draft` as the operator's reply sends it, never refused whole for what's drafted on an item it doesn't answer (`unanswerable`), as their own words a thread shows, or on one past waiting on them (`unanswered`), each part on one said."""
         concerns = self.concerns()
-        mentioned = dict.fromkeys([*draft.covered(), *draft.parked])
+        mentioned = dict.fromkeys(draft.covered())
         aside = {
             found.number: found
             for item in (self.inbox.items.get(each) for each in mentioned)
@@ -2117,7 +2136,6 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 ],
                 "done": [each for each in draft.done if each not in aside],
                 "declined": [each for each in draft.declined if each not in aside],
-                "parked": [each for each in draft.parked if each not in aside],
             }
         )
         return Answerable(
@@ -2130,10 +2148,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     def unanswered(
         draft: Draft, item: Item, roster: Roster, concerns: Concerns
     ) -> Unanswered | None:
-        """Return what sending `draft` does with what's drafted on `item`, where the reply doesn't answer it (`unanswerable`), or it's past waiting on them (`past`); none where the reply does, or where it's left for later with words on it, which stay drafted as on any item left for later.
+        """Return what sending `draft` does with what's drafted on `item`, where the reply doesn't answer it (`unanswerable`), or it's past waiting on them (`past`); none where the reply does.
 
-        Its marks are dropped: done or declined, which nothing would answer,
-        and left for later, which nothing waits on. A comment on it is the
+        Its marks are dropped: done or declined, which nothing would answer. A comment on it is the
         operator adding to what they said: it's written on the thread the item
         is in, to whoever answers for it, quoting the passage it's on
         (`quoting`), as a message written there goes; kept drafted where it's
@@ -2146,12 +2163,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         ]
         if why is None:
             return None if item.waits else Delivery.past(draft, item, roster, concerns)
-        if number in draft.parked and words:
-            return None
         marks: dict[Listed, list[int]] = {
             "done": draft.done,
             "declined": draft.declined,
-            "parked": draft.parked,
         }
         dropped = [
             Unanswerable(
@@ -2203,8 +2217,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
         Its marks are dropped and said, rather than sent: answered, decided or
         replaced since it was marked, there's nothing for them to do, and the
-        reply says so rather than saying it did it. Left for later is dropped
-        unsaid: nothing waits on it to come back to. A comment on it is the
+        reply says so rather than saying it did it. A comment on it is the
         operator adding to what they said. It stays in the reply, to its sender,
         leaving it as it stands (`reviews`); on an approval or a held change,
         whose answer a comment can't change, it's written to whoever asked it, on
@@ -3319,8 +3332,6 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             self.say(
                 f"{cited(each.number)}, an approval, is superseded by {cited(item.number)}"
             )
-        if replaced:
-            self.inbox.drafted(self.unparked(self.inbox.draft()))
         await self.noticed(item)
         return item
 
