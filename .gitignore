@@ -1,0 +1,7 @@
+tmp/
+.venv/
+__pycache__/
+.lup/
+# The person's own layer of the declaration and section of the guidance, never committed.
+/lup_project.local.py
+/AGENTS.local.md
