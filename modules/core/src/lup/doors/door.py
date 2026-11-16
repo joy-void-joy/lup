@@ -323,13 +323,18 @@ class Method(property):
 
     @property
     def taken(self) -> Taken:
-        """What the method takes and returns, its door's checks passed.
+        """What the method takes and returns, its door's checks passed (`checked`)."""
+        return self.checked()
+
+    def checked(self) -> Taken:
+        """Return what the method takes and returns, checked against its door.
 
         Read as the door is put on, or, where an annotation names a class defined
         further down its file, the first time it's needed: resolving a
-        declaration needs it of every method its modules serve. Raise
-        `DoorError` where an annotation names what's never defined where the
-        method runs, as an import under `TYPE_CHECKING` alone is.
+        declaration checks every method its modules serve. Raise `DoorError`
+        where it isn't what its door takes, or where an annotation names what's
+        never defined where the method runs, as an import under `TYPE_CHECKING`
+        alone is.
         """
         if self.known is None:
             name = self.function.__qualname__

@@ -160,8 +160,7 @@ class Doors(Model):
             made_with(each)
         try:
             for entry in doors.entries():
-                # lup: ignore("B018", why="reading a method's `taken` checks it against its door, which resolving does of every method once every class its annotations name is defined")
-                entry.method.taken
+                entry.method.checked()
         except DoorError as wrong:
             raise ProjectError(str(wrong), about=wrong.about) from wrong
         distinct("A tool's name", doors.keyed(ToolDoor))
