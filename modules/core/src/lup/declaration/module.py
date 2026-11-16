@@ -1,0 +1,324 @@
+"""A module, one part of lup or of a project, and `Modules`, the selection of them.
+
+A module is a `Module` subclass: its name, the modules it requires and what it
+needs from outside the project as class attributes, its docstring as its one
+sentence, and its parts and settings as fields whose defaults are the module's own
+(`README.md` here, *What a module is*).
+
+A module is a layer. Wherever it's written, in `.add` or `.edit` or bound to a
+name, it means the module below with the fields it set (pydantic's
+`model_fields_set`) changed: a selection or a model of settings (a `Layer`) it
+set composes over below's, any other field it set replaces below's, and every
+field it didn't set stays as below has it. Where nothing is below, below is the module's own
+defaults. Each field a layer set is credited to that layer, by its place in the
+chain of `Modules`' verbs and its reason, so the overview can show where every
+value came from.
+"""
+
+from collections.abc import Collection
+from inspect import cleandoc
+from itertools import takewhile
+from types import UnionType
+from typing import ClassVar, Self, TypeAliasType, get_args, get_origin, override
+
+from lup.declaration.errors import ProjectError
+from lup.declaration.grammar import (
+    Edit,
+    Layer,
+    Of,
+    Placed,
+    Selection,
+    applied,
+    defaulted,
+    set_fields,
+)
+from lup.types import Model
+
+
+class Origin(Model):
+    """Which layer last set one of a module's fields, and why."""
+
+    field: str
+    position: int | None = None
+    """The layer's place in the chain of `Modules`' verbs: 0 for its start, then
+    one for each verb; none while the module isn't placed in one."""
+    why: str | None = None
+    """The reason given with that layer, or with the `.edit` that set the field."""
+
+
+class Origins(Model):
+    """Which layer last set each field of a module that a layer set."""
+
+    each: list[Origin] = []
+
+    def of(self, field: str) -> Origin:
+        """Return the origin of `field`, a blank one where no layer is credited."""
+        return next(
+            (origin for origin in self.each if origin.field == field),
+            Origin(field=field),
+        )
+
+    def updated(self, origins: list[Origin]) -> Origins:
+        """Return these origins with `origins` in place of the same fields'."""
+        fields = [origin.field for origin in origins]
+        kept = [origin for origin in self.each if origin.field not in fields]
+        return Origins(each=[*kept, *origins])
+
+
+# lup: ignore("bare-object", why="a field's annotation as pydantic gives it, any type form: a class, a union, an alias or a generic, which the match below tells apart")
+def plain(annotation: object) -> bool:
+    """Say whether a field's type is a plain collection, optional or not.
+
+    A `str` or `bytes` is a value, not a collection of its characters.
+
+    >>> [plain(list[str]), plain(dict[str, int] | None), plain(str), plain(int)]
+    [True, True, False, False]
+    """
+    match annotation:
+        case TypeAliasType():
+            return plain(annotation.__value__)
+        case UnionType():
+            return any(plain(each) for each in get_args(annotation))
+        case _:
+            kind = get_origin(annotation) or annotation
+            if not isinstance(kind, type) or issubclass(kind, str | bytes):
+                return False
+            return issubclass(kind, Collection)
+
+
+class Module(Model, extra="forbid"):
+    """A part of lup or of a project: what it brings, taken away when it's dropped.
+
+    Subclass it to declare one, as lup's own are declared:
+
+    >>> class Narration(Module):
+    ...     '''Turning a page into an episode.'''
+    ...
+    ...     name = "narration"
+    >>> Narration.sentence()
+    'Turning a page into an episode.'
+    """
+
+    name: ClassVar[str]
+    """How the module is named in `Modules`' verbs: `.drop("python")`."""
+    requires: ClassVar[list[type[Module]]] = []
+    """The modules it can't work without, which a selection holding it must hold."""
+
+    origins: Origins = Origins()
+    """Which layer last set each field a layer set: lup's record, kept by `.edit`
+    and by `Modules` as it places the module, never written in a declaration."""
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: object) -> None:
+        """Refuse a module without a name or a sentence, with a plain collection, or with a default starting from itself; complete the classes its defaults list.
+
+        A class its defaults list may name the module, as its tools narrow
+        `module` to it, before the module is defined: each is completed here, the
+        module's name resolved, while the file declaring it is still imported.
+
+        Every collection in a module is a selection: a layer would replace a
+        plain list whole, so a base couldn't be extended without restating it.
+        A module's own default for a selection has nothing beneath it, so one
+        starting from `Kind.default()` would start from itself.
+        """
+        super().__pydantic_init_subclass__(**kwargs)
+        declared = cls.__name__
+        if not isinstance(getattr(cls, "name", None), str):
+            message = f"`{declared}` has no `name`, which `Modules`' verbs know it by"
+            raise ProjectError(message)
+        if not cls.__doc__:
+            message = f"`{declared}` has no docstring, which is its one sentence"
+            raise ProjectError(message)
+        required = [
+            field for field, info in cls.model_fields.items() if info.is_required()
+        ]
+        if required:
+            message = (
+                f"`{declared}` gives {', '.join(f'`{field}`' for field in required)} "
+                "no default: a module added with nothing set stands on its own defaults"
+            )
+            raise ProjectError(message)
+        collections = [
+            field for field, info in cls.model_fields.items() if plain(info.annotation)
+        ]
+        if collections:
+            message = (
+                f"`{declared}` holds {', '.join(f'`{field}`' for field in collections)} "
+                "as a plain collection: a layer would replace it whole, so a base "
+                "couldn't be extended without restating it. Make each a selection: a "
+                "`Named` selection of its own entries, or a kind lup's modules "
+                "declare"
+            )
+            raise ProjectError(message)
+        circular = [
+            found
+            for field, info in cls.model_fields.items()
+            if issubclass(type(default := info.default), Selection | Layer)
+            for found in defaulted(field, default)
+        ]
+        if circular:
+            message = (
+                f"`{declared}` starts its own default for {', '.join(circular)}, "
+                "which is that default itself: nothing is beneath a module's own "
+                "default to start from. Start each from `Kind.of(…)` or `Kind()`, "
+                "which start from nothing there, `Kind.all()` or `Kind.only(…)`"
+            )
+            raise ProjectError(message)
+        for info in cls.model_fields.values():
+            if isinstance(default := info.default, Selection):
+                default.complete({declared: cls})
+
+    @classmethod
+    def sentence(cls) -> str:
+        """Return the module's one sentence: its docstring's first paragraph."""
+        lines = (line.strip() for line in cleandoc(cls.__doc__ or "").splitlines())
+        return " ".join(takewhile(bool, lines))
+
+    def changed(self) -> list[str]:
+        """List the fields this module's layers set, in the order they're declared."""
+        return [field for field in set_fields(self) if field != "origins"]
+
+    def held[E](self, kind: type[Selection[E]]) -> list[E]:
+        """Return every entry of `kind` this module holds, in order.
+
+        Each field holding a selection of `kind` is resolved over the module's
+        own default for it, which `Kind.default()` there starts from.
+
+        >>> from lup.declaration.grammar import Named
+        >>> class Ids(Named[str]):
+        ...     '''Names.'''
+        >>> class Counting(Module):
+        ...     '''Counting names.'''
+        ...
+        ...     name = "counting"
+        ...     ids: Ids = Ids.of("a", "b")
+        >>> Counting(ids=Ids.default().add("c")).over(Counting()).held(Ids)
+        ['a', 'b', 'c']
+        """
+        fields = type(self).model_fields
+        held: dict[str, Selection[E]] = {
+            field: value
+            for field in fields
+            if isinstance(value := getattr(self, field), kind)
+        }
+        defaults: dict[str, Selection[E]] = {
+            field: default
+            for field, info in fields.items()
+            if isinstance(default := info.default, kind)
+        }
+
+        def own(field: str) -> list[E]:
+            default = defaults.get(field)
+            if default is None:
+                return []
+            return [each.entry for each in default.resolve([], [])]
+
+        return [
+            entry
+            for field, value in held.items()
+            for entry in value.ordered(value.resolve(own(field), own(field)))
+        ]
+
+    def over(self, below: Self) -> Self:
+        """Return this module as a layer over `below`: the fields it set, on below's.
+
+        A selection or a model of settings it set composes over below's; any other
+        field it set replaces below's. Every field it didn't set stays as below has
+        it, credited to the layer that set it there.
+        """
+        changed = self.changed()
+        origins = below.origins.updated([self.origins.of(field) for field in changed])
+        return applied(self, below, changed).model_copy(update={"origins": origins})
+
+    def stamped(self, position: int | None, why: str | None) -> Self:
+        """Credit each field this module set to the layer at `position`, for `why`.
+
+        A field an `.edit` on the module already credits keeps its reason, and
+        its place once it has one.
+        """
+
+        def credited(field: str) -> Origin:
+            origin = self.origins.of(field)
+            return Origin(
+                field=field,
+                position=position if origin.position is None else origin.position,
+                why=why if origin.why is None else origin.why,
+            )
+
+        origins = self.origins.updated([credited(field) for field in self.changed()])
+        return self.model_copy(update={"origins": origins})
+
+    def edited(self, module: Self, position: int | None, why: str | None) -> Self:
+        """Return this module with `module` on it, as the layer at `position`.
+
+        `module` must be of this module's class: one of another class goes in its
+        place with `.replace`, which says so in the declaration.
+        """
+        if type(module) is not type(self):
+            mine = type(self).__name__
+            message = (
+                f"`.edit` puts a `{type(module).__name__}` on `{mine}` "
+                f"`{self.name}`; a module of another class goes in its place with "
+                f'`.replace("{self.name}", …)`'
+            )
+            raise ProjectError(message)
+        return module.stamped(position, why).over(self)
+
+    def edit(self, module: Self, why: str | None = None) -> Self:
+        """Return this module with `module` as a layer on it.
+
+        The fields `module` set change, as a layer over this one, and the rest
+        stay as they are here.
+        """
+        return self.edited(module, None, why)
+
+
+class Modules(Selection[Module]):
+    """The modules a project is made of, each named by its `name`.
+
+    `Modules.default()` is lup's default modules, `Modules.all()` every one lup
+    ships, and `Modules.only(…)` an exact list of modules, each with its settings.
+    """
+
+    @override
+    def named(self, entry: Module) -> str:
+        return entry.name
+
+    @classmethod
+    def only(cls, *modules: Module) -> Self:
+        """Start from these modules and no other: a later release's don't come in."""
+        return cls.starting(Of(entries=list(modules)))
+
+    def edit(self, module: Module, why: str | None = None) -> Self:
+        """Put `module` as a layer on the module of its name, which must be there."""
+        return self.then(Edit(entry=module, why=why))
+
+    @override
+    def placed(self, placed: Placed[Module]) -> Placed[Module]:
+        """Return a module placed in the chain, over its own defaults."""
+        module = placed.entry.stamped(placed.position, placed.why)
+        return placed.model_copy(update={"entry": module.over(type(module)())})
+
+    @override
+    def edited(self, below: Placed[Module], layer: Placed[Module]) -> Placed[Module]:
+        """Return the module `below` with `layer`'s module on it, where it was."""
+        module = below.entry.edited(layer.entry, layer.position, layer.why)
+        return below.model_copy(update={"entry": module})
+
+    @override
+    def taken(self, below: Placed[Module], added: Placed[Module]) -> Placed[Module]:
+        """Return the module `below`, from a layer below or the defaults, with `added`'s module, which a layer above adds, on it.
+
+        A module of another class is another module of the same name, which
+        `.replace` puts in its place, so the swap is said where it's made.
+        """
+        if type(added.entry) is not type(below.entry):
+            name = below.entry.name
+            message = (
+                f"`Modules.add` puts `{type(added.entry).__name__}` on `{name}`, "
+                f"already there from below as `{type(below.entry).__name__}`, "
+                f'another class: `.replace("{name}", …)` puts another module in '
+                "its place"
+            )
+            raise ProjectError(message)
+        return super().taken(below, added)
