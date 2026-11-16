@@ -277,10 +277,6 @@ class Holding(Model):
 """
 
 
-AGENT = Agent(id="agent-1")
-"""The agent calling, where who calls doesn't matter beyond being an agent."""
-
-
 class DoorsPromises(ModuleServing):
     """What a module's code and its callers can count on of the doors its methods are reached through."""
 
@@ -298,10 +294,11 @@ class DoorsPromises(ModuleServing):
     ) -> None:
         """A tool call runs its method with the module's settings, every layer applied, and hands it the agent calling."""
         volume = by.any(Loudness).volume
+        agent = by.any(Agent)
         started = await by.started(declared(Echo(volume=volume)))
-        answered = await started.call("shout", Said(text="hi"), AGENT)
+        answered = await started.call("shout", Said(text="hi"), agent)
         assert isinstance(answered, Accepted)
-        assert answered.output == Shouted(text="HI" * volume, caller=AGENT.id)
+        assert answered.output == Shouted(text="HI" * volume, caller=agent.id)
 
     @lup.promise
     async def nothing_sent_makes_a_call_raise(self, by: Testing) -> None:
@@ -326,19 +323,20 @@ class DoorsPromises(ModuleServing):
     @lup.promise
     async def what_a_tool_doesnt_take_is_refused(self, by: Testing) -> None:
         """A call whose arguments aren't what its tool takes, or to a tool no module serves, is refused with what was sent, rather than run."""
+        agent = by.any(Agent)
         started = await by.started(declared(Echo()))
         sent = {"words": "hi"}
-        wrong = await started.call("shout", sent, AGENT)
+        wrong = await started.call("shout", sent, agent)
         assert isinstance(wrong, Refused)
         assert wrong.rejection.submitted == sent
-        assert isinstance(await started.call("whisper", {}, AGENT), Refused)
+        assert isinstance(await started.call("whisper", {}, agent), Refused)
 
     @lup.promise
     async def a_method_answers_only_who_its_for(self, by: Testing) -> None:
         """A method runs only for the parties its `by` names, checked before each call: the operator's command refuses an agent."""
         started = await by.started(declared(Echo()))
         greeting = Greeting(name="kai")
-        refused = await started.run("echo", "greet", greeting, AGENT)
+        refused = await started.run("echo", "greet", greeting, by.any(Agent))
         assert isinstance(refused, Refused)
         accepted = await started.run("echo", "greet", greeting, Operator())
         assert isinstance(accepted, Accepted)
@@ -364,7 +362,7 @@ class DoorsPromises(ModuleServing):
     ) -> None:
         """A module's method, read through an instance of its class, is called as any method, typed as written."""
         serving = EchoServing(module=Echo(volume=2))
-        shouted = await serving.shout(Said(text="a"), by=AGENT)
+        shouted = await serving.shout(Said(text="a"), by=by.any(Agent))
         assert shouted.text == "AA"
 
     @lup.promise

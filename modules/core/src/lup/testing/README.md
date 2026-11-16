@@ -21,8 +21,9 @@ class CounterPromises(ModuleServing):
         """A bump up moves the count up by what it asks."""
         started = await by.started(Project(modules=Modules.default().add(Counter())))
         climbing = by.any(Climbing)
-        await started.call("bump", climbing, Agent(id="counting"))
-        counted = await started.call("counted", Asking(), Agent(id="counting"))
+        agent = by.any(Agent)
+        await started.call("bump", climbing, agent)
+        counted = await started.call("counted", Asking(), agent)
         assert isinstance(counted, Accepted)
         assert counted.output == Count(count=climbing.by)
 ```

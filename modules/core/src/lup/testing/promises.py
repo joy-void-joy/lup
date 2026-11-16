@@ -127,8 +127,9 @@ class CounterPromises(ModuleServing):
         """A bump up moves the count up by what it asks."""
         started = await by.started(Project(modules=Modules.default().add(Counter())))
         bumping = by.any(Climbing)
-        await started.call("bump", bumping, Agent(id="counting"))
-        counted = await started.call("counted", Asking(), Agent(id="counting"))
+        agent = by.any(Agent)
+        await started.call("bump", bumping, agent)
+        counted = await started.call("counted", Asking(), agent)
         assert isinstance(counted, Accepted)
         assert counted.output == Count(count=bumping.by)
 
@@ -160,9 +161,10 @@ class TestingPromises(ModuleServing):
     ) -> None:
         """Every law of every module a scenario starts is checked over each call it makes, and one that doesn't hold fails the scenario there."""
         started = await by.started(counter())
-        await started.call("bump", Bumping(by=1), Agent(id="counting"))
+        agent = by.any(Agent)
+        await started.call("bump", Bumping(by=1), agent)
         with raises(BrokenLawError) as broken:
-            await started.call("bump", Bumping(by=-1), Agent(id="counting"))
+            await started.call("bump", Bumping(by=-1), agent)
         assert broken.raised().step.before.model_dump() == {"count": 1}
 
     @lup.promise
