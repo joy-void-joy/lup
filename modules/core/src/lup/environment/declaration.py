@@ -3,8 +3,9 @@
 A declaration is a Python file binding `project`, a `Project`. Loading it runs it,
 and every module it imports, so it's loaded where running a branch's code is
 harmless, never by the program on the operator's machine (`DESIGN.md`, *Where
-code runs*). What comes out of resolving it is the modules, each with every layer
-applied, which the rest of lup reads as data.
+code runs*). What comes out of resolving it (`Resolved`) is the modules, each with
+every layer applied, and what they serve behind their doors, which the rest of lup
+reads.
 
 Resolving applies every layer over lup's default modules, in order, then checks
 what a selection must hold: a module named `core`, and every module a selected
@@ -19,12 +20,22 @@ from typing import TYPE_CHECKING
 from lup.declaration.core import Core
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import listed
+from lup.declaration.module import Module
 from lup.declaration.project import Project
+from lup.environment.doors import Doors
+from lup.types import Model
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from lup.declaration.module import Module
+
+class Resolved(Model):
+    """A declaration resolved: what the rest of lup reads of it."""
+
+    modules: list[Module]
+    """The modules it's made of, every layer applied, in order."""
+    doors: Doors
+    """What the modules serve, each method behind its door."""
 
 
 def default() -> list[Module]:
@@ -75,12 +86,13 @@ def load(path: Path) -> Project:
     return project
 
 
-def resolve(project: Project) -> list[Module]:
-    """Return the modules `project` is made of, every layer applied, in order.
+def resolve(project: Project) -> Resolved:
+    """Return the modules `project` is made of, every layer applied, in order, and what they serve.
 
     Raise `ProjectError` where a name its verbs give isn't there, where it holds
-    no module named `core`, where a module it holds requires one it doesn't, or
-    where modules require each other in a cycle.
+    no module named `core`, where a module it holds requires one it doesn't,
+    where modules require each other in a cycle, or where what they serve can't
+    be served (`Doors.of`).
     """
     placed = project.modules.resolve(default(), shipped())
     modules = project.modules.ordered(placed)
@@ -110,7 +122,7 @@ def resolve(project: Project) -> list[Module]:
             "never adds or drops a module behind the declaration's back"
         )
         raise ProjectError(message)
-    return modules
+    return Resolved(modules=modules, doors=Doors.of(modules))
 
 
 def cycle(module: type[Module], trail: list[type[Module]]) -> list[str] | None:

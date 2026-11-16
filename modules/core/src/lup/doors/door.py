@@ -1,0 +1,419 @@
+"""What every door shares: reading a method's signature, the method served through its door, and the checks as a door is put on it.
+
+A door is a class deriving from `Door`, a model of its settings: whom it brings
+(`through`), whom a method leaving `by` out is for (`default`), and what it
+holds a method to beyond what every door does (`contract`). Called on a method,
+it makes a `Served`: a property of the method's class which, read through an
+instance, is that instance's method, called as any, and read through the class,
+the `Method` saying its door and what it takes. Adding a door is adding such a
+class (`README.md` here, *A method behind a door*).
+"""
+
+import inspect
+from annotationlib import Format, type_repr
+from collections.abc import Awaitable, Callable
+from functools import partial
+from types import GenericAlias, UnionType
+from typing import ClassVar, Concatenate, Self, TypeIs, get_args, get_origin, overload
+
+from pydantic import BaseModel, JsonValue, SerializeAsAny, TypeAdapter
+
+from lup.doors.parties import Party
+from lup.errors import LupError
+from lup.types import Model
+
+type Answer = BaseModel | str | None
+"""What a method behind a door answers: a model, words, or nothing, as its door
+allows."""
+
+type Annotation = type | GenericAlias | UnionType | None
+"""A type as a signature writes it: a class, a generic alias (`list[Said]`), a
+union, or `None`."""
+
+
+class DoorError(LupError):
+    """A method can't be reached through a door: it isn't what the door takes or returns, or doesn't say who may call it where the door needs it to."""
+
+
+class RefusedError(LupError):
+    """A method won't do what it was asked, raised from its body: the call through its door answers `Refused`, its message saying why."""
+
+
+def spelled(annotation: Annotation) -> str:
+    """Say a type as a signature writes it, for a door's refusal.
+
+    >>> spelled(int | None), spelled(list[str])
+    ('`int | None`', '`list[str]`')
+    """
+    return f"`{type_repr(annotation)}`"
+
+
+def is_model(annotation: Annotation) -> TypeIs[type[BaseModel]]:
+    """Say whether an annotation is a pydantic model's class.
+
+    >>> is_model(Model), is_model(str), is_model(list[Model])
+    (True, False, False)
+    """
+    return isinstance(annotation, type) and issubclass(annotation, BaseModel)
+
+
+def shaped(function: Callable[..., Awaitable[Answer]]) -> None:
+    """Raise `DoorError` where `function` can't be behind a door, whatever its types say.
+
+    A method behind a door is async, takes `self`, one model, then `by` where it
+    needs who calls it, each annotated, says what it returns, and has a docstring.
+    Its annotations aren't evaluated here: one may name a class defined further
+    down its file, which is read later (`Method.taken`).
+    """
+    name = function.__qualname__
+    if not inspect.iscoroutinefunction(function):
+        message = f"`{name}` is reached through a door, so it's async"
+        raise DoorError(message)
+    signature = inspect.signature(function, annotation_format=Format.FORWARDREF)
+    parameters = list(signature.parameters.values())
+    match parameters:
+        case [inspect.Parameter(name="self"), _] | [
+            inspect.Parameter(name="self"),
+            _,
+            inspect.Parameter(name="by"),
+        ]:
+            pass
+        case [inspect.Parameter(name="self"), *taken]:
+            named = ", ".join(f"`{each.name}`" for each in taken) or "nothing"
+            message = (
+                f"`{name}` takes {named}: a method behind a door takes one model, "
+                "then, where it needs who calls it, `by`"
+            )
+            raise DoorError(message)
+        case _:
+            message = f"`{name}` takes no `self`: a door is put on a method of a class"
+            raise DoorError(message)
+    bare = [
+        f"`{each.name}`"
+        for each in parameters[1:]
+        if each.annotation is inspect.Parameter.empty
+    ]
+    if signature.return_annotation is inspect.Signature.empty:
+        bare.append("what it returns")
+    if bare:
+        message = (
+            f"`{name}` leaves {', '.join(bare)} without a type: its door reads "
+            "each, so pyright and lup hold it to the door's contract"
+        )
+        raise DoorError(message)
+    if not inspect.getdoc(function):
+        message = (
+            f"`{name}` needs a docstring: it describes it to whoever its door "
+            "brings, an agent reading a tool, the operator a command's help"
+        )
+        raise DoorError(message)
+
+
+class Taken(Model, arbitrary_types_allowed=True):
+    """What a method behind a door takes and returns, its annotations evaluated."""
+
+    name: str
+    """The method's name: a tool's, an action's or a command's, which it's
+    called by."""
+    qualified: str
+    """Its name within its class, as a refusal names it: `EchoServing.shout`."""
+    description: str
+    """Its docstring, which describes it: what an agent reads of a tool."""
+    model: inspect.Parameter
+    """The parameter taking its model: a tool's input, a request, an action's
+    mark or a command's arguments."""
+    by: inspect.Parameter | None
+    """The parameter taking who calls it, typed as who may; none where it's left
+    out, and its door's default callers may."""
+    returned: Annotation
+    """Its return annotation, as written."""
+
+    @classmethod
+    def of(cls, function: Callable[..., Awaitable[Answer]]) -> Taken:
+        """Read what `function`, shaped as a door takes it (`shaped`), takes and returns.
+
+        Raise `NameError` where an annotation names a class that isn't defined
+        (yet), and `DoorError` where what it returns isn't a type.
+        """
+        signature = inspect.signature(function)
+        parameters = list(signature.parameters.values())
+        returned = signature.return_annotation
+        if not (
+            returned is None or isinstance(returned, type | GenericAlias | UnionType)
+        ):
+            message = (
+                f"`{function.__qualname__}` returns {returned!r}, which isn't a type"
+            )
+            raise DoorError(message)
+        return cls(
+            name=function.__name__,
+            qualified=function.__qualname__,
+            description=inspect.getdoc(function) or "",
+            model=parameters[1],
+            by=parameters[2] if len(parameters) > 2 else None,
+            returned=returned,
+        )
+
+    def answers_model(self) -> bool:
+        """Say whether it returns a pydantic model."""
+        return is_model(self.returned)
+
+    def gathers(self) -> bool:
+        """Say whether it takes a list of its model, as an action given every mark of a send at once does."""
+        return get_origin(self.model.annotation) is list
+
+    def one(self) -> Annotation:
+        """Return the type of the model it takes, or, where it takes a list of it, of each."""
+        annotation = self.model.annotation
+        return get_args(annotation)[0] if self.gathers() else annotation
+
+    def spelled_model(self) -> str:
+        """Say its model parameter, as a refusal names it: `said` typed `Said`."""
+        return f"`{self.model.name}` typed {spelled(self.model.annotation)}"
+
+
+class Door(Model):
+    """A door a method is reached through: what it holds a method to, and who may call one that doesn't say.
+
+    Each door is a subclass, a model of its settings (`@lup.tool(reads=True)`),
+    called on the method it's put on, with a signature typed with its contract.
+    """
+
+    called: ClassVar[str]
+    """What the door makes a method, as a refusal names it: `a tool`."""
+    default: ClassVar[list[type[Party]]] = []
+    """Who may call a method leaving `by` out; none where each method says, as a
+    request does."""
+
+    def contract(self, taken: Taken) -> None:
+        """Raise `DoorError` where `taken` isn't what this door takes and returns."""
+
+    def checked(self, taken: Taken) -> None:
+        """Raise `DoorError` where `taken` isn't what this door takes and returns, or doesn't say who may call it."""
+        self.contract(taken)
+        self.parties(taken)
+
+    def parties(self, taken: Taken) -> list[type[Party]]:
+        """Return who may call a method taking what `taken` says: the parties its `by` names, or this door's default where it leaves `by` out.
+
+        Raise `DoorError` where `by` is typed as other than parties' classes, or
+        is left out where this door has no default.
+        """
+        if taken.by is None:
+            if not self.default:
+                message = (
+                    f"`{taken.qualified}` is {self.called}, which says who may call "
+                    "it: `by` typed as a party, `by: Agent`, or a union of them"
+                )
+                raise DoorError(message)
+            return self.default
+        annotation = taken.by.annotation
+        typed = (
+            get_args(annotation) if isinstance(annotation, UnionType) else [annotation]
+        )
+        found: list[type[Party]] = [
+            each
+            for each in typed
+            if isinstance(each, type) and issubclass(each, Party) and each is not Party
+        ]
+        if len(found) != len(typed):
+            message = (
+                f"`{taken.qualified}` takes `by` typed {spelled(annotation)}: who "
+                "calls is a party, a class deriving from `Party` such as `Agent`, or "
+                "a union of them"
+            )
+            raise DoorError(message)
+        return found
+
+
+class Method(property):
+    """A method behind a door, read through its class: its function, its door, and what it takes.
+
+    A property of its class, so a pydantic model holds it as it holds any
+    property, not as a field, and its class lists it among its attributes, which
+    is how a class's methods are found (`served`).
+    """
+
+    def __init__(self, function: Callable[..., Awaitable[Answer]], door: Door) -> None:
+        """Put `door` on `function`, checking it as far as its annotations are defined yet.
+
+        Raise `DoorError` where it can't be behind the door, or is behind
+        another already.
+        """
+        if isinstance(function, Method):
+            message = (
+                f"`{function.function.__qualname__}` is {function.door.called} "
+                f"already, and can't be {door.called} too: a method is reached "
+                "through one door"
+            )
+            raise DoorError(message)
+        shaped(function)
+        self.function = function
+        self.door = door
+        self.known = self.attempted()
+        super().__init__(self.bound)
+
+    def attempted(self) -> Taken | None:
+        """Read what the method takes and check it against its door; none where an annotation names a class not defined yet."""
+        try:
+            return self.read()
+        except NameError:
+            return None
+
+    def read(self) -> Taken:
+        """Read what the method takes and check it against its door."""
+        taken = Taken.of(self.function)
+        self.door.checked(taken)
+        return taken
+
+    @property
+    def taken(self) -> Taken:
+        """What the method takes and returns, its door's checks passed.
+
+        Read as the door is put on, or, where an annotation names a class defined
+        further down its file, the first time it's needed: resolving a
+        declaration needs it of every method its modules serve. Raise
+        `DoorError` where an annotation names what's never defined where the
+        method runs, as an import under `TYPE_CHECKING` alone is.
+        """
+        if self.known is None:
+            try:
+                self.known = self.read()
+            except NameError as unnamed:
+                message = (
+                    f"`{self.function.__qualname__}`'s annotations name "
+                    f"`{unnamed.name}`, which isn't defined where it runs: its door "
+                    "reads them, so import it outside `TYPE_CHECKING`"
+                )
+                raise DoorError(message) from unnamed
+        return self.known
+
+    def bound(self, instance: BaseModel) -> Callable[..., Awaitable[Answer]]:
+        """Return the method of `instance`."""
+        return partial(self.function, instance)
+
+    def __set_name__(self, owner: type, name: str) -> None:
+        """Refuse a name a base of its class gives a field: the field would hide the method."""
+        refuse_taken(owner, name)
+
+    def parties(self) -> list[type[Party]]:
+        """Return who may call it: the parties its `by` names, or its door's default."""
+        return self.door.parties(self.taken)
+
+    def admits(self, by: Party) -> bool:
+        """Say whether `by` may call it."""
+        return isinstance(by, tuple(self.parties()))
+
+    def validated(self, given: JsonValue) -> BaseModel | list[BaseModel]:
+        """Return `given` as the model the method takes, or a list of it.
+
+        Raise pydantic's `ValidationError` where it isn't.
+        """
+        model = self.taken.model.annotation
+        return TypeAdapter[BaseModel | list[BaseModel]](model).validate_python(given)
+
+    async def called(
+        self, instance: BaseModel, value: BaseModel | list[BaseModel], by: Party
+    ) -> Answer:
+        """Run the method of `instance` on `value`, handing it `by` where it takes who calls it."""
+        if self.taken.by is None:
+            return await self.function(instance, value)
+        return await self.function(instance, value, by=by)
+
+
+class Served[S, **P, R: Awaitable[Answer]](Method):
+    """A method behind a door, typed as written: read through an instance, it's that instance's method; read through its class, the `Method` saying its door."""
+
+    def __init__(self, function: Callable[Concatenate[S, P], R], door: Door) -> None:
+        """Hold the function as written, behind `door`."""
+        self.written = function
+        super().__init__(function, door)
+
+    @overload
+    def __get__(self, instance: None, owner: type | None = None) -> Self: ...
+    @overload
+    def __get__(self, instance: S, owner: type | None = None) -> Callable[P, R]: ...
+    def __get__(
+        self, instance: S | None, owner: type | None = None
+    ) -> Self | Callable[P, R]:
+        """Return the method of `instance`, or this where read through its class."""
+        if instance is None:
+            return self
+        return partial(self.written, instance)
+
+
+def refuse_taken(owner: type, name: str) -> None:
+    """Raise `DoorError` where a class `owner` derives from gives `name` to a field of its model.
+
+    pydantic drops a class's attribute named after a base's field, so a method
+    named so would vanish without a word.
+    """
+    fields = [
+        field
+        for base in owner.__mro__[1:]
+        if issubclass(base, BaseModel)
+        for field in base.model_fields
+    ]
+    if name in fields:
+        message = (
+            f"`{owner.__name__}`'s method `{name}` takes the name of a field of its "
+            "model, which would hide it: name it otherwise"
+        )
+        raise DoorError(message)
+
+
+def served(owner: type) -> dict[str, Method]:
+    """Return each method `owner`, or a class it derives from, serves behind a door, by its name, in the order declared.
+
+    A method a subclass declares again stands in its base's place.
+    """
+    return {
+        name: value
+        for klass in reversed(owner.__mro__)
+        for name, value in vars(klass).items()
+        if isinstance(value, Method)
+    }
+
+
+class Rejection(Model):
+    """One refused call: what was sent, and why it was refused.
+
+    `submitted` is what the caller sent, whether or not it reads as what the
+    method takes.
+    """
+
+    submitted: JsonValue
+    reason: str
+
+
+class Accepted(Model):
+    """A call a method behind a door ran: what it was given, read as its model, and what it answered."""
+
+    value: SerializeAsAny[BaseModel] | list[SerializeAsAny[BaseModel]]
+    """What it was given, as the model it takes, or a list of it."""
+    output: SerializeAsAny[BaseModel] | str | None
+    """What it answered: a model, words, or nothing, as its door allows."""
+
+    def answer(self) -> str:
+        """Return what a caller reads of the answer: its words, a model's JSON, or nothing.
+
+        >>> class Said(Model):
+        ...     text: str
+        >>> Accepted(value=Said(text="hi"), output="Filed.").answer()
+        'Filed.'
+        >>> Accepted(value=Said(text="hi"), output=Said(text="hi")).answer()
+        '{"text":"hi"}'
+        """
+        match self.output:
+            case str() as words:
+                return words
+            case BaseModel() as model:
+                return model.model_dump_json()
+            case None:
+                return ""
+
+
+class Refused(Model):
+    """A call refused before the method ran, or by the method itself (`RefusedError`): what was sent, and why."""
+
+    rejection: Rejection

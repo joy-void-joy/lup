@@ -178,6 +178,47 @@ class Module(Model, extra="forbid"):
         """List the fields this module's layers set, in the order they're declared."""
         return [field for field in set_fields(self) if field != "origins"]
 
+    def held[E](self, kind: type[Selection[E]]) -> list[E]:
+        """Return every entry of `kind` this module holds, in order.
+
+        Each field holding a selection of `kind` is resolved over the module's
+        own default for it, which `Kind.default()` there starts from.
+
+        >>> from lup.declaration.grammar import Named
+        >>> class Ids(Named[str]):
+        ...     '''Names.'''
+        >>> class Counting(Module):
+        ...     '''Counting names.'''
+        ...
+        ...     name = "counting"
+        ...     ids: Ids = Ids.of("a", "b")
+        >>> Counting(ids=Ids.default().add("c")).over(Counting()).held(Ids)
+        ['a', 'b', 'c']
+        """
+        fields = type(self).model_fields
+        held: dict[str, Selection[E]] = {
+            field: value
+            for field in fields
+            if isinstance(value := getattr(self, field), kind)
+        }
+        defaults: dict[str, Selection[E]] = {
+            field: default
+            for field, info in fields.items()
+            if isinstance(default := info.default, kind)
+        }
+
+        def own(field: str) -> list[E]:
+            default = defaults.get(field)
+            if default is None:
+                return []
+            return [each.entry for each in default.resolve([], [])]
+
+        return [
+            entry
+            for field, value in held.items()
+            for entry in value.ordered(value.resolve(own(field), own(field)))
+        ]
+
     def over(self, below: Self) -> Self:
         """Return this module as a layer over `below`: the fields it set, on below's.
 

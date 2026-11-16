@@ -48,7 +48,9 @@ def test_a_layer_changes_only_what_it_names() -> None:
         .add(Narration(speed=1.5))
         .edit(Narration(voices=Voices().add("villain")), why="the villain speaks")
     )
-    narration = next(each for each in resolve(project) if isinstance(each, Narration))
+    narration = next(
+        each for each in resolve(project).modules if isinstance(each, Narration)
+    )
     assert narration.speed == 1.5
     voices = {each.entry for each in narration.voices.resolve([], [])}
     assert {"narrator", "villain"} <= voices
@@ -68,7 +70,7 @@ def test_another_core_may_take_its_place() -> None:
         """lup's core, with this project's changes."""
 
     project = Project(modules=Modules.default().replace("core", Mine()))
-    assert any(isinstance(each, Mine) for each in resolve(project))
+    assert any(isinstance(each, Mine) for each in resolve(project).modules)
 
 
 def test_lup_adds_no_module_behind_the_declarations_back() -> None:
@@ -76,7 +78,9 @@ def test_lup_adds_no_module_behind_the_declarations_back() -> None:
     project = Project(modules=Modules.default().add(Captions()))
     with pytest.raises(ProjectError):
         resolve(project)
-    resolved = resolve(Project(modules=Modules.default().add(Narration(), Captions())))
+    resolved = resolve(
+        Project(modules=Modules.default().add(Narration(), Captions()))
+    ).modules
     assert {"narration", "captions"} <= {each.name for each in resolved}
 
 
@@ -98,7 +102,7 @@ class Episodes(Module):
 project = Project(modules=Modules.default().add(Episodes(length=30)))
 ''',
     )
-    resolved = resolve(load(path))
+    resolved = resolve(load(path)).modules
     episodes = next(each for each in resolved if each.name == "episodes")
     assert episodes.model_dump()["length"] == 30
 

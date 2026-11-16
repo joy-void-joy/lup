@@ -105,6 +105,10 @@ ignore = [
 ]
 # `# lup:` directives aren't commented-out code (`ERA001`).
 task-tags = ["lup"]
+# A method behind a door may take `by` for its type alone, which says who may call
+# it, so `by` goes unused without a finding (`ARG002`), as `_` does by default
+# (`lup/doors/README.md`, *Who calls*).
+dummy-variable-rgx = "^(_+|(_+[\\p{XID_Continue}]*[\\p{XID_Continue}--_]+?)|by)$"
 
 [tool.ruff.lint.flake8-type-checking]
 # A pydantic field's type is read at runtime, so its import stays out of a
@@ -118,6 +122,24 @@ runtime-evaluated-base-classes = [
     "lup.types.Settings",
     "lup.declaration.module.Module",
     "lup.declaration.grammar.Layer",
+    "lup.doors.request.Request",
+    "lup.Request",
+    "lup.doors.serving.ModuleServing",
+    "lup.ModuleServing",
+]
+# A door reads the annotations of the method it's put on, at run time, so an
+# import they alone use stays out of a `TYPE_CHECKING` block, which would leave it
+# undefined where the door reads it (`lup/doors/README.md`, *A method behind a
+# door*).
+runtime-evaluated-decorators = [
+    "lup.tool",
+    "lup.request",
+    "lup.action",
+    "lup.command",
+    "lup.doors.tool.tool",
+    "lup.doors.request.request",
+    "lup.doors.action.action",
+    "lup.doors.command.command",
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -155,5 +177,5 @@ root_packages = ["lup"]
 [[tool.importlinter.contracts]]
 name = "lup's library side never imports its environment side"
 type = "forbidden"
-source_modules = ["lup.types", "lup.errors", "lup.declaration"]
+source_modules = ["lup.types", "lup.errors", "lup.declaration", "lup.doors"]
 forbidden_modules = ["lup.environment"]

@@ -4,9 +4,10 @@ The module every project holds: what every project has, packaged as submodules, 
 
 ## Layout
 
-- **`lup`**, the front door: the bases every model starts from (`lup.types`), the root of lup's errors (`lup.errors`), and each submodule's library side re-exported. A project's declaration and a module's code import it.
+- **`lup`**, the front door: the bases every model starts from (`lup.types`), the root of lup's errors (`lup.errors`), and each submodule's library side re-exported. A project's declaration and a module's code import it, and nothing else of the core.
 - **One directory per submodule** under `src/lup/`, each with its own `README.md`: its library side at its top, its environment side under `lup.environment`, named after it. An import contract in `pyproject.toml` holds every library side away from `lup.environment`.
 
 ## Submodules
 
 - **The declaration** (`lup/declaration/`, `lup.environment.declaration`): what a project writes to say which modules it's made of, the grammar every module's parts are written in, and loading and resolving it. `README.md` there.
+- **The doors** (`lup/doors/`, `lup.environment.doors`): what a module's methods are reached through (`@lup.tool`, `@lup.request`, `@lup.action`, `@lup.command`), the parties who may call them, the classes a module groups them in, and calling them. `README.md` there.
