@@ -17,13 +17,6 @@ Until this lup runs its own sessions (#13), you run on the second lup: its rooms
 - **`docs/field-notes.md` came over whole:** what was measured of each runtime and of git, with its version. Where a note names a path, a command or an issue, it's the second lup's.
 - **The first lup** (`joy-void-joy/lup-legacy`) is evidence only: how something behaved, what a measurement found.
 
-## How the work goes
-
-- **Decisions first,** put to the operator before a piece is built.
-- **Hand building on with the conversation, not a brief.** When part of the work goes to another agent, fork it (Claude Code's `fork` agent, Codex's `fork_context`) rather than summarise for it: a fork has what was discussed, so what it asks the operator is about the work rather than about your brief. A brief is for a side job, a search or a measurement, whose report comes back to you.
-- **Build the piece whole, on both runtimes, and run it.** A piece is done when it does what its issue says on Claude Code and on Codex, driven end to end with real logins. A test against a stub of a runtime proves the stub. Where you can't run something from your room, say so and ask, rather than build past it.
-- **Finish what you took up.** What you couldn't finish stays in its issue, saying what's left and why, rather than going to a new issue nobody holds.
-
 ## Landing work
 
 1. **One concern per branch,** from `dev`, landed with `land` by whoever wrote it, never by the session that handed them the work: what waits on the operator at landing, and each comment on it, reaches the one who wrote the code. A simple doc change skips the branch: commit it on `dev` and call `land` without one.
