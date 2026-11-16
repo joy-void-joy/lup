@@ -1,7 +1,7 @@
 [project]
 name = "lup-next"
 version = "0.0.0"
-requires-python = ">=3.14"
+requires-python = ">=3.15"
 # Each module of lup's own is a member of the workspace, installed here so the
 # gate checks them together.
 dependencies = ["lup-core"]
@@ -34,7 +34,7 @@ lup-core = { workspace = true }
 lup-dev = { git = "https://github.com/joy-void-joy/lup-legacy-2", subdirectory = "packages/lup-dev", rev = "7ce587e702bbec873ad1047fde4ee5be39c7c0d3" }
 
 [tool.ruff]
-target-version = "py314"
+target-version = "py315"
 # Where the modules' packages live, so their imports sort as first-party.
 src = ["modules/*/src"]
 
@@ -150,7 +150,7 @@ runtime-evaluated-decorators = [
 
 [tool.pyright]
 typeCheckingMode = "strict"
-pythonVersion = "3.14"
+pythonVersion = "3.15"
 enableTypeIgnoreComments = false
 # The modules; scratch work under `tmp/` stays out of the gate.
 include = ["modules"]
