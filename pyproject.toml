@@ -1,0 +1,27 @@
+[project]
+name = "lup-next"
+version = "0.0.0"
+requires-python = ">=3.14"
+
+[dependency-groups]
+dev = [
+    "import-linter>=2.15",
+    "pyright>=1.1.414",
+    "pytest>=9.1.1",
+    "pytest-xdist>=3.8.0",
+    "ruff>=0.16.10",
+]
+# Until this lup runs its own sessions (#13), the second lup judges them, at the
+# commit pinned here: a launch approves and builds it, and its rooms run that
+# copy. It's locked and never installed, so none of the second lup's packages
+# reach this environment (`lup-legacy-2`'s `docs/launch.md`, *The copy that
+# judges, in a room*).
+second-lup = ["lup-dev"]
+
+[tool.uv]
+default-groups = ["dev"]
+# The package age gate: nothing published in the last three days resolves.
+exclude-newer = "3 days"
+
+[tool.uv.sources]
+lup-dev = { git = "https://github.com/joy-void-joy/lup-legacy-2", subdirectory = "packages/lup-dev", rev = "7ce587e702bbec873ad1047fde4ee5be39c7c0d3" }
