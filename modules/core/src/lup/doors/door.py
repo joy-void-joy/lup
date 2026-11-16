@@ -11,7 +11,8 @@ class (`README.md` here, *A method behind a door*).
 
 import inspect
 from annotationlib import Format, type_repr
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Generator
+from contextlib import contextmanager
 from functools import partial
 from types import GenericAlias, UnionType
 from typing import ClassVar, Concatenate, Self, TypeIs, get_args, get_origin, overload
@@ -285,17 +286,27 @@ class Method(property):
         another already.
         """
         if isinstance(function, Method):
+            name = function.function.__qualname__
             message = (
-                f"`{function.function.__qualname__}` is {function.door.called} "
-                f"already, and can't be {door.called} too: a method is reached "
-                "through one door"
+                f"`{name}` is {function.door.called} already, and can't be "
+                f"{door.called} too: a method is reached through one door"
             )
-            raise DoorError(message)
-        door.shaped(function)
+            raise DoorError(message, about=[name])
         self.function = function
         self.door = door
-        self.known = self.attempted()
+        with self.named():
+            door.shaped(function)
+            self.known = self.attempted()
         super().__init__(self.bound)
+
+    @contextmanager
+    def named(self) -> Generator[None]:
+        """Name the method as what a `DoorError` raised within is about, where it names nothing yet."""
+        try:
+            yield
+        except DoorError as wrong:
+            wrong.about = wrong.about or [self.function.__qualname__]
+            raise
 
     def attempted(self) -> Taken | None:
         """Read what the method takes and check it against its door; none where an annotation names a class not defined yet."""
@@ -321,15 +332,17 @@ class Method(property):
         method runs, as an import under `TYPE_CHECKING` alone is.
         """
         if self.known is None:
+            name = self.function.__qualname__
             try:
-                self.known = self.read()
+                with self.named():
+                    self.known = self.read()
             except NameError as unnamed:
                 message = (
-                    f"`{self.function.__qualname__}`'s annotations name "
-                    f"`{unnamed.name}`, which isn't defined where it runs: its door "
-                    "reads them, so import it outside `TYPE_CHECKING`"
+                    f"`{name}`'s annotations name `{unnamed.name}`, which isn't "
+                    "defined where it runs: its door reads them, so import it "
+                    "outside `TYPE_CHECKING`"
                 )
-                raise DoorError(message) from unnamed
+                raise DoorError(message, about=[name]) from unnamed
         return self.known
 
     def bound(self, instance: BaseModel) -> Function:

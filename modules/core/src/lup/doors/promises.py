@@ -381,8 +381,7 @@ class DoorsPromises(ModuleServing):
         """A tool's name is one method's across modules, so two modules sharing one fail to resolve, naming both; dropping one's class resolves."""
         with raises(ProjectError) as shared:
             await by.started(declared(Echo(), Other()))
-        # lup: ignore("error-text", why="the promise is that the failure names both modules, and `ProjectError` carries no field naming them: the names, read from what the promise made, are looked for in its message, never its wording")
-        assert all(name in str(shared.raised()) for name in ["echo", "other"])
+        assert all(name in shared.raised().about for name in ["echo", "other"])
         quiet = Other(serving=Serving().drop("OtherServing"))
         started = await by.started(declared(Echo(), quiet))
         assert [each.name for each in started.tools()].count("shout") == 1
@@ -403,8 +402,7 @@ class DoorsPromises(ModuleServing):
         misshapen = by.any(Misshapen)
         with raises(ProjectError) as failed:
             await by.started(loud(misshapen.methods()))
-        # lup: ignore("error-text", why="the promise is that the failure names the method, and `ProjectError` carries no field naming it: the name, read from what the promise made, is looked for in its message, never its wording")
-        assert "wrong" in str(failed.raised())
+        assert "LoudServing.wrong" in failed.raised().about
 
     @lup.promise
     async def a_door_reads_a_class_defined_further_down_its_file(

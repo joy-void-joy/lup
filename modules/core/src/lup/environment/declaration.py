@@ -23,6 +23,7 @@ from lup.declaration.grammar import listed
 from lup.declaration.module import Module
 from lup.declaration.project import Project
 from lup.environment.doors import Doors
+from lup.errors import LupError
 from lup.types import Model
 
 if TYPE_CHECKING:
@@ -68,7 +69,8 @@ def load(path: Path) -> Project:
         raise
     except Exception as failed:
         message = f"{path} failed as it ran: {type(failed).__name__}: {failed}"
-        raise ProjectError(message) from failed
+        about = failed.about if isinstance(failed, LupError) else []
+        raise ProjectError(message, about=about) from failed
     finally:
         del sys.modules[name]
     project = getattr(module, "project", None)
@@ -102,26 +104,31 @@ def resolve(project: Project) -> Resolved:
             f"every project holds a module named `{Core.name}`, which this "
             f"declaration's modules leave out; they're {listed(names)}"
         )
-        raise ProjectError(message)
+        raise ProjectError(message, about=[Core.name])
     looped = next(
         (found for module in modules if (found := cycle(type(module), []))), None
     )
     if looped is not None:
         around = " requires ".join(f"`{name}`" for name in looped)
         message = f"modules can't require each other in a cycle: {around}"
-        raise ProjectError(message)
-    missing = [
-        f"`{module.name}` requires `{required.name}`, which isn't selected"
+        raise ProjectError(message, about=list(dict.fromkeys(looped)))
+    unmet = [
+        (module.name, required.name)
         for module in modules
         for required in module.requires
         if required.name not in names
     ]
-    if missing:
+    if unmet:
+        missing = [
+            f"`{name}` requires `{required}`, which isn't selected"
+            for name, required in unmet
+        ]
         message = (
             f"{'; '.join(missing)}. Add each, or drop what requires it too: lup "
             "never adds or drops a module behind the declaration's back"
         )
-        raise ProjectError(message)
+        about = [name for pair in unmet for name in pair]
+        raise ProjectError(message, about=list(dict.fromkeys(about)))
     return Resolved(modules=modules, doors=Doors.of(modules))
 
 

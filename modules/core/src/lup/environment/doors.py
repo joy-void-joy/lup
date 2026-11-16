@@ -104,18 +104,23 @@ class Keyed(Model):
 
 def distinct(what: str, keyed: list[Keyed]) -> None:
     """Raise `ProjectError` where two methods are reached by one name, naming both."""
-    clashes = [
-        f"`{one.name}` by {one.entry.serves.said()} and {other.entry.serves.said()}"
+    pairs = [
+        (one, other)
         for at, one in enumerate(keyed)
         for other in keyed[at + 1 :]
         if one.scope == other.scope and one.name == other.name
     ]
-    if clashes:
+    if pairs:
+        clashes = [
+            f"`{one.name}` by {one.entry.serves.said()} and {other.entry.serves.said()}"
+            for one, other in pairs
+        ]
         message = (
             f"{what} is one method's, and {'; '.join(clashes)} share one: drop or "
             "rename one"
         )
-        raise ProjectError(message)
+        about = [each.entry.serves.module.name for pair in pairs for each in pair]
+        raise ProjectError(message, about=list(dict.fromkeys(about)))
 
 
 def made_with(serves: Serves) -> None:
@@ -127,13 +132,13 @@ def made_with(serves: Serves) -> None:
             f"{serves.said()} narrows its `module` to another module's class, so "
             f"it can't be made with the module listing it: {wrong}"
         )
-        raise ProjectError(message) from wrong
+        raise ProjectError(message, about=[serves.module.name]) from wrong
     except PydanticUserError as undefined:
         message = (
             f"{serves.said()} names a class that isn't defined where it's made: "
             f"{undefined}"
         )
-        raise ProjectError(message) from undefined
+        raise ProjectError(message, about=[serves.module.name]) from undefined
 
 
 class Doors(Model):
@@ -164,7 +169,7 @@ class Doors(Model):
         try:
             takes = [entry.method.taken for entry in entries]
         except DoorError as wrong:
-            raise ProjectError(str(wrong)) from wrong
+            raise ProjectError(str(wrong), about=wrong.about) from wrong
         distinct("A tool's name", doors.keyed(ToolDoor))
         distinct(
             "A request's kind",
