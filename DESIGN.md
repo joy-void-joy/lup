@@ -30,7 +30,7 @@ A module refers to its code by importing it, so pyright checks the reference and
 
 **Rooms.** A project declares named rooms, each a selection of modules on top of the project's own. A maintaining room, for working on the project's code, has the code rules and reviews. A playground room, where an agent makes things freely (art, or podcasts), leaves them out: the container is its only wall.
 
-**The measure:** a project is its own logic and its views, and what every project would otherwise rebuild is lup's. planecrash2, a story read aloud and edited with Claude in a page beside the session, is its corpus, its reading of the story and one view: the room, the session's wiring to the page, the panes, comments on passages and voice are modules it selects.
+**The measure:** a project is its own logic and its views, and what every project would otherwise rebuild is lup's. A story reader built outside lup, which reads a story aloud and edits it with Claude in a page beside the session, is its corpus, its reading of the story and one view: the room, the session's wiring to the page, the panes, comments on passages and voice are modules it selects.
 
 ## Where code runs
 
