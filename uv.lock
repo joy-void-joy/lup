@@ -1,10 +1,16 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.14"
 
 [options]
 exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P3D"
+
+[manifest]
+members = [
+    "lup-core",
+    "lup-next",
+]
 
 [[package]]
 name = "annotated-doc"
@@ -426,6 +432,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "lup-core"
+version = "0.0.0"
+source = { editable = "modules/core" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.14" },
+    { name = "pydantic-settings", specifier = ">=2.11" },
+]
+
+[[package]]
 name = "lup-dev"
 version = "0.1.0"
 source = { git = "https://github.com/joy-void-joy/lup-legacy-2?subdirectory=packages%2Flup-dev&rev=7ce587e702bbec873ad1047fde4ee5be39c7c0d3#7ce587e702bbec873ad1047fde4ee5be39c7c0d3" }
@@ -458,6 +479,9 @@ dependencies = [
 name = "lup-next"
 version = "0.0.0"
 source = { virtual = "." }
+dependencies = [
+    { name = "lup-core" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -472,6 +496,7 @@ second-lup = [
 ]
 
 [package.metadata]
+requires-dist = [{ name = "lup-core", editable = "modules/core" }]
 
 [package.metadata.requires-dev]
 dev = [

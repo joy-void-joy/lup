@@ -1,0 +1,20 @@
+[project]
+# The core's package imports as `lup`. Its distribution is named apart from it
+# while this repository's lock also pins the second lup's `lup-dev`, which
+# depends on a distribution named `lup`: uv refuses two sources for one name in a
+# lock, whatever group each comes from.
+name = "lup-core"
+version = "0.0.0"
+description = "lup's core: the declaration's grammar, the doors a module is reached through, and the submodules every project has."
+requires-python = ">=3.14"
+dependencies = [
+    "pydantic>=2.14",
+    "pydantic-settings>=2.11",
+]
+
+[tool.uv.build-backend]
+module-name = "lup"
+
+[build-system]
+requires = ["uv_build>=0.9,<1"]
+build-backend = "uv_build"
