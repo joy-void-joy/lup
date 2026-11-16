@@ -58,12 +58,12 @@ def is_model(annotation: Annotation) -> TypeIs[type[BaseModel]]:
 
 
 def shaped(function: Callable[..., Awaitable[Answer]]) -> None:
-    """Raise `DoorError` where `function` can't be behind a door, whatever its types say.
+    """Raise `DoorError` where `function` can't be behind a door of the usual shape, whatever its types say.
 
-    A method behind a door is async, takes `self`, one model, then `by` where it
-    needs who calls it, each annotated, says what it returns, and has a docstring.
-    Its annotations aren't evaluated here: one may name a class defined further
-    down its file, which is read later (`Method.taken`).
+    A method behind such a door is async, takes `self`, one model, then `by`
+    where it needs who calls it, each annotated, says what it returns, and has a
+    docstring. Its annotations aren't evaluated here: one may name a class
+    defined further down its file, which is read later (`Method.taken`).
     """
     name = function.__qualname__
     if not inspect.iscoroutinefunction(function):
@@ -185,6 +185,14 @@ class Door(Model):
     """Who may call a method leaving `by` out; none where each method says, as a
     request does."""
 
+    def shaped(self, function: Callable[..., Awaitable[Answer]]) -> None:
+        """Raise `DoorError` where `function` can't be behind this door, whatever its types say: as it's put on, with no annotation evaluated.
+
+        Most doors take the usual shape (`shaped`); a door of another shape says
+        its own here.
+        """
+        shaped(function)
+
     def contract(self, taken: Taken) -> None:
         """Raise `DoorError` where `taken` isn't what this door takes and returns."""
 
@@ -247,7 +255,7 @@ class Method(property):
                 "through one door"
             )
             raise DoorError(message)
-        shaped(function)
+        door.shaped(function)
         self.function = function
         self.door = door
         self.known = self.attempted()
