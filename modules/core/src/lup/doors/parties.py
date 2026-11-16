@@ -15,7 +15,7 @@ class Party(Model):
 
 
 class Agent(Party):
-    """An agent: a session's own conversation, or one of their subagents', calling one of their tools, or running code in their room that sends a request or runs a command.
+    """An agent: a session's own conversation, or one of their subagents', calling one of their tools, or running a command from their room.
 
     Identified by lup's id for them, which stays put as they're renamed; the id
     becomes the conversation's own type, with the session it's in, once lup

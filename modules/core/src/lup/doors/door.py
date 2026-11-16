@@ -141,9 +141,9 @@ class Taken(Model, arbitrary_types_allowed=True):
     description: str
     """Its docstring, which describes it: what an agent reads of a tool."""
     model: inspect.Parameter | None
-    """The parameter taking its model: a tool's input, a request, an action's
-    mark, a command's arguments or a law's value; none where it takes `by`
-    alone, as a scenario does."""
+    """The parameter taking its model: a tool's input, an action's mark, a
+    command's arguments or a law's value; none where it takes `by` alone, as a
+    scenario does."""
     by: inspect.Parameter | None
     """The parameter taking who calls it, typed as who may; none where it's left
     out, and its door's default callers may."""
@@ -220,7 +220,7 @@ class Door(Model):
     """What the door makes a method, as a refusal names it: `a tool`."""
     default: ClassVar[list[type[Party]]] = []
     """Who may call a method leaving `by` out; none where each method says, as a
-    request does."""
+    command does."""
 
     def shaped(self, function: Function) -> None:
         """Raise `DoorError` where `function` can't be behind this door, whatever its types say: as it's put on, with no annotation evaluated.

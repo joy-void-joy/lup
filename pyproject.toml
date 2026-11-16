@@ -122,8 +122,6 @@ runtime-evaluated-base-classes = [
     "lup.types.Settings",
     "lup.declaration.module.Module",
     "lup.declaration.grammar.Layer",
-    "lup.doors.request.Request",
-    "lup.Request",
     "lup.doors.serving.ModuleServing",
     "lup.ModuleServing",
     "lup.doors.door.Door",
@@ -134,11 +132,9 @@ runtime-evaluated-base-classes = [
 # door*).
 runtime-evaluated-decorators = [
     "lup.tool",
-    "lup.request",
     "lup.action",
     "lup.command",
     "lup.doors.tool.tool",
-    "lup.doors.request.request",
     "lup.doors.action.action",
     "lup.doors.command.command",
     "lup.promise",

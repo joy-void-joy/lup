@@ -3,22 +3,13 @@
 What a module's methods are reached through. A module groups its methods in classes deriving from `ModuleServing`, lists them in its `serving` field, and puts each method behind one door, which says who calls it, what it takes and what it returns:
 
 ```python
-from typing import Literal
-
 import lup
-from lup import Agent, Model, Module, ModuleServing, Operator, Request, Serving
+from lup import Agent, Model, Module, ModuleServing, Operator, Serving
 
 
 class Said(Model):
     """What to shout."""
 
-    text: str
-
-
-class Ping(Request):
-    """Whether a module is there."""
-
-    kind: Literal["ping"] = "ping"
     text: str
 
 
@@ -31,11 +22,6 @@ class EchoServing(ModuleServing):
     async def shout(self, said: Said, by: Agent) -> str:
         """Shout what you're told."""
         return said.text.upper() * self.module.volume
-
-    @lup.request
-    async def ping(self, asked: Ping, by: Agent) -> Said:
-        """Answer a ping from an agent's room."""
-        return Said(text=f"{asked.text}, from {by.id}")
 
     @lup.command
     async def echo(self, said: Said, by: Operator) -> str:
@@ -58,13 +44,11 @@ Its library side (`lup.doors`, re-exported by `lup`) is what a module's code imp
 | Door | Who calls it | It takes | It returns | Who may call it, unsaid |
 |---|---|---|---|---|
 | `@lup.tool`, `@lup.tool(reads=True, idempotent=True)` | an agent, through MCP | a model, its arguments | a model, or `str` | `Agent` |
-| `@lup.request` | code in an agent's room | a `Request`, whose `kind` routes it | a model, the reply | nobody: it says |
 | `@lup.action(verb=…, says=…)` | the operator's key, on what a view offers | a model, or a list of it, every mark of a send | a model, `str`, or nothing | `Operator` |
 | `@lup.command` | whoever runs the command line | a model, its fields the arguments and options | `str`, the text it prints | nobody: it says |
 
 A door exists only where the contract differs: who calls a method, what it takes, what it returns. A module's promises are behind a door of their own too, `@lup.promise`, which the harness checks (`lup/testing/README.md`).
 - **A tool's name is its method's,** and its docstring's first line, standing alone, is its summary, 50 characters at most, which a session that searches for tools lists. Its marks say whether a call may be sent again: `reads`, it changes nothing; `idempotent`, a call sent again adds nothing (MCP's hints).
-- **A request is routed by its `kind`,** a literal default of its own on its `Request` class, since code in a room sends a typed request whichever module answers it.
 - **An action** names the `verb` whose key reaches it, and what the line of keys `says` it does.
 - **A command takes everything as arguments,** so one run without an argument it needs is refused at once rather than waiting on input that may never come, and an agent or a test running it fails rather than hangs.
 
@@ -78,7 +62,7 @@ Read through its class, a method is a `Method`, saying its door and what it take
 
 ## Who calls
 
-A method's `by` is typed as the parties who may call it, `by: Agent` or `by: Agent | Operator`, and is handed the one calling. A party is a class deriving from `Party`, which any module may declare; the core's are `Agent`, an agent, identified by lup's id for them, and `Operator`. A request from an agent's room is `by: Agent`: its door is what tells code in a room from the agent's own call. Left out, a method may be called by its door's default parties; a request and a command have none, so each says who may send or run it. Who calls is checked as the door is put on, `by` naming parties' classes alone, and again before each call.
+A method's `by` is typed as the parties who may call it, `by: Agent` or `by: Agent | Operator`, and is handed the one calling. A party is a class deriving from `Party`, which any module may declare; the core's are `Agent`, an agent, identified by lup's id for them, and `Operator`. Left out, a method may be called by its door's default parties; a command has none, so each says who may run it. Who calls is checked as the door is put on, `by` naming parties' classes alone, and again before each call.
 
 ## What a module serves
 
@@ -87,9 +71,9 @@ A `ModuleServing` class narrows `module` to its module's class (`module: Echo`),
 A module lists its classes in `serving`, a selection (`Serving`) naming each by its class's name: a project drops one with `Echo(serving=Serving().drop("EchoServing"))`. Resolving a declaration (`lup.environment.declaration.resolve`) lists every class each module serves (`Resolved.doors`), and refuses:
 - a class narrowed to another module's class, which can't be made with the module listing it;
 - a method that can't be behind its door, once every class its annotations name is defined;
-- a tool's name or a request's kind two methods share across modules, since an agent and a room name them without the module, naming both;
+- a tool's name two methods share across modules, since an agent names it without the module, naming both;
 - an action's or a command's name two methods share within a module, which names them.
 
 ## Calling through a door
 
-`Doors` is how the harness and the services reach a module's methods. `tools()` and `kinds()` say what's served; `call(tool, arguments, by)`, `ask(request, by)`, `act(module, action, given, by)` and `run(module, command, arguments, by)` find the method, check who calls, read what's given as the model it takes, and run it on its class made afresh. Each answers `Accepted`, with what was given, as its model, and what the method answered, or `Refused`, with what was sent and why: no such method, a caller it isn't for, what it doesn't take, or the method raising `RefusedError`. Nothing a caller sends makes a call raise, so a service relays a refusal rather than catching errors; what a method raises otherwise goes up as raised.
+`Doors` is how the harness and the services reach a module's methods. `tools()` says what a session is told of each tool served; `call(tool, arguments, by)`, `act(module, action, given, by)` and `run(module, command, arguments, by)` find the method, check who calls, read what's given as the model it takes, and run it on its class made afresh. Each answers `Accepted`, with what was given, as its model, and what the method answered, or `Refused`, with what was sent and why: no such method, a caller it isn't for, what it doesn't take, or the method raising `RefusedError`. Nothing a caller sends makes a call raise, so a service relays a refusal rather than catching errors; what a method raises otherwise goes up as raised.

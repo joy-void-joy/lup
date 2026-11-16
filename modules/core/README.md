@@ -13,5 +13,5 @@ lup declares itself as any project does, in `lup_declaration.py` at the reposito
 ## Submodules
 
 - **The declaration** (`lup/declaration/`, `lup.environment.declaration`): what a project writes to say which modules it's made of, the grammar every module's parts are written in, and loading and resolving it. `README.md` there.
-- **The doors** (`lup/doors/`, `lup.environment.doors`): what a module's methods are reached through (`@lup.tool`, `@lup.request`, `@lup.action`, `@lup.command`), the parties who may call them, the classes a module groups them in, and calling them. `README.md` there.
+- **The doors** (`lup/doors/`, `lup.environment.doors`): what a module's methods are reached through (`@lup.tool`, `@lup.action`, `@lup.command`), the parties who may call them, the classes a module groups them in, and calling them. `README.md` there.
 - **Promises** (`lup/testing/`, `lup.environment.testing`): what a module promises (`@lup.promise`, a law or a scenario), the harness a promise reaches lup through, and checking them, with the pytest plugin the gate runs them through. `README.md` there.

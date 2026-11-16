@@ -2,12 +2,11 @@
 
 Resolving a declaration lists every class of methods each module serves
 (`Doors.of`), each made with its module, refusing what two methods would share:
-a tool's name or a request's kind across the project's modules, an action's or
-a command's name within one. Calling through a door (`Doors.call`, `.ask`,
-`.act` and `.run`) finds the method, checks who calls, reads what it's given as
-the model it takes, and runs it on its class made afresh, answering `Accepted`
-or `Refused`: what the harness and the services call (`README.md` in
-`lup/doors/`, *Calling through a door*).
+a tool's name across the project's modules, an action's or a command's name
+within one. Calling through a door (`Doors.call`, `.act` and `.run`) finds the
+method, checks who calls, reads what it's given as the model it takes, and runs
+it on its class made afresh, answering `Accepted` or `Refused`: what the harness
+and the services call (`README.md` in `lup/doors/`, *Calling through a door*).
 """
 
 from pydantic import JsonValue, PydanticUserError, ValidationError
@@ -28,7 +27,6 @@ from lup.doors.door import (
     served,
 )
 from lup.doors.parties import Party, said
-from lup.doors.request import Request, RequestDoor
 from lup.doors.serving import ModuleServing, Serving
 from lup.doors.tool import ToolDoor, ToolSpec
 from lup.types import Model
@@ -61,11 +59,6 @@ class Entry(Model, arbitrary_types_allowed=True):
     name: str
     method: Method
 
-    def kind(self) -> str | None:
-        """Return the kind of request it answers; none where it isn't behind a request's door."""
-        door = self.method.door
-        return door.kind(self.method.taken) if isinstance(door, RequestDoor) else None
-
     async def answered(self, given: JsonValue, by: Party) -> Accepted | Refused:
         """Run the method on `given`, called by `by`, and say what came of it.
 
@@ -93,7 +86,7 @@ class Entry(Model, arbitrary_types_allowed=True):
 
 
 class Keyed(Model):
-    """A name a method is reached by, where it's shared: a tool's or a request's across modules, an action's or a command's within its module."""
+    """A name a method is reached by, where it's shared: a tool's across modules, an action's or a command's within its module."""
 
     name: str
     scope: str = ""
@@ -153,8 +146,8 @@ class Doors(Model):
         Raise `ProjectError` where a class can't be made with the module listing
         it, where a method can't be behind its door once every class its
         annotations name is defined, or where two methods are reached by one
-        name: a tool's or a request's kind across modules, an action's or a
-        command's within a module.
+        name: a tool's across modules, an action's or a command's within a
+        module.
         """
         doors = cls(
             served=[
@@ -165,21 +158,13 @@ class Doors(Model):
         )
         for each in doors.served:
             made_with(each)
-        entries = doors.entries()
         try:
-            takes = [entry.method.taken for entry in entries]
+            for entry in doors.entries():
+                # lup: ignore("B018", why="reading a method's `taken` checks it against its door, which resolving does of every method once every class its annotations name is defined")
+                entry.method.taken
         except DoorError as wrong:
             raise ProjectError(str(wrong), about=wrong.about) from wrong
         distinct("A tool's name", doors.keyed(ToolDoor))
-        distinct(
-            "A request's kind",
-            [
-                Keyed(name=kind, entry=entry)
-                for entry, taken in zip(entries, takes, strict=True)
-                if isinstance(door := entry.method.door, RequestDoor)
-                and (kind := door.kind(taken))
-            ],
-        )
         distinct("An action's name in its module", doors.keyed(ActionDoor, scoped=True))
         distinct(
             "A command's name in its module", doors.keyed(CommandDoor, scoped=True)
@@ -219,10 +204,6 @@ class Doors(Model):
             if isinstance(entry.method.door, ToolDoor)
         ]
 
-    def kinds(self) -> list[str]:
-        """Return each kind of request the modules answer."""
-        return [kind for entry in self.through(RequestDoor) if (kind := entry.kind())]
-
     async def call(
         self, tool: str, arguments: JsonValue, by: Party
     ) -> Accepted | Refused:
@@ -231,17 +212,6 @@ class Doors(Model):
         if not found:
             return refused(arguments, f"no module serves a tool `{tool}`")
         return await found[0].answered(arguments, by)
-
-    async def ask(self, request: JsonValue, by: Party) -> Accepted | Refused:
-        """Answer `request` with the method answering its kind, called by `by`, and say what came of it."""
-        try:
-            kind = Request.model_validate(request).kind
-        except ValidationError as wrong:
-            return refused(request, f"a request carries its `kind`: {wrong}")
-        found = [entry for entry in self.through(RequestDoor) if entry.kind() == kind]
-        if not found:
-            return refused(request, f"no module answers a request of kind `{kind}`")
-        return await found[0].answered(request, by)
 
     async def act(
         self, module: str, action: str, given: JsonValue, by: Party

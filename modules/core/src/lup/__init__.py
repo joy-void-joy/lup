@@ -3,10 +3,10 @@
 `import lup` gives the bases every model starts from, the root of lup's errors,
 the declaration's grammar (`Module`, `Modules`, `Project`, and the selections and
 layers a module's parts are written in), and the doors a module's methods are
-reached through (`lup.tool`, `lup.request`, `lup.action`, `lup.command`,
-`lup.promise`), with the parties a method's `by` names and the classes a module
-groups them in (`ModuleServing`, listed in its `Serving`). The core's
-environment side (`lup.environment`) isn't among it, and nothing here imports it.
+reached through (`lup.tool`, `lup.action`, `lup.command`, `lup.promise`), with
+the parties a method's `by` names and the classes a module groups them in
+(`ModuleServing`, listed in its `Serving`). The core's environment side
+(`lup.environment`) isn't among it, and nothing here imports it.
 
 `Core` is imported when first used: it lists its submodules' promises, which
 import `lup` itself.
@@ -20,7 +20,6 @@ from lup.doors.action import action
 from lup.doors.command import command
 from lup.doors.door import DoorError, RefusedError
 from lup.doors.parties import Agent, Operator, Party
-from lup.doors.request import Request, request
 from lup.doors.serving import ModuleServing, Serving
 from lup.doors.tool import tool
 from lup.errors import LupError
@@ -46,13 +45,11 @@ __all__ = [
     "Project",
     "ProjectError",
     "RefusedError",
-    "Request",
     "Selection",
     "Serving",
     "Settings",
     "action",
     "command",
     "promise",
-    "request",
     "tool",
 ]
