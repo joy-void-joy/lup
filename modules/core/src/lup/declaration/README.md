@@ -31,7 +31,7 @@ Its library side (`lup.declaration`, re-exported by `lup`) is what a declaration
 
 `Project` holds the modules a project is made of: lup's default ones, `Modules.default()`, unless it says otherwise. Loading runs the file and returns its `project`; a file that binds none, binds something else or fails as it runs raises `ProjectError`, never standing in the defaults, which would run the project as something it isn't. Loading runs the file and everything it imports, so it runs where a branch's code is harmless, never in the program on the operator's machine (`DESIGN.md`, *Where code runs*).
 
-Resolving applies every layer in order over lup's default modules, then checks that the selection holds a module named `core` (`Core`, or another put in its place with `.replace`), and every module a selected one `requires`, with no cycle among them. lup never adds or drops a module behind the declaration's back. What comes out (`Resolved`) is the modules, and what they serve behind their doors (`lup/doors/README.md`).
+Resolving applies every layer in order over lup's default modules, then checks that the selection holds a module named `core` (`Core`, `lup/core.py`, or another put in its place with `.replace`), and every module a selected one `requires`, with no cycle among them. lup never adds or drops a module behind the declaration's back. What comes out (`Resolved`) is the modules, and what they serve behind their doors (`lup/doors/README.md`).
 
 ## What a module is
 

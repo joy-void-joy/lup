@@ -30,6 +30,10 @@ type Returned = Answer | bool
 """What a method behind any door returns: what a party's call answers, or a
 law's verdict (`lup.testing`), which no party calls."""
 
+type Function = Callable[..., Awaitable[Returned] | bool]
+"""A method as a door takes it: async, or, where its door allows, a law's
+predicate, which answers its verdict at once."""
+
 type Annotation = type | GenericAlias | UnionType | None
 """A type as a signature writes it: a class, a generic alias (`list[Said]`), a
 union, or `None`."""
@@ -61,22 +65,27 @@ def is_model(annotation: Annotation) -> TypeIs[type[BaseModel]]:
     return isinstance(annotation, type) and issubclass(annotation, BaseModel)
 
 
-def shaped(
-    function: Callable[..., Awaitable[Returned]], *, by_alone: bool = False
-) -> None:
+def shaped(function: Function, *, by_alone: bool = False) -> None:
     """Raise `DoorError` where `function` can't be behind a door of the usual shape, whatever its types say.
 
-    A method behind such a door is async, takes `self`, one model, then `by`
-    where it needs who calls it, each annotated, says what it returns, and has a
-    docstring; with `by_alone`, one taking `by` and no model fits too, as a
-    scenario does (`lup.testing`). Its annotations aren't evaluated here: one
-    may name a class defined further down its file, which is read later
-    (`Method.taken`).
+    A method behind such a door is async, and takes what `taking` says.
+    """
+    if not inspect.iscoroutinefunction(function):
+        message = f"`{function.__qualname__}` is reached through a door, so it's async"
+        raise DoorError(message)
+    taking(function, by_alone=by_alone)
+
+
+def taking(function: Function, *, by_alone: bool = False) -> None:
+    """Raise `DoorError` where `function` doesn't take what a method behind a door takes, whatever its types say.
+
+    It takes `self`, one model, then `by` where it needs who calls it, each
+    annotated, says what it returns, and has a docstring; with `by_alone`, one
+    taking `by` and no model fits too, as a scenario does (`lup.testing`). Its
+    annotations aren't evaluated here: one may name a class defined further
+    down its file, which is read later (`Method.taken`).
     """
     name = function.__qualname__
-    if not inspect.iscoroutinefunction(function):
-        message = f"`{name}` is reached through a door, so it's async"
-        raise DoorError(message)
     signature = inspect.signature(function, annotation_format=Format.FORWARDREF)
     parameters = list(signature.parameters.values())
     match parameters:
@@ -141,7 +150,7 @@ class Taken(Model, arbitrary_types_allowed=True):
     """Its return annotation, as written."""
 
     @classmethod
-    def of(cls, function: Callable[..., Awaitable[Returned]]) -> Taken:
+    def of(cls, function: Function) -> Taken:
         """Read what `function`, shaped as a door takes it (`shaped`), takes and returns.
 
         Raise `NameError` where an annotation names a class that isn't defined
@@ -212,7 +221,7 @@ class Door(Model):
     """Who may call a method leaving `by` out; none where each method says, as a
     request does."""
 
-    def shaped(self, function: Callable[..., Awaitable[Returned]]) -> None:
+    def shaped(self, function: Function) -> None:
         """Raise `DoorError` where `function` can't be behind this door, whatever its types say: as it's put on, with no annotation evaluated.
 
         Most doors take the usual shape (`shaped`); a door of another shape says
@@ -269,9 +278,7 @@ class Method(property):
     is how a class's methods are found (`served`).
     """
 
-    def __init__(
-        self, function: Callable[..., Awaitable[Returned]], door: Door
-    ) -> None:
+    def __init__(self, function: Function, door: Door) -> None:
         """Put `door` on `function`, checking it as far as its annotations are defined yet.
 
         Raise `DoorError` where it can't be behind the door, or is behind
@@ -325,7 +332,7 @@ class Method(property):
                 raise DoorError(message) from unnamed
         return self.known
 
-    def bound(self, instance: BaseModel) -> Callable[..., Awaitable[Returned]]:
+    def bound(self, instance: BaseModel) -> Function:
         """Return the method of `instance`."""
         return partial(self.function, instance)
 
@@ -358,9 +365,10 @@ class Method(property):
         party calls a promise.
         """
         if self.taken.by is None:
-            answered = await self.function(instance, value)
+            called = self.function(instance, value)
         else:
-            answered = await self.function(instance, value, by=by)
+            called = self.function(instance, value, by=by)
+        answered = called if isinstance(called, bool) else await called
         if isinstance(answered, bool):
             message = (
                 f"`{self.taken.qualified}` answers a verdict, as a law does, which "
@@ -370,7 +378,7 @@ class Method(property):
         return answered
 
 
-class Served[S, **P, R: Awaitable[Returned]](Method):
+class Served[S, **P, R: Awaitable[Returned] | bool](Method):
     """A method behind a door, typed as written: read through an instance, it's that instance's method; read through its class, the `Method` saying its door."""
 
     def __init__(self, function: Callable[Concatenate[S, P], R], door: Door) -> None:

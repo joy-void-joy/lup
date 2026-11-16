@@ -3,8 +3,8 @@ name = "lup-next"
 version = "0.0.0"
 requires-python = ">=3.15"
 # Each module of lup's own is a member of the workspace, installed here so the
-# gate checks them together.
-dependencies = ["lup-core"]
+# gate checks them together, with what checking their promises needs.
+dependencies = ["lup-core[testing]"]
 
 [dependency-groups]
 dev = [
@@ -126,6 +126,7 @@ runtime-evaluated-base-classes = [
     "lup.Request",
     "lup.doors.serving.ModuleServing",
     "lup.ModuleServing",
+    "lup.doors.door.Door",
 ]
 # A door reads the annotations of the method it's put on, at run time, so an
 # import they alone use stays out of a `TYPE_CHECKING` block, which would leave it
@@ -140,6 +141,8 @@ runtime-evaluated-decorators = [
     "lup.doors.request.request",
     "lup.doors.action.action",
     "lup.doors.command.command",
+    "lup.promise",
+    "lup.testing.promise.promise",
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -147,6 +150,14 @@ runtime-evaluated-decorators = [
 # assertion is a test's point (`S101`), its functions need no docstring beyond
 # the promise they check (`D`), and a stand-in's argument may go unused (`ARG`).
 "modules/*/tests/**" = ["S101", "D", "ARG"]
+# A module's promises assert what they promise, as a test does (`S101`), and are
+# read as part of the module (`lup/testing/README.md`).
+"modules/*/src/**/promises.py" = ["S101"]
+
+[tool.ruff.lint.pydocstyle]
+# A promise's docstring is what it promises, a statement rather than a command
+# (`D401`); its door holds it to having one.
+ignore-decorators = ["lup.promise", "lup.testing.promise.promise"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
@@ -156,9 +167,12 @@ enableTypeIgnoreComments = false
 include = ["modules"]
 
 [tool.pytest]
-# The modules' sources are collected too, so `--doctest-modules` runs their
-# docstring examples as tests.
-testpaths = ["modules/*/tests", "modules/*/src"]
+# lup's own declaration, whose modules' promises lup's plugin checks, and the
+# modules' sources, so `--doctest-modules` runs their docstring examples.
+testpaths = ["lup_declaration.py", "modules/*/src"]
+# Named apart from `lup_project.py` until this lup runs its own sessions (#13),
+# the second lup reading that file as its own (`lup_declaration.py`).
+lup_declaration = "lup_declaration.py"
 # `importlib` lets two modules' tests share a file name.
 addopts = ["--doctest-modules", "--import-mode=importlib"]
 # A check stuck past 30 seconds has its threads dumped and its worker ended,
@@ -177,5 +191,31 @@ root_packages = ["lup"]
 [[tool.importlinter.contracts]]
 name = "lup's library side never imports its environment side"
 type = "forbidden"
-source_modules = ["lup.types", "lup.errors", "lup.declaration", "lup.doors"]
+source_modules = [
+    "lup.types",
+    "lup.errors",
+    "lup.core",
+    "lup.declaration",
+    "lup.doors",
+    "lup.testing",
+]
 forbidden_modules = ["lup.environment"]
+
+# A promise reaches lup through the harness and modules' public surface alone, so
+# a change inside a module leaves its promises alone (`lup/testing/README.md`):
+# a module's promises import `lup` and `lup.testing`, never the core's insides.
+# Only what they import themselves counts, since `lup` imports everything.
+[[tool.importlinter.contracts]]
+name = "a promise imports the harness and lup's front door alone"
+type = "forbidden"
+source_modules = ["lup.*.promises"]
+forbidden_modules = [
+    "lup.environment",
+    "lup.core",
+    "lup.types",
+    "lup.errors",
+    "lup.declaration.*",
+    "lup.doors.*",
+    "lup.testing.*",
+]
+allow_indirect_imports = true

@@ -12,6 +12,18 @@ dependencies = [
     "pydantic-settings>=2.11",
 ]
 
+[project.optional-dependencies]
+# Checking promises: hypothesis draws and shrinks what they explore. A project's
+# gate installs it; what runs a project's modules doesn't need it.
+testing = [
+    "hypothesis>=6.170",
+]
+
+# pytest runs lup's plugin wherever the core is installed, checking the promises
+# of the modules a project's declaration resolves to (`lup/testing/README.md`).
+[project.entry-points.pytest11]
+lup = "lup.environment.testing.plugin"
+
 [tool.uv.build-backend]
 module-name = "lup"
 

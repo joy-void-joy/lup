@@ -17,7 +17,7 @@ import importlib.util
 import sys
 from typing import TYPE_CHECKING
 
-from lup.declaration.core import Core
+from lup.core import Core
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import listed
 from lup.declaration.module import Module
