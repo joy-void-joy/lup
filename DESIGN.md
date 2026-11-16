@@ -82,10 +82,10 @@ A concern is something to keep an eye on: a feature to build, a problem met, a d
 
 ## The dashboard
 
-The dashboard is where the operator works: every agent and concern across their projects, and what each project's modules show. Every view also has a command, for the operator and for agents.
+The dashboard is where the operator works: every agent and concern across their projects, and what each project's modules show. Every view also has a command, for the operator and for agents. It runs from one home repository, lup's own unless the operator picks another, whose declaration configures what serves every project: the shell, the keymap, the store. A project's own settings for those take effect when it's the home, and another shell is tried by starting a dashboard from its branch beside the operator's.
 
 - **The shell knows no module.** Modules lay out documents of lup's blocks, and the shell does everything else: folding, selecting, commenting, sending, clearing, marks. Where something can't be said in blocks, the blocks grow, for every module. An embed carries what blocks can't draw (a video, a site, a module's own viewer), sandboxed so that all it tells the shell is what the operator points at, and a comment there works as anywhere.
-- **Keymaps are modules.** The shell has named commands, and a keymap turns the operator's input into them: vim's, with its modes, operators and motions, and a plain one, where typing on a line comments on it, selecting a passage replies to it, and every command is also a button, which is also the phone's. The operator's own layer picks one.
+- **Keymaps are modules.** The shell has named commands, and a keymap turns the operator's input into them: vim's, with its modes, operators and motions, and a plain one, where typing on a line comments on it, selecting a passage replies to it, and every command is also a button, which is also the phone's. The operator's own settings pick one.
 - **Comments sit where the buffer puts them:** under what they're on, or in a pane beside it that follows the cursor, a choice of the buffer's rather than of the module showing it.
 
 Everything in it is read and commented on as the review is: the operator points at any part, says something, and it goes with the one draft to the agent concerned. A module's data is typed Python an agent reads too. A project making an animation is commented on frame by frame; a site being built is used as its end product, with an overlay to point at its parts.
@@ -105,7 +105,7 @@ The core decides and the page only draws, keeping no rule of its own beside the 
 
 Every agent runs in a container. Commands run there without asking, because the container keeps them from harming the operator's machine, and it's the same standard machine whatever the host. The operator's credentials stay out of rooms, used on the agent's behalf within limits the project sets.
 
-**The operator's own layer,** in `~/.config/lup/`, applies over every project: their keymap, accounts and profiles, and session defaults. What's theirs for one repository alone (the other repositories they relate to it, their private values) is a gitignored layer in that repository.
+**The operator's own settings** (their keymap, accounts and profiles, and session defaults) are the home repository's gitignored layer, and `~/.config/lup/` can override them. What's theirs for one repository alone (the other repositories they relate to it, their private values) is a gitignored layer in that repository.
 
 ## Calling agents from code
 
