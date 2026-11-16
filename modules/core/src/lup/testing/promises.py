@@ -3,8 +3,12 @@
 Each is checked through the harness over an example module, a counter, whose
 own promises the harness checks as the gate does (`Started.checked`). Its count
 lives in an object its module holds, made afresh each time lup starts: a
-stand-in for the store, which lup doesn't have yet (`README.md` here, *Laws*).
+stand-in for the store, which lup doesn't have yet. Its bump reads the count,
+waits, then writes it, so two bumps that overlap lose one: a race a law catches
+only where calls interleave (`README.md` here, *Laws*).
 """
+
+import asyncio
 
 from pydantic import Field
 
@@ -73,8 +77,14 @@ class CounterServing(ModuleServing):
 
     @lup.tool
     async def bump(self, bumping: Bumping) -> Count:
-        """Move the count by as much as asked."""
-        self.module.tally.count += bumping.by
+        """Move the count by as much as asked.
+
+        It reads the count, waits, then writes it, so a bump overlapping
+        another loses it.
+        """
+        count = self.module.tally.count
+        await asyncio.sleep(0)
+        self.module.tally.count = count + bumping.by
         return Count(count=self.module.tally.count)
 
     @lup.tool(reads=True)
@@ -84,11 +94,20 @@ class CounterServing(ModuleServing):
 
 
 class CounterPromises(ModuleServing):
-    """The counter's promises: two laws, one it keeps and one it breaks, and two scenarios, one of each."""
+    """The counter's promises: laws it keeps and laws it breaks, alone or only where bumps overlap, and a scenario of each."""
+
+    @lup.promise
+    def reading_changes_nothing(self, step: Step[Count]) -> bool:
+        """Reading the count never moves it."""
+        match step.call:
+            case ToolCall(tool="counted"):
+                return step.after.count == step.before.count
+            case _:
+                return True
 
     @lup.promise
     def moves_by_what_its_bumped(self, step: Step[Count]) -> bool:
-        """The count moves by what an accepted bump asks, and not at all otherwise."""
+        """The count moves by what a bump asks, on the slice that ends it, and not at all otherwise, which two bumps overlapping break."""
         moved = step.after.count - step.before.count
         match step.call:
             case ToolCall(tool="bump", arguments=arguments) if isinstance(
@@ -160,10 +179,32 @@ class TestingPromises(ModuleServing):
         assert Bumping.model_validate(call.arguments).by == -1
 
     @lup.promise
+    async def a_law_broken_only_where_calls_overlap_is_told_with_how_they_interleaved(
+        self, by: Testing
+    ) -> None:
+        """A law that only calls overlapping break, each slice of a call a step of its own, is reported broken with the calls and the order their slices ran in."""
+        started = await by.started(counter())
+        [broken] = await started.checked("counter", "moves_by_what_its_bumped")
+        assert isinstance(broken, Broken)
+        assert isinstance(broken.error, BrokenLawError)
+        first, second = broken.calls
+        assert all(isinstance(each, ToolCall) for each in (first, second))
+        ends = max(at for at, each in enumerate(broken.slices) if each == first)
+        assert broken.slices.index(second) < ends
+
+    @lup.promise
+    async def a_run_never_waits_on_real_time(self, by: Testing) -> None:
+        """A run's clock moves only when nothing else can run, straight to the next timer: an hour's sleep passes at once, its clock an hour on."""
+        loop = asyncio.get_running_loop()
+        began = loop.time()
+        await asyncio.sleep(3600)
+        assert loop.time() - began >= 3600
+
+    @lup.promise
     async def a_promise_that_holds_is_kept(self, by: Testing) -> None:
         """A law that holds over every run, and a scenario that holds for every value it draws, are kept."""
         started = await by.started(counter())
-        [law] = await started.checked("counter", "moves_by_what_its_bumped")
+        [law] = await started.checked("counter", "reading_changes_nothing")
         [scenario] = await started.checked("counter", "counts_what_its_told")
         assert isinstance(law, Kept)
         assert isinstance(scenario, Kept)

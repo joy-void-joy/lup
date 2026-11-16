@@ -83,15 +83,20 @@ by whom."""
 
 
 class Step[S](Model):
-    """One step of a run, as a law reads it: a module's state before, the call made through a door, what it answered, and the state after.
+    """One step of a run, as a law reads it: a slice of a call, from one `await` to the next, with the module's state before and after it.
 
     `S` is the module's state as a party sees it: what a door of the module
-    that only reads answers (`README.md` here, *Laws*).
+    that only reads answers (`README.md` here, *Laws*). Where calls overlap,
+    each slice of each is a step of its own, so a law sees what that call
+    changed, and when.
     """
 
     before: S
     call: Call
-    answered: Accepted | Refused
+    """The call the slice belongs to."""
+    answered: Accepted | Refused | None = None
+    """What the call answered, on the slice that ended it; none on the
+    slices before."""
     after: S
 
     def by(self) -> Party:
@@ -114,8 +119,10 @@ class Broken(Model, arbitrary_types_allowed=True):
     drawn: list[JsonValue]
     """What the run drew from the harness, in order, as JSON."""
     calls: list[Call]
-    """The calls the run made through lup's doors, in order, the last the one
-    that broke a law, where a law broke."""
+    """The calls the run made through lup's doors, in the order they started."""
+    slices: list[Call] = []
+    """The call each slice of the run belonged to, in the order the slices
+    ran: how the calls interleaved, where they overlapped."""
     error: BaseException
     """What broke it: a law that didn't hold (`BrokenLawError`), an assertion
     that failed, or what the promise raised."""

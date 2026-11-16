@@ -290,12 +290,18 @@ def said(broken: Broken, description: str) -> str:
     """Say what a broken promise promised, the smallest run that broke it, and where."""
     drawn = [f"  {json.dumps(each)}" for each in broken.drawn]
     calls = [f"  {each.model_dump_json()}" for each in broken.calls]
+    slices = [f"  {broken.calls.index(each) + 1}" for each in broken.slices]
     where = pytest.ExceptionInfo[BaseException].from_exception(broken.error)
     return "\n".join(
         [
             f"The promise `{broken.promise}` doesn't hold: {description}",
             *(["Drawn, the smallest that breaks it:", *drawn] if drawn else []),
             *(["Called, the shortest run that breaks it:", *calls] if calls else []),
+            *(
+                ["Each slice, by the call it was of, in the order they ran:", *slices]
+                if len(calls) > 1
+                else []
+            ),
             str(where.getrepr(style="short")),
         ]
     )

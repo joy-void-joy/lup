@@ -1,4 +1,4 @@
-"""The harness as the gate runs it: lup started in this process, its doors called through `Doors`, every law checked after each call, and values drawn by hypothesis.
+"""The harness as the gate runs it: lup started in this process, its doors called through `Doors`, every law checked over each slice of each call, and values drawn by hypothesis.
 
 A law reads its module's state through a door of the module that only reads:
 a tool marked `reads=True` answering the state its step names, taking nothing
@@ -9,6 +9,8 @@ it must be given and no `by`, since a module's state is the same whoever asks
 import asyncio
 import tempfile
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import ContextVar, copy_context
 from pathlib import Path
 
 from hypothesis import strategies as st
@@ -41,10 +43,11 @@ from lup.types import Model, MutableModel
 
 
 class Run(MutableModel, arbitrary_types_allowed=True):
-    """What one run of a promise did: the values it drew and the calls it made, kept to say what broke it."""
+    """What one run of a promise did: the values it drew, the calls it made and the order their slices ran in, kept to say what broke it."""
 
     drawn: list[JsonValue] = []
     calls: list[Call] = []
+    slices: list[Call] = []
     checking: Callable[[Project, Module, str | None], list[Kept | Broken]] | None = None
     """How the run checks another module's promises, where a promise asks
     (`Started.checked`): the gate's own checking, which this module can't
@@ -62,12 +65,25 @@ class Law(Model, arbitrary_types_allowed=True):
         """Name the law, as a broken one is named: `CounterPromises.never_goes_back`."""
         return self.method.taken.qualified
 
-    async def read(self) -> BaseModel:
-        """Return the module's state, as its door that only reads answers it."""
+    def read(self) -> BaseModel:
+        """Return the module's state, as its door that only reads answers it, at once: it's read between two slices, where nothing else may run.
+
+        Raise `DoorError` where the door waits on something rather than
+        answering.
+        """
         state = self.state.method
-        answered = await state.called(
-            self.state.serves.made(), state.validated({}), Reader()
-        )
+        reading = state.called(self.state.serves.made(), state.validated({}), Reader())
+        try:
+            reading.send(None)
+        except StopIteration as read:
+            answered = read.value
+        else:
+            reading.close()
+            message = (
+                f"`{state.taken.qualified}`, which the law `{self.said()}` reads "
+                "its state through, waits rather than answering at once"
+            )
+            raise DoorError(message)
         if not isinstance(answered, BaseModel):
             message = f"`{state.taken.qualified}` answers no state"
             raise DoorError(message)
@@ -80,6 +96,63 @@ class Law(Model, arbitrary_types_allowed=True):
             message = f"the law `{self.said()}` answers no verdict"
             raise DoorError(message)
         return verdict
+
+
+class Calling(MutableModel, arbitrary_types_allowed=True):
+    """A call in flight: what it is, the laws checked over each of its slices, and what came of it so far."""
+
+    call: Call
+    laws: list[Law]
+    run: Run
+    states: list[BaseModel] = []
+    """Each law's state, read before the slice that's running."""
+    answered: Accepted | Refused | None = None
+    """What the call answered, once it has."""
+    broken: BrokenLawError | None = None
+    """The first law a slice of it broke, raised from the call when it ends."""
+
+    def before(self) -> None:
+        """Read each law's state before a slice of the call runs."""
+        self.run.slices.append(self.call)
+        self.states = [law.read() for law in self.laws]
+
+    def after(self) -> None:
+        """Check each law over the slice that just ran, keeping the first it broke."""
+        steps = [
+            (
+                law,
+                Step[BaseModel](
+                    before=before,
+                    call=self.call,
+                    answered=self.answered,
+                    after=law.read(),
+                ),
+            )
+            for law, before in zip(self.laws, self.states, strict=True)
+        ]
+        broken = next(
+            (
+                BrokenLawError(law.said(), step)
+                for law, step in steps
+                if not law.holds(step)
+            ),
+            None,
+        )
+        self.broken = self.broken or broken
+
+
+CALLING = ContextVar[Calling | None]("calling", default=None)
+"""The call a task runs, which each of its slices belongs to, and the tasks it
+starts too."""
+
+
+def watched(handle: asyncio.Handle) -> Callable[[], None] | None:
+    """Read the state before a slice of a call runs, and return what checks its laws after it; none for a slice of no call."""
+    calling = handle.get_context().get(CALLING)
+    if calling is None:
+        return None
+    calling.before()
+    return calling.after
 
 
 class Reader(Party):
@@ -147,20 +220,27 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
         return self.doors.tools()
 
     async def answered(self, call: Call) -> Accepted | Refused:
-        """Make `call` through its door, every law checked over it.
+        """Make `call` through its door, as a task of its own, every law checked over each slice of it.
 
-        Raise `BrokenLawError` where a law doesn't hold over the step it made.
+        Raise `BrokenLawError` where a law doesn't hold over a slice of it,
+        once it's ended.
         """
-        before = [await law.read() for law in self.laws]
+        calling = Calling(call=call, laws=self.laws, run=self.run)
+        context = copy_context()
+        context.run(CALLING.set, calling)
         self.run.calls.append(call)
-        answered = await self.reached(call)
-        for law, state in zip(self.laws, before, strict=True):
-            after = await law.read()
-            step = Step[BaseModel](
-                before=state, call=call, answered=answered, after=after
-            )
-            if not law.holds(step):
-                raise BrokenLawError(law.said(), step)
+        task = asyncio.get_running_loop().create_task(
+            self.ran(calling), context=context
+        )
+        answered = await task
+        if calling.broken is not None:
+            raise calling.broken
+        return answered
+
+    async def ran(self, calling: Calling) -> Accepted | Refused:
+        """Make the call, keeping what it answered for the laws checked over its last slice."""
+        answered = await self.reached(calling.call)
+        calling.answered = answered
         return answered
 
     async def reached(self, call: Call) -> Accepted | Refused:
@@ -174,13 +254,19 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
                 return await self.doors.run(module, command, arguments, by)
 
     async def checked(self, module: str, promise: str | None) -> list[Kept | Broken]:
-        """Check the promise named `promise` of the module named `module`, or every one where none is named, as the gate does, and say how each fared."""
+        """Check the promise named `promise` of the module named `module`, or every one where none is named, as the gate does, and say how each fared.
+
+        The check runs in a thread of its own, this run waiting on it: asyncio
+        runs one task at a time in a thread, and the check's runs are tasks of
+        their own loop.
+        """
         checking = self.run.checking
         if checking is None:
             message = "this run checks no other module's promises"
             raise DoorError(message)
         [held] = [each for each in self.modules if each.name == module]
-        return await asyncio.to_thread(checking, self.project, held, promise)
+        with ThreadPoolExecutor(max_workers=1) as apart:
+            return apart.submit(checking, self.project, held, promise).result()
 
 
 class Harness(Testing, arbitrary_types_allowed=True):

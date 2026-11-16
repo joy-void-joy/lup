@@ -21,12 +21,15 @@ from lup.doors.command import CommandDoor
 from lup.doors.door import DoorError
 from lup.doors.tool import ToolDoor
 from lup.environment.doors import Entry
-from lup.environment.testing.harness import Harness, Run, promises
+from lup.environment.testing.harness import Harness, Run, promises, watched
+from lup.environment.testing.simulation import Simulation
 from lup.testing.harness import Acted, Broken, Kept, Ran, Sent, ToolCall, sent
 from lup.testing.promise import PromiseDoor
 from lup.types import Model
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from hypothesis.strategies import SearchStrategy
 
     from lup.declaration.module import Module
@@ -59,33 +62,34 @@ class Check(Model, arbitrary_types_allowed=True):
     def checked(self, exploring: Exploring) -> Kept | Broken:
         """Check the promise over as many runs as `exploring` says, and say how it fared: kept, or broken by the smallest run hypothesis found."""
         runs: list[Run] = []
-        with asyncio.Runner() as runner:
 
-            def once(data: st.DataObject) -> None:
-                run = Run(checking=checked)
-                runs.append(run)
-                runner.run(self.ran(Harness(data=data, run=run)))
+        def once(data: st.DataObject) -> None:
+            run = Run(checking=checked)
+            runs.append(run)
+            loop = Simulation(choose=chooser(data), watch=watched)
+            loop.run_until_complete(self.ran(Harness(data=data, run=run)))
 
-            test = given(st.data())(once)
-            if exploring.seeded:
-                test = seed(self.seed())(test)
-            test = settings(
-                database=None,
-                deadline=None,
-                max_examples=exploring.runs,
-                report_multiple_bugs=False,
-                suppress_health_check=[HealthCheck.too_slow],
-            )(test)
-            try:
-                test()
-            except Exception as error:
-                last = runs[-1]
-                return Broken(
-                    promise=self.said(),
-                    drawn=last.drawn,
-                    calls=last.calls,
-                    error=error,
-                )
+        test = given(st.data())(once)
+        if exploring.seeded:
+            test = seed(self.seed())(test)
+        test = settings(
+            database=None,
+            deadline=None,
+            max_examples=exploring.runs,
+            report_multiple_bugs=False,
+            suppress_health_check=[HealthCheck.too_slow, HealthCheck.nested_given],
+        )(test)
+        try:
+            test()
+        except Exception as error:
+            last = runs[-1]
+            return Broken(
+                promise=self.said(),
+                drawn=last.drawn,
+                calls=last.calls,
+                slices=last.slices,
+                error=error,
+            )
         return Kept(promise=self.said())
 
     async def ran(self, harness: Harness) -> None:
@@ -111,8 +115,8 @@ class Check(Model, arbitrary_types_allowed=True):
                 ]
             }
         )
-        for each in harness.data.draw(st.lists(calls(reached.doors))):
-            await mine.answered(each)
+        drawn = harness.data.draw(st.lists(calls(reached.doors)))
+        await asyncio.gather(*(mine.answered(each) for each in drawn))
 
     def seed(self) -> int:
         """Return the seed the promise's own source fixes, its name and its body, so its values change only as it does."""
@@ -123,6 +127,15 @@ class Check(Model, arbitrary_types_allowed=True):
             source = ""
         hashed = hashlib.blake2b(f"{self.said()}\n{source}".encode(), digest_size=8)
         return int.from_bytes(hashed.digest())
+
+
+def chooser(data: st.DataObject) -> Callable[[int], int]:
+    """Return how a run's loop chooses what runs next among so many: as hypothesis draws, its first choice asyncio's own."""
+
+    def choose(choices: int) -> int:
+        return data.draw(st.integers(min_value=0, max_value=choices - 1))
+
+    return choose
 
 
 def checked(
