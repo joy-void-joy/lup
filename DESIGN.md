@@ -23,6 +23,7 @@ A module can declare:
 - the room its sessions run in: packages, GPU, caches, network, privileges;
 - services: a program running during a launch or always, such as a preview server, a bot, or one holding an API key that agents use without seeing it, with the secrets it gets from the machine's secret store and the port it listens on;
 - guidance, code rules, gate steps, path roles and requirements;
+- promises: what someone can count on, each checked through lup's doors;
 - what it shows the operator: views, embeds, kinds of item, and parts of the shell, keymaps among them.
 
 A module refers to its code by importing it, so pyright checks the reference and renames follow it. The declaration is loaded at every hook, so the gate checks that loading it imports nothing heavy, and names the import chain when it does.
@@ -114,5 +115,6 @@ A project's code asks an agent a question and gets a typed answer, with tools it
 
 - Decisions are made live: the agent explains the problem and their options, numbered, each with their lean, and the operator answers. They aren't written down as the operator's, since a recorded decision gives the next session a wrong view of it.
 - **Agents can run what they build,** end to end, from their room: lup started from their branch with secrets of its own, both runtimes with real logins. Building against stubs is how work ends half done.
+- **A test checks a promise** someone relies on, through the module's doors, and leaves what nobody promised (a message's words, an internal type, a whole list) free to change.
 - Documentation describes what exists, briefly, once it's built. It carries no history: what was tried, when, and who decided stays out of it.
 - lup is built with lup: its own sessions run under what it builds, and its projects' sessions grow it.

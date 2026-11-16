@@ -35,6 +35,14 @@ Beside the code rules every project gets:
 - **A library side never imports an environment side,** held apart by import contracts.
 - **Nothing above the runtimes' adapter names a runtime.** Codex rotted in the first lup because features were built per runtime above the adapter.
 
+## Tests
+
+Until #14 gives modules `@lup.promise`, write each test as one:
+- **It checks a promise someone relies on,** said in its docstring. A test that can't say one isn't written.
+- **Through the module's surface:** its tools, views, commands and events, never its internal types, so a change inside the module leaves its tests alone.
+- **Properties, not the whole output:** what's among the results and what holds for all of them, with ids read from what the test made. A message's words aren't asserted: check the structured result behind it.
+- **No real time:** wait on the event, never on a sleep or a timeout.
+
 ## docs/
 
 `docs/README.md` lists the docs, a line each. Each module's doc describes it as built: what it's for, how to use it, and the reasons that aren't obvious, each beside the fact it explains, in a screen or two, kept true as the code changes. Details go in docstrings beside the code, future work in issues, and what was measured in `docs/field-notes.md`, with its version and date. No history: what was tried, when, and who decided stays out.
