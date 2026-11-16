@@ -8,7 +8,8 @@ modules whose code it holds, not those of lup's it installs, which lup's own
 gate checks.
 
 Every other check pytest collects names no promise, and fails, saying so,
-unless it's a docstring's example or marked `unpromised(why=…)`
+unless it's a docstring's example or marked `unpromised(why=…)`; and a class of
+promises no module lists fails, since nothing would check it
 (`lup/testing/README.md`, *What the gate runs*).
 """
 
@@ -21,11 +22,15 @@ from typing import TYPE_CHECKING, override
 import pytest
 from pydantic import ValidationError
 
+from lup.declaration.module import Module
+from lup.doors.door import served
+from lup.doors.serving import ModuleServing, Serving
 from lup.environment.declaration import load, resolve
 from lup.environment.testing.checking import Check, Exploring
 from lup.environment.testing.harness import laws, promises
 from lup.errors import LupError
 from lup.testing.harness import Broken, Kept
+from lup.testing.promise import PromiseDoor
 from lup.types import Model
 
 if TYPE_CHECKING:
@@ -33,7 +38,6 @@ if TYPE_CHECKING:
 
     from _pytest._code.code import ExceptionInfo, TerminalRepr
 
-    from lup.declaration.module import Module
     from lup.declaration.project import Project
     from lup.environment.doors import Entry
 
@@ -105,13 +109,13 @@ class Unpromised(Model):
     why: str
 
 
-def own(module: Module, root: Path) -> bool:
-    """Say whether `module`'s code is the repository's at `root`, rather than installed from elsewhere.
+def own(code: type, root: Path) -> bool:
+    """Say whether the class `code`'s source is the repository's at `root`, rather than installed from elsewhere.
 
-    A module declared in the declaration's own file is the repository's.
+    A class declared in the declaration's own file is the repository's.
     """
     try:
-        source = Path(inspect.getfile(type(module))).resolve()
+        source = Path(inspect.getfile(code)).resolve()
     except TypeError:
         return True
     installed = [
@@ -120,6 +124,29 @@ def own(module: Module, root: Path) -> bool:
     if any(source.is_relative_to(each) for each in installed):
         return False
     return source.is_relative_to(root.resolve())
+
+
+def subclasses[C](base: type[C]) -> list[type[C]]:
+    """Return every class deriving from `base` defined so far, however far below it."""
+    return [
+        found for each in base.__subclasses__() for found in [each, *subclasses(each)]
+    ]
+
+
+def unlisted(root: Path) -> list[type[ModuleServing]]:
+    """Return each class of the repository's at `root` holding promises that no module lists in its `serving`, so the gate would never check them."""
+    listed = [
+        served for module in subclasses(Module) for served in module().held(Serving)
+    ]
+    return [
+        each
+        for each in subclasses(ModuleServing)
+        if own(each, root)
+        and each not in listed
+        and any(
+            isinstance(method.door, PromiseDoor) for method in served(each).values()
+        )
+    ]
 
 
 class Declared(pytest.File):
@@ -131,12 +158,16 @@ class Declared(pytest.File):
         project = load(self.path)
         resolved = resolve(project)
         laws(resolved.doors)
+        root = self.config.rootpath
         for module in resolved.modules:
-            if own(module, self.config.rootpath):
+            if own(type(module), root):
                 # lup: ignore("reportUnknownMemberType", why="pytest leaves untyped the keyword arguments a node's constructor is passed")
                 yield Held.from_parent(
                     self, name=module.name, module=module, project=project
                 )
+        for each in unlisted(root):
+            # lup: ignore("reportUnknownMemberType", why="pytest leaves untyped the keyword arguments a node's constructor is passed")
+            yield Unlisted.from_parent(self, name=each.__qualname__, unlisted=each)
 
 
 class Held(pytest.Collector):
@@ -166,6 +197,35 @@ class Held(pytest.Collector):
                 project=self.project,
                 exploring=exploring,
             )
+
+
+class Unlisted(pytest.Item):
+    """A class of promises no module lists, which fails: nothing would check them."""
+
+    def __init__(
+        self, *, unlisted: type[ModuleServing], name: str, parent: pytest.Collector
+    ) -> None:
+        """Hold the class no module lists."""
+        # lup: ignore("reportUnknownMemberType", why="pytest leaves untyped the keyword arguments a node's constructor is passed")
+        super().__init__(name=name, parent=parent)
+        self.unlisted = unlisted
+
+    @override
+    def runtest(self) -> None:
+        """Fail, naming the class and what to do."""
+        message = (
+            f"`{self.unlisted.__qualname__}` holds promises no module lists in its "
+            "`serving`, so nothing checks them: list it in its module's"
+        )
+        pytest.fail(message, pytrace=False)
+
+    @override
+    # lup: ignore("tuple-shape", why="pytest takes where a check is as this tuple: its file, its line and its name")
+    def reportinfo(self) -> tuple[Path, int | None, str]:
+        """Point at the class."""
+        lines, line = inspect.getsourcelines(self.unlisted)
+        del lines
+        return Path(inspect.getfile(self.unlisted)), line, self.name
 
 
 class BrokenPromiseError(LupError):
