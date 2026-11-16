@@ -61,6 +61,11 @@ class Entry(Model, arbitrary_types_allowed=True):
     name: str
     method: Method
 
+    def kind(self) -> str | None:
+        """Return the kind of request it answers; none where it isn't behind a request's door."""
+        door = self.method.door
+        return door.kind(self.method.taken) if isinstance(door, RequestDoor) else None
+
     async def answered(self, given: JsonValue, by: Party) -> Accepted | Refused:
         """Run the method on `given`, called by `by`, and say what came of it.
 
@@ -166,8 +171,8 @@ class Doors(Model):
             [
                 Keyed(name=kind, entry=entry)
                 for entry, taken in zip(entries, takes, strict=True)
-                if isinstance(entry.method.door, RequestDoor)
-                and (kind := taken.model.annotation.named())
+                if isinstance(door := entry.method.door, RequestDoor)
+                and (kind := door.kind(taken))
             ],
         )
         distinct("An action's name in its module", doors.keyed(ActionDoor, scoped=True))
@@ -211,11 +216,7 @@ class Doors(Model):
 
     def kinds(self) -> list[str]:
         """Return each kind of request the modules answer."""
-        return [
-            kind
-            for entry in self.through(RequestDoor)
-            if (kind := entry.method.taken.model.annotation.named())
-        ]
+        return [kind for entry in self.through(RequestDoor) if (kind := entry.kind())]
 
     async def call(
         self, tool: str, arguments: JsonValue, by: Party
@@ -232,11 +233,7 @@ class Doors(Model):
             kind = Request.model_validate(request).kind
         except ValidationError as wrong:
             return refused(request, f"a request carries its `kind`: {wrong}")
-        found = [
-            entry
-            for entry in self.through(RequestDoor)
-            if entry.method.taken.model.annotation.named() == kind
-        ]
+        found = [entry for entry in self.through(RequestDoor) if entry.kind() == kind]
         if not found:
             return refused(request, f"no module answers a request of kind `{kind}`")
         return await found[0].answered(request, by)

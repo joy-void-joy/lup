@@ -93,7 +93,7 @@ class ToolDoor(Door):
 
     def contract(self, taken: Taken) -> None:
         """Raise `DoorError` where `taken` isn't a tool's: one model in, a model or `str` out, and a docstring opening with its summary."""
-        if not is_model(taken.model.annotation):
+        if not is_model(taken.given().annotation):
             message = (
                 f"the tool `{taken.qualified}` takes {taken.spelled_model()}: a tool "
                 "takes one pydantic model, its arguments"
@@ -109,7 +109,7 @@ class ToolDoor(Door):
 
     def spec(self, taken: Taken) -> ToolSpec:
         """Return what a session tells the model about the tool taking what `taken` says."""
-        model = taken.model.annotation
+        model = taken.given().annotation
         return ToolSpec(
             name=taken.name,
             description=taken.description,

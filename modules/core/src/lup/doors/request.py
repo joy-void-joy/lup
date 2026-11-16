@@ -53,8 +53,7 @@ class RequestDoor(Door):
 
     def contract(self, taken: Taken) -> None:
         """Raise `DoorError` where `taken` isn't a request's: a `Request` of a kind of its own in, a model out."""
-        model = taken.model.annotation
-        if not (is_model(model) and issubclass(model, Request) and model.named()):
+        if not self.kind(taken):
             message = (
                 f"the request `{taken.qualified}` takes {taken.spelled_model()}: a "
                 "request takes a `Request` giving `kind` a default of its own, "
@@ -67,6 +66,13 @@ class RequestDoor(Door):
                 "a request returns its reply, a pydantic model"
             )
             raise DoorError(message)
+
+    def kind(self, taken: Taken) -> str | None:
+        """Return the kind of request a method taking what `taken` says answers: its `Request`'s own; none where it takes no `Request` of a kind of its own."""
+        model = taken.given().annotation
+        if is_model(model) and issubclass(model, Request):
+            return model.named()
+        return None
 
     def __call__[S, I: Request, O: BaseModel, **P](
         self, method: Callable[Concatenate[S, I, P], Awaitable[O]], /

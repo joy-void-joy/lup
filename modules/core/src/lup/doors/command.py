@@ -30,7 +30,7 @@ class CommandDoor(Door):
 
     def contract(self, taken: Taken) -> None:
         """Raise `DoorError` where `taken` isn't a command's: one model in, `str` out."""
-        if not is_model(taken.model.annotation):
+        if not is_model(taken.given().annotation):
             message = (
                 f"the command `{taken.qualified}` takes {taken.spelled_model()}: a "
                 "command takes one pydantic model, whose fields are its arguments "
