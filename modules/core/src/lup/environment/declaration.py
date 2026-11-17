@@ -18,18 +18,16 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from lup.command_line.names import typed_methods
 from lup.core import Core
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import applied, listed, set_fields
 from lup.declaration.module import Module, Modules
 from lup.declaration.project import Project
-from lup.doors.command import CommandDoor
-from lup.doors.tool import ToolDoor
 from lup.environment.doors import Doors
 from lup.errors import LupError
 from lup.running.plan import typed
 from lup.shell.looks import Looks
-from lup.shell.view import ViewDoor
 from lup.store.records import Edge, Kinds, Node, Recorded
 from lup.types import Model
 
@@ -184,7 +182,7 @@ def resolve(project: Project) -> Resolved:
         about = [name for pair in unmet for name in pair]
         raise ProjectError(message, about=list(dict.fromkeys(about)))
     doors = Doors.of(modules)
-    unshadowed(modules, doors)
+    unshadowed(modules)
     return Resolved(
         modules=modules,
         doors=doors,
@@ -193,13 +191,13 @@ def resolve(project: Project) -> Resolved:
     )
 
 
-def unshadowed(modules: list[Module], doors: Doors) -> None:
+def unshadowed(modules: list[Module]) -> None:
     """Raise `ProjectError` where a module's name, as it's typed, is one a tool, command or view of the core takes, naming both: `lup` types the core's at its top level and every other module by its name, so both would be typed alike."""
     top = {
-        typed(entry.name): entry
-        for entry in doors.entries()
-        if entry.serves.module.name == Core.name
-        and isinstance(entry.method.door, ToolDoor | CommandDoor | ViewDoor)
+        name: method
+        for module in modules
+        if module.name == Core.name
+        for name, method in typed_methods(module).items()
     }
     shadowed = [
         (module.name, top[typed(module.name)])
@@ -208,8 +206,8 @@ def unshadowed(modules: list[Module], doors: Doors) -> None:
     ]
     if shadowed:
         clashes = [
-            f"the module `{name}` and {entry.method.door.called} of the core's, `{entry.name}`"
-            for name, entry in shadowed
+            f"the module `{name}` and {method.door.called} of the core's typed so"
+            for name, method in shadowed
         ]
         message = (
             "`lup` types the core's tools, commands and views at its top level, "

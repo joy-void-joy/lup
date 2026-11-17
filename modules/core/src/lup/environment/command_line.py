@@ -29,16 +29,18 @@ from lup.declaration.grammar import listed
 from lup.declaration.layout import MachineLayout, RepositoryLayout
 from lup.declaration.module import Modules
 from lup.declaration.project import Project
-from lup.doors.door import Rejection
+from lup.doors.door import Rejection, served
 from lup.doors.parties import Operator
+from lup.doors.parts import Runs
 from lup.environment.declaration import Resolved, read, resolve
 from lup.environment.doors import Running
 from lup.environment.running.calling import Calling
 from lup.environment.running.container import REPLIES, answered
 from lup.environment.running.planning import plan_of
+from lup.environment.running.programs import Local
 from lup.environment.settings import LupSettings
 from lup.programs import ProgramFailedError, run
-from lup.running.plan import CORE
+from lup.running.plan import CORE, typed
 from lup.running.wire import (
     Call,
     Caller,
@@ -52,8 +54,9 @@ from lup.running.wire import (
 from lup.running.wire import (
     read as read_reply,
 )
+from lup.setup.part import Setup
 from lup.types import MutableModel, Settings
-lazy from lup.command_line.line import typed
+lazy from lup.command_line import line
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -85,6 +88,9 @@ class InProcess(MutableModel, Answerer, arbitrary_types_allowed=True):
     environment, so a part holding one runs apart."""
     running: Running | None = None
     """The parts started here, once a call has come."""
+    runs: Runs | None = None
+    """What runs the programs the parts started here declare; none where
+    nothing does, and a part's program is refused."""
     offering: list[str] | None = None
     """The modules whose methods it offers, by name: those a project's own
     command is given, never the core's, which are lup's development side; none
@@ -149,7 +155,7 @@ class InProcess(MutableModel, Answerer, arbitrary_types_allowed=True):
             return Declined(rejection=rejection)
         if self.running is None:
             self.running = await self.resolved.doors.started(
-                self.repository, self.secrets, only=self.startable()
+                self.repository, self.secrets, only=self.startable(), runs=self.runs
             )
         made = call.model_copy(update={"by": self.by})
         text = await answered(
@@ -169,7 +175,9 @@ def ran(answerer: Answerer, name: str, words: list[str], top: str | None) -> NoR
 
     async def running() -> int:
         try:
-            done = await typed(words, answerer, name, sys.stdout, sys.stderr, top=top)
+            done = await line.typed(
+                words, answerer, name, sys.stdout, sys.stderr, top=top
+            )
         finally:
             await answerer.stopped()
         return done.status
@@ -188,12 +196,35 @@ def machine() -> MachineLayout:
     return MachineLayout(configuration=LupSettings().xdg_config_home)
 
 
+def setting_up(words: list[str]) -> bool:
+    """Say whether `words` name one of lup's own commands setting a repository up, `lup init` or `lup new`.
+
+    >>> setting_up(["init"]), setting_up(["new", "--help"]), setting_up(["hosting"])
+    (True, True, False)
+    """
+    match line.reached(words):
+        case [first, *_]:
+            return first in [typed(name) for name in served(Setup)]
+        case _:
+            return False
+
+
 def main() -> None:
     """Run `lup` on the words it's given: through lup's program on the operator's machine where `LUP_CALLING` names its socket, which says who calls; else as the operator, over the declaration of the worktree it runs in, with its layers.
 
     Through the program, nothing of the project's code runs here: the command
-    line lists and parses the plan the program offers.
+    line lists and parses the plan the program offers. `lup init` and `lup new`
+    are lup's own program acting on the operator's machine, writing their files
+    and running their git and uv, never a project's code: they're answered here,
+    as the operator, over lup's default modules alone, whatever the worktree
+    declares and wherever `LUP_CALLING` points (`lup/setup/README.md`).
     """
+    words = sys.argv[1:]
+    if setting_up(words):
+        lups = InProcess(
+            by=Operator(), resolved=resolve(Project()), repository="lup", runs=Local()
+        )
+        ran(lups, "lup", words, CORE)
     calling = LupSettings().lup_calling
     try:
         layout = RepositoryLayout.found(Path.cwd())
@@ -201,14 +232,19 @@ def main() -> None:
             ran(
                 Calling(socket=calling, repository=layout.main.name),
                 "lup",
-                sys.argv[1:],
+                words,
                 CORE,
             )
         resolved = resolve(read(layout, machine()).project)
     except (ProgramFailedError, ProjectError) as failure:
         refused("lup", failure)
-    answerer = InProcess(by=Operator(), resolved=resolved, repository=layout.main.name)
-    ran(answerer, "lup", sys.argv[1:], CORE)
+    answerer = InProcess(
+        by=Operator(),
+        resolved=resolved,
+        repository=layout.main.name,
+        runs=Local(),
+    )
+    ran(answerer, "lup", words, CORE)
 
 
 def developed(modules: list[Module]) -> Project | None:
@@ -295,6 +331,7 @@ def command_line(name: str, *modules: Module) -> Callable[[], None]:
             repository=name,
             secrets=secrets_of(name, list(dict.fromkeys(held))),
             command=name,
+            runs=Local(),
             offering=[each.name for each in modules],
         )
         ran(answerer, name, sys.argv[1:], modules[0].name if modules else None)

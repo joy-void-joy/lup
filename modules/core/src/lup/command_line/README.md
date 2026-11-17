@@ -33,7 +33,7 @@ It builds its parser from the plan alone, the JSON Schema of what each method ta
 
 ## `lup`
 
-`lup` is the core's script. It reads the declaration of the worktree it runs in with its layers (`RepositoryLayout.found`, `lup.environment.declaration.read`) and answers in this process, as the operator, until lup's program on the operator's machine answers a room and the operator's terminal (#3). Bare `lup` will open the dashboard (#7); until then it shows the help.
+`lup` is the core's script. Where `LUP_CALLING` names the socket of lup's program on the operator's machine, it answers through it (`Calling`); else it reads the declaration of the worktree it runs in with its layers (`RepositoryLayout.found`, `lup.environment.declaration.read`) and answers in this process, as the operator. `lup init` and `lup new` come first, whatever `LUP_CALLING` says: they're lup's own program acting on the operator's machine, writing their files and running their git and uv, never a project's code, so they're answered in this process over lup's default modules alone, reading no declaration (`lup/setup/README.md`). Bare `lup` will open the dashboard (#7); until then it shows the help.
 
 ## A project's own command
 
