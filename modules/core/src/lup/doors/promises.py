@@ -549,7 +549,7 @@ class Keeper(Module):
     parts: Parts = Parts.of(KeeperPart, AskingPart)
 
 
-class RunningPromises(Part):
+class PartsPromises(Part):
     """What a module's code can count on of its classes made once where they run: what they keep, the services they serve, the secrets they hold, and their start and stop."""
 
     @lup.promise

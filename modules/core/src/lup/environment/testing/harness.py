@@ -25,11 +25,14 @@ from lup.doors.parts import Parts
 from lup.doors.tool import ToolDoor, ToolSpec
 from lup.environment.declaration import load, resolve
 from lup.environment.doors import Doors, Entry, Running, Serves
+from lup.environment.running.container import answered
+from lup.environment.running.planning import plan_of
 from lup.testing.harness import (
     Acted,
     Broken,
     BrokenLawError,
     Call,
+    Crossing,
     Kept,
     Ran,
     Reaching,
@@ -55,12 +58,17 @@ class Run(MutableModel, arbitrary_types_allowed=True):
     import."""
     started: list[Running] = []
     """What the run started, stopped once the promise ends."""
+    kept: list[tempfile.TemporaryDirectory[str]] = []
+    """Where what the run started keeps its data, removed once it's stopped."""
 
     async def stopped(self) -> None:
-        """Stop what the run started, the last first."""
+        """Stop what the run started, the last first, and remove where it kept its data."""
         for running in reversed(self.started):
             await running.stopped()
         self.started = []
+        for each in self.kept:
+            each.cleanup()
+        self.kept = []
 
 
 class Law(Model, arbitrary_types_allowed=True):
@@ -87,7 +95,7 @@ class Law(Model, arbitrary_types_allowed=True):
         """
         state = self.state.method
         reading = state.called(
-            self.running.instance(self.state), state.validated({}), Reader()
+            self.running.part(self.state), state.validated({}), Reader()
         )
         try:
             reading.send(None)
@@ -107,7 +115,7 @@ class Law(Model, arbitrary_types_allowed=True):
 
     def holds(self, step: Step[BaseModel]) -> bool:
         """Say whether the law holds over `step`."""
-        verdict = self.method.function(self.running.instance(self.entry), step)
+        verdict = self.method.function(self.running.part(self.entry), step)
         if not isinstance(verdict, bool):
             message = f"the law `{self.said()}` answers no verdict"
             raise DoorError(message)
@@ -325,6 +333,16 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
             return apart.submit(checking, self.project, held, promise).result()
 
 
+class Crosser(Model, Crossing, arbitrary_types_allowed=True):
+    """A started lup's parts, a message crossing to them answered as their container answers it."""
+
+    running: Running
+
+    async def crossed(self, text: bytes) -> bytes:
+        """Answer one message as the container running these parts would."""
+        return await answered(self.running, text)
+
+
 class Harness(Testing, arbitrary_types_allowed=True):
     """The harness as the gate runs it: lup started in this process, and values drawn by hypothesis."""
 
@@ -345,7 +363,13 @@ class Harness(Testing, arbitrary_types_allowed=True):
         """
         project = declared if isinstance(declared, Project) else loaded(declared)
         reached = await self.reached(project, secrets, repository)
-        return Started(modules=reached.modules, specs=reached.tools(), doors=reached)
+        return Started(
+            modules=reached.modules,
+            specs=reached.tools(),
+            plan=plan_of(resolve(project), []),
+            doors=reached,
+            crossing=Crosser(running=reached.running),
+        )
 
     async def reached(
         self,
@@ -367,7 +391,9 @@ class Harness(Testing, arbitrary_types_allowed=True):
             if secrets is not None
             else {name: self.any(str) for name in dict.fromkeys(held)}
         )
-        running = await resolved.doors.started(repository, given)
+        kept = tempfile.TemporaryDirectory(prefix="lup-data-")
+        self.run.kept.append(kept)
+        running = await resolved.doors.started(repository, given, data=Path(kept.name))
         self.run.started.append(running)
         return Reached(
             project=project,

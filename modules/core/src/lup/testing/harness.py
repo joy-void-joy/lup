@@ -19,6 +19,7 @@ from lup.doors.door import Accepted, Refused
 from lup.doors.parties import Party
 from lup.doors.tool import ToolSpec
 from lup.errors import LupError
+from lup.running.plan import Plan
 from lup.types import Model
 
 if TYPE_CHECKING:
@@ -163,6 +164,14 @@ class Reaching(ABC):
         """Stop what's started: each class's methods run at `Stopping`, then what each runs since `Starting` cancelled."""
 
 
+class Crossing(ABC):
+    """A started lup's parts, as a message crossing to their container reaches them: what the program on the operator's machine sends."""
+
+    @abstractmethod
+    async def crossed(self, text: bytes) -> bytes:
+        """Answer one message that crossed to the container running the parts, as it would: its call through a door answered, or why it's refused."""
+
+
 class Started(Model, arbitrary_types_allowed=True):
     """lup started on a declaration: its modules, and its doors, called as a party calls them.
 
@@ -175,8 +184,17 @@ class Started(Model, arbitrary_types_allowed=True):
     """The modules it's made of, every layer applied, in order."""
     specs: list[ToolSpec]
     """What a session is told of each tool its modules serve."""
+    plan: Plan
+    """Its declaration's plan, as the program on the operator's machine reads
+    it."""
     doors: Reaching
     """Its doors, as the harness reaches them."""
+    crossing: Crossing
+    """Its parts, as a message crossing to their container reaches them."""
+
+    async def crossed(self, text: bytes) -> bytes:
+        """Answer one message as the container running its parts would: a call through a door, carrying the version of its shape (`lup.running.wire`)."""
+        return await self.crossing.crossed(text)
 
     def tools(self) -> list[ToolSpec]:
         """Return what a session is told of each tool its modules serve."""
