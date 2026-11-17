@@ -90,6 +90,16 @@ class Inboxes(Part, approved=True, shared=True):
         """Return `repository`'s inbox."""
         return Inbox(database=self.opened(), repository=repository)
 
+    def elsewhere(self, own: str, other: str | None) -> Inbox:
+        """Return the inbox of the repository `other` names, else `own`'s: where an agent of `own` sends what they say; raise `InboxError` where the store holds nothing of `other`."""
+        if other is None or other == own:
+            return self.inbox(own)
+        # lup: defer(issue=2, why="any repository the store holds, until #2 resolves the repositories a declaration relates, which alone an agent's project may write into")
+        if other not in self.opened().repositories():
+            message = f"the store holds nothing of a repository named `{other}`"
+            raise InboxError(message, about=[other])
+        return self.inbox(other)
+
     # Agents' acts, called by their project's code
 
     @lup.service
@@ -113,10 +123,10 @@ class Inboxes(Part, approved=True, shared=True):
     @lup.service
     async def friction(self, given: Spoken[FrictionSaid], by: Codebase) -> str:
         """Keep what got in an agent's way as a friction, where they send it, and say where."""
-        inbox = self.inbox(by.repository)
-        agent = inbox.agent(given.agent)
+        agent = self.inbox(by.repository).agent(given.agent)
         said = given.said
         with refusing():
+            inbox = self.elsewhere(by.repository, said.repository)
             under = inbox.party_or_pile(said.under, agent)
             friction = inbox.opened(
                 agent,
@@ -142,12 +152,17 @@ class Inboxes(Part, approved=True, shared=True):
     @lup.service
     async def send(self, given: Spoken[SendSaid], by: Codebase) -> str:
         """Send an agent's message to the party it names: a pile opens a concern with it."""
-        inbox = self.inbox(by.repository)
-        agent = inbox.agent(given.agent)
+        own = self.inbox(by.repository)
+        agent = own.agent(given.agent)
         said = given.said
         with refusing():
+            inbox = self.elsewhere(by.repository, said.repository)
             to = inbox.party(said.to)
-            concern = inbox.thread(agent, said.thread)
+            concern = (
+                own.thread(agent, said.thread)
+                if inbox.repository == own.repository
+                else None
+            )
             if isinstance(to, PileRecord):
                 opened = inbox.opened(agent, first_line(said.text), said.text, to)
                 return f"Opened @{opened.number} in {inbox.called(to)}."

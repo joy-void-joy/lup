@@ -317,3 +317,27 @@ class InboxPromises(Part):
                 await viewed(started, "waiting", PartiesOf(repository="harness"))
             ).text()
         )
+
+    @lup.promise
+    async def a_friction_about_another_repository_lands_in_its_pile(
+        self, by: Testing
+    ) -> None:
+        """A friction an agent of one project sends to another repository's pile lands there, made if it isn't, and not in their own."""
+        started = await by.started(project())
+        lup_agent, project_agent = by.any(Agent), Agent(id="downstream")
+        await said(started, "note", NoteSaid(remark="here first"), lup_agent)
+        elsewhere = Codebase(repository="downstream")
+        sent = await started.serve(
+            "friction",
+            {
+                "agent": project_agent.id,
+                "said": FrictionSaid(
+                    text="lup's keys lag", under="frictions/keys", repository="harness"
+                ).model_dump(),
+            },
+            elsewhere,
+        )
+        assert isinstance(sent, Accepted), sent
+        found = placed(await inboxed(started), "lup's keys lag")
+        assert found.holder == "@frictions/keys"
+        assert found.kind == "inbox:friction"

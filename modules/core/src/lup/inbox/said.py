@@ -59,6 +59,8 @@ class FrictionSaid(Model):
     """A few words naming it. Left out, its first line."""
     under: str = FRICTIONS
     """Where it goes: a pile by its path, made where it isn't there yet, or an agent by their name."""
+    repository: str | None = None
+    """Another repository it goes to, by the name lup knows it by, as a friction about lup met in a project's session goes to lup's. Left out, the agent's own."""
 
 
 class NoteSaid(Model):
@@ -74,6 +76,8 @@ class SendSaid(Model):
 
     to: str
     """The party, by its name: `operator`, an agent's name, or a pile's path."""
+    repository: str | None = None
+    """Another repository the party is of, by the name lup knows it by. Left out, the agent's own."""
     tone: Tone = "note"
     text: str
     thread: str | None = None
