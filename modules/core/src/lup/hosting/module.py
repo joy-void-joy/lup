@@ -12,7 +12,12 @@ from lup.hosting.approvals import Approvals
 from lup.hosting.carrying import Carrying
 from lup.hosting.containers import Containers
 from lup.hosting.projects import Projects
-from lup.hosting.promises import ApprovalsPromises, HostingPromises, TreesPromises
+from lup.hosting.promises import (
+    ApprovalsPromises,
+    HostingPromises,
+    ProjectsPromises,
+    TreesPromises,
+)
 from lup.hosting.secrets import Secrets
 from lup.hosting.trees import Trees
 
@@ -31,4 +36,5 @@ class Hosting(Module):
         HostingPromises,
         TreesPromises,
         ApprovalsPromises,
+        ProjectsPromises,
     )

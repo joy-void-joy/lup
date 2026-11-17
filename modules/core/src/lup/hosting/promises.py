@@ -152,10 +152,10 @@ class Unsafe(Model):
 
 
 class Opens(Model):
-    """A project the promises open: harmon unless it says, its tree and the machine's interpreters."""
+    """A project the promises open: harmon unless it says, where git keeps it, and the machine's interpreters."""
 
     repository: str = "harmon"
-    root: str = "/srv/harmon"
+    common: str = "/srv/harmon.git"
     interpreters: str = "/srv/python"
 
     def given(self) -> JsonValue:
@@ -411,7 +411,7 @@ class HostingPromises(Part):
                 Answering(when=["run", "--detach"]),
             ]
         )
-        started = await by.started(HOME, programs={"podman": podman}, machine=True)
+        started = await started_approved(by, podman)
         if kept:
             await started.run(
                 "hosting",
@@ -479,7 +479,7 @@ class HostingPromises(Part):
                 Answering(when=["run", "--detach"]),
             ]
         )
-        started = await by.started(HOME, programs={"podman": podman}, machine=True)
+        started = await started_approved(by, podman)
         opened = await started.serve("opened", Opens().given(), Machine())
         assert isinstance(opened, Refused)
         assert podman_ran(started, "run") == [
@@ -499,7 +499,7 @@ class HostingPromises(Part):
                 Answering(when=["run", "--detach"]),
             ]
         )
-        started = await by.started(HOME, programs={"podman": podman}, machine=True)
+        started = await started_approved(by, podman)
         opening = Opens() if in_plan else Opens(repository=unsafe.name)
         opened = await started.serve("opened", opening.given(), Machine())
         assert isinstance(opened, Refused)
@@ -515,7 +515,7 @@ class HostingPromises(Part):
                 Answering(when=["run", "--detach"]),
             ]
         )
-        started = await by.started(HOME, programs={"podman": podman}, machine=True)
+        started = await started_approved(by, podman)
         await started.run(
             "hosting",
             "keep",
@@ -914,3 +914,98 @@ class ApprovalsPromises(Part):
             for each in ["--no-index", "--no-ext-diff", "--no-textconv"]
         )
         assert {"GIT_CONFIG_GLOBAL": os.devnull}.items() <= diff.env.items()
+
+
+async def started_approved(
+    by: Testing, podman: Scripted, committed: Committed | None = None
+) -> Started:
+    """Start the machine's parts, podman as `podman` scripts it, and a store of git's objects holding `committed`, a commit of harmon the operator approved."""
+    approving = committed or Committed.of(Files())
+    started = await by.started(
+        HOME, programs={"podman": podman, "git": approving.store}, machine=True
+    )
+    await started.run(
+        "hosting",
+        "approve",
+        {"project": "harmon", "commit": approving.commit},
+        lup.Operator(),
+    )
+    return started
+
+
+OPENING_PODMAN = Scripted(
+    answers=[
+        Answering(when=["image", "exists"], status=0),
+        Answering(when=["run", "--interactive"], output=json.dumps(VAULT_PLAN)),
+        Answering(when=["run", "--detach"]),
+        Answering(when=["stop"]),
+    ]
+)
+"""podman as the promises opening a project stand it in: the image there,
+the plan of a part holding nothing and one holding a secret, and every run and
+stop succeeding."""
+
+
+class ProjectsPromises(Part):
+    """What the operator can count on of what runs of a project: the commit they approved last, and nothing before."""
+
+    @lup.promise
+    async def nothing_of_a_project_runs_before_its_first_approval(
+        self, by: Testing
+    ) -> None:
+        """A project nothing of which the operator approved yet is refused, and no container of it starts: lup asks them before its first run."""
+        committed = Committed.of(by.any(Files))
+        started = await by.started(
+            HOME,
+            programs={"podman": OPENING_PODMAN, "git": committed.store},
+            machine=True,
+        )
+        opened = await started.serve("opened", Opens().given(), Machine())
+        assert isinstance(opened, Refused)
+        assert podman_ran(started, "run") == []
+
+    @lup.promise
+    async def a_project_runs_the_commit_approved_last(self, by: Testing) -> None:
+        """A project's containers run the commit the operator approved last, written out from git's objects and mounted read-only, never one approved before it."""
+        first, last = Committed.of(by.any(Files)), Committed.of(by.any(Files))
+        store = Store(objects=[*first.store.objects, *last.store.objects])
+        started = await by.started(
+            HOME, programs={"podman": OPENING_PODMAN, "git": store}, machine=True
+        )
+        for each in [first, last]:
+            await started.run(
+                "hosting",
+                "approve",
+                {"project": "harmon", "commit": each.commit},
+                lup.Operator(),
+            )
+        opened = await started.serve("opened", Opens().given(), Machine())
+        assert isinstance(opened, Accepted)
+        assert json.loads(opened.answer())["commit"] == last.commit
+        mounted = [
+            each
+            for command in podman_ran(started, "run")
+            for each in command
+            if each.startswith("--mount=type=bind") and "/harmon/" in each
+        ]
+        assert mounted
+        assert all(f"/harmon/{last.commit}," in each for each in mounted)
+        assert all("ro=true" in each for each in mounted)
+
+    @lup.promise
+    async def opening_again_stops_what_ran_before(self, by: Testing) -> None:
+        """Opening a project again stops each container it ran before, before starting those of the commit approved last, so two never run under one name."""
+        started = await started_approved(by, OPENING_PODMAN)
+        await started.run(
+            "hosting",
+            "keep",
+            {"project": "harmon", "name": "key", "value": "k"},
+            lup.Operator(),
+        )
+        first = await started.serve("opened", Opens().given(), Machine())
+        again = await started.serve("opened", Opens().given(), Machine())
+        assert isinstance(first, Accepted)
+        assert isinstance(again, Accepted)
+        containers: list[str] = json.loads(first.answer())["containers"]
+        stopped = [each[-1] for each in podman_ran(started, "stop")]
+        assert stopped == containers
