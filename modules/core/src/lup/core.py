@@ -3,7 +3,8 @@
 from lup.declaration.module import Module
 from lup.declaration.promises import DeclarationPromises
 from lup.doors.parts import Parts
-from lup.doors.promises import DoorsPromises, RunningPromises
+from lup.doors.promises import DoorsPromises, PartsPromises
+from lup.running.promises import RunningPromises
 from lup.testing.promises import TestingPromises
 
 
@@ -17,5 +18,9 @@ class Core(Module):
 
     name = "core"
     parts: Parts = Parts.of(
-        DeclarationPromises, DoorsPromises, RunningPromises, TestingPromises
+        DeclarationPromises,
+        DoorsPromises,
+        PartsPromises,
+        RunningPromises,
+        TestingPromises,
     )

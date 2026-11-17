@@ -7,6 +7,8 @@ carry only what identifies them: what an agent is, beyond lup's id for them, is
 the pieces' that start sessions and hold concerns, which give the id its type.
 """
 
+from typing import Literal
+
 from lup.types import Model
 
 
@@ -22,12 +24,17 @@ class Agent(Party):
     starts sessions (#5).
     """
 
+    party: Literal["agent"] = "agent"
+    """Which of the core's parties it is, as a call across containers names it."""
     id: str
     """lup's id for the agent."""
 
 
 class Operator(Party):
     """The operator, from the dashboard or from a terminal on their machine, where a command carries their authority."""
+
+    party: Literal["operator"] = "operator"
+    """Which of the core's parties it is, as a call across containers names it."""
 
 
 class Code(Party):
@@ -39,6 +46,8 @@ class Code(Party):
     projects apart, not the classes of one project.
     """
 
+    party: Literal["code"] = "code"
+    """Which of the core's parties it is, as a call across containers names it."""
     repository: str
     """The repository whose code calls, as lup names it."""
 
