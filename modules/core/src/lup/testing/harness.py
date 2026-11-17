@@ -77,7 +77,17 @@ class Ran(Model):
     by: SerializeAsAny[Party]
 
 
-type Call = Annotated[ToolCall | Acted | Ran, Field(discriminator="door")]
+class Viewed(Model):
+    """A view read, by its module's name and its own."""
+
+    door: Literal["view"] = "view"
+    module: str
+    view: str
+    given: JsonValue
+    by: SerializeAsAny[Party]
+
+
+type Call = Annotated[ToolCall | Acted | Ran | Viewed, Field(discriminator="door")]
 """One call through a door, as a party makes it: which door, what was sent, and
 by whom."""
 
@@ -194,6 +204,17 @@ class Started(Model, arbitrary_types_allowed=True):
     ) -> Accepted | Refused:
         """Run the command `command` of the module named `module` with `arguments`, as `by` does, and say what came of it."""
         call = Ran(module=module, command=command, arguments=sent(arguments), by=by)
+        return await self.doors.answered(call)
+
+    async def view(
+        self, module: str, view: str, given: Sent, by: Party
+    ) -> Accepted | Refused:
+        """Read the view `view` of the module named `module` for `given`, as `by` does, and say what came of it: its `Blocks`, where it answered.
+
+        Raise `BlockError` where what it answers names a kind neither the core
+        nor its module declares.
+        """
+        call = Viewed(module=module, view=view, given=sent(given), by=by)
         return await self.doors.answered(call)
 
 

@@ -2,8 +2,8 @@
 
 Resolving a declaration lists every class of methods each module serves
 (`Doors.of`), each made with its module, refusing what two methods would share:
-a tool's name across the project's modules, an action's or a command's name
-within one. Calling through a door (`Doors.call`, `.act` and `.run`) finds the
+a name across the project's modules where their door names them so, as a tool's
+(`Door.named_across`), else within one module. Calling through a door (`Doors.call`, `.act` and `.run`) finds the
 method, checks who calls, reads what it's given as the model it takes, and runs
 it on its class made afresh, answering `Accepted` or `Refused`: what the harness
 and the services call (`README.md` in `lup/doors/`, *Calling through a door*).
@@ -163,11 +163,13 @@ class Doors(Model):
                 entry.method.checked()
         except DoorError as wrong:
             raise ProjectError(str(wrong), about=wrong.about) from wrong
-        distinct("A tool's name", doors.keyed(ToolDoor))
-        distinct("An action's name in its module", doors.keyed(ActionDoor, scoped=True))
-        distinct(
-            "A command's name in its module", doors.keyed(CommandDoor, scoped=True)
-        )
+        kinds: list[type[Door]] = [type(entry.method.door) for entry in doors.entries()]
+        for door in dict.fromkeys(kinds):
+            within = "" if door.named_across else " in its module"
+            distinct(
+                f"{door.called}'s name{within}".capitalize(),
+                doors.keyed(door, scoped=not door.named_across),
+            )
         return doors
 
     def entries(self) -> list[Entry]:

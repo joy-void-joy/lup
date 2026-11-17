@@ -58,7 +58,7 @@ A method is async, takes `self`, one model, then `by` where it needs who calls i
 
 A door reads the method's annotations at run time. Where one names a class defined further down its file, as Python 3.14 allows, what needs that type is checked once the declaration resolves, which reads every method its modules serve. A name imported under `TYPE_CHECKING` alone is never defined where a door reads it, so ruff is told the doors are runtime-evaluated decorators (`pyproject.toml`), and steers such an import out of that block.
 
-Read through its class, a method is a `Method`, saying its door and what it takes; read through an instance, it's that instance's method, called as any and typed as written (`await serving.shout(said, by=agent)`). Adding a door is adding a class deriving from `Door` (`door.py`): its settings as fields, what it holds a method to (`contract`), who may call a method leaving `by` out (`default`), and a `__call__` typed with its contract; a door whose methods take another shape than one model then `by` says so too (`shaped`), as the promise's door does, taking a law that isn't async.
+Read through its class, a method is a `Method`, saying its door and what it takes; read through an instance, it's that instance's method, called as any and typed as written (`await serving.shout(said, by=agent)`). Adding a door is adding a class deriving from `Door` (`door.py`): its settings as fields, what it holds a method to (`contract`), who may call a method leaving `by` out (`default`), whether its methods' names are shared across every module (`named_across`), and a `__call__` typed with its contract; a door whose methods take another shape than one model then `by` says so too (`shaped`), as the promise's door does, taking a law that isn't async.
 
 ## Who calls
 
@@ -71,8 +71,7 @@ A `ModuleServing` class narrows `module` to its module's class (`module: Echo`),
 A module lists its classes in `serving`, a selection (`Serving`) naming each by its class's name: a project drops one with `Echo(serving=Serving().drop("EchoServing"))`. Resolving a declaration (`lup.environment.declaration.resolve`) lists every class each module serves (`Resolved.doors`), and refuses:
 - a class narrowed to another module's class, which can't be made with the module listing it;
 - a method that can't be behind its door, once every class its annotations name is defined;
-- a tool's name two methods share across modules, since an agent names it without the module, naming both;
-- an action's or a command's name two methods share within a module, which names them.
+- a name two methods behind one kind of door share: across modules where the door names its methods so (`Door.named_across`), as an agent names a tool without its module, else within a module, which names them, naming both.
 
 ## Calling through a door
 

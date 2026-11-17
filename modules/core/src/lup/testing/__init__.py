@@ -23,6 +23,7 @@ from lup.testing.harness import (
     Step,
     Testing,
     ToolCall,
+    Viewed,
 )
 from lup.testing.raising import Raised, raises
 
@@ -43,5 +44,6 @@ __all__ = [
     "Testing",
     "ToolCall",
     "ToolSpec",
+    "Viewed",
     "raises",
 ]

@@ -139,6 +139,8 @@ runtime-evaluated-decorators = [
     "lup.doors.command.command",
     "lup.promise",
     "lup.testing.promise.promise",
+    "lup.view",
+    "lup.shell.view.view",
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -197,6 +199,7 @@ source_modules = [
     "lup.core",
     "lup.declaration",
     "lup.doors",
+    "lup.shell",
     "lup.testing",
 ]
 forbidden_modules = ["lup.environment"]
@@ -216,6 +219,7 @@ forbidden_modules = [
     "lup.errors",
     "lup.declaration.*",
     "lup.doors.*",
+    "lup.shell.*",
     "lup.testing.*",
 ]
 allow_indirect_imports = true
