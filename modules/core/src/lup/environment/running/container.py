@@ -11,6 +11,7 @@ otherwise sent to the program, which carries it to the part's container
 import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING, override
+lazy from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
@@ -64,12 +65,9 @@ async def answered(running: Running, text: bytes) -> bytes:
     try:
         call = read(text, CALLS)
     except FormatError as other:
-        reply: Reply = Declined(rejection=Rejection(submitted=None, reason=str(other)))
-        return REPLIES.dump_json(reply)
+        return declined(str(other))
     except ValidationError as wrong:
-        reason = f"a message that crossed isn't a call through a door: {wrong}"
-        reply = Declined(rejection=Rejection(submitted=None, reason=reason))
-        return REPLIES.dump_json(reply)
+        return declined(f"a message that crossed isn't a call through a door: {wrong}")
     match call:
         case ToolCalled(tool=tool, given=given, by=by):
             outcome = await running.call(tool, given, by)
@@ -82,9 +80,39 @@ async def answered(running: Running, text: bytes) -> bytes:
     return REPLIES.dump_json(replied(outcome))
 
 
-async def asked(socket: Path, text: bytes) -> bytes:
-    """Send one message on `socket` and return the answer it gets: one connection, one message each way."""
-    reader, writer = await asyncio.open_unix_connection(socket)
+def declined(reason: str) -> bytes:
+    """Return a refusal of a message as it crosses, saying why."""
+    reply: Reply = Declined(rejection=Rejection(submitted=None, reason=reason))
+    return REPLIES.dump_json(reply)
+
+
+async def listening(
+    socket: Path, answer: Callable[[bytes], Awaitable[bytes]], *, limit: int
+) -> asyncio.Server:
+    """Answer each connection on `socket`, a file, a stale one replaced: one message each way, a message past `limit` bytes refused rather than read."""
+
+    async def connected(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        try:
+            try:
+                text = await reader.readline()
+            except ValueError:
+                reply = declined(f"a message past {limit} bytes isn't read")
+            else:
+                reply = await answer(text)
+            writer.write(reply + b"\n")
+            await writer.drain()
+        finally:
+            writer.close()
+
+    await asyncio.to_thread(socket.unlink, missing_ok=True)
+    return await asyncio.start_unix_server(connected, path=socket, limit=limit)
+
+
+async def asked(socket: Path, text: bytes, *, limit: int = 16 * 2**20) -> bytes:
+    """Send one message on `socket` and return the answer it gets: one connection, one message each way, an answer past `limit` bytes raising `ValueError`."""
+    reader, writer = await asyncio.open_unix_connection(socket, limit=limit)
     try:
         writer.write(text + b"\n")
         await writer.drain()
@@ -118,7 +146,7 @@ class Outward(Model, Carrier):
         try:
             text = await asked(self.calling, call.model_dump_json().encode())
             reply = read(text, REPLIES)
-        except (OSError, LupError, ValidationError) as lost:
+        except (OSError, ValueError, LupError, ValidationError) as lost:
             message = f"`{name}` couldn't be carried to where its part runs: {lost}"
             raise RefusedError(message, about=[name]) from lost
         match reply:
@@ -169,21 +197,14 @@ async def started(start: Start) -> Running:
     )
 
 
-async def served(start: Start) -> None:
-    """Start the parts `start` names, and answer each call that comes in on its socket until the container is stopped, the parts' `Stopping` run before it ends."""
+async def served(start: Start, *, limit: int = 16 * 2**20) -> None:
+    """Start the parts `start` names, and answer each call that comes in on its socket until the container is stopped, a message past `limit` bytes refused, the parts' `Stopping` run before it ends."""
     running = await started(start)
 
-    async def connected(
-        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ) -> None:
-        try:
-            text = await reader.readline()
-            writer.write(await answered(running, text) + b"\n")
-            await writer.drain()
-        finally:
-            writer.close()
+    async def answer(text: bytes) -> bytes:
+        return await answered(running, text)
 
-    server = await asyncio.start_unix_server(connected, path=start.listening)
+    server = await listening(start.listening, answer, limit=limit)
     try:
         async with server:
             await server.serve_forever()

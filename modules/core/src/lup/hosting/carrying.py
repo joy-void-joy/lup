@@ -10,17 +10,21 @@ never an abstract socket, which rooms, sharing the machine's network, could
 reach (`README.md` here, *Carrying*).
 
 The sockets themselves, binding and forwarding, are the environment's
-(`lup.environment.running.machine`); this part keeps where each part runs and
-decides each route.
+(`lup.environment.running.machine`), told of each directory as it's made
+(`Listens`); this part keeps where each part runs and decides each route.
 """
 
+import hashlib
+from abc import ABC, abstractmethod
 from pathlib import Path
+
+from pydantic import Field
 
 import lup
 from lup.doors.door import RefusedError
 from lup.doors.parties import Codebase, Machine, Operator
 from lup.doors.parts import Data, Part
-from lup.running.plan import PartPlan, Plan
+from lup.running.plan import Name, Plan
 from lup.running.wire import (
     ActionCalled,
     Call,
@@ -35,7 +39,7 @@ from lup.types import Model
 class Placement(Model):
     """A container lup started for a project's parts: their names, and its directory of sockets."""
 
-    repository: str
+    repository: Name
     """The project whose code it runs, as lup names it."""
     parts: list[str]
     """The parts it runs, each `module.Part`."""
@@ -55,7 +59,7 @@ class Placement(Model):
 class Placing(Model):
     """Where a project's parts run, as they're started: its plan, and each container."""
 
-    repository: str
+    repository: Name
     plan: Plan
     placements: list[Placement]
 
@@ -83,7 +87,7 @@ class Route(Model):
 class Naming(Model):
     """A container to give a directory of sockets, by its name."""
 
-    container: str
+    container: Name
 
 
 class Directory(Model):
@@ -92,10 +96,12 @@ class Directory(Model):
     path: Path
 
 
-class Placed(Model):
-    """Each container lup started that calls come in from, by its directory."""
+class Listens(ABC):
+    """What listens on each directory's calling socket where the machine's parts run: the environment's, binding a socket file there and answering what comes in as `Carrying` routes it."""
 
-    placements: list[Placement]
+    @abstractmethod
+    async def listened(self, directory: Path) -> None:
+        """Listen on `directory`'s calling socket from now on."""
 
 
 class Carrying(Part, machine=True, shared=True):
@@ -103,6 +109,10 @@ class Carrying(Part, machine=True, shared=True):
 
     sockets: Data
     """Every directory of sockets: one per container, and the operator's."""
+    listens: Listens | None = Field(default=None, exclude=True, repr=False)
+    """What listens on each directory's socket as it's made: the
+    environment's, set where the machine's parts run; none where calls are
+    routed without sockets, as in a promise."""
     plans: dict[str, Plan] = {}
     """Each project's plan, by its repository."""
     placements: list[Placement] = []
@@ -115,10 +125,17 @@ class Carrying(Part, machine=True, shared=True):
 
     @lup.service
     async def directory(self, naming: Naming, by: Machine) -> Directory:
-        """Make a container's directory of sockets, its own, and return it."""
+        """Make a container's directory of sockets, its own, listened on from now on, and return it.
+
+        It's named by a digest of the container's name, short, since a
+        socket's path is limited to 108 bytes.
+        """
         del by
-        directory = self.sockets.path / "containers" / naming.container
+        digest = hashlib.blake2b(naming.container.encode(), digest_size=8)
+        directory = self.sockets.path / "containers" / digest.hexdigest()
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if self.listens is not None:
+            await self.listens.listened(directory)
         return Directory(path=directory)
 
     @lup.service
@@ -136,19 +153,16 @@ class Carrying(Part, machine=True, shared=True):
         ]
 
     @lup.service
-    async def listened(self, asking: Placed, by: Machine) -> Placed:
-        """Return each container calls come in from, for the machine to listen on its socket."""
-        del asking, by
-        return Placed(placements=self.placements)
-
-    @lup.service
     async def routed(self, arrival: Arrival, by: Machine) -> Route:
         """Decide where a call come in on a socket goes, and who it's by: the operator on their own directory, a project's code on its container's.
 
-        A call is answered by a part of the caller's project, the one the
-        operator names for theirs, or else by a part one for the whole machine.
-        Raise `RefusedError` where the directory is no container's nor the
-        operator's, or no part answers the call.
+        A call is answered by a part of the caller's project running in one
+        of its containers, the project the operator names for theirs, or else
+        by the machine's own parts, which refuse what none of them serves:
+        never by another project's part, and a part a plan says is the
+        machine's is only ever the machine's own. Raise
+        `RefusedError` where the directory is no container's nor the
+        operator's, or the project's part answering the call isn't running.
         """
         del by
         caller = self.caller(arrival.directory)
@@ -156,15 +170,26 @@ class Carrying(Part, machine=True, shared=True):
         repository = (
             caller.repository if isinstance(caller, Codebase) else arrival.repository
         )
-        serving = self.serving(way_of(call), repository)
-        if serving is None:
-            message = f"no part lup runs answers {way_of(call).said()}"
-            raise RefusedError(message)
+        plan = None if repository is None else self.plans.get(repository)
+        way = way_of(call)
+        serving = None if plan is None else plan.serving(way.door, way.name, way.module)
+        if serving is None or serving.holds.machine or serving.holds.shared:
+            return Route(to=None, call=call)
         placement = next(
-            (each for each in self.placements if serving.named() in each.parts),
+            (
+                each
+                for each in self.placements
+                if each.repository == repository and serving.named() in each.parts
+            ),
             None,
         )
-        return Route(to=None if placement is None else placement.listening(), call=call)
+        if placement is None:
+            message = (
+                f"{way.said()} is `{serving.named()}`'s, which isn't running: "
+                "a part holding something waits for the operator"
+            )
+            raise RefusedError(message)
+        return Route(to=placement.listening(), call=call)
 
     def caller(self, directory: Path) -> Caller:
         """Return who a call coming in on `directory` is by.
@@ -180,22 +205,6 @@ class Carrying(Part, machine=True, shared=True):
             message = f"{directory} is no container's lup started, nor the operator's"
             raise RefusedError(message)
         return Codebase(repository=placement.repository)
-
-    def serving(self, way: Way, repository: str | None) -> PartPlan | None:
-        """Return the part answering a call through `way`: of `repository`'s plan first, then any project's part one for the whole machine."""
-        own = None if repository is None else self.plans.get(repository)
-        found = None if own is None else own.serving(way.door, way.name, way.module)
-        if found is not None:
-            return found
-        return next(
-            (
-                each
-                for plan in self.plans.values()
-                if (each := plan.serving(way.door, way.name, way.module)) is not None
-                and each.holds.shared
-            ),
-            None,
-        )
 
 
 class Way(Model):

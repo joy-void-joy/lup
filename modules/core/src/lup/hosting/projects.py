@@ -7,24 +7,25 @@ only the secrets it holds. Each container's directory of sockets comes from
 `Carrying`, which is told where each part runs (`README.md` here, *Projects*).
 
 A project's Python environment is made in its container, as rooms make theirs:
-the machine's own uv-managed interpreters mounted read-only at their own paths,
-nothing fetched, and the environment and uv's cache kept in directories of the
-project's own under this part's data, so a container starts on what it synced
-before.
+the machine's own uv-managed interpreters mounted read-only, nothing fetched,
+and each container's environment and uv's cache kept in directories of that
+container's own under this part's data, so it starts on what it synced before,
+and code running in one container never writes what another imports.
 """
 
 from pathlib import Path
 
-from pydantic import Field, TypeAdapter
+from pydantic import Field, TypeAdapter, ValidationError
 
 import lup
 from lup.doors.door import RefusedError
 from lup.doors.parties import Machine, Operator
 from lup.doors.parts import Data, Part
+from lup.errors import LupError
 from lup.hosting.carrying import Carrying, Naming, Placement, Placing
 from lup.hosting.containers import Bind, Containers, Image, Once, Spec
 from lup.hosting.secrets import Holding, Secrets
-from lup.running.plan import PartPlan, Plan
+from lup.running.plan import Name, PartPlan, Plan
 from lup.running.wire import Planning, Start, read
 from lup.types import Model
 
@@ -34,15 +35,15 @@ PLANS = TypeAdapter[Plan](Plan)
 class Opening(Model):
     """A project to run: its repository, as lup names it, its tree at the commit it runs, and its declaration."""
 
-    repository: str
+    repository: Name
     root: Path
     """Its tree on the machine, at the commit it runs, mounted read-only."""
     declaration: Path = Path("lup_project.py")
     """Its declaration, relative to the root."""
     interpreters: Path
     """Where the machine's uv keeps its Python interpreters, mounted read-only
-    at the same path, so a container runs the Python the project asks for
-    without fetching one."""
+    at this path, which an environment's links name, so a container runs the
+    Python the project asks for without fetching one."""
 
 
 class Opened(Model):
@@ -87,17 +88,19 @@ class Projects(Part, machine=True, shared=True):
 
     def image(self, repository: str) -> Image:
         """Return the image a project's containers run."""
-        return Image(definition=self.base.definition(), project=repository)
+        return Image(
+            base=self.base.image, definition=self.base.definition(), project=repository
+        )
 
     def spec(self, opening: Opening, name: str, sockets: Path | None) -> Spec:
-        """Return a container of the project running the program a container runs, its tree read-only, its environment and cache its own."""
-        environment = self.places.path / opening.repository / "environment"
-        cache = self.places.path / opening.repository / "cache"
+        """Return a container of the project running the program a container runs, its tree read-only, its environment and uv's cache the container's own."""
+        environment = self.places.path / name / "environment"
+        cache = self.places.path / name / "cache"
         environment.mkdir(parents=True, exist_ok=True)
         cache.mkdir(parents=True, exist_ok=True)
         binds = [
             Bind(source=opening.root),
-            Bind(source=opening.interpreters),
+            Bind(source=opening.interpreters.resolve(), target=opening.interpreters),
             Bind(
                 source=environment, target=Path("/var/lup/environment"), read_only=False
             ),
@@ -204,7 +207,19 @@ class Projects(Part, machine=True, shared=True):
         if finished.status != 0:
             message = f"{opening.repository}'s declaration didn't plan: {finished.error.strip()}"
             raise RefusedError(message)
-        return read(finished.output, PLANS)
+        try:
+            plan = read(finished.output, PLANS)
+        except (LupError, ValidationError) as wrong:
+            message = f"{opening.repository}'s plan isn't one lup runs: {wrong}"
+            raise RefusedError(message) from wrong
+        ties = plan.ties()
+        if ties:
+            message = (
+                f"{opening.repository}'s declaration serves {', '.join(ties)} "
+                "from two parts each: lup routes a call to one part only"
+            )
+            raise RefusedError(message)
+        return plan
 
     async def placed(
         self,

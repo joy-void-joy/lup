@@ -12,6 +12,7 @@ from pydantic import Field, TypeAdapter
 import lup
 from lup.doors.parties import Machine, Operator
 from lup.doors.parts import Data, Part
+from lup.running.plan import Name
 from lup.types import Model
 
 STORED = TypeAdapter(dict[str, str])
@@ -20,7 +21,7 @@ STORED = TypeAdapter(dict[str, str])
 class Holding(Model):
     """The secrets a part of a project holds, by their names."""
 
-    project: str
+    project: Name
     names: list[str] = []
 
 
@@ -34,7 +35,7 @@ class Values(Model):
 class Keeping(Model):
     """A secret of a project the operator gives, to keep under its name."""
 
-    project: str
+    project: Name
     name: str
     value: str = Field(repr=False)
 

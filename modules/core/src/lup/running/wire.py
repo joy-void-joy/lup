@@ -142,8 +142,23 @@ class Start(Model):
     `module.Part` each; none where none keeps any."""
 
 
-type Asked = Annotated[Planning | Start, Field(discriminator="kind")]
-"""What a container's program is given to do, on its input: plan, or start."""
+class Host(Model):
+    """How the machine's own parts are started, on the operator's machine, from the home repository's approved commit: its tree, its declaration, and where lup keeps its state."""
+
+    format: int = 1
+    kind: Literal["host"] = "host"
+    root: Path
+    """The home repository's tree, at the commit the operator approved."""
+    declaration: Path
+    """Its declaration, relative to the root."""
+    repository: str
+    """The home repository, as lup names it."""
+    state: Path
+    """Where the machine's parts keep their data, a directory each."""
+
+
+type Asked = Annotated[Planning | Start | Host, Field(discriminator="kind")]
+"""What the program is given to do: plan, start a container's parts, or host the machine's."""
 
 
 def read[M](text: bytes | str, kind: TypeAdapter[M], reads: int = 1) -> M:
