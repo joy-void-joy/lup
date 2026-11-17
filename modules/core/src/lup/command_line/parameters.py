@@ -4,7 +4,7 @@ A field with no default is an argument; one with a default is an option, named
 for the field's alias, else its name, as typer names one (`-` for `_`); a `bool`
 is a flag, a `list` is repeated, a field limited to some words takes one of
 them, and a field the command line can't say in words (a model, a mapping) is
-written as JSON. A field's description is its help. An option left out isn't
+written as JSON. A field's description, its docstring, is its help. An option left out isn't
 sent, so the model's own default applies, whatever it is.
 """
 

@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from pydantic import JsonValue
+    from typer.core import MarkupMode
 
 
 class Parsing(MutableModel):
@@ -83,10 +84,17 @@ def modules() -> None:
 
 
 def built(
-    name: str, offered: Offered, module: str | None, parsing: Parsing
+    name: str,
+    offered: Offered,
+    module: str | None,
+    parsing: Parsing,
+    markup: MarkupMode = None,
 ) -> typer.Typer:
-    """Return the command line `offered` makes, called `name`: each module with something its party may call, and, of the one named `module`, each method they may call, its command keeping the call it parses in `parsing`."""
-    markup = None
+    """Return the command line `offered` makes, called `name`: each module with something its party may call, and, of the one named `module`, each method they may call, its command keeping the call it parses in `parsing`.
+
+    Its help is plain, or, with `markup`, typer's rich layout, docstrings
+    read as that markup.
+    """
     line = typer.Typer(
         name=name,
         add_completion=False,
@@ -168,7 +176,8 @@ async def typed(
 
     What it prints goes to `out` and `error`, or, where they're left out, is
     kept in what it answers. Typer's own help and messages are written to
-    them as it parses.
+    them as it parses: in typer's rich layout where `out` is a terminal, as
+    the operator's is, and plain where it's piped, as an agent's always is.
     """
     offered = await answerer.offered()
     # lup: defer(issue=7, why="`lup` alone opens the dashboard, which is #7's: until then it shows the help")
@@ -180,7 +189,9 @@ async def typed(
     printing = out or kept_out
     erring = error or kept_error
     parsing = Parsing()
-    line = get_command(built(name, offered, named[0] if named else None, parsing))
+    markup: MarkupMode = "markdown" if printing.isatty() else None
+    module = named[0] if named else None
+    line = get_command(built(name, offered, module, parsing, markup))
     with redirect_stdout(printing), redirect_stderr(erring):
         try:
             line.main(args=asked, prog_name=name, standalone_mode=True)

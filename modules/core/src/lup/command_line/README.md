@@ -9,7 +9,7 @@ One command line for developing with lup, the one universal interface: `lup <mod
 - one with a default is an option, named for its alias, else its name (`--dry-run` for `dry_run`), left out where it isn't given, so the model's own default applies;
 - a `bool` is a flag, a `list` is repeated (`--tags=a --tags=b`), and a field limited to some words takes one of them;
 - a field a word can't say (a model, a mapping) is written as JSON;
-- a field's description is its help, and the method's docstring is the command's.
+- a field's docstring is its help, as it's its description in the model's JSON Schema (`lup.types`), and the method's docstring is the command's.
 
 A command takes everything as arguments: one missing is refused as the words are read, nothing runs, and nothing is ever asked for, so an agent or a test typing it fails rather than hangs. Words starting with `-` that aren't options go after `--`.
 
@@ -18,6 +18,8 @@ What a run prints: a view's text (`Blocks.text`), what the operator sees said in
 ## Who calls, and what they may run
 
 Who calls isn't the command line's to say. It hands each call to an answerer (`Answerer`), which says who the calls are by and offers the project's plan (`offered`), then sends each call and returns its reply (`answered`). The call itself carries no `by`: whoever carries it adds one. The command line offers, and `--help` lists, only what the plan's doorways let that party call: the operator's commands in their terminal, an agent's tools and the commands and views their `by` admits in their room. `lup --help` lists the modules with something the party may run, and `lup <module> --help` lists those methods.
+
+Its help is typer's rich layout where it prints to a terminal, as the operator's command line does, and plain where its output is piped, as an agent's always is.
 
 It builds its parser from the plan alone, the JSON Schema of what each method takes (`lup/running/README.md`, *The plan*), never from the modules' code. That lets the program on the operator's machine answer a terminal there from a plan made in a container, so a branch's code never runs on the operator's machine to say what may be typed. Only the module named is built, so help and a run cost what one module's methods do.
 
@@ -43,7 +45,7 @@ from lup_discord import Discord
 main = command_line("harmon", Discord(), Harmon())
 ```
 
-Whoever installs the project gets a plain command: lup's default modules and those given, answered in this process by whoever runs it (`Operator`). Each secret a part holds is read from the environment variable named after the command and the secret (`HARMON_TOKEN`), or a line of `.env` or `.env.local` in the current directory setting it; the environment wins over `.env.local`, which wins over `.env`. In development, where one of the modules given is code that a worktree holding a declaration tracks, the command reads that declaration with its layers instead, so it offers what the dashboard does. It goes by where the code lives, never the current directory, so an installed command run inside another project's worktree never reads that project's declaration.
+Whoever installs the project gets a plain command: lup's default modules and those given, answered in this process by whoever runs it (`Operator`). Each secret a part holds is read from the environment variable named after the command and the secret, in capitals, each `-` a `_` (`HARMON_TOKEN`), or a line of `.env` or `.env.local` in the current directory setting it; the environment wins over `.env.local`, which wins over `.env`. In development, where one of the modules given is code that a worktree holding a declaration tracks, the command reads that declaration with its layers instead, so it offers what the dashboard does. It goes by where the code lives, never the current directory, so an installed command run inside another project's worktree never reads that project's declaration.
 
 ## Promises
 

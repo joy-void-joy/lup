@@ -57,6 +57,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from lup.declaration.module import Module
+    from lup.doors.parts import Holds
     from lup.errors import LupError
     from lup.running.plan import PartPlan
 
@@ -76,10 +77,10 @@ class InProcess(MutableModel, Answerer, arbitrary_types_allowed=True):
     by."""
     secrets: dict[str, str] = {}
     """The value of each secret a part holds, by its name, as given."""
-    variable: str | None = None
-    """What the environment variable holding a secret starts with, its
-    secret's name after it (`HARMON_` for `HARMON_TOKEN`); none where secrets
-    aren't read from the environment, so a part holding one runs apart."""
+    command: str | None = None
+    """The project's command, whose name the environment variable holding a
+    secret starts with (`variable`); none where secrets aren't read from the
+    environment, so a part holding one runs apart."""
     running: Running | None = None
     """The parts started here, once a call has come."""
 
@@ -92,18 +93,20 @@ class InProcess(MutableModel, Answerer, arbitrary_types_allowed=True):
         return [
             each.named()
             for each in self.resolved.doors.served
-            if not (
-                (holds := each.part.holds()).machine or holds.approved or holds.shared
-            )
-            and all(secret in self.secrets for secret in holds.secrets)
+            if self.here(each.part.holds())
         ]
+
+    def here(self, holds: Holds) -> bool:
+        """Say whether a part holding `holds` is started here: it holds nothing but secrets, each given."""
+        apart = holds.machine or holds.approved or holds.shared
+        return not apart and all(each in self.secrets for each in holds.secrets)
 
     def elsewhere(self, part: PartPlan) -> str:
         """Say why a call to `part`, which isn't started here, can't be answered here: the secrets it needs, or that it runs apart."""
         missing = [each for each in part.holds.secrets if each not in self.secrets]
-        held = part.holds.machine or part.holds.approved or part.holds.shared
-        if missing and not held and self.variable is not None:
-            named = [f"`{self.variable}{each}`".upper() for each in missing]
+        apart = part.holds.machine or part.holds.approved or part.holds.shared
+        if missing and not apart and self.command is not None:
+            named = [variable(self.command, each) for each in missing]
             return (
                 f"`{part.named()}` holds {listed(missing)}, given here by the "
                 f"environment variable {listed(named)}, or a line of `.env` or "
@@ -216,6 +219,16 @@ class Secrets(Settings):
     """Where a project's command reads the secrets its parts hold: the environment, and `.env` files, as pydantic's settings read them."""
 
 
+def variable(command: str, secret: str) -> str:
+    """Name the environment variable a project's command reads `secret` from: the command's name, then the secret's, in capitals, each `-` a `_`.
+
+    >>> variable("story-reader", "token")
+    'STORY_READER_TOKEN'
+    """
+    # lup: ignore("string-replace", why="an environment variable's name can't hold a `-`, which a command's may: `story-reader`'s token is `STORY_READER_TOKEN`")
+    return f"{command}_{secret}".upper().replace("-", "_")
+
+
 def secrets_of(name: str, held: list[str]) -> dict[str, str]:
     """Return the value of each secret in `held` that's set: by the environment variable named after the command `name` and it (`HARMON_TOKEN`), or a line of `.env` or `.env.local` in the current directory setting it, the environment first, then `.env.local`, then `.env`.
 
@@ -223,7 +236,7 @@ def secrets_of(name: str, held: list[str]) -> dict[str, str]:
     """
     environment = EnvSettingsSource(Secrets).env_vars
     files = DotEnvSettingsSource(Secrets, env_file=[".env", ".env.local"]).env_vars
-    keys = {each: f"{name}_{each}".lower() for each in held}
+    keys = {each: variable(name, each).lower() for each in held}
     found = {each: environment.get(key) or files.get(key) for each, key in keys.items()}
     return {each: value for each, value in found.items() if value is not None}
 
@@ -255,7 +268,7 @@ def command_line(name: str, *modules: Module) -> Callable[[], None]:
             resolved=resolved,
             repository=name,
             secrets=secrets_of(name, list(dict.fromkeys(held))),
-            variable=f"{name}_",
+            command=name,
         )
         ran(answerer, name, sys.argv[1:])
 
