@@ -12,39 +12,18 @@ plan*).
 from collections import Counter
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator
+from pydantic import StringConstraints
 
 from lup.doors.parts import Holds
 from lup.doors.tool import ToolSpec
 from lup.types import Model
 
-
-def checked(name: str) -> str:
-    """Return `name` where it's safe as a directory's name and a container's, as the machine makes both from it: ASCII letters, digits, `-`, `_` and `.`, starting with a letter or a digit.
-
-    Raise `ValueError` otherwise, so a name a project chose never reaches a
-    path or podman's command line as anything but one name.
-
-    >>> checked("harmon")
-    'harmon'
-    >>> checked("../operator")
-    Traceback (most recent call last):
-    ...
-    ValueError: `../operator` isn't a name lup runs: ASCII letters, digits, `-`, `_` and `.`, starting with a letter or a digit
-    """
-    allowed = name.isascii() and all(each.isalnum() or each in "-_." for each in name)
-    if not allowed or not name or name.startswith(("-", "_", ".")):
-        message = (
-            f"`{name}` isn't a name lup runs: ASCII letters, digits, `-`, `_` "
-            "and `.`, starting with a letter or a digit"
-        )
-        raise ValueError(message)
-    return name
-
-
-type Name = Annotated[str, AfterValidator(checked)]
+type Name = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")]
 """A name the machine makes a directory's or a container's name from: a
-repository's, a module's, a part's."""
+repository's, a module's, a part's. ASCII letters, digits, `-`, `_` and `.`,
+starting with a letter or a digit, so a name a project chose never reaches a
+path or podman's command line as anything but one name: never `../operator`,
+`.hidden` or `-rm`."""
 
 
 class Doorway(Model):
