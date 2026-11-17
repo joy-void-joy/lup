@@ -1127,3 +1127,24 @@ class Failing(lup.MutableModel, Responding):
         if "--interactive" in arguments:
             return Answering(output=json.dumps(VAULT_PLAN))
         return Answering()
+
+
+class ClearingPromises(Part):
+    """What the operator can count on of the machine's parts starting again: nothing left running that no call reaches."""
+
+    @lup.promise
+    async def the_machine_stops_every_container_it_left(self, by: Testing) -> None:
+        """Every container lup starts is labelled as lup's and its project's, and clearing stops every container so labelled, as the machine's parts start, those a machine that stopped before left among them; only the machine's own parts may clear."""
+        asked = by.any(Asked)
+        started = await by.started(HOME, programs={"podman": PODMAN}, machine=True)
+        await started.serve("started", asked.spec(), Machine())
+        [command] = podman_ran(started, "run")
+        assert "--label=lup.machine" in command
+        assert "--label=lup.project=harness" in command
+        refused = await started.serve("cleared", {}, by.any(Agent))
+        assert isinstance(refused, Refused)
+        cleared = await started.serve("cleared", {}, Machine())
+        assert isinstance(cleared, Accepted)
+        assert podman_ran(started, "stop") == [
+            ["stop", "--ignore", "--time=10", "--filter=label=lup.machine"]
+        ]

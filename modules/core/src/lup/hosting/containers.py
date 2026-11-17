@@ -164,6 +164,8 @@ def command_of(spec: Spec, walls: Walls, *, detached: bool = True) -> list[str]:
         "--detach" if detached else "--interactive",
         *walls.options(),
         f"--name={spec.name}",
+        "--label=lup.machine",
+        f"--label=lup.project={spec.image.project}",
         f"--network={spec.network}",
         f"--workdir={spec.workdir}",
         *(["--device=nvidia.com/gpu=all"] if spec.gpu else []),
@@ -186,6 +188,10 @@ class Named(Model):
     """A container, by its name."""
 
     name: Name
+
+
+class Clearing(Model):
+    """Asking to stop every container lup started, giving nothing."""
 
 
 class Built(Model):
@@ -316,3 +322,18 @@ class Containers(Part, machine=True, shared=True):
             message = f"podman couldn't stop {named.name}: {ran.said()}"
             raise ContainerError(message)
         self.running = [each for each in self.running if each.spec.name != named.name]
+
+    @lup.service
+    async def cleared(self, clearing: Clearing, by: Machine) -> None:
+        """Stop every container lup started, as the machine's parts start: those a machine that stopped before left running, which nothing routes calls to any more.
+
+        Raise `ContainerError` where podman fails to.
+        """
+        del clearing, by
+        ran = await self.podman.ran(
+            "stop", "--ignore", "--time=10", "--filter=label=lup.machine"
+        )
+        if ran.status != 0:
+            message = f"podman couldn't stop the containers lup started: {ran.said()}"
+            raise ContainerError(message)
+        self.running = []

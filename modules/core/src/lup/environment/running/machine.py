@@ -22,6 +22,7 @@ from lup.environment.declaration import load, resolve
 from lup.environment.running.container import answered, asked, declined, listening
 from lup.environment.running.planning import plan_of
 from lup.hosting.carrying import Arrival, Carrying, Listens, Route, Visiting
+from lup.hosting.containers import Clearing, ContainerError
 from lup.running.plan import Plan
 from lup.running.wire import Asking, FormatError, Host, Offer, Offering, read
 from lup.types import MutableModel
@@ -108,8 +109,10 @@ async def hosted_parts(host: Host, runs: Runs | None) -> Running:
 async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> None:
     """Host the machine's own parts, and carry every call coming in on a socket of theirs until stopped: the operator's, and each container's as `Carrying` makes its directory, a message past `limit` bytes refused.
 
-    Raise `ProjectError` where the home repository's declaration doesn't
-    select `Hosting`, which carries calls.
+    Every container a machine that stopped before left running is stopped
+    first, since nothing routes calls to it any more. Raise `ProjectError`
+    where the home repository's declaration doesn't select `Hosting`, which
+    carries calls, and `ContainerError` where podman can't stop those left.
     """
     running = await hosted_parts(host, runs)
     carrying = next(
@@ -122,6 +125,12 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
             "`Carrying` carries every call: the home repository's must"
         )
         raise ProjectError(message)
+    cleared = await running.serve(
+        "cleared", Clearing().model_dump(mode="json"), Machine()
+    )
+    if not isinstance(cleared, Accepted):
+        await running.stopped()
+        raise ContainerError(cleared.rejection.reason)
     binder = Binder(running=running, limit=limit)
     carrying.listens = binder
     hosting = plan_of(resolve(load(host.root / host.declaration)), [], host.root)
