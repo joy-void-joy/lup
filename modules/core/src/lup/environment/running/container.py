@@ -22,7 +22,6 @@ from lup.doors.service import Carrier
 from lup.environment.declaration import load, resolve
 from lup.errors import LupError
 from lup.running.wire import (
-    ActionCalled,
     Answered,
     Call,
     CommandCalled,
@@ -79,8 +78,6 @@ async def answered(running: Running, text: bytes) -> bytes:
             outcome = await running.call(tool, given, call.by)
         case ServiceCalled(service=service, given=given):
             outcome = await running.serve(service, given, call.by)
-        case ActionCalled(module=module, action=action, given=given):
-            outcome = await running.act(module, action, given, call.by)
         case CommandCalled(module=module, command=command, given=given):
             outcome = await running.run(module, command, given, call.by)
     return REPLIES.dump_json(replied(outcome))

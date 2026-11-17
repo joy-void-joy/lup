@@ -139,7 +139,7 @@ class RunningPromises(Part):
         [way] = [each for each in sealing.doorways if each.name == "sealed"]
         assert "Codebase" in way.parties
         assert all(
-            way.door in ("tool", "service", "action", "command")
+            way.door in ("tool", "service", "command")
             for each in started.plan.parts
             for way in each.doorways
         )

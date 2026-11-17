@@ -61,16 +61,6 @@ class ToolCall(Model):
     by: SerializeAsAny[Party]
 
 
-class Acted(Model):
-    """An action run on what a view offers, by its module's name and its own."""
-
-    door: Literal["action"] = "action"
-    module: str
-    action: str
-    given: JsonValue
-    by: SerializeAsAny[Party]
-
-
 class Ran(Model):
     """A command run, by its module's name and its own."""
 
@@ -100,11 +90,20 @@ class Viewed(Model):
     by: SerializeAsAny[Party]
 
 
-type Call = Annotated[
-    ToolCall | Acted | Ran | Served | Viewed, Field(discriminator="door")
-]
+type Call = Annotated[ToolCall | Ran | Served | Viewed, Field(discriminator="door")]
 """One call through a door, as a party makes it: which door, what was sent, and
 by whom."""
+
+
+class Repository(Model):
+    """A repository as lup finds one on disk: the text of its declaration's file, of its own local layer, and of the machine's layer, each where there's one."""
+
+    declaration: str | None = None
+    """Its declaration's file; none for a repository that declares nothing."""
+    local: str | None = None
+    """Its own local layer, which git ignores."""
+    machine: str | None = None
+    """The machine's layer, for every repository on it."""
 
 
 class Step[S](Model):
@@ -315,17 +314,10 @@ class Started(Model, arbitrary_types_allowed=True):
         call = ToolCall(tool=tool, arguments=sent(arguments), by=by)
         return await self.doors.answered(call)
 
-    async def act(
-        self, module: str, action: str, given: Sent, by: Party
-    ) -> Accepted | Refused:
-        """Run the action `action` of the module named `module` on `given`, as `by` does, and say what came of it."""
-        call = Acted(module=module, action=action, given=sent(given), by=by)
-        return await self.doors.answered(call)
-
     async def run(
         self, module: str, command: str, arguments: Sent, by: Party
     ) -> Accepted | Refused:
-        """Run the command `command` of the module named `module` with `arguments`, as `by` does, and say what came of it."""
+        """Run the command `command` of the module named `module` with `arguments`, as `by` does, from the command line or the dashboard's key, and say what came of it."""
         call = Ran(module=module, command=command, arguments=sent(arguments), by=by)
         return await self.doors.answered(call)
 
@@ -355,14 +347,14 @@ class Testing(Party, ABC):
     @abstractmethod
     async def started(
         self,
-        declared: Project | str,
+        declared: Project | Repository,
         secrets: Mapping[str, str] | None = None,
         repository: str = "harness",
         programs: Mapping[str, Scripted | Responding] | None = None,
         *,
         machine: bool = False,
     ) -> Started:
-        """Start lup on a declaration: a `Project`, or the text of a declaration's file, loaded as lup loads one, each class of its modules made once and started, as the code of `repository`, each program its parts run stood in for as `programs` scripts it; where `machine`, as the machine's own parts, a service their code calls being by `Machine`.
+        """Start lup on a declaration: a `Project`, or a repository's files, read with their layers as lup reads a repository's, each class of its modules made once and started, as the code of `repository`, each program its parts run stood in for as `programs` scripts it; where `machine`, as the machine's own parts, a service their code calls being by `Machine`.
 
         `secrets` holds the value of each secret a class holds, by its name;
         left out, each is drawn. Raise `ProjectError` where it doesn't load or

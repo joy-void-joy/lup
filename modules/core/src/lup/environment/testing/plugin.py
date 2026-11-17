@@ -2,8 +2,8 @@
 
 pytest finds it by lup's core's entry point (`pytest11`), so a project with the
 core installed runs it. The declaration is `lup_project.py` at pytest's root, or
-the file `lup_declaration` names in pytest's configuration, and it's collected
-where pytest's paths reach it. A project's gate checks the promises of the
+the file `[tool.lup]`'s `declaration` names in its `pyproject.toml`, as lup reads
+a repository's, and it's collected where pytest's paths reach it. A project's gate checks the promises of the
 modules whose code it holds, not those of lup's it installs, which lup's own
 gate checks.
 
@@ -26,6 +26,7 @@ from lup.declaration.module import Module
 from lup.doors.door import served
 from lup.doors.parts import Part, Parts
 from lup.environment.declaration import load, resolve
+from lup.environment.layout import RepositoryLayout
 from lup.environment.testing.checking import Check, Exploring
 from lup.environment.testing.harness import promises, readers
 from lup.errors import LupError
@@ -43,12 +44,7 @@ if TYPE_CHECKING:
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    """Say where the declaration is, and offer an exploring run."""
-    parser.addini(
-        "lup_declaration",
-        "The declaration whose modules' promises are checked, from pytest's root.",
-        default="lup_project.py",
-    )
+    """Offer an exploring run."""
     parser.addoption(
         "--lup-explore",
         type=int,
@@ -74,7 +70,8 @@ def pytest_configure(config: pytest.Config) -> None:
 def pytest_collect_file(file_path: Path, parent: pytest.Collector) -> Declared | None:
     """Collect the declaration's file as its modules' promises."""
     config = parent.config
-    if file_path != config.rootpath / str(config.getini("lup_declaration")):
+    root = config.rootpath
+    if file_path != RepositoryLayout(root=root, main=root).declaration:
         return None
     # lup: ignore("reportUnknownMemberType", why="pytest leaves untyped the keyword arguments a node's constructor is passed")
     return Declared.from_parent(parent, path=file_path)

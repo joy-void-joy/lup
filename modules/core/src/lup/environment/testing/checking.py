@@ -16,7 +16,6 @@ from hypothesis import HealthCheck, given, seed, settings
 from hypothesis import strategies as st
 
 from lup.declaration.project import Project
-from lup.doors.action import ActionDoor
 from lup.doors.command import CommandDoor
 from lup.doors.door import DoorError
 from lup.doors.parts import Given
@@ -26,7 +25,6 @@ from lup.environment.doors import Entry
 from lup.environment.testing.harness import Harness, Run, promises, watched
 from lup.environment.testing.simulation import Simulation
 from lup.testing.harness import (
-    Acted,
     Broken,
     Kept,
     Ran,
@@ -170,7 +168,7 @@ def checked(
 
 
 def calls(doors: Doors, module: str) -> SearchStrategy[Call]:
-    """Return every call a party could make through the doors `doors` serve of the module named `module`: each tool, action, command and service, given a value of what it takes, by a party of any its doors name.
+    """Return every call a party could make through the doors `doors` serve of the module named `module`: each tool, command and service, given a value of what it takes, by a party of any its doors name.
 
     A law's runs call its own module's doors alone: only they change the state
     it reads, its services among them, which code in another module calls; the
@@ -182,9 +180,7 @@ def calls(doors: Doors, module: str) -> SearchStrategy[Call]:
         entry
         for entry in doors.entries()
         if entry.serves.module.name == module
-        and isinstance(
-            entry.method.door, ToolDoor | ActionDoor | CommandDoor | ServiceDoor
-        )
+        and isinstance(entry.method.door, ToolDoor | CommandDoor | ServiceDoor)
     ]
     if not entries:
         return st.nothing()
@@ -204,10 +200,6 @@ def call(entry: Entry, by: SearchStrategy[Party]) -> SearchStrategy[Call]:
         match door:
             case ToolDoor():
                 return ToolCall(tool=entry.name, arguments=sent(value), by=party)
-            case ActionDoor():
-                return Acted(
-                    module=module, action=entry.name, given=sent(value), by=party
-                )
             case ServiceDoor():
                 return Served(service=entry.name, given=sent(value), by=party)
             case _:

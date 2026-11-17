@@ -55,7 +55,7 @@ They hold nothing of any module, so every view is drawn, folded and commented on
 - **`Fold`:** a summary line and what's under it, of a fold kind; its content given, or read from a view as it opens (`Viewing`), so a long view sends only what's open. Whether it starts open is its kind's, unless its view says otherwise (`open`).
 - **`Code` and `Diff`:** a file as it stands, or as it changed, under a fold of the shell's `file` kind, its bodies in `body` folds and its runs of unchanged lines in `lines` folds, with `Mark`s on its lines of kinds its module declares.
 
-Every block (`Shown`) has an id its module keeps from one answer to the next, by which the page keeps the cursor, folds and comments where they were; a version where what it shows changes, which a comment written on it records; what it offers (`Offer.of(action, given)`: one of its module's actions, under its verb's key); and the party a comment on it reaches (`reaches`). `Offer.of` and `Viewing.of` take the method read through its class, so pyright follows a rename, and fail with `BlockError` where it isn't an action, or a view, or doesn't take what's given.
+Every block (`Shown`) has an id its module keeps from one answer to the next, by which the page keeps the cursor, folds and comments where they were; a version where what it shows changes, which a comment written on it records; what it offers (`Offer.of(command, given)`: one of its module's commands given a verb, under that verb's key); and the party a comment on it reaches (`reaches`). `Offer.of` and `Viewing.of` take the method read through its class, so pyright follows a rename, and fail with `BlockError` where it isn't a command given a verb, or a view, or doesn't take what's given.
 
 ## Kinds
 

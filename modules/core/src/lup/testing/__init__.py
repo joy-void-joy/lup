@@ -27,7 +27,6 @@ from lup.shell.wire import (
     Write,
 )
 from lup.testing.harness import (
-    Acted,
     Answering,
     Broken,
     BrokenLawError,
@@ -36,6 +35,7 @@ from lup.testing.harness import (
     Page,
     ProgramRun,
     Ran,
+    Repository,
     Responding,
     Scripted,
     Sent,
@@ -50,7 +50,6 @@ from lup.testing.raising import Raised, raises
 
 __all__ = [
     "Accepted",
-    "Acted",
     "Answered",
     "Answering",
     "Broken",
@@ -73,6 +72,7 @@ __all__ = [
     "Ran",
     "Refused",
     "Rejection",
+    "Repository",
     "Responding",
     "Scripted",
     "Send",

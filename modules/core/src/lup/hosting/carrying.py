@@ -26,7 +26,6 @@ from lup.doors.parties import Codebase, Machine, Operator
 from lup.doors.parts import Part, Runtime
 from lup.running.plan import Name, Plan
 from lup.running.wire import (
-    ActionCalled,
     Call,
     Caller,
     CommandCalled,
@@ -267,7 +266,5 @@ def way_of(call: Call) -> Way:
             return Way(door="tool", name=tool)
         case ServiceCalled(service=service):
             return Way(door="service", name=service)
-        case ActionCalled(module=module, action=action):
-            return Way(door="action", name=action, module=module)
         case CommandCalled(module=module, command=command):
             return Way(door="command", name=command, module=module)

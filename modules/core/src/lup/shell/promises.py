@@ -128,22 +128,24 @@ class NotesPart(Part):
         """Return the notes' titles, in order."""
         return [f"note {number}" for number in range(1, self.module.notes + 1)]
 
-    @lup.action(verb="done", says="clear it")
-    async def clear(self, clearing: Clearing) -> str:
+    @lup.command(verb="done", says="clear it")
+    async def clear(self, clearing: Clearing, by: lup.Operator) -> str:
         """Clear a note."""
         return f"cleared {clearing.number}"
 
-    @lup.action(verb="comment", says="comment on it")
-    async def comment(self, commented: Commented[NoteOf]) -> str:
+    @lup.command(verb="comment", says="comment on it")
+    async def comment(self, commented: Commented[NoteOf], by: lup.Operator) -> str:
         """Take a comment on a note, once the pile lets comments through where it holds them."""
+        del by
         if self.module.holding:
             await self.released.wait()
         self.heard.append(commented.words)
         return f"note {commented.on.number}: {commented.words}"
 
-    @lup.action(verb="release", says="let the comments held through")
-    async def release(self, of: PileOf) -> str:
+    @lup.command(verb="release", says="let the comments held through")
+    async def release(self, of: PileOf, by: lup.Operator) -> str:
         """Let every comment held, and every one after, through."""
+        del by
         self.released.set()
         return f"{of.pile}: comments let through"
 
@@ -208,7 +210,7 @@ class ShellPromises(Part):
             assert all(fold.kind == "note" for fold in folds)
             assert all(
                 any(
-                    offer.verb == "done" and offer.action == "clear"
+                    offer.verb == "done" and offer.command == "clear"
                     for offer in fold.offers
                 )
                 for fold in folds
@@ -254,8 +256,8 @@ class ShellPromises(Part):
         assert all(name in clash.raised().about for name in ["notes", "echoes"])
 
     @lup.promise
-    async def a_block_offers_only_an_action(self, by: Testing) -> None:
-        """A block offering a method that isn't an action, or reading a method that isn't a view, fails as it's laid out, naming the method."""
+    async def a_block_offers_only_a_command_with_a_key(self, by: Testing) -> None:
+        """A block offering a method that isn't a command given a verb, or reading a method that isn't a view, fails as it's laid out, naming the method."""
         del by
         with raises(lup.BlockError) as offered:
             Offer.of(NotesPart.pile, PileOf(pile="p"))
@@ -415,7 +417,7 @@ class ShellPromises(Part):
             )
         )
         await second.say(Send())
-        released = await started.act("notes", "release", PileOf(pile="p"), Operator())
+        released = await started.run("notes", "release", PileOf(pile="p"), Operator())
         assert isinstance(released, Accepted)
         sends = [await delivered(first), await delivered(second)]
         assert sorted(part for each in sends for part in each.went) == ["later", "sent"]

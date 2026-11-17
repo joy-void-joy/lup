@@ -32,7 +32,15 @@ from lup import (
     UncarriedError,
     UnrunError,
 )
-from lup.testing import Accepted, Answering, Refused, Scripted, Testing, raises
+from lup.testing import (
+    Accepted,
+    Answering,
+    Refused,
+    Repository,
+    Scripted,
+    Testing,
+    raises,
+)
 
 
 class Said(Model):
@@ -73,8 +81,8 @@ class EchoPart(Part):
         """
         return Shouted(text=said.text.upper() * self.module.volume, caller=by.id)
 
-    @lup.action(verb="done", says="merge it")
-    async def merge(self, merging: Merging) -> str:
+    @lup.command(verb="done", says="merge it")
+    async def merge(self, merging: Merging, by: Operator) -> str:
         """Merge a branch, refusing `main`, which is merged into."""
         if merging.branch == "main":
             message = "`main` is merged into, never merged"
@@ -134,7 +142,7 @@ class Loudness(Model):
 class Sending(Model):
     """Something a party sends through one of echo's doors, or one it doesn't have."""
 
-    door: Literal["tool", "action", "command"]
+    door: Literal["tool", "command"]
     name: Literal["shout", "merge", "greet", "whisper"]
     given: dict[str, str | int | None]
     by: Agent | Operator
@@ -317,10 +325,6 @@ class DoorsPromises(Part):
         match sending.door:
             case "tool":
                 answered = await started.call(sending.name, sending.given, sending.by)
-            case "action":
-                answered = await started.act(
-                    "echo", sending.name, sending.given, sending.by
-                )
             case "command":
                 answered = await started.run(
                     "echo", sending.name, sending.given, sending.by
@@ -360,9 +364,9 @@ class DoorsPromises(Part):
     async def a_method_refusing_is_answered_as_a_refusal(self, by: Testing) -> None:
         """A method refusing what it's asked, by raising `RefusedError`, answers a refusal; asked otherwise, it runs."""
         started = await by.started(declared(Echo()))
-        main = await started.act("echo", "merge", Merging(branch="main"), Operator())
+        main = await started.run("echo", "merge", Merging(branch="main"), Operator())
         assert isinstance(main, Refused)
-        dev = await started.act("echo", "merge", Merging(branch="dev"), Operator())
+        dev = await started.run("echo", "merge", Merging(branch="dev"), Operator())
         assert isinstance(dev, Accepted)
 
     @lup.promise
@@ -408,7 +412,7 @@ class DoorsPromises(Part):
         """A method that isn't what its door takes and returns, or doesn't say who may call it where its door has no default, fails the declaration's load, naming it, before anything calls it."""
         misshapen = by.any(Misshapen)
         with raises(ProjectError) as failed:
-            await by.started(loud(misshapen.methods()))
+            await by.started(Repository(declaration=loud(misshapen.methods())))
         assert "LoudPart.wrong" in failed.raised().about
 
     @lup.promise
@@ -428,7 +432,7 @@ class Heard(lup.Model):
 
     text: str
 '''
-        started = await by.started(loud(methods))
+        started = await by.started(Repository(declaration=loud(methods)))
         assert any(each.name == "shout" for each in started.tools())
 
     @lup.promise
@@ -438,7 +442,7 @@ class Heard(lup.Model):
         """lup makes a part with its module and its secrets alone: a field of its own with no default, or a method hiding its module, fails the load."""
         holding = by.any(Holding)
         with raises(ProjectError):
-            await by.started(loud(holding.methods()))
+            await by.started(Repository(declaration=loud(holding.methods())))
 
 
 class Adding(Model):

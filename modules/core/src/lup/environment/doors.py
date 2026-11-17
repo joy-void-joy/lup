@@ -9,7 +9,7 @@ project's modules where their door names them so, as a tool's or a service's
 Starting what's served (`Doors.started`) makes each part once, with its module
 and what it holds, runs what each runs at `Starting`, and carries a service's
 call made in it to the part serving it (`Running`). Calling through a door
-(`Running.call`, `.serve`, `.act`, `.run`) finds the method, checks who calls,
+(`Running.call`, `.serve`, `.run`) finds the method, checks who calls,
 reads what it's given as the model it takes, and runs it on its part, answering
 `Accepted` or `Refused`: what the harness and the containers call (`README.md`
 in `lup/doors/`, *Starting, calling and stopping*). Stopping (`Running.stopped`)
@@ -27,7 +27,6 @@ from pydantic import BaseModel, JsonValue, PydanticUserError, ValidationError
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import listed
 from lup.declaration.module import Module
-from lup.doors.action import ActionDoor
 from lup.doors.command import CommandDoor
 from lup.doors.door import (
     Accepted,
@@ -78,7 +77,7 @@ class Entry(Model, arbitrary_types_allowed=True):
 
 
 class Keyed(Model):
-    """A name a method is reached by, where it's shared: a tool's or a service's across modules, an action's or a command's within its module."""
+    """A name a method is reached by, where it's shared: a tool's or a service's across modules, a command's within its module."""
 
     name: str
     scope: str = ""
@@ -138,7 +137,7 @@ class Doors(Model):
         Raise `ProjectError` where a class can't be made with the module listing
         it, where a method can't be behind its door once every class its
         annotations name is defined, or where two methods are reached by one
-        name: a tool's or a service's across modules, an action's or a command's
+        name: a tool's or a service's across modules, a command's
         within a module.
         """
         doors = cls(
@@ -403,21 +402,28 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
             return refused(given, f"no module serves a service `{service}`")
         return await self.answered(found[0], given, by)
 
-    async def act(
-        self, module: str, action: str, given: JsonValue, by: Party
-    ) -> Accepted | Refused:
-        """Run the action `action` of the module named `module` on `given`, called by `by`, and say what came of it."""
-        return await self.reached(ActionDoor, module, action, given, by)
-
     async def run(
         self, module: str, command: str, arguments: JsonValue, by: Party
     ) -> Accepted | Refused:
         """Run the command `command` of the module named `module` with `arguments`, called by `by`, and say what came of it.
 
         A command takes everything as arguments: one it needs and isn't given
-        is refused at once, naming it, never asked for.
+        is refused at once, naming it, never asked for. One taking every mark of
+        a send, as the dashboard gives it, is given what the command line sends
+        as one mark.
         """
-        return await self.reached(CommandDoor, module, command, arguments, by)
+        within = self.doors.through(CommandDoor)
+        gathers = any(
+            entry.serves.module.name == module
+            and entry.name == command
+            and entry.method.taken.gathers()
+            for entry in within
+        )
+        one: list[JsonValue] = [arguments]
+        given: JsonValue = (
+            one if gathers and not isinstance(arguments, list) else arguments
+        )
+        return await self.reached(CommandDoor, module, command, given, by)
 
     async def reached(
         self, door: type[Door], module: str, name: str, given: JsonValue, by: Party

@@ -176,9 +176,6 @@ ignore = ["lup_project.py"]
 # lup's own declaration, whose modules' promises lup's plugin checks, and the
 # modules' sources, so `--doctest-modules` runs their docstring examples.
 testpaths = ["lup_declaration.py", "modules/*/src"]
-# Named apart from `lup_project.py` until this lup runs its own sessions (#13),
-# the second lup reading that file as its own (`lup_declaration.py`).
-lup_declaration = "lup_declaration.py"
 # `importlib` lets two modules' tests share a file name.
 addopts = ["--doctest-modules", "--import-mode=importlib"]
 # A check stuck past 30 seconds has its threads dumped and its worker ended,
@@ -205,6 +202,7 @@ source_modules = [
     "lup.doors",
     "lup.shell",
     "lup.testing",
+    "lup.programs",
     "lup.running",
     "lup.hosting",
     "lup.store",
@@ -229,7 +227,13 @@ forbidden_modules = [
     "lup.doors.*",
     "lup.shell.*",
     "lup.testing.*",
+    "lup.programs.*",
     "lup.running.*",
     "lup.hosting.*",
 ]
 allow_indirect_imports = true
+
+[tool.lup]
+# Named apart from `lup_project.py` until this lup runs its own sessions (#13),
+# the second lup reading that file as its own (`lup_declaration.py`).
+declaration = "lup_declaration.py"

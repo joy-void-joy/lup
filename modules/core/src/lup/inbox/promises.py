@@ -226,7 +226,7 @@ class InboxPromises(Part):
         state = await inboxed(started)
         assert state.new
         concern = placed(state, "a direction")
-        cleared = await started.act(
+        cleared = await started.run(
             "core",
             "clear",
             Clearing(repository="harness", what=str(concern.number)),
@@ -255,7 +255,7 @@ class InboxPromises(Part):
         await started.serve("agent_named", Naming(agent=reader.id, name="reader"), HERE)
         await said(started, "send", SendSaid(to="reader", text="over to you"), writer)
         message = max((await inboxed(started)).new)
-        commented = await started.act(
+        commented = await started.run(
             "core",
             "comment",
             Commented[OnItem](on=OnItem(item=message), words="noted"),
@@ -369,7 +369,7 @@ class InboxPromises(Part):
             agent,
         )
         pile = Pile(repository="harness", path="frictions/keys")
-        commented = await started.act(
+        commented = await started.run(
             "core",
             "comment_to",
             Commented[Reached](on=Reached(party=pile), words="group these"),

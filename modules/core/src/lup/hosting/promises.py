@@ -15,6 +15,7 @@ from typing import Literal, get_args
 from pydantic import Field, JsonValue
 
 import lup
+import lup.testing
 from lup import Agent, Codebase, Machine, Model, Part
 from lup.testing import (
     Accepted,
@@ -222,7 +223,11 @@ class HostingPromises(Part):
     async def every_container_stands_behind_the_same_walls(self, by: Testing) -> None:
         """Every container lup starts, whatever asked for it and however, stands behind the same walls: the operator's uid inside, every capability dropped, no privilege gained, a limit on processes, reaped, removed when it ends, no image fetched, no log kept."""
         asked = by.any(Asked)
-        started = await by.started(HOME, programs={"podman": PODMAN}, machine=True)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": PODMAN},
+            machine=True,
+        )
         run = await started.serve("started", asked.spec(), Machine())
         assert isinstance(run, Accepted)
         [command] = podman_ran(started, "run")
@@ -234,7 +239,11 @@ class HostingPromises(Part):
     async def a_mount_is_read_only_unless_it_says(self, by: Testing) -> None:
         """A directory lup mounts into a container is read-only there unless the container's spec says otherwise, and lands at its own path, a path holding a comma as one path."""
         asked = by.any(Asked)
-        started = await by.started(HOME, programs={"podman": PODMAN}, machine=True)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": PODMAN},
+            machine=True,
+        )
         await started.serve("started", asked.spec(), Machine())
         [command] = podman_ran(started, "run")
         binds = [each for each in command if each.startswith("--mount=type=bind")]
@@ -245,7 +254,11 @@ class HostingPromises(Part):
     async def only_the_machines_own_parts_start_a_container(self, by: Testing) -> None:
         """Only the machine's own parts may start or stop a container: an agent, or any project's code, the home repository's own branch among it, is refused, and podman never runs for it."""
         asked = by.any(Asked)
-        started = await by.started(HOME, programs={"podman": PODMAN}, machine=True)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": PODMAN},
+            machine=True,
+        )
         caller = by.any(Agent) if by.any(bool) else Codebase(repository=by.any(str))
         refused = await started.serve("started", asked.spec(), caller)
         stopped = await started.serve("stopped", {"name": asked.name}, caller)
@@ -266,7 +279,11 @@ class HostingPromises(Part):
                 Answering(when=["build"]),
             ]
         )
-        started = await by.started(HOME, programs={"podman": podman}, machine=True)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": podman},
+            machine=True,
+        )
         built = await started.serve("built", image, Machine())
         assert isinstance(built, Accepted)
         assert json.loads(built.answer()) == {"built": not tagged}
@@ -278,7 +295,11 @@ class HostingPromises(Part):
     @lup.promise
     async def a_base_not_named_by_its_digest_is_refused(self, by: Testing) -> None:
         """An image whose base isn't named by its digest is refused, and nothing is fetched or built: what's fetched under a name could change."""
-        started = await by.started(HOME, programs={"podman": PODMAN}, machine=True)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": PODMAN},
+            machine=True,
+        )
         image: JsonValue = {
             "base": by.any(Unpinned).base,
             "definition": "FROM scratch",
@@ -296,7 +317,11 @@ class HostingPromises(Part):
         asked = by.any(Asked)
         binds: list[JsonValue] = [{"source": by.any(Unowned).source}]
         spec = {**asked.spec(), "binds": binds}
-        started = await by.started(HOME, programs={"podman": PODMAN}, machine=True)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": PODMAN},
+            machine=True,
+        )
         refused = await started.serve("started", spec, Machine())
         assert isinstance(refused, Refused)
         assert started.ran("podman") == []
@@ -306,7 +331,11 @@ class HostingPromises(Part):
         """podman failing to start a container refuses the call that asked, saying why, rather than leaving it believed running."""
         asked = by.any(Asked)
         podman = Scripted(answers=[Answering(when=["run"], status=125, error="no")])
-        started = await by.started(HOME, programs={"podman": podman}, machine=True)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": podman},
+            machine=True,
+        )
         refused = await started.serve("started", asked.spec(), Machine())
         assert isinstance(refused, Refused)
 
@@ -314,7 +343,11 @@ class HostingPromises(Part):
     async def a_part_is_handed_only_the_secrets_it_holds(self, by: Testing) -> None:
         """The machine's parts hand a part the secrets kept for its project that it holds, and name those that aren't kept, for the operator to be asked for; another project's secret of the same name is never among them."""
         kept, other = by.any(Kept), by.any(Kept)
-        started = await by.started(HOME, programs={"podman": PODMAN}, machine=True)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": PODMAN},
+            machine=True,
+        )
         operator = lup.Operator()
         await started.run(
             "hosting",
@@ -341,7 +374,11 @@ class HostingPromises(Part):
         self, by: Testing
     ) -> None:
         """A secret kept is read only by the machine's own parts, and kept only by the operator: an agent or a project's code asking for one, or giving one, is refused."""
-        started = await by.started(HOME, programs={"podman": PODMAN}, machine=True)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": PODMAN},
+            machine=True,
+        )
         caller = by.any(Agent) if by.any(bool) else Codebase(repository="harmon")
         held = await started.serve(
             "held", {"project": "harmon", "names": ["token"]}, caller
@@ -359,7 +396,11 @@ class HostingPromises(Part):
     async def a_call_is_by_whom_its_socket_says(self, by: Testing) -> None:
         """A call coming in on a container's socket is by that container's project, whatever the call says it's by, or where it says nothing; one coming in on a socket no container lup started has is refused."""
         claimed = by.any(Agent) if by.any(bool) else None
-        started = await by.started(HOME, programs={"podman": PODMAN}, machine=True)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": PODMAN},
+            machine=True,
+        )
         made = await started.serve("directory", {"container": "c"}, Machine())
         assert isinstance(made, Accepted)
         directory: str = json.loads(made.answer())["path"]
@@ -439,7 +480,11 @@ class HostingPromises(Part):
     ) -> None:
         """A call is carried to a part of the caller's own project running in its containers, or else to the machine's own parts: never to another project's part, nor to a part another project's plan says is the machine's."""
         claims = by.any(bool)
-        started = await by.started(HOME, programs={"podman": PODMAN}, machine=True)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": PODMAN},
+            machine=True,
+        )
         own = await placed(started, "harmon", NOTES_PLAN, ["notes.Notes"])
         claimed = plan_of(
             Planned(module="notes", part="Notes", shared=True, tools=["note"])
@@ -695,7 +740,9 @@ class TreesPromises(Part):
         files = by.any(Files)
         committed = Committed.of(files)
         started = await by.started(
-            HOME, programs={"git": committed.store}, machine=True
+            lup.testing.Repository(declaration=HOME),
+            programs={"git": committed.store},
+            machine=True,
         )
         exported = await started.serve("exported", committed.exporting(), Machine())
         assert isinstance(exported, Accepted)
@@ -720,7 +767,11 @@ class TreesPromises(Part):
                 for each in committed.store.objects
             ]
         )
-        started = await by.started(HOME, programs={"git": swapped}, machine=True)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"git": swapped},
+            machine=True,
+        )
         exported = await started.serve("exported", committed.exporting(), Machine())
         assert isinstance(exported, Refused) == (planted != files.nested)
 
@@ -729,7 +780,9 @@ class TreesPromises(Part):
         """git, reading a commit's objects, is held to the repository's own git directory, reading no `commondir`, graft, replace ref, commit-graph or configuration but the repository's own, with nothing that could run code."""
         committed = Committed.of(by.any(Files))
         started = await by.started(
-            HOME, programs={"git": committed.store}, machine=True
+            lup.testing.Repository(declaration=HOME),
+            programs={"git": committed.store},
+            machine=True,
         )
         await started.serve("exported", committed.exporting(), Machine())
         runs = [each for each in started.heard.runs if each.program == "git"]
@@ -760,7 +813,9 @@ class TreesPromises(Part):
         )
         committed = Committed.of(by.any(Files), [link])
         started = await by.started(
-            HOME, programs={"git": committed.store}, machine=True
+            lup.testing.Repository(declaration=HOME),
+            programs={"git": committed.store},
+            machine=True,
         )
         exported = await started.serve("exported", committed.exporting(), Machine())
         assert isinstance(exported, Refused)
@@ -771,7 +826,9 @@ class TreesPromises(Part):
         committed = Committed.of(by.any(Files))
         caller = by.any(Agent) if by.any(bool) else Codebase(repository="harmon")
         started = await by.started(
-            HOME, programs={"git": committed.store}, machine=True
+            lup.testing.Repository(declaration=HOME),
+            programs={"git": committed.store},
+            machine=True,
         )
         exported = await started.serve("exported", committed.exporting(), caller)
         assert isinstance(exported, Refused)
@@ -783,7 +840,9 @@ class TreesPromises(Part):
         named = by.any(Abbreviated)
         committed = Committed.of(Files())
         started = await by.started(
-            HOME, programs={"git": committed.store}, machine=True
+            lup.testing.Repository(declaration=HOME),
+            programs={"git": committed.store},
+            machine=True,
         )
         asked = {
             "repository": "harmon",
@@ -822,7 +881,9 @@ class ApprovalsPromises(Part):
     async def what_runs_is_what_was_approved_last(self, by: Testing) -> None:
         """A project runs the commit approved last, by a landing's review or by the operator answering the question asked, and nothing before its first approval."""
         approvals = by.any(list[Approved])
-        started = await by.started(HOME, machine=True)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME), machine=True
+        )
         for each in approvals:
             asked = {"project": "harmon", "commit": each.commit}
             if each.landing:
@@ -838,7 +899,9 @@ class ApprovalsPromises(Part):
     async def only_the_operator_or_their_review_approves(self, by: Testing) -> None:
         """Only the operator approves a commit to run, answering the question asked or reviewing a landing, which the machine records: an agent or a project's code asking to approve, record or read an approval is refused, and nothing is approved."""
         caller = by.any(Agent) if by.any(bool) else Codebase(repository="harmon")
-        started = await by.started(HOME, machine=True)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME), machine=True
+        )
         asked = {"project": "harmon", "commit": by.any(Approved).commit}
         approved = await started.run("hosting", "approve", asked, caller)
         landed = await started.serve("landed", asked, caller)
@@ -858,7 +921,11 @@ class ApprovalsPromises(Part):
         was, now = by.any(Files), by.any(Files)
         before, after = Committed.of(was), Committed.of(now)
         store = Store(objects=[*before.store.objects, *after.store.objects])
-        started = await by.started(HOME, programs={"git": store}, machine=True)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"git": store},
+            machine=True,
+        )
         await started.run(
             "hosting",
             "approve",
@@ -895,7 +962,11 @@ class ApprovalsPromises(Part):
         was, now = by.any(Files), by.any(Files)
         before, after = Committed.of(was), Committed.of(now)
         store = Store(objects=[*before.store.objects, *after.store.objects])
-        started = await by.started(HOME, programs={"git": store}, machine=True)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"git": store},
+            machine=True,
+        )
         diffed = await started.serve(
             "diffed",
             {
@@ -922,7 +993,9 @@ async def started_approved(
     """Start the machine's parts, podman as `podman` scripts it, and a store of git's objects holding `committed`, a commit of harmon the operator approved."""
     approving = committed or Committed.of(Files())
     started = await by.started(
-        HOME, programs={"podman": podman, "git": approving.store}, machine=True
+        lup.testing.Repository(declaration=HOME),
+        programs={"podman": podman, "git": approving.store},
+        machine=True,
     )
     await started.run(
         "hosting",
@@ -956,7 +1029,7 @@ class ProjectsPromises(Part):
         """A project nothing of which the operator approved yet is refused, and no container of it starts: lup asks them before its first run."""
         committed = Committed.of(by.any(Files))
         started = await by.started(
-            HOME,
+            lup.testing.Repository(declaration=HOME),
             programs={"podman": OPENING_PODMAN, "git": committed.store},
             machine=True,
         )
@@ -970,7 +1043,9 @@ class ProjectsPromises(Part):
         first, last = Committed.of(by.any(Files)), Committed.of(by.any(Files))
         store = Store(objects=[*first.store.objects, *last.store.objects])
         started = await by.started(
-            HOME, programs={"podman": OPENING_PODMAN, "git": store}, machine=True
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": OPENING_PODMAN, "git": store},
+            machine=True,
         )
         for each in [first, last]:
             await started.run(
@@ -1015,7 +1090,11 @@ class ProjectsPromises(Part):
         self, by: Testing
     ) -> None:
         """A caller asking what they may call is told who they are from the socket they asked on, whatever they say, and offered their own project's plan: never another project's, nor a part the machine runs; a socket no container lup started has is refused."""
-        started = await by.started(HOME, programs={"podman": PODMAN}, machine=True)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": PODMAN},
+            machine=True,
+        )
         own = await placed(
             started,
             "harmon",
@@ -1136,7 +1215,11 @@ class ClearingPromises(Part):
     async def the_machine_stops_every_container_it_left(self, by: Testing) -> None:
         """Every container lup starts is labelled as lup's and its project's, and clearing stops every container so labelled, as the machine's parts start, those a machine that stopped before left among them; only the machine's own parts may clear."""
         asked = by.any(Asked)
-        started = await by.started(HOME, programs={"podman": PODMAN}, machine=True)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": PODMAN},
+            machine=True,
+        )
         await started.serve("started", asked.spec(), Machine())
         [command] = podman_ran(started, "run")
         assert "--label=lup.machine" in command

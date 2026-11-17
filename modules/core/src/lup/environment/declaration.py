@@ -15,12 +15,13 @@ the declaration's back.
 
 import importlib.util
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lup.core import Core
 from lup.declaration.errors import ProjectError
-from lup.declaration.grammar import listed
-from lup.declaration.module import Module
+from lup.declaration.grammar import applied, listed, set_fields
+from lup.declaration.module import Module, Modules
 from lup.declaration.project import Project
 from lup.environment.doors import Doors
 from lup.errors import LupError
@@ -29,7 +30,7 @@ from lup.store.records import Edge, Kinds, Node, Recorded
 from lup.types import Model
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from lup.environment.layout import MachineLayout, RepositoryLayout
 
 
 class Resolved(Model):
@@ -95,6 +96,45 @@ def load(path: Path) -> Project:
     return project
 
 
+class Declared(Model):
+    """A repository's declaration as lup finds it: the project, every layer found applied, and the files it was read from."""
+
+    project: Project
+    """The project: lup's defaults where the repository declares none, then each
+    layer found over it."""
+    read: list[Path]
+    """The files read, in the order they were applied: the declaration, the
+    machine's layer, the repository's own local layer, each where it's there."""
+
+
+def read(repository: RepositoryLayout, machine: MachineLayout) -> Declared:
+    """Return the declaration of `repository`, with the machine's layer and then the repository's own local layer over it, each where it's there.
+
+    A layer binds `project` too, a `Project` written as a layer on what's below
+    it: what it sets changes what's below, as a module's layer does, so
+    `Modules().edit(…)` changes a module of the project's. The most specific
+    comes last: the repository's own layer wins over the machine's, which wins
+    over the declaration. A repository with no declaration runs on lup's
+    defaults, its layers still over them. Raise `ProjectError` where a file
+    found doesn't load (`load`): a layer that's there and broken is never left
+    out without a word.
+    """
+    found = [
+        each
+        for each in [repository.declaration, machine.layer, repository.local]
+        if each.is_file()
+    ]
+    project = Project()
+    for path in found:
+        layer = load(path)
+        project = (
+            layer
+            if path == repository.declaration
+            else applied(layer, project, set_fields(layer))
+        )
+    return Declared(project=project, read=found)
+
+
 def resolve(project: Project) -> Resolved:
     """Return the modules `project` is made of, every layer applied, in order, and what they serve.
 
@@ -104,8 +144,9 @@ def resolve(project: Project) -> Resolved:
     be served (`Doors.of`), or where what they declare for their views clashes
     (`Looks.of`).
     """
-    placed = project.modules.resolve(default(), shipped())
-    modules = project.modules.ordered(placed)
+    selected = project.modules.over(Modules.default())
+    placed = selected.resolve(default(), shipped())
+    modules = selected.ordered(placed)
     names = [module.name for module in modules]
     if Core.name not in names:
         message = (

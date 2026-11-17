@@ -28,7 +28,7 @@ path or podman's command line as anything but one name: never `../operator`,
 class Doorway(Model):
     """One method a part serves behind a door, as calls to it are routed: its door, its name, and who may call it."""
 
-    door: Literal["tool", "service", "action", "command"]
+    door: Literal["tool", "service", "command"]
     name: str
     parties: list[str]
     """Who may call it, by each party's class name: `Agent`, `Codebase`."""
@@ -42,7 +42,7 @@ class Doorway(Model):
         match self.door:
             case "tool" | "service":
                 return f"the {self.door} `{self.name}`"
-            case "command" | "action":
+            case "command":
                 return f"the {self.door} `{self.name}` of `{module}`"
 
 

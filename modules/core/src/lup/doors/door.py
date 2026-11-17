@@ -134,14 +134,14 @@ class Taken(Model, arbitrary_types_allowed=True):
     """What a method behind a door takes and returns, its annotations evaluated."""
 
     name: str
-    """The method's name: a tool's, an action's or a command's, which it's
+    """The method's name: a tool's, a service's or a command's, which it's
     called by."""
     qualified: str
     """Its name within its class, as a refusal names it: `EchoPart.shout`."""
     description: str
     """Its docstring, which describes it: what an agent reads of a tool."""
     model: inspect.Parameter | None
-    """The parameter taking its model: a tool's input, an action's mark, a
+    """The parameter taking its model: a tool's input, a command's arguments or one mark of a send, a
     command's arguments or a law's value; none where it takes `by` alone, as a
     scenario does."""
     by: inspect.Parameter | None
@@ -195,7 +195,7 @@ class Taken(Model, arbitrary_types_allowed=True):
         return is_model(self.returned)
 
     def gathers(self) -> bool:
-        """Say whether it takes a list of its model, as an action given every mark of a send at once does."""
+        """Say whether it takes a list of its model, as a command the dashboard gives every mark of a send at once does."""
         return get_origin(self.given().annotation) is list
 
     def one(self) -> Annotation:

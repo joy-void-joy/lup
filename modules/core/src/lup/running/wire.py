@@ -60,19 +60,6 @@ class ServiceCalled(Model):
     socket it came in on: none as it's sent."""
 
 
-class ActionCalled(Model):
-    """The operator's action on what a view offers, by its module's name and its own."""
-
-    format: int = 1
-    kind: Literal["action"] = "action"
-    module: str
-    action: str
-    given: JsonValue
-    by: Caller | None = None
-    """Who it's by, as the program on the operator's machine vouches from the
-    socket it came in on: none as it's sent."""
-
-
 class CommandCalled(Model):
     """A command run, by its module's name and its own."""
 
@@ -87,7 +74,7 @@ class CommandCalled(Model):
 
 
 type Call = Annotated[
-    ToolCalled | ServiceCalled | ActionCalled | CommandCalled,
+    ToolCalled | ServiceCalled | CommandCalled,
     Field(discriminator="kind"),
 ]
 """A call through any door, as it crosses: the one of each kind it is."""

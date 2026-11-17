@@ -300,18 +300,20 @@ class Inboxes(Part, approved=True, shared=True):
             answer = inbox.answered(question, answering.rulings, answering.text)
         return f"Answered @{question.number}, @{answer.number}."
 
-    @lup.action(verb="comment", says="comment on it")
-    async def comment(self, commented: Commented[OnItem]) -> str:
+    @lup.command(verb="comment", says="comment on it")
+    async def comment(self, commented: Commented[OnItem], by: Operator) -> str:
         """Keep your comment on an item, or a part of it: it reaches whoever wrote it, and each party it was for."""
+        del by
         with refusing():
             item = self.numbered(commented.on.item, Item)
             inbox = self.inbox(item.repository)
             comment = inbox.commented(item, commented, commented.on.part)
         return f"Commented, @{comment.number}."
 
-    @lup.action(verb="comment", says="comment to them")
-    async def comment_to(self, commented: Commented[Reached]) -> str:
+    @lup.command(verb="comment", says="comment to them")
+    async def comment_to(self, commented: Commented[Reached], by: Operator) -> str:
         """Keep your comment on a block that offers none of its own, for the party it reaches: an agent, or a pile, where it opens a concern."""
+        del by
         with refusing():
             found = self.reached(commented.on.party)
             inbox = self.inbox(found.repository)
@@ -328,18 +330,20 @@ class Inboxes(Part, approved=True, shared=True):
             comment = inbox.told_party(party, Commenting(words=addressing.text))
         return f"Sent to {inbox.called(party)}, @{comment.number}."
 
-    @lup.action(verb="done", says="clear it")
-    async def clear(self, clearing: Clearing) -> str:
+    @lup.command(verb="done", says="clear it")
+    async def clear(self, clearing: Clearing, by: Operator) -> str:
         """Clear an item, a concern, or a party's buffer whole, until something new happens there."""
+        del by
         inbox = self.inbox(clearing.repository)
         with refusing():
             node = inbox.cited(clearing.what)
             inbox.cleared(node)
         return f"Cleared {clearing.what}."
 
-    @lup.action(verb="decline", says="decline it")
-    async def decline(self, declining: Declining) -> str:
+    @lup.command(verb="decline", says="decline it")
+    async def decline(self, declining: Declining, by: Operator) -> str:
         """Decline a concern, saying why: nothing more will be done about it."""
+        del by
         with refusing():
             concern = self.numbered(declining.concern, Concern)
             self.inbox(concern.repository).declined(concern, declining.why)
@@ -354,9 +358,10 @@ class Inboxes(Part, approved=True, shared=True):
             made = inbox.pile(piling.path, inbox.operator())
         return f"Made {inbox.called(made)}."
 
-    @lup.action(verb="seen", says="seen")
-    async def shown(self, showing: Showing) -> str:
+    @lup.command(verb="seen", says="seen")
+    async def shown(self, showing: Showing, by: Operator) -> str:
         """Say what's been on your screen: each isn't new to you after, and stays where it is until you clear it."""
+        del by
         with refusing():
             items = [self.numbered(each, Item) for each in showing.items]
         for repository in dict.fromkeys(each.repository for each in items):

@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, Field, JsonValue, SerializeAsAny
 
-from lup.doors.action import ActionDoor
+from lup.doors.command import CommandDoor
 from lup.doors.door import Annotation, is_model
 from lup.doors.parties import Party
 from lup.errors import LupError
@@ -34,7 +34,7 @@ lazy from lup.shell.view import ViewDoor
 
 
 class BlockError(LupError):
-    """A block can't say what it was asked to: it offers what isn't an action, or reads what isn't a view, or not with what it takes."""
+    """A block can't say what it was asked to: it offers what isn't a command the dashboard offers, or reads what isn't a view, or not with what it takes."""
 
 
 class Ticking(Model):
@@ -124,22 +124,22 @@ class Span(Model):
 
 
 class Offer(Model):
-    """What a block offers the operator to do with what it shows: one of its module's actions, what it's given, and the verb whose key reaches it.
+    """What a block offers the operator to do with what it shows: one of its module's commands, what it's given, and the verb whose key reaches it.
 
     A verb's key, Space and its letter, does what the innermost block under the
     cursor offering that verb offers, so one key marks a file reviewed or clears
     a concern, as the block it's on says.
     """
 
-    action: str
-    """The action, by its method's name."""
+    command: str
+    """The command, by its method's name."""
     module: str | None = None
     """The module serving it, by its name; none for the module whose view
     offers it."""
     given: dict[str, JsonValue] = {}
-    """What the action is given, as JSON."""
+    """What the command is given, as JSON."""
     verb: str
-    """The verb whose key reaches it: the action's own."""
+    """The verb whose key reaches it: the command's own."""
     says: str
     """What it does, as the line of keys says it after its key: `clear it`."""
     draws: str | None = None
@@ -150,40 +150,46 @@ class Offer(Model):
     @classmethod
     def of(
         cls,
-        action: Method,
+        command: Method,
         given: BaseModel,
         *,
         says: str | None = None,
         draws: str | None = None,
     ) -> Offer:
-        """Return the offer of `action`, an action read through its class, given `given`: its verb and what it does are the action's own, what the block offering it says closer to what it's on (`says`), and what its line reads marked (`draws`).
+        """Return the offer of `command`, a command read through its class, given `given`: its verb and what it does are the command's own, what the block offering it says closer to what it's on (`says`), and what its line reads marked (`draws`).
 
-        An action taking `Commented[G]`, as one offered under the `comment` verb
+        A command taking `Commented[G]`, as one offered under the `comment` verb
         does, is given a `G`, the comment written with it as it's sent. Raise
-        `BlockError` where `action` isn't an action, or doesn't take `given`'s type.
+        `BlockError` where `command` isn't a command with a verb, or doesn't take
+        `given`'s type.
         """
-        door = action.door
-        if not isinstance(door, ActionDoor):
-            message = f"a block offers `{action.taken.name}`, which isn't an action"
-            raise BlockError(message, about=[action.taken.qualified])
-        one = commented_on(action.taken.one())
+        match command.door:
+            case CommandDoor(verb=str() as verb, says=str() as said):
+                pass
+            case _:
+                message = (
+                    f"a block offers `{command.taken.name}`, which isn't a command "
+                    "the dashboard offers: one given the `verb` whose key reaches it"
+                )
+                raise BlockError(message, about=[command.taken.qualified])
+        one = commented_on(command.taken.one())
         if not (is_model(one) and isinstance(given, one)):
             message = (
-                f"a block offers `{action.taken.name}` with a "
+                f"a block offers `{command.taken.name}` with a "
                 f"`{type(given).__name__}`, which it doesn't take"
             )
-            raise BlockError(message, about=[action.taken.qualified])
+            raise BlockError(message, about=[command.taken.qualified])
         return cls(
-            action=action.taken.name,
+            command=command.taken.name,
             given=given.model_dump(mode="json"),
-            verb=door.verb,
-            says=door.says if says is None else says,
+            verb=verb,
+            says=said if says is None else says,
             draws=draws,
         )
 
 
 def commented_on(taken: Annotation) -> Annotation:
-    """Return what an action taking `taken` is offered with: `G` for `Commented[G]`, as a comment action takes, else `taken` itself.
+    """Return what a command taking `taken` is offered with: `G` for `Commented[G]`, as a comment command takes, else `taken` itself.
 
     >>> from lup.types import Model
     >>> class OnItem(Model):
@@ -220,7 +226,7 @@ class Shown(Model):
     """The party a comment on it reaches; none for whoever the block it's in
     says, and none at all where nothing does, so it takes no comment."""
     sighted: Offer | None = None
-    """What being seen does: an action the page runs once the block has been on
+    """What being seen does: a command the page runs once the block has been on
     the operator's screen long enough, as marking an item read; none where
     being seen does nothing."""
 

@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lup.doors.action import ActionDoor
 from lup.doors.command import CommandDoor
 from lup.doors.service import ServiceDoor
 from lup.doors.tool import ToolDoor
@@ -76,8 +75,6 @@ def doorway(entry: Entry) -> Doorway | None:
             door = "tool"
         case ServiceDoor():
             door = "service"
-        case ActionDoor():
-            door = "action"
         case CommandDoor():
             door = "command"
         case _:
