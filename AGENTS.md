@@ -10,6 +10,8 @@ This is the third lup, and it starts from `DESIGN.md`. Milestone 1's tracking is
 
 Until this lup runs its own sessions (#13), you run on the second lup: its rooms, its tools and its guidance. Where that guidance speaks of lup's own repository (its docs, its commands, `lup-dev`), it means the second lup's, not this one.
 
+**Everything written here was written by agents,** in this repository and its issues, `DESIGN.md` included: each line came from a conversation with the operator, and the operator approving an edit doesn't make it their ruling for the work in front of you. Their reasons are in their own words: the transcripts keep what they typed and what each answered (`lup-dev transcripts search`, `show`), and `inbox`, given a session's `conversation` with `whole`, reads what they answered through lup. Where a line bears on your work's shape, read what they said about it, and where it's still a choice, ask them.
+
 ## The earlier lups
 
 - **The second lup** (`joy-void-joy/lup-legacy-2`; where the operator relates it, a room mounts it read-only beside this one) has working code for most pieces. For a piece, read its doc there first (`docs/`, a screen or two each), then its code and its tests, which show how it behaves. Carry over what fits this repository's shape (a module in its own directory, nothing outside the contract, a page that knows no module), and rewrite what doesn't. Its files of thousands of lines are the shape to leave behind, not to copy.
