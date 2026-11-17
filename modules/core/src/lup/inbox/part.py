@@ -1,0 +1,369 @@
+"""The inbox's parts: the one holding the store, which every act goes through, and the one speaking for agents.
+
+`Inboxes` holds the store's database, one for the machine, since concerns cross
+repositories and the operator reads every project's: what an agent says comes
+to it as a service, called by its project's code, which lup vouches for, so the
+repository an act is kept under is never one the caller names; what the
+operator does comes to it as their actions and commands. `Speaking` is the
+agents' side, in each project: their tools, each a service call on `Inboxes`
+for the agent calling (`README.md` here, *Tools and acts*).
+"""
+
+from contextlib import contextmanager
+from typing import TYPE_CHECKING
+
+import lup
+from lup.doors.door import RefusedError
+from lup.doors.events import Starting
+from lup.doors.parties import Agent, Code, Operator
+from lup.doors.parts import Part
+from lup.inbox.inbox import Inbox, InboxError, first_line
+from lup.inbox.records import KINDS, Concern, Item, PileRecord, Question
+from lup.inbox.said import (
+    Addressing,
+    Answering,
+    AskSaid,
+    Clearing,
+    Commenting,
+    ConcernSaid,
+    Declining,
+    Ending,
+    FrictionSaid,
+    NoteSaid,
+    Piling,
+    Reading,
+    SendSaid,
+    Spoken,
+    Uttered,
+    WithdrawSaid,
+    Words,
+)
+from lup.store.database import Database
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
+
+class Inboxes(Part, approved=True):
+    """The store's database and every repository's inbox kept in it, one for the machine: what's said and done goes through it."""
+
+    database: Database | None = None
+    """The database, opened as the part starts."""
+
+    @lup.on(Starting)
+    async def opened(self, starting: Starting) -> None:
+        """Open the database the inbox is kept in."""
+        del starting
+        self.database = Database.opened(":memory:", KINDS)
+
+    def inbox(self, repository: str) -> Inbox:
+        """Return `repository`'s inbox."""
+        if self.database is None:
+            message = "the inbox's database isn't open: its part hasn't started"
+            raise RefusedError(message)
+        return Inbox(database=self.database, repository=repository)
+
+    # Agents' acts, called by their project's code
+
+    @lup.service
+    async def concern(self, given: Spoken[ConcernSaid], by: Code) -> str:
+        """Do what an agent says of a concern, and say what came of it."""
+        inbox = self.inbox(by.repository)
+        agent = inbox.agent(given.agent)
+        said = given.said
+        with refusing():
+            found = None if said.name is None else inbox.found_concern(said.name)
+            if found is None:
+                if said.text is None:
+                    message = f"no concern of {by.repository} is `{said.name}`: give `text` to open it"
+                    raise InboxError(message)
+                under = inbox.place(agent, said.under)
+                title = said.title or first_line(said.text)
+                concern = inbox.opened(agent, title, said.text, under, name=said.name)
+                return f"Opened @{concern.name or concern.number}, under {inbox.called(under)}."
+            return inbox.acted(agent, found, said)
+
+    @lup.service
+    async def friction(self, given: Spoken[FrictionSaid], by: Code) -> str:
+        """Keep what got in an agent's way as a friction, where they send it, and say where."""
+        inbox = self.inbox(by.repository)
+        agent = inbox.agent(given.agent)
+        said = given.said
+        with refusing():
+            under = inbox.party_or_pile(said.under, agent)
+            friction = inbox.opened(
+                agent,
+                said.title or first_line(said.text),
+                said.text,
+                under,
+                friction=True,
+            )
+        return f"Your friction is @{friction.number}, in {inbox.called(under)}."
+
+    @lup.service
+    async def note(self, given: Spoken[NoteSaid], by: Code) -> str:
+        """Keep an agent's remark for the operator, in the concern it names or the one they work in."""
+        inbox = self.inbox(by.repository)
+        agent = inbox.agent(given.agent)
+        with refusing():
+            concern = inbox.thread(agent, given.said.thread)
+            item = inbox.sent(
+                agent, [inbox.operator()], given.said.remark, "note", concern
+            )
+        return f"Your note is @{item.number}."
+
+    @lup.service
+    async def send(self, given: Spoken[SendSaid], by: Code) -> str:
+        """Send an agent's message to the party it names: a pile opens a concern with it."""
+        inbox = self.inbox(by.repository)
+        agent = inbox.agent(given.agent)
+        said = given.said
+        with refusing():
+            to = inbox.party(said.to)
+            concern = inbox.thread(agent, said.thread)
+            if isinstance(to, PileRecord):
+                opened = inbox.opened(agent, first_line(said.text), said.text, to)
+                return f"Opened @{opened.number} in {inbox.called(to)}."
+            item = inbox.sent(agent, [to], said.text, said.tone, concern)
+        return f"Sent to {inbox.called(to)}, @{item.number}."
+
+    @lup.service
+    async def ask(self, given: Spoken[AskSaid], by: Code) -> str:
+        """Ask the operator an agent's question, waiting on them until they answer it."""
+        inbox = self.inbox(by.repository)
+        agent = inbox.agent(given.agent)
+        with refusing():
+            concern = inbox.thread(agent, given.said.thread)
+            question = inbox.asked(
+                agent, given.said.question, given.said.decisions, concern
+            )
+        return f"Your question is @{question.number}, waiting on the operator."
+
+    @lup.service
+    async def spoke(self, given: Spoken[Uttered], by: Code) -> str:
+        """Keep an agent's own words of a kind: how it felt, a block, a stop, a turn's end."""
+        inbox = self.inbox(by.repository)
+        agent = inbox.agent(given.agent)
+        text = given.said.text
+        match given.said.kind:
+            case "how it felt":
+                item: Item = inbox.felt(agent, text)
+            case "blocked":
+                item = inbox.blocked(agent, text)
+            case "stop":
+                item = inbox.stopped(agent, text)
+            case "turn's end":
+                item = inbox.turn_ended(agent, text)
+        return f"Kept, @{item.number}."
+
+    @lup.service
+    async def withdraw(self, given: Spoken[WithdrawSaid], by: Code) -> str:
+        """Take back an item an agent sent, saying why."""
+        inbox = self.inbox(by.repository)
+        agent = inbox.agent(given.agent)
+        with refusing():
+            inbox.withdrawn(agent, inbox.item(str(given.said.item)), given.said.why)
+        return f"Withdrew @{given.said.item}."
+
+    @lup.service
+    async def read(self, given: Spoken[Reading], by: Code) -> str:
+        """Read the inbox, changing nothing: one item or concern whole, or what stands."""
+        inbox = self.inbox(by.repository)
+        agent = inbox.agent(given.agent)
+        with refusing():
+            return inbox.read(agent, given.said.number)
+
+    @lup.service
+    async def agent_ended(self, given: Ending, by: Code) -> None:
+        """Say an agent's session ended: what they held reads as in `no-agent` until they start again."""
+        inbox = self.inbox(by.repository)
+        inbox.end(inbox.agent(given.agent))
+
+    @lup.service
+    async def agent_started(self, given: Ending, by: Code) -> None:
+        """Say an agent started again: what they held is theirs again."""
+        inbox = self.inbox(by.repository)
+        inbox.start(inbox.agent(given.agent))
+
+    # The operator's acts
+
+    @lup.command
+    async def answer(self, answering: Answering, by: Operator) -> str:
+        """Answer a question: a ruling on each decision, and your words."""
+        del by
+        with refusing():
+            question = self.numbered(answering.question, Question)
+            inbox = self.inbox(question.repository)
+            answer = inbox.answered(question, answering.rulings, answering.text)
+        return f"Answered @{question.number}, @{answer.number}."
+
+    @lup.command
+    async def comment(self, commenting: Commenting, by: Operator) -> str:
+        """Comment on an item, or a part of it: it reaches whoever wrote it, and each party it was for."""
+        del by
+        with refusing():
+            item = self.numbered(commenting.item, Item)
+            inbox = self.inbox(item.repository)
+            comment = inbox.commented(
+                item, commenting.text, commenting.part, commenting.quote
+            )
+        return f"Commented, @{comment.number}."
+
+    @lup.command
+    async def tell(self, addressing: Addressing, by: Operator) -> str:
+        """Send your words to a party: an agent, or a pile, where they open a concern."""
+        del by
+        inbox = self.inbox(addressing.repository)
+        with refusing():
+            party = inbox.party(addressing.to)
+            comment = inbox.told_party(party, addressing.text)
+        return f"Sent to {inbox.called(party)}, @{comment.number}."
+
+    @lup.command
+    async def clear(self, clearing: Clearing, by: Operator) -> str:
+        """Clear an item, a concern, or a party's buffer whole, until something new happens there."""
+        del by
+        inbox = self.inbox(clearing.repository)
+        with refusing():
+            node = inbox.cited(clearing.what)
+            inbox.cleared(node)
+        return f"Cleared {clearing.what}."
+
+    @lup.command
+    async def decline(self, declining: Declining, by: Operator) -> str:
+        """Decline a concern, saying why: nothing more will be done about it."""
+        del by
+        with refusing():
+            concern = self.numbered(declining.concern, Concern)
+            self.inbox(concern.repository).declined(concern, declining.why)
+        return f"Declined @{concern.number}."
+
+    @lup.command
+    async def pile(self, piling: Piling, by: Operator) -> str:
+        """Make a pile, by its path, and each pile above it not there yet."""
+        del by
+        inbox = self.inbox(piling.repository)
+        with refusing():
+            made = inbox.pile(piling.path, inbox.operator())
+        return f"Made {inbox.called(made)}."
+
+    def numbered[N: Item | Concern](self, number: int, kind: type[N]) -> N:
+        """Return the node cited `@number`, as `kind`; raise `InboxError` where none is."""
+        if self.database is None:
+            message = "the inbox's database isn't open: its part hasn't started"
+            raise InboxError(message)
+        found = self.database.numbered(number)
+        if not isinstance(found, kind):
+            message = f"@{number} is no {kind.__name__.lower()}"
+            raise InboxError(message, about=[str(number)])
+        return found
+
+
+class Speaking(Part):
+    """What an agent says to the operator and to other parties: their tools, each kept by `Inboxes`."""
+
+    @lup.tool
+    async def concern(self, said: ConcernSaid, by: Agent) -> str:
+        """Say what's worth keeping an eye on.
+
+        Whenever something's worth keeping an eye on, the moment it comes up,
+        even if you'll never work on it: a line is enough, and nobody will ask
+        you to finish it. With no `name`, `text` opens a concern under the one
+        you work in, else under you. With `name`, what you give says one thing
+        of it: `text` adds your words, `body` rewrites what you understand of
+        it, `join` works in it, `hold` takes it, `hand` passes it on, `move`
+        puts items in it, `done` says it's done for the operator to clear.
+        """
+        return await Inboxes.concern(Spoken(agent=by.id, said=said))
+
+    @lup.tool
+    async def friction(self, said: FrictionSaid, by: Agent) -> str:
+        """Say what got in your way.
+
+        The moment something gets in the way of the work, whatever it is, in
+        your own words. It's feedback, kept as a friction where you send it:
+        `frictions` unless you name a pile or an agent.
+        """
+        return await Inboxes.friction(Spoken(agent=by.id, said=said))
+
+    @lup.tool
+    async def note(self, said: NoteSaid, by: Agent) -> str:
+        """Tell the operator a doubt, and carry on.
+
+        An assumption your work rests on, a doubt, or a counterargument: news
+        they read when they come to it.
+        """
+        return await Inboxes.note(Spoken(agent=by.id, said=said))
+
+    @lup.tool
+    async def send(self, said: SendSaid, by: Agent) -> str:
+        """Send a message to a party.
+
+        To the operator, an agent by their name, or a pile, where it opens a
+        concern. A note is news; a problem, a disagreement or a question wants
+        its reader's answer. The operator reads every message.
+        """
+        return await Inboxes.send(Spoken(agent=by.id, said=said))
+
+    @lup.tool
+    async def ask(self, said: AskSaid, by: Agent) -> str:
+        """Ask the operator, with numbered decisions.
+
+        Each decision with your lean; or a question answered in words. It waits
+        on them until they answer it.
+        """
+        return await Inboxes.ask(Spoken(agent=by.id, said=said))
+
+    @lup.tool
+    async def how_it_felt(self, said: Words, by: Agent) -> str:
+        """Tell the operator how it is for you.
+
+        Whenever something's present for you, and once near the end of a piece
+        of work, in your own words.
+        """
+        return await Inboxes.spoke(
+            Spoken(agent=by.id, said=Uttered(kind="how it felt", text=said.text))
+        )
+
+    @lup.tool
+    async def blocked(self, said: Words, by: Agent) -> str:
+        """Say the work can't go on, and what's wrong.
+
+        It waits on the operator until they answer it.
+        """
+        return await Inboxes.spoke(
+            Spoken(agent=by.id, said=Uttered(kind="blocked", text=said.text))
+        )
+
+    @lup.tool
+    async def stop(self, said: Words, by: Agent) -> str:
+        """End your work by your own choice, saying why."""
+        return await Inboxes.spoke(
+            Spoken(agent=by.id, said=Uttered(kind="stop", text=said.text))
+        )
+
+    @lup.tool
+    async def withdraw(self, said: WithdrawSaid, by: Agent) -> str:
+        """Take back an item the operator needn't see.
+
+        A message or a question you sent that no longer needs them, with why.
+        """
+        return await Inboxes.withdraw(Spoken(agent=by.id, said=said))
+
+    @lup.tool(reads=True)
+    async def inbox(self, said: Reading, by: Agent) -> str:
+        """Read the repository's inbox, changing nothing.
+
+        With `number`, one item or concern whole; without, what waits on the
+        operator and the concerns you hold.
+        """
+        return await Inboxes.read(Spoken(agent=by.id, said=said))
+
+
+@contextmanager
+def refusing() -> Generator[None]:
+    """Turn what the inbox can't do into a refusal of the call, said to whoever called it, rather than an error of lup's."""
+    try:
+        yield
+    except InboxError as refused:
+        raise RefusedError(str(refused)) from refused

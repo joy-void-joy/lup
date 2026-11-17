@@ -12,6 +12,12 @@ from typing import ClassVar, Literal
 from lup.store.records import Edge, Kinds, Name, Node
 from lup.types import Model
 
+NO_AGENT = "no-agent"
+"""The pile where what an ended agent held reads as being, each concern saying who left it."""
+
+FRICTIONS = "frictions"
+"""The pile a friction lands in where its agent names no other."""
+
 # Parties
 
 

@@ -9,10 +9,12 @@ until an item newer than the newest they said it after.
 """
 
 from datetime import UTC, datetime
+from itertools import accumulate, groupby
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from lup.inbox.records import (
+    NO_AGENT,
     AgentRecord,
     Answer,
     Answers,
@@ -50,13 +52,11 @@ from lup.store.records import Edge, Node
 from lup.types import Model
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from pydantic import JsonValue
 
-NO_AGENT = "no-agent"
-"""The pile where what an ended agent held reads as being, each concern saying who left it."""
-
-FRICTIONS = "frictions"
-"""The pile a friction lands in where its agent names no other."""
+    from lup.inbox.said import ConcernSaid
 
 
 class InboxError(StoreError):
@@ -134,9 +134,16 @@ class Inbox(Model, arbitrary_types_allowed=True):
         )
 
     def agent(
-        self, known_as: str, name: str, spawner: AgentRecord | None = None
+        self,
+        known_as: str,
+        name: str | None = None,
+        spawner: AgentRecord | None = None,
     ) -> AgentRecord:
-        """Return the agent lup knows by the id `known_as`, named `name`, under `spawner` where they have one: made the first time, renamed where their name changed."""
+        """Return the agent lup knows by the id `known_as`, under `spawner` where they have one: made the first time, and named `name` where a name is given, renamed where it changed.
+
+        An agent lup hasn't named yet, as one whose session hasn't said its
+        name, has none, and is found by their id.
+        """
         known = next(
             (
                 each
@@ -146,7 +153,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
             None,
         )
         if known is not None:
-            if known.name == name:
+            if name is None or known.name == name:
                 return known
             return self.database.kept(
                 known.model_copy(update={"name": name, "at": self.now()})
@@ -243,11 +250,22 @@ class Inbox(Model, arbitrary_types_allowed=True):
         under: PartyRecord | Concern,
         *,
         friction: bool = False,
+        name: str | None = None,
     ) -> Concern:
-        """Open a concern titled `title`, under `under`, with `by`'s `words` its first item, told to the operator: a `Friction` where `friction` says so."""
+        """Open a concern titled `title`, under `under`, with `by`'s `words` its first item, told to the operator: a `Friction` where `friction` says so.
+
+        It's named `name`, or after its title where none is given (`slug`),
+        with a number after where another node holds that name.
+        """
         kind = Friction if friction else Concern
         concern = self.database.kept(
-            kind(repository=self.repository, by=by.name, at=self.now(), title=title)
+            kind(
+                repository=self.repository,
+                by=by.name,
+                at=self.now(),
+                title=title,
+                name=name or self.free(slug(title)),
+            )
         )
         self.edge(Under, under, concern, by)
         self.said(by, concern, words)
@@ -269,6 +287,141 @@ class Inbox(Model, arbitrary_types_allowed=True):
         )
         self.edge(In, concern, message, by)
         return message
+
+    def free(self, name: str | None) -> str | None:
+        """Return `name`, or `name` with the first number after it that no node of the repository holds; none for none."""
+        if name is None:
+            return None
+        taken = self.database.named(self.repository, name)
+        if taken is None:
+            return name
+        return next(
+            candidate
+            for count in range(2, 10_000)
+            if self.database.named(self.repository, candidate := f"{name}-{count}")
+            is None
+        )
+
+    def found_concern(self, cited: str) -> Concern | None:
+        """Return the concern `cited` names, by its number or its name; none where none is."""
+        bare = cited.removeprefix("@")
+        found = (
+            self.database.numbered(int(bare))
+            if bare.isdigit()
+            else self.database.named(self.repository, bare)
+        )
+        return found if isinstance(found, Concern) else None
+
+    def cited(self, what: str) -> Node:
+        """Return what `what` names: an item or a concern by its number, or a party or a concern by its name; raise `InboxError` where nothing is."""
+        bare = what.removeprefix("@")
+        found = (
+            self.database.numbered(int(bare))
+            if bare.isdigit()
+            else self.database.named(self.repository, bare)
+        )
+        if found is None:
+            message = f"nothing of {self.repository} is `{what}`"
+            raise InboxError(message, about=[what])
+        return found
+
+    def place(self, agent: AgentRecord, under: str | None) -> PartyRecord | Concern:
+        """Return where `agent` puts what they open: the party or concern `under` names, else the concern they work in, else themselves."""
+        if under is None:
+            return self.working_in(agent) or agent
+        found = self.cited(under)
+        if not isinstance(found, PartyRecord | Concern):
+            message = f"`{under}` is no party nor concern: nothing goes under it"
+            raise InboxError(message, about=[under])
+        return found
+
+    def thread(self, agent: AgentRecord, cited: str | None) -> Concern | None:
+        """Return the concern `cited` names, else the one `agent` works in, else none."""
+        if cited is None:
+            return self.working_in(agent)
+        return self.concern(cited)
+
+    def called(self, node: Node) -> str:
+        """Name `node` as `@` cites it: by its name where it has one, else by its number, else by its key."""
+        if node.name is not None:
+            return f"@{node.name}"
+        if node.number is not None:
+            return f"@{node.number}"
+        return f"node {node.key}"
+
+    def acted(self, agent: AgentRecord, concern: Concern, said: ConcernSaid) -> str:
+        """Do to `concern` what `agent` says of it, each field given one act, and say what came of it; with nothing given, say where it stands."""
+
+        def acts() -> Iterator[str]:
+            if said.text is not None:
+                self.said(agent, concern, said.text)
+                yield "your words are in it"
+            if said.body is not None:
+                self.rewritten(agent, concern, said.body)
+                yield "its body is rewritten"
+            for number in said.move:
+                self.edge(In, concern, self.item(str(number)), agent)
+                yield f"@{number} is in it"
+            if said.hold:
+                self.moved(agent, concern, agent)
+                self.works_in(agent, concern)
+                yield "you hold it, and work in it"
+            if said.join and not said.hold:
+                self.works_in(agent, concern)
+                yield "you work in it"
+            if said.hand is not None:
+                to = self.party(said.hand)
+                self.moved(agent, concern, to)
+                yield f"it's {self.called(to)}'s"
+            if said.done is not None:
+                self.done(agent, concern, said.done)
+                yield "it's done, for the operator to clear"
+
+        done = list(acts())
+        if not done:
+            return self.described(concern)
+        return f"{self.called(concern)}: {'; '.join(done)}."
+
+    def described(self, concern: Concern) -> str:
+        """Say where `concern` stands, in a line: its title, who holds it, and its marks."""
+        standing = self.standing(concern)
+        marks = [
+            f"left by {self.called(standing.left_by)}" if standing.left_by else "",
+            "done, to clear" if standing.done is not None else "",
+            "cleared" if standing.cleared else "",
+            "declined" if standing.declined is not None else "",
+        ]
+        said = ", ".join(each for each in marks if each)
+        return (
+            f"{self.called(concern)}, {concern.title}: held by "
+            f"{self.called(standing.holder)}{f', {said}' if said else ''}."
+        )
+
+    def read(self, agent: AgentRecord, number: int | None) -> str:
+        """Read the inbox for `agent`, changing nothing: one item or concern whole, by its number, or what waits on the operator and the concerns they hold."""
+        if number is not None:
+            found = self.cited(str(number))
+            match found:
+                case Concern():
+                    words = [
+                        f"{self.called(each)}: {each.text}"
+                        for each in self.said_in(found)
+                    ]
+                    return "\n".join(
+                        [self.described(found), found.body, *words]
+                    ).strip()
+                case Item():
+                    return (
+                        f"{self.called(found)} from {found.by or 'lup'}: {found.text}"
+                    )
+                case _:
+                    return self.called(found)
+        waiting = [
+            f"{self.called(each)} waits on the operator"
+            for each in self.waits_on_operator()
+        ]
+        held = [self.described(each) for each in self.held(agent)]
+        return "\n".join([*waiting, *held]) or "Nothing waits, and you hold nothing."
 
     def concern(self, cited: str) -> Concern:
         """Return the concern `cited` names, by its number or its name, `@` before it or not; raise `InboxError` where none is."""
@@ -654,6 +807,25 @@ class Inbox(Model, arbitrary_types_allowed=True):
         for each in items:
             if not self.told(party, each):
                 self.edge(Told, each, party, None)
+
+
+def slug(title: str, longest: int = 40) -> str | None:
+    """Return a name made of `title`: its letters and digits, lower case, words joined by `-`, cut at a word's end to `longest`; none where it holds no letter.
+
+    >>> slug("The gate hangs on a fresh worktree!"), slug("42")
+    ('the-gate-hangs-on-a-fresh-worktree', None)
+    """
+    words = [
+        "".join(letters)
+        for kept, letters in groupby(
+            title.lower(), key=lambda each: each.isalnum() and each.isascii()
+        )
+        if kept
+    ]
+    ends = accumulate(len(each) + 1 for each in words)
+    kept = [each for each, end in zip(words, ends, strict=True) if end - 1 <= longest]
+    name = "-".join(kept)
+    return name if any(each.isalpha() for each in name) else None
 
 
 def first_line(text: str) -> str:
