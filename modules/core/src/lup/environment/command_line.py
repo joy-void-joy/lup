@@ -183,7 +183,7 @@ def main() -> None:
         resolved = resolve(read(layout, machine()).project)
     except (ProgramFailedError, ProjectError) as failure:
         refused("lup", failure)
-    # lup: defer(issue=3, why="in a room and in the operator's terminal, lup's program on the operator's machine answers, naming who calls from the socket the call came in on")
+    # lup: defer(issue=3, why="where `LUP_CALLING` names the socket of lup's program on the operator's machine, as in a room and the operator's terminal, it answers, naming who calls from the socket, and offers the plan of the repository asked for")
     answerer = InProcess(by=Operator(), resolved=resolved, repository=layout.main.name)
     ran(answerer, "lup", sys.argv[1:])
 
