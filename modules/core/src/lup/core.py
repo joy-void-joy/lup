@@ -4,6 +4,9 @@ from lup.declaration.module import Module
 from lup.declaration.promises import DeclarationPromises
 from lup.doors.promises import DoorsPromises
 from lup.doors.serving import Serving
+from lup.inbox.records import EDGES, NODES
+from lup.store.promises import StorePromises
+from lup.store.records import Recorded
 from lup.testing.promises import TestingPromises
 
 
@@ -16,4 +19,8 @@ class Core(Module):
     """
 
     name = "core"
-    serving: Serving = Serving.of(DeclarationPromises, DoorsPromises, TestingPromises)
+    serving: Serving = Serving.of(
+        DeclarationPromises, DoorsPromises, TestingPromises, StorePromises
+    )
+    kinds: Recorded = Recorded.of(*NODES, *EDGES)
+    """The kinds of record the core's submodules keep in the store: the inbox's."""

@@ -13,10 +13,11 @@ status kept on a record outlives what justified it (`README.md` here, *Records*)
 """
 
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Annotated, ClassVar, Self
+from typing import TYPE_CHECKING, Annotated, ClassVar, Self, override
 
 from pydantic import AfterValidator, AwareDatetime, Field, model_validator
 
+from lup.declaration.grammar import Named
 from lup.types import Model
 
 if TYPE_CHECKING:
@@ -200,3 +201,16 @@ class Kinds(Model):
     def edge(self, kind: str) -> type[Edge]:
         """Return the class an edge of `kind` reads as: the one declaring it, or `Edge`."""
         return next((each for each in self.edges if each.declared() == kind), Edge)
+
+
+class Recorded(Named[type[Node] | type[Edge]]):
+    """The kinds of record a module keeps in the store, each named by the kind it declares.
+
+    `Recorded.of(Concern, Under)`: resolving a declaration gathers every
+    module's, and the store reads its records as them; a kind two modules
+    declare fails the load, naming both.
+    """
+
+    @override
+    def named(self, entry: type[Node | Edge]) -> str:
+        return entry.declared() or entry.__name__

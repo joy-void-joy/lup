@@ -15,7 +15,7 @@ from lup.types import Model
 # Parties
 
 
-class Party(Node):
+class PartyRecord(Node):
     """Someone or something that holds concerns and is sent to: the operator, an agent, or a pile.
 
     Named, its name unique in its repository and what `@` takes; never numbered.
@@ -25,14 +25,14 @@ class Party(Node):
     kind: str = "inbox:party"
 
 
-class OperatorParty(Party):
+class OperatorRecord(PartyRecord):
     """The operator, as a party of a repository: whom what asks them is for."""
 
     kind: str = "inbox:operator"
     name: Name | None = "operator"
 
 
-class AgentParty(Party):
+class AgentRecord(PartyRecord):
     """An agent: a session's own conversation, or one they spawned or started as a subagent.
 
     Known to lup's doors by `id` (`lup.Agent.id`), which stays put as they're
@@ -45,7 +45,7 @@ class AgentParty(Party):
     """lup's id for the agent, which the doors hand a method as `by: Agent`."""
 
 
-class Pile(Party):
+class PileRecord(PartyRecord):
     """A party that holds concerns and does nothing else: made by the operator as they think, or by a friction sent to a path not there yet."""
 
     kind: str = "inbox:pile"
@@ -291,10 +291,10 @@ class Started(Edge):
 
 
 NODES: list[type[Node]] = [
-    Party,
-    OperatorParty,
-    AgentParty,
-    Pile,
+    PartyRecord,
+    OperatorRecord,
+    AgentRecord,
+    PileRecord,
     Concern,
     Friction,
     Item,

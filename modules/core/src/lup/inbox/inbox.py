@@ -13,7 +13,7 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from lup.inbox.records import (
-    AgentParty,
+    AgentRecord,
     Answer,
     Answers,
     Blocked,
@@ -29,9 +29,9 @@ from lup.inbox.records import (
     In,
     Item,
     Message,
-    OperatorParty,
-    Party,
-    Pile,
+    OperatorRecord,
+    PartyRecord,
+    PileRecord,
     Question,
     Ruling,
     Shown,
@@ -66,9 +66,9 @@ class InboxError(StoreError):
 class Standing(Model):
     """Where a concern stands, read from the edges drawn to it and the items said in it."""
 
-    holder: Party
+    holder: PartyRecord
     """Who holds it: the party it's under, or that its nearest parent concern is under."""
-    left_by: AgentParty | None = None
+    left_by: AgentRecord | None = None
     """The agent who held it and has ended, where it reads as in `No agent`."""
     done: str | None = None
     """What its agent said of it being done, where they did and nothing's been said in it since."""
@@ -105,7 +105,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
         kind: type[E],
         target: Node,
         source: Node | None,
-        by: Party | None,
+        by: PartyRecord | None,
         **fields: JsonValue,
     ) -> E:
         """Draw an edge of `kind` to `target`, from `source` where it has one, written by `by` (lup where none), and return it."""
@@ -124,23 +124,23 @@ class Inbox(Model, arbitrary_types_allowed=True):
 
     # Parties
 
-    def operator(self) -> OperatorParty:
+    def operator(self) -> OperatorRecord:
         """Return the operator, as a party of the repository, made the first time it's needed."""
         found = self.database.named(self.repository, "operator")
-        if isinstance(found, OperatorParty):
+        if isinstance(found, OperatorRecord):
             return found
         return self.database.kept(
-            OperatorParty(repository=self.repository, by=None, at=self.now())
+            OperatorRecord(repository=self.repository, by=None, at=self.now())
         )
 
     def agent(
-        self, known_as: str, name: str, spawner: AgentParty | None = None
-    ) -> AgentParty:
+        self, known_as: str, name: str, spawner: AgentRecord | None = None
+    ) -> AgentRecord:
         """Return the agent lup knows by the id `known_as`, named `name`, under `spawner` where they have one: made the first time, renamed where their name changed."""
         known = next(
             (
                 each
-                for each in self.database.nodes(self.repository, AgentParty)
+                for each in self.database.nodes(self.repository, AgentRecord)
                 if each.id == known_as
             ),
             None,
@@ -152,7 +152,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
                 known.model_copy(update={"name": name, "at": self.now()})
             )
         made = self.database.kept(
-            AgentParty(
+            AgentRecord(
                 repository=self.repository,
                 by=None,
                 at=self.now(),
@@ -164,22 +164,22 @@ class Inbox(Model, arbitrary_types_allowed=True):
             self.edge(Under, spawner, made, None)
         return made
 
-    def party(self, name: str) -> Party:
+    def party(self, name: str) -> PartyRecord:
         """Return the party named `name`, `@` before it or not; raise `InboxError` where none is."""
         found = self.database.named(self.repository, name.removeprefix("@"))
-        if not isinstance(found, Party):
+        if not isinstance(found, PartyRecord):
             message = f"no party of {self.repository} is named `{name}`"
             raise InboxError(message, about=[name])
         return found
 
-    def pile(self, path: str, by: Party | None = None) -> Pile:
+    def pile(self, path: str, by: PartyRecord | None = None) -> PileRecord:
         """Return the pile at `path` (`frictions/dashboard/keys`), making it, and each pile above it that isn't there yet, under its parent.
 
         A path's first segments may name a party there already, an agent among
         them, which the piles below go under.
         """
         found = self.database.named(self.repository, path)
-        if isinstance(found, Pile):
+        if isinstance(found, PileRecord):
             return found
         if found is not None:
             message = (
@@ -189,7 +189,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
         above = str(PurePosixPath(path).parent)
         parent = None if above == "." else self.party_or_pile(above, by)
         made = self.database.kept(
-            Pile(
+            PileRecord(
                 repository=self.repository,
                 by=None if by is None else by.name,
                 at=self.now(),
@@ -200,14 +200,14 @@ class Inbox(Model, arbitrary_types_allowed=True):
             self.edge(Under, parent, made, by)
         return made
 
-    def party_or_pile(self, path: str, by: Party | None) -> Party:
+    def party_or_pile(self, path: str, by: PartyRecord | None) -> PartyRecord:
         """Return the party at `path`, or a pile made there where nothing is."""
         found = self.database.named(self.repository, path)
-        if isinstance(found, Party):
+        if isinstance(found, PartyRecord):
             return found
         return self.pile(path, by)
 
-    def ended(self, agent: AgentParty) -> bool:
+    def ended(self, agent: AgentRecord) -> bool:
         """Say whether `agent` has ended: their latest `Ended` or `Started` is an `Ended`."""
         marks = [
             each
@@ -216,11 +216,11 @@ class Inbox(Model, arbitrary_types_allowed=True):
         ]
         return bool(marks) and isinstance(marks[-1], Ended)
 
-    def end(self, agent: AgentParty) -> None:
+    def end(self, agent: AgentRecord) -> None:
         """Say `agent` ended: what they held reads as in `No agent` until they start again."""
         self.edge(Ended, agent, None, None)
 
-    def start(self, agent: AgentParty) -> None:
+    def start(self, agent: AgentRecord) -> None:
         """Say `agent` started again: what they held is theirs again."""
         self.edge(Started, agent, None, None)
 
@@ -229,18 +229,18 @@ class Inbox(Model, arbitrary_types_allowed=True):
         places = self.database.drawn_from(node.key, Under, current=True)
         return None if not places else self.database.found(places[-1].target)
 
-    def parties(self) -> list[Party]:
+    def parties(self) -> list[PartyRecord]:
         """Return every party of the repository, in the order made."""
-        return self.database.nodes(self.repository, Party)
+        return self.database.nodes(self.repository, PartyRecord)
 
     # Concerns
 
     def opened(
         self,
-        by: Party,
+        by: PartyRecord,
         title: str,
         words: str,
-        under: Party | Concern,
+        under: PartyRecord | Concern,
         *,
         friction: bool = False,
     ) -> Concern:
@@ -254,7 +254,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
         return concern
 
     def said(
-        self, by: Party, concern: Concern, words: str, tone: Tone = "note"
+        self, by: PartyRecord, concern: Concern, words: str, tone: Tone = "note"
     ) -> Message:
         """Keep `by`'s `words` in `concern`, told to the operator, and return them."""
         message = self.database.kept(
@@ -283,17 +283,19 @@ class Inbox(Model, arbitrary_types_allowed=True):
             raise InboxError(message, about=[cited])
         return found
 
-    def rewritten(self, by: Party, concern: Concern, body: str) -> Concern:
+    def rewritten(self, by: PartyRecord, concern: Concern, body: str) -> Concern:
         """Rewrite `concern`'s body whole, as `by` understands it, its body before kept as an earlier version."""
         return self.database.kept(
             concern.model_copy(update={"body": body, "by": by.name, "at": self.now()})
         )
 
-    def moved(self, by: Party, concern: Concern, to: Party | Concern) -> None:
+    def moved(
+        self, by: PartyRecord, concern: Concern, to: PartyRecord | Concern
+    ) -> None:
         """Move `concern` under `to`: it's in one place, where it's moved."""
         self.edge(Under, to, concern, by)
 
-    def done(self, by: AgentParty, concern: Concern, said: str) -> None:
+    def done(self, by: AgentRecord, concern: Concern, said: str) -> None:
         """Say, for `by`, that `concern` is done: what's done, what isn't, and what to try, for the operator to clear."""
         self.edge(Done, concern, by, by, said=said, newest=self.newest(concern))
 
@@ -306,11 +308,11 @@ class Inbox(Model, arbitrary_types_allowed=True):
         """Decline `concern`, for the operator, saying why: nothing more will be done about it."""
         self.edge(Declined, concern, self.operator(), self.operator(), why=why)
 
-    def works_in(self, agent: AgentParty, concern: Concern) -> None:
+    def works_in(self, agent: AgentRecord, concern: Concern) -> None:
         """Have `agent` work in `concern`: what they say without naming another lands there."""
         self.edge(WorksIn, concern, agent, agent)
 
-    def working_in(self, agent: AgentParty) -> Concern | None:
+    def working_in(self, agent: AgentRecord) -> Concern | None:
         """Return the concern `agent` works in; none where they work in none."""
         places = self.database.drawn_from(agent.key, WorksIn, current=True)
         found = None if not places else self.database.found(places[-1].target)
@@ -331,7 +333,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
         """Return the key of the newest item in `concern`, 0 where none is."""
         return max((each.key for each in self.said_in(concern)), default=0)
 
-    def held(self, party: Party) -> list[Concern]:
+    def held(self, party: PartyRecord) -> list[Concern]:
         """Return each concern right under `party`, as the store holds them, oldest first."""
         keys = [
             each.source
@@ -344,11 +346,11 @@ class Inbox(Model, arbitrary_types_allowed=True):
             if isinstance(found := self.database.found(key), Concern)
         ]
 
-    def holder(self, concern: Concern) -> Party:
+    def holder(self, concern: Concern) -> PartyRecord:
         """Return the party `concern` is under, or its nearest parent concern is under."""
         place = self.under(concern)
         match place:
-            case Party():
+            case PartyRecord():
                 return place
             case Concern():
                 return self.holder(place)
@@ -359,7 +361,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
         """Read where `concern` stands, from the edges drawn to it and what's been said in it."""
         holder = self.holder(concern)
         left_by = (
-            holder if isinstance(holder, AgentParty) and self.ended(holder) else None
+            holder if isinstance(holder, AgentRecord) and self.ended(holder) else None
         )
         newest = self.newest(concern)
         edges = self.database.drawn_to(concern.key, Edge)
@@ -378,8 +380,8 @@ class Inbox(Model, arbitrary_types_allowed=True):
 
     def sent(
         self,
-        by: Party,
-        to: list[Party],
+        by: PartyRecord,
+        to: list[PartyRecord],
         text: str,
         tone: Tone = "note",
         concern: Concern | None = None,
@@ -401,7 +403,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
 
     def asked(
         self,
-        by: AgentParty,
+        by: AgentRecord,
         text: str,
         decisions: list[Decision],
         concern: Concern | None = None,
@@ -459,9 +461,9 @@ class Inbox(Model, arbitrary_types_allowed=True):
         self.edge(Answers, on, comment, operator, part=part)
         return comment
 
-    def told_party(self, party: Party, text: str) -> Comment:
+    def told_party(self, party: PartyRecord, text: str) -> Comment:
         """Send the operator's `text` to `party` alone: to an agent, or to a pile, where it opens a concern."""
-        if isinstance(party, Pile):
+        if isinstance(party, PileRecord):
             self.opened(self.operator(), first_line(text), text, party)
         return self.database.kept(
             Comment(
@@ -473,7 +475,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
             )
         )
 
-    def felt(self, by: AgentParty, text: str) -> Felt:
+    def felt(self, by: AgentRecord, text: str) -> Felt:
         """Keep how it is for `by`, in their words, told to the operator."""
         return self.database.kept(
             Felt(
@@ -485,7 +487,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
             )
         )
 
-    def blocked(self, by: AgentParty, text: str) -> Blocked:
+    def blocked(self, by: AgentRecord, text: str) -> Blocked:
         """Keep `by`'s word that their work can't go on, waiting on the operator."""
         return self.database.kept(
             Blocked(
@@ -497,7 +499,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
             )
         )
 
-    def stopped(self, by: AgentParty, text: str) -> Stopped:
+    def stopped(self, by: AgentRecord, text: str) -> Stopped:
         """Keep `by`'s word that they ended their work by their own choice."""
         return self.database.kept(
             Stopped(
@@ -509,7 +511,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
             )
         )
 
-    def turn_ended(self, by: AgentParty, text: str) -> TurnEnd:
+    def turn_ended(self, by: AgentRecord, text: str) -> TurnEnd:
         """Keep `by`'s last words of a turn, answering each of the operator's items told to them since their last turn's end."""
         end = self.database.kept(
             TurnEnd(
@@ -532,7 +534,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
                 self.edge(Answers, told, end, by)
         return end
 
-    def withdrawn(self, by: AgentParty, item: Item, why: str) -> None:
+    def withdrawn(self, by: AgentRecord, item: Item, why: str) -> None:
         """Take back `by`'s `item`, saying why: it waits on nobody after."""
         if item.by != by.name:
             message = f"@{item.number} is {item.by}'s, not {by.name}'s, to withdraw"
@@ -600,7 +602,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
         for each in items:
             self.edge(Shown, each, operator, operator)
 
-    def told_to(self, party: Party) -> list[Item]:
+    def told_to(self, party: PartyRecord) -> list[Item]:
         """Return each item for `party` already told to them, oldest first."""
         return [
             each
@@ -608,13 +610,13 @@ class Inbox(Model, arbitrary_types_allowed=True):
             if party.key in each.to and self.told(party, each)
         ]
 
-    def told(self, party: Party, item: Item) -> bool:
+    def told(self, party: PartyRecord, item: Item) -> bool:
         """Say whether `item` has been told to `party`."""
         return any(
             each.source == party.key for each in self.database.drawn_to(item.key, Told)
         )
 
-    def untold(self, party: Party) -> list[Item]:
+    def untold(self, party: PartyRecord) -> list[Item]:
         """Return each item for `party` not yet told to them, oldest first: what reaches them at their next call."""
         return [
             each
@@ -622,7 +624,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
             if party.key in each.to and not self.told(party, each)
         ]
 
-    def tell(self, party: Party, items: list[Item]) -> None:
+    def tell(self, party: PartyRecord, items: list[Item]) -> None:
         """Say `items` were told to `party`: each is told once, never again."""
         for each in items:
             if not self.told(party, each):
