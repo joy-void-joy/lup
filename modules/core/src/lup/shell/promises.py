@@ -12,6 +12,7 @@ import lup
 from lup import (
     Agent,
     Blocks,
+    Commented,
     Fold,
     FoldKind,
     Folds,
@@ -34,12 +35,20 @@ from lup import (
 from lup.testing import (
     Accepted,
     Answered,
+    Comment,
+    Delivered,
+    Drafted,
     Hello,
     Opened,
+    Page,
+    Quote,
     Refused,
+    Send,
+    Started,
     Testing,
     Unanswered,
     Watch,
+    Write,
     raises,
 )
 
@@ -77,7 +86,10 @@ class NotesPart(Part):
                     kind="note",
                     summary=[Span(text=title, tone="title")],
                     content=Viewing.of(NotesPart.note, NoteOf(number=number)),
-                    offers=[Offer.of(NotesPart.clear, Clearing(number=number))],
+                    offers=[
+                        Offer.of(NotesPart.clear, Clearing(number=number)),
+                        Offer.of(NotesPart.comment, NoteOf(number=number)),
+                    ],
                 )
                 for number, title in enumerate(self.titles(), start=1)
             ),
@@ -102,6 +114,11 @@ class NotesPart(Part):
     async def clear(self, clearing: Clearing) -> str:
         """Clear a note."""
         return f"cleared {clearing.number}"
+
+    @lup.action(verb="comment", says="comment on it")
+    async def comment(self, commented: Commented[NoteOf]) -> str:
+        """Take a comment on a note."""
+        return f"note {commented.on.number}: {commented.words}"
 
 
 class Notes(Module):
@@ -160,9 +177,11 @@ class ShellPromises(Part):
             assert len(folds) == notes
             assert all(fold.kind == "note" for fold in folds)
             assert all(
-                offer.verb == "done" and offer.action == "clear"
+                any(
+                    offer.verb == "done" and offer.action == "clear"
+                    for offer in fold.offers
+                )
                 for fold in folds
-                for offer in fold.offers
             )
 
     @lup.promise
@@ -244,6 +263,7 @@ class ShellPromises(Part):
         assert isinstance(opened, Opened)
         assert opened.root is not None
         assert any(each.kind.name == "note" for each in opened.looks.folds)
+        assert isinstance(await page.told(), Drafted)
         await page.say(Watch(watch=watch, viewing=opened.root))
         answered = await page.told()
         assert isinstance(answered, Answered)
@@ -259,6 +279,7 @@ class ShellPromises(Part):
         page = await started.dashboard()
         await page.say(Hello(token=page.token))
         assert isinstance(await page.told(), Opened)
+        assert isinstance(await page.told(), Drafted)
         await page.say(f"not a frame: {garbage}")
         refused = await page.told()
         assert isinstance(refused, Unanswered)
@@ -273,6 +294,50 @@ class ShellPromises(Part):
         assert answered.watch == 7
         await page.leave()
 
+    @lup.promise
+    async def every_page_shows_the_same_draft(self, by: Testing) -> None:
+        """Every page open on the dashboard is told the draft as it changes, so a comment written in one shows in the other, and a closed tab loses nothing."""
+        words = by.any(Words).words
+        started = await by.started(noted(1))
+        first = await opened(started)
+        second = await opened(started)
+        await first.say(
+            Write(comment=Comment(id="c1", on=quoted("note-1"), words=words))
+        )
+        for page in [first, second]:
+            drafted = await page.told()
+            assert isinstance(drafted, Drafted)
+            assert [each.words for each in drafted.draft.comments] == [words]
+        await first.leave()
+        third = await opened(started, drafted=False)
+        drafted = await third.told()
+        assert isinstance(drafted, Drafted)
+        assert [each.id for each in drafted.draft.comments] == ["c1"]
+        await second.leave()
+        await third.leave()
+
+    @lup.promise
+    async def sending_sends_each_part_on_its_own(self, by: Testing) -> None:
+        """Sending the draft sends each comment on its own: one whose block takes comments goes, and leaves the draft; one whose block takes none stays in it, saying why, and holds up nothing else."""
+        words = by.any(Words).words
+        started = await by.started(noted(1))
+        page = await opened(started)
+        going = Comment(id="going", on=quoted("note-1"), words=words)
+        staying = Comment(id="staying", on=quoted("nowhere"), words=words)
+        for comment in [going, staying]:
+            await page.say(Write(comment=comment))
+            assert isinstance(await page.told(), Drafted)
+        await page.say(Send())
+        drafted = await page.told()
+        delivered = await page.told()
+        assert isinstance(drafted, Drafted)
+        assert isinstance(delivered, Delivered)
+        assert "going" in delivered.went
+        assert "staying" in delivered.stayed
+        assert [each.id for each in drafted.draft.comments] == ["staying"]
+        assert all(each.reason for each in drafted.draft.comments)
+        await page.leave()
+
 
 class Picked(Model):
     """A number the page picks to watch a view under."""
@@ -284,3 +349,25 @@ class Garbage(Model):
     """Text a page might send, which, said after words that aren't JSON, no frame reads as."""
 
     text: str
+
+
+class Words(Model):
+    """What a comment says."""
+
+    words: str
+
+
+async def opened(started: Started, *, drafted: bool = True) -> Page:
+    """Open a page of `started`'s dashboard, its token said, told it's opened, and, where `drafted`, the draft too."""
+    page = await started.dashboard()
+    await page.say(Hello(token=page.token))
+    assert isinstance(await page.told(), Opened)
+    if drafted:
+        assert isinstance(await page.told(), Drafted)
+    return page
+
+
+def quoted(block: str) -> Quote:
+    """Return a quote of the block `block` of the pile's view."""
+    pile = Viewing(module="notes", view="pile", given={"pile": "p"})
+    return Quote(viewing=pile, block=block, lines=["note 1"])

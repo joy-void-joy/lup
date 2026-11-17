@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from pydantic import BaseModel, Field, JsonValue, SerializeAsAny
 
 from lup.doors.action import ActionDoor
-from lup.doors.door import is_model
+from lup.doors.door import Annotation, is_model
 from lup.doors.parties import Party
 from lup.errors import LupError
 from lup.types import Model
@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
     from lup.doors.door import Method
 
+lazy from lup.shell.draft import Commenting
 lazy from lup.shell.view import ViewDoor
 
 
@@ -157,13 +158,15 @@ class Offer(Model):
     ) -> Offer:
         """Return the offer of `action`, an action read through its class, given `given`: its verb and what it does are the action's own, what the block offering it says closer to what it's on (`says`), and what its line reads marked (`draws`).
 
-        Raise `BlockError` where `action` isn't an action, or doesn't take `given`'s type.
+        An action taking `Commented[G]`, as one offered under the `comment` verb
+        does, is given a `G`, the comment written with it as it's sent. Raise
+        `BlockError` where `action` isn't an action, or doesn't take `given`'s type.
         """
         door = action.door
         if not isinstance(door, ActionDoor):
             message = f"a block offers `{action.taken.name}`, which isn't an action"
             raise BlockError(message, about=[action.taken.qualified])
-        one = action.taken.one()
+        one = commented_on(action.taken.one())
         if not (is_model(one) and isinstance(given, one)):
             message = (
                 f"a block offers `{action.taken.name}` with a "
@@ -177,6 +180,24 @@ class Offer(Model):
             says=door.says if says is None else says,
             draws=draws,
         )
+
+
+def commented_on(taken: Annotation) -> Annotation:
+    """Return what an action taking `taken` is offered with: `G` for `Commented[G]`, as a comment action takes, else `taken` itself.
+
+    >>> from lup.types import Model
+    >>> class OnItem(Model):
+    ...     item: int
+    >>> from lup.shell.draft import Commented
+    >>> commented_on(Commented[OnItem]) is OnItem, commented_on(OnItem) is OnItem
+    (True, True)
+    """
+    match taken:
+        case type() if issubclass(taken, Commenting):
+            given: type[BaseModel] = taken.__pydantic_generic_metadata__["args"][0]
+            return given
+        case _:
+            return taken
 
 
 class Shown(Model):

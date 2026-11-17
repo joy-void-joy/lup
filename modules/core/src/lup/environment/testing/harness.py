@@ -31,9 +31,9 @@ from lup.environment.running.container import answered
 from lup.environment.running.planning import plan_of
 from lup.environment.shell import viewed
 from lup.environment.shell.server import Dashboard, Session, Socket
-from lup.shell.blocks import Viewing
 from lup.shell.looks import Looks
-from lup.shell.wire import Answered, Hello, Opened, Told, Unanswered, Unwatch, Watch
+from lup.shell.wire import Sent as Frame
+from lup.shell.wire import Told
 from lup.testing.harness import (
     Acted,
     Broken,
@@ -58,6 +58,7 @@ from lup.testing.harness import (
 )
 from lup.testing.promise import PromiseDoor
 from lup.types import Model, MutableModel
+lazy from lup.shell.blocks import Viewing
 
 
 class Run(MutableModel, arbitrary_types_allowed=True):
@@ -412,23 +413,23 @@ class Crosser(Model, Crossing, arbitrary_types_allowed=True):
 
 
 class Dashboards(Model, Opening, arbitrary_types_allowed=True):
-    """A started lup's dashboard, as the harness opens its pages."""
+    """A started lup's one dashboard, as the harness opens its pages: every page on the same draft."""
 
-    running: Running
-    looks: Looks
-    root: Viewing | None
+    dashboard: Dashboard
 
     @override
     async def page(self) -> Page:
         """Open a page of the dashboard, its socket in memory, served as the server serves one."""
-        dashboard = Dashboard(running=self.running, looks=self.looks, root=self.root)
         inbound: asyncio.Queue[str | None] = asyncio.Queue()
         outbound: asyncio.Queue[str | None] = asyncio.Queue()
         socket = Queued(inbound=inbound, outbound=outbound)
-        session = Session(dashboard=dashboard, socket=socket)
+        session = Session(dashboard=self.dashboard, socket=socket)
         serving = asyncio.get_running_loop().create_task(session.run())
         return Paged(
-            token=dashboard.token, inbound=inbound, outbound=outbound, serving=serving
+            token=self.dashboard.token,
+            inbound=inbound,
+            outbound=outbound,
+            serving=serving,
         )
 
 
@@ -461,13 +462,13 @@ class Paged(Page, arbitrary_types_allowed=True):
     """The server's session reading the page's socket."""
 
     @override
-    async def say(self, frame: Hello | Watch | Unwatch | str) -> None:
+    async def say(self, frame: Frame | str) -> None:
         await self.inbound.put(
             frame if isinstance(frame, str) else frame.model_dump_json()
         )
 
     @override
-    async def told(self) -> Opened | Answered | Unanswered | None:
+    async def told(self) -> Told | None:
         text = await self.outbound.get()
         return None if text is None else TypeAdapter[Told](Told).validate_json(text)
 
@@ -512,9 +513,11 @@ class Harness(Testing, arbitrary_types_allowed=True):
             crossing=Crosser(running=reached.running),
             heard=heard,
             dashboards=Dashboards(
-                running=reached.running,
-                looks=reached.looks,
-                root=document_of(reached.modules),
+                dashboard=Dashboard(
+                    running=reached.running,
+                    looks=reached.looks,
+                    root=document_of(reached.modules),
+                )
             ),
         )
 

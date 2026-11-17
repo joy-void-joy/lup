@@ -11,7 +11,21 @@ promises is the environment's (`lup.environment.testing`). Its reasons are in
 
 from lup.doors.door import Accepted, Refused, Rejection
 from lup.doors.tool import ToolSpec
-from lup.shell.wire import Answered, Hello, Opened, Unanswered, Unwatch, Watch
+from lup.shell.draft import Comment, Draft, Marked, Quote
+from lup.shell.wire import (
+    Answered,
+    Delivered,
+    Drafted,
+    Erase,
+    Hello,
+    Mark,
+    Opened,
+    Send,
+    Unanswered,
+    Unwatch,
+    Watch,
+    Write,
+)
 from lup.testing.harness import (
     Acted,
     Answering,
@@ -42,17 +56,26 @@ __all__ = [
     "Broken",
     "BrokenLawError",
     "Call",
+    "Comment",
+    "Delivered",
+    "Draft",
+    "Drafted",
+    "Erase",
     "Hello",
     "Kept",
+    "Mark",
+    "Marked",
     "Opened",
     "Page",
     "ProgramRun",
+    "Quote",
     "Raised",
     "Ran",
     "Refused",
     "Rejection",
     "Responding",
     "Scripted",
+    "Send",
     "Sent",
     "Served",
     "Started",
@@ -64,5 +87,6 @@ __all__ = [
     "Unwatch",
     "Viewed",
     "Watch",
+    "Write",
     "raises",
 ]
