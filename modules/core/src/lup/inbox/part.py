@@ -61,6 +61,10 @@ class Inboxes(Part, approved=True, shared=True):
     """Where the database is kept, across restarts."""
     database: Database | None = None
     """The database, opened the first time it's needed."""
+    state: Everywhere | None = None
+    """Every repository's inbox as data, as last read: read again only once the database has taken a write since."""
+    state_at: int = -1
+    """How many writes the database had taken when `state` was read."""
 
     def opened(self) -> Database:
         """Return the database the inbox is kept in, opening it the first time: before anything else of the part runs, whatever order its start and its first call come in."""
@@ -203,12 +207,16 @@ class Inboxes(Part, approved=True, shared=True):
         them, what's been told, and the operator's comments.
         """
         del nothing
-        return Everywhere(
-            inboxes=[
-                self.inbox(repository).inboxed()
-                for repository in self.opened().repositories()
-            ]
-        )
+        database = self.opened()
+        if self.state is None or self.state_at != database.writes:
+            self.state = Everywhere(
+                inboxes=[
+                    self.inbox(repository).inboxed()
+                    for repository in database.repositories()
+                ]
+            )
+            self.state_at = database.writes
+        return self.state
 
     @lup.service
     async def told(self, given: Ending, by: Code) -> Told:
@@ -405,7 +413,7 @@ class Speaking(Part):
     async def withdraw(self, said: WithdrawSaid, by: Agent) -> str:
         """Take back an item the operator needn't see.
 
-        A message or a question you sent that no longer needs them, with why.
+        A message or a question you sent that needn't take their time, with why.
         """
         return await Inboxes.withdraw(Spoken(agent=by.id, said=said))
 

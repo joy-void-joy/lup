@@ -52,7 +52,7 @@ from sqlalchemy.pool import StaticPool
 
 from lup.store.errors import StoreError
 from lup.store.records import Edge, Kinds, Node, Record
-from lup.types import Model
+from lup.types import Model, MutableModel
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -149,7 +149,7 @@ class Drawn(Model):
     edge: Edge
 
 
-class Database(Model, arbitrary_types_allowed=True):
+class Database(MutableModel, arbitrary_types_allowed=True):
     """The store's database, open: every repository's nodes and edges.
 
     Safe to share between threads: each call takes the lock, and is one
@@ -169,6 +169,10 @@ class Database(Model, arbitrary_types_allowed=True):
     lock: threading.RLock = Field(default_factory=threading.RLock)
     """Held for each call, and across several by `together`; reentrant, so a
     kind's refusal reads the store while a write holds it."""
+    writes: int = 0
+    """How many writes it has taken, each node kept, edge drawn or plain record
+    rewritten: a reader holding what it made of the store compares it, to know
+    whether to make it again."""
 
     @classmethod
     def opened(cls, database: Path | str, kinds: Kinds, schema: int = 1) -> Database:
@@ -388,6 +392,7 @@ class Database(Model, arbitrary_types_allowed=True):
                 .where(NODES.c.key == node.key)
                 .values(version=version, name=node.name)
             )
+            self.writes += 1
         return node
 
     def refusal(self, node: Node, earlier: Node | None) -> str | None:
@@ -441,6 +446,7 @@ class Database(Model, arbitrary_types_allowed=True):
                     record=edge.model_dump_json(),
                 )
             )
+            self.writes += 1
         return edge
 
     def placed(self, query: Select[int, str, str]) -> list[Drawn]:
@@ -534,3 +540,4 @@ class Database(Model, arbitrary_types_allowed=True):
                 database.execute(
                     insert(PLAIN).values(name=name, record=value.model_dump_json())
                 )
+            self.writes += 1
