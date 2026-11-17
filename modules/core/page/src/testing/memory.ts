@@ -1,8 +1,10 @@
 // Views read from memory, for the page's promises: what each answers is set by the promise, and pushed to whoever
 // watches it, as the core pushes a view answered again; and the draft, kept as the core keeps it, a send taking out
-// every comment that says something and dropping the rest.
+// every comment that says something and isn't held back, and dropping those that say nothing. The document's root, where
+// one is named, answers with the review at its top as the server's does (`lup.environment.shell.review`), each part a
+// line of its id, without the server's grouping by where each goes.
 
-import type { Blocks, Comment, Delivered, Draft, Looks, Viewing } from "../generated/read";
+import type { Block, Blocks, Comment, Delivered, Draft, Looks, Viewing } from "../generated/read";
 import { viewKey } from "../document/tree";
 import declared from "../generated/core-looks.json";
 import type { Source } from "../shell/shell";
@@ -16,12 +18,56 @@ export class Memory implements Source {
     /** The draft, as the core keeps it. */
     draft: Draft = { comments: [], marks: [] };
 
+    /** Keep views answered by the promise, the document's root, where one is named, answering with the review at its top. */
+    constructor(readonly root: Viewing | null = null) {}
+
     /** Set what `viewing` answers, and push it to every watch of it. */
     set(viewing: Viewing, blocks: Blocks): void {
         const key = viewKey(viewing);
         this.#answers.set(key, blocks);
         for (const answered of this.#watches.get(key) ?? []) {
-            answered(blocks);
+            answered(this.#topped(key, blocks));
+        }
+    }
+
+    /** Return what the view keyed `key` answers as a watch is told it: the root with the review at its top. */
+    #topped(key: string, blocks: Blocks): Blocks {
+        if (this.root === null || key !== viewKey(this.root) || this.draft.comments.length === 0) {
+            return blocks;
+        }
+        const parts: Block[] = this.draft.comments.map((comment) => ({
+            block: "line",
+            id: comment.id,
+            version: null,
+            offers: [],
+            reaches: null,
+            sighted: null,
+            spans: [{ text: comment.words.split("\n")[0] ?? "", tone: "strong", ticking: null, gauge: null, refers: null }],
+        }));
+        const review: Block = {
+            block: "fold",
+            id: "draft",
+            version: null,
+            offers: [],
+            reaches: null,
+            sighted: null,
+            kind: "draft",
+            summary: [{ text: `draft · ${parts.length}`, tone: "strong", ticking: null, gauge: null, refers: null }],
+            open: null,
+            content: parts,
+        };
+        return { ...blocks, blocks: [review, ...blocks.blocks] };
+    }
+
+    /** Answer the root again for every watch of it, the review as the draft stands. */
+    #reviewed(): void {
+        if (this.root === null) {
+            return;
+        }
+        const key = viewKey(this.root);
+        const blocks = this.#answers.get(key);
+        if (blocks !== undefined) {
+            this.set(this.root, blocks);
         }
     }
 
@@ -32,7 +78,7 @@ export class Memory implements Source {
         this.#watches.set(key, watches);
         const answer = this.#answers.get(key);
         if (answer !== undefined) {
-            answered(answer);
+            answered(this.#topped(key, answer));
         }
         return () => {
             watches.delete(answered);
@@ -45,18 +91,21 @@ export class Memory implements Source {
             ...this.draft,
             comments: kept ? this.draft.comments.map((each) => (each.id === comment.id ? comment : each)) : [...this.draft.comments, comment],
         };
+        this.#reviewed();
     }
 
     erase(id: string): void {
         this.draft = { comments: this.draft.comments.filter((each) => each.id !== id), marks: this.draft.marks.filter((each) => each.id !== id) };
+        this.#reviewed();
     }
 
     send(): void {
-        const went = this.draft.comments.filter((each) => each.words.trim() !== "").map((each) => each.id);
-        this.draft = { comments: [], marks: [] };
+        const held = this.draft.comments.filter((each) => each.held);
+        const went = this.draft.comments.filter((each) => !each.held && each.words.trim() !== "").map((each) => each.id);
+        this.draft = { comments: held, marks: this.draft.marks.filter((each) => each.held) };
         this.told(this.draft);
         for (const delivered of this.#delivered) {
-            delivered({ kind: "delivered", went, stayed: [] });
+            delivered({ kind: "delivered", went, stayed: [], held: held.map((each) => each.id) });
         }
     }
 
@@ -76,6 +125,7 @@ export class Memory implements Source {
         for (const drafted of this.#drafted) {
             drafted(draft);
         }
+        this.#reviewed();
     }
 }
 

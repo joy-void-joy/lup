@@ -128,19 +128,45 @@ export const commands: Readonly<Record<string, (shell: Shell, given: Given) => v
         shell.choose(found);
         shell.say(`${kind.called}: ${new Set(found).size} chosen`);
     },
-    /** Choose nothing, and clear what the status line says. */
+    /** Choose nothing, clear what the status line says, and leave the review where it was opened: Esc. */
     "choose-none": (shell) => {
         shell.choose([]);
         shell.say(null);
+        shell.leaveReview();
     },
-    /** End the comment being written, as leaving insert mode does; outside one, send the draft: Ctrl+Enter. */
+    /**
+     * End the comment being written, as leaving insert mode does; outside one, open the review of what the draft
+     * sends where and go to it; in the review, send the draft: Ctrl+Enter.
+     */
     send: (shell) => {
         const cm = getCM(shell.view);
         if (shell.comments.writing() !== null && cm !== null) {
             Vim.handleKey(cm, "<Esc>", "mapping");
             return;
         }
-        shell.comments.send();
+        if (shell.inReview()) {
+            shell.leaveReview();
+            shell.comments.send();
+            return;
+        }
+        shell.comments.flush();
+        if (shell.toReview()) {
+            shell.say("the review: Ctrl+Enter sends it, Space x holds a part back, Esc goes back");
+            return;
+        }
+        shell.say("the draft holds nothing to send");
+    },
+    /** Hold the part of the draft at the cursor back from sends: Space x on a comment or a line of the review. */
+    hold: (shell) => {
+        shell.comments.hold(true);
+    },
+    /** Let the part of the draft at the cursor go at the next send: Space d. */
+    "let-go": (shell) => {
+        shell.comments.hold(false);
+    },
+    /** Choose whom the comment at the cursor reaches, or write one to whom's chosen: Space s. */
+    address: (shell) => {
+        shell.comments.address();
     },
     /** Comment on the innermost block at the cursor whole, rather than on one of its lines: Space `c`. */
     "comment-whole": (shell) => {
@@ -204,7 +230,7 @@ function jumped(shell: Shell, forward: boolean): void {
     if (over.length > 0) {
         shell.fold(over, true);
     }
-    shell.view.dispatch({ selection: { anchor: offsetOf(found.node) }, scrollIntoView: true });
+    shell.go(offsetOf(found.node));
 }
 
 /** Return the levels of the folds open, or closed, in the shell's document. */
@@ -227,6 +253,9 @@ export const vimBindings: readonly Bind[] = [
     { keys: "<Esc>", command: "choose-none", modes: ["normal"] },
     { keys: "<C-CR>", command: "send", modes: ["normal", "insert"] },
     { keys: "<Space>c", command: "comment-whole", modes: ["normal"] },
+    { keys: "<Space>x", command: "hold", modes: ["normal"] },
+    { keys: "<Space>d", command: "let-go", modes: ["normal"] },
+    { keys: "<Space>s", command: "address", modes: ["normal"] },
     { keys: "]n", command: "comment-next", modes: ["normal"] },
     { keys: "[n", command: "comment-previous", modes: ["normal"] },
     { keys: ":w", command: "draft-write", modes: ["normal"] },

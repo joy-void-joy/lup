@@ -103,11 +103,22 @@ SHELL_FOLDS = [
         colour="muted",
     ),
     FoldKind(name="lines", letter="l", called="unchanged lines", level=4),
+    FoldKind(name="draft", letter="d", called="draft", level=0, colour="warn"),
+    FoldKind(
+        name="sent-to",
+        letter="t",
+        called="where parts go",
+        level=1,
+        starts_open=True,
+        colour="warn",
+    ),
 ]
 """The fold kinds every view may name: a party's section of the document, which
 holds what's shown of an agent or a pile; a file a `Code` or a `Diff` shows; a
-function's or a class's body in it; and a run of a file's unchanged lines, the
-context around a change, which `zr` opens last."""
+function's or a class's body in it; a run of a file's unchanged lines, the
+context around a change, which `zr` opens last; and the review of the draft at
+the document's top, closed until a send is asked for, its parts under where
+each goes."""
 
 
 class MarkKind(Model):
