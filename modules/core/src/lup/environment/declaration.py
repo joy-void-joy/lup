@@ -23,6 +23,7 @@ from lup.declaration.grammar import listed
 from lup.declaration.module import Module
 from lup.declaration.project import Project
 from lup.environment.doors import Doors
+from lup.environment.shell import Looks
 from lup.errors import LupError
 from lup.store.records import Edge, Kinds, Node, Recorded
 from lup.types import Model
@@ -38,6 +39,9 @@ class Resolved(Model):
     """The modules it's made of, every layer applied, in order."""
     doors: Doors
     """What the modules serve, each method behind its door."""
+    looks: Looks
+    """The tones, fold kinds and mark kinds the modules declare, which their
+    views may name."""
     kinds: Kinds
     """The kinds of record the modules keep in the store, which it reads its records as."""
 
@@ -96,8 +100,9 @@ def resolve(project: Project) -> Resolved:
 
     Raise `ProjectError` where a name its verbs give isn't there, where it holds
     no module named `core`, where a module it holds requires one it doesn't,
-    where modules require each other in a cycle, or where what they serve can't
-    be served (`Doors.of`).
+    where modules require each other in a cycle, where what they serve can't
+    be served (`Doors.of`), or where what they declare for their views clashes
+    (`Looks.of`).
     """
     placed = project.modules.resolve(default(), shipped())
     modules = project.modules.ordered(placed)
@@ -132,7 +137,12 @@ def resolve(project: Project) -> Resolved:
         )
         about = [name for pair in unmet for name in pair]
         raise ProjectError(message, about=list(dict.fromkeys(about)))
-    return Resolved(modules=modules, doors=Doors.of(modules), kinds=kept(modules))
+    return Resolved(
+        modules=modules,
+        doors=Doors.of(modules),
+        looks=Looks.of(modules),
+        kinds=kept(modules),
+    )
 
 
 def cycle(module: type[Module], trail: list[type[Module]]) -> list[str] | None:

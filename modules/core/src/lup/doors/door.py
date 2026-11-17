@@ -221,6 +221,10 @@ class Door(Model):
     default: ClassVar[list[type[Party]]] = []
     """Who may call a method leaving `by` out; none where each method says, as a
     command does."""
+    named_across: ClassVar[bool] = False
+    """Whether a method behind it is reached by its name across every module, as
+    an agent names a tool, so two modules' can't share one; else within its
+    module, whose name comes with it."""
 
     def shaped(self, function: Function) -> None:
         """Raise `DoorError` where `function` can't be behind this door, whatever its types say: as it's put on, with no annotation evaluated.

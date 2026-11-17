@@ -13,7 +13,7 @@ from pydantic import Field, JsonValue
 import lup
 from lup import (
     Agent,
-    Code,
+    Codebase,
     Data,
     Model,
     Module,
@@ -64,7 +64,7 @@ class Archive(Part, shared=True):
     shelf: Data
 
     @lup.service
-    async def shelved(self, note: Note, by: Code) -> Noted:
+    async def shelved(self, note: Note, by: Codebase) -> Noted:
         """Keep a note on the shelf, under the project asking."""
         (self.shelf.path / by.repository).write_text(note.text)
         return Noted(text=note.text)
@@ -127,7 +127,7 @@ class RunningPromises(Part):
         sealing = started.plan.serving("service", "sealed")
         assert sealing is not None
         [way] = [each for each in sealing.doorways if each.name == "sealed"]
-        assert "Code" in way.parties
+        assert "Codebase" in way.parties
         assert all(
             way.door in ("tool", "service", "action", "command")
             for each in started.plan.parts
@@ -182,12 +182,12 @@ class RunningPromises(Part):
     async def a_part_keeping_data_keeps_it_in_a_directory_of_its_own(
         self, by: Testing
     ) -> None:
-        """A part with a field typed `Data` is given a directory of its own where it runs, there to write in, and a shared part serving several projects is told which one calls by its `Code`."""
+        """A part with a field typed `Data` is given a directory of its own where it runs, there to write in, and a shared part serving several projects is told which one calls by its `Codebase`."""
         note = by.any(Note)
         repository = by.any(Repository).name
         started = await by.started(
             couriered(), secrets={"key": by.any(str)}, repository=repository
         )
-        shelved = await started.serve("shelved", note, Code(repository=repository))
+        shelved = await started.serve("shelved", note, Codebase(repository=repository))
         assert isinstance(shelved, Accepted)
         assert shelved.output == Noted(text=note.text)

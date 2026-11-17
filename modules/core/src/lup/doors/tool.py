@@ -84,6 +84,7 @@ class ToolDoor(Door):
 
     called: ClassVar[str] = "a tool"
     default: ClassVar[list[type[Party]]] = [Agent]
+    named_across: ClassVar[bool] = True
 
     reads: bool = False
     """Whether the tool only reads, changing nothing: MCP's `readOnlyHint`."""

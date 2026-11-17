@@ -1,20 +1,19 @@
 """Serving a module's methods, and calling them through their doors: the doors' environment side.
 
-Resolving a declaration lists every part each module serves
-(`Doors.of`), refusing a class that can't be made with the module listing it, a
-method that can't be behind its door, and what two methods would share: a
-tool's or a service's name across the project's modules, an action's or a
-command's within one.
+Resolving a declaration lists every part each module serves (`Doors.of`),
+refusing a part that can't be made with the module listing it, a method that
+can't be behind its door, and what two methods would share: a name across the
+project's modules where their door names them so, as a tool's or a service's
+(`Door.named_across`), else within one module.
 
-Starting what's served (`Doors.started`) makes each class once, with its module
-and the secrets it holds, runs what each runs at `Starting`, and carries a
-service's call made in it to the class serving it (`Running`). Calling through a
-door (`Running.call`, `.act`, `.run`, `.serve`) finds the method, checks who
-calls, reads what it's given as the model it takes, and runs it on its class,
-answering `Accepted` or `Refused`: what the harness and the containers call
-(`README.md` in `lup/doors/`, *Calling through a door*). Stopping
-(`Running.stopped`) runs what each runs at `Stopping`, then cancels what it
-started.
+Starting what's served (`Doors.started`) makes each part once, with its module
+and what it holds, runs what each runs at `Starting`, and carries a service's
+call made in it to the part serving it (`Running`). Calling through a door
+(`Running.call`, `.serve`, `.act`, `.run`) finds the method, checks who calls,
+reads what it's given as the model it takes, and runs it on its part, answering
+`Accepted` or `Refused`: what the harness and the containers call (`README.md`
+in `lup/doors/`, *Starting, calling and stopping*). Stopping (`Running.stopped`)
+runs what each runs at `Stopping`, then cancels what it started.
 """
 
 import asyncio
@@ -43,8 +42,8 @@ from lup.doors.door import (
 )
 from lup.doors.events import Event, Starting, Stopping
 from lup.doors.on import OnDoor
-from lup.doors.parties import Code, Party, said
-from lup.doors.parts import Part, Parts
+from lup.doors.parties import Codebase, Party, said
+from lup.doors.parts import Given, Part, Parts, Runs
 from lup.doors.service import CARRYING, Carrier, ServiceDoor
 from lup.doors.tool import ToolDoor, ToolSpec
 from lup.types import Model, MutableModel
@@ -156,12 +155,13 @@ class Doors(Model):
                 entry.method.checked()
         except DoorError as wrong:
             raise ProjectError(str(wrong), about=wrong.about) from wrong
-        distinct("A tool's name", doors.keyed(ToolDoor))
-        distinct("A service's name", doors.keyed(ServiceDoor))
-        distinct("An action's name in its module", doors.keyed(ActionDoor, scoped=True))
-        distinct(
-            "A command's name in its module", doors.keyed(CommandDoor, scoped=True)
-        )
+        kinds: list[type[Door]] = [type(entry.method.door) for entry in doors.entries()]
+        for door in dict.fromkeys(kinds):
+            within = "" if door.named_across else " in its module"
+            distinct(
+                f"{door.called}'s name{within}".capitalize(),
+                doors.keyed(door, scoped=not door.named_across),
+            )
         return doors
 
     @cached_property
@@ -206,9 +206,11 @@ class Doors(Model):
         self,
         repository: str,
         secrets: dict[str, str],
+        *,
         only: list[str] | None = None,
         beyond: Carrier | None = None,
         data: Path | None = None,
+        runs: Runs | None = None,
     ) -> Running:
         """Make each part once, with its module and the value of each secret it holds, run what each runs at `Starting`, and return them running, as the project of `repository`'s code.
 
@@ -217,18 +219,22 @@ class Doors(Model):
         `module.Part`, where the others run elsewhere, a call to one of their
         services carried by `beyond`; left out, every part is made here. Raise
         `ProjectError` where a part made here holds a secret not given. A part
-        keeping data is given a directory under `data`, named `module.Part`.
+        keeping data is given a directory under `data`, named `module.Part`, and
+        a program a part declares is run by `runs`.
         """
         running = Running(
             doors=self,
-            caller=Code(repository=repository),
+            caller=Codebase(repository=repository),
             made=[
                 Made(
                     serves=each,
                     made=each.part.made(
                         each.module,
-                        secrets,
-                        None if data is None else data / each.named(),
+                        Given(
+                            secrets=secrets,
+                            data=None if data is None else data / each.named(),
+                            runs=runs,
+                        ),
                     ),
                 )
                 for each in self.served
@@ -261,7 +267,7 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
     """
 
     doors: Doors
-    caller: Code
+    caller: Codebase
     """The project whose code this is: who a service's call made here is
     by."""
     made: list[Made]

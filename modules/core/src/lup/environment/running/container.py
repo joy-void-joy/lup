@@ -16,7 +16,7 @@ from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from lup.declaration.errors import ProjectError
 from lup.doors.door import Accepted, Answer, Method, Refused, RefusedError, Rejection
-from lup.doors.parties import Code
+from lup.doors.parties import Codebase
 from lup.doors.service import Carrier
 from lup.environment.declaration import load, resolve
 from lup.errors import LupError
@@ -112,7 +112,7 @@ class Outward(Model, Carrier):
         call = ServiceCalled(
             service=method.taken.name,
             given=value.model_dump(mode="json"),
-            by=Code(repository=self.repository),
+            by=Codebase(repository=self.repository),
         )
         name = method.taken.qualified
         try:

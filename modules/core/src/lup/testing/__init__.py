@@ -13,31 +13,38 @@ from lup.doors.door import Accepted, Refused, Rejection
 from lup.doors.tool import ToolSpec
 from lup.testing.harness import (
     Acted,
+    Answering,
     Broken,
     BrokenLawError,
     Call,
     Kept,
+    ProgramRun,
     Ran,
+    Scripted,
     Sent,
     Served,
     Started,
     Step,
     Testing,
     ToolCall,
+    Viewed,
 )
 from lup.testing.raising import Raised, raises
 
 __all__ = [
     "Accepted",
     "Acted",
+    "Answering",
     "Broken",
     "BrokenLawError",
     "Call",
     "Kept",
+    "ProgramRun",
     "Raised",
     "Ran",
     "Refused",
     "Rejection",
+    "Scripted",
     "Sent",
     "Served",
     "Started",
@@ -45,5 +52,6 @@ __all__ = [
     "Testing",
     "ToolCall",
     "ToolSpec",
+    "Viewed",
     "raises",
 ]

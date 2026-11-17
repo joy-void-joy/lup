@@ -14,9 +14,9 @@ calls it. Carrying is the environment's: lup sets what carries a call
 (`CARRYING`) wherever it runs a module's code, and outside lup a service can't be
 called (`UncarriedError`).
 
-Who calls is, by default, a project's own code (`Code`), which whoever carries
+Who calls is, by default, a project's own code (`Codebase`), which whoever carries
 the call vouches for from where it came; a room's program calls for its agent,
-so a service it may call says `by: Agent | Code`.
+so a service it may call says `by: Agent | Codebase`.
 """
 
 from abc import ABC, abstractmethod
@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, ClassVar, Concatenate, overload
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from lup.doors.door import Answer, Door, DoorError, Method, Taken, is_model, spelled
-from lup.doors.parties import Code, Party
+from lup.doors.parties import Codebase, Party
 from lup.errors import LupError
 from lup.types import Model
 
@@ -63,7 +63,8 @@ class ServiceDoor(Door):
     """
 
     called: ClassVar[str] = "a service"
-    default: ClassVar[list[type[Party]]] = [Code]
+    default: ClassVar[list[type[Party]]] = [Codebase]
+    named_across: ClassVar[bool] = True
 
     def contract(self, taken: Taken) -> None:
         """Raise `DoorError` where `taken` isn't a service's: one model in, a model, `str` or nothing out."""

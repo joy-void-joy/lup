@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 import lup
 from lup.doors.door import RefusedError
 from lup.doors.events import Stopping
-from lup.doors.parties import Agent, Code, Operator
+from lup.doors.parties import Agent, Codebase, Operator
 from lup.doors.parts import Data, Part
 from lup.inbox.inbox import Inbox, InboxError, first_line
 from lup.inbox.records import KINDS, Concern, Item, PileRecord, Question
@@ -86,7 +86,7 @@ class Inboxes(Part, approved=True, shared=True):
     # Agents' acts, called by their project's code
 
     @lup.service
-    async def concern(self, given: Spoken[ConcernSaid], by: Code) -> str:
+    async def concern(self, given: Spoken[ConcernSaid], by: Codebase) -> str:
         """Do what an agent says of a concern, and say what came of it."""
         inbox = self.inbox(by.repository)
         agent = inbox.agent(given.agent)
@@ -104,7 +104,7 @@ class Inboxes(Part, approved=True, shared=True):
             return inbox.acted(agent, found, said)
 
     @lup.service
-    async def friction(self, given: Spoken[FrictionSaid], by: Code) -> str:
+    async def friction(self, given: Spoken[FrictionSaid], by: Codebase) -> str:
         """Keep what got in an agent's way as a friction, where they send it, and say where."""
         inbox = self.inbox(by.repository)
         agent = inbox.agent(given.agent)
@@ -121,7 +121,7 @@ class Inboxes(Part, approved=True, shared=True):
         return f"Your friction is @{friction.number}, in {inbox.called(under)}."
 
     @lup.service
-    async def note(self, given: Spoken[NoteSaid], by: Code) -> str:
+    async def note(self, given: Spoken[NoteSaid], by: Codebase) -> str:
         """Keep an agent's remark for the operator, in the concern it names or the one they work in."""
         inbox = self.inbox(by.repository)
         agent = inbox.agent(given.agent)
@@ -133,7 +133,7 @@ class Inboxes(Part, approved=True, shared=True):
         return f"Your note is @{item.number}."
 
     @lup.service
-    async def send(self, given: Spoken[SendSaid], by: Code) -> str:
+    async def send(self, given: Spoken[SendSaid], by: Codebase) -> str:
         """Send an agent's message to the party it names: a pile opens a concern with it."""
         inbox = self.inbox(by.repository)
         agent = inbox.agent(given.agent)
@@ -148,7 +148,7 @@ class Inboxes(Part, approved=True, shared=True):
         return f"Sent to {inbox.called(to)}, @{item.number}."
 
     @lup.service
-    async def ask(self, given: Spoken[AskSaid], by: Code) -> str:
+    async def ask(self, given: Spoken[AskSaid], by: Codebase) -> str:
         """Ask the operator an agent's question, waiting on them until they answer it."""
         inbox = self.inbox(by.repository)
         agent = inbox.agent(given.agent)
@@ -160,7 +160,7 @@ class Inboxes(Part, approved=True, shared=True):
         return f"Your question is @{question.number}, waiting on the operator."
 
     @lup.service
-    async def spoke(self, given: Spoken[Uttered], by: Code) -> str:
+    async def spoke(self, given: Spoken[Uttered], by: Codebase) -> str:
         """Keep an agent's own words of a kind: how it felt, a block, a stop, a turn's end."""
         inbox = self.inbox(by.repository)
         agent = inbox.agent(given.agent)
@@ -177,7 +177,7 @@ class Inboxes(Part, approved=True, shared=True):
         return f"Kept, @{item.number}."
 
     @lup.service
-    async def withdraw(self, given: Spoken[WithdrawSaid], by: Code) -> str:
+    async def withdraw(self, given: Spoken[WithdrawSaid], by: Codebase) -> str:
         """Take back an item an agent sent, saying why."""
         inbox = self.inbox(by.repository)
         agent = inbox.agent(given.agent)
@@ -186,7 +186,7 @@ class Inboxes(Part, approved=True, shared=True):
         return f"Withdrew @{given.said.item}."
 
     @lup.service
-    async def read(self, given: Spoken[Reading], by: Code) -> str:
+    async def read(self, given: Spoken[Reading], by: Codebase) -> str:
         """Read the inbox, changing nothing: one item or concern whole, or what stands."""
         inbox = self.inbox(by.repository)
         agent = inbox.agent(given.agent)
@@ -194,7 +194,7 @@ class Inboxes(Part, approved=True, shared=True):
             return inbox.read(agent, given.said.number)
 
     @lup.service
-    async def standing(self, given: Nothing, by: Code) -> Inboxed:
+    async def standing(self, given: Nothing, by: Codebase) -> Inboxed:
         """Read the repository's inbox as data, changing nothing."""
         del given
         return self.inbox(by.repository).inboxed()
@@ -219,7 +219,7 @@ class Inboxes(Part, approved=True, shared=True):
         return self.state
 
     @lup.service
-    async def told(self, given: Ending, by: Code) -> Told:
+    async def told(self, given: Ending, by: Codebase) -> Told:
         """Tell an agent each item for them not told yet, once: what reaches them at their next call."""
         inbox = self.inbox(by.repository)
         items = inbox.taken(inbox.agent(given.agent))
@@ -236,7 +236,7 @@ class Inboxes(Part, approved=True, shared=True):
         )
 
     @lup.service
-    async def agent_named(self, given: Naming, by: Code) -> None:
+    async def agent_named(self, given: Naming, by: Codebase) -> None:
         """Name an agent, as their session says its name, under the agent who spawned them where one did."""
         inbox = self.inbox(by.repository)
         spawner = None if given.spawner is None else inbox.agent(given.spawner)
@@ -244,13 +244,13 @@ class Inboxes(Part, approved=True, shared=True):
             inbox.agent(given.agent, given.name, spawner)
 
     @lup.service
-    async def agent_ended(self, given: Ending, by: Code) -> None:
+    async def agent_ended(self, given: Ending, by: Codebase) -> None:
         """Say an agent's session ended: what they held reads as in `no-agent` until they start again."""
         inbox = self.inbox(by.repository)
         inbox.end(inbox.agent(given.agent))
 
     @lup.service
-    async def agent_started(self, given: Ending, by: Code) -> None:
+    async def agent_started(self, given: Ending, by: Codebase) -> None:
         """Say an agent started again: what they held is theirs again."""
         inbox = self.inbox(by.repository)
         inbox.start(inbox.agent(given.agent))

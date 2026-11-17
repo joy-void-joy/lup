@@ -5,9 +5,11 @@ the declaration's grammar (`Module`, `Modules`, `Project`, and the selections an
 layers a module's parts are written in), and the doors a module's methods are
 reached through (`lup.tool`, `lup.service`, `lup.action`, `lup.command`,
 `lup.on`, `lup.promise`), with the parties a method's `by` names, lup's events,
-and the classes a module groups them in (`Part`, listed in its
-`Parts`, holding its `Secret`s), and the records a module keeps in the store
-(`Node`, `Edge`, listed in its `Recorded`). The core's environment side
+and the parts a module is made of (`Part`, listed in its `Parts`, holding its
+`Secret`s and its `Data`); the shell's view door (`lup.view`), the blocks a
+view answers, and the kinds a module declares for them (`Tones`, `Folds`,
+`Marks`); and the records a module keeps in the store (`Node`, `Edge`, listed
+in its `Recorded`). The core's environment side
 (`lup.environment`) isn't among it, and nothing here imports it.
 
 `Core` is imported when first used: it lists its submodules' promises, which
@@ -23,11 +25,38 @@ from lup.doors.command import command
 from lup.doors.door import DoorError, RefusedError
 from lup.doors.events import Event, Starting, Stopping
 from lup.doors.on import on
-from lup.doors.parties import Agent, Code, Operator, Party
-from lup.doors.parts import Data, Part, Parts, Secret
+from lup.doors.parties import Agent, Codebase, Operator, Party
+from lup.doors.parts import (
+    Data,
+    Finished,
+    Part,
+    Parts,
+    Program,
+    ProgramError,
+    Secret,
+)
 from lup.doors.service import UncarriedError, service
 from lup.doors.tool import tool
 from lup.errors import LupError
+from lup.shell.blocks import (
+    BlockError,
+    Blocks,
+    Code,
+    Diff,
+    FileBytes,
+    FileText,
+    Fold,
+    Gauge,
+    Line,
+    Mark,
+    Markdown,
+    Offer,
+    Span,
+    Ticking,
+    Viewing,
+)
+from lup.shell.kinds import FoldKind, Folds, MarkKind, Marks, Tone, Tones
+from lup.shell.view import view
 from lup.store.records import Edge, Node, Recorded
 from lup.testing.promise import promise
 from lup.types import JsonObject, Model, MutableModel, Settings
@@ -35,25 +64,44 @@ lazy from lup.core import Core
 
 __all__ = [
     "Agent",
+    "BlockError",
+    "Blocks",
     "Code",
+    "Codebase",
     "Core",
     "Data",
+    "Diff",
     "DoorError",
     "Edge",
     "Event",
+    "FileBytes",
+    "FileText",
+    "Finished",
+    "Fold",
+    "FoldKind",
+    "Folds",
+    "Gauge",
     "JsonObject",
     "Layer",
+    "Line",
     "LupError",
+    "Mark",
+    "MarkKind",
+    "Markdown",
+    "Marks",
     "Model",
     "Module",
     "Modules",
     "MutableModel",
     "Named",
     "Node",
+    "Offer",
     "Operator",
     "Part",
     "Parts",
     "Party",
+    "Program",
+    "ProgramError",
     "Project",
     "ProjectError",
     "Recorded",
@@ -61,13 +109,19 @@ __all__ = [
     "Secret",
     "Selection",
     "Settings",
+    "Span",
     "Starting",
     "Stopping",
+    "Ticking",
+    "Tone",
+    "Tones",
     "UncarriedError",
+    "Viewing",
     "action",
     "command",
     "on",
     "promise",
     "service",
     "tool",
+    "view",
 ]

@@ -6,7 +6,7 @@ its services, as #5's sessions will (`README.md` here).
 """
 
 import lup
-from lup import Agent, Code, Model, Modules, Operator, Part, Project
+from lup import Agent, Codebase, Model, Modules, Operator, Part, Project
 from lup.inbox.said import (
     Answering,
     AskSaid,
@@ -27,7 +27,7 @@ from lup.inbox.said import (
 )
 from lup.testing import Accepted, Started, Step, Testing
 
-HERE = Code(repository="harness")
+HERE = Codebase(repository="harness")
 """The harness's project's own code, which calls the inbox's services for its agents."""
 
 
