@@ -5,7 +5,8 @@ core installed runs it. The declaration is `lup_project.py` at pytest's root, or
 the file `[tool.lup]`'s `declaration` names in its `pyproject.toml`, as lup reads
 a repository's, and it's collected where pytest's paths reach it. A project's gate checks the promises of the
 modules whose code it holds, not those of lup's it installs, which lup's own
-gate checks.
+gate checks; but a promise about every project (`@lup.promise(every_project=True)`)
+of any module it selects, checked over its own declaration.
 
 Every other check pytest collects names no promise, and fails, saying so,
 unless it's a docstring's example or marked `unpromised(why=…)`; and a class of
@@ -157,35 +158,54 @@ class Declared(pytest.File):
         readers(resolved.doors)
         root = self.config.rootpath
         for module in resolved.modules:
-            if own(type(module), root):
+            mine = own(type(module), root)
+            if mine or any(about_every_project(each) for each in promises(module)):
                 # lup: ignore("reportUnknownMemberType", why="pytest leaves untyped the keyword arguments a node's constructor is passed")
                 yield Held.from_parent(
-                    self, name=module.name, module=module, project=project
+                    self, name=module.name, module=module, project=project, every=mine
                 )
         for each in unlisted(root):
             # lup: ignore("reportUnknownMemberType", why="pytest leaves untyped the keyword arguments a node's constructor is passed")
             yield Unlisted.from_parent(self, name=each.__qualname__, unlisted=each)
 
 
+def about_every_project(entry: Entry) -> bool:
+    """Say whether the promise behind `entry` is about whichever project's gate checks it."""
+    door = entry.method.door
+    return isinstance(door, PromiseDoor) and door.every_project
+
+
 class Held(pytest.Collector):
-    """A module's promises, collected."""
+    """A module's promises, collected: every one of the repository's own module, and those about every project of another's."""
 
     def __init__(
-        self, *, module: Module, project: Project, name: str, parent: pytest.Collector
+        self,
+        *,
+        module: Module,
+        project: Project,
+        every: bool,
+        name: str,
+        parent: pytest.Collector,
     ) -> None:
-        """Hold `module`, of `project`."""
+        """Hold `module`, of `project`: every promise of it where `every`, else those about every project."""
         super().__init__(name=name, parent=parent)
         self.module = module
         self.project = project
+        self.every = every
 
     @override
     def collect(self) -> Iterator[pytest.Item | pytest.Collector]:
-        """Collect each promise the module serves, in the order declared."""
+        """Collect each promise of the module this gate checks, in the order declared."""
         runs = self.config.getoption("lup_explore")
         exploring = (
             Exploring() if runs is None else Exploring(runs=int(runs), seeded=False)
         )
-        for entry in promises(self.module):
+        checked = [
+            entry
+            for entry in promises(self.module)
+            if self.every or about_every_project(entry)
+        ]
+        for entry in checked:
             # lup: ignore("reportUnknownMemberType", why="pytest leaves untyped the keyword arguments a node's constructor is passed")
             yield Promised.from_parent(
                 self,

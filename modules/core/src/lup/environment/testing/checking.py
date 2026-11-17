@@ -75,7 +75,9 @@ class Check(Model, arbitrary_types_allowed=True):
             run = Run(checking=checked)
             runs.append(run)
             loop = Simulation(choose=chooser(data), watch=watched)
-            loop.run_until_complete(self.ran(Harness(data=data, run=run)))
+            loop.run_until_complete(
+                self.ran(Harness(data=data, run=run, gated=self.project))
+            )
 
         test = given(st.data())(once)
         if exploring.seeded:

@@ -352,6 +352,12 @@ class Harness(Testing, arbitrary_types_allowed=True):
 
     data: st.DataObject
     run: Run
+    gated: Project
+    """The project whose gate checks the promise, as its gate loads it."""
+
+    def project(self) -> Project:
+        """Return the project whose gate checks this promise, as its gate loads it."""
+        return self.gated
 
     async def started(
         self,

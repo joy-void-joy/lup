@@ -272,6 +272,10 @@ class Testing(Party, ABC):
         """
 
     @abstractmethod
+    def project(self) -> Project:
+        """Return the project whose gate checks this promise, as its gate loads its declaration: what a promise about every project checks (`@lup.promise(every_project=True)`)."""
+
+    @abstractmethod
     def any[T](self, kind: type[T]) -> T:
         """Return a value of `kind`, generated: each run of the promise draws another, and one that breaks it is shrunk to the smallest that does.
 
