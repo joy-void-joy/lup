@@ -52,6 +52,18 @@ class Codebase(Party):
     """The repository whose code calls, as lup names it."""
 
 
+class Machine(Party):
+    """The operator's machine's own parts: the home repository's code, from the commit the operator approved, running on their machine, calling each other.
+
+    Only a call made where those parts run is by `Machine`: nothing carrying a
+    call from a container names it, so code a container runs, the home
+    repository's own branch among it, never is.
+    """
+
+    party: Literal["machine"] = "machine"
+    """Which of the core's parties it is, as a call across containers names it."""
+
+
 def said(parties: list[type[Party]]) -> str:
     """Name `parties` as a type naming them does, a union for several.
 

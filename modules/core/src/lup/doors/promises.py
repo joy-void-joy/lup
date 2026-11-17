@@ -23,6 +23,8 @@ from lup import (
     Operator,
     Part,
     Parts,
+    Program,
+    ProgramError,
     Project,
     ProjectError,
     Secret,
@@ -30,7 +32,15 @@ from lup import (
     Stopping,
     UncarriedError,
 )
-from lup.testing import Accepted, Refused, Repository, Testing, raises
+from lup.testing import (
+    Accepted,
+    Answering,
+    Refused,
+    Repository,
+    Scripted,
+    Testing,
+    raises,
+)
 
 
 class Said(Model):
@@ -537,6 +547,50 @@ class AskingPart(Part):
         return "answered"
 
 
+class Listing(Model):
+    """Names a directory holds, as a listing prints them."""
+
+    names: list[Literal["notes", "src", "README.md", "a b"]] = Field(
+        default=[], max_length=5
+    )
+
+
+class Listed(Model):
+    """What a lister listed."""
+
+    names: list[str]
+
+
+class ListerPart(Part):
+    """A lister's part, running `ls` through its field."""
+
+    ls: Program = Program(name="ls")
+
+    @lup.tool
+    async def listed(self, asking: Asking) -> Listed:
+        """List what the directory holds."""
+        del asking
+        finished = await self.ls.ran("-1")
+        return Listed(names=finished.output.splitlines())
+
+    @lup.tool
+    async def missing(self, asking: Asking) -> Listed:
+        """List what a program nobody scripted would say."""
+        del asking
+        try:
+            await self.ls.ran("-a")
+        except ProgramError as missing:
+            raise lup.RefusedError(str(missing)) from missing
+        return Listed(names=[])
+
+
+class Lister(Module):
+    """Listing a directory."""
+
+    name = "lister"
+    parts: Parts = Parts.of(ListerPart)
+
+
 class Keeper(Module):
     """Keeping a count while it runs, behind a token."""
 
@@ -619,3 +673,20 @@ class PartsPromises(Part):
         if "starting" in seen:
             assert seen.index("starting") < seen.index("stopping")
             assert seen.index("stopping") < seen.index("cancelled")
+
+    @lup.promise
+    async def a_part_runs_the_programs_it_declares_through_their_fields(
+        self, by: Testing
+    ) -> None:
+        """A part runs a program it declares as a field typed `Program` through that field, what runs it given where the part runs: in the harness, a stand-in answering as the promise scripts it, and failing as a program that isn't there where the script has no answer."""
+        listing = by.any(Listing)
+        scripted = Scripted(
+            answers=[Answering(when=["-1"], output="\n".join(listing.names))]
+        )
+        started = await by.started(declared(Lister()), programs={"ls": scripted})
+        listed = await started.call("listed", Asking(), by.any(Agent))
+        assert isinstance(listed, Accepted)
+        assert listed.output == Listed(names=list(listing.names))
+        assert ["-1"] in started.ran("ls")
+        missing = await started.call("missing", Asking(), by.any(Agent))
+        assert isinstance(missing, Refused)
