@@ -1,0 +1,28 @@
+/* The shell's palette: every colour a module may name, each reading at 7:1 or more on black. */
+:root {
+    --lup-fg: #e6e6e6;
+    --lup-muted: #a0a0a0;
+    --lup-link: #8cb4ff;
+    --lup-ok: #7fd88f;
+    --lup-err: #ff8c8c;
+    --lup-warn: #f0c674;
+    --lup-info: #8be9fd;
+    --lup-purple: #c9a0ff;
+    --lup-cyan: #7fe0e0;
+    --lup-orange: #ffb070;
+    color-scheme: dark;
+}
+
+html,
+body,
+#root {
+    height: 100%;
+    margin: 0;
+    background: #000;
+    color: var(--lup-fg);
+}
+
+.lup-said {
+    color: var(--lup-err);
+    font-family: ui-monospace, monospace;
+}

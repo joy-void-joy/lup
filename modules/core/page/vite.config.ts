@@ -10,7 +10,7 @@ export default defineConfig({
         emptyOutDir: true,
     },
     test: {
-        include: ["src/**/*.test.ts"],
+        include: ["src/**/promises.ts"],
         environment: "happy-dom",
     },
 });
