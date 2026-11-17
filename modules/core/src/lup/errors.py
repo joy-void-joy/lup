@@ -16,5 +16,5 @@ class LupError(Exception):
         super().__init__(message)
         self.about: list[str] = [] if about is None else about
         """What it's about, by name: the method a door can't take, by its name
-        in its class (`EchoServing.shout`), or the modules a declaration can't
+        in its class (`EchoPart.shout`), or the modules a declaration can't
         resolve with; none where it names nothing."""

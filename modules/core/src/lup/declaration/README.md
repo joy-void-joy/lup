@@ -43,7 +43,7 @@ A `Module` subclass: its `name` and the modules it `requires` as class attribute
 
 Unknown fields are refused, so a misspelled one fails the load rather than vanishing.
 
-A module's methods are in classes it lists in its `serving` field, each method behind one of lup's doors (`lup/doors/README.md`). `Module.held(Kind)` gives every entry of a kind a module holds, each of its fields of that kind resolved over the module's own default.
+A module's methods are in classes it lists in its `parts` field, each method behind one of lup's doors (`lup/doors/README.md`). `Module.held(Kind)` gives every entry of a kind a module holds, each of its fields of that kind resolved over the module's own default.
 
 ## The verbs on modules
 

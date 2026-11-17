@@ -4,9 +4,10 @@
 the declaration's grammar (`Module`, `Modules`, `Project`, and the selections and
 layers a module's parts are written in, and the profiles a repository's sessions
 run on), and the doors a module's methods are
-reached through (`lup.tool`, `lup.action`, `lup.command`, `lup.promise`), with
-the parties a method's `by` names and the classes a module groups them in
-(`ModuleServing`, listed in its `Serving`). The core's environment side
+reached through (`lup.tool`, `lup.service`, `lup.action`, `lup.command`,
+`lup.on`, `lup.promise`), with the parties a method's `by` names, lup's events,
+and the classes a module groups them in (`Part`, listed in its
+`Parts`, holding its `Secret`s). The core's environment side
 (`lup.environment`) isn't among it, and nothing here imports it.
 
 Running a program is `lup.programs` (`lup.programs.run`), kept under its own
@@ -32,8 +33,11 @@ from lup.declaration.project import Project
 from lup.doors.action import action
 from lup.doors.command import command
 from lup.doors.door import DoorError, RefusedError
-from lup.doors.parties import Agent, Operator, Party
-from lup.doors.serving import ModuleServing, Serving
+from lup.doors.events import Event, Starting, Stopping
+from lup.doors.on import on
+from lup.doors.parties import Agent, Code, Operator, Party
+from lup.doors.parts import Part, Parts, Secret
+from lup.doors.service import UncarriedError, service
 from lup.doors.tool import tool
 from lup.errors import LupError
 from lup.testing.promise import promise
@@ -44,8 +48,10 @@ lazy from lup.core import Core
 __all__ = [
     "Agent",
     "Chosen",
+    "Code",
     "Core",
     "DoorError",
+    "Event",
     "JsonObject",
     "Layer",
     "Lend",
@@ -53,11 +59,12 @@ __all__ = [
     "LupError",
     "Model",
     "Module",
-    "ModuleServing",
     "Modules",
     "MutableModel",
     "Named",
     "Operator",
+    "Part",
+    "Parts",
     "Party",
     "Profile",
     "Profiles",
@@ -65,13 +72,18 @@ __all__ = [
     "ProjectError",
     "RefusedError",
     "RuntimeDefaults",
+    "Secret",
     "Selection",
-    "Serving",
     "Settings",
+    "Starting",
+    "Stopping",
+    "UncarriedError",
     "action",
     "chosen",
     "command",
+    "on",
     "programs",
     "promise",
+    "service",
     "tool",
 ]

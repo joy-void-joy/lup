@@ -3,8 +3,8 @@
 from lup.declaration.module import Module
 from lup.declaration.profiles import DEFAULT, DirectoryName, Profile, Profiles
 from lup.declaration.promises import DeclarationPromises, ProfilesPromises
-from lup.doors.promises import DoorsPromises
-from lup.doors.serving import Serving
+from lup.doors.parts import Parts
+from lup.doors.promises import DoorsPromises, RunningPromises
 from lup.programs.promises import ProgramsPromises
 from lup.testing.promises import TestingPromises
 
@@ -18,10 +18,11 @@ class Core(Module):
     """
 
     name = "core"
-    serving: Serving = Serving.of(
+    parts: Parts = Parts.of(
         DeclarationPromises,
         ProfilesPromises,
         DoorsPromises,
+        RunningPromises,
         TestingPromises,
         ProgramsPromises,
     )

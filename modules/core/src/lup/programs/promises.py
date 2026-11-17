@@ -104,7 +104,7 @@ def released(pipe: Path) -> None:
     pipe.write_bytes(b"")
 
 
-class ProgramsPromises(lup.ModuleServing):
+class ProgramsPromises(lup.Part):
     """What a caller can count on of running a program."""
 
     @lup.promise

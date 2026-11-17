@@ -16,8 +16,8 @@ from lup import (
     Model,
     Module,
     Modules,
-    ModuleServing,
     Named,
+    Part,
     Profile,
     Profiles,
     Project,
@@ -148,7 +148,7 @@ project = Project(modules=Modules.default().add(Episodes(length=30)))
 """A project's declaration, declaring a module of its own."""
 
 
-class DeclarationPromises(lup.ModuleServing):
+class DeclarationPromises(lup.Part):
     """What a project can count on of loading and resolving its declaration."""
 
     @lup.promise
@@ -217,7 +217,7 @@ class Accounted(Model):
     instead: Literal["work", "home", "team"] | None = None
 
 
-class ProfilesPromises(ModuleServing):
+class ProfilesPromises(Part):
     """What a repository can count on of the profiles its sessions run on, as its layers declare them."""
 
     @lup.promise

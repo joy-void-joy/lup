@@ -122,8 +122,8 @@ runtime-evaluated-base-classes = [
     "lup.types.Settings",
     "lup.declaration.module.Module",
     "lup.declaration.grammar.Layer",
-    "lup.doors.serving.ModuleServing",
-    "lup.ModuleServing",
+    "lup.doors.parts.Part",
+    "lup.Part",
     "lup.doors.door.Door",
 ]
 # A door reads the annotations of the method it's put on, at run time, so an

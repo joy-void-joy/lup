@@ -17,12 +17,12 @@ from pydantic import BaseModel, Field, JsonValue, SerializeAsAny
 from lup.declaration.module import Module
 from lup.doors.door import Accepted, Refused
 from lup.doors.parties import Party
+from lup.doors.tool import ToolSpec
 from lup.errors import LupError
 from lup.types import Model
 
 if TYPE_CHECKING:
     from lup.declaration.project import Project
-    from lup.doors.tool import ToolSpec
 
 type Sent = BaseModel | list[BaseModel] | Mapping[str, JsonValue] | JsonValue
 """What a party sends through a door: a model, or a list of it, sent as its JSON,
@@ -77,7 +77,16 @@ class Ran(Model):
     by: SerializeAsAny[Party]
 
 
-type Call = Annotated[ToolCall | Acted | Ran, Field(discriminator="door")]
+class Served(Model):
+    """A service called as code calls it, by its name."""
+
+    door: Literal["service"] = "service"
+    service: str
+    given: JsonValue
+    by: SerializeAsAny[Party]
+
+
+type Call = Annotated[ToolCall | Acted | Ran | Served, Field(discriminator="door")]
 """One call through a door, as a party makes it: which door, what was sent, and
 by whom."""
 
@@ -142,16 +151,16 @@ class Reaching(ABC):
     """lup's doors, as the harness reaches a started lup's: what its modules serve, and each call answered."""
 
     @abstractmethod
-    def tools(self) -> list[ToolSpec]:
-        """Return what a session is told of each tool the modules serve."""
-
-    @abstractmethod
     async def answered(self, call: Call) -> Accepted | Refused:
         """Make `call`, and say what came of it, every law the modules hold checked over it."""
 
     @abstractmethod
     async def checked(self, module: str, promise: str | None) -> list[Kept | Broken]:
         """Check the promise named `promise` of the module named `module`, or every one where none is named, as the gate does, and say how each fared."""
+
+    @abstractmethod
+    async def stopped(self) -> None:
+        """Stop what's started: each class's methods run at `Stopping`, then what each runs since `Starting` cancelled."""
 
 
 class Started(Model, arbitrary_types_allowed=True):
@@ -164,12 +173,18 @@ class Started(Model, arbitrary_types_allowed=True):
 
     modules: list[Module]
     """The modules it's made of, every layer applied, in order."""
+    specs: list[ToolSpec]
+    """What a session is told of each tool its modules serve."""
     doors: Reaching
     """Its doors, as the harness reaches them."""
 
     def tools(self) -> list[ToolSpec]:
         """Return what a session is told of each tool its modules serve."""
-        return self.doors.tools()
+        return self.specs
+
+    async def stopped(self) -> None:
+        """Stop it before the promise ends, rather than as it does: each class's methods run at `Stopping`, then what each runs since `Starting` cancelled."""
+        await self.doors.stopped()
 
     async def checked(
         self, module: str, promise: str | None = None
@@ -196,6 +211,11 @@ class Started(Model, arbitrary_types_allowed=True):
         call = Ran(module=module, command=command, arguments=sent(arguments), by=by)
         return await self.doors.answered(call)
 
+    async def serve(self, service: str, given: Sent, by: Party) -> Accepted | Refused:
+        """Call the service named `service` on `given`, as `by`'s code does, and say what came of it."""
+        call = Served(service=service, given=sent(given), by=by)
+        return await self.doors.answered(call)
+
 
 class Testing(Party, ABC):
     """The harness: what checks a module's promises, handed to each as `by`, starting lup for them and drawing the values they explore.
@@ -204,11 +224,18 @@ class Testing(Party, ABC):
     """
 
     @abstractmethod
-    async def started(self, declared: Project | str) -> Started:
-        """Start lup on a declaration: a `Project`, or the text of a declaration's file, loaded as lup loads one.
+    async def started(
+        self,
+        declared: Project | str,
+        secrets: Mapping[str, str] | None = None,
+        repository: str = "harness",
+    ) -> Started:
+        """Start lup on a declaration: a `Project`, or the text of a declaration's file, loaded as lup loads one, each class of its modules made once and started, as the code of `repository`.
 
-        Raise `ProjectError` where it doesn't load or resolve, as lup's start
-        does.
+        `secrets` holds the value of each secret a class holds, by its name;
+        left out, each is drawn. Raise `ProjectError` where it doesn't load or
+        resolve, or where a secret a class holds isn't given, as lup's start
+        does. What it started is stopped once the promise ends.
         """
 
     @abstractmethod
