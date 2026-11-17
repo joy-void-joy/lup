@@ -199,6 +199,7 @@ source_modules = [
     "lup.shell",
     "lup.testing",
     "lup.programs",
+    "lup.told",
 ]
 forbidden_modules = ["lup.environment"]
 
@@ -220,6 +221,7 @@ forbidden_modules = [
     "lup.shell.*",
     "lup.testing.*",
     "lup.programs.*",
+    "lup.told.*",
 ]
 allow_indirect_imports = true
 

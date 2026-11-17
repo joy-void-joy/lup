@@ -20,7 +20,7 @@ from lup.declaration.errors import ProjectError
 from lup.declaration.module import Module
 from lup.declaration.project import Project
 from lup.doors.door import Accepted, DoorError, Method, Refused
-from lup.doors.parties import Party
+from lup.doors.parties import Agent, Party
 from lup.doors.parts import Parts
 from lup.doors.tool import ToolDoor, ToolSpec
 from lup.environment.declaration import read, resolve
@@ -29,6 +29,7 @@ from lup.environment.layout import MachineLayout, RepositoryLayout
 from lup.environment.running.container import answered
 from lup.environment.running.planning import plan_of
 from lup.environment.shell import Looks, viewed
+from lup.environment.told import rendered
 from lup.testing.harness import (
     Broken,
     BrokenLawError,
@@ -41,12 +42,14 @@ from lup.testing.harness import (
     Served,
     Started,
     Step,
+    Telling,
     Testing,
     ToolCall,
     Viewed,
 )
 from lup.testing.promise import PromiseDoor
 from lup.types import Model, MutableModel
+lazy from lup.told.guidance import Guidance
 
 
 class Run(MutableModel, arbitrary_types_allowed=True):
@@ -347,6 +350,16 @@ class Crosser(Model, Crossing, arbitrary_types_allowed=True):
         return await answered(self.running, text)
 
 
+class Teller(Model, Telling, arbitrary_types_allowed=True):
+    """A started lup's guidance, rendered on its parts as made in this process."""
+
+    running: Running
+
+    async def guidance(self, by: Agent) -> Guidance:
+        """Render what the session `by` is told at its start of the modules started here."""
+        return await rendered(self.running, by)
+
+
 class Harness(Testing, arbitrary_types_allowed=True):
     """The harness as the gate runs it: lup started in this process, and values drawn by hypothesis."""
 
@@ -379,6 +392,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
             plan=plan_of(resolve(project), []),
             doors=reached,
             crossing=Crosser(running=reached.running),
+            telling=Teller(running=reached.running),
         )
 
     async def reached(
