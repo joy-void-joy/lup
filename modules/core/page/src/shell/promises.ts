@@ -36,6 +36,8 @@ const keys = fc.constantFrom(
     ["<CR>"],
     ["<BS>"],
     ["<C-CR>"],
+    ["u"],
+    ["<C-r>"],
     [":w"],
     ...["fn", "fb", "Fn", "Fb", "fz", "c"].map((typed) => ["<Space>", ...typed]),
 );

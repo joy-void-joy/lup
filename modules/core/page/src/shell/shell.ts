@@ -3,7 +3,8 @@
 // cursor is) by each block's key, so a view answering again moves nothing they didn't move.
 
 import { foldEffect, foldedRanges, foldState, unfoldEffect } from "@codemirror/language";
-import { EditorState, Facet, StateEffect, StateField, type ChangeSpec, type Extension, type Range } from "@codemirror/state";
+import { history } from "@codemirror/commands";
+import { EditorState, Facet, StateEffect, StateField, Transaction, type ChangeSpec, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, showPanel, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { getCM, vim } from "@replit/codemirror-vim";
 
@@ -107,6 +108,9 @@ export class Shell {
                     vim(),
                     EditorView.lineWrapping,
                     EditorState.changeFilter.of((transaction) => transaction.annotation(fromCore) === true || shell.comments.allows(transaction)),
+                    // vim's `u` and Ctrl+R undo and redo what the operator wrote, never what views answered.
+                    history(),
+                    EditorState.transactionExtender.of((transaction) => (transaction.annotation(fromCore) === true ? { annotations: Transaction.addToHistory.of(false) } : null)),
                     EditorView.updateListener.of((update) => {
                         shell.comments.changed(update);
                     }),
