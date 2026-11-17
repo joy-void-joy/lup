@@ -194,6 +194,8 @@ source_modules = [
     "lup.declaration",
     "lup.doors",
     "lup.testing",
+    "lup.store",
+    "lup.inbox",
 ]
 forbidden_modules = ["lup.environment"]
 
