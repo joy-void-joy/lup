@@ -54,6 +54,7 @@ from lup.shell.blocks import (
     Ticking,
     Viewing,
 )
+from lup.shell.draft import Commented, Commenting
 from lup.shell.kinds import FoldKind, Folds, MarkKind, Marks, Tone, Tones
 from lup.shell.view import view
 from lup.testing.promise import promise
@@ -66,6 +67,8 @@ __all__ = [
     "Blocks",
     "Code",
     "Codebase",
+    "Commented",
+    "Commenting",
     "Core",
     "Data",
     "Diff",

@@ -19,33 +19,41 @@ import json
 import logging
 import secrets
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import Field, TypeAdapter, ValidationError
+from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 from pydantic.json_schema import GenerateJsonSchema
 
-from lup.doors.door import Accepted
+from lup.doors.door import Accepted, Refused
 from lup.doors.parties import Operator
 from lup.environment.doors import Running
 from lup.environment.shell.layout import ShellLayout
 from lup.environment.shell.viewing import viewed
-from lup.shell.blocks import BlockError, Blocks, Viewing
+from lup.shell.blocks import Block, BlockError, Blocks, Viewing
+from lup.shell.draft import Comment, Commenting, Draft, Marked, Quote
 from lup.shell.looks import Looks
 from lup.shell.wire import (
     Answered,
+    Delivered,
+    Drafted,
+    Erase,
     Hello,
+    Mark,
     Opened,
     Read,
+    Send,
     Sent,
     Unanswered,
     Unwatch,
     Watch,
+    Write,
 )
-from lup.types import Model
+from lup.types import Model, MutableModel
 
 if TYPE_CHECKING:
     from pydantic_core.core_schema import (
@@ -88,6 +96,33 @@ def described() -> str:
     return json.dumps(schema, indent=2)
 
 
+class Keeping(MutableModel, arbitrary_types_allowed=True):
+    """The one draft, and the pages open on the dashboard, each told the draft as it changes."""
+
+    draft: Draft = Draft()
+    path: Path | None = None
+    """Where the draft is kept across restarts of the server; none where it's
+    kept in memory alone."""
+    pages: list[Session] = []
+
+    @classmethod
+    def at(cls, path: Path) -> Keeping:
+        """Return the draft kept at `path`, an empty one where none is kept there yet."""
+        draft = (
+            Draft.model_validate_json(path.read_text()) if path.exists() else Draft()
+        )
+        return cls(draft=draft, path=path)
+
+    async def changed(self, draft: Draft) -> None:
+        """Keep `draft` in place of the draft, and tell every page open."""
+        self.draft = draft
+        if self.path is not None:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(draft.model_dump_json())
+        for page in self.pages:
+            await page.tell(Drafted(draft=draft))
+
+
 class Dashboard(Model, arbitrary_types_allowed=True):
     """The dashboard of a running project: its page, and what its views answer the operator."""
 
@@ -97,6 +132,8 @@ class Dashboard(Model, arbitrary_types_allowed=True):
     """The kinds its modules declare, which their views may name."""
     root: Viewing | None
     """The document's root view, as the core module names it (`Core.document`)."""
+    kept: Keeping = Field(default_factory=Keeping)
+    """The draft, and the pages open, which each change of it is told."""
     token: str = Field(default_factory=lambda: secrets.token_urlsafe(32))
     """What the page has to say before anything is answered: rooms reach every
     port on the operator's machine, so being on localhost keeps nothing out."""
@@ -149,6 +186,79 @@ class Dashboard(Model, arbitrary_types_allowed=True):
             case _:
                 return Unanswered(watch=watch, reason=answered.rejection.reason)
 
+    async def sent(self) -> Delivered:
+        """Send the draft: each comment and mark on its own, those that went taken out of it, each that can't kept in it with why, every page told the draft as it stands."""
+        draft = self.kept.draft
+        commented = [(each, await self.commented(each)) for each in draft.comments]
+        acted = [(each, await self.acted(each)) for each in draft.marks]
+        kept = Draft(
+            comments=[
+                each.model_copy(update={"reason": reason})
+                for each, reason in commented
+                if reason is not None
+            ],
+            marks=[
+                each.model_copy(update={"reason": reason})
+                for each, reason in acted
+                if reason is not None
+            ],
+        )
+        await self.kept.changed(kept)
+        outcomes = [(each.id, reason) for each, reason in [*commented, *acted]]
+        return Delivered(
+            went=[part for part, reason in outcomes if reason is None],
+            stayed=[part for part, reason in outcomes if reason is not None],
+        )
+
+    async def block(self, quote: Quote) -> Block | str:
+        """Return the block `quote` is on, as its view answers at the send; why not, where it can't be read."""
+        answered = await self.answer(0, quote.viewing)
+        if isinstance(answered, Unanswered):
+            return f"its view can't be read: {answered.reason}"
+        found = next(
+            (each for each in answered.blocks.every() if each.id == quote.block), None
+        )
+        return "what it's on is gone from its view" if found is None else found
+
+    async def commented(self, comment: Comment) -> str | None:
+        """Send `comment` to what its block offers for comments; why not, where it can't go."""
+        block = await self.block(comment.on)
+        if isinstance(block, str):
+            return block
+        offer = next((each for each in block.offers if each.verb == "comment"), None)
+        if offer is None:
+            if block.reaches is not None:
+                # lup: defer(issue=8, why="a comment on a block that offers none reaches its party through the inbox's delivery, which #8 brings")
+                return "nothing delivers a comment to a party yet"
+            return "what it's on takes no comment"
+        quote = comment.on
+        commenting = Commenting(
+            words=comment.words,
+            lines=quote.lines,
+            start=quote.start,
+            end=quote.end,
+            version=quote.version,
+        )
+        given: dict[str, JsonValue] = {
+            **commenting.model_dump(mode="json"),
+            "on": offer.given,
+        }
+        module = offer.module or quote.viewing.module or ""
+        answered = await self.running.act(module, offer.action, given, Operator())
+        return answered.rejection.reason if isinstance(answered, Refused) else None
+
+    async def acted(self, mark: Marked) -> str | None:
+        """Run the action `mark` marks; why not, where it can't run, as on a block that changed since it was marked."""
+        block = await self.block(mark.on)
+        if isinstance(block, str):
+            return block
+        if mark.on.version is not None and block.version != mark.on.version:
+            return "what it's on changed since it was marked"
+        offer = mark.offer
+        module = offer.module or mark.on.viewing.module or ""
+        answered = await self.running.act(module, offer.action, offer.given, Operator())
+        return answered.rejection.reason if isinstance(answered, Refused) else None
+
 
 class Socket(ABC):
     """A page's socket, as the server reads and writes it: over the network, or in memory for the harness."""
@@ -196,8 +306,12 @@ class Session(Model, arbitrary_types_allowed=True):
 
     async def run(self) -> None:
         """Read the page's frames until it goes, each answered or refused alone, every view watched answered at once, so a slow one holds up no other."""
-        async with asyncio.TaskGroup() as answering:
-            await self.read(answering)
+        kept = self.dashboard.kept
+        try:
+            async with asyncio.TaskGroup() as answering:
+                await self.read(answering)
+        finally:
+            kept.pages = [page for page in kept.pages if page is not self]
 
     async def read(self, answering: asyncio.TaskGroup) -> None:
         """Read the page's frames until it goes, each watched view answered as a task of `answering`."""
@@ -224,16 +338,31 @@ class Session(Model, arbitrary_types_allowed=True):
                     opened = True
                     dashboard = self.dashboard
                     await self.tell(Opened(root=dashboard.root, looks=dashboard.looks))
+                    dashboard.kept.pages = [*dashboard.kept.pages, self]
+                    await self.tell(Drafted(draft=dashboard.kept.draft))
                 case Watch(watch=watch, viewing=viewing):
                     answering.create_task(self.answered(watch, viewing))
                 case Unwatch():
                     pass
+                case Write(comment=comment):
+                    kept = self.dashboard.kept
+                    await kept.changed(kept.draft.written(comment))
+                case Mark(marked=marked):
+                    kept = self.dashboard.kept
+                    await kept.changed(kept.draft.marked(marked))
+                case Erase(id=part):
+                    kept = self.dashboard.kept
+                    await kept.changed(kept.draft.erased(part))
+                case Send():
+                    await self.tell(await self.dashboard.sent())
 
     async def answered(self, watch: int, viewing: Viewing) -> None:
         """Answer the view watched under `watch`, and tell the page."""
         await self.tell(await self.dashboard.answer(watch, viewing))
 
-    async def tell(self, told: Opened | Answered | Unanswered) -> None:
+    async def tell(
+        self, told: Opened | Answered | Unanswered | Drafted | Delivered
+    ) -> None:
         """Send the page one frame, one at a time whichever task sends it."""
         async with self.sending:
             await self.socket.send(told.model_dump_json())

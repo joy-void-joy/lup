@@ -24,7 +24,8 @@ from lup.types import Model, MutableModel
 
 if TYPE_CHECKING:
     from lup.declaration.project import Project
-    from lup.shell.wire import Answered, Hello, Opened, Unanswered, Unwatch, Watch
+    from lup.shell.wire import Sent as Frame
+    from lup.shell.wire import Told
 
 
 type Sent = BaseModel | list[BaseModel] | Mapping[str, JsonValue] | JsonValue
@@ -224,11 +225,11 @@ class Page(Model, ABC):
     """The dashboard's token, which the page was handed in its address."""
 
     @abstractmethod
-    async def say(self, frame: Hello | Watch | Unwatch | str) -> None:
+    async def say(self, frame: Frame | str) -> None:
         """Send the server `frame`, or text as it is, which needn't be a frame it reads."""
 
     @abstractmethod
-    async def told(self) -> Opened | Answered | Unanswered | None:
+    async def told(self) -> Told | None:
         """Return the next frame the server tells the page; none once it's closed the socket."""
 
     @abstractmethod
