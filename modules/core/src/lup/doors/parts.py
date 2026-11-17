@@ -100,6 +100,10 @@ class Runs(ABC):
         Raise `UnrunError` where it can't be run at all.
         """
 
+    @abstractmethod
+    async def found(self, program: Program) -> bool:
+        """Say whether `program` is there where the part runs, to run by its name."""
+
 
 class UnrunError(RefusedError):
     """A program a part declares can't be run: it isn't there, isn't at a version the part takes, or nothing runs programs where the part does; the call needing it is refused, saying why."""

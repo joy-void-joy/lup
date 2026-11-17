@@ -153,11 +153,10 @@ class Unsafe(Model):
 
 
 class Opens(Model):
-    """A project the promises open: harmon unless it says, where git keeps it, and the machine's interpreters."""
+    """A project the promises open: harmon unless it says, and where git keeps it."""
 
     repository: str = "harmon"
     common: str = "/srv/harmon.git"
-    interpreters: str = "/srv/python"
 
     def given(self) -> JsonValue:
         """Return it as the machine's parts are given it."""
@@ -994,7 +993,7 @@ async def started_approved(
     approving = committed or Committed.of(Files())
     started = await by.started(
         lup.testing.Repository(declaration=HOME),
-        programs={"podman": podman, "git": approving.store},
+        programs={"podman": podman, "git": approving.store, "uv": UV},
         machine=True,
     )
     await started.run(
@@ -1005,6 +1004,10 @@ async def started_approved(
     )
     return started
 
+
+UV = Scripted(answers=[Answering(when=["python", "dir"], output="/srv/python\n")])
+"""uv as the promises stand it in: saying the machine keeps Python at
+`/srv/python`."""
 
 OPENING_PODMAN = Scripted(
     answers=[
@@ -1030,7 +1033,7 @@ class ProjectsPromises(Part):
         committed = Committed.of(by.any(Files))
         started = await by.started(
             lup.testing.Repository(declaration=HOME),
-            programs={"podman": OPENING_PODMAN, "git": committed.store},
+            programs={"podman": OPENING_PODMAN, "git": committed.store, "uv": UV},
             machine=True,
         )
         opened = await started.serve("opened", Opens().given(), Machine())
@@ -1044,7 +1047,7 @@ class ProjectsPromises(Part):
         store = Store(objects=[*first.store.objects, *last.store.objects])
         started = await by.started(
             lup.testing.Repository(declaration=HOME),
-            programs={"podman": OPENING_PODMAN, "git": store},
+            programs={"podman": OPENING_PODMAN, "git": store, "uv": UV},
             machine=True,
         )
         for each in [first, last]:
@@ -1245,3 +1248,24 @@ class ClearingPromises(Part):
         assert answer["opened"] == (["harmon"] if ran else [])
         clearing = ["stop", "--ignore", "--time=10", "--filter=label=lup.machine"]
         assert (clearing in podman_ran(started, "stop")) == ran
+
+    @lup.promise
+    async def a_project_registered_is_opened_as_the_machine_starts(
+        self, by: Testing
+    ) -> None:
+        """The operator registers a project with their lup without opening it, and it's opened as the machine's parts start, once a commit of it is approved; a name another project, at another git directory, holds already is refused."""
+        started = await started_approved(by, OPENING_PODMAN)
+        operator = lup.Operator()
+        registered = await started.run("hosting", "register", Opens().given(), operator)
+        taken = await started.run(
+            "hosting",
+            "register",
+            {"repository": "harmon", "common": "/srv/elsewhere.git"},
+            operator,
+        )
+        assert isinstance(registered, Accepted)
+        assert isinstance(taken, Refused)
+        assert podman_ran(started, "run") == []
+        resumed = await started.serve("resumed", {}, Machine())
+        assert isinstance(resumed, Accepted)
+        assert json.loads(resumed.answer())["opened"] == ["harmon"]

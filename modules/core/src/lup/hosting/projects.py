@@ -24,7 +24,7 @@ from pydantic import Field, TypeAdapter, ValidationError
 import lup
 from lup.doors.door import RefusedError
 from lup.doors.parties import Machine, Operator
-from lup.doors.parts import Data, Part
+from lup.doors.parts import Data, Part, Program
 from lup.errors import LupError
 from lup.hosting.approvals import Approvals, Asking
 from lup.hosting.carrying import Carrying, Naming, Placement, Placing
@@ -55,19 +55,19 @@ class Opening(Model):
     written out from."""
     declaration: Path = Path("lup_project.py")
     """Its declaration, relative to its root."""
-    interpreters: Path
-    """Where the machine's uv keeps its Python interpreters, mounted read-only
-    at this path, which an environment's links name, so a container runs the
-    Python the project asks for without fetching one."""
 
 
 class Source(Model):
-    """A project's commit as its containers run it: written out on the machine, mounted read-only at the same path."""
+    """A project's commit as its containers run it: written out on the machine, mounted read-only at the same path, and where the machine's uv keeps its interpreters."""
 
     opening: Opening
     commit: Commit
     root: Path
     """The commit's files, written out."""
+    interpreters: Path
+    """Where the machine's uv keeps its Python interpreters, mounted read-only
+    at this path, which an environment's links name, so a container runs the
+    Python the project asks for without fetching one."""
 
 
 class Opened(Model):
@@ -123,8 +123,14 @@ class Projects(Part, machine=True, shared=True):
     """Each container's Python environment, uv cache and parts' data, a
     directory each, by the container's name."""
     registry: Data
-    """Each project opened, kept so the machine's parts open it again as they
-    start."""
+    """Each project registered or opened, kept so the machine's parts open it
+    again as they start."""
+    uv: Program = Program(
+        name="uv",
+        optional=True,
+        why="says where the machine keeps Python, which a project's containers run",
+        install="https://docs.astral.sh/uv/getting-started/installation/",
+    )
     base: Base = Field(default_factory=Base)
     projects: dict[str, Opened] = {}
     """Each project running, by its repository."""
@@ -160,7 +166,7 @@ class Projects(Part, machine=True, shared=True):
             each.mkdir(parents=True, exist_ok=True)
         binds = [
             Bind(source=source.root),
-            Bind(source=opening.interpreters.resolve(), target=opening.interpreters),
+            Bind(source=source.interpreters.resolve(), target=source.interpreters),
             Bind(
                 source=environment, target=Path("/var/lup/environment"), read_only=False
             ),
@@ -193,6 +199,33 @@ class Projects(Part, machine=True, shared=True):
                 "UV_PYTHON_DOWNLOADS": "never",
             },
         )
+
+    @lup.command
+    async def register(self, opening: Opening, by: Operator) -> str:
+        """Register a project with your lup, which lists it and opens it once you approve a commit of it.
+
+        Refuse a repository's name another project registered already.
+        """
+        del by
+        self.kept_with(opening)
+        return f"registered {opening.repository}"
+
+    def kept_with(self, opening: Opening) -> None:
+        """Keep `opening` among the projects opened, in place of what it kept for its repository.
+
+        Raise `RefusedError` where another project, at another git directory,
+        holds its repository's name.
+        """
+        kept = self.kept()
+        before = kept.get(opening.repository)
+        if before is not None and before.common != opening.common:
+            message = (
+                f"{opening.repository} is the name of the project at {before.common} "
+                "already: lup names each project once"
+            )
+            raise RefusedError(message)
+        kept = {**kept, opening.repository: opening}
+        (self.registry.path / "openings.json").write_bytes(OPENINGS.dump_json(kept))
 
     @lup.command
     async def open(self, opening: Opening, by: Operator) -> str:
@@ -271,7 +304,16 @@ class Projects(Part, machine=True, shared=True):
                 commit=approved.commit,
             )
         )
-        source = Source(opening=opening, commit=approved.commit, root=exported.path)
+        found = await self.uv.ran("python", "dir")
+        if found.status != 0:
+            message = f"uv couldn't say where it keeps Python: {found.said()}"
+            raise RefusedError(message)
+        source = Source(
+            opening=opening,
+            commit=approved.commit,
+            root=exported.path,
+            interpreters=Path(found.text().strip()),
+        )
         await Containers.built(self.image(opening.repository))
         plan = await self.planned(source)
         apart = [
@@ -321,8 +363,7 @@ class Projects(Part, machine=True, shared=True):
             waiting=waiting,
         )
         self.projects = {**self.projects, opening.repository: opened}
-        kept = {**self.kept(), opening.repository: opening}
-        (self.registry.path / "openings.json").write_bytes(OPENINGS.dump_json(kept))
+        self.kept_with(opening)
         return opened
 
     async def planned(self, source: Source) -> Plan:

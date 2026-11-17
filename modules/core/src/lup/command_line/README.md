@@ -27,6 +27,8 @@ It builds its parser from the plan alone, the JSON Schema of what each method ta
 
 `InProcess` answers over the project's parts, started here at the first call (help starts nothing) and stopped once the call is answered. Each call is answered as their container answers it (`lup.environment.running.container.answered`), by the party whoever made the answerer names. It starts the parts that hold nothing beyond secrets, every one of which is given. A call to any other part is refused, saying which secret it needs or that it runs apart, from approved code, through lup's program on the operator's machine.
 
+`Calling` answers through that program, over the socket `LUP_CALLING` names, as a room's command line does and the operator's can: it asks the program what may be called (`Offering`), and the program answers with who the socket says the caller is and the plan of the project asked about, the machine's own parts' beside it, so nothing of the project's code runs where the command line does. Each call goes to the program, which says who it's by and carries it where it's answered (`lup/hosting/README.md`, *Carrying*). Every answerer says how it stops (`stopped`): `InProcess` stops the parts it started, the others nothing.
+
 ## `lup`
 
 `lup` is the core's script. It reads the declaration of the worktree it runs in with its layers (`RepositoryLayout.found`, `lup.environment.declaration.read`) and answers in this process, as the operator, until lup's program on the operator's machine answers a room and the operator's terminal (#3). Bare `lup` will open the dashboard (#7); until then it shows the help.
