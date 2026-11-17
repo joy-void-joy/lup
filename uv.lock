@@ -417,20 +417,22 @@ source = { editable = "modules/core" }
 dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "typer" },
 ]
 
 [package.optional-dependencies]
-testing = [
+environment = [
     { name = "hypothesis" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "hypothesis", marker = "extra == 'testing'", specifier = ">=6.170" },
+    { name = "hypothesis", marker = "extra == 'environment'", specifier = ">=6.170" },
     { name = "pydantic", specifier = ">=2.14" },
     { name = "pydantic-settings", specifier = ">=2.11" },
+    { name = "typer", specifier = ">=0.29" },
 ]
-provides-extras = ["testing"]
+provides-extras = ["environment"]
 
 [[package]]
 name = "lup-dev"
@@ -466,7 +468,7 @@ name = "lup-next"
 version = "0.0.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "lup-core", extra = ["testing"] },
+    { name = "lup-core", extra = ["environment"] },
 ]
 
 [package.dev-dependencies]
@@ -482,7 +484,7 @@ second-lup = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "lup-core", extras = ["testing"], editable = "modules/core" }]
+requires-dist = [{ name = "lup-core", extras = ["environment"], editable = "modules/core" }]
 
 [package.metadata.requires-dev]
 dev = [

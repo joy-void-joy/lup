@@ -14,16 +14,27 @@ from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, Field, JsonValue, SerializeAsAny
 
+from lup.command_line.answering import Answerer, Offered, Typed
 from lup.declaration.module import Module
 from lup.doors.door import Accepted, Refused
 from lup.doors.parties import Party
 from lup.doors.tool import ToolSpec
 from lup.errors import LupError
 from lup.running.plan import Plan
+from lup.running.wire import (
+    Caller,
+    CommandCalled,
+    ServiceCalled,
+    ToolCalled,
+    ViewCalled,
+    replied,
+)
 from lup.types import Model
+lazy from lup.command_line import line
 
 if TYPE_CHECKING:
     from lup.declaration.project import Project
+    from lup.running import wire
 
 type Sent = BaseModel | list[BaseModel] | Mapping[str, JsonValue] | JsonValue
 """What a party sends through a door: a model, or a list of it, sent as its JSON,
@@ -248,6 +259,40 @@ class Started(Model, arbitrary_types_allowed=True):
         """
         call = Viewed(module=module, view=view, given=sent(given), by=by)
         return await self.doors.answered(call)
+
+    async def typed(self, words: list[str], by: Caller) -> Typed:
+        """Type `words` on the command line, `lup`, as `by` does in their terminal or their room, and say what it did: what it printed and how it ended, what the help it showed listed, and the call it made.
+
+        It offers what this lup's plan lets `by` call, and makes its call
+        through these doors, every law checked over it. Raise `BlockError`
+        where a view it reads names a kind nobody declares, as `view` does.
+        """
+        return await line.typed(words, Harnessed(started=self, by=by), "lup")
+
+
+class Harnessed(Model, Answerer, arbitrary_types_allowed=True):
+    """The command line's calls answered through a started lup's doors, as the harness reaches them, by the party a promise names."""
+
+    started: Started
+    by: Caller
+
+    async def offered(self) -> Offered:
+        """Return who the calls are by, and the started lup's plan."""
+        return Offered(by=self.by, plan=self.started.plan)
+
+    async def answered(self, call: wire.Call) -> wire.Reply:
+        """Make `call` through the started lup's doors, by the party this names, every law checked over it, and return its reply."""
+        by = self.by
+        match call:
+            case ToolCalled(tool=tool, given=given):
+                answered = await self.started.call(tool, given, by)
+            case CommandCalled(module=module, command=command, given=given):
+                answered = await self.started.run(module, command, given, by)
+            case ViewCalled(module=module, view=view, given=given):
+                answered = await self.started.view(module, view, given, by)
+            case ServiceCalled(service=service, given=given):
+                answered = await self.started.serve(service, given, by)
+        return replied(answered)
 
 
 class Testing(Party, ABC):

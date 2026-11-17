@@ -4,7 +4,8 @@ Each message is one JSON object, carrying the version of its shape (`format`),
 read first (`read`): a reader meeting another version refuses in words, naming
 both and how to update, never with a validation error about a field it doesn't
 know. Who calls (`by`) is one of the core's parties, which only the program
-names, from the socket a call came in on.
+names, from the socket a call came in on: a call leaves whoever makes it with
+none, and a container refuses one that reaches it without.
 """
 
 from pathlib import Path
@@ -39,7 +40,9 @@ class ToolCalled(Model):
     kind: Literal["tool"] = "tool"
     tool: str
     given: JsonValue
-    by: Caller
+    by: Caller | None = None
+    """Who calls, which the program on the operator's machine names; none as
+    the call leaves whoever makes it."""
 
 
 class ServiceCalled(Model):
@@ -49,7 +52,9 @@ class ServiceCalled(Model):
     kind: Literal["service"] = "service"
     service: str
     given: JsonValue
-    by: Caller
+    by: Caller | None = None
+    """Who calls, which the program on the operator's machine names; none as
+    the call leaves whoever makes it."""
 
 
 class CommandCalled(Model):
@@ -60,7 +65,9 @@ class CommandCalled(Model):
     module: str
     command: str
     given: JsonValue
-    by: Caller
+    by: Caller | None = None
+    """Who calls, which the program on the operator's machine names; none as
+    the call leaves whoever makes it."""
 
 
 class ViewCalled(Model):
@@ -71,7 +78,9 @@ class ViewCalled(Model):
     module: str
     view: str
     given: JsonValue
-    by: Caller
+    by: Caller | None = None
+    """Who calls, which the program on the operator's machine names; none as
+    the call leaves whoever makes it."""
 
 
 type Call = Annotated[

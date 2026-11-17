@@ -63,14 +63,22 @@ async def answered(running: Running, looks: Looks, text: bytes) -> bytes:
         reason = f"a message that crossed isn't a call through a door: {wrong}"
         reply = Declined(rejection=Rejection(submitted=None, reason=reason))
         return REPLIES.dump_json(reply)
+    by = call.by
+    if by is None:
+        reason = (
+            "a call reached this container saying nobody calls it: lup's program "
+            "on the operator's machine says who, from where the call came"
+        )
+        reply = Declined(rejection=Rejection(submitted=call.given, reason=reason))
+        return REPLIES.dump_json(reply)
     match call:
-        case ToolCalled(tool=tool, given=given, by=by):
+        case ToolCalled(tool=tool, given=given):
             outcome = await running.call(tool, given, by)
-        case ServiceCalled(service=service, given=given, by=by):
+        case ServiceCalled(service=service, given=given):
             outcome = await running.serve(service, given, by)
-        case CommandCalled(module=module, command=command, given=given, by=by):
+        case CommandCalled(module=module, command=command, given=given):
             outcome = await running.run(module, command, given, by)
-        case ViewCalled(module=module, view=view, given=given, by=by):
+        case ViewCalled(module=module, view=view, given=given):
             try:
                 outcome = await viewed(running, looks, module, view, given, by)
             except BlockError as drawn:

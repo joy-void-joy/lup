@@ -4,7 +4,7 @@ version = "0.0.0"
 requires-python = ">=3.15"
 # Each module of lup's own is a member of the workspace, installed here so the
 # gate checks them together, with what checking their promises needs.
-dependencies = ["lup-core[testing]"]
+dependencies = ["lup-core[environment]"]
 
 [dependency-groups]
 dev = [
@@ -199,6 +199,8 @@ source_modules = [
     "lup.shell",
     "lup.testing",
     "lup.programs",
+    "lup.running",
+    "lup.command_line",
 ]
 forbidden_modules = ["lup.environment"]
 
@@ -220,6 +222,7 @@ forbidden_modules = [
     "lup.shell.*",
     "lup.testing.*",
     "lup.programs.*",
+    "lup.command_line.*",
 ]
 allow_indirect_imports = true
 
