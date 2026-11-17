@@ -44,7 +44,7 @@ A law over `Step[State]` reads its module's state through a door of the module t
 
 A step is a slice of a call: what one call runs from one `await` to the next. Each call runs as a task of its own, so where calls overlap, each slice is credited to its own call, and a law sees exactly what that call changed and when. `step.answered` is what the call answered, on the slice that ended it, and none before. A law a slice breaks is raised from that call when it ends (`BrokenLawError`), so a scenario sees it where it called.
 
-The gate checks a law over runs of calls through every door of its project's modules: each tool, command and service, given a value of what it takes, by a party of any its doors name, all started at once. A run that breaks it is shrunk to the fewest calls, in the order closest to asyncio's own, and told with the order their slices ran in.
+The gate checks a law over runs of calls through every door of its own module: each tool, command and service, given a value of what it takes, by a party of any its doors name, all started at once. Only they change the state the law reads, its services among them, which another module's code calls; the rest of a project's doors would dilute the search, and the core's grow with each submodule. A scenario checks every law of every module it starts, over every call it makes, whichever module's door it goes through. A run that breaks it is shrunk to the fewest calls, in the order closest to asyncio's own, and told with the order their slices ran in.
 
 ## Time and order
 

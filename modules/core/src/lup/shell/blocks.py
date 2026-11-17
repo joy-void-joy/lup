@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from pydantic import BaseModel, Field, JsonValue, SerializeAsAny
 
 from lup.doors.command import CommandDoor
-from lup.doors.door import is_model
+from lup.doors.door import Annotation, is_model
 from lup.doors.parties import Party
 from lup.errors import LupError
 from lup.types import Model
@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
     from lup.doors.door import Method
 
+lazy from lup.shell.draft import Commenting
 lazy from lup.shell.view import ViewDoor
 
 
@@ -157,7 +158,10 @@ class Offer(Model):
     ) -> Offer:
         """Return the offer of `command`, a command read through its class, given `given`: its verb and what it does are the command's own, what the block offering it says closer to what it's on (`says`), and what its line reads marked (`draws`).
 
-        Raise `BlockError` where `command` isn't a command with a verb, or doesn't take `given`'s type.
+        A command taking `Commented[G]`, as one offered under the `comment` verb
+        does, is given a `G`, the comment written with it as it's sent. Raise
+        `BlockError` where `command` isn't a command with a verb, or doesn't take
+        `given`'s type.
         """
         match command.door:
             case CommandDoor(verb=str() as verb, says=str() as said):
@@ -168,7 +172,7 @@ class Offer(Model):
                     "the dashboard offers: one given the `verb` whose key reaches it"
                 )
                 raise BlockError(message, about=[command.taken.qualified])
-        one = command.taken.one()
+        one = commented_on(command.taken.one())
         if not (is_model(one) and isinstance(given, one)):
             message = (
                 f"a block offers `{command.taken.name}` with a "
@@ -182,6 +186,24 @@ class Offer(Model):
             says=said if says is None else says,
             draws=draws,
         )
+
+
+def commented_on(taken: Annotation) -> Annotation:
+    """Return what a command taking `taken` is offered with: `G` for `Commented[G]`, as a comment command takes, else `taken` itself.
+
+    >>> from lup.types import Model
+    >>> class OnItem(Model):
+    ...     item: int
+    >>> from lup.shell.draft import Commented
+    >>> commented_on(Commented[OnItem]) is OnItem, commented_on(OnItem) is OnItem
+    (True, True)
+    """
+    match taken:
+        case type() if issubclass(taken, Commenting):
+            given: type[BaseModel] = taken.__pydantic_generic_metadata__["args"][0]
+            return given
+        case _:
+            return taken
 
 
 class Shown(Model):
@@ -203,6 +225,10 @@ class Shown(Model):
     reaches: SerializeAsAny[Party] | None = None
     """The party a comment on it reaches; none for whoever the block it's in
     says, and none at all where nothing does, so it takes no comment."""
+    sighted: Offer | None = None
+    """What being seen does: a command the page runs once the block has been on
+    the operator's screen long enough, as marking an item read; none where
+    being seen does nothing."""
 
 
 class Line(Shown):

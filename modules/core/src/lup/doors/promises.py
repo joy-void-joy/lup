@@ -24,13 +24,13 @@ from lup import (
     Part,
     Parts,
     Program,
-    ProgramError,
     Project,
     ProjectError,
     Secret,
     Starting,
     Stopping,
     UncarriedError,
+    UnrunError,
 )
 from lup.testing import (
     Accepted,
@@ -536,7 +536,7 @@ class AskingPart(Part):
     """Another class, whose tools call the keeper's services as plain calls."""
 
     @lup.tool
-    async def ask(self, asking: Asking) -> Tallied:
+    async def query(self, asking: Asking) -> Tallied:
         """Ask the keeper for its count, as code."""
         return await KeeperPart.tallied(asking)
 
@@ -571,7 +571,7 @@ class ListerPart(Part):
         """List what the directory holds."""
         del asking
         finished = await self.ls.ran("-1")
-        return Listed(names=finished.output.splitlines())
+        return Listed(names=finished.text().splitlines())
 
     @lup.tool
     async def missing(self, asking: Asking) -> Listed:
@@ -579,7 +579,7 @@ class ListerPart(Part):
         del asking
         try:
             await self.ls.ran("-a")
-        except ProgramError as missing:
+        except UnrunError as missing:
             raise lup.RefusedError(str(missing)) from missing
         return Listed(names=[])
 
@@ -618,7 +618,7 @@ class PartsPromises(Part):
         """A service read through its class is called as a plain call, carried to its class wherever it runs, and called by the project whose code made the call."""
         repository = by.any(str)
         started = await by.started(declared(Keeper()), repository=repository)
-        asked = await started.call("ask", Asking(), by.any(Agent))
+        asked = await started.call("query", Asking(), by.any(Agent))
         assert isinstance(asked, Accepted)
         assert isinstance(asked.output, Tallied)
         assert asked.output.repository == repository

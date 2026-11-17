@@ -12,6 +12,7 @@ import lup
 from lup import (
     Agent,
     Blocks,
+    Commented,
     Fold,
     FoldKind,
     Folds,
@@ -31,7 +32,25 @@ from lup import (
     Tones,
     Viewing,
 )
-from lup.testing import Accepted, Refused, Testing, raises
+from lup.testing import (
+    Accepted,
+    Answered,
+    Comment,
+    Delivered,
+    Drafted,
+    Hello,
+    Opened,
+    Page,
+    Quote,
+    Refused,
+    Send,
+    Started,
+    Testing,
+    Unanswered,
+    Watch,
+    Write,
+    raises,
+)
 
 
 class PileOf(Model):
@@ -67,7 +86,10 @@ class NotesPart(Part):
                     kind="note",
                     summary=[Span(text=title, tone="title")],
                     content=Viewing.of(NotesPart.note, NoteOf(number=number)),
-                    offers=[Offer.of(NotesPart.clear, Clearing(number=number))],
+                    offers=[
+                        Offer.of(NotesPart.clear, Clearing(number=number)),
+                        Offer.of(NotesPart.comment, NoteOf(number=number)),
+                    ],
                 )
                 for number, title in enumerate(self.titles(), start=1)
             ),
@@ -93,6 +115,12 @@ class NotesPart(Part):
         """Clear a note."""
         return f"cleared {clearing.number}"
 
+    @lup.command(verb="comment", says="comment on it")
+    async def comment(self, commented: Commented[NoteOf], by: lup.Operator) -> str:
+        """Take a comment on a note."""
+        del by
+        return f"note {commented.on.number}: {commented.words}"
+
 
 class Notes(Module):
     """Notes in a pile: an example module the shell's promises read views of."""
@@ -113,8 +141,17 @@ class Echoes(Module):
 
 
 def noted(notes: int) -> Project:
-    """Return a project of lup's default modules and a pile of `notes` notes."""
-    return Project(modules=Modules.default().add(Notes(notes=notes)))
+    """Return a project of lup's default modules and a pile of `notes` notes, the dashboard's document its pile.
+
+    `lup.Core` is read as it's called, not imported with the module: the core
+    lists these promises, so it's still being made as this module is.
+    """
+    document = Viewing(module="notes", view="pile", given={"pile": "p"})
+    return Project(
+        modules=Modules.default()
+        .edit(lup.Core(document=document))
+        .add(Notes(notes=notes))
+    )
 
 
 class Drawn(Model):
@@ -141,9 +178,11 @@ class ShellPromises(Part):
             assert len(folds) == notes
             assert all(fold.kind == "note" for fold in folds)
             assert all(
-                offer.verb == "done" and offer.command == "clear"
+                any(
+                    offer.verb == "done" and offer.command == "clear"
+                    for offer in fold.offers
+                )
                 for fold in folds
-                for offer in fold.offers
             )
 
     @lup.promise
@@ -195,3 +234,141 @@ class ShellPromises(Part):
         with raises(lup.BlockError) as read:
             Viewing.of(NotesPart.clear, Clearing(number=1))
         assert "NotesPart.clear" in read.raised().about
+
+    @lup.promise
+    async def the_dashboard_answers_nothing_before_its_token(self, by: Testing) -> None:
+        """The dashboard answers no view until the page has said its token, and closes a page that says another, since rooms reach every port on the operator's machine."""
+        started = await by.started(noted(1))
+        page = await started.dashboard()
+        await page.say(
+            Watch(
+                watch=1,
+                viewing=Viewing(module="notes", view="pile", given={"pile": "p"}),
+            )
+        )
+        refused = await page.told()
+        assert isinstance(refused, Unanswered)
+        assert refused.watch is None
+        await page.say(Hello(token=f"not-{page.token}"))
+        assert await page.told() is None
+
+    @lup.promise
+    async def a_page_watching_a_view_is_told_its_blocks(self, by: Testing) -> None:
+        """A page that has said its token is told the document's root view and the project's kinds, and each view it watches is answered under the number it picked, with the view's blocks as the operator reads them."""
+        notes = by.any(Drawn).notes
+        watch = by.any(Picked).watch
+        started = await by.started(noted(notes))
+        page = await started.dashboard()
+        await page.say(Hello(token=page.token))
+        opened = await page.told()
+        assert isinstance(opened, Opened)
+        assert opened.root is not None
+        assert any(each.kind.name == "note" for each in opened.looks.folds)
+        assert isinstance(await page.told(), Drafted)
+        await page.say(Watch(watch=watch, viewing=opened.root))
+        answered = await page.told()
+        assert isinstance(answered, Answered)
+        assert answered.watch == watch
+        assert len(answered.blocks.blocks) == notes
+        await page.leave()
+
+    @lup.promise
+    async def a_frame_the_server_cant_read_is_refused_alone(self, by: Testing) -> None:
+        """A frame the dashboard can't read is refused on its own, and the page's socket keeps answering what comes after it."""
+        garbage = by.any(Garbage).text
+        started = await by.started(noted(1))
+        page = await started.dashboard()
+        await page.say(Hello(token=page.token))
+        assert isinstance(await page.told(), Opened)
+        assert isinstance(await page.told(), Drafted)
+        await page.say(f"not a frame: {garbage}")
+        refused = await page.told()
+        assert isinstance(refused, Unanswered)
+        await page.say(
+            Watch(
+                watch=7,
+                viewing=Viewing(module="notes", view="pile", given={"pile": "p"}),
+            )
+        )
+        answered = await page.told()
+        assert isinstance(answered, Answered)
+        assert answered.watch == 7
+        await page.leave()
+
+    @lup.promise
+    async def every_page_shows_the_same_draft(self, by: Testing) -> None:
+        """Every page open on the dashboard is told the draft as it changes, so a comment written in one shows in the other, and a closed tab loses nothing."""
+        words = by.any(Words).words
+        started = await by.started(noted(1))
+        first = await opened(started)
+        second = await opened(started)
+        await first.say(
+            Write(comment=Comment(id="c1", on=quoted("note-1"), words=words))
+        )
+        for page in [first, second]:
+            drafted = await page.told()
+            assert isinstance(drafted, Drafted)
+            assert [each.words for each in drafted.draft.comments] == [words]
+        await first.leave()
+        third = await opened(started, drafted=False)
+        drafted = await third.told()
+        assert isinstance(drafted, Drafted)
+        assert [each.id for each in drafted.draft.comments] == ["c1"]
+        await second.leave()
+        await third.leave()
+
+    @lup.promise
+    async def sending_sends_each_part_on_its_own(self, by: Testing) -> None:
+        """Sending the draft sends each comment on its own: one whose block takes comments goes, and leaves the draft; one whose block takes none stays in it, saying why, and holds up nothing else."""
+        words = by.any(Words).words
+        started = await by.started(noted(1))
+        page = await opened(started)
+        going = Comment(id="going", on=quoted("note-1"), words=words)
+        staying = Comment(id="staying", on=quoted("nowhere"), words=words)
+        for comment in [going, staying]:
+            await page.say(Write(comment=comment))
+            assert isinstance(await page.told(), Drafted)
+        await page.say(Send())
+        drafted = await page.told()
+        delivered = await page.told()
+        assert isinstance(drafted, Drafted)
+        assert isinstance(delivered, Delivered)
+        assert "going" in delivered.went
+        assert "staying" in delivered.stayed
+        assert [each.id for each in drafted.draft.comments] == ["staying"]
+        assert all(each.reason for each in drafted.draft.comments)
+        await page.leave()
+
+
+class Picked(Model):
+    """A number the page picks to watch a view under."""
+
+    watch: int
+
+
+class Garbage(Model):
+    """Text a page might send, which, said after words that aren't JSON, no frame reads as."""
+
+    text: str
+
+
+class Words(Model):
+    """What a comment says."""
+
+    words: str
+
+
+async def opened(started: Started, *, drafted: bool = True) -> Page:
+    """Open a page of `started`'s dashboard, its token said, told it's opened, and, where `drafted`, the draft too."""
+    page = await started.dashboard()
+    await page.say(Hello(token=page.token))
+    assert isinstance(await page.told(), Opened)
+    if drafted:
+        assert isinstance(await page.told(), Drafted)
+    return page
+
+
+def quoted(block: str) -> Quote:
+    """Return a quote of the block `block` of the pile's view."""
+    pile = Viewing(module="notes", view="pile", given={"pile": "p"})
+    return Quote(viewing=pile, block=block, lines=["note 1"])

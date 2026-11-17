@@ -19,3 +19,5 @@ lup declares itself as any project does, in `lup_declaration.py` at the reposito
 - **Promises** (`lup/testing/`, `lup.environment.testing`): what a module promises (`@lup.promise`, a law or a scenario), the harness a promise reaches lup through, and checking them, with the pytest plugin the gate runs them through. `README.md` there.
 - **Programs** (`lup/programs/`): running a program, lup's one runner of them, which every module's code uses: to its end, on an event loop, or beside its caller. `README.md` there.
 - **The shell** (`lup/shell/`, `lup.environment.shell`): the view door (`@lup.view`), the blocks a view answers, the kinds a module declares for them, and answering a view; the dashboard's page that draws them. `README.md` there.
+- **The store** (`lup/store/`): the records every module keeps its state as, the kinds a module declares them in (`Recorded`), and the database keeping them. `README.md` there.
+- **The inbox** (`lup/inbox/`): parties, the concerns they hold, what's said between them, and where each stands, kept in the store. `README.md` there.

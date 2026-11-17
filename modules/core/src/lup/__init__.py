@@ -7,9 +7,11 @@ run on), and the doors a module's methods are
 reached through (`lup.tool`, `lup.service`, `lup.command`, `lup.on`,
 `lup.promise`), with the parties a method's `by` names, lup's events,
 and the parts a module is made of (`Part`, listed in its `Parts`, holding its
-`Secret`s and its `Data`); and the shell's view door (`lup.view`), the blocks a
+`Secret`s, its `Data` and what lasts while it runs, its `Runtime`); the shell's
+view door (`lup.view`), the blocks a
 view answers, and the kinds a module declares for them (`Tones`, `Folds`,
-`Marks`). The core's environment side
+`Marks`); and the records a module keeps in the store (`Node`, `Edge`, listed
+in its `Recorded`). The core's environment side
 (`lup.environment`) isn't among it, and nothing here imports it.
 
 Running a program is `lup.programs` (`lup.programs.run`), kept under its own
@@ -43,8 +45,9 @@ from lup.doors.parts import (
     Part,
     Parts,
     Program,
-    ProgramError,
+    Runtime,
     Secret,
+    UnrunError,
 )
 from lup.doors.service import UncarriedError, service
 from lup.doors.tool import tool
@@ -66,8 +69,10 @@ from lup.shell.blocks import (
     Ticking,
     Viewing,
 )
+from lup.shell.draft import Commented, Commenting
 from lup.shell.kinds import FoldKind, Folds, MarkKind, Marks, Tone, Tones
 from lup.shell.view import view
+from lup.store.records import Edge, Node, Recorded
 from lup.testing.promise import promise
 from lup.types import JsonObject, Model, MutableModel, Settings
 lazy from lup import programs
@@ -80,10 +85,13 @@ __all__ = [
     "Chosen",
     "Code",
     "Codebase",
+    "Commented",
+    "Commenting",
     "Core",
     "Data",
     "Diff",
     "DoorError",
+    "Edge",
     "Event",
     "FileBytes",
     "FileText",
@@ -108,6 +116,7 @@ __all__ = [
     "Modules",
     "MutableModel",
     "Named",
+    "Node",
     "Offer",
     "Operator",
     "Part",
@@ -116,10 +125,11 @@ __all__ = [
     "Profile",
     "Profiles",
     "Program",
-    "ProgramError",
     "Project",
     "ProjectError",
+    "Recorded",
     "RefusedError",
+    "Runtime",
     "RuntimeDefaults",
     "Secret",
     "Selection",
@@ -131,6 +141,7 @@ __all__ = [
     "Tone",
     "Tones",
     "UncarriedError",
+    "UnrunError",
     "Viewing",
     "chosen",
     "command",
