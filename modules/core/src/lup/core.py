@@ -5,6 +5,7 @@ from lup.declaration.promises import DeclarationPromises
 from lup.doors.parts import Parts
 from lup.doors.promises import DoorsPromises, PartsPromises
 from lup.running.promises import RunningPromises
+from lup.shell.blocks import Viewing
 from lup.shell.kinds import SHELL_FOLDS, SHELL_TONES, Folds, Tones
 from lup.shell.promises import ShellPromises
 from lup.testing.promises import TestingPromises
@@ -34,3 +35,8 @@ class Core(Module):
     folds: Folds = Folds.of(*SHELL_FOLDS)
     """The shell's fold kinds: a party's section, a file, a body, a run of
     unchanged lines."""
+    document: Viewing | None = None
+    """The view the dashboard's document is, its root: a view listing the
+    parties, each a fold of the `party` kind whose content reads what's shown of
+    it, of the module named; none where the home repository's declaration names
+    none, and the dashboard shows nothing."""

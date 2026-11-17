@@ -31,7 +31,17 @@ from lup import (
     Tones,
     Viewing,
 )
-from lup.testing import Accepted, Refused, Testing, raises
+from lup.testing import (
+    Accepted,
+    Answered,
+    Hello,
+    Opened,
+    Refused,
+    Testing,
+    Unanswered,
+    Watch,
+    raises,
+)
 
 
 class PileOf(Model):
@@ -113,8 +123,17 @@ class Echoes(Module):
 
 
 def noted(notes: int) -> Project:
-    """Return a project of lup's default modules and a pile of `notes` notes."""
-    return Project(modules=Modules.default().add(Notes(notes=notes)))
+    """Return a project of lup's default modules and a pile of `notes` notes, the dashboard's document its pile.
+
+    `lup.Core` is read as it's called, not imported with the module: the core
+    lists these promises, so it's still being made as this module is.
+    """
+    document = Viewing(module="notes", view="pile", given={"pile": "p"})
+    return Project(
+        modules=Modules.default()
+        .edit(lup.Core(document=document))
+        .add(Notes(notes=notes))
+    )
 
 
 class Drawn(Model):
@@ -195,3 +214,73 @@ class ShellPromises(Part):
         with raises(lup.BlockError) as read:
             Viewing.of(NotesPart.clear, Clearing(number=1))
         assert "NotesPart.clear" in read.raised().about
+
+    @lup.promise
+    async def the_dashboard_answers_nothing_before_its_token(self, by: Testing) -> None:
+        """The dashboard answers no view until the page has said its token, and closes a page that says another, since rooms reach every port on the operator's machine."""
+        started = await by.started(noted(1))
+        page = await started.dashboard()
+        await page.say(
+            Watch(
+                watch=1,
+                viewing=Viewing(module="notes", view="pile", given={"pile": "p"}),
+            )
+        )
+        refused = await page.told()
+        assert isinstance(refused, Unanswered)
+        assert refused.watch is None
+        await page.say(Hello(token=f"not-{page.token}"))
+        assert await page.told() is None
+
+    @lup.promise
+    async def a_page_watching_a_view_is_told_its_blocks(self, by: Testing) -> None:
+        """A page that has said its token is told the document's root view and the project's kinds, and each view it watches is answered under the number it picked, with the view's blocks as the operator reads them."""
+        notes = by.any(Drawn).notes
+        watch = by.any(Picked).watch
+        started = await by.started(noted(notes))
+        page = await started.dashboard()
+        await page.say(Hello(token=page.token))
+        opened = await page.told()
+        assert isinstance(opened, Opened)
+        assert opened.root is not None
+        assert any(each.kind.name == "note" for each in opened.looks.folds)
+        await page.say(Watch(watch=watch, viewing=opened.root))
+        answered = await page.told()
+        assert isinstance(answered, Answered)
+        assert answered.watch == watch
+        assert len(answered.blocks.blocks) == notes
+        await page.leave()
+
+    @lup.promise
+    async def a_frame_the_server_cant_read_is_refused_alone(self, by: Testing) -> None:
+        """A frame the dashboard can't read is refused on its own, and the page's socket keeps answering what comes after it."""
+        garbage = by.any(Garbage).text
+        started = await by.started(noted(1))
+        page = await started.dashboard()
+        await page.say(Hello(token=page.token))
+        assert isinstance(await page.told(), Opened)
+        await page.say(f"not a frame: {garbage}")
+        refused = await page.told()
+        assert isinstance(refused, Unanswered)
+        await page.say(
+            Watch(
+                watch=7,
+                viewing=Viewing(module="notes", view="pile", given={"pile": "p"}),
+            )
+        )
+        answered = await page.told()
+        assert isinstance(answered, Answered)
+        assert answered.watch == 7
+        await page.leave()
+
+
+class Picked(Model):
+    """A number the page picks to watch a view under."""
+
+    watch: int
+
+
+class Garbage(Model):
+    """Text a page might send, which, said after words that aren't JSON, no frame reads as."""
+
+    text: str

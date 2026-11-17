@@ -1,35 +1,25 @@
-"""The shell's environment side: what a project's modules declare for their views to name, and answering a view.
+"""What a project's modules declare for their views to name: every tone, fold kind and mark kind, each with its module.
 
-Resolving a declaration gathers every module's tones, fold kinds and mark kinds
-(`Looks.of`), refusing two that share a name, or two fold kinds that share a
-letter, since the page has one table of them and one set of keys. Answering a
-view (`viewed`) calls it through its door and checks that its blocks name only
-what its module or the core declares, so a view naming a kind nobody declares
-fails as it's answered rather than drawing wrong (`README.md` in `lup/shell/`,
-*Kinds*).
+Resolving a declaration gathers them (`Looks.of`), refusing two that share a
+name, or two fold kinds that share a letter, since the page has one table of
+them and one set of keys; answering a view checks that its blocks name only what
+its module or the core declares (`Looks.checked`), so a view naming a kind
+nobody declares fails as it's answered rather than drawing wrong (`README.md`
+here, *Kinds*).
 """
 
-import json
-from typing import TYPE_CHECKING, Literal, override
+from typing import TYPE_CHECKING, Literal
 
-from pydantic.json_schema import GenerateJsonSchema
-
-from lup.core import Core
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import Named, listed
 from lup.shell.blocks import BlockError, Blocks, Code, Diff, Fold, Line
 from lup.shell.kinds import FoldKind, Folds, MarkKind, Marks, Tone, Tones
-from lup.shell.view import ViewDoor
 from lup.types import Model
 
 if TYPE_CHECKING:
-    from pydantic import JsonValue
-    from pydantic_core.core_schema import DataclassField, ModelField, TypedDictField
-
     from lup.declaration.module import Module
-    from lup.doors.door import Accepted, Refused
-    from lup.doors.parties import Party
-    from lup.environment.doors import Running
+
+lazy from lup.core import Core
 
 
 class Owned[K](Model):
@@ -168,48 +158,3 @@ def apart(what: str, named: list[Owned[str]]) -> None:
         about = [each.module for pair in pairs for each in pair]
         message = f"a {what} is one module's, and {'; '.join(clashes)} share one"
         raise ProjectError(message, about=list(dict.fromkeys(about)))
-
-
-async def viewed(
-    doors: Running,
-    looks: Looks,
-    module: str,
-    view: str,
-    given: JsonValue,
-    by: Party,
-) -> Accepted | Refused:
-    """Answer the view `view` of the module named `module` for `given`, read by `by`, and say what came of it.
-
-    Raise `BlockError` where what it answers names a kind neither the core nor
-    its module declares: the view's fault, not the caller's.
-    """
-    answered = await doors.reached(ViewDoor, module, view, given, by)
-    output = getattr(answered, "output", None)
-    if isinstance(output, Blocks):
-        looks.checked(output, module)
-    return answered
-
-
-class Read(Model):
-    """What the page reads from the core: a view's answer, and the kinds a project's modules declare for their views, the page's types generated from its description (`described`)."""
-
-    blocks: Blocks
-    looks: Looks
-
-
-class AsSent(GenerateJsonSchema):
-    """JSON Schema of a model as it's sent: every field there, a default one among them, since dumping a model writes each."""
-
-    @override
-    def field_is_required(
-        self,
-        field: ModelField | DataclassField | TypedDictField,
-        total: bool,
-    ) -> bool:
-        return True
-
-
-def described() -> str:
-    """Describe what the page reads from the core, as JSON Schema of what's sent, which the page's types are generated from, so the two can't disagree."""
-    schema = Read.model_json_schema(mode="serialization", schema_generator=AsSent)
-    return json.dumps(schema, indent=2)
