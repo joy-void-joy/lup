@@ -1,4 +1,4 @@
-"""Checking a module's promises, as the gate does: a scenario run on hypothesis's draws, a law over runs of calls through every door of its project, and the smallest run that breaks either kept to say so.
+"""Checking a module's promises, as the gate does: a scenario run on hypothesis's draws, a law over runs of calls through every door of its module, and the smallest run that breaks either kept to say so.
 
 The gate's check is repeatable: each promise draws from a seed its own source
 fixes, so a tree gets the same values, and the same verdict, every time. An
@@ -16,7 +16,6 @@ from hypothesis import HealthCheck, given, seed, settings
 from hypothesis import strategies as st
 
 from lup.declaration.project import Project
-from lup.doors.action import ActionDoor
 from lup.doors.command import CommandDoor
 from lup.doors.door import DoorError
 from lup.doors.parts import Given
@@ -26,7 +25,6 @@ from lup.environment.doors import Entry
 from lup.environment.testing.harness import Harness, Run, promises, watched
 from lup.environment.testing.simulation import Simulation
 from lup.testing.harness import (
-    Acted,
     Broken,
     Kept,
     Ran,
@@ -78,7 +76,9 @@ class Check(Model, arbitrary_types_allowed=True):
             run = Run(checking=checked)
             runs.append(run)
             loop = Simulation(choose=chooser(data), watch=watched)
-            loop.run_until_complete(self.ran(Harness(data=data, run=run)))
+            loop.run_until_complete(
+                self.ran(Harness(data=data, run=run, gated=self.project))
+            )
 
         test = given(st.data())(once)
         if exploring.seeded:
@@ -104,14 +104,14 @@ class Check(Model, arbitrary_types_allowed=True):
         return Kept(promise=self.said())
 
     async def ran(self, harness: Harness) -> None:
-        """Run the promise once, then stop what it started: a scenario's story, or a run of calls through every door of its project, the law checked after each."""
+        """Run the promise once, then stop what it started: a scenario's story, or a run of calls through every door of its module, the law checked after each."""
         try:
             await self.told(harness)
         finally:
             await harness.run.stopped()
 
     async def told(self, harness: Harness) -> None:
-        """Run the promise once: a scenario's story on its class made for it, or a run of calls through every door of its project, the law checked after each."""
+        """Run the promise once: a scenario's story on its class made for it, or a run of calls through every door of its module, the law checked after each."""
         method = self.entry.method
         door = method.door
         if not (isinstance(door, PromiseDoor) and door.law(method.taken)):
@@ -134,7 +134,8 @@ class Check(Model, arbitrary_types_allowed=True):
                 ]
             }
         )
-        drawn = harness.data.draw(st.lists(calls(reached.doors)))
+        module = self.entry.serves.module.name
+        drawn = harness.data.draw(st.lists(calls(reached.doors, module)))
         await asyncio.gather(*(mine.answered(each) for each in drawn))
 
     def seed(self) -> int:
@@ -168,14 +169,20 @@ def checked(
     ]
 
 
-def calls(doors: Doors) -> SearchStrategy[Call]:
-    """Return every call a party could make through the doors `doors` serve: each tool, action, command and service, given a value of what it takes, by a party of any its doors name."""
+def calls(doors: Doors, module: str) -> SearchStrategy[Call]:
+    """Return every call a party could make through the doors `doors` serve of the module named `module`: each tool, command and service, given a value of what it takes, by a party of any its doors name.
+
+    A law's runs call its own module's doors alone: only they change the state
+    it reads, its services among them, which code in another module calls; the
+    rest of a project's doors, the core's growing with each submodule, would
+    only dilute the search. A scenario checks every law of every module it
+    starts, over every call it makes.
+    """
     entries = [
         entry
         for entry in doors.entries()
-        if isinstance(
-            entry.method.door, ToolDoor | ActionDoor | CommandDoor | ServiceDoor
-        )
+        if entry.serves.module.name == module
+        and isinstance(entry.method.door, ToolDoor | CommandDoor | ServiceDoor)
     ]
     if not entries:
         return st.nothing()
@@ -195,10 +202,6 @@ def call(entry: Entry, by: SearchStrategy[Party]) -> SearchStrategy[Call]:
         match door:
             case ToolDoor():
                 return ToolCall(tool=entry.name, arguments=sent(value), by=party)
-            case ActionDoor():
-                return Acted(
-                    module=module, action=entry.name, given=sent(value), by=party
-                )
             case ServiceDoor():
                 return Served(service=entry.name, given=sent(value), by=party)
             case _:

@@ -278,13 +278,13 @@ class Dashboard(Model, arbitrary_types_allowed=True):
             "on": offer.given,
         }
         module = offer.module or quote.viewing.module or ""
-        answered = await self.running.act(module, offer.action, given, Operator())
+        answered = await self.running.run(module, offer.command, given, Operator())
         return Outcome(
             reason=answered.rejection.reason if isinstance(answered, Refused) else None
         )
 
     async def acted(self, mark: Marked) -> str | None:
-        """Run the action `mark` marks; why not, where it can't run, as on a block that changed since it was marked."""
+        """Run the command `mark` marks; why not, where it can't run, as on a block that changed since it was marked."""
         block = await self.block(mark.on)
         if isinstance(block, str):
             return block
@@ -292,7 +292,9 @@ class Dashboard(Model, arbitrary_types_allowed=True):
             return "what it's on changed since it was marked"
         offer = mark.offer
         module = offer.module or mark.on.viewing.module or ""
-        answered = await self.running.act(module, offer.action, offer.given, Operator())
+        answered = await self.running.run(
+            module, offer.command, offer.given, Operator()
+        )
         return answered.rejection.reason if isinstance(answered, Refused) else None
 
 

@@ -22,20 +22,21 @@ from lup.declaration.errors import ProjectError
 from lup.declaration.module import Module
 from lup.declaration.project import Project
 from lup.doors.door import Accepted, DoorError, Method, Refused
-from lup.doors.parties import Party
-from lup.doors.parts import Finished, Parts, Program, ProgramError, Runs
+from lup.doors.parties import Agent, Party
+from lup.doors.parts import Finished, Parts, Program, Runs, UnrunError
 from lup.doors.tool import ToolDoor, ToolSpec
-from lup.environment.declaration import load, resolve
+from lup.environment.declaration import read, resolve
 from lup.environment.doors import Doors, Entry, Running, Serves
+from lup.environment.layout import MachineLayout, RepositoryLayout
 from lup.environment.running.container import answered
 from lup.environment.running.planning import plan_of
 from lup.environment.shell import viewed
 from lup.environment.shell.server import Dashboard, Session, Socket
+from lup.environment.told import rendered
 from lup.shell.looks import Looks
 from lup.shell.wire import Sent as Frame
 from lup.shell.wire import Told
 from lup.testing.harness import (
-    Acted,
     Broken,
     BrokenLawError,
     Call,
@@ -47,10 +48,13 @@ from lup.testing.harness import (
     ProgramRun,
     Ran,
     Reaching,
+    Repository,
+    Responding,
     Scripted,
     Served,
     Started,
     Step,
+    Telling,
     Testing,
     ToolCall,
     Viewed,
@@ -58,6 +62,7 @@ from lup.testing.harness import (
 from lup.testing.promise import PromiseDoor
 from lup.types import Model, MutableModel
 lazy from lup.shell.blocks import Viewing
+lazy from lup.told.guidance import Guidance
 
 
 class Run(MutableModel, arbitrary_types_allowed=True):
@@ -73,7 +78,7 @@ class Run(MutableModel, arbitrary_types_allowed=True):
     started: list[Running] = []
     """What the run started, stopped once the promise ends."""
     kept: list[tempfile.TemporaryDirectory[str]] = []
-    """Where what the run started keeps its data, removed once it's stopped."""
+    """Where what the run started keeps its data and what lasts while it runs, removed once it's stopped."""
 
     async def stopped(self) -> None:
         """Stop what the run started, the last first, and remove where it kept its data."""
@@ -318,8 +323,6 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
         match call:
             case ToolCall(tool=tool, arguments=arguments, by=by):
                 return await self.running.call(tool, arguments, by)
-            case Acted(module=module, action=action, given=given, by=by):
-                return await self.running.act(module, action, given, by)
             case Ran(module=module, command=command, arguments=arguments, by=by):
                 return await self.running.run(module, command, arguments, by)
             case Served(service=service, given=given, by=by):
@@ -351,48 +354,76 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
 
 
 class StandIn(Model, Runs, arbitrary_types_allowed=True):
-    """The programs a started lup's parts run, stood in for as a promise scripts them: each run heard, and answered by the first answer whose `when` its arguments start with."""
+    """The programs a started lup's parts run, stood in for as a promise scripts them: each run heard, and answered by the first answer whose `when` its arguments start with, or by the code the promise wrote for it."""
 
-    scripts: dict[str, Scripted] = {}
+    scripts: dict[str, Scripted | Responding] = {}
     heard: Heard
 
     async def ran(
-        self, program: Program, arguments: list[str], given: str | None
+        self,
+        program: Program,
+        arguments: list[str],
+        given: bytes | None,
+        env: dict[str, str],
     ) -> Finished:
         """Hear the run, and answer it as its program's script says.
 
-        Raise `ProgramError` where no answer of its script fits, as for a
+        Raise `UnrunError` where no answer of its script fits, as for a
         program that isn't there.
         """
         self.heard.runs.append(
-            ProgramRun(program=program.name, arguments=arguments, given=given)
+            ProgramRun(program=program.name, arguments=arguments, given=given, env=env)
         )
-        script = self.scripts.get(program.name, Scripted())
-        answer = next(
-            (
-                each
-                for each in script.answers
-                if arguments[: len(each.when)] == each.when
-            ),
-            None,
-        )
+        match self.scripts.get(program.name, Scripted()):
+            case Scripted(answers=answers):
+                answer = next(
+                    (
+                        each
+                        for each in answers
+                        if arguments[: len(each.when)] == each.when
+                    ),
+                    None,
+                )
+            case Responding() as responding:
+                answer = responding.answered(arguments, given)
         if answer is None:
             message = (
                 f"`{program.name} {' '.join(arguments)}` has no answer in the "
                 "promise's script, so it's run as a program that isn't there"
             )
-            raise ProgramError(message, about=[program.name])
-        return Finished(status=answer.status, output=answer.output, error=answer.error)
+            raise UnrunError(message, about=[program.name])
+        return Finished(
+            status=answer.status,
+            output=bytes_of(answer.output),
+            error=bytes_of(answer.error),
+        )
+
+
+def bytes_of(written: bytes | str) -> bytes:
+    """Return what a program stood in for writes, as bytes, text as UTF-8."""
+    return written.encode() if isinstance(written, str) else written
 
 
 class Crosser(Model, Crossing, arbitrary_types_allowed=True):
     """A started lup's parts, a message crossing to them answered as their container answers it."""
 
     running: Running
+    looks: Looks
+    """The kinds the parts' modules declare, which their views may name."""
 
     async def crossed(self, text: bytes) -> bytes:
         """Answer one message as the container running these parts would."""
-        return await answered(self.running, text)
+        return await answered(self.running, text, looks=self.looks)
+
+
+class Teller(Model, Telling, arbitrary_types_allowed=True):
+    """A started lup's guidance, rendered on its parts as made in this process."""
+
+    running: Running
+
+    async def guidance(self, by: Agent) -> Guidance:
+        """Render what the session `by` is told at its start of the modules started here."""
+        return await rendered(self.running, by)
 
 
 class Dashboards(Model, Opening, arbitrary_types_allowed=True):
@@ -466,17 +497,23 @@ class Harness(Testing, arbitrary_types_allowed=True):
 
     data: st.DataObject
     run: Run
+    gated: Project
+    """The project whose gate checks the promise, as its gate loads it."""
+
+    def project(self) -> Project:
+        """Return the project whose gate checks this promise, as its gate loads it."""
+        return self.gated
 
     async def started(
         self,
-        declared: Project | str,
+        declared: Project | Repository,
         secrets: Mapping[str, str] | None = None,
         repository: str = "harness",
-        programs: Mapping[str, Scripted] | None = None,
+        programs: Mapping[str, Scripted | Responding] | None = None,
         *,
         machine: bool = False,
     ) -> Started:
-        """Start lup on a declaration: a `Project`, or the text of a declaration's file, loaded as lup loads one, each class made once and started.
+        """Start lup on a declaration: a `Project`, or a repository's files, read with their layers as lup reads a repository's, each class made once and started.
 
         Raise `ProjectError` where it doesn't load or resolve, where a secret a
         class holds isn't given, or where a law its modules hold has no door to
@@ -493,8 +530,9 @@ class Harness(Testing, arbitrary_types_allowed=True):
             specs=reached.tools(),
             plan=plan_of(resolve(project), []),
             doors=reached,
-            crossing=Crosser(running=reached.running),
+            crossing=Crosser(running=reached.running, looks=reached.looks),
             heard=heard,
+            telling=Teller(running=reached.running),
             dashboards=Dashboards(
                 dashboard=Dashboard(
                     running=reached.running,
@@ -528,11 +566,13 @@ class Harness(Testing, arbitrary_types_allowed=True):
             else {name: self.any(str) for name in dict.fromkeys(held)}
         )
         kept = tempfile.TemporaryDirectory(prefix="lup-data-")
-        self.run.kept.append(kept)
+        lasting = tempfile.TemporaryDirectory(prefix="lup-run-")
+        self.run.kept.extend([kept, lasting])
         running = await resolved.doors.started(
             repository,
             given,
             data=Path(kept.name),
+            runtime=Path(lasting.name),
             runs=runs or StandIn(heard=Heard()),
             machine=machine,
         )
@@ -553,15 +593,25 @@ class Harness(Testing, arbitrary_types_allowed=True):
         return value
 
 
-def loaded(text: str) -> Project:
-    """Load the declaration whose file holds `text`, as lup loads one.
+def loaded(files: Repository) -> Project:
+    """Read the declaration of a repository holding `files`, with its layers, as lup reads a repository's.
 
-    Raise `ProjectError` where it doesn't load.
+    Raise `ProjectError` where a file that's there doesn't load.
     """
     with tempfile.TemporaryDirectory() as directory:
-        path = Path(directory) / "declaration.py"
-        path.write_text(text)
-        return load(path)
+        root = Path(directory) / "repository"
+        configuration = Path(directory) / "configuration"
+        layout = RepositoryLayout(root=root, main=root)
+        machine = MachineLayout(configuration=configuration)
+        for path, text in [
+            (layout.declaration, files.declaration),
+            (layout.local, files.local),
+            (machine.layer, files.machine),
+        ]:
+            if text is not None:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text)
+        return read(layout, machine).project
 
 
 def promises(module: Module) -> list[Entry]:

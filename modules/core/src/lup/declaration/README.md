@@ -77,3 +77,21 @@ Every collection a module holds is a selection (`Selection`): where its entries 
 | `.replace(name, entry, why=…)` | `entry` in place of the one named |
 
 Entries placed `before=` or `after=` another go there, whichever module holds it; the rest keep the order of their modules. A `Layer` is a model of settings changed field by field, as a module is.
+
+## Layers
+
+A repository's declaration is read with layers over it (`lup.environment.declaration.read`), each a file binding `project`, a `Project` written as a layer on what's below it, in the same grammar: `Modules().edit(Core(profile="work"))` changes the core's `profile` and nothing else. In the order they apply, the last winning:
+1. lup's default modules;
+2. the repository's declaration, at its worktree's root: `lup_project.py`, unless `[tool.lup]`'s `declaration` in its `pyproject.toml` names another;
+3. the machine's layer, `$XDG_CONFIG_HOME/lup/lup_project.local.py`, for every repository on this machine;
+4. the repository's own local layer, named after its declaration (`lup_project.local.py`), in its main worktree (a clone's root, or a bare repository's own directory), so every worktree shares it. Git ignores it. lup finds a worktree's root and its main worktree through git (`RepositoryLayout.found`).
+
+So the most specific wins: a repository's own setting over the machine's, the machine's over what the repository commits. Each layer is optional, a repository with no declaration running on lup's defaults; one that's there and doesn't load fails the read, never left out without a word.
+
+## Profiles and accounts
+
+`Core` holds the profiles a repository's sessions may run on (`profiles`) and the one they run on where a session names none (`profile`), so a profile is declared where any setting is: in a repository's declaration or its own local layer for that repository, in the machine's layer for every repository on this machine.
+- **A profile** (`Profile`) names the account its sessions log in with (`account`, or one per runtime in `accounts`), the directories it lends every session (`lent`), each runtime's model and effort (`defaults`), whether the operator's own runtime configuration is below its own, and where its rooms keep their history. `Profiles().edit(Profile(name="default", …))` changes one field by field, as a module's layer does.
+- **An account** is a login per runtime, kept by its name, so every room on it shares one login. A name, a profile's or an account's, names a directory of its own, so one holding `/`, `..` or a leading `.` is refused as it's written.
+- **`default`** is always there, account `default` and nothing lent: profiles leaving it out are refused when they're read.
+- **A session's profile and account** (`chosen`): the profile it's started with, else `Core.profile`; the account it's started with, else the profile's for its runtime.

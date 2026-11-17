@@ -9,7 +9,7 @@ project's modules where their door names them so, as a tool's or a service's
 Starting what's served (`Doors.started`) makes each part once, with its module
 and what it holds, runs what each runs at `Starting`, and carries a service's
 call made in it to the part serving it (`Running`). Calling through a door
-(`Running.call`, `.serve`, `.act`, `.run`) finds the method, checks who calls,
+(`Running.call`, `.serve`, `.run`) finds the method, checks who calls,
 reads what it's given as the model it takes, and runs it on its part, answering
 `Accepted` or `Refused`: what the harness and the containers call (`README.md`
 in `lup/doors/`, *Starting, calling and stopping*). Stopping (`Running.stopped`)
@@ -18,6 +18,7 @@ runs what each runs at `Stopping`, then cancels what it started.
 
 import asyncio
 from contextvars import ContextVar
+from functools import cached_property
 from typing import override
 lazy from pathlib import Path
 
@@ -26,7 +27,6 @@ from pydantic import BaseModel, JsonValue, PydanticUserError, ValidationError
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import listed
 from lup.declaration.module import Module
-from lup.doors.action import ActionDoor
 from lup.doors.command import CommandDoor
 from lup.doors.door import (
     Accepted,
@@ -77,7 +77,7 @@ class Entry(Model, arbitrary_types_allowed=True):
 
 
 class Keyed(Model):
-    """A name a method is reached by, where it's shared: a tool's or a service's across modules, an action's or a command's within its module."""
+    """A name a method is reached by, where it's shared: a tool's or a service's across modules, a command's within its module."""
 
     name: str
     scope: str = ""
@@ -137,7 +137,7 @@ class Doors(Model):
         Raise `ProjectError` where a class can't be made with the module listing
         it, where a method can't be behind its door once every class its
         annotations name is defined, or where two methods are reached by one
-        name: a tool's or a service's across modules, an action's or a command's
+        name: a tool's or a service's across modules, a command's
         within a module.
         """
         doors = cls(
@@ -163,13 +163,18 @@ class Doors(Model):
             )
         return doors
 
-    def entries(self) -> list[Entry]:
-        """List every method each class serves behind a door, in the order of their modules."""
+    @cached_property
+    def listed(self) -> list[Entry]:
+        """Every method each class serves behind a door, in the order of their modules: read once, since what's served doesn't change once resolved."""
         return [
             Entry(serves=each, name=name, method=method)
             for each in self.served
             for name, method in served(each.part).items()
         ]
+
+    def entries(self) -> list[Entry]:
+        """List every method each class serves behind a door, in the order of their modules."""
+        return list(self.listed)
 
     def through(self, door: type[Door]) -> list[Entry]:
         """List every method behind a door of `door`'s class."""
@@ -204,6 +209,7 @@ class Doors(Model):
         only: list[str] | None = None,
         beyond: Carrier | None = None,
         data: Path | None = None,
+        runtime: Path | None = None,
         runs: Runs | None = None,
         machine: bool = False,
     ) -> Running:
@@ -214,7 +220,8 @@ class Doors(Model):
         `module.Part`, where the others run elsewhere, a call to one of their
         services carried by `beyond`; left out, every part is made here. Raise
         `ProjectError` where a part made here holds a secret not given. A part
-        keeping data is given a directory under `data`, named `module.Part`, and
+        keeping data is given a directory under `data`, named `module.Part`, one
+        keeping what lasts while it runs one under `runtime`, named so too, and
         a program a part declares is run by `runs`. Where `machine`, these are
         the machine's own parts, and a service their code calls is by `Machine`.
         """
@@ -229,6 +236,7 @@ class Doors(Model):
                         Given(
                             secrets=secrets,
                             data=None if data is None else data / each.named(),
+                            runtime=None if runtime is None else runtime / each.named(),
                             runs=runs,
                         ),
                     ),
@@ -394,21 +402,28 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
             return refused(given, f"no module serves a service `{service}`")
         return await self.answered(found[0], given, by)
 
-    async def act(
-        self, module: str, action: str, given: JsonValue, by: Party
-    ) -> Accepted | Refused:
-        """Run the action `action` of the module named `module` on `given`, called by `by`, and say what came of it."""
-        return await self.reached(ActionDoor, module, action, given, by)
-
     async def run(
         self, module: str, command: str, arguments: JsonValue, by: Party
     ) -> Accepted | Refused:
         """Run the command `command` of the module named `module` with `arguments`, called by `by`, and say what came of it.
 
         A command takes everything as arguments: one it needs and isn't given
-        is refused at once, naming it, never asked for.
+        is refused at once, naming it, never asked for. One taking every mark of
+        a send, as the dashboard gives it, is given what the command line sends
+        as one mark.
         """
-        return await self.reached(CommandDoor, module, command, arguments, by)
+        within = self.doors.through(CommandDoor)
+        gathers = any(
+            entry.serves.module.name == module
+            and entry.name == command
+            and entry.method.taken.gathers()
+            for entry in within
+        )
+        one: list[JsonValue] = [arguments]
+        given: JsonValue = (
+            one if gathers and not isinstance(arguments, list) else arguments
+        )
+        return await self.reached(CommandDoor, module, command, given, by)
 
     async def reached(
         self, door: type[Door], module: str, name: str, given: JsonValue, by: Party

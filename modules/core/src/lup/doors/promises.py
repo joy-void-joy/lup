@@ -24,15 +24,23 @@ from lup import (
     Part,
     Parts,
     Program,
-    ProgramError,
     Project,
     ProjectError,
     Secret,
     Starting,
     Stopping,
     UncarriedError,
+    UnrunError,
 )
-from lup.testing import Accepted, Answering, Refused, Scripted, Testing, raises
+from lup.testing import (
+    Accepted,
+    Answering,
+    Refused,
+    Repository,
+    Scripted,
+    Testing,
+    raises,
+)
 
 
 class Said(Model):
@@ -73,8 +81,8 @@ class EchoPart(Part):
         """
         return Shouted(text=said.text.upper() * self.module.volume, caller=by.id)
 
-    @lup.action(verb="done", says="merge it")
-    async def merge(self, merging: Merging) -> str:
+    @lup.command(verb="done", says="merge it")
+    async def merge(self, merging: Merging, by: Operator) -> str:
         """Merge a branch, refusing `main`, which is merged into."""
         if merging.branch == "main":
             message = "`main` is merged into, never merged"
@@ -134,7 +142,7 @@ class Loudness(Model):
 class Sending(Model):
     """Something a party sends through one of echo's doors, or one it doesn't have."""
 
-    door: Literal["tool", "action", "command"]
+    door: Literal["tool", "command"]
     name: Literal["shout", "merge", "greet", "whisper"]
     given: dict[str, str | int | None]
     by: Agent | Operator
@@ -317,10 +325,6 @@ class DoorsPromises(Part):
         match sending.door:
             case "tool":
                 answered = await started.call(sending.name, sending.given, sending.by)
-            case "action":
-                answered = await started.act(
-                    "echo", sending.name, sending.given, sending.by
-                )
             case "command":
                 answered = await started.run(
                     "echo", sending.name, sending.given, sending.by
@@ -360,9 +364,9 @@ class DoorsPromises(Part):
     async def a_method_refusing_is_answered_as_a_refusal(self, by: Testing) -> None:
         """A method refusing what it's asked, by raising `RefusedError`, answers a refusal; asked otherwise, it runs."""
         started = await by.started(declared(Echo()))
-        main = await started.act("echo", "merge", Merging(branch="main"), Operator())
+        main = await started.run("echo", "merge", Merging(branch="main"), Operator())
         assert isinstance(main, Refused)
-        dev = await started.act("echo", "merge", Merging(branch="dev"), Operator())
+        dev = await started.run("echo", "merge", Merging(branch="dev"), Operator())
         assert isinstance(dev, Accepted)
 
     @lup.promise
@@ -408,7 +412,7 @@ class DoorsPromises(Part):
         """A method that isn't what its door takes and returns, or doesn't say who may call it where its door has no default, fails the declaration's load, naming it, before anything calls it."""
         misshapen = by.any(Misshapen)
         with raises(ProjectError) as failed:
-            await by.started(loud(misshapen.methods()))
+            await by.started(Repository(declaration=loud(misshapen.methods())))
         assert "LoudPart.wrong" in failed.raised().about
 
     @lup.promise
@@ -428,7 +432,7 @@ class Heard(lup.Model):
 
     text: str
 '''
-        started = await by.started(loud(methods))
+        started = await by.started(Repository(declaration=loud(methods)))
         assert any(each.name == "shout" for each in started.tools())
 
     @lup.promise
@@ -438,7 +442,7 @@ class Heard(lup.Model):
         """lup makes a part with its module and its secrets alone: a field of its own with no default, or a method hiding its module, fails the load."""
         holding = by.any(Holding)
         with raises(ProjectError):
-            await by.started(loud(holding.methods()))
+            await by.started(Repository(declaration=loud(holding.methods())))
 
 
 class Adding(Model):
@@ -532,7 +536,7 @@ class AskingPart(Part):
     """Another class, whose tools call the keeper's services as plain calls."""
 
     @lup.tool
-    async def ask(self, asking: Asking) -> Tallied:
+    async def query(self, asking: Asking) -> Tallied:
         """Ask the keeper for its count, as code."""
         return await KeeperPart.tallied(asking)
 
@@ -567,7 +571,7 @@ class ListerPart(Part):
         """List what the directory holds."""
         del asking
         finished = await self.ls.ran("-1")
-        return Listed(names=finished.output.splitlines())
+        return Listed(names=finished.text().splitlines())
 
     @lup.tool
     async def missing(self, asking: Asking) -> Listed:
@@ -575,7 +579,7 @@ class ListerPart(Part):
         del asking
         try:
             await self.ls.ran("-a")
-        except ProgramError as missing:
+        except UnrunError as missing:
             raise lup.RefusedError(str(missing)) from missing
         return Listed(names=[])
 
@@ -614,7 +618,7 @@ class PartsPromises(Part):
         """A service read through its class is called as a plain call, carried to its class wherever it runs, and called by the project whose code made the call."""
         repository = by.any(str)
         started = await by.started(declared(Keeper()), repository=repository)
-        asked = await started.call("ask", Asking(), by.any(Agent))
+        asked = await started.call("query", Asking(), by.any(Agent))
         assert isinstance(asked, Accepted)
         assert isinstance(asked.output, Tallied)
         assert asked.output.repository == repository

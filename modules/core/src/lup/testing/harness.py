@@ -14,19 +14,31 @@ from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, Field, JsonValue, SerializeAsAny
 
+from lup.command_line.answering import Answerer, Offered, Typed
 from lup.declaration.module import Module
 from lup.doors.door import Accepted, Refused
 from lup.doors.parties import Party
 from lup.doors.tool import ToolSpec
 from lup.errors import LupError
 from lup.running.plan import Plan
+from lup.running.wire import (
+    Caller,
+    CommandCalled,
+    ServiceCalled,
+    ToolCalled,
+    ViewCalled,
+    replied,
+)
 from lup.types import Model, MutableModel
+lazy from lup.command_line import line
 
 if TYPE_CHECKING:
     from lup.declaration.project import Project
+    from lup.doors.parties import Agent
+    from lup.running import wire
     from lup.shell.wire import Sent as Frame
     from lup.shell.wire import Told
-
+    from lup.told.guidance import Guidance
 
 type Sent = BaseModel | list[BaseModel] | Mapping[str, JsonValue] | JsonValue
 """What a party sends through a door: a model, or a list of it, sent as its JSON,
@@ -61,16 +73,6 @@ class ToolCall(Model):
     by: SerializeAsAny[Party]
 
 
-class Acted(Model):
-    """An action run on what a view offers, by its module's name and its own."""
-
-    door: Literal["action"] = "action"
-    module: str
-    action: str
-    given: JsonValue
-    by: SerializeAsAny[Party]
-
-
 class Ran(Model):
     """A command run, by its module's name and its own."""
 
@@ -100,11 +102,20 @@ class Viewed(Model):
     by: SerializeAsAny[Party]
 
 
-type Call = Annotated[
-    ToolCall | Acted | Ran | Served | Viewed, Field(discriminator="door")
-]
+type Call = Annotated[ToolCall | Ran | Served | Viewed, Field(discriminator="door")]
 """One call through a door, as a party makes it: which door, what was sent, and
 by whom."""
+
+
+class Repository(Model):
+    """A repository as lup finds one on disk: the text of its declaration's file, of its own local layer, and of the machine's layer, each where there's one."""
+
+    declaration: str | None = None
+    """Its declaration's file; none for a repository that declares nothing."""
+    local: str | None = None
+    """Its own local layer, which git ignores."""
+    machine: str | None = None
+    """The machine's layer, for every repository on it."""
 
 
 class Step[S](Model):
@@ -184,7 +195,10 @@ class ProgramRun(Model):
 
     program: str
     arguments: list[str]
-    given: str | None = None
+    given: bytes | None = None
+    """What it was given on its input."""
+    env: dict[str, str] = {}
+    """The variables it was run with beside the machine's own."""
 
 
 class Heard(MutableModel):
@@ -200,8 +214,10 @@ class Answering(Model):
     """The arguments a run starts with, for it to get this answer; none for
     any run."""
     status: int = 0
-    output: str = ""
-    error: str = ""
+    output: bytes | str = b""
+    """What it prints, text written as UTF-8."""
+    error: bytes | str = b""
+    """What it writes on its standard error, text written as UTF-8."""
 
 
 class Scripted(Model):
@@ -210,12 +226,28 @@ class Scripted(Model):
     answers: list[Answering] = []
 
 
+class Responding(ABC):
+    """A program a part declares, stood in for by code a promise writes: it answers each run from its arguments and its input, as a store of git's objects answers what's asked of it."""
+
+    @abstractmethod
+    def answered(self, arguments: list[str], given: bytes | None) -> Answering | None:
+        """Answer one run; none where the program as stood in for has no answer to it, which fails as a program that isn't there."""
+
+
 class Crossing(ABC):
     """A started lup's parts, as a message crossing to their container reaches them: what the program on the operator's machine sends."""
 
     @abstractmethod
     async def crossed(self, text: bytes) -> bytes:
         """Answer one message that crossed to the container running the parts, as it would: its call through a door answered, or why it's refused."""
+
+
+class Telling(ABC):
+    """A started lup's guidance, as a session's start renders it."""
+
+    @abstractmethod
+    async def guidance(self, by: Agent) -> Guidance:
+        """Render what the session `by` is told at its start of the modules: each section, on its part as made here."""
 
 
 class Page(Model, ABC):
@@ -274,6 +306,8 @@ class Started(Model, arbitrary_types_allowed=True):
     heard: Heard
     """Each run of a program its parts asked for, in order, as the harness's
     stand-in heard it."""
+    telling: Telling
+    """Its guidance, as a session's start renders it."""
 
     async def crossed(self, text: bytes) -> bytes:
         """Answer one message as the container running its parts would: a call through a door, carrying the version of its shape (`lup.running.wire`)."""
@@ -297,22 +331,23 @@ class Started(Model, arbitrary_types_allowed=True):
         """Check the promise named `promise` of the module named `module`, or every one where none is named, as the gate does, and say how each fared."""
         return await self.doors.checked(module, promise)
 
+    async def guidance(self, by: Agent) -> Guidance:
+        """Render what the session `by` is told at its start of its modules: each section they serve, in the declaration's order, on its part as started here.
+
+        Raise `GuidanceError`, naming its module, where a section doesn't
+        render.
+        """
+        return await self.telling.guidance(by)
+
     async def call(self, tool: str, arguments: Sent, by: Party) -> Accepted | Refused:
         """Call the tool named `tool` with `arguments`, as `by` does, and say what came of it."""
         call = ToolCall(tool=tool, arguments=sent(arguments), by=by)
         return await self.doors.answered(call)
 
-    async def act(
-        self, module: str, action: str, given: Sent, by: Party
-    ) -> Accepted | Refused:
-        """Run the action `action` of the module named `module` on `given`, as `by` does, and say what came of it."""
-        call = Acted(module=module, action=action, given=sent(given), by=by)
-        return await self.doors.answered(call)
-
     async def run(
         self, module: str, command: str, arguments: Sent, by: Party
     ) -> Accepted | Refused:
-        """Run the command `command` of the module named `module` with `arguments`, as `by` does, and say what came of it."""
+        """Run the command `command` of the module named `module` with `arguments`, as `by` does, from the command line or the dashboard's key, and say what came of it."""
         call = Ran(module=module, command=command, arguments=sent(arguments), by=by)
         return await self.doors.answered(call)
 
@@ -332,6 +367,40 @@ class Started(Model, arbitrary_types_allowed=True):
         call = Viewed(module=module, view=view, given=sent(given), by=by)
         return await self.doors.answered(call)
 
+    async def typed(self, words: list[str], by: Caller) -> Typed:
+        """Type `words` on the command line, `lup`, as `by` does in their terminal or their room, and say what it did: what it printed and how it ended, what the help it showed listed, and the call it made.
+
+        It offers what this lup's plan lets `by` call, and makes its call
+        through these doors, every law checked over it. Raise `BlockError`
+        where a view it reads names a kind nobody declares, as `view` does.
+        """
+        return await line.typed(words, Harnessed(started=self, by=by), "lup")
+
+
+class Harnessed(Model, Answerer, arbitrary_types_allowed=True):
+    """The command line's calls answered through a started lup's doors, as the harness reaches them, by the party a promise names."""
+
+    started: Started
+    by: Caller
+
+    async def offered(self) -> Offered:
+        """Return who the calls are by, and the started lup's plan."""
+        return Offered(by=self.by, plan=self.started.plan)
+
+    async def answered(self, call: wire.Call) -> wire.Reply:
+        """Make `call` through the started lup's doors, by the party this names, every law checked over it, and return its reply."""
+        by = self.by
+        match call:
+            case ToolCalled(tool=tool, given=given):
+                answered = await self.started.call(tool, given, by)
+            case CommandCalled(module=module, command=command, given=given):
+                answered = await self.started.run(module, command, given, by)
+            case ViewCalled(module=module, view=view, given=given):
+                answered = await self.started.view(module, view, given, by)
+            case ServiceCalled(service=service, given=given):
+                answered = await self.started.serve(service, given, by)
+        return replied(answered)
+
 
 class Testing(Party, ABC):
     """The harness: what checks a module's promises, handed to each as `by`, starting lup for them and drawing the values they explore.
@@ -342,20 +411,24 @@ class Testing(Party, ABC):
     @abstractmethod
     async def started(
         self,
-        declared: Project | str,
+        declared: Project | Repository,
         secrets: Mapping[str, str] | None = None,
         repository: str = "harness",
-        programs: Mapping[str, Scripted] | None = None,
+        programs: Mapping[str, Scripted | Responding] | None = None,
         *,
         machine: bool = False,
     ) -> Started:
-        """Start lup on a declaration: a `Project`, or the text of a declaration's file, loaded as lup loads one, each class of its modules made once and started, as the code of `repository`, each program its parts run stood in for as `programs` scripts it; where `machine`, as the machine's own parts, a service their code calls being by `Machine`.
+        """Start lup on a declaration: a `Project`, or a repository's files, read with their layers as lup reads a repository's, each class of its modules made once and started, as the code of `repository`, each program its parts run stood in for as `programs` scripts it; where `machine`, as the machine's own parts, a service their code calls being by `Machine`.
 
         `secrets` holds the value of each secret a class holds, by its name;
         left out, each is drawn. Raise `ProjectError` where it doesn't load or
         resolve, or where a secret a class holds isn't given, as lup's start
         does. What it started is stopped once the promise ends.
         """
+
+    @abstractmethod
+    def project(self) -> Project:
+        """Return the project whose gate checks this promise, as its gate loads its declaration: what a promise about every project checks (`@lup.promise(every_project=True)`)."""
 
     @abstractmethod
     def any[T](self, kind: type[T]) -> T:

@@ -61,6 +61,12 @@ class PromiseDoor(Door):
     called: ClassVar[str] = "a promise"
     default: ClassVar[list[type[Party]]] = [Testing]
 
+    every_project: bool = False
+    """Whether it's about whichever project's gate checks it, over that
+    project's declaration (`Testing.project`), so every project selecting its
+    module checks it, rather than the gate of the module's own repository
+    alone."""
+
     @override
     def shaped(self, function: Function) -> None:
         """Raise `DoorError` where `function` can't be a promise: a law takes a step and isn't async, a scenario takes the harness alone and is.
@@ -151,16 +157,23 @@ def promise[S, V: BaseModel, **P](
 def promise[S, **P](
     method: Callable[Concatenate[S, Testing, P], Awaitable[None]], /
 ) -> Served[S, Concatenate[Testing, P], Awaitable[None]]: ...
+@overload
+def promise(*, every_project: bool) -> PromiseDoor: ...
 def promise[S, R: Awaitable[None] | bool, **P](
-    method: Callable[Concatenate[S, P], R], /
-) -> Served[S, P, R]:
-    """Make a method a promise: its docstring says what someone can count on, and its body checks it.
+    method: Callable[Concatenate[S, P], R] | None = None,
+    /,
+    *,
+    every_project: bool = False,
+) -> Served[S, P, R] | PromiseDoor:
+    """Make a method a promise: its docstring says what someone can count on, and its body checks it; given no method, the door, to put on one.
 
     A law, `def name(self, step: Step[State]) -> bool`, says whether it holds
     over one step, and the harness checks it after every step of every run; a
     scenario, `async def name(self, by: Testing) -> None`, tells a story
     through the harness, asserting, and draws what it explores from it
     (`by.any(Kind)`). A run that breaks either is shrunk to the smallest that
-    does.
+    does. `every_project` makes it about whichever project's gate checks it
+    (`by.project()`), so every project selecting its module checks it.
     """
-    return Served(method, PromiseDoor())
+    door = PromiseDoor(every_project=every_project)
+    return door if method is None else Served(method, door)

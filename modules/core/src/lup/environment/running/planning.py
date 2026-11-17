@@ -1,20 +1,23 @@
 """Planning a declaration: loading it where its code may run, and saying what the program on the operator's machine reads of it.
 
-The plan is each part of each module with what it holds and the doors it
-serves, the tools a session is told of, and the files loading the declaration
-imported, relative to the project's root (`lup/running/README.md`, *The plan*).
+The plan is each module with its one sentence, each part of each module with
+what it holds and the doors it serves, each with what it takes, the tools a
+session is told of, and the files loading the declaration imported, relative
+to the project's root (`lup/running/README.md`, *The plan*).
 """
 
+import inspect
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lup.doors.action import ActionDoor
 from lup.doors.command import CommandDoor
+from lup.doors.door import is_model
 from lup.doors.service import ServiceDoor
 from lup.doors.tool import ToolDoor
 from lup.environment.declaration import Resolved, load, resolve
-from lup.running.plan import Doorway, PartPlan, Plan
+from lup.running.plan import Doorway, ModulePlan, PartPlan, Plan
+from lup.shell.view import ViewDoor
 
 if TYPE_CHECKING:
     from lup.environment.doors import Entry, Serves
@@ -27,25 +30,43 @@ def planned(root: Path, declaration: Path) -> Plan:
     """
     resolved = resolve(load(root / declaration))
     loaded = dict.fromkeys([str(declaration), *files(root)])
-    return plan_of(resolved, sorted(loaded))
+    return plan_of(resolved, sorted(loaded), root)
 
 
-def plan_of(resolved: Resolved, loaded: list[str]) -> Plan:
-    """Return the plan of a declaration resolved, which loading imported `loaded`."""
+def plan_of(resolved: Resolved, loaded: list[str], root: Path | None = None) -> Plan:
+    """Return the plan of a declaration resolved, which loading imported `loaded`, each part's source read relative to `root`, where one is given."""
     entries = resolved.doors.entries()
     return Plan(
-        parts=[part_plan(each, entries) for each in resolved.doors.served],
+        modules=[
+            ModulePlan(name=each.name, description=each.sentence())
+            for each in resolved.modules
+        ],
+        parts=[part_plan(each, entries, root) for each in resolved.doors.served],
         tools=resolved.doors.tools(),
         files=loaded,
     )
 
 
-def part_plan(serves: Serves, entries: list[Entry]) -> PartPlan:
-    """Return one part's plan: what it holds, and each method it serves behind a door a party calls."""
+def source_of(part: type, root: Path | None) -> str | None:
+    """Return the file `part` is defined in, relative to `root`; none where it's outside it, or it's defined where no file is, as in a declaration read from its text."""
+    try:
+        found = inspect.getsourcefile(part)
+    except TypeError:
+        return None
+    if found is None or root is None:
+        return None
+    path = Path(found).resolve()
+    base = root.resolve()
+    return path.relative_to(base).as_posix() if path.is_relative_to(base) else None
+
+
+def part_plan(serves: Serves, entries: list[Entry], root: Path | None) -> PartPlan:
+    """Return one part's plan: what it holds, the file it's defined in, and each method it serves behind a door a party calls."""
     return PartPlan(
         module=serves.module.name,
         part=serves.part.__name__,
         holds=serves.part.holds(),
+        source=source_of(serves.part, root),
         doorways=[
             way
             for entry in entries
@@ -61,16 +82,20 @@ def doorway(entry: Entry) -> Doorway | None:
             door = "tool"
         case ServiceDoor():
             door = "service"
-        case ActionDoor():
-            door = "action"
         case CommandDoor():
             door = "command"
+        case ViewDoor():
+            door = "view"
         case _:
             return None
+    taken = entry.method.taken
+    model = taken.one()
     return Doorway(
         door=door,
         name=entry.name,
         parties=[each.__name__ for each in entry.method.parties()],
+        description=taken.description,
+        input_schema=model.model_json_schema() if is_model(model) else {},
     )
 
 
