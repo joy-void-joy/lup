@@ -15,7 +15,8 @@ class ShellRoom(Module):
 
     - pnpm installs the page's packages from its lockfile, held to the package
       age its settings keep.
-    - Chromium, driven headless, shows an agent the page they build; a virtual
+    - Chromium and Firefox, driven headless, show an agent the page they
+      build, in each engine a page has to work in; a virtual
       display and `xdotool` give a windowed Chromium real key events, which
       headless Chromium never sees.
     - The gate's `page` step installs the page's packages from its lockfile,
@@ -29,6 +30,10 @@ class ShellRoom(Module):
             name="pnpm", why="installs the dashboard page's packages from its lockfile"
         ),
         Package(name="chromium", why="shows an agent the dashboard's page they build"),
+        Package(
+            name="firefox",
+            why="the dashboard's page measured and looked at in the browser the operator uses, beside Chromium",
+        ),
         Package(
             name="xorg-server-xvfb",
             why="`Xvfb`, a virtual display for a windowed Chromium to take key events",
