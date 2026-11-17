@@ -16,7 +16,6 @@ from hypothesis import HealthCheck, given, seed, settings
 from hypothesis import strategies as st
 
 from lup.declaration.project import Project
-from lup.doors.action import ActionDoor
 from lup.doors.command import CommandDoor
 from lup.doors.door import DoorError
 from lup.doors.service import ServiceDoor
@@ -25,7 +24,6 @@ from lup.environment.doors import Entry
 from lup.environment.testing.harness import Harness, Run, promises, watched
 from lup.environment.testing.simulation import Simulation
 from lup.testing.harness import (
-    Acted,
     Broken,
     Kept,
     Ran,
@@ -168,12 +166,12 @@ def checked(
 
 
 def calls(doors: Doors) -> SearchStrategy[Call]:
-    """Return every call a party could make through the doors `doors` serve: each tool, action, command and service, given a value of what it takes, by a party of any its doors name."""
+    """Return every call a party could make through the doors `doors` serve: each tool, command and service, given a value of what it takes, by a party of any its doors name."""
     entries = [
         entry
         for entry in doors.entries()
         if isinstance(
-            entry.method.door, ToolDoor | ActionDoor | CommandDoor | ServiceDoor
+            entry.method.door, ToolDoor | CommandDoor | ServiceDoor
         )
     ]
     if not entries:
@@ -194,10 +192,6 @@ def call(entry: Entry, by: SearchStrategy[Party]) -> SearchStrategy[Call]:
         match door:
             case ToolDoor():
                 return ToolCall(tool=entry.name, arguments=sent(value), by=party)
-            case ActionDoor():
-                return Acted(
-                    module=module, action=entry.name, given=sent(value), by=party
-                )
             case ServiceDoor():
                 return Served(service=entry.name, given=sent(value), by=party)
             case _:

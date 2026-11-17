@@ -26,7 +26,6 @@ from lup.doors.tool import ToolDoor, ToolSpec
 from lup.environment.declaration import load, resolve
 from lup.environment.doors import Doors, Entry, Running, Serves
 from lup.testing.harness import (
-    Acted,
     Broken,
     BrokenLawError,
     Call,
@@ -295,8 +294,6 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
         match call:
             case ToolCall(tool=tool, arguments=arguments, by=by):
                 return await self.running.call(tool, arguments, by)
-            case Acted(module=module, action=action, given=given, by=by):
-                return await self.running.act(module, action, given, by)
             case Ran(module=module, command=command, arguments=arguments, by=by):
                 return await self.running.run(module, command, arguments, by)
             case Served(service=service, given=given, by=by):

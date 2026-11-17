@@ -57,16 +57,6 @@ class ToolCall(Model):
     by: SerializeAsAny[Party]
 
 
-class Acted(Model):
-    """An action run on what a view offers, by its module's name and its own."""
-
-    door: Literal["action"] = "action"
-    module: str
-    action: str
-    given: JsonValue
-    by: SerializeAsAny[Party]
-
-
 class Ran(Model):
     """A command run, by its module's name and its own."""
 
@@ -86,7 +76,7 @@ class Served(Model):
     by: SerializeAsAny[Party]
 
 
-type Call = Annotated[ToolCall | Acted | Ran | Served, Field(discriminator="door")]
+type Call = Annotated[ToolCall | Ran | Served, Field(discriminator="door")]
 """One call through a door, as a party makes it: which door, what was sent, and
 by whom."""
 
@@ -197,17 +187,10 @@ class Started(Model, arbitrary_types_allowed=True):
         call = ToolCall(tool=tool, arguments=sent(arguments), by=by)
         return await self.doors.answered(call)
 
-    async def act(
-        self, module: str, action: str, given: Sent, by: Party
-    ) -> Accepted | Refused:
-        """Run the action `action` of the module named `module` on `given`, as `by` does, and say what came of it."""
-        call = Acted(module=module, action=action, given=sent(given), by=by)
-        return await self.doors.answered(call)
-
     async def run(
         self, module: str, command: str, arguments: Sent, by: Party
     ) -> Accepted | Refused:
-        """Run the command `command` of the module named `module` with `arguments`, as `by` does, and say what came of it."""
+        """Run the command `command` of the module named `module` with `arguments`, as `by` does, from the command line or the dashboard's key, and say what came of it."""
         call = Ran(module=module, command=command, arguments=sent(arguments), by=by)
         return await self.doors.answered(call)
 

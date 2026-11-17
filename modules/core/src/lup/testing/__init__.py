@@ -12,7 +12,6 @@ promises is the environment's (`lup.environment.testing`). Its reasons are in
 from lup.doors.door import Accepted, Refused, Rejection
 from lup.doors.tool import ToolSpec
 from lup.testing.harness import (
-    Acted,
     Broken,
     BrokenLawError,
     Call,
@@ -29,7 +28,6 @@ from lup.testing.raising import Raised, raises
 
 __all__ = [
     "Accepted",
-    "Acted",
     "Broken",
     "BrokenLawError",
     "Call",

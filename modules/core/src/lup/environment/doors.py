@@ -26,7 +26,6 @@ from pydantic import BaseModel, JsonValue, PydanticUserError, ValidationError
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import listed
 from lup.declaration.module import Module
-from lup.doors.action import ActionDoor
 from lup.doors.command import CommandDoor
 from lup.doors.door import (
     Accepted,
@@ -152,7 +151,6 @@ class Doors(Model):
             raise ProjectError(str(wrong), about=wrong.about) from wrong
         distinct("A tool's name", doors.keyed(ToolDoor))
         distinct("A service's name", doors.keyed(ServiceDoor))
-        distinct("An action's name in its module", doors.keyed(ActionDoor, scoped=True))
         distinct(
             "A command's name in its module", doors.keyed(CommandDoor, scoped=True)
         )
@@ -333,21 +331,26 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
             return refused(given, f"no module serves a service `{service}`")
         return await self.answered(found[0], given, by)
 
-    async def act(
-        self, module: str, action: str, given: JsonValue, by: Party
-    ) -> Accepted | Refused:
-        """Run the action `action` of the module named `module` on `given`, called by `by`, and say what came of it."""
-        return await self.reached(ActionDoor, module, action, given, by)
-
     async def run(
         self, module: str, command: str, arguments: JsonValue, by: Party
     ) -> Accepted | Refused:
         """Run the command `command` of the module named `module` with `arguments`, called by `by`, and say what came of it.
 
         A command takes everything as arguments: one it needs and isn't given
-        is refused at once, naming it, never asked for.
+        is refused at once, naming it, never asked for. One taking every mark of
+        a send, as the dashboard gives it, is given what the command line sends
+        as one mark.
         """
-        return await self.reached(CommandDoor, module, command, arguments, by)
+        within = self.doors.through(CommandDoor)
+        gathers = any(
+            entry.serves.module.name == module
+            and entry.name == command
+            and entry.method.taken.gathers()
+            for entry in within
+        )
+        one: list[JsonValue] = [arguments]
+        given: JsonValue = one if gathers and not isinstance(arguments, list) else arguments
+        return await self.reached(CommandDoor, module, command, given, by)
 
     async def reached(
         self, door: type[Door], module: str, name: str, given: JsonValue, by: Party
