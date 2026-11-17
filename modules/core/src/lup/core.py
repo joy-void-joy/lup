@@ -4,6 +4,8 @@ from lup.declaration.module import Module
 from lup.declaration.promises import DeclarationPromises
 from lup.doors.parts import Parts
 from lup.doors.promises import DoorsPromises, PartsPromises
+from lup.inbox.part import Inboxes, Speaking
+from lup.inbox.promises import InboxPromises
 from lup.inbox.records import EDGES, NODES
 from lup.running.promises import RunningPromises
 from lup.store.promises import StorePromises
@@ -16,7 +18,7 @@ class Core(Module):
 
     A project changes it with `.edit` as it would any module, or puts another in
     its place with `.replace`, but can't drop it: resolving a selection without a
-    module named `core` fails. What it serves is its submodules' promises.
+    module named `core` fails. What it serves is its submodules' parts and promises: the inbox's.
     """
 
     name = "core"
@@ -27,6 +29,9 @@ class Core(Module):
         RunningPromises,
         TestingPromises,
         StorePromises,
+        Inboxes,
+        Speaking,
+        InboxPromises,
     )
     kinds: Recorded = Recorded.of(*NODES, *EDGES)
     """The kinds of record the core's submodules keep in the store: the inbox's."""

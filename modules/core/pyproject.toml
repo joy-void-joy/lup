@@ -8,6 +8,9 @@ version = "0.0.0"
 description = "lup's core: the declaration's grammar, the doors a module is reached through, and the submodules every project has."
 requires-python = ">=3.15"
 dependencies = [
+    # Bounds on a field's value, which pydantic checks and hypothesis draws
+    # within wherever the field's type nests them: pydantic's own dependency.
+    "annotated-types>=0.7",
     "pydantic>=2.14",
     "pydantic-settings>=2.11",
     # The store's database: its tables declared once in Python and its queries

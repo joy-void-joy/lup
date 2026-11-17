@@ -7,7 +7,9 @@ done with it are edges, so where something stands is read from them, never
 stored (`README.md` here, *What's kept*).
 """
 
-from typing import ClassVar, Literal
+from typing import Annotated, ClassVar, Literal
+
+from annotated_types import Ge, Lt
 
 from lup.store.records import Edge, Kinds, Name, Node
 from lup.types import Model
@@ -144,7 +146,7 @@ type Verdict = Literal["leaning", "undecided", "leave open"]
 class Ruling(Model):
     """The operator's word on one decision of a question, by its number from 1."""
 
-    number: int
+    number: Annotated[int, Ge(1), Lt(2**63)]
     verdict: Verdict | None = None
     comment: str = ""
 

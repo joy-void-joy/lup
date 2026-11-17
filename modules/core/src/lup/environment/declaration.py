@@ -151,10 +151,11 @@ def cycle(module: type[Module], trail: list[type[Module]]) -> list[str] | None:
 
 def kept(modules: list[Module]) -> Kinds:
     """Return the kinds of record `modules` keep in the store; raise `ProjectError` where two modules declare one kind, naming both."""
+    held = {module.name: module.held(Recorded) for module in modules}
     owners = {
-        kind: [module.name for module in modules if kind in module.held(Recorded)]
-        for module in modules
-        for kind in module.held(Recorded)
+        kind: [name for name, kinds in held.items() if kind in kinds]
+        for kinds in held.values()
+        for kind in kinds
     }
     shared = {kind: names for kind, names in owners.items() if len(names) > 1}
     if shared:

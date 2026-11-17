@@ -72,9 +72,9 @@ class Record(Model, extra="allow"):
     """Its kind's name, namespaced by the module declaring it: `inbox:concern`."""
     repository: str
     """The repository it's of, by the name lup knows it by."""
-    by: Name | None
-    """The party who wrote it, by its name in the repository; none where lup
-    wrote it, of its own accord."""
+    by: int | None
+    """The key of the node of the party who wrote it, which stays as they're
+    renamed; none where lup wrote it, of its own accord."""
     at: AwareDatetime
     """When it was written: for a node, this version of it."""
 

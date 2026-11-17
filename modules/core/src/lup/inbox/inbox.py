@@ -46,17 +46,16 @@ from lup.inbox.records import (
     Withdrawn,
     WorksIn,
 )
+from lup.inbox.said import Comments, ConcernSaid, Inboxed, Placed, Telling
 from lup.store.database import Database
 from lup.store.errors import StoreError
-from lup.store.records import Edge, Node
+from lup.store.records import Edge, Node, named
 from lup.types import Model
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from pydantic import JsonValue
-
-    from lup.inbox.said import ConcernSaid
 
 
 class InboxError(StoreError):
@@ -113,7 +112,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
             kind.model_validate(
                 {
                     "repository": self.repository,
-                    "by": None if by is None else by.name,
+                    "by": None if by is None else by.key,
                     "at": self.now(),
                     "target": target.key,
                     "source": None if source is None else source.key,
@@ -142,8 +141,14 @@ class Inbox(Model, arbitrary_types_allowed=True):
         """Return the agent lup knows by the id `known_as`, under `spawner` where they have one: made the first time, and named `name` where a name is given, renamed where it changed.
 
         An agent lup hasn't named yet, as one whose session hasn't said its
-        name, has none, and is found by their id.
+        name, has none, and is found by their id. Raise `InboxError` where
+        `name` isn't one a node can take, or another node holds it.
         """
+        if name is not None:
+            try:
+                named(name)
+            except ValueError as wrong:
+                raise InboxError(str(wrong), about=[name]) from wrong
         known = next(
             (
                 each
@@ -185,6 +190,10 @@ class Inbox(Model, arbitrary_types_allowed=True):
         A path's first segments may name a party there already, an agent among
         them, which the piles below go under.
         """
+        try:
+            named(path)
+        except ValueError as wrong:
+            raise InboxError(str(wrong), about=[path]) from wrong
         found = self.database.named(self.repository, path)
         if isinstance(found, PileRecord):
             return found
@@ -198,7 +207,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
         made = self.database.kept(
             PileRecord(
                 repository=self.repository,
-                by=None if by is None else by.name,
+                by=None if by is None else by.key,
                 at=self.now(),
                 name=path,
             )
@@ -261,7 +270,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
         concern = self.database.kept(
             kind(
                 repository=self.repository,
-                by=by.name,
+                by=by.key,
                 at=self.now(),
                 title=title,
                 name=name or self.free(slug(title)),
@@ -278,7 +287,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
         message = self.database.kept(
             Message(
                 repository=self.repository,
-                by=by.name,
+                by=by.key,
                 at=self.now(),
                 to=[self.operator().key],
                 text=words,
@@ -340,6 +349,15 @@ class Inbox(Model, arbitrary_types_allowed=True):
         if cited is None:
             return self.working_in(agent)
         return self.concern(cited)
+
+    def by(self, node: Node) -> PartyRecord:
+        """Return the party who wrote `node`: the operator where lup did, of its own accord, since lup acts for them."""
+        found = None if node.by is None else self.database.found(node.by)
+        return found if isinstance(found, PartyRecord) else self.operator()
+
+    def writer(self, node: Node) -> str:
+        """Name who wrote `node`, as `@` cites them, or `lup`."""
+        return "lup" if node.by is None else self.called(self.by(node))
 
     def called(self, node: Node) -> str:
         """Name `node` as `@` cites it: by its name where it has one, else by its number, else by its key."""
@@ -412,7 +430,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
                     ).strip()
                 case Item():
                     return (
-                        f"{self.called(found)} from {found.by or 'lup'}: {found.text}"
+                        f"{self.called(found)} from {self.writer(found)}: {found.text}"
                     )
                 case _:
                     return self.called(found)
@@ -439,7 +457,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
     def rewritten(self, by: PartyRecord, concern: Concern, body: str) -> Concern:
         """Rewrite `concern`'s body whole, as `by` understands it, its body before kept as an earlier version."""
         return self.database.kept(
-            concern.model_copy(update={"body": body, "by": by.name, "at": self.now()})
+            concern.model_copy(update={"body": body, "by": by.key, "at": self.now()})
         )
 
     def moved(
@@ -468,14 +486,14 @@ class Inbox(Model, arbitrary_types_allowed=True):
         return [
             each
             for each in self.database.nodes(self.repository, Item)
-            if each.by == party.name or party.key in each.to
+            if each.by == party.key or party.key in each.to
         ]
 
     def is_cleared(self, item: Item) -> bool:
         """Say whether the operator cleared `item`: itself, the concern it's in, or the buffer of a party who wrote it or was for it, with nothing newer there since."""
         places = [item.key, *item.to]
         if item.by is not None:
-            places.append(self.party(item.by).key)
+            places.append(item.by)
         within = self.database.drawn_from(item.key, In, current=True)
         places.extend(each.target for each in within)
         return any(
@@ -570,7 +588,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
         message = self.database.kept(
             Message(
                 repository=self.repository,
-                by=by.name,
+                by=by.key,
                 at=self.now(),
                 to=[each.key for each in to],
                 text=text,
@@ -592,7 +610,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
         question = self.database.kept(
             Question(
                 repository=self.repository,
-                by=by.name,
+                by=by.key,
                 at=self.now(),
                 to=[self.operator().key],
                 text=text,
@@ -605,11 +623,11 @@ class Inbox(Model, arbitrary_types_allowed=True):
 
     def answered(self, question: Question, rulings: list[Ruling], text: str) -> Answer:
         """Answer `question`, for the operator: a ruling on each decision and their words, told to whoever asked."""
-        asker = self.party(question.by or "operator")
+        asker = self.by(question)
         answer = self.database.kept(
             Answer(
                 repository=self.repository,
-                by="operator",
+                by=self.operator().key,
                 at=self.now(),
                 to=[asker.key],
                 text=text,
@@ -624,12 +642,12 @@ class Inbox(Model, arbitrary_types_allowed=True):
     ) -> Comment:
         """Comment on `on`, or a part of it, for the operator: told to whoever wrote it, and to each it was for where an agent wrote it to another."""
         operator = self.operator()
-        writer = [] if on.by is None or on.by == "operator" else [self.party(on.by).key]
+        writer = [] if on.by is None or on.by == operator.key else [on.by]
         readers = [each for each in on.to if each != operator.key]
         comment = self.database.kept(
             Comment(
                 repository=self.repository,
-                by="operator",
+                by=self.operator().key,
                 at=self.now(),
                 to=list(dict.fromkeys([*writer, *readers])),
                 text=text,
@@ -648,7 +666,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
         return self.database.kept(
             Comment(
                 repository=self.repository,
-                by="operator",
+                by=self.operator().key,
                 at=self.now(),
                 to=[party.key],
                 text=text,
@@ -660,7 +678,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
         return self.database.kept(
             Felt(
                 repository=self.repository,
-                by=by.name,
+                by=by.key,
                 at=self.now(),
                 to=[self.operator().key],
                 text=text,
@@ -672,7 +690,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
         return self.database.kept(
             Blocked(
                 repository=self.repository,
-                by=by.name,
+                by=by.key,
                 at=self.now(),
                 to=[self.operator().key],
                 text=text,
@@ -684,7 +702,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
         return self.database.kept(
             Stopped(
                 repository=self.repository,
-                by=by.name,
+                by=by.key,
                 at=self.now(),
                 to=[self.operator().key],
                 text=text,
@@ -696,7 +714,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
         end = self.database.kept(
             TurnEnd(
                 repository=self.repository,
-                by=by.name,
+                by=by.key,
                 at=self.now(),
                 to=[self.operator().key],
                 text=text,
@@ -706,18 +724,18 @@ class Inbox(Model, arbitrary_types_allowed=True):
         ends = [
             each
             for each in self.database.nodes(self.repository, TurnEnd)
-            if each.by == by.name and each.key != end.key
+            if each.by == by.key and each.key != end.key
         ]
         since = ends[-1].key if ends else 0
         for told in self.told_to(by):
-            if told.key > since and told.by == operator.name:
+            if told.key > since and told.by == operator.key:
                 self.edge(Answers, told, end, by)
         return end
 
     def withdrawn(self, by: AgentRecord, item: Item, why: str) -> None:
         """Take back `by`'s `item`, saying why: it waits on nobody after."""
-        if item.by != by.name:
-            message = f"@{item.number} is {item.by}'s, not {by.name}'s, to withdraw"
+        if item.by != by.key:
+            message = f"@{item.number} isn't {self.called(by)}'s to withdraw"
             raise InboxError(message, about=[str(item.number)])
         self.edge(Withdrawn, item, by, by, why=why)
 
@@ -769,7 +787,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
         return [
             each
             for each in self.database.nodes(self.repository, Item)
-            if each.by != "operator"
+            if each.by != self.operator().key
             and not self.database.drawn_to(each.key, Shown)
             and not self.is_cleared(each)
         ]
@@ -801,6 +819,61 @@ class Inbox(Model, arbitrary_types_allowed=True):
             for each in self.database.nodes(self.repository, Item)
             if party.key in each.to and not self.told(party, each)
         ]
+
+    def taken(self, party: PartyRecord) -> list[Item]:
+        """Return each item for `party` not yet told them, and say it's told, in one transaction: what reaches them at their next call, told once."""
+        with self.database.writing():
+            untold = self.untold(party)
+            self.tell(party, untold)
+        return untold
+
+    def inboxed(self) -> Inboxed:
+        """Read the repository's inbox as data: where each concern stands, what waits on the operator, what's new to them, what's been told, and the operator's comments."""
+        with self.database.together():
+            concerns = [
+                Placed(
+                    number=each.number or 0,
+                    name=each.name,
+                    title=each.title,
+                    kind=each.kind,
+                    holder=self.called((standing := self.standing(each)).holder),
+                    left_by=None
+                    if standing.left_by is None
+                    else self.called(standing.left_by),
+                    said=len(self.said_in(each)),
+                    done=standing.done is not None,
+                    cleared=standing.cleared,
+                    declined=standing.declined is not None,
+                )
+                for each in self.database.nodes(self.repository, Concern)
+            ]
+            items = self.database.nodes(self.repository, Item)
+            told = [
+                Telling(
+                    item=item.number or 0,
+                    party=self.called(party),
+                    times=sum(
+                        1
+                        for edge in self.database.drawn_to(item.key, Told)
+                        if edge.source == party.key
+                    ),
+                )
+                for item in items
+                for key in item.to
+                if isinstance(party := self.database.found(key), PartyRecord)
+            ]
+            return Inboxed(
+                repository=self.repository,
+                concerns=concerns,
+                waiting=[each.number or 0 for each in self.waits_on_operator()],
+                new=[each.number or 0 for each in self.new_to_operator()],
+                told=told,
+                comments=[
+                    Comments(item=each.number or 0, reaches=len(each.to))
+                    for each in items
+                    if isinstance(each, Comment)
+                ],
+            )
 
     def tell(self, party: PartyRecord, items: list[Item]) -> None:
         """Say `items` were told to `party`: each is told once, never again."""

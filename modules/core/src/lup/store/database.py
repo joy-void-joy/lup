@@ -43,6 +43,7 @@ from sqlalchemy import (
     Text,
     create_engine,
     event,
+    func,
     insert,
     select,
     update,
@@ -216,9 +217,10 @@ class Database(Model, arbitrary_types_allowed=True):
         return cls(connection=connection, kinds=kinds)
 
     def close(self) -> None:
-        """Close the database; the store can't be used after."""
+        """Close the database, and what opened it; the store can't be used after."""
         with self.lock:
             self.connection.close()
+            self.connection.engine.dispose()
 
     @contextmanager
     def together(self) -> Generator[None]:
@@ -284,8 +286,10 @@ class Database(Model, arbitrary_types_allowed=True):
             raise StoreError(message)
         return found
 
-    def numbered(self, number: int) -> Node | None:
-        """Return the node cited `@number` as it stands; none where none is."""
+    def numbered(self, number: int, beyond: int = 2**63) -> Node | None:
+        """Return the node cited `@number` as it stands; none where none is, a number from `beyond`, past what SQLite keeps as an integer, among them."""
+        if not 1 <= number < beyond:
+            return None
         return self.one(latest().where(NODES.c.number == number))
 
     def named(self, repository: str, name: str) -> Node | None:
@@ -293,6 +297,16 @@ class Database(Model, arbitrary_types_allowed=True):
         return self.one(
             latest().where(NODES.c.repository == repository, NODES.c.name == name)
         )
+
+    def repositories(self) -> list[str]:
+        """Return every repository the store holds a node of, in the order first kept."""
+        query = (
+            select(NODES.c.repository)
+            .group_by(NODES.c.repository)
+            .order_by(func.min(NODES.c.key))
+        )
+        with self.writing() as database:
+            return list(database.execute(query).scalars())
 
     def versions(self, key: int) -> list[Node]:
         """Return every version of node `key`, oldest first; none where the store holds none."""

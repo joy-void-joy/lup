@@ -5,10 +5,15 @@ project's part hands `Inboxes` as `Spoken`, with lup's id for them; the
 operator's commands take what they do (`Answering`, `Clearing`…).
 """
 
-from typing import Literal
+from typing import Annotated, Literal
+
+from annotated_types import Ge, Lt
 
 from lup.inbox.records import FRICTIONS, Decision, Ruling, Tone
 from lup.types import Model
+
+type Cited = Annotated[int, Ge(1), Lt(2**63)]
+"""A number something is cited by, `@12`: from 1, and within what the store keeps a number as. Its bounds are annotated-types', which pydantic checks and hypothesis draws within, wherever the number sits."""
 
 # What agents say
 
@@ -39,7 +44,7 @@ class ConcernSaid(Model):
     """Take it, and work in it."""
     hand: str | None = None
     """Pass it on to another agent, by their name: it's theirs after."""
-    move: list[int] = []
+    move: list[Cited] = []
     """Items to put in it, by their numbers."""
     done: str | None = None
     """Say it's done, for the operator to clear: what's done, what isn't, and what to try."""
@@ -92,14 +97,14 @@ class Words(Model):
 class WithdrawSaid(Model):
     """An item an agent sent the operator, taken back, and why."""
 
-    item: int
+    item: Cited
     why: str
 
 
 class Reading(Model):
     """What of the inbox to read: one item or concern whole, by its number, or what stands."""
 
-    number: int | None = None
+    number: Cited | None = None
 
 
 type Spoke = Literal["how it felt", "blocked", "stop", "turn's end"]
@@ -119,7 +124,7 @@ class Uttered(Model):
 class Answering(Model):
     """The operator's answer to a question: a ruling on each decision, and their words."""
 
-    question: int
+    question: Cited
     rulings: list[Ruling] = []
     text: str = ""
 
@@ -127,7 +132,7 @@ class Answering(Model):
 class Commenting(Model):
     """The operator's words on an item, or a part of it."""
 
-    item: int
+    item: Cited
     text: str
     part: int | None = None
     quote: str = ""
@@ -151,7 +156,7 @@ class Clearing(Model):
 class Declining(Model):
     """A concern the operator declines, and why."""
 
-    concern: int
+    concern: Cited
     why: str = ""
 
 
@@ -160,6 +165,14 @@ class Piling(Model):
 
     repository: str
     path: str
+
+
+class Naming(Model):
+    """An agent named, as their session says its name, under the agent who spawned them where one did, each by lup's id for them."""
+
+    agent: str
+    name: str
+    spawner: str | None = None
 
 
 class Ending(Model):
@@ -183,10 +196,12 @@ class Placed(Model):
     title: str
     kind: str
     """Its kind: `inbox:concern`, or `inbox:friction`."""
-    holder: str | None
-    """Who holds it, by their name; none for an agent lup hasn't named yet."""
+    holder: str
+    """Who holds it, as `@` cites them: `@frictions`, `@no-agent`, an agent's name."""
     left_by: str | None = None
-    """The ended agent who held it, where it reads as in `no-agent`."""
+    """The ended agent who held it, as `@` cites them, where it reads as in `no-agent`."""
+    said: int = 0
+    """How many items are in it."""
     done: bool = False
     cleared: bool = False
     declined: bool = False
@@ -210,6 +225,7 @@ class Comments(Model):
 class Inboxed(Model):
     """A repository's inbox, as data: where each concern stands, what waits on the operator, what's new to them, what's been told, and the operator's comments."""
 
+    repository: str
     concerns: list[Placed] = []
     waiting: list[int] = []
     """The numbers of what waits on the operator."""
@@ -232,3 +248,9 @@ class Told(Model):
     """What's told to an agent: each item for them not told before this, by its number, who wrote it, and its words."""
 
     items: list[ToldItem] = []
+
+
+class Everywhere(Model):
+    """Every repository's inbox the store holds, as data."""
+
+    inboxes: list[Inboxed] = []

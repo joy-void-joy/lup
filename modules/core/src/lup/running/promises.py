@@ -42,7 +42,7 @@ class Ledger(Part):
     """The courier's part holding nothing: it runs in the project's own container."""
 
     @lup.tool
-    async def note(self, note: Note) -> Noted:
+    async def jot(self, note: Note) -> Noted:
         """Note something."""
         return Noted(text=note.text)
 
@@ -121,7 +121,7 @@ class RunningPromises(Part):
     async def a_plan_routes_every_call_a_party_makes(self, by: Testing) -> None:
         """A plan names, for each method a party calls, its door, its name and who may call it, so the program routes a call without running the declaration; hooks and promises, which no party calls, aren't among them."""
         started = await by.started(couriered(), secrets={"key": by.any(str)})
-        noting = started.plan.serving("tool", "note")
+        noting = started.plan.serving("tool", "jot")
         assert noting is not None
         assert noting.part == "Ledger"
         sealing = started.plan.serving("service", "sealed")
@@ -145,7 +145,7 @@ class RunningPromises(Part):
         sent = {
             "format": 1,
             "kind": "tool",
-            "tool": "note",
+            "tool": "jot",
             "given": note.model_dump(mode="json"),
             "by": agent.model_dump(mode="json"),
         }
@@ -162,7 +162,7 @@ class RunningPromises(Part):
         started = await by.started(couriered(), secrets={"key": by.any(str)})
         call: dict[str, JsonValue] = {
             "kind": "tool",
-            "tool": "note",
+            "tool": "jot",
             "given": {"text": "x"},
             "by": {"party": "agent", "id": "a"},
         }

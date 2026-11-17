@@ -14,9 +14,9 @@ from typing import TYPE_CHECKING
 
 import lup
 from lup.doors.door import RefusedError
-from lup.doors.events import Starting
+from lup.doors.events import Stopping
 from lup.doors.parties import Agent, Code, Operator
-from lup.doors.parts import Part
+from lup.doors.parts import Data, Part
 from lup.inbox.inbox import Inbox, InboxError, first_line
 from lup.inbox.records import KINDS, Concern, Item, PileRecord, Question
 from lup.inbox.said import (
@@ -28,40 +28,56 @@ from lup.inbox.said import (
     ConcernSaid,
     Declining,
     Ending,
+    Everywhere,
     FrictionSaid,
+    Inboxed,
+    Naming,
     NoteSaid,
+    Nothing,
     Piling,
     Reading,
     SendSaid,
     Spoken,
+    Told,
+    ToldItem,
     Uttered,
     WithdrawSaid,
     Words,
 )
 from lup.store.database import Database
+from lup.store.errors import StoreError
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
+DATABASE = "store.sqlite3"
+"""The database's file, in the part's own directory."""
 
-class Inboxes(Part, approved=True):
+
+class Inboxes(Part, approved=True, shared=True):
     """The store's database and every repository's inbox kept in it, one for the machine: what's said and done goes through it."""
 
+    data: Data
+    """Where the database is kept, across restarts."""
     database: Database | None = None
-    """The database, opened as the part starts."""
+    """The database, opened the first time it's needed."""
 
-    @lup.on(Starting)
-    async def opened(self, starting: Starting) -> None:
-        """Open the database the inbox is kept in."""
-        del starting
-        self.database = Database.opened(":memory:", KINDS)
+    def opened(self) -> Database:
+        """Return the database the inbox is kept in, opening it the first time: before anything else of the part runs, whatever order its start and its first call come in."""
+        if self.database is None:
+            self.database = Database.opened(self.data.path / DATABASE, KINDS)
+        return self.database
+
+    @lup.on(Stopping)
+    async def closed(self, stopping: Stopping) -> None:
+        """Close the database."""
+        del stopping
+        if self.database is not None:
+            self.database.close()
 
     def inbox(self, repository: str) -> Inbox:
         """Return `repository`'s inbox."""
-        if self.database is None:
-            message = "the inbox's database isn't open: its part hasn't started"
-            raise RefusedError(message)
-        return Inbox(database=self.database, repository=repository)
+        return Inbox(database=self.opened(), repository=repository)
 
     # Agents' acts, called by their project's code
 
@@ -174,6 +190,52 @@ class Inboxes(Part, approved=True):
             return inbox.read(agent, given.said.number)
 
     @lup.service
+    async def standing(self, given: Nothing, by: Code) -> Inboxed:
+        """Read the repository's inbox as data, changing nothing."""
+        del given
+        return self.inbox(by.repository).inboxed()
+
+    @lup.tool(reads=True)
+    async def everywhere(self, nothing: Nothing) -> Everywhere:
+        """Read every repository's inbox as data.
+
+        Where each concern stands, what waits on the operator, what's new to
+        them, what's been told, and the operator's comments.
+        """
+        del nothing
+        return Everywhere(
+            inboxes=[
+                self.inbox(repository).inboxed()
+                for repository in self.opened().repositories()
+            ]
+        )
+
+    @lup.service
+    async def told(self, given: Ending, by: Code) -> Told:
+        """Tell an agent each item for them not told yet, once: what reaches them at their next call."""
+        inbox = self.inbox(by.repository)
+        items = inbox.taken(inbox.agent(given.agent))
+        return Told(
+            items=[
+                ToldItem(
+                    number=each.number or 0,
+                    by=inbox.writer(each),
+                    kind=each.kind,
+                    text=each.text,
+                )
+                for each in items
+            ]
+        )
+
+    @lup.service
+    async def agent_named(self, given: Naming, by: Code) -> None:
+        """Name an agent, as their session says its name, under the agent who spawned them where one did."""
+        inbox = self.inbox(by.repository)
+        spawner = None if given.spawner is None else inbox.agent(given.spawner)
+        with refusing():
+            inbox.agent(given.agent, given.name, spawner)
+
+    @lup.service
     async def agent_ended(self, given: Ending, by: Code) -> None:
         """Say an agent's session ended: what they held reads as in `no-agent` until they start again."""
         inbox = self.inbox(by.repository)
@@ -249,10 +311,7 @@ class Inboxes(Part, approved=True):
 
     def numbered[N: Item | Concern](self, number: int, kind: type[N]) -> N:
         """Return the node cited `@number`, as `kind`; raise `InboxError` where none is."""
-        if self.database is None:
-            message = "the inbox's database isn't open: its part hasn't started"
-            raise InboxError(message)
-        found = self.database.numbered(number)
+        found = self.opened().numbered(number)
         if not isinstance(found, kind):
             message = f"@{number} is no {kind.__name__.lower()}"
             raise InboxError(message, about=[str(number)])
@@ -365,5 +424,5 @@ def refusing() -> Generator[None]:
     """Turn what the inbox can't do into a refusal of the call, said to whoever called it, rather than an error of lup's."""
     try:
         yield
-    except InboxError as refused:
+    except StoreError as refused:
         raise RefusedError(str(refused)) from refused
