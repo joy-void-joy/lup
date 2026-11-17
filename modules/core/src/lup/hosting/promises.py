@@ -1352,3 +1352,19 @@ class WithoutPromises(Part):
         await started.stopped()
         stopped = [each[-1] for each in podman_ran(started, "stop")]
         assert stopped == containers
+
+    @lup.promise
+    async def the_operator_sees_what_the_machine_runs(self, by: Testing) -> None:
+        """The operator can ask what the machine runs: each project open with the commit it runs and its containers, each registered and not open; an agent or a project's code can't."""
+        opened = by.any(bool)
+        started = await started_approved(by, OPENING_PODMAN)
+        await started.run("hosting", "register", Opens().given(), lup.Operator())
+        if opened:
+            await started.serve("opened", Opens().given(), Machine())
+        status = await started.run("hosting", "status", {}, lup.Operator())
+        refused = await started.run("hosting", "status", {}, by.any(Agent))
+        assert isinstance(status, Accepted)
+        assert isinstance(refused, Refused)
+        said = status.answer()
+        assert ("harmon runs" in said) == opened
+        assert ("harmon is registered, and not open" in said) != opened

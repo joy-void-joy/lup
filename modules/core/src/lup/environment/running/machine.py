@@ -133,8 +133,11 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
     binder = Binder(running=running, limit=limit)
     carrying.listens = binder
     hosting = plan_of(resolve(load(host.root / host.declaration)), [], host.root)
+    unrun = [each.part for each in running.unrun]
     machine = [
-        each for each in hosting.parts if each.holds.machine or each.holds.shared
+        each
+        for each in hosting.parts
+        if (each.holds.machine or each.holds.shared) and each.named() not in unrun
     ]
     carrying.hosted = Plan(parts=machine, tools=hosting.tools)
     try:
