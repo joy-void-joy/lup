@@ -6,7 +6,7 @@ layers a module's parts are written in), and the doors a module's methods are
 reached through (`lup.tool`, `lup.service`, `lup.action`, `lup.command`,
 `lup.on`, `lup.promise`), with the parties a method's `by` names, lup's events,
 and the parts a module is made of (`Part`, listed in its `Parts`, holding its
-`Secret`s and its `Data`); and the shell's view door (`lup.view`), the blocks a
+`Secret`s, its `Data` and what lasts while it runs, its `Runtime`); and the shell's view door (`lup.view`), the blocks a
 view answers, and the kinds a module declares for them (`Tones`, `Folds`,
 `Marks`). The core's environment side
 (`lup.environment`) isn't among it, and nothing here imports it.
@@ -32,6 +32,7 @@ from lup.doors.parts import (
     Parts,
     Program,
     ProgramError,
+    Runtime,
     Secret,
 )
 from lup.doors.service import UncarriedError, service
@@ -102,6 +103,7 @@ __all__ = [
     "Project",
     "ProjectError",
     "RefusedError",
+    "Runtime",
     "Secret",
     "Selection",
     "Settings",

@@ -15,14 +15,15 @@ import csv
 import hashlib
 import io
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import AfterValidator, Field
 
 import lup
 from lup.doors.door import RefusedError
 from lup.doors.parties import Machine
-from lup.doors.parts import Part, Program
+from lup.doors.parts import Finished, Part, Program
+from lup.running.plan import Name
 from lup.types import Model
 
 
@@ -30,18 +31,39 @@ class ContainerError(RefusedError):
     """podman couldn't build, start or stop a container as it was asked: its call is refused, saying why."""
 
 
-class Image(Model):
-    """An image lup builds: a Containerfile's text, for one project, tagged by its digest, so a changed definition is a new tag."""
+def pinned(image: str) -> str:
+    """Return `image` where it's named by its digest, so what's fetched under its name can't change.
 
+    Raise `ValueError` otherwise.
+
+    >>> pinned("docker.io/library/archlinux@sha256:4bf3")
+    'docker.io/library/archlinux@sha256:4bf3'
+    """
+    if "@sha256:" not in image:
+        message = f"`{image}` isn't named by its digest, so what it is could change"
+        raise ValueError(message)
+    return image
+
+
+class Image(Model):
+    """An image lup builds: a Containerfile's text, from a base image named by its digest, for one project, tagged by its digest, so a changed definition is a new tag."""
+
+    base: Annotated[str, AfterValidator(pinned)]
+    """The image it's built from, which its definition names: fetched by its
+    digest where it isn't there, so the build itself fetches nothing."""
     definition: str
     """The Containerfile, built with an empty context, so it copies nothing in."""
-    project: str
+    project: Name
     """The project it's built for, which its label names."""
 
     def tag(self) -> str:
         """Return its tag: the digest of its definition and its project.
 
-        >>> Image(definition="FROM scratch", project="harmon").tag().startswith("localhost/lup:")
+        >>> Image(
+        ...     base="docker.io/library/archlinux@sha256:4bf3",
+        ...     definition="FROM docker.io/library/archlinux@sha256:4bf3",
+        ...     project="harmon",
+        ... ).tag().startswith("localhost/lup:")
         True
         """
         digest = hashlib.sha256(self.model_dump_json().encode()).hexdigest()
@@ -63,7 +85,7 @@ class Bind(Model):
 class Spec(Model):
     """A container to start: its name, its image, what it runs, what's mounted, its variables and its network."""
 
-    name: str
+    name: Name
     """Its name while it runs, one container's at a time."""
     image: Image
     command: list[str]
@@ -75,6 +97,12 @@ class Spec(Model):
     network: Literal["host", "private"] = "host"
     """The machine's network, as rooms share it, or one of its own."""
     gpu: bool = False
+
+    def linked(self) -> list[Path]:
+        """Return each directory or file it mounts whose path isn't its own: relative, or through a link, which podman would follow to wherever the link points."""
+        return [
+            each.source for each in self.binds if each.source.resolve() != each.source
+        ]
 
 
 class Run(Model):
@@ -121,8 +149,8 @@ def mount_option(fields: list[str]) -> str:
     return record.getvalue()
 
 
-def command_of(spec: Spec, walls: Walls) -> list[str]:
-    """Return the arguments that start `spec`'s container, detached, behind `walls`."""
+def command_of(spec: Spec, walls: Walls, *, detached: bool = True) -> list[str]:
+    """Return the arguments that start `spec`'s container behind `walls`: detached, or run to its end, its input given."""
     binds = [
         "--mount="
         + mount_option(
@@ -141,7 +169,7 @@ def command_of(spec: Spec, walls: Walls) -> list[str]:
     ]
     return [
         "run",
-        "--detach",
+        "--detach" if detached else "--interactive",
         *walls.options(),
         f"--name={spec.name}",
         f"--network={spec.network}",
@@ -155,10 +183,17 @@ def command_of(spec: Spec, walls: Walls) -> list[str]:
     ]
 
 
+class Once(Model):
+    """A container run to its end: what it runs, and what's given on its input."""
+
+    spec: Spec
+    given: str | None = None
+
+
 class Named(Model):
     """A container, by its name."""
 
-    name: str
+    name: Name
 
 
 class Built(Model):
@@ -183,22 +218,21 @@ class Containers(Part, machine=True, shared=True):
 
     @lup.service
     async def built(self, image: Image, by: Machine) -> Built:
-        """Build `image` where its tag isn't there yet, and say whether it was built.
+        """Build `image` where its tag isn't there yet, its base fetched by its digest first where it isn't there either, and say whether it was built.
 
-        Raise `ContainerError` where podman can't say or can't build it.
+        Raise `ContainerError` where podman can't say, fetch or build.
         """
         del by
-        exists = await self.podman.ran("image", "exists", image.tag())
-        match exists.status:
-            case 0:
-                return Built(built=False)
-            case 1:
-                pass
-            case status:
-                message = f"podman couldn't say whether {image.tag()} is there (status {status})"
+        if await self.there(image.tag()):
+            return Built(built=False)
+        if not await self.there(image.base):
+            pulled = await self.podman.ran("pull", "--quiet", image.base)
+            if pulled.status != 0:
+                message = f"podman couldn't fetch {image.base}: {pulled.error.strip()}"
                 raise ContainerError(message)
         made = await self.podman.ran(
             "build",
+            "--pull=never",
             "--tag",
             image.tag(),
             "--label",
@@ -213,6 +247,37 @@ class Containers(Part, machine=True, shared=True):
             raise ContainerError(message)
         return Built(built=True)
 
+    async def there(self, image: str) -> bool:
+        """Say whether the image named `image` is there.
+
+        Raise `ContainerError` where podman can't say.
+        """
+        exists = await self.podman.ran("image", "exists", image)
+        match exists.status:
+            case 0:
+                return True
+            case 1:
+                return False
+            case status:
+                message = (
+                    f"podman couldn't say whether {image} is there (status {status})"
+                )
+                raise ContainerError(message)
+
+    def walled(self, spec: Spec) -> None:
+        """Refuse a container mounting a path that isn't its own, which podman would follow wherever a link points.
+
+        Raise `ContainerError` where one does.
+        """
+        linked = spec.linked()
+        if linked:
+            named = ", ".join(str(each) for each in linked)
+            message = (
+                f"{spec.name} would mount {named} through a link or by a relative "
+                "path: lup mounts a path only as it is, resolved"
+            )
+            raise ContainerError(message)
+
     @lup.service
     async def started(self, spec: Spec, by: Machine) -> Run:
         """Start `spec`'s container, detached, behind the walls every container stands behind, and say how.
@@ -220,6 +285,7 @@ class Containers(Part, machine=True, shared=True):
         Raise `ContainerError` where podman fails to.
         """
         del by
+        self.walled(spec)
         command = command_of(spec, self.walls)
         ran = await self.podman.ran(*command)
         if ran.status != 0:
@@ -228,6 +294,21 @@ class Containers(Part, machine=True, shared=True):
         run = Run(spec=spec, command=command)
         self.running = [*self.running, run]
         return run
+
+    @lup.service
+    async def ran(self, once: Once, by: Machine) -> Finished:
+        """Run `once`'s container to its end, behind the same walls, what it's given on its input, and say how it ended, as a declaration is planned.
+
+        Raise `ContainerError` where podman itself fails (status 125).
+        """
+        del by
+        self.walled(once.spec)
+        command = command_of(once.spec, self.walls, detached=False)
+        finished = await self.podman.ran(*command, given=once.given)
+        if finished.status == 125:
+            message = f"podman couldn't run {once.spec.name}: {finished.error.strip()}"
+            raise ContainerError(message)
+        return finished
 
     @lup.service
     async def stopped(self, named: Named, by: Machine) -> None:

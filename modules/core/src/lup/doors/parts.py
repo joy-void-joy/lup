@@ -51,6 +51,17 @@ class Data(Model):
     """The directory: it's there, and the part's alone to write."""
 
 
+class Runtime(Model):
+    """A directory a part keeps what lasts only while it runs in: a field typed `Runtime`, given where the part runs, in memory, gone when the machine restarts, one for each such field: a socket, or a value handed over to be read once.
+
+    >>> Runtime(path=Path("/run/user/1000/lup/hosting.Carrying/sockets")).path.name
+    'sockets'
+    """
+
+    path: Path
+    """The directory: it's there, and the part's alone to write."""
+
+
 class Finished(Model):
     """How a program a part ran ended: its status, and what it printed and said."""
 
@@ -124,6 +135,9 @@ class Given(Model, arbitrary_types_allowed=True):
     data: Path | None = None
     """The part's own directory, under which each field typed `Data` gets
     one; none where nothing gives it one."""
+    runtime: Path | None = None
+    """The part's own directory in memory, under which each field typed
+    `Runtime` gets one; none where nothing gives it one."""
     runs: Runs | None = None
     """What runs the programs it declares; none where nothing runs any."""
 
@@ -206,7 +220,7 @@ class Part(MutableModel, arbitrary_types_allowed=True):
             for field, info in cls.model_fields.items()
             if field != "module"
             and info.is_required()
-            and info.annotation not in (Secret, Data)
+            and info.annotation not in (Secret, Data, Runtime)
         ]
         if bare:
             message = (
@@ -232,19 +246,31 @@ class Part(MutableModel, arbitrary_types_allowed=True):
 
     @classmethod
     def made(cls, module: Module, given: Given) -> Part:
-        """Make the part where it runs, with its module and what lup gives it: the value of each secret it holds, a directory for each field typed `Data`, made where it isn't there, and what runs each program it declares.
+        """Make the part where it runs, with its module and what lup gives it: the value of each secret it holds, a directory for each field typed `Data` or `Runtime`, made where it isn't there, and what runs each program it declares.
 
         Raise `ProjectError` where a secret it holds isn't given, or it keeps
-        data and no directory is given.
+        data, or what lasts while it runs, and no directory is given.
         """
-        secrets, data = given.secrets, given.data
+        secrets, data, runtime = given.secrets, given.data, given.runtime
         kept = [
             field for field, info in cls.model_fields.items() if info.annotation is Data
+        ]
+        lasting = [
+            field
+            for field, info in cls.model_fields.items()
+            if info.annotation is Runtime
         ]
         if kept and data is None:
             message = (
                 f"`{cls.__name__}` keeps data in {', '.join(f'`{name}`' for name in kept)}, "
                 "and nothing gives it a directory to keep it in"
+            )
+            raise ProjectError(message, about=[cls.__name__])
+        if lasting and runtime is None:
+            message = (
+                f"`{cls.__name__}` keeps what lasts while it runs in "
+                f"{', '.join(f'`{name}`' for name in lasting)}, and nothing gives it "
+                "a directory in memory to keep it in"
             )
             raise ProjectError(message, about=[cls.__name__])
         missing = [name for name in cls.holds().secrets if name not in secrets]
@@ -254,7 +280,7 @@ class Part(MutableModel, arbitrary_types_allowed=True):
                 "which nothing stored: the operator stores each under its name"
             )
             raise ProjectError(message, about=[cls.__name__])
-        fields: dict[str, Module | Secret | Data | Program] = {
+        fields: dict[str, Module | Secret | Data | Runtime | Program] = {
             name: Secret(value=secrets[name]) for name in cls.holds().secrets
         }
         for name in kept:
@@ -262,6 +288,11 @@ class Part(MutableModel, arbitrary_types_allowed=True):
                 directory = data / name
                 directory.mkdir(parents=True, exist_ok=True)
                 fields[name] = Data(path=directory)
+        for name in lasting:
+            if runtime is not None:
+                directory = runtime / name
+                directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+                fields[name] = Runtime(path=directory)
         for name, program in cls.programs().items():
             fields[name] = program.model_copy(update={"runs": given.runs})
         if "module" in cls.model_fields:
