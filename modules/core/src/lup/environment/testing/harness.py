@@ -21,7 +21,7 @@ from lup.declaration.module import Module
 from lup.declaration.project import Project
 from lup.doors.door import Accepted, DoorError, Method, Refused
 from lup.doors.parties import Party
-from lup.doors.parts import Parts
+from lup.doors.parts import Finished, Parts, Program, ProgramError, Runs
 from lup.doors.tool import ToolDoor, ToolSpec
 from lup.environment.declaration import load, resolve
 from lup.environment.doors import Doors, Entry, Running, Serves
@@ -34,9 +34,12 @@ from lup.testing.harness import (
     BrokenLawError,
     Call,
     Crossing,
+    Heard,
     Kept,
+    ProgramRun,
     Ran,
     Reaching,
+    Scripted,
     Served,
     Started,
     Step,
@@ -338,6 +341,41 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
             return apart.submit(checking, self.project, held, promise).result()
 
 
+class StandIn(Model, Runs, arbitrary_types_allowed=True):
+    """The programs a started lup's parts run, stood in for as a promise scripts them: each run heard, and answered by the first answer whose `when` its arguments start with."""
+
+    scripts: dict[str, Scripted] = {}
+    heard: Heard
+
+    async def ran(
+        self, program: Program, arguments: list[str], given: str | None
+    ) -> Finished:
+        """Hear the run, and answer it as its program's script says.
+
+        Raise `ProgramError` where no answer of its script fits, as for a
+        program that isn't there.
+        """
+        self.heard.runs.append(
+            ProgramRun(program=program.name, arguments=arguments, given=given)
+        )
+        script = self.scripts.get(program.name, Scripted())
+        answer = next(
+            (
+                each
+                for each in script.answers
+                if arguments[: len(each.when)] == each.when
+            ),
+            None,
+        )
+        if answer is None:
+            message = (
+                f"`{program.name} {' '.join(arguments)}` has no answer in the "
+                "promise's script, so it's run as a program that isn't there"
+            )
+            raise ProgramError(message, about=[program.name])
+        return Finished(status=answer.status, output=answer.output, error=answer.error)
+
+
 class Crosser(Model, Crossing, arbitrary_types_allowed=True):
     """A started lup's parts, a message crossing to them answered as their container answers it."""
 
@@ -359,6 +397,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
         declared: Project | str,
         secrets: Mapping[str, str] | None = None,
         repository: str = "harness",
+        programs: Mapping[str, Scripted] | None = None,
     ) -> Started:
         """Start lup on a declaration: a `Project`, or the text of a declaration's file, loaded as lup loads one, each class made once and started.
 
@@ -367,13 +406,16 @@ class Harness(Testing, arbitrary_types_allowed=True):
         read its state through.
         """
         project = declared if isinstance(declared, Project) else loaded(declared)
-        reached = await self.reached(project, secrets, repository)
+        heard = Heard()
+        stand = StandIn(scripts=dict(programs or {}), heard=heard)
+        reached = await self.reached(project, secrets, repository, stand)
         return Started(
             modules=reached.modules,
             specs=reached.tools(),
             plan=plan_of(resolve(project), []),
             doors=reached,
             crossing=Crosser(running=reached.running),
+            heard=heard,
         )
 
     async def reached(
@@ -381,6 +423,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
         project: Project,
         secrets: Mapping[str, str] | None = None,
         repository: str = "harness",
+        runs: Runs | None = None,
     ) -> Reached:
         """Start lup on `project`, as the code of `repository`, and return its doors as this harness reaches them, every law its modules hold checked over each call.
 
@@ -398,7 +441,12 @@ class Harness(Testing, arbitrary_types_allowed=True):
         )
         kept = tempfile.TemporaryDirectory(prefix="lup-data-")
         self.run.kept.append(kept)
-        running = await resolved.doors.started(repository, given, data=Path(kept.name))
+        running = await resolved.doors.started(
+            repository,
+            given,
+            data=Path(kept.name),
+            runs=runs or StandIn(heard=Heard()),
+        )
         self.run.started.append(running)
         return Reached(
             project=project,

@@ -42,7 +42,7 @@ from lup.doors.door import (
 from lup.doors.events import Event, Starting, Stopping
 from lup.doors.on import OnDoor
 from lup.doors.parties import Codebase, Party, said
-from lup.doors.parts import Part, Parts
+from lup.doors.parts import Given, Part, Parts, Runs
 from lup.doors.service import CARRYING, Carrier, ServiceDoor
 from lup.doors.tool import ToolDoor, ToolSpec
 from lup.types import Model, MutableModel
@@ -200,9 +200,11 @@ class Doors(Model):
         self,
         repository: str,
         secrets: dict[str, str],
+        *,
         only: list[str] | None = None,
         beyond: Carrier | None = None,
         data: Path | None = None,
+        runs: Runs | None = None,
     ) -> Running:
         """Make each part once, with its module and the value of each secret it holds, run what each runs at `Starting`, and return them running, as the project of `repository`'s code.
 
@@ -211,7 +213,8 @@ class Doors(Model):
         `module.Part`, where the others run elsewhere, a call to one of their
         services carried by `beyond`; left out, every part is made here. Raise
         `ProjectError` where a part made here holds a secret not given. A part
-        keeping data is given a directory under `data`, named `module.Part`.
+        keeping data is given a directory under `data`, named `module.Part`, and
+        a program a part declares is run by `runs`.
         """
         running = Running(
             doors=self,
@@ -221,8 +224,11 @@ class Doors(Model):
                     serves=each,
                     made=each.part.made(
                         each.module,
-                        secrets,
-                        None if data is None else data / each.named(),
+                        Given(
+                            secrets=secrets,
+                            data=None if data is None else data / each.named(),
+                            runs=runs,
+                        ),
                     ),
                 )
                 for each in self.served

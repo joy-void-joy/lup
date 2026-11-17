@@ -25,7 +25,15 @@ from lup.doors.door import DoorError, RefusedError
 from lup.doors.events import Event, Starting, Stopping
 from lup.doors.on import on
 from lup.doors.parties import Agent, Codebase, Operator, Party
-from lup.doors.parts import Data, Part, Parts, Secret
+from lup.doors.parts import (
+    Data,
+    Finished,
+    Part,
+    Parts,
+    Program,
+    ProgramError,
+    Secret,
+)
 from lup.doors.service import UncarriedError, service
 from lup.doors.tool import tool
 from lup.errors import LupError
@@ -65,6 +73,7 @@ __all__ = [
     "Event",
     "FileBytes",
     "FileText",
+    "Finished",
     "Fold",
     "FoldKind",
     "Folds",
@@ -87,6 +96,8 @@ __all__ = [
     "Part",
     "Parts",
     "Party",
+    "Program",
+    "ProgramError",
     "Project",
     "ProjectError",
     "RefusedError",

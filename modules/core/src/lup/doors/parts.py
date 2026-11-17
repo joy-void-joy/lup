@@ -12,6 +12,7 @@ hold (`approved=True`) runs in a container of its own, from a commit the
 operator approved, with what it holds alone, or on the machine.
 """
 
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import ClassVar, Unpack, override
 
@@ -20,6 +21,7 @@ from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import Named
 from lup.doors.door import DoorError, Method
+from lup.errors import LupError
 from lup.types import Model, MutableModel
 lazy from lup.declaration.module import Module
 
@@ -48,6 +50,83 @@ class Data(Model):
 
     path: Path
     """The directory: it's there, and the part's alone to write."""
+
+
+class Finished(Model):
+    """How a program a part ran ended: its status, and what it printed and said."""
+
+    status: int
+    output: str = ""
+    """What it printed on its standard output."""
+    error: str = ""
+    """What it wrote on its standard error."""
+
+
+class Runs(ABC):
+    """What runs the programs a part declares, where it runs: the machine's own, or a stand-in a promise scripts."""
+
+    @abstractmethod
+    async def ran(
+        self, program: Program, arguments: list[str], given: str | None
+    ) -> Finished:
+        """Run `program` with `arguments`, `given` on its input, and say how it ended, whatever its status.
+
+        Raise `ProgramError` where it can't be run at all.
+        """
+
+
+class ProgramError(LupError):
+    """A program a part declares can't be run: it isn't there, isn't at a version the part takes, or nothing runs programs where the part does."""
+
+
+class Program(Model, arbitrary_types_allowed=True):
+    """A program a part runs, from outside its project's environment: a field typed `Program`, its default saying which, checked before the part starts, and run through the field.
+
+    >>> Program(name="podman", version=">=5", probe=["--version"]).name
+    'podman'
+    """
+
+    name: str
+    """The program, as the `PATH` finds it."""
+    version: str | None = None
+    """The versions that will do, as a specifier (`>=5`); none for any."""
+    probe: list[str] = []
+    """The arguments that make it print its bare version, where `version` is
+    given."""
+    optional: bool = False
+    """Whether its part may go without it: missing, the part doesn't start,
+    said once, and nothing else stops."""
+    why: str = ""
+    """What the part runs it for, said where it's missing."""
+    install: str = ""
+    """How to install it, said where it's missing."""
+    runs: Runs | None = Field(default=None, exclude=True, repr=False)
+    """What runs it where the part runs, given as the part is made."""
+
+    async def ran(self, *arguments: str, given: str | None = None) -> Finished:
+        """Run it with `arguments`, `given` on its input, and say how it ended, whatever its status.
+
+        Raise `ProgramError` where it can't be run.
+        """
+        if self.runs is None:
+            message = (
+                f"`{self.name}` is run where its part runs, which gives it what "
+                "runs programs; nothing does here"
+            )
+            raise ProgramError(message, about=[self.name])
+        return await self.runs.ran(self, list(arguments), given)
+
+
+class Given(Model, arbitrary_types_allowed=True):
+    """What lup gives a part where it runs, beside its module: the secrets it holds, where it keeps its data, and what runs its programs."""
+
+    secrets: dict[str, str] = {}
+    """Each secret's value, by its name."""
+    data: Path | None = None
+    """The part's own directory, under which each field typed `Data` gets
+    one; none where nothing gives it one."""
+    runs: Runs | None = None
+    """What runs the programs it declares; none where nothing runs any."""
 
 
 class Holds(Model):
@@ -153,14 +232,13 @@ class Part(MutableModel, arbitrary_types_allowed=True):
         )
 
     @classmethod
-    def made(
-        cls, module: Module, secrets: dict[str, str], data: Path | None = None
-    ) -> Part:
-        """Make the class where it runs, with its module, the value of each secret it holds, and a directory under `data` for each field typed `Data`, made where it isn't there.
+    def made(cls, module: Module, given: Given) -> Part:
+        """Make the part where it runs, with its module and what lup gives it: the value of each secret it holds, a directory for each field typed `Data`, made where it isn't there, and what runs each program it declares.
 
         Raise `ProjectError` where a secret it holds isn't given, or it keeps
         data and no directory is given.
         """
+        secrets, data = given.secrets, given.data
         kept = [
             field for field, info in cls.model_fields.items() if info.annotation is Data
         ]
@@ -177,17 +255,28 @@ class Part(MutableModel, arbitrary_types_allowed=True):
                 "which nothing stored: the operator stores each under its name"
             )
             raise ProjectError(message, about=[cls.__name__])
-        given: dict[str, Module | Secret | Data] = {
+        fields: dict[str, Module | Secret | Data | Program] = {
             name: Secret(value=secrets[name]) for name in cls.holds().secrets
         }
         for name in kept:
             if data is not None:
                 directory = data / name
                 directory.mkdir(parents=True, exist_ok=True)
-                given[name] = Data(path=directory)
+                fields[name] = Data(path=directory)
+        for name, program in cls.programs().items():
+            fields[name] = program.model_copy(update={"runs": given.runs})
         if "module" in cls.model_fields:
-            given["module"] = module
-        return cls.model_validate(given)
+            fields["module"] = module
+        return cls.model_validate(fields)
+
+    @classmethod
+    def programs(cls) -> dict[str, Program]:
+        """Return each program the part declares, by its field's name, as its default says."""
+        return {
+            field: info.default
+            for field, info in cls.model_fields.items()
+            if isinstance(info.default, Program)
+        }
 
     @classmethod
     def admits(cls, module: Module) -> bool:

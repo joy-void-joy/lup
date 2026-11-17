@@ -20,7 +20,7 @@ from lup.doors.parties import Party
 from lup.doors.tool import ToolSpec
 from lup.errors import LupError
 from lup.running.plan import Plan
-from lup.types import Model
+from lup.types import Model, MutableModel
 
 if TYPE_CHECKING:
     from lup.declaration.project import Project
@@ -176,6 +176,37 @@ class Reaching(ABC):
         """Stop what's started: each class's methods run at `Stopping`, then what each runs since `Starting` cancelled."""
 
 
+class ProgramRun(Model):
+    """One run of a program a part asked for, as the harness's stand-in heard it."""
+
+    program: str
+    arguments: list[str]
+    given: str | None = None
+
+
+class Heard(MutableModel):
+    """What the harness's stand-in for a part's programs heard: each run asked for, in order."""
+
+    runs: list[ProgramRun] = []
+
+
+class Answering(Model):
+    """One answer a program stood in for gives: to a run whose arguments start with `when`."""
+
+    when: list[str] = []
+    """The arguments a run starts with, for it to get this answer; none for
+    any run."""
+    status: int = 0
+    output: str = ""
+    error: str = ""
+
+
+class Scripted(Model):
+    """A program a part declares, stood in for in the harness: the answers it gives, the first whose `when` a run's arguments start with; a run none answers fails as a program that isn't there."""
+
+    answers: list[Answering] = []
+
+
 class Crossing(ABC):
     """A started lup's parts, as a message crossing to their container reaches them: what the program on the operator's machine sends."""
 
@@ -203,10 +234,17 @@ class Started(Model, arbitrary_types_allowed=True):
     """Its doors, as the harness reaches them."""
     crossing: Crossing
     """Its parts, as a message crossing to their container reaches them."""
+    heard: Heard
+    """Each run of a program its parts asked for, in order, as the harness's
+    stand-in heard it."""
 
     async def crossed(self, text: bytes) -> bytes:
         """Answer one message as the container running its parts would: a call through a door, carrying the version of its shape (`lup.running.wire`)."""
         return await self.crossing.crossed(text)
+
+    def ran(self, program: str) -> list[list[str]]:
+        """Return the arguments of each run of the program named `program` its parts asked for, in order, as the harness's stand-in heard them."""
+        return [each.arguments for each in self.heard.runs if each.program == program]
 
     def tools(self) -> list[ToolSpec]:
         """Return what a session is told of each tool its modules serve."""
@@ -270,8 +308,9 @@ class Testing(Party, ABC):
         declared: Project | str,
         secrets: Mapping[str, str] | None = None,
         repository: str = "harness",
+        programs: Mapping[str, Scripted] | None = None,
     ) -> Started:
-        """Start lup on a declaration: a `Project`, or the text of a declaration's file, loaded as lup loads one, each class of its modules made once and started, as the code of `repository`.
+        """Start lup on a declaration: a `Project`, or the text of a declaration's file, loaded as lup loads one, each class of its modules made once and started, as the code of `repository`, each program its parts run stood in for as `programs` scripts it.
 
         `secrets` holds the value of each secret a class holds, by its name;
         left out, each is drawn. Raise `ProjectError` where it doesn't load or

@@ -19,6 +19,7 @@ from lup.declaration.project import Project
 from lup.doors.action import ActionDoor
 from lup.doors.command import CommandDoor
 from lup.doors.door import DoorError
+from lup.doors.parts import Given
 from lup.doors.service import ServiceDoor
 from lup.doors.tool import ToolDoor
 from lup.environment.doors import Entry
@@ -115,7 +116,7 @@ class Check(Model, arbitrary_types_allowed=True):
         door = method.door
         if not (isinstance(door, PromiseDoor) and door.law(method.taken)):
             serves = self.entry.serves
-            made = serves.part.made(serves.module, {})
+            made = serves.part.made(serves.module, Given())
             told = method.function(made, by=harness)
             if isinstance(told, bool):
                 message = f"the scenario `{self.said()}` answers a verdict"
