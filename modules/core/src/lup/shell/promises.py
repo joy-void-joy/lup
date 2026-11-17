@@ -34,6 +34,7 @@ from lup import (
     Tones,
     Viewing,
 )
+from lup.inbox.said import PartyOf, Pile
 from lup.testing import (
     Accepted,
     Answered,
@@ -112,6 +113,18 @@ class NotesPart(Part):
     async def unknown(self, of: PileOf) -> Blocks:
         """Show a line in a tone nobody declares."""
         return Blocks.of(Line(id="1", spans=[Span(text=of.pile, tone="neon")]))
+
+    @lup.view
+    async def reaching(self, of: PileOf) -> Blocks:
+        """Show a line that reaches the pile's own pile in the inbox, and one that reaches no party, neither offering a comment of its own."""
+        return Blocks.of(
+            Line(
+                id="reaches",
+                spans=[Span(text=f"what {of.pile} reaches")],
+                reaches=Pile(repository="harness", path=f"notes/{of.pile}"),
+            ),
+            Line(id="alone", spans=[Span(text="what reaches no one")]),
+        )
 
     @lup.view
     async def taken(self, of: PileOf) -> Blocks:
@@ -463,6 +476,35 @@ class ShellPromises(Part):
         await page.leave()
 
     @lup.promise
+    async def a_part_held_back_stays_through_sends_and_goes_once_let_go(
+        self, by: Testing
+    ) -> None:
+        """A comment the operator holds back stays in the draft as it is through every send, while the rest goes; let go, it goes at the next."""
+        words = f"said {by.any(Words).words}"
+        sends = by.any(Drawn).notes % 3 + 1
+        started = await by.started(noted(1))
+        page = await opened(started)
+        held = Comment(id="held", on=quoted("note-1"), words=words, held=True)
+        await page.say(Write(comment=held))
+        for _ in range(sends):
+            await page.say(Send())
+            drafted = await page.told()
+            delivered = await page.told()
+            assert isinstance(drafted, Drafted)
+            assert isinstance(delivered, Delivered)
+            assert delivered.held == ["held"]
+            assert drafted.draft.comments == [held]
+        assert await taken(started) == []
+        await page.say(Write(comment=held.model_copy(update={"held": False})))
+        await page.say(Send())
+        drafted = await page.told()
+        delivered = await page.told()
+        assert isinstance(delivered, Delivered)
+        assert delivered.went == ["held"]
+        assert await taken(started) == [words.strip()]
+        await page.leave()
+
+    @lup.promise
     async def every_block_answered_carries_a_version_of_what_it_shows(
         self, by: Testing
     ) -> None:
@@ -476,6 +518,73 @@ class ShellPromises(Part):
         assert all(
             one != other for one, other in zip(versions[0], versions[2], strict=True)
         )
+
+    @lup.promise
+    async def a_comment_reaches_its_party_whoever_takes_it(self, by: Testing) -> None:
+        """A comment on a block offering none of its own goes through the inbox to the party the block reaches, or to the No agent pile where it reaches none; one the operator sent elsewhere goes there instead of to what its block offers."""
+        words = f"said {by.any(Words).words}".strip()
+        started = await by.started(noted(1))
+        page = await opened(started)
+        reaching = Viewing(module="notes", view="reaching", given={"pile": "p"})
+        comments = [
+            Comment(
+                id="reaches",
+                on=Quote(viewing=reaching, block="reaches", lines=["what p reaches"]),
+                words=f"{words} 1",
+            ),
+            Comment(
+                id="alone",
+                on=Quote(
+                    viewing=reaching, block="alone", lines=["what reaches no one"]
+                ),
+                words=f"{words} 2",
+            ),
+            Comment(
+                id="chosen",
+                on=quoted("note-1"),
+                words=f"{words} 3",
+                to=Pile(repository="harness", path="chosen").model_dump(mode="json"),
+            ),
+        ]
+        for comment in comments:
+            await page.say(Write(comment=comment))
+        await page.say(Send())
+        sent = await delivered(page)
+        assert sorted(sent.went) == ["alone", "chosen", "reaches"]
+        assert await taken(started) == []
+        for pile, said in [("notes/p", "1"), ("no-agent", "2"), ("chosen", "3")]:
+            answered = await started.view(
+                "core", "party", PartyOf(repository="harness", name=pile), Operator()
+            )
+            assert isinstance(answered, Accepted)
+            assert isinstance(answered.output, Blocks)
+            assert any(
+                isinstance(each, Markdown) and each.text == f"{words} {said}"
+                for each in answered.output.every()
+            )
+        await page.leave()
+
+    @lup.promise
+    async def the_review_tops_the_document_saying_where_each_part_goes(
+        self, by: Testing
+    ) -> None:
+        """While the draft holds something, the document's root opens with the review, a fold for each place its parts go and one for those held back, laid out again for the page as the draft changes."""
+        words = f"said {by.any(Words).words}".strip()
+        started = await by.started(noted(1))
+        page = await opened(started)
+        pile = Viewing(module="notes", view="pile", given={"pile": "p"})
+        await page.say(Watch(watch=1, viewing=pile))
+        first = await page.told()
+        assert isinstance(first, Answered)
+        assert all(each.id != "draft" for each in first.blocks.blocks)
+        comment = Comment(id="c", on=quoted("note-1"), words=words)
+        await page.say(Write(comment=comment))
+        review = await reviewed_in(page)
+        assert list(parts_in(review).values()) == [["c"]]
+        await page.say(Write(comment=comment.model_copy(update={"held": True})))
+        held = await reviewed_in(page)
+        assert parts_in(held) == {"held": ["c"]}
+        await page.leave()
 
 
 class Picked(Model):
@@ -515,6 +624,30 @@ async def opened(started: Started, *, drafted: bool = True) -> Page:
     if drafted:
         assert isinstance(await page.told(), Drafted)
     return page
+
+
+async def reviewed_in(page: Page) -> Fold:
+    """Read what `page` is told until the document's root comes with the review at its top, and return the review."""
+    while True:
+        told = await page.told()
+        assert told is not None, "the page was told nothing more before the review"
+        if isinstance(told, Answered):
+            top = told.blocks.blocks[0] if told.blocks.blocks else None
+            if isinstance(top, Fold) and top.kind == "draft":
+                return top
+
+
+def parts_in(review: Fold) -> dict[str, list[str]]:
+    """Return the parts a review shows, by the id of the fold of where they go: each part's id, in order."""
+    places = review.content if isinstance(review.content, list) else []
+    return {
+        place.id: [
+            each.id
+            for each in (place.content if isinstance(place.content, list) else [])
+        ]
+        for place in places
+        if isinstance(place, Fold)
+    }
 
 
 async def delivered(page: Page) -> Delivered:

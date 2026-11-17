@@ -45,9 +45,23 @@ export const chrome = {
     rule: "#1d3a44",
 } as const;
 
-/** Set every colour of the palette on `root`, as `--lup-<name>`. */
+/**
+ * What a colour means wherever the page draws it, each one of the palette's, so one thing reads in one colour
+ * everywhere: a comment's lines, the passage it quotes, its mark in the margin and a closed fold's count of them alike.
+ */
+export const meanings = {
+    /** What the operator wrote and what it's on. */
+    comment: "warn",
+    /** What keeps something written from going as it is: lines it quotes that changed, a send that kept it back. */
+    trouble: "err",
+} as const satisfies Record<string, Colour>;
+
+/** Set every colour of the palette on `root`, as `--lup-<name>`, and each meaning as the colour it's drawn in. */
 export function painted(root: HTMLElement): void {
     for (const [name, value] of [...Object.entries(colours), ...Object.entries(chrome)]) {
         root.style.setProperty(`--lup-${name}`, value);
+    }
+    for (const [meaning, colour] of Object.entries(meanings)) {
+        root.style.setProperty(`--lup-${meaning}`, `var(--lup-${colour})`);
     }
 }
