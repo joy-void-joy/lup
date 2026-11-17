@@ -35,7 +35,7 @@ from lup.environment.doors import Running
 from lup.environment.shell.layout import ShellLayout
 from lup.environment.shell.viewing import viewed
 from lup.shell.blocks import Block, BlockError, Blocks, Viewing
-from lup.shell.draft import Comment, Commenting, Draft, Marked, Quote
+from lup.shell.draft import Comment, Commenting, Draft, Marked, Outcome, Quote
 from lup.shell.looks import Looks
 from lup.shell.wire import (
     Answered,
@@ -116,14 +116,19 @@ class Keeping(MutableModel, arbitrary_types_allowed=True):
         )
         return cls(draft=draft, path=path)
 
-    async def changed(self, draft: Draft) -> None:
-        """Keep `draft` in place of the draft, and tell every page open."""
+    async def changed(self, draft: Draft, by: Session | None = None) -> None:
+        """Keep `draft` in place of the draft, and tell every page open but `by`, the page that wrote the change, which holds it already.
+
+        Told its own change back, a page would lay a copy older than what's
+        been typed since over a comment being written.
+        """
         self.draft = draft
         if self.path is not None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(draft.model_dump_json())
         for page in self.pages:
-            await page.tell(Drafted(draft=draft))
+            if page is not by:
+                await page.tell(Drafted(draft=draft))
 
 
 class Dashboard(Model, arbitrary_types_allowed=True):
@@ -195,18 +200,24 @@ class Dashboard(Model, arbitrary_types_allowed=True):
         Each part that went leaves the draft and each that can't stays in it
         with why, in the draft as it stands once the send ends, so what's
         written or erased while it runs is kept as it is; every page is told
-        the draft.
+        the draft. A comment on what changed since it was written stays the
+        first time, saying so, and goes the next.
         """
         async with self.kept.sending:
             draft = self.kept.draft
-            outcomes: dict[str, str | None] = {
+            outcomes: dict[str, Outcome] = {
                 **{
                     comment.id: (
-                        await self.commented(comment) if comment.words.strip() else None
+                        await self.commented(comment)
+                        if comment.words.strip()
+                        else Outcome()
                     )
                     for comment in draft.comments
                 },
-                **{mark.id: await self.acted(mark) for mark in draft.marks},
+                **{
+                    mark.id: Outcome(reason=await self.acted(mark))
+                    for mark in draft.marks
+                },
             }
             await self.kept.changed(self.kept.draft.settled(draft, outcomes))
             said = [
@@ -214,8 +225,8 @@ class Dashboard(Model, arbitrary_types_allowed=True):
                 *(each.id for each in draft.marks),
             ]
             return Delivered(
-                went=[part for part in said if outcomes[part] is None],
-                stayed=[part for part in said if outcomes[part] is not None],
+                went=[part for part in said if outcomes[part].reason is None],
+                stayed=[part for part in said if outcomes[part].reason is not None],
             )
 
     async def block(self, quote: Quote) -> Block | str:
@@ -228,18 +239,33 @@ class Dashboard(Model, arbitrary_types_allowed=True):
         )
         return "what it's on is gone from its view" if found is None else found
 
-    async def commented(self, comment: Comment) -> str | None:
-        """Send `comment` to what its block offers for comments; why not, where it can't go."""
+    async def commented(self, comment: Comment) -> Outcome:
+        """Send `comment` to what its block offers for comments, and say what came of it: why it stays, where it can't go, or was written on what changed since and hasn't been sent anyway once already."""
         block = await self.block(comment.on)
         if isinstance(block, str):
-            return block
+            return Outcome(reason=block)
+        quote = comment.on
+        if (
+            quote.version is not None
+            and block.version != quote.version
+            and not comment.warned
+        ):
+            return Outcome(
+                reason="what it's on changed since you wrote it: send again to send it anyway",
+                outdated=True,
+            )
+        if comment.to is not None:
+            # lup: defer(issue=8, why="a comment sent to a party the operator chose goes through the inbox's delivery, which #8 brings")
+            return Outcome(reason="nothing delivers a comment to a chosen party yet")
         offer = next((each for each in block.offers if each.verb == "comment"), None)
         if offer is None:
             if block.reaches is not None:
                 # lup: defer(issue=8, why="a comment on a block that offers none reaches its party through the inbox's delivery, which #8 brings")
-                return "nothing delivers a comment to a party yet"
-            return "what it's on takes no comment"
-        quote = comment.on
+                return Outcome(reason="nothing delivers a comment to a party yet")
+            # lup: defer(issue=8, why="a comment on what reaches no party goes to the No agent pile, which #8's piles bring")
+            return Outcome(
+                reason="nothing delivers a comment that reaches no party yet"
+            )
         commenting = Commenting(
             words=comment.words.strip(),
             lines=quote.lines,
@@ -253,7 +279,9 @@ class Dashboard(Model, arbitrary_types_allowed=True):
         }
         module = offer.module or quote.viewing.module or ""
         answered = await self.running.act(module, offer.action, given, Operator())
-        return answered.rejection.reason if isinstance(answered, Refused) else None
+        return Outcome(
+            reason=answered.rejection.reason if isinstance(answered, Refused) else None
+        )
 
     async def acted(self, mark: Marked) -> str | None:
         """Run the action `mark` marks; why not, where it can't run, as on a block that changed since it was marked."""
@@ -354,13 +382,13 @@ class Session(Model, arbitrary_types_allowed=True):
                     pass
                 case Write(comment=comment):
                     kept = self.dashboard.kept
-                    await kept.changed(kept.draft.written(comment))
+                    await kept.changed(kept.draft.written(comment), by=self)
                 case Mark(marked=marked):
                     kept = self.dashboard.kept
-                    await kept.changed(kept.draft.marked(marked))
+                    await kept.changed(kept.draft.marked(marked), by=self)
                 case Erase(id=part):
                     kept = self.dashboard.kept
-                    await kept.changed(kept.draft.erased(part))
+                    await kept.changed(kept.draft.erased(part), by=self)
                 case Send():
                     await self.tell(await self.dashboard.sent())
 
