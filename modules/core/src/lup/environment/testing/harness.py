@@ -12,6 +12,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar, copy_context
 from pathlib import Path
+from typing import override
 
 from hypothesis import strategies as st
 from pydantic import BaseModel, JsonValue, TypeAdapter
@@ -23,15 +24,20 @@ from lup.doors.door import Accepted, DoorError, Method, Refused
 from lup.doors.parties import Party
 from lup.doors.serving import Serving
 from lup.doors.tool import ToolDoor, ToolSpec
-from lup.environment.declaration import load, resolve
+from lup.environment.declaration import Resolved, load, resolve
 from lup.environment.doors import Doors, Entry, Serves
-from lup.environment.shell import Looks, viewed
+from lup.environment.shell import viewed
+from lup.environment.shell.server import Dashboard, Session, Socket
+from lup.shell.looks import Looks
+from lup.shell.wire import Answered, Hello, Opened, Told, Unanswered, Unwatch, Watch
 from lup.testing.harness import (
     Acted,
     Broken,
     BrokenLawError,
     Call,
     Kept,
+    Opening,
+    Page,
     Ran,
     Reaching,
     Started,
@@ -274,6 +280,70 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
             return apart.submit(checking, self.project, held, promise).result()
 
 
+class Dashboards(Model, Opening, arbitrary_types_allowed=True):
+    """A started lup's dashboard, as the harness opens its pages."""
+
+    resolved: Resolved
+
+    @override
+    async def page(self) -> Page:
+        """Open a page of the dashboard, its socket in memory, served as the server serves one."""
+        dashboard = Dashboard(resolved=self.resolved)
+        inbound: asyncio.Queue[str | None] = asyncio.Queue()
+        outbound: asyncio.Queue[str | None] = asyncio.Queue()
+        socket = Queued(inbound=inbound, outbound=outbound)
+        session = Session(dashboard=dashboard, socket=socket)
+        serving = asyncio.get_running_loop().create_task(session.run())
+        return Paged(
+            token=dashboard.token, inbound=inbound, outbound=outbound, serving=serving
+        )
+
+
+class Queued(Socket, Model, arbitrary_types_allowed=True):
+    """A page's socket in memory: what the page says, and what it's told, each a queue."""
+
+    inbound: asyncio.Queue[str | None]
+    outbound: asyncio.Queue[str | None]
+
+    @override
+    async def received(self) -> str | None:
+        return await self.inbound.get()
+
+    @override
+    async def send(self, text: str) -> None:
+        await self.outbound.put(text)
+
+    @override
+    async def close(self, code: int, reason: str) -> None:
+        del code, reason
+        await self.outbound.put(None)
+
+
+class Paged(Page, arbitrary_types_allowed=True):
+    """A page of the dashboard as the harness opens it: its socket in memory, served as the server serves one."""
+
+    inbound: asyncio.Queue[str | None]
+    outbound: asyncio.Queue[str | None]
+    serving: asyncio.Task[None]
+    """The server's session reading the page's socket."""
+
+    @override
+    async def say(self, frame: Hello | Watch | Unwatch | str) -> None:
+        await self.inbound.put(
+            frame if isinstance(frame, str) else frame.model_dump_json()
+        )
+
+    @override
+    async def told(self) -> Opened | Answered | Unanswered | None:
+        text = await self.outbound.get()
+        return None if text is None else TypeAdapter[Told](Told).validate_json(text)
+
+    @override
+    async def leave(self) -> None:
+        await self.inbound.put(None)
+        await self.serving
+
+
 class Harness(Testing, arbitrary_types_allowed=True):
     """The harness as the gate runs it: lup started in this process, and values drawn by hypothesis."""
 
@@ -288,7 +358,14 @@ class Harness(Testing, arbitrary_types_allowed=True):
         """
         project = declared if isinstance(declared, Project) else loaded(declared)
         reached = self.reached(project)
-        return Started(modules=reached.modules, doors=reached)
+        resolved = Resolved(
+            modules=reached.modules, doors=reached.doors, looks=reached.looks
+        )
+        return Started(
+            modules=reached.modules,
+            doors=reached,
+            dashboards=Dashboards(resolved=resolved),
+        )
 
     def reached(self, project: Project) -> Reached:
         """Start lup on `project`, and return its doors as this harness reaches them, every law its modules hold checked over each call."""

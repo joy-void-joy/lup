@@ -23,6 +23,7 @@ from lup.types import Model
 if TYPE_CHECKING:
     from lup.declaration.project import Project
     from lup.doors.tool import ToolSpec
+    from lup.shell.wire import Answered, Hello, Opened, Unanswered, Unwatch, Watch
 
 type Sent = BaseModel | list[BaseModel] | Mapping[str, JsonValue] | JsonValue
 """What a party sends through a door: a model, or a list of it, sent as its JSON,
@@ -164,6 +165,33 @@ class Reaching(ABC):
         """Check the promise named `promise` of the module named `module`, or every one where none is named, as the gate does, and say how each fared."""
 
 
+class Page(Model, ABC):
+    """The dashboard's page, as a promise drives it: what it says on the server's socket, and what it's told."""
+
+    token: str
+    """The dashboard's token, which the page was handed in its address."""
+
+    @abstractmethod
+    async def say(self, frame: Hello | Watch | Unwatch | str) -> None:
+        """Send the server `frame`, or text as it is, which needn't be a frame it reads."""
+
+    @abstractmethod
+    async def told(self) -> Opened | Answered | Unanswered | None:
+        """Return the next frame the server tells the page; none once it's closed the socket."""
+
+    @abstractmethod
+    async def leave(self) -> None:
+        """Close the page, as the operator's tab closing does."""
+
+
+class Opening(ABC):
+    """The dashboard of a started lup, as the harness reaches it."""
+
+    @abstractmethod
+    async def page(self) -> Page:
+        """Open a page of the dashboard, its socket open, nothing said yet."""
+
+
 class Started(Model, arbitrary_types_allowed=True):
     """lup started on a declaration: its modules, and its doors, called as a party calls them.
 
@@ -176,6 +204,12 @@ class Started(Model, arbitrary_types_allowed=True):
     """The modules it's made of, every layer applied, in order."""
     doors: Reaching
     """Its doors, as the harness reaches them."""
+    dashboards: Opening
+    """Its dashboard, as the harness reaches it."""
+
+    async def dashboard(self) -> Page:
+        """Open a page of its dashboard, as the operator's browser does: its socket open, nothing said yet."""
+        return await self.dashboards.page()
 
     def tools(self) -> list[ToolSpec]:
         """Return what a session is told of each tool its modules serve."""

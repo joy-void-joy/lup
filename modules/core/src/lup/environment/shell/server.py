@@ -4,7 +4,7 @@ The page opens the socket and says the token it was handed in its address's
 fragment, which no request carries; the server then tells it the document's root
 view and the project's kinds (`Opened`), and answers each view the page watches
 (`Watch`), as the operator reads it, with its blocks or why it can't (`Answered`,
-`Refused`), and again once what it shows changes. One socket for every watch, since
+`Unanswered`), and again once what it shows changes. One socket for every watch, since
 a browser keeps few connections to a host; a frame the server can't read is
 refused alone, never closing the socket (`README.md` in `lup/shell/`, *The server*).
 
@@ -18,7 +18,8 @@ import hmac
 import json
 import logging
 import secrets
-from typing import TYPE_CHECKING, Annotated, Literal, override
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, override
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -32,8 +33,18 @@ from lup.doors.door import Accepted
 from lup.doors.parties import Operator
 from lup.environment.declaration import Resolved
 from lup.environment.shell.layout import ShellLayout
-from lup.environment.shell.looks import Looks, viewed
+from lup.environment.shell.viewing import viewed
 from lup.shell.blocks import BlockError, Blocks, Viewing
+from lup.shell.wire import (
+    Answered,
+    Hello,
+    Opened,
+    Read,
+    Sent,
+    Unanswered,
+    Unwatch,
+    Watch,
+)
 from lup.types import Model
 
 if TYPE_CHECKING:
@@ -46,70 +57,6 @@ if TYPE_CHECKING:
     )
 
 log = logging.getLogger(__name__)
-
-
-class Hello(Model):
-    """The page's first frame: the token it was handed."""
-
-    kind: Literal["hello"] = "hello"
-    token: str
-
-
-class Watch(Model):
-    """Read a view, and again each time what it shows changes, under a number the page picks."""
-
-    kind: Literal["watch"] = "watch"
-    watch: int
-    viewing: Viewing
-
-
-class Unwatch(Model):
-    """Stop reading the view watched under a number."""
-
-    kind: Literal["unwatch"] = "unwatch"
-    watch: int
-
-
-type Sent = Annotated[Hello | Watch | Unwatch, Field(discriminator="kind")]
-"""What the page sends the server."""
-
-
-class Opened(Model):
-    """What the page is told once its token is read: the document's root view, and the kinds a project's modules declare."""
-
-    kind: Literal["opened"] = "opened"
-    root: Viewing | None
-    looks: Looks
-
-
-class Answered(Model):
-    """What a view watched answers."""
-
-    kind: Literal["answered"] = "answered"
-    watch: int
-    blocks: Blocks
-
-
-class Refused(Model):
-    """Why a frame the page sent isn't answered: a view it can't read, or a frame the server can't."""
-
-    kind: Literal["refused"] = "refused"
-    watch: int | None
-    """The watch it's about, where it's about one."""
-    reason: str
-
-
-type Told = Annotated[Opened | Answered | Refused, Field(discriminator="kind")]
-"""What the server tells the page."""
-
-
-class Read(Model):
-    """What the page reads from the core and sends it: a view's answer, the kinds a project's modules declare, and every frame the socket carries, the page's types generated from its description (`described`)."""
-
-    blocks: Blocks
-    looks: Looks
-    sent: Sent
-    told: Told
 
 
 class AsSent(GenerateJsonSchema):
@@ -164,7 +111,7 @@ class Dashboard(Model, arbitrary_types_allowed=True):
         async def socket(websocket: WebSocket) -> None:
             """Carry every view the page watches, once it's said the token."""
             await websocket.accept()
-            await Session(dashboard=self, websocket=websocket).run()
+            await Session(dashboard=self, socket=Carried(websocket=websocket)).run()
 
         if (page / "assets").is_dir():
             application.mount(
@@ -183,10 +130,10 @@ class Dashboard(Model, arbitrary_types_allowed=True):
             None,
         )
 
-    async def answer(self, watch: int, viewing: Viewing) -> Answered | Refused:
+    async def answer(self, watch: int, viewing: Viewing) -> Answered | Unanswered:
         """Answer `viewing`, watched under `watch`, as the operator reads it."""
         if viewing.module is None:
-            return Refused(watch=watch, reason=f"`{viewing.view}` names no module")
+            return Unanswered(watch=watch, reason=f"`{viewing.view}` names no module")
         try:
             answered = await viewed(
                 self.resolved.doors,
@@ -197,23 +144,60 @@ class Dashboard(Model, arbitrary_types_allowed=True):
                 Operator(),
             )
         except BlockError as wrong:
-            return Refused(watch=watch, reason=str(wrong))
+            return Unanswered(watch=watch, reason=str(wrong))
         match answered:
             case Accepted(output=Blocks() as blocks):
                 return Answered(watch=watch, blocks=blocks)
             case Accepted():
-                return Refused(
+                return Unanswered(
                     watch=watch, reason=f"`{viewing.view}` answered no blocks"
                 )
             case _:
-                return Refused(watch=watch, reason=answered.rejection.reason)
+                return Unanswered(watch=watch, reason=answered.rejection.reason)
+
+
+class Socket(ABC):
+    """A page's socket, as the server reads and writes it: over the network, or in memory for the harness."""
+
+    @abstractmethod
+    async def received(self) -> str | None:
+        """Return the page's next frame, as it sent it; none once it's gone."""
+
+    @abstractmethod
+    async def send(self, text: str) -> None:
+        """Send the page a frame."""
+
+    @abstractmethod
+    async def close(self, code: int, reason: str) -> None:
+        """Close the socket, saying why."""
+
+
+class Carried(Socket, Model, arbitrary_types_allowed=True):
+    """A page's socket over the network: a WebSocket of the server's."""
+
+    websocket: WebSocket
+
+    @override
+    async def received(self) -> str | None:
+        try:
+            return await self.websocket.receive_text()
+        except WebSocketDisconnect:
+            return None
+
+    @override
+    async def send(self, text: str) -> None:
+        await self.websocket.send_text(text)
+
+    @override
+    async def close(self, code: int, reason: str) -> None:
+        await self.websocket.close(code=code, reason=reason)
 
 
 class Session(Model, arbitrary_types_allowed=True):
     """One page's socket: what it watches, answered."""
 
     dashboard: Dashboard
-    websocket: WebSocket
+    socket: Socket
     sending: asyncio.Lock = Field(default_factory=asyncio.Lock)
 
     async def run(self) -> None:
@@ -225,46 +209,40 @@ class Session(Model, arbitrary_types_allowed=True):
         """Read the page's frames until it goes, each watched view answered as a task of `answering`."""
         reading = TypeAdapter[Sent](Sent)
         opened = False
-        try:
-            while True:
-                text = await self.websocket.receive_text()
-                try:
-                    frame = reading.validate_json(text)
-                except ValidationError as wrong:
-                    await self.tell(
-                        Refused(
-                            watch=None, reason=f"a frame the server can't read: {wrong}"
-                        )
+        while (text := await self.socket.received()) is not None:
+            try:
+                frame = reading.validate_json(text)
+            except ValidationError as wrong:
+                await self.tell(
+                    Unanswered(
+                        watch=None, reason=f"a frame the server can't read: {wrong}"
                     )
-                    continue
-                if not opened and not isinstance(frame, Hello):
-                    await self.tell(Refused(watch=None, reason="say the token first"))
-                    continue
-                match frame:
-                    case Hello(token=token):
-                        if not hmac.compare_digest(token, self.dashboard.token):
-                            await self.websocket.close(
-                                code=4401, reason="not the dashboard's token"
-                            )
-                            return
-                        opened = True
-                        looks = self.dashboard.resolved.looks
-                        await self.tell(Opened(root=self.dashboard.root(), looks=looks))
-                    case Watch(watch=watch, viewing=viewing):
-                        answering.create_task(self.answered(watch, viewing))
-                    case Unwatch():
-                        pass
-        except WebSocketDisconnect:
-            return
+                )
+                continue
+            if not opened and not isinstance(frame, Hello):
+                await self.tell(Unanswered(watch=None, reason="say the token first"))
+                continue
+            match frame:
+                case Hello(token=token):
+                    if not hmac.compare_digest(token, self.dashboard.token):
+                        await self.socket.close(4401, "not the dashboard's token")
+                        return
+                    opened = True
+                    looks = self.dashboard.resolved.looks
+                    await self.tell(Opened(root=self.dashboard.root(), looks=looks))
+                case Watch(watch=watch, viewing=viewing):
+                    answering.create_task(self.answered(watch, viewing))
+                case Unwatch():
+                    pass
 
     async def answered(self, watch: int, viewing: Viewing) -> None:
         """Answer the view watched under `watch`, and tell the page."""
         await self.tell(await self.dashboard.answer(watch, viewing))
 
-    async def tell(self, told: Opened | Answered | Refused) -> None:
+    async def tell(self, told: Opened | Answered | Unanswered) -> None:
         """Send the page one frame, one at a time whichever task sends it."""
         async with self.sending:
-            await self.websocket.send_text(told.model_dump_json())
+            await self.socket.send(told.model_dump_json())
 
 
 async def serve(dashboard: Dashboard, port: int) -> None:

@@ -3,8 +3,8 @@
 import sys
 
 from lup.core import Core
-from lup.environment.shell import Looks
 from lup.environment.shell.server import described
+from lup.shell.looks import Looks
 
 match sys.argv[1:]:
     case ["schema"]:

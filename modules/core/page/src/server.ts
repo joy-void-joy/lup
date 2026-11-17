@@ -2,7 +2,7 @@
 // page picks, answered and answered again; the token said first, read from the page's address's fragment, which no
 // request carries.
 
-import type { Blocks, Opened, Refused, Sent, Told, Viewing } from "./generated/read";
+import type { Blocks, Opened, Sent, Told, Unanswered, Viewing } from "./generated/read";
 import type { Source } from "./shell/shell";
 
 /** The server's socket, as a source of views. */
@@ -14,7 +14,7 @@ export class Server implements Source {
     #open = false;
 
     /** Open the socket at `url`, say `token`, and hand what it's told to `opened` and `refused`. */
-    constructor(url: string, token: string, opened: (told: Opened) => void, refused: (told: Refused) => void) {
+    constructor(url: string, token: string, opened: (told: Opened) => void, refused: (told: Unanswered) => void) {
         this.#socket = new WebSocket(url);
         this.#socket.addEventListener("open", () => {
             this.#socket.send(JSON.stringify({ kind: "hello", token } satisfies Sent));
@@ -32,7 +32,7 @@ export class Server implements Source {
                 case "answered":
                     this.#watches.get(told.watch)?.(told.blocks);
                     break;
-                case "refused":
+                case "unanswered":
                     refused(told);
                     break;
             }
