@@ -1148,3 +1148,17 @@ class ClearingPromises(Part):
         assert podman_ran(started, "stop") == [
             ["stop", "--ignore", "--time=10", "--filter=label=lup.machine"]
         ]
+
+    @lup.promise
+    async def the_machine_opens_again_what_it_ran(self, by: Testing) -> None:
+        """As the machine's parts start, they open again each project they ran before they last stopped, at the commit approved last, every container left stopped first; with nothing run before, they stop nothing and open nothing."""
+        ran = by.any(bool)
+        started = await started_approved(by, OPENING_PODMAN)
+        if ran:
+            await started.serve("opened", Opens().given(), Machine())
+        resumed = await started.serve("resumed", {}, Machine())
+        assert isinstance(resumed, Accepted)
+        answer = json.loads(resumed.answer())
+        assert answer["opened"] == (["harmon"] if ran else [])
+        clearing = ["stop", "--ignore", "--time=10", "--filter=label=lup.machine"]
+        assert (clearing in podman_ran(started, "stop")) == ran

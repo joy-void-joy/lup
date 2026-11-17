@@ -28,7 +28,15 @@ from lup.doors.parts import Data, Part
 from lup.errors import LupError
 from lup.hosting.approvals import Approvals, Asking
 from lup.hosting.carrying import Carrying, Naming, Placement, Placing
-from lup.hosting.containers import Bind, Containers, Image, Named, Once, Spec
+from lup.hosting.containers import (
+    Bind,
+    Clearing,
+    Containers,
+    Image,
+    Named,
+    Once,
+    Spec,
+)
 from lup.hosting.secrets import Holding, Secrets
 from lup.hosting.trees import Commit, Exporting, Trees
 from lup.running.plan import Name, PartPlan, Plan
@@ -74,6 +82,20 @@ class Opened(Model):
     started until the operator gives it."""
 
 
+OPENINGS = TypeAdapter(dict[str, Opening])
+
+
+class Resuming(Model):
+    """Asking to open again each project the machine's parts ran before they last stopped, giving nothing."""
+
+
+class Resumed(Model):
+    """Each project opened again, and each refused, with why."""
+
+    opened: list[str] = []
+    refused: dict[str, str] = {}
+
+
 class Base(Model):
     """The image every project's containers start from: Arch Linux's, pinned with the day of its archive its packages come from, with git and uv."""
 
@@ -100,6 +122,9 @@ class Projects(Part, machine=True, shared=True):
     places: Data
     """Each container's Python environment, uv cache and parts' data, a
     directory each, by the container's name."""
+    registry: Data
+    """Each project opened, kept so the machine's parts open it again as they
+    start."""
     base: Base = Field(default_factory=Base)
     projects: dict[str, Opened] = {}
     """Each project running, by its repository."""
@@ -180,6 +205,36 @@ class Projects(Part, machine=True, shared=True):
             else f"; waiting on secrets for {', '.join(opened.waiting)}"
         )
         return f"{opened.repository}: {len(opened.containers)} containers{waiting}"
+
+    @lup.service
+    async def resumed(self, resuming: Resuming, by: Machine) -> Resumed:
+        """Open again each project the machine's parts ran before they last stopped, at the commit approved last, every container they left stopped first, since nothing routes calls to it any more: as the machine's parts start.
+
+        A project that can't open is said with why, and the others open.
+        Raise `RefusedError` where the containers left can't be stopped.
+        """
+        del resuming, by
+        kept = self.kept()
+        if not kept:
+            return Resumed()
+        await Containers.cleared(Clearing())
+        opened: list[str] = []
+        refused: dict[str, str] = {}
+        for repository, opening in kept.items():
+            try:
+                await self.opening(opening)
+            except RefusedError as unopened:
+                refused = {**refused, repository: str(unopened)}
+            else:
+                opened = [*opened, repository]
+        return Resumed(opened=opened, refused=refused)
+
+    def kept(self) -> dict[str, Opening]:
+        """Return each project opened, by its repository, as kept."""
+        file = self.registry.path / "openings.json"
+        if not file.exists():
+            return {}
+        return OPENINGS.validate_json(file.read_bytes())
 
     @lup.service
     async def opened(self, opening: Opening, by: Machine) -> Opened:
@@ -266,6 +321,8 @@ class Projects(Part, machine=True, shared=True):
             waiting=waiting,
         )
         self.projects = {**self.projects, opening.repository: opened}
+        kept = {**self.kept(), opening.repository: opening}
+        (self.registry.path / "openings.json").write_bytes(OPENINGS.dump_json(kept))
         return opened
 
     async def planned(self, source: Source) -> Plan:
