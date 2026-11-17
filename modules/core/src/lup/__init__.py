@@ -9,8 +9,11 @@ the parties a method's `by` names and the classes a module groups them in
 (`ModuleServing`, listed in its `Serving`). The core's environment side
 (`lup.environment`) isn't among it, and nothing here imports it.
 
-`Core` is imported when first used: it lists its submodules' promises, which
-import `lup` itself.
+Running a program is `lup.programs` (`lup.programs.run`), kept under its own
+name: alone, its names would read as lup's own (`lup.run`).
+
+`Core` and `lup.programs` are imported when first used: `Core` lists its
+submodules' promises, which import `lup` itself.
 """
 
 from lup.declaration.errors import ProjectError
@@ -35,6 +38,7 @@ from lup.doors.tool import tool
 from lup.errors import LupError
 from lup.testing.promise import promise
 from lup.types import JsonObject, Model, MutableModel, Settings
+lazy from lup import programs
 lazy from lup.core import Core
 
 __all__ = [
@@ -67,6 +71,7 @@ __all__ = [
     "action",
     "chosen",
     "command",
+    "programs",
     "promise",
     "tool",
 ]

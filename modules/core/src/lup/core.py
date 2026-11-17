@@ -5,11 +5,12 @@ from lup.declaration.profiles import DEFAULT, DirectoryName, Profile, Profiles
 from lup.declaration.promises import DeclarationPromises, ProfilesPromises
 from lup.doors.promises import DoorsPromises
 from lup.doors.serving import Serving
+from lup.programs.promises import ProgramsPromises
 from lup.testing.promises import TestingPromises
 
 
 class Core(Module):
-    """What every project has: loading the declaration, the doors its modules are reached through, and checking their promises; the core's other submodules as they're built.
+    """What every project has: loading the declaration, the doors its modules are reached through, checking their promises, and running programs; the core's other submodules as they're built.
 
     A project changes it with `.edit` as it would any module, or puts another in
     its place with `.replace`, but can't drop it: resolving a selection without a
@@ -18,7 +19,11 @@ class Core(Module):
 
     name = "core"
     serving: Serving = Serving.of(
-        DeclarationPromises, ProfilesPromises, DoorsPromises, TestingPromises
+        DeclarationPromises,
+        ProfilesPromises,
+        DoorsPromises,
+        TestingPromises,
+        ProgramsPromises,
     )
     # lup: defer(issue=5, why="a session's start reads the profile it runs on and its account (`lup.declaration.profiles.chosen`), which lup's sessions bring")
     profiles: Profiles = Profiles.of(Profile(name=DEFAULT))
