@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 
 from annotated_types import Ge, Lt
 
+from lup.doors.parties import Party
 from lup.inbox.records import FRICTIONS, Decision, Ruling, Tone
 from lup.types import Model
 
@@ -254,3 +255,40 @@ class Everywhere(Model):
     """Every repository's inbox the store holds, as data."""
 
     inboxes: list[Inboxed] = []
+
+
+# What the operator reads
+
+
+class PartiesOf(Model):
+    """A repository whose parties to show."""
+
+    repository: str
+
+
+class PartyOf(Model):
+    """A party whose buffer to show: a repository's, by its name, as `@` cites it."""
+
+    repository: str
+    name: str
+
+
+class ConcernOf(Model):
+    """A concern to show, by its number."""
+
+    number: Cited
+
+
+class Showing(Model):
+    """What's been on the operator's screen, by their numbers: each isn't new to them after."""
+
+    items: list[Cited]
+
+
+class Pile(Party):
+    """A pile, as a party a comment reaches: it keeps what's sent to it, as a concern."""
+
+    party: Literal["pile"] = "pile"
+    """Which party it is, as a call across containers names it."""
+    repository: str
+    path: str

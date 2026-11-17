@@ -149,6 +149,23 @@ class Drawn(Model):
     edge: Edge
 
 
+class Remembered(MutableModel):
+    """What the store has read since its last write, read again only after the next: a reading of the inbox reads one node or one node's edges many times over."""
+
+    found: dict[int, Node | None] = {}
+    """Each node by its key, as it stands."""
+    numbered: dict[int, Node | None] = {}
+    """Each node by its number."""
+    named: dict[str, dict[str, Node | None]] = {}
+    """Each repository's nodes by their names."""
+    nodes: dict[str, list[Node]] = {}
+    """Each repository's nodes, in the order first kept."""
+    to: dict[int, list[Drawn]] = {}
+    """The edges drawn to each node, in the order drawn."""
+    sources: dict[int, list[Drawn]] = {}
+    """The edges drawn from each node, in the order drawn."""
+
+
 class Database(MutableModel, arbitrary_types_allowed=True):
     """The store's database, open: every repository's nodes and edges.
 
@@ -169,6 +186,8 @@ class Database(MutableModel, arbitrary_types_allowed=True):
     lock: threading.RLock = Field(default_factory=threading.RLock)
     """Held for each call, and across several by `together`; reentrant, so a
     kind's refusal reads the store while a write holds it."""
+    remembered: Remembered = Field(default_factory=Remembered)
+    """What it has read since its last write."""
     writes: int = 0
     """How many writes it has taken, each node kept, edge drawn or plain record
     rewritten: a reader holding what it made of the store compares it, to know
@@ -249,6 +268,11 @@ class Database(MutableModel, arbitrary_types_allowed=True):
             with begun:
                 yield self.connection
 
+    def wrote(self) -> None:
+        """Count a write, and forget what was read before it."""
+        self.writes += 1
+        self.remembered = Remembered()
+
     def node_read(self, row: Row[str, str]) -> Node:
         """Read a node from its row, kind and record, as the class declaring its kind, or `Node`; raise `StoreError` where it doesn't read."""
         kind, record = row
@@ -274,7 +298,11 @@ class Database(MutableModel, arbitrary_types_allowed=True):
 
     def found(self, key: int) -> Node | None:
         """Return node `key` as it stands, its latest version; none where the store holds none."""
-        return self.one(latest().where(NODES.c.key == key))
+        with self.lock:
+            known = self.remembered.found
+            if key not in known:
+                known[key] = self.one(latest().where(NODES.c.key == key))
+            return known[key]
 
     def node[N: Node](self, key: int, kind: type[N]) -> N:
         """Return node `key` as it stands, as `kind`: `Node` for any.
@@ -294,13 +322,23 @@ class Database(MutableModel, arbitrary_types_allowed=True):
         """Return the node cited `@number` as it stands; none where none is, a number from `beyond`, past what SQLite keeps as an integer, among them."""
         if not 1 <= number < beyond:
             return None
-        return self.one(latest().where(NODES.c.number == number))
+        with self.lock:
+            known = self.remembered.numbered
+            if number not in known:
+                known[number] = self.one(latest().where(NODES.c.number == number))
+            return known[number]
 
     def named(self, repository: str, name: str) -> Node | None:
         """Return the node of `repository` named `name`, as it stands; none where none is."""
-        return self.one(
-            latest().where(NODES.c.repository == repository, NODES.c.name == name)
-        )
+        with self.lock:
+            known = self.remembered.named.setdefault(repository, {})
+            if name not in known:
+                known[name] = self.one(
+                    latest().where(
+                        NODES.c.repository == repository, NODES.c.name == name
+                    )
+                )
+            return known[name]
 
     def repositories(self) -> list[str]:
         """Return every repository the store holds a node of, in the order first kept."""
@@ -325,12 +363,18 @@ class Database(MutableModel, arbitrary_types_allowed=True):
 
     def nodes[N: Node](self, repository: str, kind: type[N]) -> list[N]:
         """Return each node of `repository` of `kind` as it stands, in the order first kept: those of each kind it or a class the store reads derived from it declares, or every node for `Node`."""
-        query = latest().where(NODES.c.repository == repository).order_by(NODES.c.key)
-        if kind.declared() is not None:
-            query = query.where(NODES.c.kind.in_(declared(kind, self.kinds.nodes)))
         with self.writing() as database:
-            rows = database.execute(query).all()
-        found = [self.node_read(row) for row in rows]
+            known = self.remembered.nodes
+            if repository not in known:
+                query = (
+                    latest()
+                    .where(NODES.c.repository == repository)
+                    .order_by(NODES.c.key)
+                )
+                known[repository] = [
+                    self.node_read(row) for row in database.execute(query).all()
+                ]
+            found = known[repository]
         return [each for each in found if isinstance(each, kind)]
 
     def every[N: Node](self, kind: type[N]) -> list[N]:
@@ -392,7 +436,7 @@ class Database(MutableModel, arbitrary_types_allowed=True):
                 .where(NODES.c.key == node.key)
                 .values(version=version, name=node.name)
             )
-            self.writes += 1
+            self.wrote()
         return node
 
     def refusal(self, node: Node, earlier: Node | None) -> str | None:
@@ -446,7 +490,7 @@ class Database(MutableModel, arbitrary_types_allowed=True):
                     record=edge.model_dump_json(),
                 )
             )
-            self.writes += 1
+            self.wrote()
         return edge
 
     def placed(self, query: Select[int, str, str]) -> list[Drawn]:
@@ -471,7 +515,10 @@ class Database(MutableModel, arbitrary_types_allowed=True):
             EDGES.c.target == target
         )
         with self.writing():
-            found = self.placed(query)
+            known = self.remembered.to
+            if target not in known:
+                known[target] = self.placed(query)
+            found = known[target]
             held = [each for each in found if not current or self.holds(each)]
         return [each.edge for each in held if isinstance(each.edge, kind)]
 
@@ -496,11 +543,15 @@ class Database(MutableModel, arbitrary_types_allowed=True):
 
     def later(self, source: int, place: int) -> list[Drawn]:
         """Return the edges drawn from node `source` after `place` in the order drawn, in that order."""
-        return self.placed(
-            select(EDGES.c.drawn, EDGES.c.kind, EDGES.c.record).where(
-                EDGES.c.source == source, EDGES.c.drawn > place
-            )
-        )
+        with self.lock:
+            known = self.remembered.sources
+            if source not in known:
+                known[source] = self.placed(
+                    select(EDGES.c.drawn, EDGES.c.kind, EDGES.c.record).where(
+                        EDGES.c.source == source
+                    )
+                )
+            return [each for each in known[source] if each.place > place]
 
     def holds(self, drawn: Drawn) -> bool:
         """Say whether no edge drawn later from the same node replaced `drawn`."""
@@ -540,4 +591,4 @@ class Database(MutableModel, arbitrary_types_allowed=True):
                 database.execute(
                     insert(PLAIN).values(name=name, record=value.model_dump_json())
                 )
-            self.writes += 1
+            self.wrote()

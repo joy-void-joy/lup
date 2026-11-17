@@ -6,12 +6,13 @@ its services, as #5's sessions will (`README.md` here).
 """
 
 import lup
-from lup import Agent, Codebase, Model, Modules, Operator, Part, Project
+from lup import Agent, Blocks, Codebase, Fold, Model, Modules, Operator, Part, Project
 from lup.inbox.said import (
     Answering,
     AskSaid,
     Clearing,
     Commenting,
+    ConcernOf,
     ConcernSaid,
     Ending,
     Everywhere,
@@ -20,6 +21,9 @@ from lup.inbox.said import (
     Naming,
     NoteSaid,
     Nothing,
+    PartiesOf,
+    PartyOf,
+    Pile,
     Placed,
     SendSaid,
     Told,
@@ -58,6 +62,19 @@ async def told(started: Started, agent: Agent) -> Told:
     assert isinstance(answered, Accepted)
     assert isinstance(answered.output, Told)
     return answered.output
+
+
+async def viewed(started: Started, view: str, given: Model) -> Blocks:
+    """Read one of the inbox's views as the operator does, which must answer its blocks."""
+    answered = await started.view("core", view, given, Operator())
+    assert isinstance(answered, Accepted), answered
+    assert isinstance(answered.output, Blocks)
+    return answered.output
+
+
+def folds(blocks: Blocks) -> list[Fold]:
+    """Return the folds among `blocks`."""
+    return [each for each in blocks.blocks if isinstance(each, Fold)]
 
 
 def placed(state: Inboxed, title: str) -> Placed:
@@ -234,3 +251,69 @@ class InboxPromises(Part):
             assert any(
                 each.text == "noted" for each in (await told(started, agent)).items
             )
+
+    @lup.promise
+    async def the_operator_finds_each_concern_from_the_list_of_parties(
+        self, by: Testing
+    ) -> None:
+        """Every concern an agent opens is found from the list of parties, under the party holding it, and opens on what was said in it; a comment on it reaches its holder."""
+        started = await by.started(project())
+        agent = by.any(Agent)
+        await started.serve("agent_named", Naming(agent=agent.id, name="builder"), HERE)
+        await said(
+            started,
+            "concern",
+            ConcernSaid(text="it hung twice", title="the gate hangs"),
+            agent,
+        )
+        await said(
+            started,
+            "friction",
+            FrictionSaid(text="slow keys", under="frictions/keys"),
+            agent,
+        )
+        listed = folds(
+            await viewed(started, "parties", PartiesOf(repository="harness"))
+        )
+        assert listed
+        assert all(each.kind == "party" for each in listed)
+        builder = folds(
+            await viewed(
+                started, "party", PartyOf(repository="harness", name="builder")
+            )
+        )
+        [gate] = [each for each in builder if each.kind == "concern"]
+        assert gate.reaches == agent
+        keys = folds(
+            await viewed(
+                started, "party", PartyOf(repository="harness", name="frictions/keys")
+            )
+        )
+        [slow] = [each for each in keys if each.kind == "concern"]
+        assert slow.reaches == Pile(repository="harness", path="frictions/keys")
+        number = int(gate.id.removeprefix("concern-"))
+        words = await viewed(started, "concern_view", ConcernOf(number=number))
+        assert any("it hung twice" in line for line in words.text().splitlines())
+
+    @lup.promise
+    async def what_waits_is_shown_as_waiting(self, by: Testing) -> None:
+        """What waits on the operator is in their view of what waits, and leaves it once they answer it."""
+        started = await by.started(project())
+        agent = by.any(Agent)
+        await said(started, "ask", AskSaid(question="which way?"), agent)
+        assert (
+            "which way?"
+            in (
+                await viewed(started, "waiting", PartiesOf(repository="harness"))
+            ).text()
+        )
+        [question] = (await inboxed(started)).waiting
+        await started.run(
+            "core", "answer", Answering(question=question, text="this way"), Operator()
+        )
+        assert (
+            "which way?"
+            not in (
+                await viewed(started, "waiting", PartiesOf(repository="harness"))
+            ).text()
+        )

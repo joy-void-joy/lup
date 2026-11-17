@@ -17,6 +17,7 @@ from lup.doors.door import RefusedError
 from lup.doors.events import Stopping
 from lup.doors.parties import Agent, Codebase, Operator
 from lup.doors.parts import Data, Part
+from lup.inbox import views
 from lup.inbox.inbox import Inbox, InboxError, first_line
 from lup.inbox.records import KINDS, Concern, Item, PileRecord, Question
 from lup.inbox.said import (
@@ -25,6 +26,7 @@ from lup.inbox.said import (
     AskSaid,
     Clearing,
     Commenting,
+    ConcernOf,
     ConcernSaid,
     Declining,
     Ending,
@@ -34,9 +36,12 @@ from lup.inbox.said import (
     Naming,
     NoteSaid,
     Nothing,
+    PartiesOf,
+    PartyOf,
     Piling,
     Reading,
     SendSaid,
+    Showing,
     Spoken,
     Told,
     ToldItem,
@@ -44,6 +49,8 @@ from lup.inbox.said import (
     WithdrawSaid,
     Words,
 )
+from lup.inbox.views import Shows
+from lup.shell.blocks import Blocks
 from lup.store.database import Database
 from lup.store.errors import StoreError
 
@@ -316,6 +323,49 @@ class Inboxes(Part, approved=True, shared=True):
         with refusing():
             made = inbox.pile(piling.path, inbox.operator())
         return f"Made {inbox.called(made)}."
+
+    @lup.command
+    async def shown(self, showing: Showing, by: Operator) -> str:
+        """Say what's been on your screen: each isn't new to you after, and stays where it is until you clear it."""
+        del by
+        with refusing():
+            items = [self.numbered(each, Item) for each in showing.items]
+        for repository in dict.fromkeys(each.repository for each in items):
+            self.inbox(repository).shown(
+                [each for each in items if each.repository == repository]
+            )
+        return f"{len(items)} shown."
+
+    # What the operator reads
+
+    def shows(self) -> Shows:
+        """Return the inbox's views a block opens."""
+        return Shows(party=Inboxes.party, concern=Inboxes.concern_view)
+
+    @lup.view
+    async def parties(self, of: PartiesOf) -> Blocks:
+        """Show a repository's parties: each agent no other spawned and each pile at the top, each opening on its buffer."""
+        return views.parties(self.inbox(of.repository), self.shows())
+
+    @lup.view
+    async def party(self, of: PartyOf) -> Blocks:
+        """Show a party's buffer: the concerns it holds, the parties under it, and what it said or was told outside any concern."""
+        inbox = self.inbox(of.repository)
+        with refusing():
+            found = inbox.party(of.name)
+        return views.buffer(inbox, found, self.shows())
+
+    @lup.view
+    async def concern_view(self, of: ConcernOf) -> Blocks:
+        """Show a concern whole: its body, the concerns under it, and what's been said in it."""
+        with refusing():
+            found = self.numbered(of.number, Concern)
+        return views.concern(self.inbox(found.repository), found, self.shows())
+
+    @lup.view
+    async def waiting(self, of: PartiesOf) -> Blocks:
+        """Show what waits on you: each item you're to answer, then each concern its agent says is done."""
+        return views.waiting(self.inbox(of.repository), self.shows())
 
     def numbered[N: Item | Concern](self, number: int, kind: type[N]) -> N:
         """Return the node cited `@number`, as `kind`; raise `InboxError` where none is."""

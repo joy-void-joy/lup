@@ -266,6 +266,11 @@ class Inbox(Model, arbitrary_types_allowed=True):
         It's named `name`, or after its title where none is given (`slug`),
         with a number after where another node holds that name.
         """
+        if name is not None:
+            try:
+                named(name)
+            except ValueError as wrong:
+                raise InboxError(str(wrong), about=[name]) from wrong
         kind = Friction if friction else Concern
         concern = self.database.kept(
             kind(
@@ -530,6 +535,62 @@ class Inbox(Model, arbitrary_types_allowed=True):
     def newest(self, concern: Concern) -> int:
         """Return the key of the newest item in `concern`, 0 where none is."""
         return max((each.key for each in self.said_in(concern)), default=0)
+
+    def holding(self, party: PartyRecord) -> list[Concern]:
+        """Return each concern that reads as held by `party`, oldest first: those under it, and, for `no-agent`, those of agents who have ended."""
+        return [
+            each
+            for each in self.database.nodes(self.repository, Concern)
+            if not isinstance(self.under(each), Concern)
+            and self.standing(each).holder.key == party.key
+        ]
+
+    def nested(self, concern: Concern) -> list[Concern]:
+        """Return each concern right under `concern`, oldest first."""
+        keys = [
+            each.source
+            for each in self.database.drawn_to(concern.key, Under, current=True)
+            if each.source is not None
+        ]
+        return [
+            found
+            for key in keys
+            if isinstance(found := self.database.found(key), Concern)
+        ]
+
+    def top(self) -> list[PartyRecord]:
+        """Return each party at the top of the repository, in the order made: an agent no other spawned, and a pile under none; never the operator, whose list it is."""
+        return [
+            each
+            for each in self.parties()
+            if self.under(each) is None and not isinstance(each, OperatorRecord)
+        ]
+
+    def beneath(self, party: PartyRecord) -> list[PartyRecord]:
+        """Return each party right under `party`, in the order made: the agents it spawned, the piles under it."""
+        keys = [
+            each.source
+            for each in self.database.drawn_to(party.key, Under, current=True)
+            if each.source is not None
+        ]
+        return [
+            found
+            for key in keys
+            if isinstance(found := self.database.found(key), PartyRecord)
+        ]
+
+    def loose(self, party: PartyRecord) -> list[Item]:
+        """Return each item `party` wrote or was for that's in no concern, oldest first."""
+        return [
+            each
+            for each in self.involving(party)
+            if not self.database.drawn_from(each.key, In, current=True)
+        ]
+
+    def new_involving(self, party: PartyRecord) -> list[Item]:
+        """Return each item new to the operator that `party` wrote or was for, oldest first."""
+        new = self.new_to_operator()
+        return [each for each in self.involving(party) if each in new]
 
     def held(self, party: PartyRecord) -> list[Concern]:
         """Return each concern right under `party`, as the store holds them, oldest first."""

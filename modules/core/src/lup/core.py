@@ -8,7 +8,7 @@ from lup.inbox.part import Inboxes, Speaking
 from lup.inbox.promises import InboxPromises
 from lup.inbox.records import EDGES, NODES
 from lup.running.promises import RunningPromises
-from lup.shell.kinds import SHELL_FOLDS, SHELL_TONES, Folds, Tones
+from lup.shell.kinds import SHELL_FOLDS, SHELL_TONES, FoldKind, Folds, Tones
 from lup.shell.promises import ShellPromises
 from lup.store.promises import StorePromises
 from lup.store.records import Recorded
@@ -41,8 +41,11 @@ class Core(Module):
     )
     tones: Tones = Tones.of(*SHELL_TONES)
     """The shell's tones: plain, muted, strong, and the operator's own words."""
-    folds: Folds = Folds.of(*SHELL_FOLDS)
+    folds: Folds = Folds.of(
+        *SHELL_FOLDS,
+        FoldKind(name="concern", letter="c", called="concern", level=1, colour="cyan"),
+    )
     """The shell's fold kinds: a party's section, a file, a body, a run of
-    unchanged lines."""
+    unchanged lines; and the inbox's, a concern."""
     kinds: Recorded = Recorded.of(*NODES, *EDGES)
     """The kinds of record the core's submodules keep in the store: the inbox's."""
