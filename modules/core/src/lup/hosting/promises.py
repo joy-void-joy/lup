@@ -186,8 +186,12 @@ async def placed(
     return directory
 
 
+VERSIONED = Answering(when=["version"], output="6.1.0\n")
+"""podman saying its version, as lup asks before the part holding it starts."""
+
 PODMAN = Scripted(
     answers=[
+        VERSIONED,
         Answering(when=["run"]),
         Answering(when=["stop"]),
         Answering(when=["image", "exists"], status=1),
@@ -208,6 +212,13 @@ type Wall = Literal[
     "--security-opt=no-new-privileges",
 ]
 """What every container lup starts stands behind, as podman's options."""
+
+
+def acted(started: Started) -> list[list[str]]:
+    """Return the arguments of each run of podman the machine's parts asked for beyond asking its version, which they do as they start."""
+    return [
+        each for each in started.ran("podman") if not (each and each[0] == "version")
+    ]
 
 
 def podman_ran(started: Started, verb: str) -> list[list[str]]:
@@ -263,7 +274,7 @@ class HostingPromises(Part):
         stopped = await started.serve("stopped", {"name": asked.name}, caller)
         assert isinstance(refused, Refused)
         assert isinstance(stopped, Refused)
-        assert started.ran("podman") == []
+        assert acted(started) == []
 
     @lup.promise
     async def an_image_is_built_only_where_it_isnt_there(self, by: Testing) -> None:
@@ -272,6 +283,7 @@ class HostingPromises(Part):
         tagged, based = by.any(bool), by.any(bool)
         podman = Scripted(
             answers=[
+                VERSIONED,
                 Answering(when=["image", "exists", BASE], status=0 if based else 1),
                 Answering(when=["image", "exists"], status=0 if tagged else 1),
                 Answering(when=["pull", "--quiet", BASE]),
@@ -306,7 +318,7 @@ class HostingPromises(Part):
         }
         refused = await started.serve("built", image, Machine())
         assert isinstance(refused, Refused)
-        assert started.ran("podman") == []
+        assert acted(started) == []
 
     @lup.promise
     async def a_mount_through_a_link_or_relative_path_is_refused(
@@ -323,13 +335,15 @@ class HostingPromises(Part):
         )
         refused = await started.serve("started", spec, Machine())
         assert isinstance(refused, Refused)
-        assert started.ran("podman") == []
+        assert acted(started) == []
 
     @lup.promise
     async def podman_failing_is_a_refusal_saying_why(self, by: Testing) -> None:
         """podman failing to start a container refuses the call that asked, saying why, rather than leaving it believed running."""
         asked = by.any(Asked)
-        podman = Scripted(answers=[Answering(when=["run"], status=125, error="no")])
+        podman = Scripted(
+            answers=[VERSIONED, Answering(when=["run"], status=125, error="no")]
+        )
         started = await by.started(
             lup.testing.Repository(declaration=HOME),
             programs={"podman": podman},
@@ -446,6 +460,7 @@ class HostingPromises(Part):
         kept = by.any(bool)
         podman = Scripted(
             answers=[
+                VERSIONED,
                 Answering(when=["image", "exists"], status=0),
                 Answering(when=["run", "--interactive"], output=json.dumps(VAULT_PLAN)),
                 Answering(when=["run", "--detach"]),
@@ -518,6 +533,7 @@ class HostingPromises(Part):
         )
         podman = Scripted(
             answers=[
+                VERSIONED,
                 Answering(when=["image", "exists"], status=0),
                 Answering(when=["run", "--interactive"], output=json.dumps(tied)),
                 Answering(when=["run", "--detach"]),
@@ -538,6 +554,7 @@ class HostingPromises(Part):
         plan = plan_of(Planned(module=unsafe.name, part="Notes"))
         podman = Scripted(
             answers=[
+                VERSIONED,
                 Answering(when=["image", "exists"], status=0),
                 Answering(when=["run", "--interactive"], output=json.dumps(plan)),
                 Answering(when=["run", "--detach"]),
@@ -554,6 +571,7 @@ class HostingPromises(Part):
         """Each container of a project syncs its Python environment and uv's cache in directories of its own, so code running in one never writes what another imports."""
         podman = Scripted(
             answers=[
+                VERSIONED,
                 Answering(when=["image", "exists"], status=0),
                 Answering(when=["run", "--interactive"], output=json.dumps(VAULT_PLAN)),
                 Answering(when=["run", "--detach"]),
@@ -1011,6 +1029,7 @@ UV = Scripted(answers=[Answering(when=["python", "dir"], output="/srv/python\n")
 
 OPENING_PODMAN = Scripted(
     answers=[
+        VERSIONED,
         Answering(when=["image", "exists"], status=0),
         Answering(when=["run", "--interactive"], output=json.dumps(VAULT_PLAN)),
         Answering(when=["run", "--detach"]),
@@ -1203,6 +1222,8 @@ class Failing(lup.MutableModel, Responding):
     def answered(self, arguments: list[str], given: bytes | None) -> Answering | None:
         """Answer each run, failing to start a container past the first `allowed`."""
         del given
+        if arguments and arguments[0] == "version":
+            return VERSIONED
         if "--detach" in arguments:
             self.started += 1
             return Answering(status=0 if self.started <= self.allowed else 125)
@@ -1269,3 +1290,44 @@ class ClearingPromises(Part):
         resumed = await started.serve("resumed", {}, Machine())
         assert isinstance(resumed, Accepted)
         assert json.loads(resumed.answer())["opened"] == ["harmon"]
+
+
+class Podmanless(Model):
+    """podman as a promise checks the machine without it: not there, at a version lup doesn't take, saying something that's no version, or at one it takes."""
+
+    version: Literal["", "4.9.3", "not a version", "6.1.0"]
+    """What it says its version is; nothing for not there at all."""
+
+
+class WithoutPromises(Part):
+    """What the operator can count on of the machine without a program it uses: the parts needing it don't start, the others do."""
+
+    @lup.promise
+    async def without_podman_only_what_needs_it_is_refused(self, by: Testing) -> None:
+        """Without podman, or with one at a version lup doesn't take, the part holding it isn't made and what needs it is refused, while the machine's other parts answer: the operator can still keep a secret; with one it takes, it starts containers."""
+        podman = by.any(Podmanless).version
+        programs = (
+            {}
+            if not podman
+            else {
+                "podman": Scripted(
+                    answers=[
+                        Answering(when=["version"], output=f"{podman}\n"),
+                        Answering(when=["run"]),
+                    ]
+                )
+            }
+        )
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME), programs=programs, machine=True
+        )
+        run = await started.serve("started", by.any(Asked).spec(), Machine())
+        kept = await started.run(
+            "hosting",
+            "keep",
+            {"project": "harmon", "name": "token", "value": "t"},
+            lup.Operator(),
+        )
+        assert isinstance(kept, Accepted)
+        assert isinstance(run, Accepted) == (podman == "6.1.0")
+        assert bool(podman_ran(started, "run")) == (podman == "6.1.0")

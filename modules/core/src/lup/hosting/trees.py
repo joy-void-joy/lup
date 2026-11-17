@@ -267,6 +267,7 @@ class Trees(Part, machine=True, shared=True):
 
     git: Program = Program(
         name="git",
+        optional=True,
         why="reads a commit's files from its objects, to run what the operator approved",
         install="https://git-scm.com/downloads",
     )

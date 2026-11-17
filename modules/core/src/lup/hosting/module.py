@@ -16,6 +16,7 @@ from lup.hosting.promises import (
     ApprovalsPromises,
     ClearingPromises,
     HostingPromises,
+    WithoutPromises,
     ProjectsPromises,
     TreesPromises,
 )
@@ -39,4 +40,5 @@ class Hosting(Module):
         ApprovalsPromises,
         ProjectsPromises,
         ClearingPromises,
+        WithoutPromises,
     )
