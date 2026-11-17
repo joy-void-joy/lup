@@ -17,6 +17,7 @@ from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 from lup.doors.door import Rejection
 from lup.doors.parties import Agent, Codebase, Operator
 from lup.errors import LupError
+from lup.running.plan import Plan
 from lup.types import Model
 
 type Caller = Annotated[Agent | Operator | Codebase, Field(discriminator="party")]
@@ -90,6 +91,31 @@ type Call = Annotated[
     Field(discriminator="kind"),
 ]
 """A call through any door, as it crosses: the one of each kind it is."""
+
+
+class Offering(Model):
+    """Asking the program on the operator's machine what the caller may call: who they are, as the socket the question came in on says, and their project's plan."""
+
+    format: int = 1
+    kind: Literal["offering"] = "offering"
+    repository: str | None = None
+    """The project the operator asks about, where it's theirs: the one whose
+    repository their `lup` runs in. A container's project is its own,
+    whatever this says."""
+
+
+type Asking = Annotated[Call | Offering, Field(discriminator="kind")]
+"""What comes in on a socket of the program on the operator's machine: a call
+through a door, or a question of what the caller may call."""
+
+
+class Offer(Model):
+    """What the program on the operator's machine says a caller may call: who they are, from the socket they asked on, and the plan of their project, the machine's own parts' beside it."""
+
+    format: int = 1
+    kind: Literal["offer"] = "offer"
+    by: Caller
+    plan: Plan
 
 
 class Answered(Model):

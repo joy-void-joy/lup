@@ -183,7 +183,10 @@ class ProgramRun(Model):
 
     program: str
     arguments: list[str]
-    given: str | None = None
+    given: bytes | None = None
+    """What it was given on its input."""
+    env: dict[str, str] = {}
+    """The variables it was run with beside the machine's own."""
 
 
 class Heard(MutableModel):
@@ -199,14 +202,24 @@ class Answering(Model):
     """The arguments a run starts with, for it to get this answer; none for
     any run."""
     status: int = 0
-    output: str = ""
-    error: str = ""
+    output: bytes | str = b""
+    """What it prints, text written as UTF-8."""
+    error: bytes | str = b""
+    """What it writes on its standard error, text written as UTF-8."""
 
 
 class Scripted(Model):
     """A program a part declares, stood in for in the harness: the answers it gives, the first whose `when` a run's arguments start with; a run none answers fails as a program that isn't there."""
 
     answers: list[Answering] = []
+
+
+class Responding(ABC):
+    """A program a part declares, stood in for by code a promise writes: it answers each run from its arguments and its input, as a store of git's objects answers what's asked of it."""
+
+    @abstractmethod
+    def answered(self, arguments: list[str], given: bytes | None) -> Answering | None:
+        """Answer one run; none where the program as stood in for has no answer to it, which fails as a program that isn't there."""
 
 
 class Crossing(ABC):
@@ -344,7 +357,7 @@ class Testing(Party, ABC):
         declared: Project | str,
         secrets: Mapping[str, str] | None = None,
         repository: str = "harness",
-        programs: Mapping[str, Scripted] | None = None,
+        programs: Mapping[str, Scripted | Responding] | None = None,
         *,
         machine: bool = False,
     ) -> Started:

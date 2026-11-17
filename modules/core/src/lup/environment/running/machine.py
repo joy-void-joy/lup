@@ -20,22 +20,32 @@ from lup.doors.door import Accepted
 from lup.doors.parties import Machine
 from lup.environment.declaration import load, resolve
 from lup.environment.running.container import answered, asked, declined, listening
-from lup.hosting.carrying import Arrival, Carrying, Listens, Route
-from lup.running.wire import Call, FormatError, Host, read
+from lup.environment.running.planning import plan_of
+from lup.hosting.carrying import Arrival, Carrying, Listens, Route, Visiting
+from lup.running.plan import Plan
+from lup.running.wire import Asking, FormatError, Host, Offer, Offering, read
 from lup.types import MutableModel
 lazy from lup.doors.parts import Runs
 lazy from lup.environment.doors import Running
 
-CALLS = TypeAdapter[Call](Call)
+ASKED = TypeAdapter[Asking](Asking)
 
 
 async def carried(running: Running, directory: Path, text: bytes) -> bytes:
-    """Answer one message come in on a socket in `directory`: route it, and answer it here or forward it to the container whose part answers it; nothing sent makes this raise."""
+    """Answer one message come in on a socket in `directory`: a call, routed and answered here or forwarded to the container whose part answers it, or a question of what the caller may call; nothing sent makes this raise."""
     try:
-        call = read(text, CALLS)
+        message = read(text, ASKED)
     except (FormatError, ValidationError) as wrong:
         return declined(str(wrong))
-    arrival = Arrival(directory=directory, call=call)
+    if isinstance(message, Offering):
+        visiting = Visiting(directory=directory, repository=message.repository)
+        offering = await running.serve(
+            "offered", visiting.model_dump(mode="json"), Machine()
+        )
+        if not isinstance(offering, Accepted):
+            return declined(offering.rejection.reason)
+        return Offer.model_validate(offering.output).model_dump_json().encode()
+    arrival = Arrival(directory=directory, call=message)
     routing = await running.serve("routed", arrival.model_dump(mode="json"), Machine())
     if not isinstance(routing, Accepted):
         return declined(routing.rejection.reason)
@@ -114,6 +124,11 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
         raise ProjectError(message)
     binder = Binder(running=running, limit=limit)
     carrying.listens = binder
+    hosting = plan_of(resolve(load(host.root / host.declaration)), [], host.root)
+    machine = [
+        each for each in hosting.parts if each.holds.machine or each.holds.shared
+    ]
+    carrying.hosted = Plan(parts=machine, tools=hosting.tools)
     try:
         await binder.listened(carrying.operator())
         await asyncio.Event().wait()

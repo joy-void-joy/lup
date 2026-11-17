@@ -2,11 +2,10 @@
 
 A declaration is code, so it's loaded in a container, where running a branch's
 code is harmless, and what comes out is this: each part of each module, what it
-holds, and the doors it serves, with the tools a session is told of and the
-files the declaration loaded. The program starts containers from it and routes
-calls by it; a part holding something runs apart, from a commit the operator
-approved, and the files are what an approval shows (`README.md` here, *The
-plan*).
+holds, the file it's defined in, and the doors it serves, with the tools a
+session is told of and the files the declaration loaded. The program starts
+containers from it and routes calls by it; a part holding something runs apart,
+in a container of its own (`README.md` here, *The plan*).
 """
 
 from collections import Counter
@@ -55,6 +54,10 @@ class PartPlan(Model):
     part: Name
     """Its class's name, which names it among its module's parts."""
     holds: Holds
+    source: str | None = None
+    """The file its class is defined in, relative to the project's root: what
+    an approval calls out where it changes; none where it's outside the root,
+    as a part lup ships is."""
     doorways: list[Doorway] = []
 
     def apart(self) -> bool:
@@ -77,8 +80,8 @@ class Plan(Model):
     """What a session is told of each tool the project's modules serve."""
     files: list[str] = []
     """The files of the project loading the declaration imported, relative to
-    its root: what a part's container runs, and what an approval shows the
-    diff of."""
+    its root: what an approval may point at, never what it approves, which is
+    the commit whole."""
 
     def together(self) -> list[PartPlan]:
         """Return the parts holding nothing, which run in the project's own container."""

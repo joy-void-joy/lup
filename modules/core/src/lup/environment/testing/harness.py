@@ -47,6 +47,7 @@ from lup.testing.harness import (
     ProgramRun,
     Ran,
     Reaching,
+    Responding,
     Scripted,
     Served,
     Started,
@@ -350,13 +351,17 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
 
 
 class StandIn(Model, Runs, arbitrary_types_allowed=True):
-    """The programs a started lup's parts run, stood in for as a promise scripts them: each run heard, and answered by the first answer whose `when` its arguments start with."""
+    """The programs a started lup's parts run, stood in for as a promise scripts them: each run heard, and answered by the first answer whose `when` its arguments start with, or by the code the promise wrote for it."""
 
-    scripts: dict[str, Scripted] = {}
+    scripts: dict[str, Scripted | Responding] = {}
     heard: Heard
 
     async def ran(
-        self, program: Program, arguments: list[str], given: str | None
+        self,
+        program: Program,
+        arguments: list[str],
+        given: bytes | None,
+        env: dict[str, str],
     ) -> Finished:
         """Hear the run, and answer it as its program's script says.
 
@@ -364,24 +369,36 @@ class StandIn(Model, Runs, arbitrary_types_allowed=True):
         program that isn't there.
         """
         self.heard.runs.append(
-            ProgramRun(program=program.name, arguments=arguments, given=given)
+            ProgramRun(program=program.name, arguments=arguments, given=given, env=env)
         )
-        script = self.scripts.get(program.name, Scripted())
-        answer = next(
-            (
-                each
-                for each in script.answers
-                if arguments[: len(each.when)] == each.when
-            ),
-            None,
-        )
+        match self.scripts.get(program.name, Scripted()):
+            case Scripted(answers=answers):
+                answer = next(
+                    (
+                        each
+                        for each in answers
+                        if arguments[: len(each.when)] == each.when
+                    ),
+                    None,
+                )
+            case Responding() as responding:
+                answer = responding.answered(arguments, given)
         if answer is None:
             message = (
                 f"`{program.name} {' '.join(arguments)}` has no answer in the "
                 "promise's script, so it's run as a program that isn't there"
             )
             raise ProgramError(message, about=[program.name])
-        return Finished(status=answer.status, output=answer.output, error=answer.error)
+        return Finished(
+            status=answer.status,
+            output=bytes_of(answer.output),
+            error=bytes_of(answer.error),
+        )
+
+
+def bytes_of(written: bytes | str) -> bytes:
+    """Return what a program stood in for writes, as bytes, text as UTF-8."""
+    return written.encode() if isinstance(written, str) else written
 
 
 class Crosser(Model, Crossing, arbitrary_types_allowed=True):
@@ -471,7 +488,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
         declared: Project | str,
         secrets: Mapping[str, str] | None = None,
         repository: str = "harness",
-        programs: Mapping[str, Scripted] | None = None,
+        programs: Mapping[str, Scripted | Responding] | None = None,
         *,
         machine: bool = False,
     ) -> Started:
