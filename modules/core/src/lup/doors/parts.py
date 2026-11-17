@@ -27,6 +27,16 @@ from lup.types import Model, MutableModel
 lazy from lup.declaration.module import Module
 
 
+def variable(command: str, secret: str) -> str:
+    """Name the environment variable a secret is read from where it's set: a project's command's name, or its repository's on the machine, then the secret's, in capitals, each `-` a `_`.
+
+    >>> variable("story-reader", "token")
+    'STORY_READER_TOKEN'
+    """
+    # lup: ignore("string-replace", why="an environment variable's name can't hold a `-`, which a command's may: `story-reader`'s token is `STORY_READER_TOKEN`")
+    return f"{command}_{secret}".upper().replace("-", "_")
+
+
 class Secret(Model):
     """A secret a class holds: a field typed `Secret`, filled where the class runs with the value the operator stored under the field's name.
 

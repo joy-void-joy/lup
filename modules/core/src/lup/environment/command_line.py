@@ -31,6 +31,7 @@ from lup.declaration.module import Modules
 from lup.declaration.project import Project
 from lup.doors.door import Rejection
 from lup.doors.parties import Operator
+from lup.doors.parts import variable
 from lup.environment.declaration import Resolved, read, resolve
 from lup.environment.doors import Running
 from lup.environment.layout import MachineLayout, RepositoryLayout
@@ -246,16 +247,6 @@ def developed(modules: list[Module]) -> Project | None:
 
 class Secrets(Settings):
     """Where a project's command reads the secrets its parts hold: the environment, and `.env` files, as pydantic's settings read them."""
-
-
-def variable(command: str, secret: str) -> str:
-    """Name the environment variable a project's command reads `secret` from: the command's name, then the secret's, in capitals, each `-` a `_`.
-
-    >>> variable("story-reader", "token")
-    'STORY_READER_TOKEN'
-    """
-    # lup: ignore("string-replace", why="an environment variable's name can't hold a `-`, which a command's may: `story-reader`'s token is `STORY_READER_TOKEN`")
-    return f"{command}_{secret}".upper().replace("-", "_")
 
 
 def secrets_of(name: str, held: list[str]) -> dict[str, str]:

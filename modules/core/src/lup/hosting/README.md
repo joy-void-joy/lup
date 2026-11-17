@@ -16,7 +16,7 @@ These are the second lup's room's walls, as measured with rootless podman 6.1 (`
 
 ## Secrets
 
-`Secrets` keeps each project's secrets, a JSON file each under its own data, outside every repository, readable by the operator alone, so a downstream project's user never learns where: lup asks them for a secret the first time a part holding it starts. Only the machine's own parts read one (`held`), handing a part the secrets kept for its project that it holds and naming those that aren't, for the operator to be asked for; another project's secret of the same name is never among them. Only the operator keeps one (`keep`, a command).
+`Secrets` keeps each project's secrets, a JSON file each under its own data, outside every repository, readable by the operator alone, so a downstream project's user never learns where: lup asks them for a secret the first time a part holding it starts. Only the machine's own parts read one (`held`), handing a part the secrets kept for its project that it holds and naming those that aren't, for the operator to be asked for; another project's secret of the same name is never among them. A secret set in the machine's environment, under the variable a project's command reads it from (`HARMON_TOKEN`, `lup.doors.parts.variable`), wins over the one kept, so a deployment sets one variable whichever way the part runs. Only the operator keeps one (`keep`, a command).
 
 ## Trees
 

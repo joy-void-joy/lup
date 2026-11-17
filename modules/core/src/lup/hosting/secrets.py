@@ -8,12 +8,13 @@ operator alone (`README.md` here, *Secrets*).
 """
 
 from pydantic import Field, TypeAdapter
+from pydantic_settings import EnvSettingsSource
 
 import lup
 from lup.doors.parties import Machine, Operator
-from lup.doors.parts import Data, Part
+from lup.doors.parts import Data, Part, variable
 from lup.running.plan import Name
-from lup.types import Model
+from lup.types import Model, Settings
 
 STORED = TypeAdapter(dict[str, str])
 
@@ -40,6 +41,10 @@ class Keeping(Model):
     value: str = Field(repr=False)
 
 
+class Overrides(Settings):
+    """Where a secret set for a deployment is read on the machine: its environment, as pydantic's settings read it."""
+
+
 class Secrets(Part, machine=True, shared=True):
     """The machine's part keeping each project's secrets: it hands the machine's parts those a part holds, and keeps what the operator gives."""
 
@@ -55,12 +60,23 @@ class Secrets(Part, machine=True, shared=True):
 
     @lup.service
     async def held(self, holding: Holding, by: Machine) -> Values:
-        """Return the values of the secrets a part holds, those kept, with the names of those that aren't, for the operator to be asked for."""
+        """Return the values of the secrets a part holds, those kept, with the names of those that aren't, for the operator to be asked for.
+
+        A secret set in the machine's environment, under the variable a
+        project's command reads it from (`HARMON_TOKEN`), wins over the one
+        kept, so a deployment sets one variable whichever way the part runs.
+        """
         del by
+        environment = EnvSettingsSource(Overrides).env_vars
         kept = self.kept_for(holding.project)
+        found = {
+            name: environment.get(variable(holding.project, name).lower())
+            or kept.get(name)
+            for name in holding.names
+        }
         return Values(
-            values={name: kept[name] for name in holding.names if name in kept},
-            missing=[name for name in holding.names if name not in kept],
+            values={name: value for name, value in found.items() if value is not None},
+            missing=[name for name, value in found.items() if value is None],
         )
 
     @lup.command
