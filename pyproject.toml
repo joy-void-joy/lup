@@ -161,6 +161,10 @@ pythonVersion = "3.15"
 enableTypeIgnoreComments = false
 # The modules; scratch work under `tmp/` stays out of the gate.
 include = ["modules"]
+# The second lup's declaration of this repository imports `lup_dev`, which only
+# the second lup's own copy has (`lup_project.py`).
+# lup: defer(issue=13, why="the second lup's declaration goes at the switch, and the third lup's takes its name, which pyright then checks")
+ignore = ["lup_project.py"]
 
 [tool.pytest]
 # lup's own declaration, whose modules' promises lup's plugin checks, and the
