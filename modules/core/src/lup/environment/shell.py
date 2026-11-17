@@ -24,7 +24,13 @@ from lup.types import Model
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
-    from pydantic_core.core_schema import DataclassField, ModelField, TypedDictField
+    from pydantic_core.core_schema import (
+        ComputedField,
+        CoreSchema,
+        DataclassField,
+        ModelField,
+        TypedDictField,
+    )
 
     from lup.declaration.module import Module
     from lup.doors.door import Accepted, Refused
@@ -198,7 +204,18 @@ class Read(Model):
 
 
 class AsSent(GenerateJsonSchema):
-    """JSON Schema of a model as it's sent: every field there, a default one among them, since dumping a model writes each."""
+    """JSON Schema of a model as it's sent: every field there, a default one among them, since dumping a model writes each; and no field titled, so a type generated from it is named after its model alone."""
+
+    @override
+    def field_title_should_be_set(
+        self,
+        schema: CoreSchema
+        | ModelField
+        | DataclassField
+        | TypedDictField
+        | ComputedField,
+    ) -> bool:
+        return False
 
     @override
     def field_is_required(

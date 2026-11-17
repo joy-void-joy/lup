@@ -4,11 +4,12 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "types": "uv run --quiet python described.py > schema.json && json2ts --input schema.json --output src/generated/read.ts --additionalProperties false --unreachableDefinitions",
+        "types": "mkdir -p src/generated && uv run --quiet python described.py schema > schema.json && uv run --quiet python described.py looks > src/generated/core-looks.json && json2ts --input schema.json --output src/generated/read.ts --additionalProperties false --unreachableDefinitions",
         "check": "tsc --noEmit",
         "test": "vitest run",
         "build": "vite build",
-        "gate": "pnpm run --silent types && pnpm run --silent check && pnpm run --silent test && pnpm run --silent build"
+        "gate": "pnpm run --silent install-locked && pnpm run --silent types && pnpm run --silent check && pnpm run --silent test && pnpm run --silent build",
+        "install-locked": "pnpm install --frozen-lockfile --silent"
     },
     "dependencies": {
         "@codemirror/commands": "6.11.1",
