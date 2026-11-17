@@ -418,6 +418,15 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
             reason = f"`{entry.name}` doesn't take what it was given: {wrong}"
             return refused(given, reason)
         instance = self.instance(entry)
+        unrun = next(
+            (each for each in self.unrun if each.part == entry.serves.named()), None
+        )
+        if instance is None and unrun is not None:
+            reason = (
+                f"`{method.taken.qualified}` of `{entry.serves.module.name}` isn't "
+                f"running: {unrun.why}"
+            )
+            return refused(given, reason)
         if instance is None:
             reason = (
                 f"`{method.taken.qualified}` of `{entry.serves.module.name}` runs "

@@ -1306,7 +1306,7 @@ class WithoutPromises(Part):
 
     @lup.promise
     async def without_podman_only_what_needs_it_is_refused(self, by: Testing) -> None:
-        """Without podman, or with one at a version lup doesn't take, the part holding it isn't made and what needs it is refused, while the machine's other parts answer: the operator can still keep a secret; with one it takes, it starts containers."""
+        """Without podman, or with one at a version lup doesn't take, the part holding it isn't made and what needs it is refused, saying it's podman and why, while the machine's other parts answer: the operator can still keep a secret; with one it takes, it starts containers."""
         podman = by.any(Podmanless).version
         programs = (
             {}
@@ -1333,6 +1333,8 @@ class WithoutPromises(Part):
         assert isinstance(kept, Accepted)
         assert isinstance(run, Accepted) == (podman == "6.1.0")
         assert bool(podman_ran(started, "run")) == (podman == "6.1.0")
+        if isinstance(run, Refused):
+            assert "`podman`" in run.rejection.reason
 
     @lup.promise
     async def the_machine_stopping_stops_its_projects(self, by: Testing) -> None:
