@@ -201,6 +201,9 @@ def main() -> None:
                 interactive=sys.stdin.isatty(),
             )
             calling = asyncio.run(loader.ensured())
+            said = asyncio.run(loader.reviewed(calling, layout))
+            if said is not None:
+                sys.stderr.write(f"lup: {said}\n")
         if calling is not None:
             ran(
                 Calling(socket=calling, repository=layout.main.name),

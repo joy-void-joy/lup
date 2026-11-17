@@ -42,14 +42,15 @@ from lup.declaration.project import Project
 from lup.doors.door import Accepted, RefusedError
 from lup.doors.parties import Machine, Operator
 from lup.environment.declaration import load, resolve
-from lup.environment.layout import MachineLayout, Pyproject
+from lup.environment.layout import MachineLayout, Pyproject, RepositoryLayout
 from lup.environment.running.calling import Calling
 from lup.environment.running.programs import Local
 from lup.errors import LupError
 from lup.hosting.approvals import Approved, Question
+from lup.hosting.projects import Opening
 from lup.hosting.trees import Diffed, Exported, pinned
 from lup.programs import awaited, detached, run
-from lup.running.wire import Host
+from lup.running.wire import Answered, CommandCalled, Declined, Host
 from lup.types import Model
 lazy from lup.environment.doors import Running
 lazy from lup.programs import Apart
@@ -257,6 +258,55 @@ class Loader(Model):
                 runtime=self.places.runtime,
             ),
         )
+
+    async def reviewed(self, socket: Path, layout: RepositoryLayout) -> str | None:
+        """Ask the operator, where the project whose worktree `lup` runs in moved since the commit they approved, whether to approve its tip, and open it again at that commit where they do: the question at start, for a project as for the home repository; say what happened, none where nothing needed asking.
+
+        Asks nothing where `lup` can't ask here, or the worktree holds no
+        declaration: its project isn't one lup runs.
+        """
+        if not self.interactive or not layout.declaration.is_file():
+            return None
+        repository = Repository.of(layout.root)
+        running = await self.asking()
+        try:
+            approval = await running.serve(
+                "approval", {"project": repository.name}, Machine()
+            )
+            before = (
+                Approved.model_validate(approval.output).commit
+                if isinstance(approval, Accepted)
+                else None
+            )
+            if before == repository.tip:
+                return None
+            try:
+                commit = await self.answered(running, repository)
+            except LoaderError as unapproved:
+                return str(unapproved)
+        finally:
+            await running.stopped()
+        if commit == before:
+            return f"{repository.name} runs {commit}, as you approved before"
+        opening = Opening(
+            repository=repository.name,
+            common=repository.common,
+            declaration=layout.declaration.relative_to(layout.root),
+        )
+        reply = await Calling(socket=socket).answered(
+            CommandCalled(
+                module="hosting",
+                command="open",
+                given=opening.model_dump(mode="json"),
+            )
+        )
+        match reply:
+            case Answered(output=str() as said):
+                return said
+            case Answered():
+                return f"{repository.name} opened at {commit}"
+            case Declined(rejection=rejection):
+                return f"{repository.name} is approved at {commit}, and didn't open: {rejection.reason}"
 
     async def answered(self, running: Running, repository: Repository) -> str:
         """Return the commit of `repository` approved to run: the one approved last, or its tip where the operator, asked here, approves it.
