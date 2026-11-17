@@ -4,10 +4,15 @@ from lup.declaration.module import Module
 from lup.declaration.promises import DeclarationPromises
 from lup.doors.parts import Parts
 from lup.doors.promises import DoorsPromises, PartsPromises
+from lup.inbox.part import Inboxes, Speaking
+from lup.inbox.promises import InboxPromises
+from lup.inbox.records import EDGES, NODES
 from lup.running.promises import RunningPromises
 from lup.shell.blocks import Viewing
-from lup.shell.kinds import SHELL_FOLDS, SHELL_TONES, Folds, Tones
+from lup.shell.kinds import SHELL_FOLDS, SHELL_TONES, FoldKind, Folds, Tones
 from lup.shell.promises import ShellPromises
+from lup.store.promises import StorePromises
+from lup.store.records import Recorded
 from lup.testing.promises import TestingPromises
 
 
@@ -16,9 +21,10 @@ class Core(Module):
 
     A project changes it with `.edit` as it would any module, or puts another in
     its place with `.replace`, but can't drop it: resolving a selection without a
-    module named `core` fails. What it serves is its submodules' promises; what
-    it declares, the shell's tones and fold kinds, which every module's views may
-    name, and which a layer changes as any field.
+    module named `core` fails. What it serves is its submodules' parts and
+    promises, the inbox's among them; what it declares, the shell's tones and
+    fold kinds, which every module's views may name, and which a layer changes
+    as any field, and the kinds of record the inbox keeps in the store.
     """
 
     name = "core"
@@ -29,12 +35,21 @@ class Core(Module):
         RunningPromises,
         TestingPromises,
         ShellPromises,
+        StorePromises,
+        Inboxes,
+        Speaking,
+        InboxPromises,
     )
     tones: Tones = Tones.of(*SHELL_TONES)
     """The shell's tones: plain, muted, strong, and the operator's own words."""
-    folds: Folds = Folds.of(*SHELL_FOLDS)
+    folds: Folds = Folds.of(
+        *SHELL_FOLDS,
+        FoldKind(name="concern", letter="c", called="concern", level=1, colour="cyan"),
+    )
     """The shell's fold kinds: a party's section, a file, a body, a run of
-    unchanged lines."""
+    unchanged lines; and the inbox's, a concern."""
+    kinds: Recorded = Recorded.of(*NODES, *EDGES)
+    """The kinds of record the core's submodules keep in the store: the inbox's."""
     document: Viewing | None = None
     """The view the dashboard's document is, its root: a view listing the
     parties, each a fold of the `party` kind whose content reads what's shown of

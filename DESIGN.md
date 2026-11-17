@@ -97,7 +97,7 @@ What the operator can count on, wherever they are in it:
 - **A command does the same thing wherever it's offered,** and is offered only where it does that.
 - **Each part shown has its fold,** and everything folds, opens and selects the same way.
 - **What's been cleared stays cleared,** across reloads, restarts and pages.
-- **Only what needs the operator counts as waiting.** Everything else is news that leaves once seen.
+- **Only what needs the operator counts as waiting.** Everything else is news, which loses its mark once it's been on their screen and stays where it is until they clear it. Clearing is the one act that clears: a reply answers what it cites, and clears nothing.
 
 The core decides and the page only draws, keeping no rule of its own beside the core's, and each of these is tested over a copy of real data rather than hand-picked cases.
 

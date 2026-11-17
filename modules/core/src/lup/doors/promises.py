@@ -532,7 +532,7 @@ class AskingPart(Part):
     """Another class, whose tools call the keeper's services as plain calls."""
 
     @lup.tool
-    async def ask(self, asking: Asking) -> Tallied:
+    async def query(self, asking: Asking) -> Tallied:
         """Ask the keeper for its count, as code."""
         return await KeeperPart.tallied(asking)
 
@@ -614,7 +614,7 @@ class PartsPromises(Part):
         """A service read through its class is called as a plain call, carried to its class wherever it runs, and called by the project whose code made the call."""
         repository = by.any(str)
         started = await by.started(declared(Keeper()), repository=repository)
-        asked = await started.call("ask", Asking(), by.any(Agent))
+        asked = await started.call("query", Asking(), by.any(Agent))
         assert isinstance(asked, Accepted)
         assert isinstance(asked.output, Tallied)
         assert asked.output.repository == repository
