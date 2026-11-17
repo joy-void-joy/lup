@@ -6,14 +6,25 @@ promise scripts it, so the gate checks what lup asks podman to do without
 running it (`README.md` here, *Promises*).
 """
 
+import hashlib
 import json
+import os
+from pathlib import Path
 from typing import Literal, get_args
 
 from pydantic import Field, JsonValue
 
 import lup
 from lup import Agent, Codebase, Machine, Model, Part
-from lup.testing import Accepted, Answering, Refused, Scripted, Started, Testing
+from lup.testing import (
+    Accepted,
+    Answering,
+    Refused,
+    Responding,
+    Scripted,
+    Started,
+    Testing,
+)
 
 HOME = """
 from lup import Modules, Project
@@ -518,3 +529,265 @@ class HostingPromises(Part):
         ]
         assert len(mounts) == 6
         assert len(dict.fromkeys(mounts)) == len(mounts)
+
+
+class Stored(Model):
+    """An object of git's store: its id, and its content as git hashes it."""
+
+    id: str
+    content: bytes
+
+    @classmethod
+    def of(cls, kind: str, content: bytes) -> Stored:
+        """Return the object of `kind` holding `content`, named by its id, as git names one in a repository of SHA-1."""
+        framed = b"".join([f"{kind} {len(content)}".encode(), b"\0", content])
+        return cls(
+            id=hashlib.sha1(framed, usedforsecurity=False).hexdigest(),
+            content=content,
+        )
+
+
+class Listed(Model):
+    """One entry of a tree as a promise writes it: its mode, its name, and its object."""
+
+    mode: str
+    name: str
+    object: Stored
+
+
+def tree_of(entries: list[Listed]) -> Stored:
+    """Return the tree object holding `entries`, each its mode, its name and its object's raw id."""
+    content = b"".join(
+        b"".join(
+            [
+                f"{each.mode} {each.name}".encode(),
+                b"\0",
+                bytes.fromhex(each.object.id),
+            ]
+        )
+        for each in entries
+    )
+    return Stored.of("tree", content)
+
+
+class Store(Model, Responding):
+    """git's object store as a promise stands it in: each object by its id, answering `git cat-file --batch=%(objectsize)` as git does, an object it lacks said missing."""
+
+    objects: list[Stored] = []
+
+    def answered(self, arguments: list[str], given: bytes | None) -> Answering | None:
+        """Answer a `cat-file` run, each object asked on its own line: its size on a line, its content, then a newline."""
+        if "cat-file" not in arguments or given is None:
+            return None
+        held = {each.id: each.content for each in self.objects}
+
+        def told(asked: str) -> bytes:
+            content = held.get(asked)
+            if content is None:
+                return f"{asked} missing\n".encode()
+            return b"".join([f"{len(content)}\n".encode(), content, b"\n"])
+
+        return Answering(
+            output=b"".join(told(each) for each in given.decode().splitlines())
+        )
+
+
+class Files(Model):
+    """A commit's files as a promise draws them: some at its root, one in a directory."""
+
+    root: dict[Literal["README.md", "lup_project.py", "uv.lock"], str] = {}
+    nested: str = ""
+    """The content of `src/app.py`."""
+    runnable: bool = False
+    """Whether `run.sh` is in it, executable."""
+
+    def expected(self) -> dict[str, str]:
+        """Return each file an export of the commit holds, by its path from the root."""
+        return {
+            **self.root,
+            "src/app.py": self.nested,
+            **({"run.sh": "#!/bin/sh"} if self.runnable else {}),
+        }
+
+
+class Committed(Model):
+    """A commit a promise wrote: its id, and the store holding it."""
+
+    commit: str
+    store: Store
+
+    @classmethod
+    def of(cls, files: Files, extra: list[Listed] | None = None) -> Committed:
+        """Return a commit of `files`, `extra` at its root beside them, in a store of its own."""
+        blobs = {
+            name: Stored.of("blob", text.encode()) for name, text in files.root.items()
+        }
+        nested = Stored.of("blob", files.nested.encode())
+        source = tree_of([Listed(mode="100644", name="app.py", object=nested)])
+        runnable = Stored.of("blob", b"#!/bin/sh")
+        entries = [
+            *(
+                Listed(mode="100644", name=name, object=blob)
+                for name, blob in blobs.items()
+            ),
+            Listed(mode="40000", name="src", object=source),
+            *(
+                [Listed(mode="100755", name="run.sh", object=runnable)]
+                if files.runnable
+                else []
+            ),
+            *(extra or []),
+        ]
+        root = tree_of(entries)
+        commit = Stored.of(
+            "commit",
+            f"tree {root.id}\nauthor a <a> 0 +0000\ncommitter a <a> 0 +0000\n\nm\n".encode(),
+        )
+        objects = [
+            commit,
+            root,
+            source,
+            nested,
+            *(each.object for each in entries),
+        ]
+        return cls(commit=commit.id, store=Store(objects=objects))
+
+    def exporting(self) -> JsonValue:
+        """Return what the machine's parts are asked to write out this commit."""
+        return {
+            "repository": "harmon",
+            "common": "/srv/harmon.git",
+            "commit": self.commit,
+        }
+
+
+class Escaping(Model):
+    """A link in a commit pointing outside its export."""
+
+    to: Literal["../outside", "../../etc/passwd", "/etc/passwd", "src/../../x"]
+
+
+def files_in(path: Path) -> dict[str, str]:
+    """Return each file under `path`, by its path from it, with its text."""
+    return {
+        each.relative_to(path).as_posix(): each.read_text()
+        for each in path.rglob("*")
+        if each.is_file()
+    }
+
+
+class TreesPromises(Part):
+    """What the operator can count on of what runs from a commit they approved: its files are what the commit names."""
+
+    @lup.promise
+    async def an_export_holds_what_the_commit_names(self, by: Testing) -> None:
+        """A commit written out holds each file its tree names, with the content its id says, an executable file kept executable, and nothing else."""
+        files = by.any(Files)
+        committed = Committed.of(files)
+        started = await by.started(
+            HOME, programs={"git": committed.store}, machine=True
+        )
+        exported = await started.serve("exported", committed.exporting(), Machine())
+        assert isinstance(exported, Accepted)
+        path = Path(json.loads(exported.answer())["path"])
+        assert files_in(path) == files.expected()
+        assert os.access(path / "run.sh", os.X_OK) == files.runnable
+
+    @lup.promise
+    async def an_object_that_isnt_what_its_id_says_is_refused(
+        self, by: Testing
+    ) -> None:
+        """A store holding, under an id a commit names, content that isn't what the id says, as a room could plant, refuses the export: nothing is written out from it."""
+        files = by.any(Files)
+        planted = by.any(str)
+        committed = Committed.of(files)
+        named = Stored.of("blob", files.nested.encode()).id
+        swapped = Store(
+            objects=[
+                Stored(id=each.id, content=planted.encode())
+                if each.id == named
+                else each
+                for each in committed.store.objects
+            ]
+        )
+        started = await by.started(HOME, programs={"git": swapped}, machine=True)
+        exported = await started.serve("exported", committed.exporting(), Machine())
+        assert isinstance(exported, Refused) == (planted != files.nested)
+
+    @lup.promise
+    async def git_reads_the_repository_alone(self, by: Testing) -> None:
+        """git, reading a commit's objects, is held to the repository's own git directory, reading no `commondir`, graft, replace ref, commit-graph or configuration but the repository's own, with nothing that could run code."""
+        committed = Committed.of(by.any(Files))
+        started = await by.started(
+            HOME, programs={"git": committed.store}, machine=True
+        )
+        await started.serve("exported", committed.exporting(), Machine())
+        runs = [each for each in started.heard.runs if each.program == "git"]
+        pins = {
+            "GIT_DIR": "/srv/harmon.git",
+            "GIT_COMMON_DIR": "/srv/harmon.git",
+            "GIT_GRAFT_FILE": os.devnull,
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_NO_LAZY_FETCH": "1",
+        }
+        assert runs
+        for each in runs:
+            assert pins.items() <= each.env.items()
+            command = each.arguments.index("cat-file")
+            assert each.arguments.index("--no-replace-objects") < command
+            assert "core.commitGraph=false" in each.arguments
+            assert "core.fsmonitor=false" in each.arguments
+            assert f"core.hooksPath={os.devnull}" in each.arguments
+
+    @lup.promise
+    async def a_link_leaving_the_export_is_refused(self, by: Testing) -> None:
+        """A commit holding a link that points outside its export is refused, rather than written out to lead a container elsewhere."""
+        escaping = by.any(Escaping)
+        link = Listed(
+            mode="120000",
+            name="escape",
+            object=Stored.of("blob", escaping.to.encode()),
+        )
+        committed = Committed.of(by.any(Files), [link])
+        started = await by.started(
+            HOME, programs={"git": committed.store}, machine=True
+        )
+        exported = await started.serve("exported", committed.exporting(), Machine())
+        assert isinstance(exported, Refused)
+
+    @lup.promise
+    async def only_the_machine_writes_out_a_commit(self, by: Testing) -> None:
+        """Only the machine's own parts may write out a commit: an agent or a project's code asking is refused, and git never runs for it."""
+        committed = Committed.of(by.any(Files))
+        caller = by.any(Agent) if by.any(bool) else Codebase(repository="harmon")
+        started = await by.started(
+            HOME, programs={"git": committed.store}, machine=True
+        )
+        exported = await started.serve("exported", committed.exporting(), caller)
+        assert isinstance(exported, Refused)
+        assert started.ran("git") == []
+
+    @lup.promise
+    async def an_abbreviated_commit_is_refused(self, by: Testing) -> None:
+        """A commit named otherwise than by its whole id, abbreviated or by a ref, is refused before git runs: those name whatever the store says."""
+        named = by.any(Abbreviated)
+        committed = Committed.of(Files())
+        started = await by.started(
+            HOME, programs={"git": committed.store}, machine=True
+        )
+        asked = {
+            "repository": "harmon",
+            "common": "/srv/harmon.git",
+            "commit": named.commit,
+        }
+        exported = await started.serve("exported", asked, Machine())
+        assert isinstance(exported, Refused)
+        assert started.ran("git") == []
+
+
+class Abbreviated(Model):
+    """A commit named otherwise than by its whole id."""
+
+    commit: Literal[
+        "HEAD", "main", "e69de29", "E69DE29BB2D1D6434B8B29AE775AD8C2E48C5391"
+    ]

@@ -205,7 +205,9 @@ class Projects(Part, machine=True, shared=True):
             Once(spec=self.spec(opening, name, None), given=asked.model_dump_json())
         )
         if finished.status != 0:
-            message = f"{opening.repository}'s declaration didn't plan: {finished.error.strip()}"
+            message = (
+                f"{opening.repository}'s declaration didn't plan: {finished.said()}"
+            )
             raise RefusedError(message)
         try:
             plan = read(finished.output, PLANS)

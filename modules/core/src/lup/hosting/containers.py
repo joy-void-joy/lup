@@ -228,7 +228,7 @@ class Containers(Part, machine=True, shared=True):
         if not await self.there(image.base):
             pulled = await self.podman.ran("pull", "--quiet", image.base)
             if pulled.status != 0:
-                message = f"podman couldn't fetch {image.base}: {pulled.error.strip()}"
+                message = f"podman couldn't fetch {image.base}: {pulled.said()}"
                 raise ContainerError(message)
         made = await self.podman.ran(
             "build",
@@ -243,7 +243,7 @@ class Containers(Part, machine=True, shared=True):
             given=image.definition,
         )
         if made.status != 0:
-            message = f"podman couldn't build {image.tag()}: {made.error.strip()}"
+            message = f"podman couldn't build {image.tag()}: {made.said()}"
             raise ContainerError(message)
         return Built(built=True)
 
@@ -289,7 +289,9 @@ class Containers(Part, machine=True, shared=True):
         command = command_of(spec, self.walls)
         ran = await self.podman.ran(*command)
         if ran.status != 0:
-            message = f"podman couldn't start {spec.name} (status {ran.status}): {ran.error.strip()}"
+            message = (
+                f"podman couldn't start {spec.name} (status {ran.status}): {ran.said()}"
+            )
             raise ContainerError(message)
         run = Run(spec=spec, command=command)
         self.running = [*self.running, run]
@@ -306,7 +308,7 @@ class Containers(Part, machine=True, shared=True):
         command = command_of(once.spec, self.walls, detached=False)
         finished = await self.podman.ran(*command, given=once.given)
         if finished.status == 125:
-            message = f"podman couldn't run {once.spec.name}: {finished.error.strip()}"
+            message = f"podman couldn't run {once.spec.name}: {finished.said()}"
             raise ContainerError(message)
         return finished
 
@@ -319,6 +321,6 @@ class Containers(Part, machine=True, shared=True):
         del by
         ran = await self.podman.ran("stop", "--ignore", "--time=10", named.name)
         if ran.status != 0:
-            message = f"podman couldn't stop {named.name}: {ran.error.strip()}"
+            message = f"podman couldn't stop {named.name}: {ran.said()}"
             raise ContainerError(message)
         self.running = [each for each in self.running if each.spec.name != named.name]

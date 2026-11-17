@@ -63,13 +63,25 @@ class Runtime(Model):
 
 
 class Finished(Model):
-    """How a program a part ran ended: its status, and what it printed and said."""
+    r"""How a program a part ran ended: its status, and what it printed and said, as the bytes it wrote.
+
+    >>> Finished(status=1, error=b"no such image\n").said()
+    'no such image'
+    """
 
     status: int
-    output: str = ""
+    output: bytes = b""
     """What it printed on its standard output."""
-    error: str = ""
+    error: bytes = b""
     """What it wrote on its standard error."""
+
+    def text(self) -> str:
+        """Return what it printed, as text, a byte that isn't UTF-8 replaced."""
+        return self.output.decode(errors="replace")
+
+    def said(self) -> str:
+        """Return what it wrote on its standard error, as text, without the blank around it, as a refusal quotes it."""
+        return self.error.decode(errors="replace").strip()
 
 
 class Runs(ABC):
@@ -77,9 +89,13 @@ class Runs(ABC):
 
     @abstractmethod
     async def ran(
-        self, program: Program, arguments: list[str], given: str | None
+        self,
+        program: Program,
+        arguments: list[str],
+        given: bytes | None,
+        env: dict[str, str],
     ) -> Finished:
-        """Run `program` with `arguments`, `given` on its input, and say how it ended, whatever its status.
+        """Run `program` with `arguments`, `given` on its input, `env` set beside the variables it runs with, and say how it ended, whatever its status.
 
         Raise `ProgramError` where it can't be run at all.
         """
@@ -113,8 +129,13 @@ class Program(Model, arbitrary_types_allowed=True):
     runs: Runs | None = Field(default=None, exclude=True, repr=False)
     """What runs it where the part runs, given as the part is made."""
 
-    async def ran(self, *arguments: str, given: str | None = None) -> Finished:
-        """Run it with `arguments`, `given` on its input, and say how it ended, whatever its status.
+    async def ran(
+        self,
+        *arguments: str,
+        given: bytes | str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> Finished:
+        """Run it with `arguments`, `given` on its input, text as UTF-8, `env` set beside the variables it runs with, and say how it ended, whatever its status.
 
         Raise `ProgramError` where it can't be run.
         """
@@ -124,7 +145,8 @@ class Program(Model, arbitrary_types_allowed=True):
                 "runs programs; nothing does here"
             )
             raise ProgramError(message, about=[self.name])
-        return await self.runs.ran(self, list(arguments), given)
+        sent = given.encode() if isinstance(given, str) else given
+        return await self.runs.ran(self, list(arguments), sent, dict(env or {}))
 
 
 class Given(Model, arbitrary_types_allowed=True):

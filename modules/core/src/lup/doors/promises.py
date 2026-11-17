@@ -567,7 +567,7 @@ class ListerPart(Part):
         """List what the directory holds."""
         del asking
         finished = await self.ls.ran("-1")
-        return Listed(names=finished.output.splitlines())
+        return Listed(names=finished.text().splitlines())
 
     @lup.tool
     async def missing(self, asking: Asking) -> Listed:
