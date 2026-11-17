@@ -30,7 +30,7 @@ from lup.store.records import Edge, Kinds, Node, Recorded
 from lup.types import Model
 
 if TYPE_CHECKING:
-    from lup.environment.layout import MachineLayout, RepositoryLayout
+    from lup.declaration.layout import MachineLayout, RepositoryLayout
 
 
 class Resolved(Model):

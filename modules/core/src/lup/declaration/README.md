@@ -84,7 +84,7 @@ A repository's declaration is read with layers over it (`lup.environment.declara
 1. lup's default modules;
 2. the repository's declaration, at its worktree's root: `lup_project.py`, unless `[tool.lup]`'s `declaration` in its `pyproject.toml` names another;
 3. the machine's layer, `$XDG_CONFIG_HOME/lup/lup_project.local.py`, for every repository on this machine;
-4. the repository's own local layer, named after its declaration (`lup_project.local.py`), in its main worktree (a clone's root, or a bare repository's own directory), so every worktree shares it. Git ignores it. lup finds a worktree's root and its main worktree through git (`RepositoryLayout.found`).
+4. the repository's own local layer, named after its declaration (`lup_project.local.py`), in its main worktree (a clone's root, or a bare repository's own directory), so every worktree shares it. Git ignores it. lup finds a worktree's root and its main worktree through git (`lup.declaration.layout`: `RepositoryLayout.found`, or `located` through a part's own `git`, which a promise stands in for).
 
 So the most specific wins: a repository's own setting over the machine's, the machine's over what the repository commits. Each layer is optional, a repository with no declaration running on lup's defaults; one that's there and doesn't load fails the read, never left out without a word.
 

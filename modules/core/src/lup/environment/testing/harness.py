@@ -19,6 +19,7 @@ from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from lup.core import Core
 from lup.declaration.errors import ProjectError
+from lup.declaration.layout import MachineLayout, RepositoryLayout
 from lup.declaration.module import Module
 from lup.declaration.project import Project
 from lup.doors.door import Accepted, DoorError, Method, Refused
@@ -27,7 +28,6 @@ from lup.doors.parts import Finished, Parts, Program, Runs, UnrunError
 from lup.doors.tool import ToolDoor, ToolSpec
 from lup.environment.declaration import read, resolve
 from lup.environment.doors import Doors, Entry, Running, Serves
-from lup.environment.layout import MachineLayout, RepositoryLayout
 from lup.environment.running.container import answered
 from lup.environment.running.planning import plan_of
 from lup.environment.shell import viewed

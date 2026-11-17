@@ -26,13 +26,13 @@ from pydantic_settings import DotEnvSettingsSource, EnvSettingsSource
 from lup.command_line.answering import Answerer, Offered
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import listed
+from lup.declaration.layout import MachineLayout, RepositoryLayout
 from lup.declaration.module import Modules
 from lup.declaration.project import Project
 from lup.doors.door import Rejection
 from lup.doors.parties import Operator
 from lup.environment.declaration import Resolved, read, resolve
 from lup.environment.doors import Running
-from lup.environment.layout import MachineLayout, RepositoryLayout
 from lup.environment.running.calling import Calling
 from lup.environment.running.container import REPLIES, answered
 from lup.environment.running.planning import plan_of
