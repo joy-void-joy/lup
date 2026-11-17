@@ -11,7 +11,7 @@ import { type EditorState, type Extension } from "@codemirror/state";
 import { EditorView, GutterMarker, gutter, type ViewUpdate } from "@codemirror/view";
 
 import { depthOf, foldKind, foldRange, nodeAt, offsetOf, type Node as Laid } from "../document/tree";
-import { settled, shells, type Shell } from "./shell";
+import { redrawn, shells, type Shell } from "./shell";
 
 /** A fold's letter, on the line its summary is on. */
 export interface Lettered {
@@ -123,7 +123,7 @@ function moved(update: ViewUpdate): boolean {
     return (
         update.docChanged ||
         update.selectionSet ||
-        update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(settled)))
+        update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(redrawn)))
     );
 }
 

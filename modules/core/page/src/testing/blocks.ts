@@ -32,28 +32,29 @@ export function markdown(id: string): fc.Arbitrary<Markdown> {
     }));
 }
 
-export function fold(id: string, depth: number): fc.Arbitrary<Fold> {
-    return fc.record({ summary: words, content: blocks(depth - 1) }).map(({ summary, content }) => ({
+/** A fold of one of `kinds`, holding blocks nested `depth` deep at most. */
+export function fold(id: string, depth: number, kinds: readonly string[] = ["note"]): fc.Arbitrary<Fold> {
+    return fc.record({ summary: words, content: blocks(depth - 1, kinds), kind: fc.constantFrom(...kinds) }).map(({ summary, content, kind }) => ({
         block: "fold",
         id,
         version: null,
         offers: [],
         reaches: null,
         sighted: null,
-        kind: "note",
+        kind,
         summary: [{ text: summary, tone: "plain", ticking: null, gauge: null, refers: null }],
         open: null,
         content,
     }));
 }
 
-/** Blocks with ids of their own, folds nested `depth` deep at most. */
-export function blocks(depth: number): fc.Arbitrary<Block[]> {
-    return fc.array(fc.integer({ min: 0, max: depth > 0 ? 2 : 1 }), { maxLength: 5 }).chain((kinds) =>
+/** Blocks with ids of their own, folds of `kinds` nested `depth` deep at most. */
+export function blocks(depth: number, kinds: readonly string[] = ["note"]): fc.Arbitrary<Block[]> {
+    return fc.array(fc.integer({ min: 0, max: depth > 0 ? 2 : 1 }), { maxLength: 5 }).chain((shapes) =>
         fc.tuple(
-            ...kinds.map((kind, at): fc.Arbitrary<Block> => {
+            ...shapes.map((shape, at): fc.Arbitrary<Block> => {
                 const id = `b${at}`;
-                return kind === 0 ? line(id) : kind === 1 ? markdown(id) : fold(id, depth);
+                return shape === 0 ? line(id) : shape === 1 ? markdown(id) : fold(id, depth, kinds);
             }),
         ),
     );

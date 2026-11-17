@@ -58,6 +58,9 @@ const runs = Number(process.env["LUP_EXPLORE"] ?? 0);
  */
 const ceiling = 60_000;
 
+/** How long vitest lets a promise's test run: past the ceiling, so fast-check reports what broke before vitest stops it. */
+const timeout = ceiling + 10_000;
+
 /** Return how a promise's property is run: seeded from its sentence in the gate, so a run is repeatable; at random, as many times as `LUP_EXPLORE` says, apart from it. */
 function settings(sentence: string): fc.Parameters<unknown> {
     const limits = { interruptAfterTimeLimit: ceiling, markInterruptAsFailure: true };
@@ -105,7 +108,7 @@ export function scenario(sentence: string, story: (by: Testing) => void | Promis
             }),
             settings(sentence),
         );
-    });
+    }, timeout);
 }
 
 /**
@@ -135,5 +138,5 @@ export function law<M, S, E>(machine: Machine<M, S, E>, sentence: string, holds:
             }),
             settings(sentence),
         );
-    });
+    }, timeout);
 }

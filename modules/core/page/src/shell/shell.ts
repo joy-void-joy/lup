@@ -3,8 +3,8 @@
 // cursor is) by each block's key, so a view answering again moves nothing they didn't move.
 
 import { foldEffect, foldedRanges, foldState, unfoldEffect } from "@codemirror/language";
-import { Annotation, EditorState, Facet, StateEffect, type ChangeSpec, type Extension, type Range } from "@codemirror/state";
-import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { Annotation, EditorState, Facet, StateEffect, StateField, type ChangeSpec, type Extension, type Range } from "@codemirror/state";
+import { Decoration, EditorView, ViewPlugin, showPanel, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { getCM, vim } from "@replit/codemirror-vim";
 
 import type { Blocks, Looks, Viewing } from "../generated/read";
@@ -20,8 +20,38 @@ export interface Source {
 /** Marks a transaction the shell makes as views answer, rather than one the operator's keys make. */
 export const fromCore = Annotation.define<boolean>();
 
-/** Marks a transaction after which what's open may have changed, though no fold's range did: a fold read as it opens, or holding nothing. */
-export const settled = StateEffect.define<null>();
+/**
+ * Marks a transaction after which what the shell draws beside the text may have changed, though the text didn't: what's
+ * open (a fold read as it opens, or holding nothing, has no range to fold) or what's chosen.
+ */
+export const redrawn = StateEffect.define<null>();
+
+/** Sets what the shell says on its status line; none clears it. */
+const say = StateEffect.define<string | null>();
+
+/** What the shell last said on its status line: a command that found nothing to act on saying why. */
+const said = StateField.define<string | null>({
+    create: () => null,
+    update(value, transaction) {
+        for (const effect of transaction.effects) {
+            if (effect.is(say)) {
+                return effect.value;
+            }
+        }
+        return value;
+    },
+    provide: (field) =>
+        showPanel.from(field, (text) =>
+            text === null
+                ? null
+                : () => {
+                      const dom = document.createElement("div");
+                      dom.className = "lup-status";
+                      dom.textContent = text;
+                      return { dom, top: false };
+                  },
+        ),
+});
 
 /** The shell's state, as its laws read it: a value of its own, which later events don't change. */
 export interface ShellState {
@@ -32,6 +62,10 @@ export interface ShellState {
     readonly at: string;
     /** The keys of the folds closed. */
     readonly closed: readonly string[];
+    /** The keys of the folds chosen, in the order the document shows them. */
+    readonly chosen: readonly string[];
+    /** What the shell last said on its status line. */
+    readonly said: string | null;
     readonly text: string;
 }
 
@@ -45,6 +79,8 @@ export class Shell {
     readonly #opened = new Map<string, boolean>();
     /** What stops each fold's view from being watched, by the fold's key, while it's open. */
     readonly #watching = new Map<string, () => void>();
+    /** The keys of the folds chosen, for an action to act on every one of. */
+    #chosen: readonly string[] = [];
     readonly #stop: () => void;
 
     constructor(parent: Element, root: Viewing, looks: Looks, source: Source, extensions: Extension[] = []) {
@@ -61,6 +97,7 @@ export class Shell {
                     EditorView.lineWrapping,
                     EditorState.changeFilter.of((transaction) => transaction.annotation(fromCore) === true),
                     foldState,
+                    said,
                     drawing,
                     shells.of(shell),
                     ...extensions,
@@ -88,21 +125,28 @@ export class Shell {
     }
 
     #apply(changes: Change[], key: string): void {
+        this.#chosen = this.#chosen.filter((chosen) => {
+            const node = this.document.node(chosen);
+            return node !== null && foldKind(node) !== null;
+        });
         this.view.dispatch({ changes: changes as ChangeSpec[], annotations: fromCore.of(true) });
         const node = this.document.node(key);
         if (node !== null) {
-            this.#settle(node);
+            this.#settle([node]);
         }
     }
 
-    /** Fold or unfold each fold in `node` as the operator left it, else as its view or its kind says; and read what each open fold reads as it opens. */
-    #settle(node: Node): void {
+    /**
+     * Fold or unfold each fold in `nodes` as the operator left it, else as its view or its kind says, in one
+     * transaction; and read what each open fold reads as it opens.
+     */
+    #settle(nodes: readonly Node[]): void {
         const effects = [];
         const closed = new Map<string, { from: number; to: number }>();
         foldedRanges(this.view.state).between(0, this.view.state.doc.length, (from, to) => {
             closed.set(`${from}:${to}`, { from, to });
         });
-        for (const each of every(node)) {
+        for (const each of nodes.flatMap(every)) {
             const start = offsetOf(each);
             const range = foldRange(each, start);
             const open = this.isOpen(each);
@@ -119,7 +163,7 @@ export class Shell {
                 effects.push(foldEffect.of({ from: range.from, to: range.to }));
             }
         }
-        this.view.dispatch({ effects: [...effects, settled.of(null)], annotations: fromCore.of(true) });
+        this.view.dispatch({ effects: [...effects, redrawn.of(null)], annotations: fromCore.of(true) });
     }
 
     /** Say whether the fold `node` is open: as the operator left it, else as its view says, else as its kind says. */
@@ -148,14 +192,43 @@ export class Shell {
         });
     }
 
-    /** Open or close the fold keyed `key`, as the operator does. */
+    /** Open or close the fold keyed `key`, as the operator does; toggle it where `open` is none. */
     toggle(key: string, open?: boolean): void {
         const node = this.document.node(key);
-        if (node === null || foldKind(node) === null) {
-            return;
+        if (node !== null && foldKind(node) !== null) {
+            this.fold([key], open ?? !this.isOpen(node));
         }
-        this.#opened.set(key, open ?? !this.isOpen(node));
-        this.#settle(node);
+    }
+
+    /** Open every fold `keys` names, or close every one, as the operator does, in one transaction. */
+    fold(keys: readonly string[], open: boolean): void {
+        const nodes = keys.flatMap((key) => {
+            const node = this.document.node(key);
+            return node === null || foldKind(node) === null ? [] : [node];
+        });
+        for (const node of nodes) {
+            this.#opened.set(node.key, open);
+        }
+        this.#settle(nodes);
+    }
+
+    /** Return the keys of the folds chosen, in the order the document shows them. */
+    chosen(): readonly string[] {
+        return this.#chosen;
+    }
+
+    /** Choose the folds of `keys`, in place of what was chosen; none chooses nothing. */
+    choose(keys: readonly string[]): void {
+        const wanted = new Set(keys);
+        this.#chosen = every(this.document.root)
+            .filter((node) => wanted.has(node.key) && foldKind(node) !== null)
+            .map((node) => node.key);
+        this.view.dispatch({ effects: redrawn.of(null) });
+    }
+
+    /** Say `text` on the status line, or clear it. */
+    say(text: string | null): void {
+        this.view.dispatch({ effects: say.of(text) });
     }
 
     /** Return the innermost fold the cursor is in, of the kind named `kind` where one is named. */
@@ -183,7 +256,7 @@ export class Shell {
                 this.#opened.set(node.key, open);
             }
         }
-        this.#settle(this.document.root);
+        this.#settle([this.document.root]);
     }
 
     /** Return the shell's state, as a law reads it. */
@@ -201,6 +274,8 @@ export class Shell {
             line: this.view.state.doc.lineAt(head).number,
             at: nodeAt(this.document.root, head).key,
             closed,
+            chosen: this.#chosen,
+            said: this.view.state.field(said),
             text: this.view.state.doc.toString(),
         };
     }
@@ -218,6 +293,18 @@ function moduleOf(node: Node): string | null {
     return null;
 }
 
+/** Say whether `node` is one of the nodes keyed in `keys`, or under one. */
+function within(node: Node, keys: ReadonlySet<string>): boolean {
+    let at: Node | null = node;
+    while (at !== null) {
+        if (keys.has(at.key)) {
+            return true;
+        }
+        at = at.parent;
+    }
+    return false;
+}
+
 /** The shell an editor shows, for the keymap's commands to find it by its editor. */
 export const shells = Facet.define<Shell, Shell | null>({ combine: (values) => values[0] ?? null });
 
@@ -231,7 +318,7 @@ const drawing = ViewPlugin.fromClass(
         }
 
         update(update: ViewUpdate): void {
-            if (update.docChanged || update.viewportChanged) {
+            if (update.docChanged || update.viewportChanged || update.transactions.some((each) => each.effects.some((effect) => effect.is(redrawn)))) {
                 this.decorations = this.drawn(update.view);
             }
         }
@@ -242,6 +329,7 @@ const drawing = ViewPlugin.fromClass(
                 return Decoration.none;
             }
             const ranges: Range<Decoration>[] = [];
+            const chosen = new Set(shell.chosen());
             for (const { from, to } of view.visibleRanges) {
                 let position = from;
                 while (position <= to) {
@@ -253,6 +341,9 @@ const drawing = ViewPlugin.fromClass(
                     const classes = ["lup-line", `lup-${node.kind}`];
                     if (heading) {
                         classes.push("lup-summary", `lup-kind-${kind}`);
+                    }
+                    if (chosen.size > 0 && within(node, chosen)) {
+                        classes.push("lup-chosen");
                     }
                     const colour =
                         heading && kind !== null
@@ -348,6 +439,10 @@ export const look = EditorView.theme(
             cursor: "pointer",
         },
         ".lup-letter.lup-closed": { boxShadow: "inset 0 0 0 1px currentColor" },
+        ".lup-line.lup-chosen": { background: "var(--lup-selection)" },
+        ".lup-status": { padding: "0 1ch", borderTop: "1px solid var(--lup-border)", color: "var(--lup-fg)" },
+        ".cm-panels": { background: "var(--lup-float)", color: "var(--lup-fg)" },
+        ".cm-panels-bottom": { borderTop: "0" },
         ".lup-placeholder": { border: "1px solid currentColor", padding: "0 0.5ch", marginLeft: "1ch", cursor: "pointer" },
     },
     { dark: true },
