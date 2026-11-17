@@ -103,6 +103,21 @@ class Projects(Part, machine=True, shared=True):
     base: Base = Field(default_factory=Base)
     projects: dict[str, Opened] = {}
     """Each project running, by its repository."""
+    generation: int = 0
+    """How many times a project was opened since the machine's parts started:
+    each opening's containers are named with it, so they start beside those
+    they replace."""
+
+    def container(self, source: Source, part: PartPlan | None) -> str:
+        """Return the name of the container of this opening running `part`, or the project's own for its parts holding nothing."""
+        return f"{self.role(source, part)}-{self.generation}"
+
+    def role(self, source: Source, part: PartPlan | None) -> str:
+        """Return the name of what a container of the project runs, the same from one opening to the next, which its environment, cache and data are kept under: the project's own container, or one part's."""
+        repository = source.opening.repository
+        if part is None:
+            return f"lup-{repository}-project"
+        return f"lup-{repository}-{part.module}-{part.part}"
 
     def image(self, repository: str) -> Image:
         """Return the image a project's containers run."""
@@ -110,12 +125,12 @@ class Projects(Part, machine=True, shared=True):
             base=self.base.image, definition=self.base.definition(), project=repository
         )
 
-    def spec(self, source: Source, name: str, sockets: Path | None) -> Spec:
-        """Return a container of the project running the program a container runs, its commit's files read-only, its environment, uv's cache and its parts' data the container's own."""
+    def spec(self, source: Source, name: str, role: str, sockets: Path | None) -> Spec:
+        """Return a container named `name` of the project running the program a container runs, its commit's files read-only, uv's cache and its parts' data kept under `role`, from one opening to the next, and its environment under `role` for the commit it runs, so a container starting never changes what one still running imports."""
         opening = source.opening
-        environment = self.places.path / name / "environment"
-        cache = self.places.path / name / "cache"
-        data = self.places.path / name / "data"
+        environment = self.places.path / role / "environments" / source.commit
+        cache = self.places.path / role / "cache"
+        data = self.places.path / role / "data"
         for each in [environment, cache, data]:
             each.mkdir(parents=True, exist_ok=True)
         binds = [
@@ -177,9 +192,14 @@ class Projects(Part, machine=True, shared=True):
         return await self.opening(opening)
 
     async def opening(self, opening: Opening) -> Opened:
-        """Run a project at the commit the operator approved last: plan it, stop the containers it ran before, and start one for its parts holding nothing, and one for each part holding something that isn't the machine's, given only the secrets it holds, unless one isn't kept.
+        """Run a project at the commit the operator approved last: plan it, and start one container for its parts holding nothing, and one for each part holding something that isn't the machine's, given only the secrets it holds, unless one isn't kept.
 
-        Raise `RefusedError` where nothing of it is approved yet.
+        A restart cuts no call: this opening's containers start beside those
+        the project runs, calls are routed to them, and only then are those
+        stopped, each finishing the calls it's answering. Where one of this
+        opening's containers doesn't start, those that did are stopped, and
+        the project runs on as it did. Raise `RefusedError` where nothing of
+        it is approved yet, or a container doesn't start.
         """
         # lup: defer(issue=3, why="the opt-out where a project's parts holding nothing follow its running branch unapproved, from a tree of their own, their data apart")
         approved = await Approvals.approval(Asking(project=opening.repository))
@@ -212,22 +232,32 @@ class Projects(Part, machine=True, shared=True):
         }
         waiting = [name for name, values in held.items() if values.missing]
         together = [each.named() for each in plan.together()]
-        before = self.projects.get(opening.repository)
-        for name in [] if before is None else before.containers:
-            await Containers.stopped(Named(name=name))
-        placements = [
-            *([await self.placed(source, None, together)] if together else []),
-            *[
-                await self.placed(
-                    source, each, [each.named()], held[each.named()].values
-                )
-                for each in apart
-                if each.named() not in waiting
-            ],
+        running = [each for each in apart if each.named() not in waiting]
+        self.generation += 1
+        named = [
+            *([self.container(source, None)] if together else []),
+            *(self.container(source, each) for each in running),
         ]
+        try:
+            placements = [
+                *([await self.placed(source, None, together)] if together else []),
+                *[
+                    await self.placed(
+                        source, each, [each.named()], held[each.named()].values
+                    )
+                    for each in running
+                ],
+            ]
+        except RefusedError:
+            for name in named:
+                await Containers.stopped(Named(name=name))
+            raise
         await Carrying.placed(
             Placing(repository=opening.repository, plan=plan, placements=placements)
         )
+        before = self.projects.get(opening.repository)
+        for name in [] if before is None else before.containers:
+            await Containers.stopped(Named(name=name))
         opened = Opened(
             repository=opening.repository,
             commit=approved.commit,
@@ -247,7 +277,10 @@ class Projects(Part, machine=True, shared=True):
         asked = Planning(root=source.root, declaration=opening.declaration)
         name = f"lup-plan-{opening.repository}"
         finished = await Containers.ran(
-            Once(spec=self.spec(source, name, None), given=asked.model_dump_json())
+            Once(
+                spec=self.spec(source, name, name, None),
+                given=asked.model_dump_json(),
+            )
         )
         if finished.status != 0:
             message = (
@@ -277,11 +310,7 @@ class Projects(Part, machine=True, shared=True):
     ) -> Placement:
         """Start one container of the project running `parts`, its sockets' directory from `Carrying`, in memory, given the secrets in `secrets` as files there, which it reads and removes as it starts, and return where it runs."""
         opening = source.opening
-        name = (
-            f"lup-{opening.repository}-project"
-            if part is None
-            else f"lup-{opening.repository}-{part.module}-{part.part}"
-        )
+        name = self.container(source, part)
         directory = await Carrying.directory(Naming(container=name))
         start = Start(
             root=source.root,
@@ -301,7 +330,7 @@ class Projects(Part, machine=True, shared=True):
                 file = kept / each
                 file.touch(mode=0o600)
                 file.write_text(value)
-        spec = self.spec(source, name, directory.path)
+        spec = self.spec(source, name, self.role(source, part), directory.path)
         spec = spec.model_copy(
             update={"env": {**spec.env, "LUP_ASKED": start.model_dump_json()}}
         )

@@ -430,8 +430,8 @@ class HostingPromises(Part):
             for each in command
             if each.startswith("--name=")
         ]
-        assert "--name=lup-harmon-project" in names
-        assert ("--name=lup-harmon-vault-Vault" in names) == kept
+        assert "--name=lup-harmon-project-1" in names
+        assert ("--name=lup-harmon-vault-Vault-1" in names) == kept
 
     @lup.promise
     async def a_call_reaches_its_own_projects_parts_or_the_machines(
@@ -917,7 +917,7 @@ class ApprovalsPromises(Part):
 
 
 async def started_approved(
-    by: Testing, podman: Scripted, committed: Committed | None = None
+    by: Testing, podman: Scripted | Responding, committed: Committed | None = None
 ) -> Started:
     """Start the machine's parts, podman as `podman` scripts it, and a store of git's objects holding `committed`, a commit of harmon the operator approved."""
     approving = committed or Committed.of(Files())
@@ -1049,3 +1049,81 @@ class Repository(Model):
     """A project a caller may say they ask about."""
 
     name: Literal["harmon", "story", "lup"]
+
+    @lup.promise
+    async def a_restart_cuts_no_call(self, by: Testing) -> None:
+        """Opening a project it runs starts the containers of this opening beside those running, and stops those only once every container of this opening has started, so calls always have somewhere to go."""
+        started = await started_approved(by, OPENING_PODMAN)
+        await started.run(
+            "hosting",
+            "keep",
+            {"project": "harmon", "name": "key", "value": "k"},
+            lup.Operator(),
+        )
+        first = await started.serve("opened", Opens().given(), Machine())
+        again = await started.serve("opened", Opens().given(), Machine())
+        assert isinstance(first, Accepted)
+        assert isinstance(again, Accepted)
+        before: list[str] = json.loads(first.answer())["containers"]
+        after: list[str] = json.loads(again.answer())["containers"]
+        assert not [each for each in after if each in before]
+        runs = [
+            each
+            for each in started.ran("podman")
+            if (each and each[0] == "stop") or "--detach" in each
+        ]
+        last_start = max(
+            index
+            for index, each in enumerate(runs)
+            if any(f"--name={name}" in each for name in after)
+        )
+        first_stop = min(
+            index for index, each in enumerate(runs) if each and each[0] == "stop"
+        )
+        assert last_start < first_stop
+
+    @lup.promise
+    async def a_restart_that_fails_leaves_the_project_running(
+        self, by: Testing
+    ) -> None:
+        """Where a container of a project's opening doesn't start, those of the opening that did are stopped, the opening is refused, and the containers the project ran before go on running."""
+        podman = Failing(allowed=by.any(Allowed).allowed)
+        started = await started_approved(by, podman)
+        await started.run(
+            "hosting",
+            "keep",
+            {"project": "harmon", "name": "key", "value": "k"},
+            lup.Operator(),
+        )
+        first = await started.serve("opened", Opens().given(), Machine())
+        again = await started.serve("opened", Opens().given(), Machine())
+        assert isinstance(first, Accepted) == (podman.allowed >= 2)
+        assert isinstance(again, Accepted) == (podman.allowed >= 4)
+        if not isinstance(first, Accepted) or isinstance(again, Accepted):
+            return
+        before: list[str] = json.loads(first.answer())["containers"]
+        stopped = [each[-1] for each in podman_ran(started, "stop")]
+        assert not [each for each in stopped if each in before]
+
+
+class Allowed(Model):
+    """How many containers a promise's podman starts before it fails to."""
+
+    allowed: int = Field(ge=0, le=4)
+
+
+class Failing(lup.MutableModel, Responding):
+    """podman as a promise stands it in where it fails to start a container past the first `allowed`: the image there, the plan of a part holding nothing and one holding a secret."""
+
+    allowed: int
+    started: int = 0
+
+    def answered(self, arguments: list[str], given: bytes | None) -> Answering | None:
+        """Answer each run, failing to start a container past the first `allowed`."""
+        del given
+        if "--detach" in arguments:
+            self.started += 1
+            return Answering(status=0 if self.started <= self.allowed else 125)
+        if "--interactive" in arguments:
+            return Answering(output=json.dumps(VAULT_PLAN))
+        return Answering()
