@@ -301,8 +301,35 @@ class Inbox(Model, arbitrary_types_allowed=True):
 
     def cleared(self, node: Node) -> None:
         """Clear `node`, for the operator: an item, a concern, or a party's buffer whole, until something new happens in it."""
-        newest = self.newest(node) if isinstance(node, Concern) else node.key
+        match node:
+            case Concern():
+                newest = self.newest(node)
+            case PartyRecord():
+                newest = max((each.key for each in self.involving(node)), default=0)
+            case _:
+                newest = node.key
         self.edge(Cleared, node, self.operator(), self.operator(), newest=newest)
+
+    def involving(self, party: PartyRecord) -> list[Item]:
+        """Return each item `party` wrote or was for, oldest first: what their buffer shows."""
+        return [
+            each
+            for each in self.database.nodes(self.repository, Item)
+            if each.by == party.name or party.key in each.to
+        ]
+
+    def is_cleared(self, item: Item) -> bool:
+        """Say whether the operator cleared `item`: itself, the concern it's in, or the buffer of a party who wrote it or was for it, with nothing newer there since."""
+        places = [item.key, *item.to]
+        if item.by is not None:
+            places.append(self.party(item.by).key)
+        within = self.database.drawn_from(item.key, In, current=True)
+        places.extend(each.target for each in within)
+        return any(
+            edge.newest >= item.key
+            for place in places
+            for edge in self.database.drawn_to(place, Cleared)
+        )
 
     def declined(self, concern: Concern, why: str) -> None:
         """Decline `concern`, for the operator, saying why: nothing more will be done about it."""
@@ -590,10 +617,8 @@ class Inbox(Model, arbitrary_types_allowed=True):
             each
             for each in self.database.nodes(self.repository, Item)
             if each.by != "operator"
-            and not any(
-                isinstance(edge, Shown | Cleared)
-                for edge in self.database.drawn_to(each.key, Edge)
-            )
+            and not self.database.drawn_to(each.key, Shown)
+            and not self.is_cleared(each)
         ]
 
     def shown(self, items: list[Item]) -> None:
