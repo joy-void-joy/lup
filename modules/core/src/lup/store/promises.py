@@ -5,7 +5,7 @@ Each is checked through the harness, as lup's start resolves a declaration
 """
 
 import lup
-from lup import Module, Modules, ModuleServing, Node, Project, ProjectError, Recorded
+from lup import Module, Modules, Node, Part, Project, ProjectError, Recorded
 from lup.testing import Testing, raises
 
 
@@ -30,7 +30,7 @@ class Jottings(Module):
     kinds: Recorded = Recorded.of(Note)
 
 
-class StorePromises(ModuleServing):
+class StorePromises(Part):
     """What a module keeping records in the store can count on."""
 
     @lup.promise

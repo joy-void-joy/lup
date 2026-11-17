@@ -30,7 +30,7 @@ class Notes(Module):
 - **A kind** is a subclass whose `kind` field's default names it, namespaced by its module (`inbox:concern`). A record of a kind no loaded class declares reads as the base class, every field it held kept, never refused or dropped, so an earlier lup, or one without the module, reads it and writes it back whole.
 - **A kind refuses what it can't be:** a node as it's kept (`Node.refused`), an edge, which alone sees both its ends, as it's drawn (`Edge.refused`).
 
-A module lists its kinds in a `Recorded` field, a selection as `Serving` is. Resolving a declaration gathers every module's (`Resolved.kinds`), and a kind two modules declare fails the load, naming both, rather than one reading the other's records as its own.
+A module lists its kinds in a `Recorded` field, a selection as `Parts` is. Resolving a declaration gathers every module's (`Resolved.kinds`), and a kind two modules declare fails the load, naming both, rather than one reading the other's records as its own.
 
 ## The database
 

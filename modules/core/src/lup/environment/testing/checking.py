@@ -19,11 +19,21 @@ from lup.declaration.project import Project
 from lup.doors.action import ActionDoor
 from lup.doors.command import CommandDoor
 from lup.doors.door import DoorError
+from lup.doors.service import ServiceDoor
 from lup.doors.tool import ToolDoor
 from lup.environment.doors import Entry
 from lup.environment.testing.harness import Harness, Run, promises, watched
 from lup.environment.testing.simulation import Simulation
-from lup.testing.harness import Acted, Broken, Kept, Ran, Sent, ToolCall, sent
+from lup.testing.harness import (
+    Acted,
+    Broken,
+    Kept,
+    Ran,
+    Sent,
+    Served,
+    ToolCall,
+    sent,
+)
 from lup.testing.promise import PromiseDoor
 from lup.types import Model
 
@@ -93,25 +103,33 @@ class Check(Model, arbitrary_types_allowed=True):
         return Kept(promise=self.said())
 
     async def ran(self, harness: Harness) -> None:
-        """Run the promise once: a scenario's story, or a run of calls through every door of its project, the law checked after each."""
+        """Run the promise once, then stop what it started: a scenario's story, or a run of calls through every door of its project, the law checked after each."""
+        try:
+            await self.told(harness)
+        finally:
+            await harness.run.stopped()
+
+    async def told(self, harness: Harness) -> None:
+        """Run the promise once: a scenario's story on its class made for it, or a run of calls through every door of its project, the law checked after each."""
         method = self.entry.method
-        made = self.entry.serves.made()
         door = method.door
         if not (isinstance(door, PromiseDoor) and door.law(method.taken)):
+            serves = self.entry.serves
+            made = serves.part.made(serves.module, {})
             told = method.function(made, by=harness)
             if isinstance(told, bool):
                 message = f"the scenario `{self.said()}` answers a verdict"
                 raise DoorError(message)
             await told
             return
-        reached = harness.reached(self.project)
+        reached = await harness.reached(self.project)
         mine = reached.model_copy(
             update={
                 "laws": [
                     law
                     for law in reached.laws
                     if law.method is method
-                    and law.serves.module.name == self.entry.serves.module.name
+                    and law.entry.serves.module.name == self.entry.serves.module.name
                 ]
             }
         )
@@ -150,11 +168,13 @@ def checked(
 
 
 def calls(doors: Doors) -> SearchStrategy[Call]:
-    """Return every call a party could make through the doors `doors` serve: each tool, action and command, given a value of what it takes, by a party of any its doors name."""
+    """Return every call a party could make through the doors `doors` serve: each tool, action, command and service, given a value of what it takes, by a party of any its doors name."""
     entries = [
         entry
         for entry in doors.entries()
-        if isinstance(entry.method.door, ToolDoor | ActionDoor | CommandDoor)
+        if isinstance(
+            entry.method.door, ToolDoor | ActionDoor | CommandDoor | ServiceDoor
+        )
     ]
     if not entries:
         return st.nothing()
@@ -178,6 +198,8 @@ def call(entry: Entry, by: SearchStrategy[Party]) -> SearchStrategy[Call]:
                 return Acted(
                     module=module, action=entry.name, given=sent(value), by=party
                 )
+            case ServiceDoor():
+                return Served(service=entry.name, given=sent(value), by=party)
             case _:
                 return Ran(
                     module=module, command=entry.name, arguments=sent(value), by=party

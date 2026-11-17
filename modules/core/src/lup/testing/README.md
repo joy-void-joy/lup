@@ -1,14 +1,14 @@
 # Promises
 
-What a module promises, and how the gate checks it. A promise is a method behind `@lup.promise` whose docstring says what someone can count on, in a class a module lists in its `serving`, as its other methods are:
+What a module promises, and how the gate checks it. A promise is a method behind `@lup.promise` whose docstring says what someone can count on, in a class a module lists in its `parts`, as its other methods are:
 
 ```python
 import lup
-from lup import ModuleServing
+from lup import Part
 from lup.testing import Step, Testing
 
 
-class CounterPromises(ModuleServing):
+class CounterPromises(Part):
     """The counter's promises."""
 
     @lup.promise
@@ -66,4 +66,4 @@ A broken promise is told with what it promises, the smallest values it drew, the
 
 ## What the gate runs
 
-Promises, and docstrings' examples, which show how something is used. A test function names no promise, and the gate fails it, saying to write it as one; one that can't be said as a law or a scenario is kept with `@pytest.mark.unpromised(why=…)`, and what couldn't be said is sent as a friction. A class of the repository's holding promises that no module lists in its `serving` fails too, since nothing would check them.
+Promises, and docstrings' examples, which show how something is used. A test function names no promise, and the gate fails it, saying to write it as one; one that can't be said as a law or a scenario is kept with `@pytest.mark.unpromised(why=…)`, and what couldn't be said is sent as a friction. A class of the repository's holding promises that no module lists in its `parts` fails too, since nothing would check them.

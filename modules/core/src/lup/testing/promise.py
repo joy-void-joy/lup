@@ -1,7 +1,7 @@
 """`@lup.promise`: what someone can count on, its docstring saying it, and its body checking it.
 
 A promise is a method behind a door, in a class a module lists in its
-`serving`, of one of two shapes, told apart by what it takes:
+`parts`, of one of two shapes, told apart by what it takes:
 - **a law**, `def name(self, step: Step[State]) -> bool`: a statement about
   every moment, a predicate over one step, which the harness checks after every
   step of every run (`README.md` here, *Laws*);
