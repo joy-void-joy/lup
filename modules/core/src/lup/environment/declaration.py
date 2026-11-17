@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from lup.core import Core
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import applied, listed, set_fields
-from lup.declaration.module import Module
+from lup.declaration.module import Module, Modules
 from lup.declaration.project import Project
 from lup.environment.doors import Doors
 from lup.environment.shell import Looks
@@ -141,8 +141,9 @@ def resolve(project: Project) -> Resolved:
     be served (`Doors.of`), or where what they declare for their views clashes
     (`Looks.of`).
     """
-    placed = project.modules.resolve(default(), shipped())
-    modules = project.modules.ordered(placed)
+    selected = project.modules.over(Modules.default())
+    placed = selected.resolve(default(), shipped())
+    modules = selected.ordered(placed)
     names = [module.name for module in modules]
     if Core.name not in names:
         message = (

@@ -92,6 +92,17 @@ type Call = Annotated[ToolCall | Ran | Served | Viewed, Field(discriminator="doo
 by whom."""
 
 
+class Repository(Model):
+    """A repository as lup finds one on disk: the text of its declaration's file, of its own local layer, and of the machine's layer, each where there's one."""
+
+    declaration: str | None = None
+    """Its declaration's file; none for a repository that declares nothing."""
+    local: str | None = None
+    """Its own local layer, which git ignores."""
+    machine: str | None = None
+    """The machine's layer, for every repository on it."""
+
+
 class Step[S](Model):
     """One step of a run, as a law reads it: a slice of a call, from one `await` to the next, with the module's state before and after it.
 
@@ -248,11 +259,11 @@ class Testing(Party, ABC):
     @abstractmethod
     async def started(
         self,
-        declared: Project | str,
+        declared: Project | Repository,
         secrets: Mapping[str, str] | None = None,
         repository: str = "harness",
     ) -> Started:
-        """Start lup on a declaration: a `Project`, or the text of a declaration's file, loaded as lup loads one, each class of its modules made once and started, as the code of `repository`.
+        """Start lup on a declaration: a `Project`, or a repository's files, read with their layers as lup reads a repository's, each class of its modules made once and started, as the code of `repository`.
 
         `secrets` holds the value of each secret a class holds, by its name;
         left out, each is drawn. Raise `ProjectError` where it doesn't load or

@@ -30,7 +30,7 @@ from lup import (
     Stopping,
     UncarriedError,
 )
-from lup.testing import Accepted, Refused, Testing, raises
+from lup.testing import Accepted, Refused, Repository, Testing, raises
 
 
 class Said(Model):
@@ -402,7 +402,7 @@ class DoorsPromises(Part):
         """A method that isn't what its door takes and returns, or doesn't say who may call it where its door has no default, fails the declaration's load, naming it, before anything calls it."""
         misshapen = by.any(Misshapen)
         with raises(ProjectError) as failed:
-            await by.started(loud(misshapen.methods()))
+            await by.started(Repository(declaration=loud(misshapen.methods())))
         assert "LoudPart.wrong" in failed.raised().about
 
     @lup.promise
@@ -422,7 +422,7 @@ class Heard(lup.Model):
 
     text: str
 '''
-        started = await by.started(loud(methods))
+        started = await by.started(Repository(declaration=loud(methods)))
         assert any(each.name == "shout" for each in started.tools())
 
     @lup.promise
@@ -432,7 +432,7 @@ class Heard(lup.Model):
         """lup makes a part with its module and its secrets alone: a field of its own with no default, or a method hiding its module, fails the load."""
         holding = by.any(Holding)
         with raises(ProjectError):
-            await by.started(loud(holding.methods()))
+            await by.started(Repository(declaration=loud(holding.methods())))
 
 
 class Adding(Model):

@@ -24,7 +24,7 @@ from lup import (
     ProjectError,
     chosen,
 )
-from lup.testing import Testing, raises
+from lup.testing import Repository, Testing, raises
 
 
 class Voices(Named[str]):
@@ -197,7 +197,7 @@ class DeclarationPromises(lup.Part):
     @lup.promise
     async def a_projects_own_module_loads_as_lups_do(self, by: Testing) -> None:
         """A module a project declares in its own declaration file loads and resolves the way lup's own do."""
-        started = await by.started(EPISODES)
+        started = await by.started(Repository(declaration=EPISODES))
         [episodes] = [each for each in started.modules if each.name == "episodes"]
         assert Episodic.model_validate(episodes.model_dump()).length == 30
 
@@ -206,7 +206,88 @@ class DeclarationPromises(lup.Part):
         """A declaration that binds no project, binds something else, or fails as it runs raises `ProjectError`, never standing in the defaults."""
         unloadable = by.any(Unloadable)
         with raises(ProjectError):
-            await by.started(unloadable.body)
+            await by.started(Repository(declaration=unloadable.body))
+
+    @lup.promise
+    async def a_repository_declaring_nothing_runs_on_lups_defaults(
+        self, by: Testing
+    ) -> None:
+        """A repository with no declaration runs on lup's default modules, its layers still over them."""
+        started = await by.started(Repository())
+        assert [each.name for each in started.modules] == [
+            each.name for each in (await by.started(Project())).modules
+        ]
+
+    @lup.promise
+    async def the_most_specific_layer_wins(self, by: Testing) -> None:
+        """The repository's own local layer wins over the machine's, which wins over its declaration, each changing only what it sets."""
+        layered = by.any(Layered)
+        started = await by.started(layered.repository())
+        [held] = [each for each in started.modules if isinstance(each, lup.Core)]
+        assert held.profile == layered.expected()
+
+    @lup.promise
+    async def a_broken_layer_is_never_left_out(self, by: Testing) -> None:
+        """A layer that's there and doesn't load fails the read, rather than lup running as if it weren't there."""
+        unloadable = by.any(Unloadable)
+        broken = by.any(Broken)
+        declared = PROFILED.format(profile="default")
+        files = (
+            Repository(declaration=declared, local=unloadable.body)
+            if broken.layer == "local"
+            else Repository(declaration=declared, machine=unloadable.body)
+        )
+        with raises(ProjectError):
+            await by.started(files)
+
+
+PROFILED = """
+from lup import Core, Modules, Profile, Profiles, Project
+
+project = Project(
+    modules=Modules().edit(
+        Core(profiles=Profiles().add(Profile(name="{profile}")), profile="{profile}")
+    )
+)
+"""
+"""A layer choosing the profile it names, as a declaration or a layer writes one."""
+
+
+class Broken(Model):
+    """Which layer of a repository's is the one that's broken."""
+
+    layer: Literal["local", "machine"]
+
+
+class Layered(Model):
+    """Which of a repository's files choose a profile, each naming its own."""
+
+    declaration: bool
+    machine: bool
+    local: bool
+
+    def repository(self) -> Repository:
+        """Return the repository's files: each that chooses one, choosing the profile named after it."""
+        return Repository(
+            declaration=PROFILED.format(profile="declared")
+            if self.declaration
+            else None,
+            machine=PROFILED.format(profile="machine") if self.machine else None,
+            local=PROFILED.format(profile="local") if self.local else None,
+        )
+
+    def expected(self) -> str:
+        """Return the profile the most specific file choosing one names, `default` where none does."""
+        chosen = [
+            name
+            for name, chooses in [
+                ("local", self.local),
+                ("machine", self.machine),
+                ("declared", self.declaration),
+            ]
+            if chooses
+        ]
+        return next(iter(chosen), lup.Core().profile)
 
 
 class Accounted(Model):

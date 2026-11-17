@@ -10,6 +10,7 @@ repository on this machine (`README.md` of `lup/declaration/`, *Layers*).
 import tomllib
 from pathlib import Path
 
+from lup.programs import run
 from lup.types import Model
 
 
@@ -47,6 +48,27 @@ class RepositoryLayout(Model):
     main: Path
     """The repository's main worktree: a clone's root, or a bare repository's own
     directory, which every worktree shares."""
+
+    @classmethod
+    def found(cls, within: Path) -> RepositoryLayout:
+        """Return the layout of the repository holding `within`, as git finds it: the root of the worktree `within` is in, and the repository's main worktree.
+
+        The main worktree is the directory git keeps the repository in where
+        it's bare, else that directory's parent, a clone's root. Raise
+        `lup.programs.ProgramFailedError` where `within` is in no repository.
+        """
+        root = Path(run("git", "rev-parse", "--show-toplevel", cwd=within).text())
+        common = Path(
+            run(
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+                cwd=within,
+            ).text()
+        )
+        bare = run("git", "config", "--bool", "core.bare", cwd=common, checked=False)
+        return cls(root=root, main=common if bare.text() == "true" else common.parent)
 
     @property
     def pyproject(self) -> Path:

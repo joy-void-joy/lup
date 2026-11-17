@@ -23,8 +23,9 @@ from lup.doors.door import Accepted, DoorError, Method, Refused
 from lup.doors.parties import Party
 from lup.doors.parts import Parts
 from lup.doors.tool import ToolDoor, ToolSpec
-from lup.environment.declaration import load, resolve
+from lup.environment.declaration import read, resolve
 from lup.environment.doors import Doors, Entry, Running, Serves
+from lup.environment.layout import MachineLayout, RepositoryLayout
 from lup.environment.running.container import answered
 from lup.environment.running.planning import plan_of
 from lup.environment.shell import Looks, viewed
@@ -36,6 +37,7 @@ from lup.testing.harness import (
     Kept,
     Ran,
     Reaching,
+    Repository,
     Served,
     Started,
     Step,
@@ -353,11 +355,11 @@ class Harness(Testing, arbitrary_types_allowed=True):
 
     async def started(
         self,
-        declared: Project | str,
+        declared: Project | Repository,
         secrets: Mapping[str, str] | None = None,
         repository: str = "harness",
     ) -> Started:
-        """Start lup on a declaration: a `Project`, or the text of a declaration's file, loaded as lup loads one, each class made once and started.
+        """Start lup on a declaration: a `Project`, or a repository's files, read with their layers as lup reads a repository's, each class made once and started.
 
         Raise `ProjectError` where it doesn't load or resolve, where a secret a
         class holds isn't given, or where a law its modules hold has no door to
@@ -413,15 +415,25 @@ class Harness(Testing, arbitrary_types_allowed=True):
         return value
 
 
-def loaded(text: str) -> Project:
-    """Load the declaration whose file holds `text`, as lup loads one.
+def loaded(files: Repository) -> Project:
+    """Read the declaration of a repository holding `files`, with its layers, as lup reads a repository's.
 
-    Raise `ProjectError` where it doesn't load.
+    Raise `ProjectError` where a file that's there doesn't load.
     """
     with tempfile.TemporaryDirectory() as directory:
-        path = Path(directory) / "declaration.py"
-        path.write_text(text)
-        return load(path)
+        root = Path(directory) / "repository"
+        configuration = Path(directory) / "configuration"
+        layout = RepositoryLayout(root=root, main=root)
+        machine = MachineLayout(configuration=configuration)
+        for path, text in [
+            (layout.declaration, files.declaration),
+            (layout.local, files.local),
+            (machine.layer, files.machine),
+        ]:
+            if text is not None:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text)
+        return read(layout, machine).project
 
 
 def promises(module: Module) -> list[Entry]:
