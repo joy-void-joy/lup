@@ -7,6 +7,7 @@ project's code reaches lup where pyright doesn't hold it (`README.md` here,
 *Promises*).
 """
 
+import asyncio
 from typing import Literal
 
 from pydantic import Field
@@ -14,14 +15,20 @@ from pydantic import Field
 import lup
 from lup import (
     Agent,
+    Code,
     Model,
     Module,
     Modules,
     ModuleServing,
+    MutableModel,
     Operator,
     Project,
     ProjectError,
+    Secret,
     Serving,
+    Starting,
+    Stopping,
+    UncarriedError,
 )
 from lup.testing import Accepted, Refused, Testing, raises
 
@@ -257,9 +264,9 @@ class Misshapen(Model):
 
 
 class Holding(Model):
-    """A class of a module's methods holding more than its module."""
+    """A class of a module's methods holding what lup can't make it with."""
 
-    held: Literal["a method named as a field", "a field of its own"]
+    held: Literal["a method named as a field", "a field with no default"]
 
     def methods(self) -> str:
         """Return the class's body, past its `module`."""
@@ -271,9 +278,9 @@ class Holding(Model):
         """Hide the class's module."""
         return said.text
 '''
-            case "a field of its own":
+            case "a field with no default":
                 return """
-    count: int = 0
+    count: int
 """
 
 
@@ -423,8 +430,194 @@ class Heard(lup.Model):
         assert any(each.name == "shout" for each in started.tools())
 
     @lup.promise
-    async def a_class_of_methods_holds_its_module_alone(self, by: Testing) -> None:
-        """A class of a module's methods holds its module alone, made afresh for each call: a field of its own, or a method hiding its module, fails the load."""
+    async def a_class_of_methods_is_made_with_its_module_alone(
+        self, by: Testing
+    ) -> None:
+        """lup makes a class of a module's methods with its module and its secrets alone: a field of its own with no default, or a method hiding its module, fails the load."""
         holding = by.any(Holding)
         with raises(ProjectError):
             await by.started(loud(holding.methods()))
+
+
+class Adding(Model):
+    """How much to add."""
+
+    by: int = Field(ge=0, le=100)
+
+
+class Tally(Model):
+    """What's been added so far."""
+
+    count: int
+
+
+class Asking(Model):
+    """Asking for something, giving nothing."""
+
+
+class Tallied(Model):
+    """What's been added so far, and whose code asked."""
+
+    count: int
+    repository: str
+
+
+class Revealed(Model):
+    """A secret's value, as a class holding it reads it."""
+
+    value: str
+
+
+class Events(MutableModel):
+    """What a keeper's class saw of its own start and stop, in order: kept on its module, so a promise reads it once the class has stopped."""
+
+    seen: list[str] = []
+
+
+class KeeperServing(ModuleServing):
+    """A keeper's class: it keeps a count while it runs, holds a token, serves code, and marks its own start and stop."""
+
+    module: Keeper
+    count: int = 0
+    token: Secret
+
+    @lup.on(Starting)
+    async def kept_running(self, starting: Starting) -> None:
+        """Run as long as the class runs, marking when it begins and when it's cancelled."""
+        del starting
+        self.module.events.seen.append("starting")
+        try:
+            await asyncio.Event().wait()
+        finally:
+            self.module.events.seen.append("cancelled")
+
+    @lup.on(Stopping)
+    async def stopping(self, stopping: Stopping) -> None:
+        """Mark the class's stop, before what it started is cancelled."""
+        del stopping
+        self.module.events.seen.append("stopping")
+
+    @lup.tool
+    async def add(self, adding: Adding) -> Tally:
+        """Add to the count.
+
+        The class keeps the count while it runs.
+        """
+        self.count += adding.by
+        return Tally(count=self.count)
+
+    @lup.service
+    async def tallied(self, asking: Asking, by: Code) -> Tallied:
+        """Say the count, and whose code asked."""
+        del asking
+        return Tallied(count=self.count, repository=by.repository)
+
+    @lup.service
+    async def reveal(self, asking: Asking) -> Revealed:
+        """Say the token's value, as the class holding it reads it."""
+        del asking
+        return Revealed(value=self.token.value)
+
+    @lup.service
+    async def refuse(self, asking: Asking) -> None:
+        """Refuse whatever is asked."""
+        del asking
+        message = "asked of a keeper that keeps nothing for you"
+        raise lup.RefusedError(message)
+
+
+class AskingServing(ModuleServing):
+    """Another class, whose tools call the keeper's services as plain calls."""
+
+    @lup.tool
+    async def ask(self, asking: Asking) -> Tallied:
+        """Ask the keeper for its count, as code."""
+        return await KeeperServing.tallied(asking)
+
+    @lup.tool
+    async def ask_refused(self, asking: Asking) -> str:
+        """Ask the keeper for what it refuses."""
+        await KeeperServing.refuse(asking)
+        return "answered"
+
+
+class Keeper(Module):
+    """Keeping a count while it runs, behind a token."""
+
+    name = "keeper"
+    events: Events = Field(default_factory=Events)
+    serving: Serving = Serving.of(KeeperServing, AskingServing)
+
+
+class RunningPromises(ModuleServing):
+    """What a module's code can count on of its classes made once where they run: what they keep, the services they serve, the secrets they hold, and their start and stop."""
+
+    @lup.promise
+    async def a_class_keeps_what_it_holds_between_calls(self, by: Testing) -> None:
+        """A class of a module's methods is made once where it runs, so what it keeps in its fields is there at its next call."""
+        first, second = by.any(Adding), by.any(Adding)
+        started = await by.started(declared(Keeper()))
+        agent = by.any(Agent)
+        await started.call("add", first, agent)
+        added = await started.call("add", second, agent)
+        assert isinstance(added, Accepted)
+        assert added.output == Tally(count=first.by + second.by)
+
+    @lup.promise
+    async def a_service_is_a_plain_call_by_the_projects_code(self, by: Testing) -> None:
+        """A service read through its class is called as a plain call, carried to its class wherever it runs, and called by the project whose code made the call."""
+        repository = by.any(str)
+        started = await by.started(declared(Keeper()), repository=repository)
+        asked = await started.call("ask", Asking(), by.any(Agent))
+        assert isinstance(asked, Accepted)
+        assert isinstance(asked.output, Tallied)
+        assert asked.output.repository == repository
+
+    @lup.promise
+    async def a_refused_service_raises_at_its_caller(self, by: Testing) -> None:
+        """A service refusing what it's asked raises `RefusedError` at the code that called it, as a plain call's failure would, so a tool calling it is refused in turn."""
+        started = await by.started(declared(Keeper()))
+        asked = await started.call("ask_refused", Asking(), by.any(Agent))
+        assert isinstance(asked, Refused)
+
+    @lup.promise
+    async def a_service_runs_only_where_lup_carries_it(self, by: Testing) -> None:
+        """A service called where lup runs no module's code, as from a promise's own body, raises `UncarriedError` rather than running somewhere it shouldn't."""
+        with raises(UncarriedError):
+            await KeeperServing.tallied(Asking())
+
+    @lup.promise
+    async def a_service_answers_only_who_its_for(self, by: Testing) -> None:
+        """A service is the project's code's to call: an agent calling it by name is refused."""
+        started = await by.started(declared(Keeper()))
+        refused = await started.serve("tallied", Asking(), by.any(Agent))
+        assert isinstance(refused, Refused)
+
+    @lup.promise
+    async def a_class_holds_the_secret_stored_under_its_fields_name(
+        self, by: Testing
+    ) -> None:
+        """A class holding a field typed `Secret` is filled, where it runs, with the value stored under the field's name, and says it holds it; a class whose secret nothing stored fails to start."""
+        value = by.any(str)
+        started = await by.started(declared(Keeper()), secrets={"token": value})
+        revealed = await started.serve("reveal", Asking(), Code(repository="harness"))
+        assert isinstance(revealed, Accepted)
+        assert revealed.output == Revealed(value=value)
+        assert "token" in KeeperServing.holds().secrets
+        assert KeeperServing.holds().anything()
+        with raises(ProjectError):
+            await by.started(declared(Keeper()), secrets={})
+
+    @lup.promise
+    async def a_class_stops_what_it_started_after_its_stop(self, by: Testing) -> None:
+        """What a class runs at `Starting` goes on as long as the class runs; as it stops, its methods run at `Stopping` first, then what it started is cancelled, wherever it had got to."""
+        started = await by.started(declared(Keeper()))
+        [keeper] = [each for each in started.modules if isinstance(each, Keeper)]
+        await asyncio.sleep(0)
+        await started.stopped()
+        seen = keeper.events.seen
+        assert "stopping" in seen
+        assert ("starting" in seen) == ("cancelled" in seen)
+        if "starting" in seen:
+            assert seen.index("starting") < seen.index("stopping")
+            assert seen.index("stopping") < seen.index("cancelled")

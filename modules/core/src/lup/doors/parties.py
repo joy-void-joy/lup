@@ -30,6 +30,19 @@ class Operator(Party):
     """The operator, from the dashboard or from a terminal on their machine, where a command carries their authority."""
 
 
+class Code(Party):
+    """A project's own code, calling a service of a module's as a plain call: a method of one of its classes, or a program of its own.
+
+    Identified by its repository, which whoever carries the call vouches for
+    from where the call came, never what the caller says of itself: the
+    container a call came from runs one project's code, so lup can tell
+    projects apart, not the classes of one project.
+    """
+
+    repository: str
+    """The repository whose code calls, as lup names it."""
+
+
 def said(parties: list[type[Party]]) -> str:
     """Name `parties` as a type naming them does, a union for several.
 

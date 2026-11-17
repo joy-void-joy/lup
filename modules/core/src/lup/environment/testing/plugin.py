@@ -27,7 +27,7 @@ from lup.doors.door import served
 from lup.doors.serving import ModuleServing, Serving
 from lup.environment.declaration import load, resolve
 from lup.environment.testing.checking import Check, Exploring
-from lup.environment.testing.harness import laws, promises
+from lup.environment.testing.harness import promises, readers
 from lup.errors import LupError
 from lup.testing.harness import Broken, Kept
 from lup.testing.promise import PromiseDoor
@@ -157,7 +157,7 @@ class Declared(pytest.File):
         """Collect each of the repository's own modules' promises, a law with no door to read its state through failing here."""
         project = load(self.path)
         resolved = resolve(project)
-        laws(resolved.doors)
+        readers(resolved.doors)
         root = self.config.rootpath
         for module in resolved.modules:
             if own(type(module), root):

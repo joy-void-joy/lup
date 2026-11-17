@@ -2,7 +2,7 @@
 
 from lup.declaration.module import Module
 from lup.declaration.promises import DeclarationPromises
-from lup.doors.promises import DoorsPromises
+from lup.doors.promises import DoorsPromises, RunningPromises
 from lup.doors.serving import Serving
 from lup.testing.promises import TestingPromises
 
@@ -16,4 +16,6 @@ class Core(Module):
     """
 
     name = "core"
-    serving: Serving = Serving.of(DeclarationPromises, DoorsPromises, TestingPromises)
+    serving: Serving = Serving.of(
+        DeclarationPromises, DoorsPromises, RunningPromises, TestingPromises
+    )
