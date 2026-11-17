@@ -309,8 +309,10 @@ class Testing(Party, ABC):
         secrets: Mapping[str, str] | None = None,
         repository: str = "harness",
         programs: Mapping[str, Scripted] | None = None,
+        *,
+        machine: bool = False,
     ) -> Started:
-        """Start lup on a declaration: a `Project`, or the text of a declaration's file, loaded as lup loads one, each class of its modules made once and started, as the code of `repository`, each program its parts run stood in for as `programs` scripts it.
+        """Start lup on a declaration: a `Project`, or the text of a declaration's file, loaded as lup loads one, each class of its modules made once and started, as the code of `repository`, each program its parts run stood in for as `programs` scripts it; where `machine`, as the machine's own parts, a service their code calls being by `Machine`.
 
         `secrets` holds the value of each secret a class holds, by its name;
         left out, each is drawn. Raise `ProjectError` where it doesn't load or

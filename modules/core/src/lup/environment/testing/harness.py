@@ -398,6 +398,8 @@ class Harness(Testing, arbitrary_types_allowed=True):
         secrets: Mapping[str, str] | None = None,
         repository: str = "harness",
         programs: Mapping[str, Scripted] | None = None,
+        *,
+        machine: bool = False,
     ) -> Started:
         """Start lup on a declaration: a `Project`, or the text of a declaration's file, loaded as lup loads one, each class made once and started.
 
@@ -408,7 +410,9 @@ class Harness(Testing, arbitrary_types_allowed=True):
         project = declared if isinstance(declared, Project) else loaded(declared)
         heard = Heard()
         stand = StandIn(scripts=dict(programs or {}), heard=heard)
-        reached = await self.reached(project, secrets, repository, stand)
+        reached = await self.reached(
+            project, secrets, repository, stand, machine=machine
+        )
         return Started(
             modules=reached.modules,
             specs=reached.tools(),
@@ -424,6 +428,8 @@ class Harness(Testing, arbitrary_types_allowed=True):
         secrets: Mapping[str, str] | None = None,
         repository: str = "harness",
         runs: Runs | None = None,
+        *,
+        machine: bool = False,
     ) -> Reached:
         """Start lup on `project`, as the code of `repository`, and return its doors as this harness reaches them, every law its modules hold checked over each call.
 
@@ -446,6 +452,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
             given,
             data=Path(kept.name),
             runs=runs or StandIn(heard=Heard()),
+            machine=machine,
         )
         self.run.started.append(running)
         return Reached(

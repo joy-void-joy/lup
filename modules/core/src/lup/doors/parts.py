@@ -20,8 +20,7 @@ from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
 
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import Named
-from lup.doors.door import DoorError, Method
-from lup.errors import LupError
+from lup.doors.door import DoorError, Method, RefusedError
 from lup.types import Model, MutableModel
 lazy from lup.declaration.module import Module
 
@@ -75,8 +74,8 @@ class Runs(ABC):
         """
 
 
-class ProgramError(LupError):
-    """A program a part declares can't be run: it isn't there, isn't at a version the part takes, or nothing runs programs where the part does."""
+class ProgramError(RefusedError):
+    """A program a part declares can't be run: it isn't there, isn't at a version the part takes, or nothing runs programs where the part does; the call needing it is refused, saying why."""
 
 
 class Program(Model, arbitrary_types_allowed=True):

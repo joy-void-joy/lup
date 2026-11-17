@@ -24,7 +24,7 @@ from lup.doors.command import command
 from lup.doors.door import DoorError, RefusedError
 from lup.doors.events import Event, Starting, Stopping
 from lup.doors.on import on
-from lup.doors.parties import Agent, Codebase, Operator, Party
+from lup.doors.parties import Agent, Codebase, Machine, Operator, Party
 from lup.doors.parts import (
     Data,
     Finished,
@@ -82,6 +82,7 @@ __all__ = [
     "Layer",
     "Line",
     "LupError",
+    "Machine",
     "Mark",
     "MarkKind",
     "Markdown",
