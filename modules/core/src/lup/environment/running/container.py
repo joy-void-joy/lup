@@ -20,6 +20,7 @@ from lup.declaration.errors import ProjectError
 from lup.doors.door import Answer, Method, Refused, RefusedError, Rejection
 from lup.doors.service import Carrier
 from lup.environment.declaration import Resolved, load, resolve
+from lup.environment.running.programs import Local
 from lup.environment.shell.viewing import viewed
 from lup.errors import LupError
 from lup.running.wire import (
@@ -201,6 +202,7 @@ async def started(start: Start, resolved: Resolved) -> Running:
         beyond=Outward(calling=start.calling),
         data=start.data,
         runtime=start.runtime,
+        runs=Local(),
     )
 
 

@@ -398,6 +398,10 @@ class StandIn(Model, Runs, arbitrary_types_allowed=True):
             error=bytes_of(answer.error),
         )
 
+    async def found(self, program: Program) -> bool:
+        """Say whether the promise stands `program` in: a program it scripts is there, any other isn't."""
+        return program.name in self.scripts
+
 
 def bytes_of(written: bytes | str) -> bytes:
     """Return what a program stood in for writes, as bytes, text as UTF-8."""
