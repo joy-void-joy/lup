@@ -30,6 +30,7 @@ from lup.running.wire import (
     Call,
     Caller,
     CommandCalled,
+    Offer,
     ServiceCalled,
     ToolCalled,
 )
@@ -75,6 +76,13 @@ class Arrival(Model):
     container's, whatever this says."""
 
 
+class Visiting(Model):
+    """A question of what the caller may call, come in on a socket: the directory it came in on, and the project the operator asks about, where it's theirs."""
+
+    directory: Path
+    repository: str | None = None
+
+
 class Route(Model):
     """Where a call goes, and the call as it's carried, its `by` this part's word."""
 
@@ -116,6 +124,9 @@ class Carrying(Part, machine=True, shared=True):
     routed without sockets, as in a promise."""
     plans: dict[str, Plan] = {}
     """Each project's plan, by its repository."""
+    hosted: Plan = Field(default_factory=Plan)
+    """The machine's own parts' plan, which every caller is offered beside
+    its project's: set where the machine's parts run."""
     placements: list[Placement] = []
 
     def operator(self) -> Path:
@@ -191,6 +202,34 @@ class Carrying(Part, machine=True, shared=True):
             )
             raise RefusedError(message)
         return Route(to=placement.listening(), call=call)
+
+    @lup.service
+    async def offered(self, visiting: Visiting, by: Machine) -> Offer:
+        """Say what a caller asking on a socket may call: who they are, from the directory it came in on, and their project's plan, the machine's own parts' beside it.
+
+        A project's parts that the machine runs are the machine's, offered
+        once, as the machine's. Raise `RefusedError` where the directory is no
+        container's nor the operator's.
+        """
+        del by
+        caller = self.caller(visiting.directory)
+        repository = (
+            caller.repository if isinstance(caller, Codebase) else visiting.repository
+        )
+        own = None if repository is None else self.plans.get(repository)
+        parts = [
+            each
+            for each in ([] if own is None else own.parts)
+            if not (each.holds.machine or each.holds.shared)
+        ]
+        tools = [] if own is None else own.tools
+        return Offer(
+            by=caller,
+            plan=Plan(
+                parts=[*parts, *self.hosted.parts],
+                tools=[*tools, *self.hosted.tools],
+            ),
+        )
 
     def caller(self, directory: Path) -> Caller:
         """Return who a call coming in on `directory` is by.

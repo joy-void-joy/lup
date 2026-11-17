@@ -1009,3 +1009,43 @@ class ProjectsPromises(Part):
         containers: list[str] = json.loads(first.answer())["containers"]
         stopped = [each[-1] for each in podman_ran(started, "stop")]
         assert stopped == containers
+
+    @lup.promise
+    async def a_caller_is_offered_what_their_socket_says_they_may_call(
+        self, by: Testing
+    ) -> None:
+        """A caller asking what they may call is told who they are from the socket they asked on, whatever they say, and offered their own project's plan: never another project's, nor a part the machine runs; a socket no container lup started has is refused."""
+        started = await by.started(HOME, programs={"podman": PODMAN}, machine=True)
+        own = await placed(
+            started,
+            "harmon",
+            plan_of(
+                Planned(module="notes", part="Notes", tools=["note"]),
+                Planned(module="notes", part="Desk", shared=True, tools=["desk"]),
+            ),
+            ["notes.Notes"],
+        )
+        await placed(
+            started,
+            "story",
+            plan_of(Planned(module="tales", part="Tales", tools=["tell"])),
+            ["tales.Tales"],
+        )
+        asked = by.any(Repository).name
+        offered = await started.serve(
+            "offered", {"directory": own, "repository": asked}, Machine()
+        )
+        assert isinstance(offered, Accepted)
+        offer = json.loads(offered.answer())
+        assert offer["by"] == {"party": "code", "repository": "harmon"}
+        assert [each["part"] for each in offer["plan"]["parts"]] == ["Notes"]
+        stranger = await started.serve(
+            "offered", {"directory": "/srv/elsewhere"}, Machine()
+        )
+        assert isinstance(stranger, Refused)
+
+
+class Repository(Model):
+    """A project a caller may say they ask about."""
+
+    name: Literal["harmon", "story", "lup"]
