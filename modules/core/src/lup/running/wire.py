@@ -10,9 +10,9 @@ names, from the socket a call came in on.
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, JsonValue, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, JsonValue, TypeAdapter, ValidationError
 
-from lup.doors.door import Rejection
+from lup.doors.door import Accepted, Refused, Rejection
 from lup.doors.parties import Agent, Codebase, Operator
 from lup.errors import LupError
 from lup.types import Model
@@ -63,8 +63,19 @@ class CommandCalled(Model):
     by: Caller
 
 
+class ViewCalled(Model):
+    """A view read, by its module's name and its own."""
+
+    format: int = 1
+    kind: Literal["view"] = "view"
+    module: str
+    view: str
+    given: JsonValue
+    by: Caller
+
+
 type Call = Annotated[
-    ToolCalled | ServiceCalled | CommandCalled,
+    ToolCalled | ServiceCalled | CommandCalled | ViewCalled,
     Field(discriminator="kind"),
 ]
 """A call through any door, as it crosses: the one of each kind it is."""
@@ -88,6 +99,19 @@ class Declined(Model):
 
 type Reply = Annotated[Answered | Declined, Field(discriminator="kind")]
 """A call's answer, as it crosses: answered or refused."""
+
+
+def replied(answered: Accepted | Refused) -> Reply:
+    """Return a call's answer as it crosses: what the method answered, as JSON, or the refusal."""
+    match answered:
+        case Accepted(output=BaseModel() as model):
+            return Answered(output=model.model_dump(mode="json"))
+        case Accepted(output=str() as words):
+            return Answered(output=words)
+        case Accepted():
+            return Answered()
+        case Refused(rejection=rejection):
+            return Declined(rejection=rejection)
 
 
 class Planning(Model):

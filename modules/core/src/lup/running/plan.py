@@ -2,8 +2,8 @@
 
 A declaration is code, so it's loaded in a container, where running a branch's
 code is harmless, and what comes out is this: each part of each module, what it
-holds, and the doors it serves, with the tools a session is told of and the
-files the declaration loaded. The program starts containers from it and routes
+holds, and the doors it serves, each with what it takes, with the tools a
+session is told of and the files the declaration loaded. The program starts containers from it and routes
 calls by it; a part holding something runs apart, from a commit the operator
 approved, and the files are what an approval shows (`README.md` here, *The
 plan*).
@@ -13,16 +13,28 @@ from typing import Literal
 
 from lup.doors.parts import Holds
 from lup.doors.tool import ToolSpec
-from lup.types import Model
+from lup.types import JsonObject, Model
 
 
 class Doorway(Model):
-    """One method a part serves behind a door, as calls to it are routed: its door, its name, and who may call it."""
+    """One method a part serves behind a door, as calls to it are routed and the command line offers it: its door, its name, who may call it, and what it takes."""
 
-    door: Literal["tool", "service", "command"]
+    door: Literal["tool", "service", "command", "view"]
     name: str
     parties: list[str]
     """Who may call it, by each party's class name: `Agent`, `Codebase`."""
+    description: str = ""
+    """Its docstring, which describes it: a command's help."""
+    input_schema: JsonObject = {}
+    """The JSON Schema of the model it takes, or of each where it takes a list
+    of it: what the command line reads its arguments and options from."""
+
+
+class ModulePlan(Model):
+    """One of the project's modules, as the command line names it: its name, and its one sentence."""
+
+    name: str
+    description: str = ""
 
 
 class PartPlan(Model):
@@ -50,6 +62,8 @@ class Plan(Model):
     format: int = 1
     """The version of the plan's shape, which a program reading another
     refuses in words, saying how to update (`Versioned`)."""
+    modules: list[ModulePlan] = []
+    """The project's modules, in order."""
     parts: list[PartPlan] = []
     tools: list[ToolSpec] = []
     """What a session is told of each tool the project's modules serve."""

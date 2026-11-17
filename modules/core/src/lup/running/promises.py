@@ -13,8 +13,10 @@ from pydantic import Field, JsonValue
 import lup
 from lup import (
     Agent,
+    Blocks,
     Codebase,
     Data,
+    Line,
     Model,
     Module,
     Modules,
@@ -22,6 +24,7 @@ from lup import (
     Parts,
     Project,
     Secret,
+    Span,
 )
 from lup.testing import Accepted, Testing
 
@@ -45,6 +48,16 @@ class Ledger(Part):
     async def note(self, note: Note) -> Noted:
         """Note something."""
         return Noted(text=note.text)
+
+    @lup.view
+    async def noting(self, note: Note) -> Blocks:
+        """Show a note as a line."""
+        return Blocks.of(Line.of("note", note.text))
+
+    @lup.view
+    async def smudged(self, note: Note) -> Blocks:
+        """Show a note in a tone nobody declares."""
+        return Blocks.of(Line(id="note", spans=[Span(text=note.text, tone="smudge")]))
 
 
 class Vault(Part):
@@ -119,20 +132,24 @@ class RunningPromises(Part):
 
     @lup.promise
     async def a_plan_routes_every_call_a_party_makes(self, by: Testing) -> None:
-        """A plan names, for each method a party calls, its door, its name and who may call it, so the program routes a call without running the declaration; hooks and promises, which no party calls, aren't among them."""
+        """A plan names, for each method a party calls, its door, its name, who may call it and the fields of what it takes, so the program routes a call, and the command line offers it, without running the declaration; hooks and promises, which no party calls, aren't among them."""
         started = await by.started(couriered(), secrets={"key": by.any(str)})
         noting = started.plan.serving("tool", "note")
         assert noting is not None
         assert noting.part == "Ledger"
+        assert started.plan.serving("view", "noting", "courier") is not None
         sealing = started.plan.serving("service", "sealed")
         assert sealing is not None
         [way] = [each for each in sealing.doorways if each.name == "sealed"]
         assert "Codebase" in way.parties
+        ways = [way for each in started.plan.parts for way in each.doorways]
+        assert all(way.door in ("tool", "service", "command", "view") for way in ways)
         assert all(
-            way.door in ("tool", "service", "command")
-            for each in started.plan.parts
-            for way in each.doorways
+            "text" in json.dumps(way.input_schema)
+            for way in ways
+            if way.name in ("note", "noting", "sealed")
         )
+        assert "courier" in [each.name for each in started.plan.modules]
 
     @lup.promise
     async def a_call_crossing_is_answered_as_through_its_door(
@@ -154,6 +171,29 @@ class RunningPromises(Part):
         )
         assert reply.kind == "answered"
         assert Noted.model_validate(reply.output) == Noted(text=note.text)
+
+    @lup.promise
+    async def a_view_crossing_is_answered_with_its_blocks(self, by: Testing) -> None:
+        """A view read across to a container is answered with its blocks, as JSON; one whose blocks name a kind nobody declares is refused, the container going on."""
+        note = by.any(Note)
+        started = await by.started(couriered(), secrets={"key": by.any(str)})
+
+        def read(view: str) -> bytes:
+            sent = {
+                "format": 1,
+                "kind": "view",
+                "module": "courier",
+                "view": view,
+                "given": note.model_dump(mode="json"),
+                "by": by.any(Agent).model_dump(mode="json"),
+            }
+            return json.dumps(sent).encode()
+
+        shown = Reply.model_validate_json(await started.crossed(read("noting")))
+        assert shown.kind == "answered"
+        assert Blocks.model_validate(shown.output).text() == note.text
+        smudged = Reply.model_validate_json(await started.crossed(read("smudged")))
+        assert smudged.kind == "refused"
 
     @lup.promise
     async def nothing_crossing_makes_a_container_fail(self, by: Testing) -> None:
