@@ -9,10 +9,11 @@ import { Decoration, EditorView, ViewPlugin, showPanel, type DecorationSet, type
 import { getCM, vim } from "@replit/codemirror-vim";
 
 import type { Blocks, Comment, Delivered, Draft, Looks, Viewing } from "../generated/read";
-import { depthOf, Document, every, foldKind, foldRange, mountedOf, nodeAt, offsetOf, section, viewKey, type Change, type Node } from "../document/tree";
+import { depthOf, Document, every, foldKind, foldRange, mountedOf, nodeAt, offsetOf, opening, section, viewKey, type Change, type Node } from "../document/tree";
 import { fromCore, redrawn } from "./annotations";
 import { Comments } from "./comments";
 import { Kinds } from "./looks";
+import { picking } from "./picker";
 
 /** Where views are read from and the draft is kept: the core, through the server, or the harness. */
 export interface Source {
@@ -88,10 +89,12 @@ export class Shell {
     readonly comments: Comments;
     /** Whether the operator opened or closed each fold, by its key: what they did, kept as views answer again. */
     readonly #opened = new Map<string, boolean>();
-    /** What stops each fold's view from being watched, by the fold's key, while it's open. */
-    readonly #watching = new Map<string, () => void>();
+    /** Each fold's view watched while it's open, by the fold's key: which view, whether it's answered yet, and what stops it. */
+    readonly #watching = new Map<string, { view: string; answered: boolean; stop: () => void }>();
     /** The keys of the folds chosen, for an action to act on every one of. */
     #chosen: readonly string[] = [];
+    /** Where the cursor was as the review was opened, to go back to as it's left. */
+    #reviewing: number | null = null;
     readonly #stop: () => void;
 
     constructor(parent: Element, root: Viewing, looks: Looks, source: Source, extensions: Extension[] = []) {
@@ -116,6 +119,7 @@ export class Shell {
                     }),
                     foldState,
                     said,
+                    picking,
                     drawing,
                     shells.of(shell),
                     ...extensions,
@@ -135,8 +139,8 @@ export class Shell {
     destroy(): void {
         this.comments.destroy();
         this.#stop();
-        for (const stop of this.#watching.values()) {
-            stop();
+        for (const watched of this.#watching.values()) {
+            watched.stop();
         }
         this.view.destroy();
     }
@@ -174,8 +178,12 @@ export class Shell {
             const start = offsetOf(each);
             const range = foldRange(each, start);
             const open = this.isOpen(each);
-            if (open && each.block?.block === "fold" && !Array.isArray(each.block.content) && !this.#watching.has(each.key)) {
-                this.#read(each.key, { ...each.block.content, module: each.block.content.module ?? moduleOf(each) });
+            const reads = open ? opening(each) : null;
+            const watched = this.#watching.get(each.key);
+            // A fold reading another view than it did, or whose answer its view laid out again without, reads afresh.
+            if (reads !== null && (watched === undefined || watched.view !== viewKey(reads) || (watched.answered && mountedOf(each) === null))) {
+                watched?.stop();
+                this.#read(each.key, reads);
             }
             if (range === null) {
                 continue;
@@ -203,10 +211,16 @@ export class Shell {
     /** Read what the fold keyed `key` reads as it opens, and keep it under the fold, answered again as it changes. */
     #read(key: string, viewing: Viewing): void {
         let stop = (): void => {};
-        this.#watching.set(key, () => {
-            stop();
-        });
+        const watched = {
+            view: viewKey(viewing),
+            answered: false,
+            stop: () => {
+                stop();
+            },
+        };
+        this.#watching.set(key, watched);
         stop = this.source.watch(viewing, (blocks) => {
+            watched.answered = true;
             const fold = this.document.node(key);
             const mounted = fold === null ? null : mountedOf(fold);
             if (mounted?.viewing !== undefined && mounted.viewing !== null && viewKey(mounted.viewing) === viewKey(viewing)) {
@@ -254,6 +268,61 @@ export class Shell {
     /** Say `text` on the status line, or clear it. */
     say(text: string | null): void {
         this.view.dispatch({ effects: say.of(text) });
+    }
+
+    /** Return the review of the draft at the top of the document; none while the draft holds nothing. */
+    review(): Node | null {
+        return this.document.root.children.find((node) => node.block?.block === "fold" && node.block.kind === "draft") ?? null;
+    }
+
+    /**
+     * Say whether the cursor is in the review, open: where a send is one key away. On the review closed, as the cursor
+     * is where the page opens, Ctrl+Enter opens it rather than sends.
+     */
+    inReview(): boolean {
+        const review = this.review();
+        const head = this.view.state.selection.main.head;
+        return review !== null && this.isOpen(review) && head >= offsetOf(review) && head <= offsetOf(review) + review.size;
+    }
+
+    /**
+     * Put the cursor at `position` and bring it into view, through vim's own cursor where vim runs, which a key's
+     * command otherwise puts back where vim last left it once the command is done.
+     */
+    go(position: number): void {
+        const at = Math.min(position, this.view.state.doc.length);
+        const cm = getCM(this.view);
+        if (cm === null) {
+            this.view.dispatch({ selection: { anchor: at }, scrollIntoView: true });
+            return;
+        }
+        cm.setCursor(cm.posFromIndex(at));
+        this.view.dispatch({ effects: EditorView.scrollIntoView(at) });
+    }
+
+    /** Open the review and go to it, as the first Ctrl+Enter does, to come back to where the cursor is as it's left. */
+    toReview(): boolean {
+        const review = this.review();
+        if (review === null) {
+            return false;
+        }
+        this.#reviewing = this.view.state.selection.main.head;
+        this.fold([review.key], true);
+        this.go(offsetOf(review));
+        return true;
+    }
+
+    /** Leave the review: close it, and go back to where the cursor was as it was opened; say whether it was open. */
+    leaveReview(): boolean {
+        const back = this.#reviewing;
+        this.#reviewing = null;
+        const review = this.review();
+        if (back === null || review === null) {
+            return false;
+        }
+        this.fold([review.key], false);
+        this.go(back);
+        return true;
     }
 
     /** Return the innermost fold the cursor is in, of the kind named `kind` where one is named. */
@@ -309,18 +378,6 @@ export class Shell {
             text: this.view.state.doc.toString(),
         };
     }
-}
-
-/** Return the module whose view laid `node` out: the module of the nearest section above it that names one. */
-function moduleOf(node: Node): string | null {
-    let at: Node | null = node;
-    while (at !== null) {
-        if (at.viewing !== null && at.viewing.module !== null) {
-            return at.viewing.module;
-        }
-        at = at.parent;
-    }
-    return null;
 }
 
 /** Say whether `node` is one of the nodes keyed in `keys`, or under one. */
@@ -502,6 +559,18 @@ export const look = EditorView.theme(
             fontStyle: "italic",
         },
         ".lup-status": { padding: "0 1ch", borderTop: "1px solid var(--lup-border)", color: "var(--lup-fg)" },
+        ".lup-picker": { padding: "0 1ch", borderTop: "1px solid var(--lup-border)", background: "var(--lup-float)" },
+        ".lup-picker-asking": { color: "var(--lup-muted)" },
+        ".lup-picker-field": {
+            width: "100%",
+            background: "var(--lup-bg)",
+            color: "var(--lup-fg)",
+            border: "1px solid var(--lup-border)",
+            fontFamily: "var(--lup-mono)",
+            fontSize: "var(--lup-fs)",
+        },
+        ".lup-picker-list": { listStyle: "none", margin: "0", padding: "0", maxHeight: "12em", overflowY: "auto" },
+        ".lup-picker-at": { background: "var(--lup-selection)" },
         ".cm-panels": { background: "var(--lup-float)", color: "var(--lup-fg)" },
         ".cm-panels-bottom": { borderTop: "0" },
         ".lup-placeholder": { border: "1px solid currentColor", padding: "0 0.5ch", marginLeft: "1ch", cursor: "pointer" },

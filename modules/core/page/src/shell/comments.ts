@@ -19,6 +19,7 @@ import { getCM, Vim } from "@replit/codemirror-vim";
 import type { Comment, Delivered, Draft, Party, Quote } from "../generated/read";
 import { comment as remark, every, nodeAt, offsetOf, ownLines, viewKey, type Node } from "../document/tree";
 import { fromCore, redrawn } from "./annotations";
+import { open, parties } from "./picker";
 import type { Shell } from "./shell";
 
 /** A comment as the page holds it: what it says and is on, where it's laid out, and whether the draft holds it as it stands. */
@@ -43,10 +44,11 @@ export interface Said {
     readonly reason: string | null;
 }
 
-/** Say `party` as a comment's line says whom it reaches: what identifies it, as its fields give it. */
+/** Say `party` as a comment's line says whom it reaches: what identifies it, as its fields give it, but which of the core's parties it is. */
 function named(party: Party): string {
-    return Object.values(party)
-        .map((value) => String(value))
+    return Object.entries(party)
+        .filter(([key]) => key !== "party")
+        .map(([, value]) => String(value))
         .join(" ");
 }
 
@@ -200,6 +202,88 @@ export class Comments {
         if (writing !== null) {
             this.#ended(writing, opened);
         }
+    }
+
+    /**
+     * Return the part of the draft at the cursor: the comment it's in, or the one a line of the review at the top of the
+     * document stands for, that line's block having the comment's id; none where it's on neither.
+     */
+    partAt(): Comment | null {
+        const head = this.#shell.view.state.selection.main.head;
+        const around = this.#around(head, head);
+        if (around !== null) {
+            return this.#heldBy(around.key)?.comment ?? null;
+        }
+        let node: Node | null = nodeAt(this.#shell.document.root, head);
+        const id = node.block?.block === "line" ? node.block.id : null;
+        while (node !== null && !(node.block?.block === "fold" && node.block.kind === "draft")) {
+            node = node.parent;
+        }
+        return node === null || id === null ? null : (this.#held.get(id)?.comment ?? null);
+    }
+
+    /** Hold back the part of the draft at the cursor from sends, or let it go, as Space x and Space d do there. */
+    hold(held: boolean): void {
+        const part = this.partAt();
+        if (part === null) {
+            this.#shell.say("no part of the draft here: a comment, or a line of the review");
+            return;
+        }
+        this.#rewritten(part.id, { ...part, held });
+        this.#shell.say(held ? "held back from sends: Space d lets it go" : "let go: it goes at the next send");
+    }
+
+    /**
+     * Choose whom the comment at the cursor reaches, from the parties the document shows, as Space s does; outside a
+     * comment, choose first, then write a new one under the cursor's line, reaching whom was chosen.
+     */
+    address(): void {
+        const part = this.partAt();
+        const choices = parties(this.#shell);
+        if (choices.length === 0) {
+            this.#shell.say("the document shows no party to send a comment to");
+            return;
+        }
+        open(this.#shell.view, part === null ? "Write a comment to…" : "Send this comment to…", choices, (choice) => {
+            if (part !== null) {
+                this.#rewritten(part.id, { ...part, to: choice.party });
+                this.#shell.say(`to ${choice.name}`);
+                return;
+            }
+            const head = this.#shell.view.state.selection.main.head;
+            const block = this.#blockAt(head);
+            if (block === null) {
+                this.#shell.say("nothing here takes a comment");
+                return;
+            }
+            const index = Math.max(
+                ownLines(block).findIndex((line) => head >= line.from && head <= line.to),
+                0,
+            );
+            const written = this.#write(block, { first: index, last: index, start: 0, end: null, whole: false }, head);
+            const held = written === null ? undefined : this.#heldBy(written.key);
+            if (written === null || held === undefined) {
+                return;
+            }
+            held.comment = { ...held.comment, to: choice.party };
+            this.#shell.view.dispatch({ selection: EditorSelection.cursor(offsetOf(written)), annotations: fromCore.of(true) });
+            const cm = getCM(this.#shell.view);
+            if (cm !== null) {
+                Vim.handleKey(cm, "i", "mapping");
+            }
+        });
+    }
+
+    /** Write `comment` in place of the part of id `id`, at once, and lay out what its first line says again. */
+    #rewritten(id: string, comment: Comment): void {
+        const held = this.#held.get(id);
+        if (held === undefined) {
+            return;
+        }
+        held.comment = comment;
+        held.written = false;
+        this.flush();
+        this.#shell.view.dispatch({ effects: redrawn.of(null), annotations: fromCore.of(true) });
     }
 
     /** Comment on the innermost block at the cursor whole, and write it, as Space `c` does. */

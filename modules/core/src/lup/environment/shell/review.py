@@ -31,10 +31,14 @@ def said(comment: Comment) -> list[Span]:
     """Return a comment as one line of the review: its first line, and the first line of what it's on."""
     words = next((line for line in comment.words.splitlines() if line.strip()), "")
     on = next((line for line in comment.on.lines if line.strip()), "")
-    return [
-        Span(text=words, tone="strong"),
-        Span(text=f"  on “{on}”" if on else "  on the block whole", tone="muted"),
-    ]
+    where = (
+        f"  on “{on}”"
+        if on
+        else "  on the block whole"
+        if not comment.on.lines
+        else "  on a blank line"
+    )
+    return [Span(text=words, tone="strong"), Span(text=where, tone="muted")]
 
 
 def reviewed(draft: Draft, going: list[Going]) -> Fold | None:

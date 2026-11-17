@@ -353,6 +353,24 @@ export function mountedOf(node: Node): Node | null {
     return node.children.find((child) => child.kind === "section") ?? null;
 }
 
+/**
+ * Return the view the fold `node` reads as it opens, its module named: where the fold names none, the module of the
+ * nearest section above it that does, whose view laid the fold out; none where it reads no view.
+ */
+export function opening(node: Node): Viewing | null {
+    const content = node.block?.block === "fold" ? node.block.content : null;
+    if (content === null || Array.isArray(content)) {
+        return null;
+    }
+    let module = content.module;
+    let at: Node | null = node;
+    while (module === null && at !== null) {
+        module = at.viewing?.module ?? null;
+        at = at.parent;
+    }
+    return { ...content, module };
+}
+
 /** Return the fold kind a node folds as, where it folds: a fold's own, a file's `file`; none for a node that doesn't. */
 export function foldKind(node: Node): string | null {
     switch (node.block?.block) {
@@ -667,9 +685,9 @@ export class Document {
         const comments = (old?.children ?? [])
             .filter((child) => child.kind === "comment")
             .map((each) => comment(each.key, each.head.join("\n"), moved(old?.head ?? [], node.head, each.after ?? 0)));
-        const content = node.block?.block === "fold" ? node.block.content : null;
+        const reads = opening(node);
         const mounted = old === undefined ? null : mountedOf(old);
-        if (content !== null && !Array.isArray(content) && mounted?.viewing !== undefined && mounted.viewing !== null && viewKey(mounted.viewing) === viewKey(content)) {
+        if (reads !== null && mounted?.viewing !== undefined && mounted.viewing !== null && viewKey(mounted.viewing) === viewKey(reads)) {
             node.children = [mounted];
         } else {
             for (const child of node.children) {
