@@ -219,6 +219,10 @@ class Shown(Model):
     reaches: SerializeAsAny[Party] | None = None
     """The party a comment on it reaches; none for whoever the block it's in
     says, and none at all where nothing does, so it takes no comment."""
+    sighted: Offer | None = None
+    """What being seen does: an action the page runs once the block has been on
+    the operator's screen long enough, as marking an item read; none where
+    being seen does nothing."""
 
 
 class Line(Shown):
