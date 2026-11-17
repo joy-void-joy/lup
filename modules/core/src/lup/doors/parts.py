@@ -16,6 +16,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import ClassVar, Unpack, override
 
+from packaging.specifiers import SpecifierSet
+from packaging.version import InvalidVersion, Version
 from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
 
 from lup.declaration.errors import ProjectError
@@ -100,6 +102,10 @@ class Runs(ABC):
         Raise `UnrunError` where it can't be run at all.
         """
 
+    @abstractmethod
+    async def found(self, program: Program) -> bool:
+        """Say whether `program` is there where the part runs, to run by its name."""
+
 
 class UnrunError(RefusedError):
     """A program a part declares can't be run: it isn't there, isn't at a version the part takes, or nothing runs programs where the part does; the call needing it is refused, saying why."""
@@ -147,6 +153,52 @@ class Program(Model, arbitrary_types_allowed=True):
             raise UnrunError(message, about=[self.name])
         sent = given.encode() if isinstance(given, str) else given
         return await self.runs.ran(self, list(arguments), sent, dict(env or {}))
+
+    def missing(self) -> str:
+        """Say it isn't there, what lup runs it for and how to install it, as a refusal or a check says it."""
+        return (
+            f"`{self.name}` isn't there"
+            + (f": lup runs it as it {self.why}" if self.why else "")
+            + (f"; install it from {self.install}" if self.install else "")
+        )
+
+    async def checked(self) -> Checked:
+        """Check it where its part runs: that it's there, and, where `version` says which it takes, that the version it reports is one.
+
+        Nothing raises: a program that isn't there, or reports a version that
+        isn't one or isn't taken, is said so.
+        """
+        if self.runs is None or not await self.runs.found(self):
+            return Checked(name=self.name, there=False, why=self.missing())
+        if self.version is None:
+            return Checked(name=self.name, there=True, fits=True)
+        try:
+            probed = await self.ran(*self.probe)
+        except UnrunError as unrun:
+            return Checked(name=self.name, there=True, why=str(unrun))
+        said = probed.text().strip()
+        try:
+            fits = Version(said) in SpecifierSet(self.version)
+        except InvalidVersion:
+            why = f"`{self.name}` says its version is `{said}`, which isn't one"
+            return Checked(name=self.name, there=True, version=said, why=why)
+        why = (
+            ""
+            if fits
+            else f"`{self.name}` is {said}, where lup takes {self.version}"
+            + (f"; install one from {self.install}" if self.install else "")
+        )
+        return Checked(name=self.name, there=True, version=said, fits=fits, why=why)
+
+
+class Checked(Model):
+    """A program a part declares, as checking it found it: whether it's there, the version it reports, and whether that's one the part takes, with why not."""
+
+    name: str
+    there: bool
+    version: str | None = None
+    fits: bool = False
+    why: str = ""
 
 
 class Given(Model, arbitrary_types_allowed=True):

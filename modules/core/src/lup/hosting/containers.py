@@ -206,7 +206,8 @@ class Containers(Part, machine=True, shared=True):
     podman: Program = Program(
         name="podman",
         version=">=5",
-        probe=["--version", "--format={{.Client.Version}}"],
+        probe=["version", "--format={{.Client.Version}}"],
+        optional=True,
         why="starts every container lup runs",
         install="https://podman.io/docs/installation",
     )

@@ -33,6 +33,7 @@ from lup.doors.parties import Operator
 from lup.environment.declaration import Resolved, read, resolve
 from lup.environment.doors import Running
 from lup.environment.layout import MachineLayout, RepositoryLayout
+from lup.environment.running.calling import Calling
 from lup.environment.running.container import REPLIES, answered
 from lup.environment.running.planning import plan_of
 from lup.environment.settings import LupSettings
@@ -154,8 +155,8 @@ class InProcess(MutableModel, Answerer, arbitrary_types_allowed=True):
             self.running = None
 
 
-def ran(answerer: InProcess, name: str, words: list[str]) -> NoReturn:
-    """Run the command line called `name` on `words` over `answerer`, printing what it prints, stop what it started, and end with its status."""
+def ran(answerer: Answerer, name: str, words: list[str]) -> NoReturn:
+    """Run the command line called `name` on `words` over `answerer`, printing what it prints, stop what it started in this process, and end with its status."""
 
     async def running() -> int:
         try:
@@ -179,13 +180,23 @@ def machine() -> MachineLayout:
 
 
 def main() -> None:
-    """Run `lup` on the words it's given, as the operator, over the declaration of the worktree it runs in, with its layers."""
+    """Run `lup` on the words it's given: through lup's program on the operator's machine where `LUP_CALLING` names its socket, which says who calls; else as the operator, over the declaration of the worktree it runs in, with its layers.
+
+    Through the program, nothing of the project's code runs here: the command
+    line lists and parses the plan the program offers.
+    """
+    calling = LupSettings().lup_calling
     try:
         layout = RepositoryLayout.found(Path.cwd())
+        if calling is not None:
+            ran(
+                Calling(socket=calling, repository=layout.main.name),
+                "lup",
+                sys.argv[1:],
+            )
         resolved = resolve(read(layout, machine()).project)
     except (ProgramFailedError, ProjectError) as failure:
         refused("lup", failure)
-    # lup: defer(issue=3, why="where `LUP_CALLING` names the socket of lup's program on the operator's machine, as in a room and the operator's terminal, it answers, naming who calls from the socket, and offers the plan of the repository asked for")
     answerer = InProcess(by=Operator(), resolved=resolved, repository=layout.main.name)
     ran(answerer, "lup", sys.argv[1:])
 

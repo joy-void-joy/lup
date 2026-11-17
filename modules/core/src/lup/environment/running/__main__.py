@@ -14,6 +14,7 @@ from pydantic import TypeAdapter
 from lup.environment.running.container import served
 from lup.environment.running.machine import hosted
 from lup.environment.running.planning import planned
+from lup.environment.running.programs import Local
 from lup.environment.running.settings import Running
 from lup.running.wire import Asked, Host, Planning, Start, read
 
@@ -29,8 +30,7 @@ def main() -> None:
         case Start():
             asyncio.run(served(asked))
         case Host():
-            # lup: defer(issue=3, why="the machine's runner of programs, over `lup.programs` once it lands from module-contract-rest: until then a machine part's program is refused, saying nothing runs it")
-            asyncio.run(hosted(asked, runs=None))
+            asyncio.run(hosted(asked, runs=Local()))
 
 
 main()
