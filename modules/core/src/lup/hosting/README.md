@@ -14,6 +14,10 @@ What's privileged in a machine part is for the machine's own parts alone: its se
 
 These are the second lup's room's walls, as measured with rootless podman 6.1 (`docs/field-notes.md`, *the engine's command lines*).
 
+## Secrets
+
+`Secrets` keeps each project's secrets, a JSON file each under its own data, outside every repository, readable by the operator alone, so a downstream project's user never learns where: lup asks them for a secret the first time a part holding it starts. Only the machine's own parts read one (`held`), handing a part the secrets kept for its project that it holds and naming those that aren't, for the operator to be asked for; another project's secret of the same name is never among them. Only the operator keeps one (`keep`, a command).
+
 ## Promises
 
 `promises.py`, through the harness, the machine's parts started as the machine's own (`by.started(…, machine=True)`), podman stood in for as each promise scripts it (`programs={"podman": Scripted(…)}`): the gate checks what lup asks podman to do, and never runs it.

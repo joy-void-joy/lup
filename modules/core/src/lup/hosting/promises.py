@@ -25,6 +25,12 @@ project = Project(modules=Modules.default().add(Hosting()))
 modules and the machine's parts."""
 
 
+class Kept(Model):
+    """A secret's value, as the operator gives one."""
+
+    value: str = Field(min_length=1, max_length=40)
+
+
 class Asked(Model):
     """A container a promise asks the machine's parts to start, drawn from what varies."""
 
@@ -147,3 +153,48 @@ class HostingPromises(Part):
         started = await by.started(HOME, programs={"podman": podman}, machine=True)
         refused = await started.serve("started", asked.spec(), Machine())
         assert isinstance(refused, Refused)
+
+    @lup.promise
+    async def a_part_is_handed_only_the_secrets_it_holds(self, by: Testing) -> None:
+        """The machine's parts hand a part the secrets kept for its project that it holds, and name those that aren't kept, for the operator to be asked for; another project's secret of the same name is never among them."""
+        kept, other = by.any(Kept), by.any(Kept)
+        started = await by.started(HOME, programs={"podman": PODMAN}, machine=True)
+        operator = lup.Operator()
+        await started.run(
+            "hosting",
+            "keep",
+            {"project": "harmon", "name": "token", "value": kept.value},
+            operator,
+        )
+        await started.run(
+            "hosting",
+            "keep",
+            {"project": "story", "name": "token", "value": other.value},
+            operator,
+        )
+        held = await started.serve(
+            "held", {"project": "harmon", "names": ["token", "key"]}, Machine()
+        )
+        assert isinstance(held, Accepted)
+        values = json.loads(held.answer())
+        assert values["values"] == {"token": kept.value}
+        assert values["missing"] == ["key"]
+
+    @lup.promise
+    async def only_the_machine_reads_a_secret_and_only_the_operator_keeps_one(
+        self, by: Testing
+    ) -> None:
+        """A secret kept is read only by the machine's own parts, and kept only by the operator: an agent or a project's code asking for one, or giving one, is refused."""
+        started = await by.started(HOME, programs={"podman": PODMAN}, machine=True)
+        caller = by.any(Agent) if by.any(bool) else Codebase(repository="harmon")
+        held = await started.serve(
+            "held", {"project": "harmon", "names": ["token"]}, caller
+        )
+        given = await started.run(
+            "hosting",
+            "keep",
+            {"project": "harmon", "name": "token", "value": "x"},
+            caller,
+        )
+        assert isinstance(held, Refused)
+        assert isinstance(given, Refused)
