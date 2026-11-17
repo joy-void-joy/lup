@@ -51,6 +51,7 @@ from lup.store.database import Database
 from lup.store.errors import StoreError
 from lup.store.records import Edge, Node, named
 from lup.types import Model
+lazy from lup.shell.draft import Commenting
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -698,10 +699,8 @@ class Inbox(Model, arbitrary_types_allowed=True):
         self.edge(Answers, question, answer, self.operator())
         return answer
 
-    def commented(
-        self, on: Item, text: str, part: int | None = None, quote: str = ""
-    ) -> Comment:
-        """Comment on `on`, or a part of it, for the operator: told to whoever wrote it, and to each it was for where an agent wrote it to another."""
+    def commented(self, on: Item, said: Commenting, part: int | None = None) -> Comment:
+        """Keep the operator's comment `said` on `on`, or a part of it: told to whoever wrote it, and to each it was for where an agent wrote it to another."""
         operator = self.operator()
         writer = [] if on.by is None or on.by == operator.key else [on.by]
         readers = [each for each in on.to if each != operator.key]
@@ -711,26 +710,33 @@ class Inbox(Model, arbitrary_types_allowed=True):
                 by=self.operator().key,
                 at=self.now(),
                 to=list(dict.fromkeys([*writer, *readers])),
-                text=text,
+                text=said.words,
                 on=on.key,
                 part=part,
-                quote=quote,
+                lines=said.lines,
+                start=said.start,
+                end=said.end,
+                version=said.version,
             )
         )
         self.edge(Answers, on, comment, operator, part=part)
         return comment
 
-    def told_party(self, party: PartyRecord, text: str) -> Comment:
-        """Send the operator's `text` to `party` alone: to an agent, or to a pile, where it opens a concern."""
+    def told_party(self, party: PartyRecord, said: Commenting) -> Comment:
+        """Keep the operator's words `said` to `party` alone: to an agent, or to a pile, where they open a concern."""
         if isinstance(party, PileRecord):
-            self.opened(self.operator(), first_line(text), text, party)
+            self.opened(self.operator(), first_line(said.words), said.words, party)
         return self.database.kept(
             Comment(
                 repository=self.repository,
                 by=self.operator().key,
                 at=self.now(),
                 to=[party.key],
-                text=text,
+                text=said.words,
+                lines=said.lines,
+                start=said.start,
+                end=said.end,
+                version=said.version,
             )
         )
 

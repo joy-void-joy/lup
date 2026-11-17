@@ -9,7 +9,7 @@ from typing import Annotated, Literal
 
 from annotated_types import Ge, Lt
 
-from lup.doors.parties import Party
+from lup.doors.parties import Agent, Party
 from lup.inbox.records import FRICTIONS, Decision, Ruling, Tone
 from lup.types import Model
 
@@ -134,13 +134,26 @@ class Answering(Model):
     text: str = ""
 
 
-class Commenting(Model):
-    """The operator's words on an item, or a part of it."""
+class Pile(Party):
+    """A pile, as a party a comment reaches: it keeps what's sent to it, as a concern."""
+
+    party: Literal["pile"] = "pile"
+    """Which party it is, as a call across containers names it."""
+    repository: str
+    path: str
+
+
+class OnItem(Model):
+    """What an item's block gives the comment it offers: the item, by its number, and the part of it, where the block is one."""
 
     item: Cited
-    text: str
     part: int | None = None
-    quote: str = ""
+
+
+class Reached(Model):
+    """The party a block's comment reaches, where the block offers no comment of its own: an agent, or a pile, which keeps it."""
+
+    party: Agent | Pile
 
 
 class Addressing(Model):
@@ -287,12 +300,3 @@ class Showing(Model):
     """What's been on the operator's screen, by their numbers: each isn't new to them after."""
 
     items: list[Cited]
-
-
-class Pile(Party):
-    """A pile, as a party a comment reaches: it keeps what's sent to it, as a concern."""
-
-    party: Literal["pile"] = "pile"
-    """Which party it is, as a call across containers names it."""
-    repository: str
-    path: str
