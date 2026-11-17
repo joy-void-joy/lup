@@ -2,7 +2,8 @@
 
 `import lup` gives the bases every model starts from, the root of lup's errors,
 the declaration's grammar (`Module`, `Modules`, `Project`, and the selections and
-layers a module's parts are written in), and the doors a module's methods are
+layers a module's parts are written in, and the profiles a repository's sessions
+run on), and the doors a module's methods are
 reached through (`lup.tool`, `lup.action`, `lup.command`, `lup.promise`), with
 the parties a method's `by` names and the classes a module groups them in
 (`ModuleServing`, listed in its `Serving`). The core's environment side
@@ -15,6 +16,15 @@ import `lup` itself.
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import Layer, Named, Selection
 from lup.declaration.module import Module, Modules
+from lup.declaration.profiles import (
+    Chosen,
+    Lend,
+    Lending,
+    Profile,
+    Profiles,
+    RuntimeDefaults,
+    chosen,
+)
 from lup.declaration.project import Project
 from lup.doors.action import action
 from lup.doors.command import command
@@ -29,10 +39,13 @@ lazy from lup.core import Core
 
 __all__ = [
     "Agent",
+    "Chosen",
     "Core",
     "DoorError",
     "JsonObject",
     "Layer",
+    "Lend",
+    "Lending",
     "LupError",
     "Model",
     "Module",
@@ -42,13 +55,17 @@ __all__ = [
     "Named",
     "Operator",
     "Party",
+    "Profile",
+    "Profiles",
     "Project",
     "ProjectError",
     "RefusedError",
+    "RuntimeDefaults",
     "Selection",
     "Serving",
     "Settings",
     "action",
+    "chosen",
     "command",
     "promise",
     "tool",
