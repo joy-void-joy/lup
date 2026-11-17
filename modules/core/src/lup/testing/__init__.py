@@ -9,6 +9,7 @@ promise door, `lup.promise`. Checking promises is the environment's
 (`lup.environment.testing`). Its reasons are in `README.md` here.
 """
 
+from lup.command_line.answering import Typed
 from lup.doors.door import Accepted, Refused, Rejection
 from lup.doors.tool import ToolSpec
 from lup.testing.harness import (
@@ -55,6 +56,7 @@ __all__ = [
     "Testing",
     "ToolCall",
     "ToolSpec",
+    "Typed",
     "Viewed",
     "raises",
 ]

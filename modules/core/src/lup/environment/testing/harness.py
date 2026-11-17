@@ -382,10 +382,12 @@ class Crosser(Model, Crossing, arbitrary_types_allowed=True):
     """A started lup's parts, a message crossing to them answered as their container answers it."""
 
     running: Running
+    looks: Looks
+    """The kinds the parts' modules declare, which their views may name."""
 
     async def crossed(self, text: bytes) -> bytes:
         """Answer one message as the container running these parts would."""
-        return await answered(self.running, text)
+        return await answered(self.running, self.looks, text)
 
 
 class Teller(Model, Telling, arbitrary_types_allowed=True):
@@ -436,7 +438,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
             specs=reached.tools(),
             plan=plan_of(resolve(project), []),
             doors=reached,
-            crossing=Crosser(running=reached.running),
+            crossing=Crosser(running=reached.running, looks=reached.looks),
             heard=heard,
             telling=Teller(running=reached.running),
         )

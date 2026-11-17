@@ -1,5 +1,6 @@
 """`Core`: the module every project holds, which packages what every project has, and lists its submodules' promises."""
 
+from lup.command_line.promises import CommandLinePromises
 from lup.declaration.module import Module
 from lup.declaration.profiles import DEFAULT, DirectoryName, Profile, Profiles
 from lup.declaration.promises import DeclarationPromises, ProfilesPromises
@@ -14,7 +15,7 @@ from lup.told.promises import GuidancePromises
 
 
 class Core(Module):
-    """What every project has: loading the declaration, the doors its modules are reached through, checking their promises, running programs, the shell's kinds, and rendering guidance; the core's other submodules as they're built.
+    """What every project has: loading the declaration, the doors its modules are reached through, checking their promises, running programs, the shell's kinds, rendering guidance, and the command line; the core's other submodules as they're built.
 
     A project changes it with `.edit` as it would any module, or puts another in
     its place with `.replace`, but can't drop it: resolving a selection without a
@@ -34,6 +35,7 @@ class Core(Module):
         ShellPromises,
         ProgramsPromises,
         GuidancePromises,
+        CommandLinePromises,
     )
     tones: Tones = Tones.of(*SHELL_TONES)
     """The shell's tones: plain, muted, strong, and the operator's own words."""

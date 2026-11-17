@@ -15,10 +15,11 @@ from typing import TYPE_CHECKING, override
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from lup.declaration.errors import ProjectError
-from lup.doors.door import Accepted, Answer, Method, Refused, RefusedError, Rejection
+from lup.doors.door import Answer, Method, Refused, RefusedError, Rejection
 from lup.doors.parties import Codebase
 from lup.doors.service import Carrier
 from lup.environment.declaration import load, resolve
+from lup.environment.shell import viewed
 from lup.errors import LupError
 from lup.running.wire import (
     Answered,
@@ -30,35 +31,28 @@ from lup.running.wire import (
     ServiceCalled,
     Start,
     ToolCalled,
+    ViewCalled,
     read,
+    replied,
 )
+from lup.shell.blocks import BlockError
 from lup.types import Model
 
 if TYPE_CHECKING:
+    from lup.environment.declaration import Resolved
     from lup.environment.doors import Running
+    from lup.environment.shell import Looks
 
 CALLS = TypeAdapter[Call](Call)
 REPLIES = TypeAdapter[Reply](Reply)
 
 
-def replied(answered: Accepted | Refused) -> Reply:
-    """Return a call's answer as it crosses: what the method answered, as JSON, or the refusal."""
-    match answered:
-        case Accepted(output=BaseModel() as model):
-            return Answered(output=model.model_dump(mode="json"))
-        case Accepted(output=str() as words):
-            return Answered(output=words)
-        case Accepted():
-            return Answered()
-        case Refused(rejection=rejection):
-            return Declined(rejection=rejection)
+async def answered(running: Running, looks: Looks, text: bytes) -> bytes:
+    """Answer one message that crossed to a container running `running`, whose views may name what `looks` holds: the call it carries, through its door, or why it's refused.
 
-
-async def answered(running: Running, text: bytes) -> bytes:
-    """Answer one message that crossed to a container running `running`: the call it carries, through its door, or why it's refused.
-
-    A message of another version of its shape, or none, is refused in words;
-    nothing sent makes this raise.
+    A message of another version of its shape, or none, is refused in words, as
+    is a view whose blocks name a kind nobody declares, the view's fault said
+    to whoever read it: nothing sent makes this raise.
     """
     try:
         call = read(text, CALLS)
@@ -69,13 +63,27 @@ async def answered(running: Running, text: bytes) -> bytes:
         reason = f"a message that crossed isn't a call through a door: {wrong}"
         reply = Declined(rejection=Rejection(submitted=None, reason=reason))
         return REPLIES.dump_json(reply)
+    by = call.by
+    if by is None:
+        reason = (
+            "a call reached this container saying nobody calls it: lup's program "
+            "on the operator's machine says who, from where the call came"
+        )
+        reply = Declined(rejection=Rejection(submitted=call.given, reason=reason))
+        return REPLIES.dump_json(reply)
     match call:
-        case ToolCalled(tool=tool, given=given, by=by):
+        case ToolCalled(tool=tool, given=given):
             outcome = await running.call(tool, given, by)
-        case ServiceCalled(service=service, given=given, by=by):
+        case ServiceCalled(service=service, given=given):
             outcome = await running.serve(service, given, by)
-        case CommandCalled(module=module, command=command, given=given, by=by):
+        case CommandCalled(module=module, command=command, given=given):
             outcome = await running.run(module, command, given, by)
+        case ViewCalled(module=module, view=view, given=given):
+            try:
+                outcome = await viewed(running, looks, module, view, given, by)
+            except BlockError as drawn:
+                reason = f"the view `{view}` of `{module}` can't be drawn: {drawn}"
+                outcome = Refused(rejection=Rejection(submitted=given, reason=reason))
     return REPLIES.dump_json(replied(outcome))
 
 
@@ -134,13 +142,12 @@ def secrets_in(directory: Path | None) -> dict[str, str]:
     }
 
 
-async def started(start: Start) -> Running:
-    """Load the project's declaration from its tree, and start the parts `start` names, a call to a service of another part carried out through the program.
+async def started(start: Start, resolved: Resolved) -> Running:
+    """Start the parts `start` names of the project's declaration, `resolved`, a call to a service of another part carried out through the program.
 
-    Raise `ProjectError` where the declaration doesn't load or resolve, or a
-    part named isn't the project's, or holds a secret not given.
+    Raise `ProjectError` where a part named isn't the project's, or holds a
+    secret not given.
     """
-    resolved = resolve(load(start.root / start.declaration))
     named = [each.named() for each in resolved.doors.served]
     wanted = (
         start.parts
@@ -167,15 +174,20 @@ async def started(start: Start) -> Running:
 
 
 async def served(start: Start) -> None:
-    """Start the parts `start` names, and answer each call that comes in on its socket until the container is stopped, the parts' `Stopping` run before it ends."""
-    running = await started(start)
+    """Load the project's declaration from its tree, start the parts `start` names, and answer each call that comes in on its socket until the container is stopped, the parts' `Stopping` run before it ends.
+
+    Raise `ProjectError` where the declaration doesn't load or resolve, or a
+    part named isn't the project's, or holds a secret not given.
+    """
+    resolved = resolve(load(start.root / start.declaration))
+    running = await started(start, resolved)
 
     async def connected(
         reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         try:
             text = await reader.readline()
-            writer.write(await answered(running, text) + b"\n")
+            writer.write(await answered(running, resolved.looks, text) + b"\n")
             await writer.drain()
         finally:
             writer.close()

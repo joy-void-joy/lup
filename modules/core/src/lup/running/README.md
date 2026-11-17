@@ -6,7 +6,7 @@ Its library side (`lup.running`) is what crosses: the plan (`plan.py`) and the m
 
 ## The plan
 
-A declaration is code, so it's loaded where running a branch's code is harmless, a container, which prints its plan (`Planning`). The plan is each part of each module, what it holds (`Holds`), and each method a party calls behind its door with who may call it (`Doorway`), the tools a session is told of, and the files loading the declaration imported, relative to the project's root.
+A declaration is code, so it's loaded where running a branch's code is harmless, a container, which prints its plan (`Planning`). The plan is each module with its one sentence, each part of each module, what it holds (`Holds`), and each method a party calls behind its door with who may call it, its docstring and the JSON Schema of the model it takes (`Doorway`), the tools a session is told of, and the files loading the declaration imported, relative to the project's root. The command line reads what it offers a party from the plan alone (`lup/command_line/README.md`), so a terminal on the operator's machine never imports a branch's code to say what it may run.
 
 What a part holds says where it runs (`PartPlan.apart`):
 - **holding nothing,** it runs with every other such part in the project's own container, from the project's running commit;
@@ -20,7 +20,7 @@ Started (`Start`), the program loads the declaration from the project's tree as 
 
 ## What crosses
 
-Each message is one JSON object, a line, carrying the version of its shape (`format`), read first (`read`): a reader meeting another version refuses in words, naming both and how to update, rather than failing on a field it doesn't know, as the second lup's host did when a newer copy wrote an approval it couldn't read. A call is a tool's, a service's or a command's (`Call`), its `by` one of the core's parties, tagged by `party`; an answer is what the method answered, as JSON (`Answered`), or the refusal (`Declined`). Nothing that crosses makes a container fail: what isn't a call, or is of another version, is refused.
+Each message is one JSON object, a line, carrying the version of its shape (`format`), read first (`read`): a reader meeting another version refuses in words, naming both and how to update, rather than failing on a field it doesn't know, as the second lup's host did when a newer copy wrote an approval it couldn't read. A call is a tool's, a service's, a command's or a view's (`Call`), its `by` one of the core's parties, tagged by `party`; an answer is what the method answered, as JSON (`Answered`), or the refusal (`Declined`). Nothing that crosses makes a container fail: what isn't a call, or is of another version, is refused, as is a view whose blocks name a kind nobody declares, saying it's the view's fault.
 
 ## Promises
 

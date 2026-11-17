@@ -14,3 +14,4 @@ Each module's doc is in its directory:
 - `modules/core/src/lup/told/README.md`: guidance, each module's sections of what a session is told at its start, the door they're written behind, rendering them, and the room they may take.
 - `modules/core/src/lup/shell/README.md`: the shell, the view door, the blocks a view answers and the kinds a module declares for them.
 - `modules/core/src/lup/hosting/README.md`: what runs on the operator's machine, and who may call it.
+- `modules/core/src/lup/command_line/README.md`: the command line, `lup <module> <name>`, the answerer its calls go through, and a project's own command.

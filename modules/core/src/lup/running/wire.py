@@ -4,15 +4,16 @@ Each message is one JSON object, carrying the version of its shape (`format`),
 read first (`read`): a reader meeting another version refuses in words, naming
 both and how to update, never with a validation error about a field it doesn't
 know. Who calls (`by`) is one of the core's parties, which only the program
-names, from the socket a call came in on.
+names, from the socket a call came in on: a call leaves whoever makes it with
+none, and a container refuses one that reaches it without.
 """
 
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, JsonValue, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, JsonValue, TypeAdapter, ValidationError
 
-from lup.doors.door import Rejection
+from lup.doors.door import Accepted, Refused, Rejection
 from lup.doors.parties import Agent, Codebase, Machine, Operator
 from lup.errors import LupError
 from lup.types import Model
@@ -41,7 +42,9 @@ class ToolCalled(Model):
     kind: Literal["tool"] = "tool"
     tool: str
     given: JsonValue
-    by: Caller
+    by: Caller | None = None
+    """Who calls, which the program on the operator's machine names; none as
+    the call leaves whoever makes it."""
 
 
 class ServiceCalled(Model):
@@ -51,7 +54,9 @@ class ServiceCalled(Model):
     kind: Literal["service"] = "service"
     service: str
     given: JsonValue
-    by: Caller
+    by: Caller | None = None
+    """Who calls, which the program on the operator's machine names; none as
+    the call leaves whoever makes it."""
 
 
 class CommandCalled(Model):
@@ -62,11 +67,26 @@ class CommandCalled(Model):
     module: str
     command: str
     given: JsonValue
-    by: Caller
+    by: Caller | None = None
+    """Who calls, which the program on the operator's machine names; none as
+    the call leaves whoever makes it."""
+
+
+class ViewCalled(Model):
+    """A view read, by its module's name and its own."""
+
+    format: int = 1
+    kind: Literal["view"] = "view"
+    module: str
+    view: str
+    given: JsonValue
+    by: Caller | None = None
+    """Who calls, which the program on the operator's machine names; none as
+    the call leaves whoever makes it."""
 
 
 type Call = Annotated[
-    ToolCalled | ServiceCalled | CommandCalled,
+    ToolCalled | ServiceCalled | CommandCalled | ViewCalled,
     Field(discriminator="kind"),
 ]
 """A call through any door, as it crosses: the one of each kind it is."""
@@ -90,6 +110,19 @@ class Declined(Model):
 
 type Reply = Annotated[Answered | Declined, Field(discriminator="kind")]
 """A call's answer, as it crosses: answered or refused."""
+
+
+def replied(answered: Accepted | Refused) -> Reply:
+    """Return a call's answer as it crosses: what the method answered, as JSON, or the refusal."""
+    match answered:
+        case Accepted(output=BaseModel() as model):
+            return Answered(output=model.model_dump(mode="json"))
+        case Accepted(output=str() as words):
+            return Answered(output=words)
+        case Accepted():
+            return Answered()
+        case Refused(rejection=rejection):
+            return Declined(rejection=rejection)
 
 
 class Planning(Model):
