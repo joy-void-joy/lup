@@ -104,6 +104,9 @@ class Keeping(MutableModel, arbitrary_types_allowed=True):
     """Where the draft is kept across restarts of the server; none where it's
     kept in memory alone."""
     pages: list[Session] = []
+    sending: asyncio.Lock = Field(default_factory=asyncio.Lock)
+    """Held while the draft is sent, so two pages sending at once send each
+    part once."""
 
     @classmethod
     def at(cls, path: Path) -> Keeping:
@@ -187,28 +190,33 @@ class Dashboard(Model, arbitrary_types_allowed=True):
                 return Unanswered(watch=watch, reason=answered.rejection.reason)
 
     async def sent(self) -> Delivered:
-        """Send the draft: each comment and mark on its own, those that went taken out of it, each that can't kept in it with why, every page told the draft as it stands."""
-        draft = self.kept.draft
-        commented = [(each, await self.commented(each)) for each in draft.comments]
-        acted = [(each, await self.acted(each)) for each in draft.marks]
-        kept = Draft(
-            comments=[
-                each.model_copy(update={"reason": reason})
-                for each, reason in commented
-                if reason is not None
-            ],
-            marks=[
-                each.model_copy(update={"reason": reason})
-                for each, reason in acted
-                if reason is not None
-            ],
-        )
-        await self.kept.changed(kept)
-        outcomes = [(each.id, reason) for each, reason in [*commented, *acted]]
-        return Delivered(
-            went=[part for part, reason in outcomes if reason is None],
-            stayed=[part for part, reason in outcomes if reason is not None],
-        )
+        """Send the draft, one send at a time whichever pages ask: each comment and mark on its own, a comment that says nothing dropped rather than sent.
+
+        Each part that went leaves the draft and each that can't stays in it
+        with why, in the draft as it stands once the send ends, so what's
+        written or erased while it runs is kept as it is; every page is told
+        the draft.
+        """
+        async with self.kept.sending:
+            draft = self.kept.draft
+            outcomes: dict[str, str | None] = {
+                **{
+                    comment.id: (
+                        await self.commented(comment) if comment.words.strip() else None
+                    )
+                    for comment in draft.comments
+                },
+                **{mark.id: await self.acted(mark) for mark in draft.marks},
+            }
+            await self.kept.changed(self.kept.draft.settled(draft, outcomes))
+            said = [
+                *(each.id for each in draft.comments if each.words.strip()),
+                *(each.id for each in draft.marks),
+            ]
+            return Delivered(
+                went=[part for part in said if outcomes[part] is None],
+                stayed=[part for part in said if outcomes[part] is not None],
+            )
 
     async def block(self, quote: Quote) -> Block | str:
         """Return the block `quote` is on, as its view answers at the send; why not, where it can't be read."""
@@ -233,7 +241,7 @@ class Dashboard(Model, arbitrary_types_allowed=True):
             return "what it's on takes no comment"
         quote = comment.on
         commenting = Commenting(
-            words=comment.words,
+            words=comment.words.strip(),
             lines=quote.lines,
             start=quote.start,
             end=quote.end,

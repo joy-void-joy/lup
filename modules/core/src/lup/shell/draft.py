@@ -9,6 +9,8 @@ so one never stops the rest (`DESIGN.md`, *The dashboard*: "Sending always
 works"; `README.md` here, *The draft*).
 """
 
+lazy from collections.abc import Iterator, Mapping
+
 from pydantic import BaseModel
 
 from lup.shell.blocks import Offer, Viewing
@@ -80,6 +82,25 @@ class Draft(Model):
         else:
             marks = [*self.marks, mark]
         return self.model_copy(update={"marks": marks})
+
+    def settled(self, sent: Draft, outcomes: Mapping[str, str | None]) -> Draft:
+        """Return this draft once `sent` was sent, each part's outcome by its id: one that went taken out, one that stayed given why (`outcomes`), where it's as it was sent; a part written again or erased while it was sent left as it is."""
+
+        def kept[P: (Comment, Marked)](parts: list[P], was: list[P]) -> Iterator[P]:
+            """Yield the parts of `parts`, those of `was` settled."""
+            for each in parts:
+                before = next((part for part in was if part.id == each.id), None)
+                if before is None or before != each or each.id not in outcomes:
+                    yield each
+                    continue
+                reason = outcomes[each.id]
+                if reason is not None:
+                    yield each.model_copy(update={"reason": reason})
+
+        return Draft(
+            comments=list(kept(self.comments, sent.comments)),
+            marks=list(kept(self.marks, sent.marks)),
+        )
 
     def erased(self, part: str) -> Draft:
         """Return the draft without the comment or mark whose id is `part`."""
