@@ -137,7 +137,7 @@ class Taken(Model, arbitrary_types_allowed=True):
     """The method's name: a tool's, an action's or a command's, which it's
     called by."""
     qualified: str
-    """Its name within its class, as a refusal names it: `EchoServing.shout`."""
+    """Its name within its class, as a refusal names it: `EchoPart.shout`."""
     description: str
     """Its docstring, which describes it: what an agent reads of a tool."""
     model: inspect.Parameter | None

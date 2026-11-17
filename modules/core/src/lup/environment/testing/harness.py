@@ -8,7 +8,7 @@ it must be given and no `by`, since a module's state is the same whoever asks
 
 import asyncio
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar, copy_context
 from pathlib import Path
@@ -21,19 +21,26 @@ from lup.declaration.module import Module
 from lup.declaration.project import Project
 from lup.doors.door import Accepted, DoorError, Method, Refused
 from lup.doors.parties import Party
-from lup.doors.serving import Serving
+from lup.doors.parts import Finished, Parts, Program, ProgramError, Runs
 from lup.doors.tool import ToolDoor, ToolSpec
 from lup.environment.declaration import load, resolve
-from lup.environment.doors import Doors, Entry, Serves
+from lup.environment.doors import Doors, Entry, Running, Serves
+from lup.environment.running.container import answered
+from lup.environment.running.planning import plan_of
 from lup.environment.shell import Looks, viewed
 from lup.testing.harness import (
     Acted,
     Broken,
     BrokenLawError,
     Call,
+    Crossing,
+    Heard,
     Kept,
+    ProgramRun,
     Ran,
     Reaching,
+    Scripted,
+    Served,
     Started,
     Step,
     Testing,
@@ -54,14 +61,32 @@ class Run(MutableModel, arbitrary_types_allowed=True):
     """How the run checks another module's promises, where a promise asks
     (`Started.checked`): the gate's own checking, which this module can't
     import."""
+    started: list[Running] = []
+    """What the run started, stopped once the promise ends."""
+    kept: list[tempfile.TemporaryDirectory[str]] = []
+    """Where what the run started keeps its data, removed once it's stopped."""
+
+    async def stopped(self) -> None:
+        """Stop what the run started, the last first, and remove where it kept its data."""
+        for running in reversed(self.started):
+            await running.stopped()
+        self.started = []
+        for each in self.kept:
+            each.cleanup()
+        self.kept = []
 
 
 class Law(Model, arbitrary_types_allowed=True):
-    """A law a module holds, with the door its state is read through."""
+    """A law a module holds, with the door its state is read through, on lup as it runs."""
 
-    serves: Serves
-    method: Method
+    entry: Entry
     state: Entry
+    running: Running
+
+    @property
+    def method(self) -> Method:
+        """The law's method."""
+        return self.entry.method
 
     def said(self) -> str:
         """Name the law, as a broken one is named: `CounterPromises.never_goes_back`."""
@@ -74,7 +99,9 @@ class Law(Model, arbitrary_types_allowed=True):
         answering.
         """
         state = self.state.method
-        reading = state.called(self.state.serves.made(), state.validated({}), Reader())
+        reading = state.called(
+            self.running.part(self.state), state.validated({}), Reader()
+        )
         try:
             reading.send(None)
         except StopIteration as read:
@@ -93,7 +120,7 @@ class Law(Model, arbitrary_types_allowed=True):
 
     def holds(self, step: Step[BaseModel]) -> bool:
         """Say whether the law holds over `step`."""
-        verdict = self.method.function(self.serves.made(), step)
+        verdict = self.method.function(self.running.part(self.entry), step)
         if not isinstance(verdict, bool):
             message = f"the law `{self.said()}` answers no verdict"
             raise DoorError(message)
@@ -161,36 +188,62 @@ class Reader(Party):
     """The harness reading a module's state, through a door that takes no `by`, so no method sees it."""
 
 
-def laws(doors: Doors) -> list[Law]:
-    """Return every law the modules `doors` serve hold, each with the door its state is read through.
+class Lawful(Model, arbitrary_types_allowed=True):
+    """A law a module holds, with the door of its module its state is read through."""
+
+    law: Entry
+    state: Entry
+
+
+def laws(running: Running) -> list[Law]:
+    """Return every law the modules `running` serves hold, each with the door its state is read through, on lup as it runs.
+
+    Raise `ProjectError` where a module holding a law has no door that reads
+    its state (`readers`).
+    """
+    return [
+        Law(entry=each.law, state=each.state, running=running)
+        for each in readers(running.doors)
+    ]
+
+
+def readers(doors: Doors) -> list[Lawful]:
+    """Return every law the modules `doors` serve hold, each with the door of its module its state is read through.
 
     Raise `ProjectError` where a module holding a law has no door that reads,
     answering the state the law's step names, taking nothing it must be given
     and no `by`.
     """
-    return [law for entry in doors.entries() if (law := law_of(entry, doors))]
+    return [
+        Lawful(law=entry, state=state)
+        for entry in doors.entries()
+        if (state := reader_of(entry, doors)) is not None
+    ]
 
 
-def law_of(entry: Entry, doors: Doors) -> Law | None:
-    """Return the law behind `entry`, with the door of its module its state is read through; none where it's no law."""
+def reader_of(entry: Entry, doors: Doors) -> Entry | None:
+    """Return the door the law behind `entry` reads its module's state through; none where it's no law.
+
+    Raise `ProjectError` where its module has none.
+    """
     door = entry.method.door
     state = door.law(entry.method.taken) if isinstance(door, PromiseDoor) else None
     if state is None:
         return None
     module = entry.serves.module.name
-    readers = [
+    reading = [
         each
         for each in doors.through(ToolDoor)
         if each.serves.module.name == module and reads(each, state)
     ]
-    if not readers:
+    if not reading:
         message = (
             f"the law `{entry.method.taken.qualified}` reads `{state.__name__}`, "
             f"which no door of `{module}` that only reads answers: a tool marked "
             "`reads=True`, taking nothing it must be given and no `by`"
         )
         raise ProjectError(message)
-    return Law(serves=entry.serves, method=entry.method, state=readers[0])
+    return reading[0]
 
 
 def reads(entry: Entry, state: type[BaseModel]) -> bool:
@@ -213,14 +266,19 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
 
     project: Project
     modules: list[Module]
-    doors: Doors
+    running: Running
     looks: Looks
     laws: list[Law]
     run: Run
 
+    @property
+    def doors(self) -> Doors:
+        """What the modules serve."""
+        return self.running.doors
+
     def tools(self) -> list[ToolSpec]:
         """Return what a session is told of each tool the modules serve."""
-        return self.doors.tools()
+        return self.running.tools()
 
     async def answered(self, call: Call) -> Accepted | Refused:
         """Make `call` through its door, as a task of its own, every law checked over each slice of it.
@@ -250,13 +308,22 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
         """Make `call` through its door, and say what came of it."""
         match call:
             case ToolCall(tool=tool, arguments=arguments, by=by):
-                return await self.doors.call(tool, arguments, by)
+                return await self.running.call(tool, arguments, by)
             case Acted(module=module, action=action, given=given, by=by):
-                return await self.doors.act(module, action, given, by)
+                return await self.running.act(module, action, given, by)
             case Ran(module=module, command=command, arguments=arguments, by=by):
-                return await self.doors.run(module, command, arguments, by)
+                return await self.running.run(module, command, arguments, by)
+            case Served(service=service, given=given, by=by):
+                return await self.running.serve(service, given, by)
             case Viewed(module=module, view=view, given=given, by=by):
-                return await viewed(self.doors, self.looks, module, view, given, by)
+                return await viewed(self.running, self.looks, module, view, given, by)
+
+    async def stopped(self) -> None:
+        """Stop the lup this harness started, rather than once the promise ends."""
+        await self.running.stopped()
+        self.run.started = [
+            each for each in self.run.started if each is not self.running
+        ]
 
     async def checked(self, module: str, promise: str | None) -> list[Kept | Broken]:
         """Check the promise named `promise` of the module named `module`, or every one where none is named, as the gate does, and say how each fared.
@@ -274,31 +341,126 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
             return apart.submit(checking, self.project, held, promise).result()
 
 
+class StandIn(Model, Runs, arbitrary_types_allowed=True):
+    """The programs a started lup's parts run, stood in for as a promise scripts them: each run heard, and answered by the first answer whose `when` its arguments start with."""
+
+    scripts: dict[str, Scripted] = {}
+    heard: Heard
+
+    async def ran(
+        self, program: Program, arguments: list[str], given: str | None
+    ) -> Finished:
+        """Hear the run, and answer it as its program's script says.
+
+        Raise `ProgramError` where no answer of its script fits, as for a
+        program that isn't there.
+        """
+        self.heard.runs.append(
+            ProgramRun(program=program.name, arguments=arguments, given=given)
+        )
+        script = self.scripts.get(program.name, Scripted())
+        answer = next(
+            (
+                each
+                for each in script.answers
+                if arguments[: len(each.when)] == each.when
+            ),
+            None,
+        )
+        if answer is None:
+            message = (
+                f"`{program.name} {' '.join(arguments)}` has no answer in the "
+                "promise's script, so it's run as a program that isn't there"
+            )
+            raise ProgramError(message, about=[program.name])
+        return Finished(status=answer.status, output=answer.output, error=answer.error)
+
+
+class Crosser(Model, Crossing, arbitrary_types_allowed=True):
+    """A started lup's parts, a message crossing to them answered as their container answers it."""
+
+    running: Running
+
+    async def crossed(self, text: bytes) -> bytes:
+        """Answer one message as the container running these parts would."""
+        return await answered(self.running, text)
+
+
 class Harness(Testing, arbitrary_types_allowed=True):
     """The harness as the gate runs it: lup started in this process, and values drawn by hypothesis."""
 
     data: st.DataObject
     run: Run
 
-    async def started(self, declared: Project | str) -> Started:
-        """Start lup on a declaration: a `Project`, or the text of a declaration's file, loaded as lup loads one.
+    async def started(
+        self,
+        declared: Project | str,
+        secrets: Mapping[str, str] | None = None,
+        repository: str = "harness",
+        programs: Mapping[str, Scripted] | None = None,
+        *,
+        machine: bool = False,
+    ) -> Started:
+        """Start lup on a declaration: a `Project`, or the text of a declaration's file, loaded as lup loads one, each class made once and started.
 
-        Raise `ProjectError` where it doesn't load or resolve, or where a law
-        its modules hold has no door to read its state through.
+        Raise `ProjectError` where it doesn't load or resolve, where a secret a
+        class holds isn't given, or where a law its modules hold has no door to
+        read its state through.
         """
         project = declared if isinstance(declared, Project) else loaded(declared)
-        reached = self.reached(project)
-        return Started(modules=reached.modules, doors=reached)
+        heard = Heard()
+        stand = StandIn(scripts=dict(programs or {}), heard=heard)
+        reached = await self.reached(
+            project, secrets, repository, stand, machine=machine
+        )
+        return Started(
+            modules=reached.modules,
+            specs=reached.tools(),
+            plan=plan_of(resolve(project), []),
+            doors=reached,
+            crossing=Crosser(running=reached.running),
+            heard=heard,
+        )
 
-    def reached(self, project: Project) -> Reached:
-        """Start lup on `project`, and return its doors as this harness reaches them, every law its modules hold checked over each call."""
+    async def reached(
+        self,
+        project: Project,
+        secrets: Mapping[str, str] | None = None,
+        repository: str = "harness",
+        runs: Runs | None = None,
+        *,
+        machine: bool = False,
+    ) -> Reached:
+        """Start lup on `project`, as the code of `repository`, and return its doors as this harness reaches them, every law its modules hold checked over each call.
+
+        Each secret a class holds is `secrets`'s, or drawn where they're left
+        out.
+        """
         resolved = resolve(project)
+        held = [
+            name for each in resolved.doors.served for name in each.part.holds().secrets
+        ]
+        given = (
+            dict(secrets)
+            if secrets is not None
+            else {name: self.any(str) for name in dict.fromkeys(held)}
+        )
+        kept = tempfile.TemporaryDirectory(prefix="lup-data-")
+        self.run.kept.append(kept)
+        running = await resolved.doors.started(
+            repository,
+            given,
+            data=Path(kept.name),
+            runs=runs or StandIn(heard=Heard()),
+            machine=machine,
+        )
+        self.run.started.append(running)
         return Reached(
             project=project,
             modules=resolved.modules,
-            doors=resolved.doors,
+            running=running,
             looks=resolved.looks,
-            laws=laws(resolved.doors),
+            laws=laws(running),
             run=self.run,
         )
 
@@ -323,7 +485,7 @@ def loaded(text: str) -> Project:
 def promises(module: Module) -> list[Entry]:
     """Return every promise `module` serves, in the order declared."""
     served = Doors(
-        served=[Serves(module=module, serving=each) for each in module.held(Serving)]
+        served=[Serves(module=module, part=each) for each in module.held(Parts)]
     )
     return [
         entry

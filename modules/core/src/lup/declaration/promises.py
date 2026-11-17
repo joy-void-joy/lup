@@ -134,7 +134,7 @@ project = Project(modules=Modules.default().add(Episodes(length=30)))
 """A project's declaration, declaring a module of its own."""
 
 
-class DeclarationPromises(lup.ModuleServing):
+class DeclarationPromises(lup.Part):
     """What a project can count on of loading and resolving its declaration."""
 
     @lup.promise

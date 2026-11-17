@@ -24,10 +24,10 @@ from pydantic import ValidationError
 
 from lup.declaration.module import Module
 from lup.doors.door import served
-from lup.doors.serving import ModuleServing, Serving
+from lup.doors.parts import Part, Parts
 from lup.environment.declaration import load, resolve
 from lup.environment.testing.checking import Check, Exploring
-from lup.environment.testing.harness import laws, promises
+from lup.environment.testing.harness import promises, readers
 from lup.errors import LupError
 from lup.testing.harness import Broken, Kept
 from lup.testing.promise import PromiseDoor
@@ -133,14 +133,14 @@ def subclasses[C](base: type[C]) -> list[type[C]]:
     ]
 
 
-def unlisted(root: Path) -> list[type[ModuleServing]]:
-    """Return each class of the repository's at `root` holding promises that no module lists in its `serving`, so the gate would never check them."""
+def unlisted(root: Path) -> list[type[Part]]:
+    """Return each class of the repository's at `root` holding promises that no module lists in its `parts`, so the gate would never check them."""
     listed = [
-        served for module in subclasses(Module) for served in module().held(Serving)
+        served for module in subclasses(Module) for served in module().held(Parts)
     ]
     return [
         each
-        for each in subclasses(ModuleServing)
+        for each in subclasses(Part)
         if own(each, root)
         and each not in listed
         and any(
@@ -157,7 +157,7 @@ class Declared(pytest.File):
         """Collect each of the repository's own modules' promises, a law with no door to read its state through failing here."""
         project = load(self.path)
         resolved = resolve(project)
-        laws(resolved.doors)
+        readers(resolved.doors)
         root = self.config.rootpath
         for module in resolved.modules:
             if own(type(module), root):
@@ -192,7 +192,7 @@ class Held(pytest.Collector):
             # lup: ignore("reportUnknownMemberType", why="pytest leaves untyped the keyword arguments a node's constructor is passed")
             yield Promised.from_parent(
                 self,
-                name=f"{entry.serves.serving.__name__}.{entry.name}",
+                name=f"{entry.serves.part.__name__}.{entry.name}",
                 entry=entry,
                 project=self.project,
                 exploring=exploring,
@@ -203,7 +203,7 @@ class Unlisted(pytest.Item):
     """A class of promises no module lists, which fails: nothing would check them."""
 
     def __init__(
-        self, *, unlisted: type[ModuleServing], name: str, parent: pytest.Collector
+        self, *, unlisted: type[Part], name: str, parent: pytest.Collector
     ) -> None:
         """Hold the class no module lists."""
         # lup: ignore("reportUnknownMemberType", why="pytest leaves untyped the keyword arguments a node's constructor is passed")
@@ -215,7 +215,7 @@ class Unlisted(pytest.Item):
         """Fail, naming the class and what to do."""
         message = (
             f"`{self.unlisted.__qualname__}` holds promises no module lists in its "
-            "`serving`, so nothing checks them: list it in its module's"
+            "`parts`, so nothing checks them: list it in its module's"
         )
         pytest.fail(message, pytrace=False)
 

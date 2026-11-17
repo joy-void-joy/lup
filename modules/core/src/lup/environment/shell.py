@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from lup.declaration.module import Module
     from lup.doors.door import Accepted, Refused
     from lup.doors.parties import Party
-    from lup.environment.doors import Doors
+    from lup.environment.doors import Running
 
 
 class Owned[K](Model):
@@ -171,7 +171,7 @@ def apart(what: str, named: list[Owned[str]]) -> None:
 
 
 async def viewed(
-    doors: Doors,
+    doors: Running,
     looks: Looks,
     module: str,
     view: str,

@@ -4,7 +4,7 @@ The dashboard's page that knows no module: modules lay out what they show from b
 
 ```python
 import lup
-from lup import Blocks, Fold, FoldKind, Folds, Markdown, Model, Module, ModuleServing, Offer, Serving, Span, Viewing
+from lup import Blocks, Fold, FoldKind, Folds, Markdown, Model, Module, Offer, Part, Parts, Span, Viewing
 
 
 class PileOf(Model):
@@ -13,7 +13,7 @@ class PileOf(Model):
     pile: str
 
 
-class NotesServing(ModuleServing):
+class NotesPart(Part):
     """A pile's notes."""
 
     module: Notes
@@ -27,8 +27,8 @@ class NotesServing(ModuleServing):
                     id=f"note-{note.number}",
                     kind="note",
                     summary=[Span(text=note.title, tone="strong")],
-                    content=Viewing.of(NotesServing.note, NoteOf(number=note.number)),
-                    offers=[Offer.of(NotesServing.clear, Clearing(number=note.number))],
+                    content=Viewing.of(NotesPart.note, NoteOf(number=note.number)),
+                    offers=[Offer.of(NotesPart.clear, Clearing(number=note.number))],
                 )
                 for note in self.module.read(of.pile)
             )
@@ -40,7 +40,7 @@ class Notes(Module):
 
     name = "notes"
     folds: Folds = Folds.of(FoldKind(name="note", letter="n", called="note"))
-    serving: Serving = Serving.of(NotesServing)
+    parts: Parts = Parts.of(NotesPart)
 ```
 
 ## The view door

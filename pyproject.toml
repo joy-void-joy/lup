@@ -122,8 +122,8 @@ runtime-evaluated-base-classes = [
     "lup.types.Settings",
     "lup.declaration.module.Module",
     "lup.declaration.grammar.Layer",
-    "lup.doors.serving.ModuleServing",
-    "lup.ModuleServing",
+    "lup.doors.parts.Part",
+    "lup.Part",
     "lup.doors.door.Door",
 ]
 # A door reads the annotations of the method it's put on, at run time, so an
@@ -141,6 +141,10 @@ runtime-evaluated-decorators = [
     "lup.testing.promise.promise",
     "lup.view",
     "lup.shell.view.view",
+    "lup.service",
+    "lup.doors.service.service",
+    "lup.on",
+    "lup.doors.on.on",
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -201,6 +205,8 @@ source_modules = [
     "lup.doors",
     "lup.shell",
     "lup.testing",
+    "lup.running",
+    "lup.hosting",
 ]
 forbidden_modules = ["lup.environment"]
 
@@ -221,5 +227,7 @@ forbidden_modules = [
     "lup.doors.*",
     "lup.shell.*",
     "lup.testing.*",
+    "lup.running.*",
+    "lup.hosting.*",
 ]
 allow_indirect_imports = true
