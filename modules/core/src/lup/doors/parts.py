@@ -12,6 +12,7 @@ hold (`approved=True`) runs in a container of its own, from a commit the
 operator approved, with what it holds alone, or on the machine.
 """
 
+from pathlib import Path
 from typing import ClassVar, Unpack, override
 
 from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
@@ -38,6 +39,17 @@ class Secret(Model):
     """The secret itself."""
 
 
+class Data(Model):
+    """A directory a part keeps what it writes in: a field typed `Data`, given where the part runs, kept across its restarts, one for each such field.
+
+    >>> Data(path=Path("/srv/lup/data/chat.Bot/cache")).path.name
+    'cache'
+    """
+
+    path: Path
+    """The directory: it's there, and the part's alone to write."""
+
+
 class Holds(Model):
     """What a part holds, which only code the operator approved may: where it runs follows from it."""
 
@@ -48,10 +60,13 @@ class Holds(Model):
     approved: bool = False
     """Whether it holds something else only approved code may, as the store
     holds the operator's acts."""
+    shared: bool = False
+    """Whether it's one for the whole machine, serving every project, as the
+    store is: run once, from the home repository's approved code."""
 
     def anything(self) -> bool:
         """Say whether it holds anything, and so runs apart, from approved code."""
-        return bool(self.secrets) or self.machine or self.approved
+        return bool(self.secrets) or self.machine or self.approved or self.shared
 
 
 class Part(MutableModel, arbitrary_types_allowed=True):
@@ -72,12 +87,16 @@ class Part(MutableModel, arbitrary_types_allowed=True):
     """Whether it runs on the operator's machine itself: its header's word."""
     approved: ClassVar[bool] = False
     """Whether it holds what only approved code may: its header's word."""
+    shared: ClassVar[bool] = False
+    """Whether it's one for the whole machine, serving every project: its
+    header's word."""
 
     def __init_subclass__(
         cls,
         *,
         machine: bool | None = None,
         approved: bool | None = None,
+        shared: bool | None = None,
         **kwargs: Unpack[ConfigDict],
     ) -> None:
         """Keep what the class's header says it holds, a subclass keeping its base's where it says nothing."""
@@ -86,6 +105,8 @@ class Part(MutableModel, arbitrary_types_allowed=True):
             cls.machine = machine
         if approved is not None:
             cls.approved = approved
+        if shared is not None:
+            cls.shared = shared
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: object) -> None:
@@ -107,7 +128,7 @@ class Part(MutableModel, arbitrary_types_allowed=True):
             for field, info in cls.model_fields.items()
             if field != "module"
             and info.is_required()
-            and info.annotation is not Secret
+            and info.annotation not in (Secret, Data)
         ]
         if bare:
             message = (
@@ -128,14 +149,27 @@ class Part(MutableModel, arbitrary_types_allowed=True):
             ],
             machine=cls.machine,
             approved=cls.approved,
+            shared=cls.shared,
         )
 
     @classmethod
-    def made(cls, module: Module, secrets: dict[str, str]) -> Part:
-        """Make the class where it runs, with its module and the value of each secret it holds.
+    def made(
+        cls, module: Module, secrets: dict[str, str], data: Path | None = None
+    ) -> Part:
+        """Make the class where it runs, with its module, the value of each secret it holds, and a directory under `data` for each field typed `Data`, made where it isn't there.
 
-        Raise `ProjectError` where a secret it holds isn't given.
+        Raise `ProjectError` where a secret it holds isn't given, or it keeps
+        data and no directory is given.
         """
+        kept = [
+            field for field, info in cls.model_fields.items() if info.annotation is Data
+        ]
+        if kept and data is None:
+            message = (
+                f"`{cls.__name__}` keeps data in {', '.join(f'`{name}`' for name in kept)}, "
+                "and nothing gives it a directory to keep it in"
+            )
+            raise ProjectError(message, about=[cls.__name__])
         missing = [name for name in cls.holds().secrets if name not in secrets]
         if missing:
             message = (
@@ -143,9 +177,14 @@ class Part(MutableModel, arbitrary_types_allowed=True):
                 "which nothing stored: the operator stores each under its name"
             )
             raise ProjectError(message, about=[cls.__name__])
-        given: dict[str, Module | Secret] = {
+        given: dict[str, Module | Secret | Data] = {
             name: Secret(value=secrets[name]) for name in cls.holds().secrets
         }
+        for name in kept:
+            if data is not None:
+                directory = data / name
+                directory.mkdir(parents=True, exist_ok=True)
+                given[name] = Data(path=directory)
         if "module" in cls.model_fields:
             given["module"] = module
         return cls.model_validate(given)

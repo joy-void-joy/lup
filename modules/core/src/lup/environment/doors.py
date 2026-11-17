@@ -1,25 +1,25 @@
 """Serving a module's methods, and calling them through their doors: the doors' environment side.
 
-Resolving a declaration lists every part each module serves
-(`Doors.of`), refusing a class that can't be made with the module listing it, a
-method that can't be behind its door, and what two methods would share: a
-tool's or a service's name across the project's modules, an action's or a
-command's within one.
+Resolving a declaration lists every part each module serves (`Doors.of`),
+refusing a part that can't be made with the module listing it, a method that
+can't be behind its door, and what two methods would share: a name across the
+project's modules where their door names them so, as a tool's or a service's
+(`Door.named_across`), else within one module.
 
-Starting what's served (`Doors.started`) makes each class once, with its module
-and the secrets it holds, runs what each runs at `Starting`, and carries a
-service's call made in it to the class serving it (`Running`). Calling through a
-door (`Running.call`, `.act`, `.run`, `.serve`) finds the method, checks who
-calls, reads what it's given as the model it takes, and runs it on its class,
-answering `Accepted` or `Refused`: what the harness and the containers call
-(`README.md` in `lup/doors/`, *Calling through a door*). Stopping
-(`Running.stopped`) runs what each runs at `Stopping`, then cancels what it
-started.
+Starting what's served (`Doors.started`) makes each part once, with its module
+and what it holds, runs what each runs at `Starting`, and carries a service's
+call made in it to the part serving it (`Running`). Calling through a door
+(`Running.call`, `.serve`, `.run`) finds the method, checks who calls,
+reads what it's given as the model it takes, and runs it on its part, answering
+`Accepted` or `Refused`: what the harness and the containers call (`README.md`
+in `lup/doors/`, *Starting, calling and stopping*). Stopping (`Running.stopped`)
+runs what each runs at `Stopping`, then cancels what it started.
 """
 
 import asyncio
 from contextvars import ContextVar
 from typing import override
+lazy from pathlib import Path
 
 from pydantic import BaseModel, JsonValue, PydanticUserError, ValidationError
 
@@ -40,7 +40,7 @@ from lup.doors.door import (
 )
 from lup.doors.events import Event, Starting, Stopping
 from lup.doors.on import OnDoor
-from lup.doors.parties import Code, Party, said
+from lup.doors.parties import Codebase, Party, said
 from lup.doors.parts import Part, Parts
 from lup.doors.service import CARRYING, Carrier, ServiceDoor
 from lup.doors.tool import ToolDoor, ToolSpec
@@ -59,8 +59,12 @@ class Serves(Model):
     part: type[Part]
 
     def said(self) -> str:
-        """Name the class and its module, as a refusal does."""
+        """Name the part and its module, as a refusal does."""
         return f"`{self.part.__name__}` of `{self.module.name}`"
+
+    def named(self) -> str:
+        """Name the part as a plan does: `module.Part`."""
+        return f"{self.module.name}.{self.part.__name__}"
 
 
 class Entry(Model, arbitrary_types_allowed=True):
@@ -72,7 +76,7 @@ class Entry(Model, arbitrary_types_allowed=True):
 
 
 class Keyed(Model):
-    """A name a method is reached by, where it's shared: a tool's or a service's across modules, an action's or a command's within its module."""
+    """A name a method is reached by, where it's shared: a tool's or a service's across modules, a command's within its module."""
 
     name: str
     scope: str = ""
@@ -132,7 +136,7 @@ class Doors(Model):
         Raise `ProjectError` where a class can't be made with the module listing
         it, where a method can't be behind its door once every class its
         annotations name is defined, or where two methods are reached by one
-        name: a tool's or a service's across modules, an action's or a command's
+        name: a tool's or a service's across modules, a command's
         within a module.
         """
         doors = cls(
@@ -149,11 +153,13 @@ class Doors(Model):
                 entry.method.checked()
         except DoorError as wrong:
             raise ProjectError(str(wrong), about=wrong.about) from wrong
-        distinct("A tool's name", doors.keyed(ToolDoor))
-        distinct("A service's name", doors.keyed(ServiceDoor))
-        distinct(
-            "A command's name in its module", doors.keyed(CommandDoor, scoped=True)
-        )
+        kinds: list[type[Door]] = [type(entry.method.door) for entry in doors.entries()]
+        for door in dict.fromkeys(kinds):
+            within = "" if door.named_across else " in its module"
+            distinct(
+                f"{door.called}'s name{within}".capitalize(),
+                doors.keyed(door, scoped=not door.named_across),
+            )
         return doors
 
     def entries(self) -> list[Entry]:
@@ -189,20 +195,39 @@ class Doors(Model):
             if isinstance(entry.method.door, ToolDoor)
         ]
 
-    async def started(self, repository: str, secrets: dict[str, str]) -> Running:
-        """Make each class once, with its module and the value of each secret it holds, run what each runs at `Starting`, and return them running, as the project of `repository`'s code.
+    async def started(
+        self,
+        repository: str,
+        secrets: dict[str, str],
+        only: list[str] | None = None,
+        beyond: Carrier | None = None,
+        data: Path | None = None,
+    ) -> Running:
+        """Make each part once, with its module and the value of each secret it holds, run what each runs at `Starting`, and return them running, as the project of `repository`'s code.
 
         `secrets` holds the value of each secret by its name, as the operator
-        stored it for the project. Raise `ProjectError` where a class holds a
-        secret it doesn't give.
+        stored it for the project. `only` names the parts made here, each
+        `module.Part`, where the others run elsewhere, a call to one of their
+        services carried by `beyond`; left out, every part is made here. Raise
+        `ProjectError` where a part made here holds a secret not given. A part
+        keeping data is given a directory under `data`, named `module.Part`.
         """
         running = Running(
             doors=self,
-            caller=Code(repository=repository),
+            caller=Codebase(repository=repository),
             made=[
-                Made(serves=each, made=each.part.made(each.module, secrets))
+                Made(
+                    serves=each,
+                    made=each.part.made(
+                        each.module,
+                        secrets,
+                        None if data is None else data / each.named(),
+                    ),
+                )
                 for each in self.served
+                if only is None or each.named() in only
             ],
+            beyond=beyond,
         )
         await running.at(Starting(), apart=True)
         return running
@@ -229,16 +254,36 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
     """
 
     doors: Doors
-    caller: Code
+    caller: Codebase
     """The project whose code this is: who a service's call made here is
     by."""
     made: list[Made]
+    beyond: Carrier | None = None
+    """What carries a call to a service of a part made elsewhere; none where
+    every part is made here."""
     started: list[asyncio.Task[None]] = []
     """What each class runs at `Starting`, going on as long as it runs."""
 
-    def instance(self, entry: Entry) -> Part:
-        """Return the class `entry` belongs to, as it was made here."""
-        return next(each.made for each in self.made if each.serves == entry.serves)
+    def instance(self, entry: Entry) -> Part | None:
+        """Return the part `entry` belongs to, as it was made here; none where it runs elsewhere."""
+        return next(
+            (each.made for each in self.made if each.serves == entry.serves), None
+        )
+
+    def part(self, entry: Entry) -> Part:
+        """Return the part `entry` belongs to, made here.
+
+        Raise `DoorError` where it runs elsewhere.
+        """
+        instance = self.instance(entry)
+        if instance is None:
+            message = f"{entry.serves.said()} runs elsewhere, not here"
+            raise DoorError(message, about=[entry.serves.named()])
+        return instance
+
+    def here(self) -> list[Entry]:
+        """List every method of a part made here."""
+        return [entry for entry in self.doors.entries() if self.instance(entry)]
 
     def tools(self) -> list[ToolSpec]:
         """Return what a session is told of each tool the modules serve."""
@@ -246,7 +291,7 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
 
     async def at(self, event: Event, *, apart: bool = False) -> None:
         """Run every method run at `event`'s class, each on its class: one after another, or, `apart`, each as a task that goes on as long as the class runs."""
-        for entry in self.doors.through(OnDoor):
+        for entry in self.here():
             door = entry.method.door
             if not (isinstance(door, OnDoor) and isinstance(event, door.event)):
                 continue
@@ -257,8 +302,10 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
                 await hook
 
     async def hooked(self, entry: Entry, event: Event) -> None:
-        """Run the method behind `entry` at `event`, on its class: nobody calls it, so it's handed no caller."""
-        await self.ran(entry.method, self.instance(entry), event, self.caller)
+        """Run the method behind `entry` at `event`, on its part: nobody calls it, so it's handed no caller."""
+        instance = self.instance(entry)
+        if instance is not None:
+            await self.ran(entry.method, instance, event, self.caller)
 
     async def stopped(self) -> None:
         """Run every method run at `Stopping`, one after another, then cancel what each class runs since `Starting`, and wait for it to end."""
@@ -305,8 +352,15 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
         except ValidationError as wrong:
             reason = f"`{entry.name}` doesn't take what it was given: {wrong}"
             return refused(given, reason)
+        instance = self.instance(entry)
+        if instance is None:
+            reason = (
+                f"`{method.taken.qualified}` of `{entry.serves.module.name}` runs "
+                "elsewhere, not where it was called"
+            )
+            return refused(given, reason)
         try:
-            output = await self.ran(method, self.instance(entry), value, by)
+            output = await self.ran(method, instance, value, by)
         except RefusedError as refusal:
             return refused(given, str(refusal))
         return Accepted(value=value, output=output)
@@ -349,7 +403,9 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
             for entry in within
         )
         one: list[JsonValue] = [arguments]
-        given: JsonValue = one if gathers and not isinstance(arguments, list) else arguments
+        given: JsonValue = (
+            one if gathers and not isinstance(arguments, list) else arguments
+        )
         return await self.reached(CommandDoor, module, command, given, by)
 
     async def reached(
@@ -381,6 +437,8 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
             name = method.taken.qualified
             message = f"`{name}` isn't served by any module of this project"
             raise RefusedError(message, about=[name])
+        if self.instance(found[0]) is None and self.beyond is not None:
+            return await self.beyond.carried(method, value)
         answered = await self.answered(
             found[0], value.model_dump(mode="json"), CALLER.get() or self.caller
         )

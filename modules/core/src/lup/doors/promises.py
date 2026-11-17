@@ -15,7 +15,7 @@ from pydantic import Field
 import lup
 from lup import (
     Agent,
-    Code,
+    Codebase,
     Model,
     Module,
     Modules,
@@ -71,8 +71,8 @@ class EchoPart(Part):
         """
         return Shouted(text=said.text.upper() * self.module.volume, caller=by.id)
 
-    @lup.action(verb="done", says="merge it")
-    async def merge(self, merging: Merging) -> str:
+    @lup.command(verb="done", says="merge it")
+    async def merge(self, merging: Merging, by: Operator) -> str:
         """Merge a branch, refusing `main`, which is merged into."""
         if merging.branch == "main":
             message = "`main` is merged into, never merged"
@@ -132,7 +132,7 @@ class Loudness(Model):
 class Sending(Model):
     """Something a party sends through one of echo's doors, or one it doesn't have."""
 
-    door: Literal["tool", "action", "command"]
+    door: Literal["tool", "command"]
     name: Literal["shout", "merge", "greet", "whisper"]
     given: dict[str, str | int | None]
     by: Agent | Operator
@@ -315,10 +315,6 @@ class DoorsPromises(Part):
         match sending.door:
             case "tool":
                 answered = await started.call(sending.name, sending.given, sending.by)
-            case "action":
-                answered = await started.act(
-                    "echo", sending.name, sending.given, sending.by
-                )
             case "command":
                 answered = await started.run(
                     "echo", sending.name, sending.given, sending.by
@@ -358,9 +354,9 @@ class DoorsPromises(Part):
     async def a_method_refusing_is_answered_as_a_refusal(self, by: Testing) -> None:
         """A method refusing what it's asked, by raising `RefusedError`, answers a refusal; asked otherwise, it runs."""
         started = await by.started(declared(Echo()))
-        main = await started.act("echo", "merge", Merging(branch="main"), Operator())
+        main = await started.run("echo", "merge", Merging(branch="main"), Operator())
         assert isinstance(main, Refused)
-        dev = await started.act("echo", "merge", Merging(branch="dev"), Operator())
+        dev = await started.run("echo", "merge", Merging(branch="dev"), Operator())
         assert isinstance(dev, Accepted)
 
     @lup.promise
@@ -507,7 +503,7 @@ class KeeperPart(Part):
         return Tally(count=self.count)
 
     @lup.service
-    async def tallied(self, asking: Asking, by: Code) -> Tallied:
+    async def tallied(self, asking: Asking, by: Codebase) -> Tallied:
         """Say the count, and whose code asked."""
         del asking
         return Tallied(count=self.count, repository=by.repository)
@@ -549,7 +545,7 @@ class Keeper(Module):
     parts: Parts = Parts.of(KeeperPart, AskingPart)
 
 
-class RunningPromises(Part):
+class PartsPromises(Part):
     """What a module's code can count on of its classes made once where they run: what they keep, the services they serve, the secrets they hold, and their start and stop."""
 
     @lup.promise
@@ -600,7 +596,9 @@ class RunningPromises(Part):
         """A class holding a field typed `Secret` is filled, where it runs, with the value stored under the field's name, and says it holds it; a class whose secret nothing stored fails to start."""
         value = by.any(str)
         started = await by.started(declared(Keeper()), secrets={"token": value})
-        revealed = await started.serve("reveal", Asking(), Code(repository="harness"))
+        revealed = await started.serve(
+            "reveal", Asking(), Codebase(repository="harness")
+        )
         assert isinstance(revealed, Accepted)
         assert revealed.output == Revealed(value=value)
         assert "token" in KeeperPart.holds().secrets

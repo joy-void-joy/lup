@@ -170,9 +170,7 @@ def calls(doors: Doors) -> SearchStrategy[Call]:
     entries = [
         entry
         for entry in doors.entries()
-        if isinstance(
-            entry.method.door, ToolDoor | CommandDoor | ServiceDoor
-        )
+        if isinstance(entry.method.door, ToolDoor | CommandDoor | ServiceDoor)
     ]
     if not entries:
         return st.nothing()
