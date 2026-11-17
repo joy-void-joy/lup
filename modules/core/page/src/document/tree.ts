@@ -263,6 +263,19 @@ export function foldKind(node: Node): string | null {
     }
 }
 
+/** Return how deep `node` sits: how many folds hold it, the root's own section not counted. */
+export function depthOf(node: Node): number {
+    let depth = 0;
+    let at = node.parent;
+    while (at !== null && at.parent !== null) {
+        if (foldKind(at) !== null) {
+            depth += 1;
+        }
+        at = at.parent;
+    }
+    return depth;
+}
+
 /** Return where `node`'s content is hidden as it folds, from `start`, where it starts; none where it doesn't fold, or holds nothing under its first line. */
 export function foldRange(node: Node, start: number): FoldRange | null {
     const kind = foldKind(node);

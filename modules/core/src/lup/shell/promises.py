@@ -6,6 +6,8 @@ as a party reads them. The page's own laws, about its cursor, its modes and its
 folds, are the page's, in TypeScript (`README.md` here, *Promises*).
 """
 
+import asyncio
+
 from pydantic import Field
 
 import lup
@@ -72,9 +74,14 @@ class Clearing(Model):
 
 
 class NotesPart(Part):
-    """A pile of notes, each a fold under its title, its text read as it opens."""
+    """A pile of notes, each a fold under its title, its text read as it opens, and the comments it took."""
 
     module: Notes
+    heard: list[str] = []
+    """What each comment it took said, in the order they came."""
+    released: asyncio.Event = Field(default_factory=asyncio.Event)
+    """Set once the comments it holds may go through, where its module holds
+    them (`Notes.holding`)."""
 
     @lup.view
     async def pile(self, of: PileOf) -> Blocks:
@@ -106,6 +113,17 @@ class NotesPart(Part):
         """Show a line in a tone nobody declares."""
         return Blocks.of(Line(id="1", spans=[Span(text=of.pile, tone="neon")]))
 
+    @lup.view
+    async def taken(self, of: PileOf) -> Blocks:
+        """Show what each comment the pile took said, a line each, in the order they came."""
+        return Blocks.of(
+            *(
+                Line(id=str(at), spans=[Span(text=words)])
+                for at, words in enumerate(self.heard)
+            ),
+            summary=[Span(text=f"{of.pile} · {len(self.heard)} comments")],
+        )
+
     def titles(self) -> list[str]:
         """Return the notes' titles, in order."""
         return [f"note {number}" for number in range(1, self.module.notes + 1)]
@@ -117,9 +135,19 @@ class NotesPart(Part):
 
     @lup.command(verb="comment", says="comment on it")
     async def comment(self, commented: Commented[NoteOf], by: lup.Operator) -> str:
-        """Take a comment on a note."""
+        """Take a comment on a note, once the pile lets comments through where it holds them."""
         del by
+        if self.module.holding:
+            await self.released.wait()
+        self.heard.append(commented.words)
         return f"note {commented.on.number}: {commented.words}"
+
+    @lup.command(verb="release", says="let the comments held through")
+    async def release(self, of: PileOf, by: lup.Operator) -> str:
+        """Let every comment held, and every one after, through."""
+        del by
+        self.released.set()
+        return f"{of.pile}: comments let through"
 
 
 class Notes(Module):
@@ -128,6 +156,9 @@ class Notes(Module):
     name = "notes"
     notes: int = 0
     """How many notes the pile holds, each titled by its number."""
+    holding: bool = False
+    """Whether a comment waits to be taken until the pile releases them
+    (`release`): what keeps a send running while a promise writes beside it."""
     folds: Folds = Folds.of(FoldKind(name="note", letter="n", called="note", level=1))
     tones: Tones = Tones.of(Tone(name="title", like="strong"))
     parts: Parts = Parts.of(NotesPart)
@@ -140,8 +171,8 @@ class Echoes(Module):
     folds: Folds = Folds.of(FoldKind(name="echo", letter="n", called="echo"))
 
 
-def noted(notes: int) -> Project:
-    """Return a project of lup's default modules and a pile of `notes` notes, the dashboard's document its pile.
+def noted(notes: int, *, holding: bool = False) -> Project:
+    """Return a project of lup's default modules and a pile of `notes` notes, the dashboard's document its pile, holding the comments it takes until released where `holding`.
 
     `lup.Core` is read as it's called, not imported with the module: the core
     lists these promises, so it's still being made as this module is.
@@ -150,7 +181,7 @@ def noted(notes: int) -> Project:
     return Project(
         modules=Modules.default()
         .edit(lup.Core(document=document))
-        .add(Notes(notes=notes))
+        .add(Notes(notes=notes, holding=holding))
     )
 
 
@@ -298,7 +329,7 @@ class ShellPromises(Part):
     @lup.promise
     async def every_page_shows_the_same_draft(self, by: Testing) -> None:
         """Every page open on the dashboard is told the draft as it changes, so a comment written in one shows in the other, and a closed tab loses nothing."""
-        words = by.any(Words).words
+        words = f"said {by.any(Words).words}"
         started = await by.started(noted(1))
         first = await opened(started)
         second = await opened(started)
@@ -320,7 +351,7 @@ class ShellPromises(Part):
     @lup.promise
     async def sending_sends_each_part_on_its_own(self, by: Testing) -> None:
         """Sending the draft sends each comment on its own: one whose block takes comments goes, and leaves the draft; one whose block takes none stays in it, saying why, and holds up nothing else."""
-        words = by.any(Words).words
+        words = f"said {by.any(Words).words}"
         started = await by.started(noted(1))
         page = await opened(started)
         going = Comment(id="going", on=quoted("note-1"), words=words)
@@ -338,6 +369,68 @@ class ShellPromises(Part):
         assert [each.id for each in drafted.draft.comments] == ["staying"]
         assert all(each.reason for each in drafted.draft.comments)
         await page.leave()
+
+    @lup.promise
+    async def a_comment_that_says_nothing_is_never_sent(self, by: Testing) -> None:
+        """A comment that says nothing, blank or only spaces, is dropped at the send rather than sent: what it's on never hears of it, and it leaves the draft, while what was said goes trimmed."""
+        blank = by.any(Blank).text()
+        words = f" said {by.any(Words).words} "
+        started = await by.started(noted(1))
+        page = await opened(started)
+        for comment in [
+            Comment(id="blank", on=quoted("note-1"), words=blank),
+            Comment(id="said", on=quoted("note-1"), words=words),
+        ]:
+            await page.say(Write(comment=comment))
+            assert isinstance(await page.told(), Drafted)
+        await page.say(Send())
+        drafted = await page.told()
+        delivered = await page.told()
+        assert isinstance(drafted, Drafted)
+        assert isinstance(delivered, Delivered)
+        assert delivered.went == ["said"]
+        assert delivered.stayed == []
+        assert drafted.draft.comments == []
+        assert await taken(started) == [words.strip()]
+        await page.leave()
+
+    @lup.promise
+    async def each_comment_is_taken_once_however_sends_and_writes_meet(
+        self, by: Testing
+    ) -> None:
+        """A comment written while a send runs stays in the draft for the next send rather than being lost, and two pages sending at once send each comment once."""
+        words = by.any(Words).words
+        started = await by.started(noted(1, holding=True))
+        first = await opened(started)
+        second = await opened(started)
+        await first.say(
+            Write(
+                comment=Comment(id="sent", on=quoted("note-1"), words=f"first {words}")
+            )
+        )
+        await first.say(Send())
+        await second.say(
+            Write(
+                comment=Comment(
+                    id="later", on=quoted("note-1"), words=f"second {words}"
+                )
+            )
+        )
+        await second.say(Send())
+        released = await started.run("notes", "release", PileOf(pile="p"), Operator())
+        assert isinstance(released, Accepted)
+        sends = [await delivered(first), await delivered(second)]
+        assert sorted(part for each in sends for part in each.went) == ["later", "sent"]
+        assert all(each.stayed == [] for each in sends)
+        assert sorted(await taken(started)) == sorted(
+            [f"first {words}".strip(), f"second {words}".strip()]
+        )
+        third = await opened(started, drafted=False)
+        drafted = await third.told()
+        assert isinstance(drafted, Drafted)
+        assert drafted.draft.comments == []
+        for page in [first, second, third]:
+            await page.leave()
 
 
 class Picked(Model):
@@ -358,6 +451,17 @@ class Words(Model):
     words: str
 
 
+class Blank(Model):
+    """A comment that says nothing: so many line breaks, then so many spaces."""
+
+    breaks: int = Field(ge=0, le=3)
+    spaces: int = Field(ge=0, le=5)
+
+    def text(self) -> str:
+        """Return the comment's text."""
+        return "\n" * self.breaks + " " * self.spaces
+
+
 async def opened(started: Started, *, drafted: bool = True) -> Page:
     """Open a page of `started`'s dashboard, its token said, told it's opened, and, where `drafted`, the draft too."""
     page = await started.dashboard()
@@ -366,6 +470,27 @@ async def opened(started: Started, *, drafted: bool = True) -> Page:
     if drafted:
         assert isinstance(await page.told(), Drafted)
     return page
+
+
+async def delivered(page: Page) -> Delivered:
+    """Read what `page` is told until its send is delivered, and return what was."""
+    while not isinstance(told := await page.told(), Delivered):
+        assert told is not None, (
+            "the page was told nothing more before its send was delivered"
+        )
+    return told
+
+
+async def taken(started: Started) -> list[str]:
+    """Return what each comment the pile took said, as its `taken` view shows it."""
+    answered = await started.view("notes", "taken", PileOf(pile="p"), Operator())
+    assert isinstance(answered, Accepted)
+    assert isinstance(answered.output, Blocks)
+    return [
+        "".join(span.text for span in each.spans)
+        for each in answered.output.blocks
+        if isinstance(each, Line)
+    ]
 
 
 def quoted(block: str) -> Quote:

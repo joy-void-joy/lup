@@ -7,7 +7,8 @@
 
 import { Vim, getCM } from "@replit/codemirror-vim";
 
-import { every, foldKind } from "../document/tree";
+import type { FoldKind } from "../generated/read";
+import { counted, every, foldKind } from "../document/tree";
 import { shells, type Shell } from "./shell";
 
 /** A mode a binding works in. */
@@ -25,38 +26,114 @@ interface Given {
     readonly kind: string | null;
 }
 
+/** Return the fold kind typed after a command's key; none, said on the status line, where no kind takes that letter. */
+function typed(shell: Shell, given: Given): FoldKind | null {
+    const kind = given.kind === null ? null : shell.kinds.byLetter(given.kind);
+    if (kind === null) {
+        shell.say(`no kind of fold is \`${given.kind ?? ""}\``);
+    }
+    return kind;
+}
+
+/** Return the keys of what an action acts on: every fold chosen, else the innermost fold the cursor is in. */
+function reached(shell: Shell): readonly string[] {
+    const chosen = shell.chosen();
+    if (chosen.length > 0) {
+        return chosen;
+    }
+    const node = shell.foldAt();
+    return node === null ? [] : [node.key];
+}
+
+/**
+ * Open or close every fold `keys` names, or toggle them together where `open` is none: open them all unless all are
+ * open. Where they were chosen, nothing is chosen after, and the status line says what was done.
+ */
+function folded(shell: Shell, keys: readonly string[], open?: boolean): void {
+    const nodes = keys.flatMap((key) => {
+        const node = shell.document.node(key);
+        return node === null ? [] : [node];
+    });
+    const opening = open ?? !nodes.every((node) => shell.isOpen(node));
+    shell.fold(nodes.map((node) => node.key), opening);
+    if (shell.chosen().length > 0) {
+        shell.choose([]);
+        shell.say(`${counted(nodes.length, "fold")} ${opening ? "opened" : "closed"}`);
+    }
+}
+
+/** Choose the nearest fold of `kind` around the cursor; where there's none, say so and leave what's chosen. */
+function nearest(shell: Shell, kind: FoldKind): boolean {
+    const node = shell.foldAt(kind.name);
+    if (node === null) {
+        shell.say(`no ${kind.called} around the cursor`);
+        return false;
+    }
+    shell.choose([node.key]);
+    shell.say(null);
+    return true;
+}
+
 /** The shell's named commands, each doing the same wherever a binding reaches it. */
 export const commands: Readonly<Record<string, (shell: Shell, given: Given) => void>> = {
-    /** Open the innermost fold the cursor is in, or close it, as `za` does. */
+    /** Open or close what's chosen, or the innermost fold the cursor is in, as `za` does. */
     "fold-toggle": (shell) => {
-        const node = shell.foldAt();
-        if (node !== null) {
-            shell.toggle(node.key);
-        }
+        folded(shell, reached(shell));
     },
-    /** Open the innermost fold the cursor is in. */
+    /** Open what's chosen, or the innermost fold the cursor is in. */
     "fold-open": (shell) => {
-        const node = shell.foldAt();
-        if (node !== null) {
-            shell.toggle(node.key, true);
-        }
+        folded(shell, reached(shell), true);
     },
-    /** Close the innermost fold the cursor is in. */
+    /** Close what's chosen, or the innermost fold the cursor is in. */
     "fold-close": (shell) => {
-        const node = shell.foldAt();
-        if (node !== null) {
-            shell.toggle(node.key, false);
-        }
+        folded(shell, reached(shell), false);
     },
-    /** Open the nearest fold of the kind typed after the key, or close it: `zf` and its letter. */
+    /** Choose the nearest fold of the kind typed after the key, then open or close it: `zf` and its letter. */
     "fold-nearest": (shell, given) => {
-        const kind = given.kind === null ? null : shell.kinds.byLetter(given.kind);
-        const node = kind === null ? null : shell.foldAt(kind.name);
-        if (node !== null) {
-            shell.toggle(node.key);
+        const kind = typed(shell, given);
+        if (kind !== null && nearest(shell, kind)) {
+            folded(shell, shell.chosen());
+            shell.say(null);
         }
     },
-    /** Open every fold, as `zR` does. */
+    /** Choose the nearest fold of the kind typed after the key around the cursor, in place of what was chosen. */
+    "choose-nearest": (shell, given) => {
+        const kind = typed(shell, given);
+        if (kind !== null) {
+            nearest(shell, kind);
+        }
+    },
+    /**
+     * Choose every fold of the kind typed after the key within what's chosen, or everywhere where nothing is; where
+     * there's none, say so and leave what's chosen.
+     */
+    "choose-every": (shell, given) => {
+        const kind = typed(shell, given);
+        if (kind === null) {
+            return;
+        }
+        const chosen = shell.chosen();
+        const under =
+            chosen.length === 0
+                ? every(shell.document.root)
+                : chosen.flatMap((key) => {
+                      const node = shell.document.node(key);
+                      return node === null ? [] : every(node).slice(1);
+                  });
+        const found = under.filter((node) => foldKind(node) === kind.name).map((node) => node.key);
+        if (found.length === 0) {
+            shell.say(`no ${kind.called} ${chosen.length === 0 ? "anywhere" : "in what's chosen"}`);
+            return;
+        }
+        shell.choose(found);
+        shell.say(`${kind.called}: ${new Set(found).size} chosen`);
+    },
+    /** Choose nothing, and clear what the status line says. */
+    "choose-none": (shell) => {
+        shell.choose([]);
+        shell.say(null);
+    },
+/** Open every fold, as `zR` does. */
     "open-all": (shell) => {
         shell.level(true);
     },
@@ -95,6 +172,9 @@ export const vimBindings: readonly Bind[] = [
     { keys: "zo", command: "fold-open", modes: ["normal"] },
     { keys: "zc", command: "fold-close", modes: ["normal"] },
     { keys: "zf{kind}", command: "fold-nearest", modes: ["normal"] },
+    { keys: "<Space>f{kind}", command: "choose-nearest", modes: ["normal"] },
+    { keys: "<Space>F{kind}", command: "choose-every", modes: ["normal"] },
+    { keys: "<Esc>", command: "choose-none", modes: ["normal"] },
     { keys: "zR", command: "open-all", modes: ["normal"] },
     { keys: "zM", command: "close-all", modes: ["normal"] },
     { keys: "zr", command: "open-more", modes: ["normal"] },
@@ -104,9 +184,16 @@ export const vimBindings: readonly Bind[] = [
 /**
  * Thread `bindings` into vim's mode: each command an action of vim's, reached by its keys in its modes.
  *
- * vim's mappings are the page's, not one editor's, so a command finds the shell it runs in by its editor.
+ * vim's mappings are the page's, not one editor's, so a command finds the shell it runs in by its editor. Where a
+ * binding starts with Space, the shell's leader, vim's own Space (a character right) is unbound, since vim acts on a
+ * key that's bound whole before waiting for the keys after it.
  */
 export function bindVim(bindings: readonly Bind[]): void {
+    if (bindings.some((bind) => bind.keys.startsWith("<Space>"))) {
+        // vim's own Space is bound in no mode of its own, which `unmap` reaches with no mode given; its declared type
+        // asks for one, though what it does compares the mode given with the binding's, none matching none.
+        (Vim.unmap as (keys: string, mode?: string) => unknown)("<Space>");
+    }
     for (const bind of bindings) {
         const run = commands[bind.command];
         if (run === undefined) {

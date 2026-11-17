@@ -53,11 +53,13 @@ export class BrokenLaw extends Error {
 const runs = Number(process.env["LUP_EXPLORE"] ?? 0);
 
 /**
- * How long a promise's runs, its shrinking among them, may take before it's failed for taking it, in milliseconds:
- * shrinking a large counterexample can otherwise outgrow the memory of the test's worker, which then dies saying
- * nothing of what broke. Runs make no real time of their own, so this is a ceiling on work, not a wait.
+ * How long a promise's runs, its shrinking among them, may take before it's failed for taking it, in milliseconds. Runs
+ * make no real time of their own, so this is a ceiling on work, not a wait.
  */
 const ceiling = 60_000;
+
+/** How long vitest lets a promise's test run: past the ceiling, so fast-check reports what broke before vitest stops it. */
+const timeout = ceiling + 10_000;
 
 /** Return how a promise's property is run: seeded from its sentence in the gate, so a run is repeatable; at random, as many times as `LUP_EXPLORE` says, apart from it. */
 function settings(sentence: string): fc.Parameters<unknown> {
@@ -70,6 +72,15 @@ function settings(sentence: string): fc.Parameters<unknown> {
         seed = (Math.imul(seed, 31) + (char.codePointAt(0) ?? 0)) | 0;
     }
     return { ...limits, seed, numRuns: 100 };
+}
+
+/**
+ * Let what a run left queued run: an editor schedules its own work (measuring, observing) on the page's timers, each
+ * holding the editor, and a run that only awaits promises never gives those timers a turn. Shrinking runs thousands
+ * back to back, which kept every one's editor and ran out of memory before saying what broke.
+ */
+async function drained(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 class Drawing implements Testing {
@@ -89,11 +100,15 @@ export function scenario(sentence: string, story: (by: Testing) => void | Promis
     test(sentence, async () => {
         await fc.assert(
             fc.asyncProperty(fc.gen(), async (draw) => {
-                await story(new Drawing(draw));
+                try {
+                    await story(new Drawing(draw));
+                } finally {
+                    await drained();
+                }
             }),
             settings(sentence),
         );
-    });
+    }, timeout);
 }
 
 /**
@@ -118,9 +133,10 @@ export function law<M, S, E>(machine: Machine<M, S, E>, sentence: string, holds:
                     }
                 } finally {
                     machine.end?.(running);
+                    await drained();
                 }
             }),
             settings(sentence),
         );
-    });
+    }, timeout);
 }

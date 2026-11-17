@@ -89,7 +89,7 @@ SHELL_FOLDS = [
         called="party",
         level=0,
         starts_open=True,
-        colour="fg",
+        colour="cyan",
     ),
     FoldKind(
         name="file", letter="f", called="file", level=2, starts_open=True, colour="link"

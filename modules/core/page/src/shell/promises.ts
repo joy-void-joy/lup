@@ -7,22 +7,34 @@ import { expect } from "vitest";
 import { Vim, getCM } from "@replit/codemirror-vim";
 
 import type { Blocks, Fold, Viewing } from "../generated/read";
-import { every, foldKind, section } from "../document/tree";
+import { every, foldKind, offsetOf, section } from "../document/tree";
 import { blocks, fold } from "../testing/blocks";
 import { Memory, looks } from "../testing/memory";
 import { law, scenario, type Machine } from "../testing/promise";
 import { bindVim, vimBindings } from "./keymap";
+import { beside, cursorFolds, type Beside } from "./margin";
 import { Shell, type ShellState } from "./shell";
 
 bindVim(vimBindings);
 
 const root: Viewing = { module: "notes", view: "pile", given: { pile: "p" } };
 
-/** What can happen to the shell: the operator's key, or a view answering again. */
-type Event = { readonly key: string } | { readonly answer: Blocks };
+/** What can happen to the shell: the operator's keys, each as vim names it, or a view answering again. */
+type Event = { readonly keys: readonly string[] } | { readonly answer: Blocks };
 
-/** The keys the operator types, as vim names them: moving, folding, entering and leaving insert mode, and text. */
-const keys = fc.constantFrom("j", "k", "gg", "G", "za", "zo", "zc", "zr", "zm", "zR", "zM", "zfn", "i", "a", "o", "x", "<Esc>", "<C-[>", "v", "<Space>");
+/** The fold kinds the shell's runs lay their folds out in: a module's, and one of the core's. */
+const kinds = ["note", "body"];
+
+/**
+ * What the operator types, each a whole command, as vim names its keys: moving, folding, choosing, entering and leaving
+ * insert mode, and text.
+ */
+const keys = fc.constantFrom(
+    ..."j k gg G za zo zc zr zm zR zM zfn zfb i a o x v".split(" ").map((typed) => [...typed]),
+    ["<Esc>"],
+    ["<C-[>"],
+    ...["fn", "fb", "Fn", "Fb", "fz"].map((typed) => ["<Space>", ...typed]),
+);
 
 /** The keys that leave insert mode, as vim has them. */
 const leaving = ["<Esc>", "<C-[>", "<C-c>"];
@@ -31,14 +43,13 @@ function answer(content: Blocks["blocks"]): Blocks {
     return { blocks: content, summary: [], offers: [] };
 }
 
-/** Send `key`, as vim names it, to `shell`'s editor, as the keyboard does. */
-function press(shell: Shell, key: string): void {
+/** Send `keys`, each as vim names it, to `shell`'s editor, as the keyboard does. */
+function press(shell: Shell, keys: readonly string[]): void {
     const cm = getCM(shell.view);
     if (cm === null) {
         throw new Error("the shell's editor has no vim mode");
     }
-    const named = key.startsWith("<") ? [key] : [...key];
-    for (const each of named) {
+    for (const each of keys) {
         Vim.handleKey(cm, each, "user");
     }
 }
@@ -49,28 +60,61 @@ interface Running {
     readonly parent: HTMLElement;
 }
 
-const shell: Machine<Running, ShellState, Event> = {
+/** One fold the document shows: its key, its kind, and the lines its summary and its end are on, from 1. */
+interface Spanned {
+    readonly key: string;
+    readonly kind: string;
+    readonly first: number;
+    readonly last: number;
+}
+
+/** The shell's state, with what its margin shows beside each line and where each fold is. */
+interface Seen extends ShellState {
+    readonly folds: readonly Spanned[];
+    /** Beside each line, the first first. */
+    readonly margin: readonly Beside[];
+}
+
+/** Return what `shell` shows, its margin and its folds among it. */
+function seen(shell: Shell): Seen {
+    const doc = shell.view.state.doc;
+    const bright = cursorFolds(shell, shell.view.state);
+    const margin: Beside[] = [];
+    for (let number = 1; number <= doc.lines; number++) {
+        const line = doc.line(number);
+        margin.push(beside(shell, line.from, line.to, bright));
+    }
+    const folds = every(shell.document.root)
+        .filter((node) => foldKind(node) !== null && node.lines > 0)
+        .map((node) => {
+            const start = offsetOf(node);
+            return { key: node.key, kind: foldKind(node) ?? "", first: doc.lineAt(start).number, last: doc.lineAt(start + node.size).number };
+        });
+    return { ...shell.state(), folds, margin };
+}
+
+const shell: Machine<Running, Seen, Event> = {
     name: "the shell",
     start(by) {
         const memory = new Memory();
-        memory.set(root, answer(by.any(blocks(2))));
+        memory.set(root, answer(by.any(blocks(2, kinds))));
         const parent = document.createElement("div");
         document.body.append(parent);
         return { shell: new Shell(parent, root, looks, memory), memory, parent };
     },
     events: fc.oneof(
-        { weight: 4, arbitrary: keys.map((key): Event => ({ key })) },
-        { weight: 1, arbitrary: blocks(1).map((content): Event => ({ answer: answer(content) })) },
+        { weight: 4, arbitrary: keys.map((typed): Event => ({ keys: typed })) },
+        { weight: 1, arbitrary: blocks(1, kinds).map((content): Event => ({ answer: answer(content) })) },
     ),
     apply(running, event) {
-        if ("key" in event) {
-            press(running.shell, event.key);
+        if ("keys" in event) {
+            press(running.shell, event.keys);
         } else {
             running.memory.set(root, event.answer);
         }
     },
     state(running) {
-        return running.shell.state();
+        return seen(running.shell);
     },
     end(running) {
         running.shell.destroy();
@@ -82,20 +126,77 @@ law(shell, "The cursor never leaves insert mode unless the operator leaves it, a
     if (step.before.mode !== "insert" || step.after.mode === "insert") {
         return true;
     }
-    return "key" in step.event && leaving.includes(step.event.key);
+    return "keys" in step.event && step.event.keys.some((key) => leaving.includes(key));
 });
 
-law(shell, "A view answering again leaves open what the operator opened and closed what they closed, of the folds it still shows", (step) => {
+law(shell, "A view answering again leaves open what the operator opened and closed what they closed, of the folds it still shows as the same kind", (step) => {
     if (!("answer" in step.event)) {
         return true;
     }
+    const kindBefore = new Map(step.before.folds.map((fold) => [fold.key, fold.kind]));
     const kept = new Set(step.after.closed);
-    const still = new Set(
-        every(section("root", root, step.event.answer))
-            .filter((node) => foldKind(node) !== null)
-            .map((node) => node.key),
-    );
-    return step.before.closed.every((key) => !still.has(key) || kept.has(key));
+    return step.after.folds.every((fold) => kindBefore.get(fold.key) !== fold.kind || step.before.closed.includes(fold.key) === kept.has(fold.key));
+});
+
+/** Return the folds `seen` shows of `kind` under one of the folds keyed in `chosen`, or anywhere where none is. */
+function under(seen: Seen, chosen: readonly string[], kind: string): string[] {
+    const outer = seen.folds.filter((fold) => chosen.includes(fold.key));
+    return seen.folds
+        .filter((fold) => fold.kind === kind && (chosen.length === 0 || outer.some((each) => each.first < fold.first && fold.last <= each.last)))
+        .map((fold) => fold.key);
+}
+
+/** Return the keys typed, where the step is the operator typing them in Normal mode. */
+function typedInNormal(step: { readonly before: Seen; readonly event: Event }): readonly string[] | null {
+    return "keys" in step.event && step.before.mode === "normal" ? step.event.keys : null;
+}
+
+law(shell, "Space F and a fold kind's letter chooses every fold of the kind within what was chosen, or anywhere where nothing was; where there's none, it says so and leaves what was chosen", (step) => {
+    const typed = typedInNormal(step);
+    if (typed === null || typed.length !== 3 || typed[0] !== "<Space>" || typed[1] !== "F") {
+        return true;
+    }
+    const kind = looks.folds.find((each) => each.kind.letter === typed[2])?.kind.name;
+    const found = kind === undefined ? [] : under(step.before, step.before.chosen, kind);
+    if (found.length === 0) {
+        return step.after.said !== null && JSON.stringify(step.after.chosen) === JSON.stringify(step.before.chosen);
+    }
+    return JSON.stringify(step.after.chosen) === JSON.stringify(found);
+});
+
+law(shell, "Space f and a fold kind's letter chooses the nearest fold of the kind around the cursor alone; where there's none, it says so and leaves what was chosen", (step) => {
+    const typed = typedInNormal(step);
+    if (typed === null || typed.length !== 3 || typed[0] !== "<Space>" || typed[1] !== "f") {
+        return true;
+    }
+    const kind = looks.folds.find((each) => each.kind.letter === typed[2])?.kind.name;
+    const around = step.before.folds.filter((fold) => fold.kind === kind && fold.first <= step.before.line && step.before.line <= fold.last);
+    const nearest = around.at(-1);
+    if (nearest === undefined) {
+        return step.after.said !== null && JSON.stringify(step.after.chosen) === JSON.stringify(step.before.chosen);
+    }
+    return JSON.stringify(step.after.chosen) === JSON.stringify([nearest.key]);
+});
+
+law(shell, "za, zo or zc on what's chosen opens or closes every fold chosen alike, then nothing is chosen", (step) => {
+    const typed = typedInNormal(step);
+    if (typed === null || typed[0] !== "z" || !["a", "o", "c"].includes(typed[1] ?? "") || typed.length !== 2 || step.before.chosen.length === 0) {
+        return true;
+    }
+    const still = step.before.chosen.filter((key) => step.after.folds.some((fold) => fold.key === key));
+    const closed = still.filter((key) => step.after.closed.includes(key));
+    const wanted = typed[1] === "o" ? "open" : typed[1] === "c" ? "closed" : step.before.chosen.every((key) => !step.before.closed.includes(key)) ? "closed" : "open";
+    return step.after.chosen.length === 0 && closed.length === (wanted === "closed" ? still.length : 0);
+});
+
+law(shell, "What's chosen changes only as the operator chooses, acts on it or leaves it with Esc, and a view answering again drops only what it no longer shows", (step) => {
+    if ("answer" in step.event) {
+        const shown = new Set(step.after.folds.map((fold) => fold.key));
+        return JSON.stringify(step.after.chosen) === JSON.stringify(step.before.chosen.filter((key) => shown.has(key)));
+    }
+    const typed = step.event.keys;
+    const choosing = step.before.mode === "normal" && (typed[0] === "<Space>" || typed[0] === "<Esc>" || typed[0] === "z");
+    return choosing || JSON.stringify(step.after.chosen) === JSON.stringify(step.before.chosen);
 });
 
 /** A source answering `root` with `blocks` alone. */
@@ -114,9 +215,9 @@ scenario("A fold of a kind that starts closed shows its summary alone until it's
         const node = opened.document.node(key);
         expect(node === null ? null : foldKind(node)).toBe("note");
         expect(opened.state().closed).toContain(key);
-        press(opened, "zfn");
+        press(opened, ["z", "f", "n"]);
         expect(opened.state().closed).not.toContain(key);
-        press(opened, "zfn");
+        press(opened, ["z", "f", "n"]);
         expect(opened.state().closed).toContain(key);
     } finally {
         opened.destroy();
@@ -144,7 +245,7 @@ scenario("A fold read as it opens reads its view once opened, and shows its answ
     const opened = new Shell(document.createElement("div"), root, looks, memory);
     try {
         expect(opened.state().text).toBe(summary);
-        press(opened, "zfn");
+        press(opened, ["z", "f", "n"]);
         expect(opened.state().text.startsWith(`${summary}\n`)).toBe(true);
         expect(opened.state().text.length).toBeGreaterThan(summary.length);
     } finally {
