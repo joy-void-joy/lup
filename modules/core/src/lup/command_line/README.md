@@ -1,6 +1,6 @@
 # The command line
 
-One command line for developing with lup, the one universal interface: `lup <module> <name> …` runs any of a module's tools, commands and views by name, as whoever types it may. A project's own command (`harmon …`) is the same command line over the project's modules. Its library side (`lup.command_line`) is what typing does: parsing words into a call that crosses (`lup.running.wire`), handing it to an answerer, and printing the reply. Answering in this process, `lup`'s own script and a project's are the environment's (`lup.environment.command_line`).
+One command line for developing with lup, the one universal interface: `lup <module> <name> …` runs any of a module's tools, commands and views by name, as whoever types it may, and the core's are typed without its name (`lup init`), since the core is lup itself. A project's own command (`harmon …`) is the same command line over the modules the project gives it. Its library side (`lup.command_line`) is what typing does: parsing words into a call that crosses (`lup.running.wire`), handing it to an answerer, and printing the reply. Answering in this process, `lup`'s own script and a project's are the environment's (`lup.environment.command_line`).
 
 ## Typing
 
@@ -11,13 +11,15 @@ One command line for developing with lup, the one universal interface: `lup <mod
 - a field a word can't say (a model, a mapping) is written as JSON;
 - a field's docstring is its help, as it's its description in the model's JSON Schema (`lup.types`), and the method's docstring is the command's.
 
+**One module at the top.** A command line types one module's methods at its top level, without the module's name, and every other module's under its name: `lup`'s is the core (`lup init`, `lup note …`, `lup hosting open`), a project's own command's the first module it's given. So no module is named as one of the core's tools, commands and views is typed, which `lup` would type alike: resolving a declaration refuses one, naming it and the method, and lup's program on the operator's machine refuses a plan holding one (`Plan.shadowed`). A method's name and a module's are compared as they're typed (`lup.running.plan.typed`).
+
 A command takes everything as arguments: one missing is refused as the words are read, nothing runs, and nothing is ever asked for, so an agent or a test typing it fails rather than hangs. Words starting with `-` that aren't options go after `--`.
 
 What a run prints: a view's text (`Blocks.text`), what the operator sees said in lines; a tool's or a command's answer, words as they are and a model as its JSON; a refusal's reason, on standard error. Its exit status is 0 where it ran or showed help, 1 where the call was refused, and 2 where the words didn't parse.
 
 ## Who calls, and what they may run
 
-Who calls isn't the command line's to say. It hands each call to an answerer (`Answerer`), which says who the calls are by and offers the project's plan (`offered`), then sends each call and returns its reply (`answered`). The call itself carries no `by`: whoever carries it adds one. The command line offers, and `--help` lists, only what the plan's doorways let that party call: the operator's commands in their terminal, an agent's tools and the commands and views their `by` admits in their room. `lup --help` lists the modules with something the party may run, and `lup <module> --help` lists those methods.
+Who calls isn't the command line's to say. It hands each call to an answerer (`Answerer`), which says who the calls are by and offers the project's plan (`offered`), then sends each call and returns its reply (`answered`). The call itself carries no `by`: whoever carries it adds one. The command line offers, and `--help` lists, only what the plan's doorways let that party call: the operator's commands in their terminal, an agent's tools and the commands and views their `by` admits in their room. `lup --help` lists the core's methods the party may run and the other modules with something they may run, and `lup <module> --help` lists that module's.
 
 Its help is typer's rich layout where it prints to a terminal, as the operator's command line does, and plain where its output is piped, as an agent's always is.
 
@@ -44,10 +46,10 @@ from lup.environment.command_line import command_line
 from harmon import Harmon
 from lup_discord import Discord
 
-main = command_line("harmon", Discord(), Harmon())
+main = command_line("harmon", Harmon(), Discord())
 ```
 
-Whoever installs the project gets a plain command: lup's default modules and those given, answered in this process by whoever runs it (`Operator`). Each secret a part holds is read from the environment variable named after the command and the secret, in capitals, each `-` a `_` (`HARMON_TOKEN`), or a line of `.env` or `.env.local` in the current directory setting it; the environment wins over `.env.local`, which wins over `.env`. In development, where one of the modules given is code that a worktree holding a declaration tracks, the command reads that declaration with its layers instead, so it offers what the dashboard does. It goes by where the code lives, never the current directory, so an installed command run inside another project's worktree never reads that project's declaration.
+Whoever installs the project gets a plain command: lup's default modules and those given, answered in this process by whoever runs it (`Operator`). It offers the methods of the modules it's given alone, the first's at its top level (`harmon play`) and the others' under their names (`harmon discord post`), never the core's: those are lup's development side, the operator's and agents' (`lup init`, the inbox's), and `harmon` isn't `lup`. The core still runs under it, its parts serving the others'. Each secret a part holds is read from the environment variable named after the command and the secret, in capitals, each `-` a `_` (`HARMON_TOKEN`), or a line of `.env` or `.env.local` in the current directory setting it; the environment wins over `.env.local`, which wins over `.env`. In development, where one of the modules given is code that a worktree holding a declaration tracks, the command reads that declaration with its layers instead, so its modules have the settings the dashboard shows. It goes by where the code lives, never the current directory, so an installed command run inside another project's worktree never reads that project's declaration.
 
 ## Promises
 

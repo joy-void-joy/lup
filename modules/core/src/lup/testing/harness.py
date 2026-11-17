@@ -20,7 +20,7 @@ from lup.doors.door import Accepted, Refused
 from lup.doors.parties import Party
 from lup.doors.tool import ToolSpec
 from lup.errors import LupError
-from lup.running.plan import Plan
+from lup.running.plan import CORE, Plan
 from lup.running.wire import (
     Caller,
     CommandCalled,
@@ -367,14 +367,21 @@ class Started(Model, arbitrary_types_allowed=True):
         call = Viewed(module=module, view=view, given=sent(given), by=by)
         return await self.doors.answered(call)
 
-    async def typed(self, words: list[str], by: Caller) -> Typed:
+    async def typed(
+        self, words: list[str], by: Caller, command: list[str] | None = None
+    ) -> Typed:
         """Type `words` on the command line, `lup`, as `by` does in their terminal or their room, and say what it did: what it printed and how it ended, what the help it showed listed, and the call it made.
 
-        It offers what this lup's plan lets `by` call, and makes its call
-        through these doors, every law checked over it. Raise `BlockError`
-        where a view it reads names a kind nobody declares, as `view` does.
+        It offers what this lup's plan lets `by` call, the core's methods at
+        its top level, and makes its call through these doors, every law
+        checked over it. Where `command` names modules, it's a project's own
+        command instead, given those modules: it offers theirs alone, the
+        first's at its top level. Raise `BlockError` where a view it reads
+        names a kind nobody declares, as `view` does.
         """
-        return await line.typed(words, Harnessed(started=self, by=by), "lup")
+        harnessed = Harnessed(started=self, by=by, offering=command)
+        top = CORE if command is None else next(iter(command), None)
+        return await line.typed(words, harnessed, "lup", top=top)
 
 
 class Harnessed(Model, Answerer, arbitrary_types_allowed=True):
@@ -382,10 +389,17 @@ class Harnessed(Model, Answerer, arbitrary_types_allowed=True):
 
     started: Started
     by: Caller
+    offering: list[str] | None = None
+    """The modules whose methods it offers, by name, as a project's own
+    command does; none for every module, as `lup` offers them."""
 
     async def offered(self) -> Offered:
-        """Return who the calls are by, and the started lup's plan."""
-        return Offered(by=self.by, plan=self.started.plan)
+        """Return who the calls are by, and the started lup's plan, of the modules it offers alone."""
+        plan = self.started.plan
+        offering = self.offering
+        return Offered(
+            by=self.by, plan=plan if offering is None else plan.only(offering)
+        )
 
     async def answered(self, call: wire.Call) -> wire.Reply:
         """Make `call` through the started lup's doors, by the party this names, every law checked over it, and return its reply."""

@@ -10,6 +10,7 @@ from lup.inbox.part import Inboxes, Speaking
 from lup.inbox.promises import InboxPromises
 from lup.inbox.records import EDGES, NODES
 from lup.programs.promises import ProgramsPromises
+from lup.running.plan import CORE
 from lup.running.promises import RunningPromises
 from lup.shell.blocks import Viewing
 from lup.shell.kinds import SHELL_FOLDS, SHELL_TONES, FoldKind, Folds, Tones
@@ -31,7 +32,7 @@ class Core(Module):
     as any field, and the kinds of record the inbox keeps in the store.
     """
 
-    name = "core"
+    name = CORE
     parts: Parts = Parts.of(
         DeclarationPromises,
         ProfilesPromises,

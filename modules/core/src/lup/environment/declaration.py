@@ -23,9 +23,13 @@ from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import applied, listed, set_fields
 from lup.declaration.module import Module, Modules
 from lup.declaration.project import Project
+from lup.doors.command import CommandDoor
+from lup.doors.tool import ToolDoor
 from lup.environment.doors import Doors
 from lup.errors import LupError
+from lup.running.plan import typed
 from lup.shell.looks import Looks
+from lup.shell.view import ViewDoor
 from lup.store.records import Edge, Kinds, Node, Recorded
 from lup.types import Model
 
@@ -141,8 +145,9 @@ def resolve(project: Project) -> Resolved:
     Raise `ProjectError` where a name its verbs give isn't there, where it holds
     no module named `core`, where a module it holds requires one it doesn't,
     where modules require each other in a cycle, where what they serve can't
-    be served (`Doors.of`), or where what they declare for their views clashes
-    (`Looks.of`).
+    be served (`Doors.of`), where a module is named as the core's tools,
+    commands and views are typed (`unshadowed`), or where what they declare for
+    their views clashes (`Looks.of`).
     """
     selected = project.modules.over(Modules.default())
     placed = selected.resolve(default(), shipped())
@@ -178,12 +183,40 @@ def resolve(project: Project) -> Resolved:
         )
         about = [name for pair in unmet for name in pair]
         raise ProjectError(message, about=list(dict.fromkeys(about)))
+    doors = Doors.of(modules)
+    unshadowed(modules, doors)
     return Resolved(
         modules=modules,
-        doors=Doors.of(modules),
+        doors=doors,
         looks=Looks.of(modules),
         kinds=kept(modules),
     )
+
+
+def unshadowed(modules: list[Module], doors: Doors) -> None:
+    """Raise `ProjectError` where a module's name, as it's typed, is one a tool, command or view of the core takes, naming both: `lup` types the core's at its top level and every other module by its name, so both would be typed alike."""
+    top = {
+        typed(entry.name): entry
+        for entry in doors.entries()
+        if entry.serves.module.name == Core.name
+        and isinstance(entry.method.door, ToolDoor | CommandDoor | ViewDoor)
+    }
+    shadowed = [
+        (module.name, top[typed(module.name)])
+        for module in modules
+        if module.name != Core.name and typed(module.name) in top
+    ]
+    if shadowed:
+        clashes = [
+            f"the module `{name}` and {entry.method.door.called} of the core's, `{entry.name}`"
+            for name, entry in shadowed
+        ]
+        message = (
+            "`lup` types the core's tools, commands and views at its top level, "
+            f"and every other module by its name, so {'; '.join(clashes)} would "
+            "be typed alike: rename the module"
+        )
+        raise ProjectError(message, about=[name for name, _ in shadowed])
 
 
 def cycle(module: type[Module], trail: list[type[Module]]) -> list[str] | None:

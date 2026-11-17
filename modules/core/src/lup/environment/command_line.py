@@ -38,6 +38,7 @@ from lup.environment.running.container import REPLIES, answered
 from lup.environment.running.planning import plan_of
 from lup.environment.settings import LupSettings
 from lup.programs import ProgramFailedError, run
+from lup.running.plan import CORE
 from lup.running.wire import (
     Call,
     Caller,
@@ -84,10 +85,18 @@ class InProcess(MutableModel, Answerer, arbitrary_types_allowed=True):
     environment, so a part holding one runs apart."""
     running: Running | None = None
     """The parts started here, once a call has come."""
+    offering: list[str] | None = None
+    """The modules whose methods it offers, by name: those a project's own
+    command is given, never the core's, which are lup's development side; none
+    for every module the project resolves to, as `lup` offers them."""
 
     async def offered(self) -> Offered:
-        """Return who the calls are by, and the project's plan."""
-        return Offered(by=self.by, plan=plan_of(self.resolved, []))
+        """Return who the calls are by, and the project's plan, of the modules it offers alone."""
+        plan = plan_of(self.resolved, [])
+        offering = self.offering
+        return Offered(
+            by=self.by, plan=plan if offering is None else plan.only(offering)
+        )
 
     def startable(self) -> list[str]:
         """Name each part started here, `module.Part`: those holding nothing beyond secrets, every one of which is given."""
@@ -155,12 +164,12 @@ class InProcess(MutableModel, Answerer, arbitrary_types_allowed=True):
             self.running = None
 
 
-def ran(answerer: Answerer, name: str, words: list[str]) -> NoReturn:
-    """Run the command line called `name` on `words` over `answerer`, printing what it prints, stop what it started in this process, and end with its status."""
+def ran(answerer: Answerer, name: str, words: list[str], top: str | None) -> NoReturn:
+    """Run the command line called `name` on `words` over `answerer`, the methods of the module named `top` typed at its top level, printing what it prints, stop what it started in this process, and end with its status."""
 
     async def running() -> int:
         try:
-            done = await typed(words, answerer, name, sys.stdout, sys.stderr)
+            done = await typed(words, answerer, name, sys.stdout, sys.stderr, top=top)
         finally:
             await answerer.stopped()
         return done.status
@@ -193,12 +202,13 @@ def main() -> None:
                 Calling(socket=calling, repository=layout.main.name),
                 "lup",
                 sys.argv[1:],
+                CORE,
             )
         resolved = resolve(read(layout, machine()).project)
     except (ProgramFailedError, ProjectError) as failure:
         refused("lup", failure)
     answerer = InProcess(by=Operator(), resolved=resolved, repository=layout.main.name)
-    ran(answerer, "lup", sys.argv[1:])
+    ran(answerer, "lup", sys.argv[1:], CORE)
 
 
 def developed(modules: list[Module]) -> Project | None:
@@ -257,9 +267,12 @@ def secrets_of(name: str, held: list[str]) -> dict[str, str]:
 def command_line(name: str, *modules: Module) -> Callable[[], None]:
     """Return a project's own command, called `name`: the command line over lup's default modules and `modules`, run in this process by whoever runs it, for a project's `[project.scripts]` to name.
 
-    In development, where one of `modules` is code a worktree tracks and that
-    worktree holds a declaration, the declaration, with its layers, says the
-    modules instead (`developed`). Each secret a part holds is read from the
+    It offers the methods of `modules` alone, the first's at its top level and
+    the others' under their names, never the core's, which are lup's
+    development side: `harmon` isn't `lup`. In development, where one of
+    `modules` is code a worktree tracks and that worktree holds a declaration,
+    the declaration, with its layers, says the modules and their settings
+    instead (`developed`). Each secret a part holds is read from the
     environment (`secrets_of`).
     """
 
@@ -282,7 +295,8 @@ def command_line(name: str, *modules: Module) -> Callable[[], None]:
             repository=name,
             secrets=secrets_of(name, list(dict.fromkeys(held))),
             command=name,
+            offering=[each.name for each in modules],
         )
-        ran(answerer, name, sys.argv[1:])
+        ran(answerer, name, sys.argv[1:], modules[0].name if modules else None)
 
     return main

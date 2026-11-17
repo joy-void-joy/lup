@@ -24,8 +24,10 @@ from lup import (
     Part,
     Parts,
     Project,
+    ProjectError,
 )
-from lup.testing import Accepted, Testing
+from lup.testing import Accepted, Testing, raises
+lazy from lup import Core
 
 
 class Jotted(Model):
@@ -110,9 +112,33 @@ class Seal(Module):
     parts: Parts = Parts.of(Sealing)
 
 
+class Stamping(Part):
+    """A command a project adds to the core, as the core's own are typed: at `lup`'s top level."""
+
+    @lup.command
+    async def stamp(self, clearing: Clearing, by: Operator) -> str:
+        """Stamp a jot."""
+        return f"stamped {clearing.number}"
+
+
+class Stamp(Module):
+    """A module named as a command of the core's is typed."""
+
+    name = "stamp"
+
+
 def jotting() -> Project:
     """Return a project of lup's default modules, the jots and the seal."""
     return Project(modules=Modules.default().add(Jot(), Seal()))
+
+
+def stamping() -> Project:
+    """Return a project of lup's default modules, the core given a command of the project's own, the jots and the seal."""
+    return Project(
+        modules=Modules.default()
+        .edit(Core(parts=Parts().add(Stamping)), why="a command typed at the top")
+        .add(Jot(), Seal())
+    )
 
 
 def words(jotted: Jotted) -> list[str]:
@@ -209,3 +235,48 @@ class CommandLinePromises(Part):
         assert isinstance(viewed.output, Blocks)
         assert typed.status == 0
         assert typed.output.splitlines() == viewed.output.text().splitlines()
+
+    @lup.promise
+    async def the_cores_methods_are_typed_at_the_top(self, by: Testing) -> None:
+        """The core's tools, commands and views are typed at `lup`'s top level, without its name, and listed there beside the other modules, each typed by its name; the core is never typed by its own."""
+        number = by.any(Clearing).number
+        started = await by.started(stamping())
+        top = await started.typed(["--help"], Operator())
+        assert top.listed is not None
+        assert all(each in top.listed for each in ["stamp", "jot", "seal"])
+        assert "core" not in top.listed
+        stamped = await started.typed(["stamp", str(number)], Operator())
+        assert stamped.call is not None
+        assert stamped.status == 0
+        named = await started.typed(["core", "stamp", str(number)], Operator())
+        assert named.call is None
+        assert named.status != 0
+        cleared = await started.typed(["jot", "clear", str(number)], Operator())
+        assert cleared.call is not None
+
+    @lup.promise
+    async def a_module_named_as_the_cores_methods_is_refused(self, by: Testing) -> None:
+        """A module whose name is typed as one of the core's tools, commands or views is refused as the declaration resolves, naming it: at `lup`'s top level, both would be typed alike."""
+        shadowing = stamping().modules.add(Stamp())
+        with raises(ProjectError) as refused:
+            await by.started(Project(modules=shadowing))
+        assert "stamp" in refused.raised().about
+
+    @lup.promise
+    async def a_projects_command_offers_its_modules_alone(self, by: Testing) -> None:
+        """A project's own command offers the methods of the modules it's given alone, the first's at its top level and the others' typed by their names, never the core's, which are lup's development side."""
+        number = by.any(Clearing).number
+        started = await by.started(stamping())
+        command = ["jot", "seal"]
+        top = await started.typed(["--help"], Operator(), command)
+        assert top.listed is not None
+        assert all(each in top.listed for each in ["jot-down", "clear", "seal"])
+        assert all(each not in top.listed for each in ["stamp", "jot", "core"])
+        cleared = await started.typed(["clear", str(number)], Operator(), command)
+        assert cleared.call is not None
+        assert cleared.status == 0
+        sealed = await started.typed(["seal", "seal", str(number)], Operator(), command)
+        assert sealed.call is not None
+        stamped = await started.typed(["stamp", str(number)], Operator(), command)
+        assert stamped.call is None
+        assert stamped.status != 0
