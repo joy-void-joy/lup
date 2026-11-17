@@ -87,6 +87,10 @@ class Opened(Model):
 OPENINGS = TypeAdapter(dict[str, Opening])
 
 
+class Statusing(Model):
+    """Asking what the machine runs, giving nothing."""
+
+
 class Resuming(Model):
     """Asking to open again each project the machine's parts ran before they last stopped, giving nothing."""
 
@@ -199,6 +203,7 @@ class Projects(Part, machine=True, shared=True):
                 "UV_PROJECT_ENVIRONMENT": "/var/lup/environment",
                 "UV_CACHE_DIR": "/var/lup/cache",
                 "UV_PYTHON_DOWNLOADS": "never",
+                "UV_PYTHON_INSTALL_DIR": str(source.interpreters),
             },
         )
 
@@ -282,6 +287,27 @@ class Projects(Part, machine=True, shared=True):
         self.projects = {}
         if refusals:
             raise ContainerError("; ".join(refusals))
+
+    @lup.command
+    async def status(self, asking: Statusing, by: Operator) -> str:
+        """Say what the machine runs: each project open, the commit it runs, its containers, and the parts waiting for a secret; and each project registered that isn't open."""
+        del asking, by
+        running = [
+            f"{each.repository} runs {each.commit} in "
+            + ", ".join(each.containers)
+            + (
+                f"; waiting on a secret: {', '.join(each.waiting)}"
+                if each.waiting
+                else ""
+            )
+            for each in self.projects.values()
+        ]
+        closed = [
+            f"{repository} is registered, and not open"
+            for repository in self.kept()
+            if repository not in self.projects
+        ]
+        return "\n".join([*running, *closed]) or "nothing is registered or open"
 
     def kept(self) -> dict[str, Opening]:
         """Return each project opened, by its repository, as kept."""
