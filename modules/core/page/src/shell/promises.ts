@@ -132,6 +132,7 @@ scenario("A fold read as it opens reads its view once opened, and shows its answ
         version: null,
         offers: [],
         reaches: null,
+        sighted: null,
         kind: "note",
         summary: [{ text: summary, tone: "plain", ticking: null, gauge: null, refers: null }],
         open: null,
