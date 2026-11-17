@@ -5,3 +5,6 @@ __pycache__/
 # The person's own layer of the declaration and section of the guidance, never committed.
 /lup_project.local.py
 /AGENTS.local.md
+# The page's packages, installed from its lockfile, and its build, which the server serves.
+node_modules/
+/modules/core/src/lup/environment/page/
