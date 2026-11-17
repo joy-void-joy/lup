@@ -401,6 +401,9 @@ class Harnessed(Model, Answerer, arbitrary_types_allowed=True):
                 answered = await self.started.serve(service, given, by)
         return replied(answered)
 
+    async def stopped(self) -> None:
+        """Stop nothing: the harness stops what it started once the promise ends."""
+
 
 class Testing(Party, ABC):
     """The harness: what checks a module's promises, handed to each as `by`, starting lup for them and drawing the values they explore.

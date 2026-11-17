@@ -80,6 +80,10 @@ class Answerer(ABC):
         program on the operator's machine from the socket it came in on.
         """
 
+    @abstractmethod
+    async def stopped(self) -> None:
+        """Stop what answering started where the command line runs, as it ends: a project's parts started in this process; nothing where the calls went elsewhere."""
+
 
 class Typed(Model):
     """What the command line did with the words typed: what it printed, how it ended, what the help it showed listed, and the call it made."""
