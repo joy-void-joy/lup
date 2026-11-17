@@ -31,9 +31,9 @@ from lup.doors.parts import (
     Part,
     Parts,
     Program,
-    ProgramError,
     Runtime,
     Secret,
+    UnrunError,
 )
 from lup.doors.service import UncarriedError, service
 from lup.doors.tool import tool
@@ -102,7 +102,6 @@ __all__ = [
     "Parts",
     "Party",
     "Program",
-    "ProgramError",
     "Project",
     "ProjectError",
     "RefusedError",
@@ -117,6 +116,7 @@ __all__ = [
     "Tone",
     "Tones",
     "UncarriedError",
+    "UnrunError",
     "Viewing",
     "action",
     "command",
