@@ -18,6 +18,7 @@ runs what each runs at `Stopping`, then cancels what it started.
 
 import asyncio
 from contextvars import ContextVar
+from functools import cached_property
 from typing import override
 lazy from pathlib import Path
 
@@ -163,13 +164,18 @@ class Doors(Model):
             )
         return doors
 
-    def entries(self) -> list[Entry]:
-        """List every method each class serves behind a door, in the order of their modules."""
+    @cached_property
+    def listed(self) -> list[Entry]:
+        """Every method each class serves behind a door, in the order of their modules: read once, since what's served doesn't change once resolved."""
         return [
             Entry(serves=each, name=name, method=method)
             for each in self.served
             for name, method in served(each.part).items()
         ]
+
+    def entries(self) -> list[Entry]:
+        """List every method each class serves behind a door, in the order of their modules."""
+        return list(self.listed)
 
     def through(self, door: type[Door]) -> list[Entry]:
         """List every method behind a door of `door`'s class."""

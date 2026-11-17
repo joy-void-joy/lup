@@ -13,7 +13,7 @@ import inspect
 from annotationlib import Format, type_repr
 from collections.abc import Awaitable, Callable, Generator
 from contextlib import contextmanager
-from functools import partial
+from functools import cache, partial
 from types import GenericAlias, UnionType
 from typing import ClassVar, Concatenate, Self, TypeIs, get_args, get_origin, overload
 
@@ -441,10 +441,13 @@ def refuse_taken(owner: type, name: str) -> None:
         raise DoorError(message)
 
 
+@cache
 def served(owner: type) -> dict[str, Method]:
     """Return each method `owner`, or a class it derives from, serves behind a door, by its name, in the order declared.
 
-    A method a subclass declares again stands in its base's place.
+    A method a subclass declares again stands in its base's place. A class's
+    methods don't change once it's made, so each class's are read once, where
+    every slice of a run asks them again.
     """
     return {
         name: value

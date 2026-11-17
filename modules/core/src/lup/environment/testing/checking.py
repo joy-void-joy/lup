@@ -1,4 +1,4 @@
-"""Checking a module's promises, as the gate does: a scenario run on hypothesis's draws, a law over runs of calls through every door of its project, and the smallest run that breaks either kept to say so.
+"""Checking a module's promises, as the gate does: a scenario run on hypothesis's draws, a law over runs of calls through every door of its module, and the smallest run that breaks either kept to say so.
 
 The gate's check is repeatable: each promise draws from a seed its own source
 fixes, so a tree gets the same values, and the same verdict, every time. An
@@ -104,14 +104,14 @@ class Check(Model, arbitrary_types_allowed=True):
         return Kept(promise=self.said())
 
     async def ran(self, harness: Harness) -> None:
-        """Run the promise once, then stop what it started: a scenario's story, or a run of calls through every door of its project, the law checked after each."""
+        """Run the promise once, then stop what it started: a scenario's story, or a run of calls through every door of its module, the law checked after each."""
         try:
             await self.told(harness)
         finally:
             await harness.run.stopped()
 
     async def told(self, harness: Harness) -> None:
-        """Run the promise once: a scenario's story on its class made for it, or a run of calls through every door of its project, the law checked after each."""
+        """Run the promise once: a scenario's story on its class made for it, or a run of calls through every door of its module, the law checked after each."""
         method = self.entry.method
         door = method.door
         if not (isinstance(door, PromiseDoor) and door.law(method.taken)):
@@ -134,7 +134,8 @@ class Check(Model, arbitrary_types_allowed=True):
                 ]
             }
         )
-        drawn = harness.data.draw(st.lists(calls(reached.doors)))
+        module = self.entry.serves.module.name
+        drawn = harness.data.draw(st.lists(calls(reached.doors, module)))
         await asyncio.gather(*(mine.answered(each) for each in drawn))
 
     def seed(self) -> int:
@@ -168,12 +169,20 @@ def checked(
     ]
 
 
-def calls(doors: Doors) -> SearchStrategy[Call]:
-    """Return every call a party could make through the doors `doors` serve: each tool, action, command and service, given a value of what it takes, by a party of any its doors name."""
+def calls(doors: Doors, module: str) -> SearchStrategy[Call]:
+    """Return every call a party could make through the doors `doors` serve of the module named `module`: each tool, action, command and service, given a value of what it takes, by a party of any its doors name.
+
+    A law's runs call its own module's doors alone: only they change the state
+    it reads, its services among them, which code in another module calls; the
+    rest of a project's doors, the core's growing with each submodule, would
+    only dilute the search. A scenario checks every law of every module it
+    starts, over every call it makes.
+    """
     entries = [
         entry
         for entry in doors.entries()
-        if isinstance(
+        if entry.serves.module.name == module
+        and isinstance(
             entry.method.door, ToolDoor | ActionDoor | CommandDoor | ServiceDoor
         )
     ]
