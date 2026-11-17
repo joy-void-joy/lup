@@ -142,7 +142,9 @@ class InProcess(MutableModel, Answerer, arbitrary_types_allowed=True):
                 self.repository, self.secrets, only=self.startable()
             )
         made = call.model_copy(update={"by": self.by})
-        text = await answered(self.running, self.resolved.looks, CALLS.dump_json(made))
+        text = await answered(
+            self.running, CALLS.dump_json(made), looks=self.resolved.looks
+        )
         return read_reply(text, REPLIES)
 
     async def stopped(self) -> None:

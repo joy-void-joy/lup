@@ -4,7 +4,7 @@ version = "0.0.0"
 requires-python = ">=3.15"
 # Each module of lup's own is a member of the workspace, installed here so the
 # gate checks them together, with what checking their promises needs.
-dependencies = ["lup-core[environment]"]
+dependencies = ["lup-core[environment,dashboard]"]
 
 [dependency-groups]
 dev = [
@@ -207,6 +207,8 @@ source_modules = [
     "lup.hosting",
     "lup.told",
     "lup.command_line",
+    "lup.store",
+    "lup.inbox",
 ]
 forbidden_modules = ["lup.environment"]
 

@@ -34,10 +34,10 @@ A module refers to its code by importing it, so pyright checks the reference and
 
 ## Where code runs
 
-- **One program runs on the operator's machine:** lup's own, which the operator installs. It loads the declaration as approved, starts each container and hands it the secrets it's granted, and it holds the two things no container gets: podman, since whatever starts containers can do anything the operator can, and the machine's secret store. It runs no project's or module's code.
-- **Everything else runs in a container:** agents in rooms, and each module's code and services in containers of their own, the core's included, so the dashboard is a service like any other. A container is the wall against a program's dependencies, a malicious package among them, and keeps each service to its own secrets. A service that needs the machine itself (its desktop, a device) says so, and runs there.
-- **What's approved is what holds something a room mustn't:** a secret, the machine, or the operator's approvals, the dashboard's among them. It runs from a commit the operator approved. Code holding none of these runs from any branch, as a room's does, so trying a branch is starting its modules, and the operator's own lup doesn't restart for it.
-- **Approval is at use.** A change to the declaration or to approved code takes effect once the operator approves it, wherever it was written, so an agent writes it freely and the operator sees it before it counts.
+- **The program the operator installs is a loader.** It starts the machine's own parts (`Hosting`, which the home repository's declaration selects) on the machine itself, from the commit of the home repository the operator approved, falling back to the last one that came up where a new one doesn't. Those parts hold what no container gets: podman, since whatever starts containers can do anything the operator can; the machine's secret store; the operator's approvals; and the sockets every call crosses. They're the only module code that runs outside a container.
+- **Everything else runs in a container:** agents in rooms, and each project's parts, the core's included, so the dashboard is a service like any other. A part holding nothing runs in its project's container. A part holding a secret, or anything only approved code may, runs in a container of its own with what it holds alone. A container is the wall against a program's dependencies, a malicious package among them. A part that needs the machine itself (its desktop, a device) says so, and runs there.
+- **Nothing runs that the operator hasn't approved.** Each project runs the commit they approved last. It's written out from git's objects, each checked against its id, since rooms write the store. Approving is reviewing a landing, whose yes approves the commit it lands, or answering the question lup asks when a project's running branch moved without their review: a pull, their own push, a first run. So an agent writes freely, and the operator sees a change before it runs. A project can opt out for its parts holding nothing, which then follow its running branch; its parts holding something still run the approved commit.
+- **Who calls is the socket's word.** Each container gets sockets of its own, and the machine says who a call is by from the socket it came in on, never from what the call says. So a container can't speak as the operator, as the machine, or as another project.
 
 ## Sessions
 
@@ -97,7 +97,7 @@ What the operator can count on, wherever they are in it:
 - **A command does the same thing wherever it's offered,** and is offered only where it does that.
 - **Each part shown has its fold,** and everything folds, opens and selects the same way.
 - **What's been cleared stays cleared,** across reloads, restarts and pages.
-- **Only what needs the operator counts as waiting.** Everything else is news that leaves once seen.
+- **Only what needs the operator counts as waiting.** Everything else is news, which loses its mark once it's been on their screen and stays where it is until they clear it. Clearing is the one act that clears: a reply answers what it cites, and clears nothing.
 
 The core decides and the page only draws, keeping no rule of its own beside the core's, and each of these is tested over a copy of real data rather than hand-picked cases.
 

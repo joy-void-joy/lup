@@ -12,24 +12,30 @@ from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar, copy_context
 from pathlib import Path
+from typing import override
 
 from hypothesis import strategies as st
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
+from lup.core import Core
 from lup.declaration.errors import ProjectError
 from lup.declaration.module import Module
 from lup.declaration.project import Project
 from lup.doors.door import Accepted, DoorError, Method, Refused
 from lup.doors.parties import Agent, Party
-from lup.doors.parts import Finished, Parts, Program, ProgramError, Runs
+from lup.doors.parts import Finished, Parts, Program, Runs, UnrunError
 from lup.doors.tool import ToolDoor, ToolSpec
 from lup.environment.declaration import read, resolve
 from lup.environment.doors import Doors, Entry, Running, Serves
 from lup.environment.layout import MachineLayout, RepositoryLayout
 from lup.environment.running.container import answered
 from lup.environment.running.planning import plan_of
-from lup.environment.shell import Looks, viewed
+from lup.environment.shell import viewed
+from lup.environment.shell.server import Dashboard, Session, Socket
 from lup.environment.told import rendered
+from lup.shell.looks import Looks
+from lup.shell.wire import Sent as Frame
+from lup.shell.wire import Told
 from lup.testing.harness import (
     Broken,
     BrokenLawError,
@@ -37,10 +43,13 @@ from lup.testing.harness import (
     Crossing,
     Heard,
     Kept,
+    Opening,
+    Page,
     ProgramRun,
     Ran,
     Reaching,
     Repository,
+    Responding,
     Scripted,
     Served,
     Started,
@@ -52,6 +61,7 @@ from lup.testing.harness import (
 )
 from lup.testing.promise import PromiseDoor
 from lup.types import Model, MutableModel
+lazy from lup.shell.blocks import Viewing
 lazy from lup.told.guidance import Guidance
 
 
@@ -68,7 +78,7 @@ class Run(MutableModel, arbitrary_types_allowed=True):
     started: list[Running] = []
     """What the run started, stopped once the promise ends."""
     kept: list[tempfile.TemporaryDirectory[str]] = []
-    """Where what the run started keeps its data, removed once it's stopped."""
+    """Where what the run started keeps its data and what lasts while it runs, removed once it's stopped."""
 
     async def stopped(self) -> None:
         """Stop what the run started, the last first, and remove where it kept its data."""
@@ -344,38 +354,54 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
 
 
 class StandIn(Model, Runs, arbitrary_types_allowed=True):
-    """The programs a started lup's parts run, stood in for as a promise scripts them: each run heard, and answered by the first answer whose `when` its arguments start with."""
+    """The programs a started lup's parts run, stood in for as a promise scripts them: each run heard, and answered by the first answer whose `when` its arguments start with, or by the code the promise wrote for it."""
 
-    scripts: dict[str, Scripted] = {}
+    scripts: dict[str, Scripted | Responding] = {}
     heard: Heard
 
     async def ran(
-        self, program: Program, arguments: list[str], given: str | None
+        self,
+        program: Program,
+        arguments: list[str],
+        given: bytes | None,
+        env: dict[str, str],
     ) -> Finished:
         """Hear the run, and answer it as its program's script says.
 
-        Raise `ProgramError` where no answer of its script fits, as for a
+        Raise `UnrunError` where no answer of its script fits, as for a
         program that isn't there.
         """
         self.heard.runs.append(
-            ProgramRun(program=program.name, arguments=arguments, given=given)
+            ProgramRun(program=program.name, arguments=arguments, given=given, env=env)
         )
-        script = self.scripts.get(program.name, Scripted())
-        answer = next(
-            (
-                each
-                for each in script.answers
-                if arguments[: len(each.when)] == each.when
-            ),
-            None,
-        )
+        match self.scripts.get(program.name, Scripted()):
+            case Scripted(answers=answers):
+                answer = next(
+                    (
+                        each
+                        for each in answers
+                        if arguments[: len(each.when)] == each.when
+                    ),
+                    None,
+                )
+            case Responding() as responding:
+                answer = responding.answered(arguments, given)
         if answer is None:
             message = (
                 f"`{program.name} {' '.join(arguments)}` has no answer in the "
                 "promise's script, so it's run as a program that isn't there"
             )
-            raise ProgramError(message, about=[program.name])
-        return Finished(status=answer.status, output=answer.output, error=answer.error)
+            raise UnrunError(message, about=[program.name])
+        return Finished(
+            status=answer.status,
+            output=bytes_of(answer.output),
+            error=bytes_of(answer.error),
+        )
+
+
+def bytes_of(written: bytes | str) -> bytes:
+    """Return what a program stood in for writes, as bytes, text as UTF-8."""
+    return written.encode() if isinstance(written, str) else written
 
 
 class Crosser(Model, Crossing, arbitrary_types_allowed=True):
@@ -387,7 +413,7 @@ class Crosser(Model, Crossing, arbitrary_types_allowed=True):
 
     async def crossed(self, text: bytes) -> bytes:
         """Answer one message as the container running these parts would."""
-        return await answered(self.running, self.looks, text)
+        return await answered(self.running, text, looks=self.looks)
 
 
 class Teller(Model, Telling, arbitrary_types_allowed=True):
@@ -398,6 +424,72 @@ class Teller(Model, Telling, arbitrary_types_allowed=True):
     async def guidance(self, by: Agent) -> Guidance:
         """Render what the session `by` is told at its start of the modules started here."""
         return await rendered(self.running, by)
+
+
+class Dashboards(Model, Opening, arbitrary_types_allowed=True):
+    """A started lup's one dashboard, as the harness opens its pages: every page on the same draft."""
+
+    dashboard: Dashboard
+
+    @override
+    async def page(self) -> Page:
+        """Open a page of the dashboard, its socket in memory, served as the server serves one."""
+        inbound: asyncio.Queue[str | None] = asyncio.Queue()
+        outbound: asyncio.Queue[str | None] = asyncio.Queue()
+        socket = Queued(inbound=inbound, outbound=outbound)
+        session = Session(dashboard=self.dashboard, socket=socket)
+        serving = asyncio.get_running_loop().create_task(session.run())
+        return Paged(
+            token=self.dashboard.token,
+            inbound=inbound,
+            outbound=outbound,
+            serving=serving,
+        )
+
+
+class Queued(Socket, Model, arbitrary_types_allowed=True):
+    """A page's socket in memory: what the page says, and what it's told, each a queue."""
+
+    inbound: asyncio.Queue[str | None]
+    outbound: asyncio.Queue[str | None]
+
+    @override
+    async def received(self) -> str | None:
+        return await self.inbound.get()
+
+    @override
+    async def send(self, text: str) -> None:
+        await self.outbound.put(text)
+
+    @override
+    async def close(self, code: int, reason: str) -> None:
+        del code, reason
+        await self.outbound.put(None)
+
+
+class Paged(Page, arbitrary_types_allowed=True):
+    """A page of the dashboard as the harness opens it: its socket in memory, served as the server serves one."""
+
+    inbound: asyncio.Queue[str | None]
+    outbound: asyncio.Queue[str | None]
+    serving: asyncio.Task[None]
+    """The server's session reading the page's socket."""
+
+    @override
+    async def say(self, frame: Frame | str) -> None:
+        await self.inbound.put(
+            frame if isinstance(frame, str) else frame.model_dump_json()
+        )
+
+    @override
+    async def told(self) -> Told | None:
+        text = await self.outbound.get()
+        return None if text is None else TypeAdapter[Told](Told).validate_json(text)
+
+    @override
+    async def leave(self) -> None:
+        await self.inbound.put(None)
+        await self.serving
 
 
 class Harness(Testing, arbitrary_types_allowed=True):
@@ -417,7 +509,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
         declared: Project | Repository,
         secrets: Mapping[str, str] | None = None,
         repository: str = "harness",
-        programs: Mapping[str, Scripted] | None = None,
+        programs: Mapping[str, Scripted | Responding] | None = None,
         *,
         machine: bool = False,
     ) -> Started:
@@ -441,6 +533,13 @@ class Harness(Testing, arbitrary_types_allowed=True):
             crossing=Crosser(running=reached.running, looks=reached.looks),
             heard=heard,
             telling=Teller(running=reached.running),
+            dashboards=Dashboards(
+                dashboard=Dashboard(
+                    running=reached.running,
+                    looks=reached.looks,
+                    root=document_of(reached.modules),
+                )
+            ),
         )
 
     async def reached(
@@ -467,11 +566,13 @@ class Harness(Testing, arbitrary_types_allowed=True):
             else {name: self.any(str) for name in dict.fromkeys(held)}
         )
         kept = tempfile.TemporaryDirectory(prefix="lup-data-")
-        self.run.kept.append(kept)
+        lasting = tempfile.TemporaryDirectory(prefix="lup-run-")
+        self.run.kept.extend([kept, lasting])
         running = await resolved.doors.started(
             repository,
             given,
             data=Path(kept.name),
+            runtime=Path(lasting.name),
             runs=runs or StandIn(heard=Heard()),
             machine=machine,
         )
@@ -523,3 +624,10 @@ def promises(module: Module) -> list[Entry]:
         for entry in served.entries()
         if isinstance(entry.method.door, PromiseDoor)
     ]
+
+
+def document_of(modules: list[Module]) -> Viewing | None:
+    """Return the document's root view, as the core module among `modules` names it."""
+    return next(
+        (module.document for module in modules if isinstance(module, Core)), None
+    )

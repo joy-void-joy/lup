@@ -1,0 +1,62 @@
+// Blocks as fast-check draws them, for the page's promises: lines, Markdown and folds, each with an id of its own
+// among its siblings, folds nested a few deep.
+
+import fc from "fast-check";
+
+import type { Block, Fold, Line, Markdown } from "../generated/read";
+
+export const words = fc.string({ unit: fc.constantFrom("a", "b", "c", " ", "é"), maxLength: 12 });
+
+export function line(id: string): fc.Arbitrary<Line> {
+    return words.map((text) => ({
+        block: "line",
+        id,
+        version: null,
+        offers: [],
+        reaches: null,
+        sighted: null,
+        spans: [{ text, tone: "plain", ticking: null, gauge: null, refers: null }],
+    }));
+}
+
+export function markdown(id: string): fc.Arbitrary<Markdown> {
+    return fc.array(words, { minLength: 1, maxLength: 3 }).map((lines) => ({
+        block: "markdown",
+        id,
+        version: null,
+        offers: [],
+        reaches: null,
+        sighted: null,
+        text: lines.join("\n"),
+        tone: "plain",
+    }));
+}
+
+/** A fold of one of `kinds`, holding blocks nested `depth` deep at most. */
+export function fold(id: string, depth: number, kinds: readonly string[] = ["note"]): fc.Arbitrary<Fold> {
+    return fc.record({ summary: words, content: blocks(depth - 1, kinds), kind: fc.constantFrom(...kinds) }).map(({ summary, content, kind }) => ({
+        block: "fold",
+        id,
+        version: null,
+        offers: [],
+        reaches: null,
+        sighted: null,
+        kind,
+        summary: [{ text: summary, tone: "plain", ticking: null, gauge: null, refers: null }],
+        open: null,
+        content,
+    }));
+}
+
+/** Blocks with ids of their own, folds of `kinds` nested `depth` deep at most. */
+export function blocks(depth: number, kinds: readonly string[] = ["note"]): fc.Arbitrary<Block[]> {
+    return fc.array(fc.integer({ min: 0, max: depth > 0 ? 2 : 1 }), { maxLength: 5 }).chain((shapes) =>
+        fc.tuple(
+            ...shapes.map((shape, at): fc.Arbitrary<Block> => {
+                const id = `b${at}`;
+                return shape === 0 ? line(id) : shape === 1 ? markdown(id) : fold(id, depth, kinds);
+            }),
+        ),
+    );
+}
+

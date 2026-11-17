@@ -51,14 +51,37 @@ class Data(Model):
     """The directory: it's there, and the part's alone to write."""
 
 
+class Runtime(Model):
+    """A directory a part keeps what lasts only while it runs in: a field typed `Runtime`, given where the part runs, in memory, gone when the machine restarts, one for each such field: a socket, or a value handed over to be read once.
+
+    >>> Runtime(path=Path("/run/user/1000/lup/hosting.Carrying/sockets")).path.name
+    'sockets'
+    """
+
+    path: Path
+    """The directory: it's there, and the part's alone to write."""
+
+
 class Finished(Model):
-    """How a program a part ran ended: its status, and what it printed and said."""
+    r"""How a program a part ran ended: its status, and what it printed and said, as the bytes it wrote.
+
+    >>> Finished(status=1, error=b"no such image\n").said()
+    'no such image'
+    """
 
     status: int
-    output: str = ""
+    output: bytes = b""
     """What it printed on its standard output."""
-    error: str = ""
+    error: bytes = b""
     """What it wrote on its standard error."""
+
+    def text(self) -> str:
+        """Return what it printed, as text, a byte that isn't UTF-8 replaced."""
+        return self.output.decode(errors="replace")
+
+    def said(self) -> str:
+        """Return what it wrote on its standard error, as text, without the blank around it, as a refusal quotes it."""
+        return self.error.decode(errors="replace").strip()
 
 
 class Runs(ABC):
@@ -66,15 +89,19 @@ class Runs(ABC):
 
     @abstractmethod
     async def ran(
-        self, program: Program, arguments: list[str], given: str | None
+        self,
+        program: Program,
+        arguments: list[str],
+        given: bytes | None,
+        env: dict[str, str],
     ) -> Finished:
-        """Run `program` with `arguments`, `given` on its input, and say how it ended, whatever its status.
+        """Run `program` with `arguments`, `given` on its input, `env` set beside the variables it runs with, and say how it ended, whatever its status.
 
-        Raise `ProgramError` where it can't be run at all.
+        Raise `UnrunError` where it can't be run at all.
         """
 
 
-class ProgramError(RefusedError):
+class UnrunError(RefusedError):
     """A program a part declares can't be run: it isn't there, isn't at a version the part takes, or nothing runs programs where the part does; the call needing it is refused, saying why."""
 
 
@@ -102,18 +129,24 @@ class Program(Model, arbitrary_types_allowed=True):
     runs: Runs | None = Field(default=None, exclude=True, repr=False)
     """What runs it where the part runs, given as the part is made."""
 
-    async def ran(self, *arguments: str, given: str | None = None) -> Finished:
-        """Run it with `arguments`, `given` on its input, and say how it ended, whatever its status.
+    async def ran(
+        self,
+        *arguments: str,
+        given: bytes | str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> Finished:
+        """Run it with `arguments`, `given` on its input, text as UTF-8, `env` set beside the variables it runs with, and say how it ended, whatever its status.
 
-        Raise `ProgramError` where it can't be run.
+        Raise `UnrunError` where it can't be run.
         """
         if self.runs is None:
             message = (
                 f"`{self.name}` is run where its part runs, which gives it what "
                 "runs programs; nothing does here"
             )
-            raise ProgramError(message, about=[self.name])
-        return await self.runs.ran(self, list(arguments), given)
+            raise UnrunError(message, about=[self.name])
+        sent = given.encode() if isinstance(given, str) else given
+        return await self.runs.ran(self, list(arguments), sent, dict(env or {}))
 
 
 class Given(Model, arbitrary_types_allowed=True):
@@ -124,6 +157,9 @@ class Given(Model, arbitrary_types_allowed=True):
     data: Path | None = None
     """The part's own directory, under which each field typed `Data` gets
     one; none where nothing gives it one."""
+    runtime: Path | None = None
+    """The part's own directory in memory, under which each field typed
+    `Runtime` gets one; none where nothing gives it one."""
     runs: Runs | None = None
     """What runs the programs it declares; none where nothing runs any."""
 
@@ -206,7 +242,7 @@ class Part(MutableModel, arbitrary_types_allowed=True):
             for field, info in cls.model_fields.items()
             if field != "module"
             and info.is_required()
-            and info.annotation not in (Secret, Data)
+            and info.annotation not in (Secret, Data, Runtime)
         ]
         if bare:
             message = (
@@ -232,19 +268,31 @@ class Part(MutableModel, arbitrary_types_allowed=True):
 
     @classmethod
     def made(cls, module: Module, given: Given) -> Part:
-        """Make the part where it runs, with its module and what lup gives it: the value of each secret it holds, a directory for each field typed `Data`, made where it isn't there, and what runs each program it declares.
+        """Make the part where it runs, with its module and what lup gives it: the value of each secret it holds, a directory for each field typed `Data` or `Runtime`, made where it isn't there, and what runs each program it declares.
 
         Raise `ProjectError` where a secret it holds isn't given, or it keeps
-        data and no directory is given.
+        data, or what lasts while it runs, and no directory is given.
         """
-        secrets, data = given.secrets, given.data
+        secrets, data, runtime = given.secrets, given.data, given.runtime
         kept = [
             field for field, info in cls.model_fields.items() if info.annotation is Data
+        ]
+        lasting = [
+            field
+            for field, info in cls.model_fields.items()
+            if info.annotation is Runtime
         ]
         if kept and data is None:
             message = (
                 f"`{cls.__name__}` keeps data in {', '.join(f'`{name}`' for name in kept)}, "
                 "and nothing gives it a directory to keep it in"
+            )
+            raise ProjectError(message, about=[cls.__name__])
+        if lasting and runtime is None:
+            message = (
+                f"`{cls.__name__}` keeps what lasts while it runs in "
+                f"{', '.join(f'`{name}`' for name in lasting)}, and nothing gives it "
+                "a directory in memory to keep it in"
             )
             raise ProjectError(message, about=[cls.__name__])
         missing = [name for name in cls.holds().secrets if name not in secrets]
@@ -254,7 +302,7 @@ class Part(MutableModel, arbitrary_types_allowed=True):
                 "which nothing stored: the operator stores each under its name"
             )
             raise ProjectError(message, about=[cls.__name__])
-        fields: dict[str, Module | Secret | Data | Program] = {
+        fields: dict[str, Module | Secret | Data | Runtime | Program] = {
             name: Secret(value=secrets[name]) for name in cls.holds().secrets
         }
         for name in kept:
@@ -262,6 +310,11 @@ class Part(MutableModel, arbitrary_types_allowed=True):
                 directory = data / name
                 directory.mkdir(parents=True, exist_ok=True)
                 fields[name] = Data(path=directory)
+        for name in lasting:
+            if runtime is not None:
+                directory = runtime / name
+                directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+                fields[name] = Runtime(path=directory)
         for name, program in cls.programs().items():
             fields[name] = program.model_copy(update={"runs": given.runs})
         if "module" in cls.model_fields:

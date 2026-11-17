@@ -18,6 +18,7 @@ runs what each runs at `Stopping`, then cancels what it started.
 
 import asyncio
 from contextvars import ContextVar
+from functools import cached_property
 from typing import override
 lazy from pathlib import Path
 
@@ -162,13 +163,18 @@ class Doors(Model):
             )
         return doors
 
-    def entries(self) -> list[Entry]:
-        """List every method each class serves behind a door, in the order of their modules."""
+    @cached_property
+    def listed(self) -> list[Entry]:
+        """Every method each class serves behind a door, in the order of their modules: read once, since what's served doesn't change once resolved."""
         return [
             Entry(serves=each, name=name, method=method)
             for each in self.served
             for name, method in served(each.part).items()
         ]
+
+    def entries(self) -> list[Entry]:
+        """List every method each class serves behind a door, in the order of their modules."""
+        return list(self.listed)
 
     def through(self, door: type[Door]) -> list[Entry]:
         """List every method behind a door of `door`'s class."""
@@ -203,6 +209,7 @@ class Doors(Model):
         only: list[str] | None = None,
         beyond: Carrier | None = None,
         data: Path | None = None,
+        runtime: Path | None = None,
         runs: Runs | None = None,
         machine: bool = False,
     ) -> Running:
@@ -213,7 +220,8 @@ class Doors(Model):
         `module.Part`, where the others run elsewhere, a call to one of their
         services carried by `beyond`; left out, every part is made here. Raise
         `ProjectError` where a part made here holds a secret not given. A part
-        keeping data is given a directory under `data`, named `module.Part`, and
+        keeping data is given a directory under `data`, named `module.Part`, one
+        keeping what lasts while it runs one under `runtime`, named so too, and
         a program a part declares is run by `runs`. Where `machine`, these are
         the machine's own parts, and a service their code calls is by `Machine`.
         """
@@ -228,6 +236,7 @@ class Doors(Model):
                         Given(
                             secrets=secrets,
                             data=None if data is None else data / each.named(),
+                            runtime=None if runtime is None else runtime / each.named(),
                             runs=runs,
                         ),
                     ),

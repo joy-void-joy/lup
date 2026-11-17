@@ -23,6 +23,7 @@ from lup import (
     Part,
     Parts,
     Project,
+    Runtime,
     Secret,
     Span,
 )
@@ -45,7 +46,7 @@ class Ledger(Part):
     """The courier's part holding nothing: it runs in the project's own container."""
 
     @lup.tool
-    async def note(self, note: Note) -> Noted:
+    async def jot(self, note: Note) -> Noted:
         """Note something."""
         return Noted(text=note.text)
 
@@ -75,12 +76,21 @@ class Archive(Part, shared=True):
     """The courier's part one for the whole machine, keeping what it's given."""
 
     shelf: Data
+    desk: Runtime
 
     @lup.service
     async def shelved(self, note: Note, by: Codebase) -> Noted:
         """Keep a note on the shelf, under the project asking."""
         (self.shelf.path / by.repository).write_text(note.text)
         return Noted(text=note.text)
+
+    @lup.service
+    async def pinned(self, note: Note, by: Codebase) -> Noted:
+        """Pin a note on the desk while the archive runs, under the project asking, and read back what's pinned, on the desk and not the shelf."""
+        (self.desk.path / by.repository).write_text(note.text)
+        shelved = (self.shelf.path / by.repository).exists()
+        pinned = (self.desk.path / by.repository).read_text()
+        return Noted(text=pinned if not shelved else "")
 
 
 class Courier(Module):
@@ -109,9 +119,9 @@ class Repository(Model):
 
 
 class Sending(Model):
-    """A message crossing to a container: a call, one of another version of its shape, or none at all."""
+    """A message crossing to a container: a call, one of another version of its shape, one no one vouched for, or none at all."""
 
-    sent: Literal["a call", "another version", "no call"]
+    sent: Literal["a call", "another version", "unvouched", "no call"]
     version: int = Field(ge=2, le=9)
 
 
@@ -134,7 +144,7 @@ class RunningPromises(Part):
     async def a_plan_routes_every_call_a_party_makes(self, by: Testing) -> None:
         """A plan names, for each method a party calls, its door, its name, who may call it and the fields of what it takes, so the program routes a call, and the command line offers it, without running the declaration; hooks and promises, which no party calls, aren't among them."""
         started = await by.started(couriered(), secrets={"key": by.any(str)})
-        noting = started.plan.serving("tool", "note")
+        noting = started.plan.serving("tool", "jot")
         assert noting is not None
         assert noting.part == "Ledger"
         assert started.plan.serving("view", "noting", "courier") is not None
@@ -144,9 +154,15 @@ class RunningPromises(Part):
         assert "Codebase" in way.parties
         ways = [way for each in started.plan.parts for way in each.doorways]
         assert all(way.door in ("tool", "service", "command", "view") for way in ways)
+        couriers = [
+            way
+            for each in started.plan.parts
+            if each.module == "courier"
+            for way in each.doorways
+        ]
         assert all(
             "text" in json.dumps(way.input_schema)
-            for way in ways
+            for way in couriers
             if way.name in ("note", "noting", "sealed")
         )
         assert "courier" in [each.name for each in started.plan.modules]
@@ -162,7 +178,7 @@ class RunningPromises(Part):
         sent = {
             "format": 1,
             "kind": "tool",
-            "tool": "note",
+            "tool": "jot",
             "given": note.model_dump(mode="json"),
             "by": agent.model_dump(mode="json"),
         }
@@ -197,12 +213,12 @@ class RunningPromises(Part):
 
     @lup.promise
     async def nothing_crossing_makes_a_container_fail(self, by: Testing) -> None:
-        """Whatever crosses to a container, a call, one of another version of its shape, or something that's no call, is answered: run, or refused, never failing the container."""
+        """Whatever crosses to a container, a call, one of another version of its shape, one saying no one's `by`, or something that's no call, is answered: run, or refused, never failing the container; and a call reaches a part only as the program on the operator's machine vouched for it."""
         sending = by.any(Sending)
         started = await by.started(couriered(), secrets={"key": by.any(str)})
         call: dict[str, JsonValue] = {
             "kind": "tool",
-            "tool": "note",
+            "tool": "jot",
             "given": {"text": "x"},
             "by": {"party": "agent", "id": "a"},
         }
@@ -211,6 +227,8 @@ class RunningPromises(Part):
                 sent: dict[str, JsonValue] = {"format": 1, **call}
             case "another version":
                 sent = {"format": sending.version, **call}
+            case "unvouched":
+                sent = {"format": 1, **call, "by": None}
             case "no call":
                 sent = {"format": 1, "kind": "letter"}
         reply = Reply.model_validate_json(
@@ -231,3 +249,17 @@ class RunningPromises(Part):
         shelved = await started.serve("shelved", note, Codebase(repository=repository))
         assert isinstance(shelved, Accepted)
         assert shelved.output == Noted(text=note.text)
+
+    @lup.promise
+    async def a_part_keeping_what_lasts_while_it_runs_has_a_directory_apart(
+        self, by: Testing
+    ) -> None:
+        """A part with a field typed `Runtime` is given a directory of its own where it runs, apart from its `Data`, there to write what lasts only while it runs."""
+        note = by.any(Note)
+        repository = by.any(Repository).name
+        started = await by.started(
+            couriered(), secrets={"key": by.any(str)}, repository=repository
+        )
+        pinned = await started.serve("pinned", note, Codebase(repository=repository))
+        assert isinstance(pinned, Accepted)
+        assert pinned.output == Noted(text=note.text)

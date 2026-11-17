@@ -1,0 +1,50 @@
+/* The page's type and spacing, the second lup's: one monospaced font at one size, a row a line, and no ligatures, so
+   what's quoted reads as it was written. Its colours are `--lup-<name>` variables, set as the page starts
+   (`shell/palette.ts`). */
+:root {
+    --lup-mono: "JetBrains Mono", "Iosevka Term", "Iosevka", "Fira Code", "Cascadia Mono", "Source Code Pro",
+        "DejaVu Sans Mono", ui-monospace, monospace;
+    --lup-fs: 13px;
+    --lup-lh: 18px;
+    /* A column of the margin: a letter's width, and a little. */
+    --lup-column: calc(1ch + 1px);
+    color-scheme: dark;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+    height: 100%;
+    margin: 0;
+}
+
+body {
+    background: var(--lup-bg);
+    color: var(--lup-fg);
+    font-family: var(--lup-mono);
+    font-size: var(--lup-fs);
+    line-height: var(--lup-lh);
+    font-variant-ligatures: none;
+    overflow: hidden;
+}
+
+::selection {
+    background: var(--lup-sel-bg);
+    color: var(--lup-sel-fg);
+}
+
+/* Every control shows where the keyboard is. */
+:focus-visible {
+    outline: 2px solid var(--lup-focus);
+    outline-offset: -2px;
+}
+
+/* What the page says of itself where it has no document to show: the server refusing it, or no document named. */
+.lup-said {
+    color: var(--lup-err);
+    padding: 0 1ch;
+}

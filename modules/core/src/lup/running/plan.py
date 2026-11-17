@@ -2,18 +2,27 @@
 
 A declaration is code, so it's loaded in a container, where running a branch's
 code is harmless, and what comes out is this: each part of each module, what it
-holds, and the doors it serves, each with what it takes, with the tools a
-session is told of and the files the declaration loaded. The program starts containers from it and routes
-calls by it; a part holding something runs apart, from a commit the operator
-approved, and the files are what an approval shows (`README.md` here, *The
-plan*).
+holds, the file it's defined in, and the doors it serves, with the tools a
+session is told of and the files the declaration loaded. The program starts
+containers from it and routes calls by it; a part holding something runs apart,
+in a container of its own (`README.md` here, *The plan*).
 """
 
-from typing import Literal
+from collections import Counter
+from typing import Annotated, Literal
+
+from pydantic import StringConstraints
 
 from lup.doors.parts import Holds
 from lup.doors.tool import ToolSpec
 from lup.types import JsonObject, Model
+
+type Name = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")]
+"""A name the machine makes a directory's or a container's name from: a
+repository's, a module's, a part's. ASCII letters, digits, `-`, `_` and `.`,
+starting with a letter or a digit, so a name a project chose never reaches a
+path or podman's command line as anything but one name: never `../operator`,
+`.hidden` or `-rm`."""
 
 
 class Doorway(Model):
@@ -29,6 +38,18 @@ class Doorway(Model):
     """The JSON Schema of the model it takes, or of each where it takes a list
     of it: what the command line reads its arguments and options from."""
 
+    def said(self, module: str) -> str:
+        """Name it as a refusal does, with its module where its name is the module's alone: a tool's or a service's name is the project's, a command's or a view's its module's.
+
+        >>> Doorway(door="command", name="keep", parties=[]).said("hosting")
+        'the command `keep` of `hosting`'
+        """
+        match self.door:
+            case "tool" | "service":
+                return f"the {self.door} `{self.name}`"
+            case "command" | "view":
+                return f"the {self.door} `{self.name}` of `{module}`"
+
 
 class ModulePlan(Model):
     """One of the project's modules, as the command line names it: its name, and its one sentence."""
@@ -40,11 +61,15 @@ class ModulePlan(Model):
 class PartPlan(Model):
     """One part of a module, as the program runs it: where it runs follows from what it holds."""
 
-    module: str
+    module: Name
     """Its module's name."""
-    part: str
+    part: Name
     """Its class's name, which names it among its module's parts."""
     holds: Holds
+    source: str | None = None
+    """The file its class is defined in, relative to the project's root: what
+    an approval calls out where it changes; none where it's outside the root,
+    as a part lup ships is."""
     doorways: list[Doorway] = []
 
     def apart(self) -> bool:
@@ -69,8 +94,8 @@ class Plan(Model):
     """What a session is told of each tool the project's modules serve."""
     files: list[str] = []
     """The files of the project loading the declaration imported, relative to
-    its root: what a part's container runs, and what an approval shows the
-    diff of."""
+    its root: what an approval may point at, never what it approves, which is
+    the commit whole."""
 
     def together(self) -> list[PartPlan]:
         """Return the parts holding nothing, which run in the project's own container."""
@@ -79,6 +104,18 @@ class Plan(Model):
     def apart(self) -> list[PartPlan]:
         """Return the parts holding something, each run apart from approved code."""
         return [each for each in self.parts if each.apart()]
+
+    def ties(self) -> list[str]:
+        """Name each method two parts serve under the same name: a tool's or a service's across the project, a command's or an action's within its module.
+
+        The machine refuses a plan with one, rather than routing a call to
+        whichever part comes first, since the plan comes from the code it
+        plans.
+        """
+        served = Counter(
+            way.said(each.module) for each in self.parts for way in each.doorways
+        )
+        return [said for said, count in served.items() if count > 1]
 
     def serving(
         self, door: str, name: str, module: str | None = None

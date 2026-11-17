@@ -4,8 +4,9 @@ Each message is one JSON object, carrying the version of its shape (`format`),
 read first (`read`): a reader meeting another version refuses in words, naming
 both and how to update, never with a validation error about a field it doesn't
 know. Who calls (`by`) is one of the core's parties, which only the program
-names, from the socket a call came in on: a call leaves whoever makes it with
-none, and a container refuses one that reaches it without.
+names, from the socket a call came in on: a call is sent without one, and a
+container's program refuses one that comes without it. `Machine` never crosses:
+it's only ever a call made where the machine's own parts run.
 """
 
 from pathlib import Path
@@ -14,15 +15,15 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, JsonValue, TypeAdapter, ValidationError
 
 from lup.doors.door import Accepted, Refused, Rejection
-from lup.doors.parties import Agent, Codebase, Machine, Operator
+from lup.doors.parties import Agent, Codebase, Operator
 from lup.errors import LupError
+from lup.running.plan import Plan
 from lup.types import Model
 
-type Caller = Annotated[
-    Agent | Operator | Codebase | Machine, Field(discriminator="party")
-]
+type Caller = Annotated[Agent | Operator | Codebase, Field(discriminator="party")]
 """Who calls, as a call across containers names them: one of the core's
-parties, which the program on the operator's machine vouches for."""
+parties, which the program on the operator's machine vouches for, never the
+machine itself."""
 
 
 class FormatError(LupError):
@@ -43,8 +44,8 @@ class ToolCalled(Model):
     tool: str
     given: JsonValue
     by: Caller | None = None
-    """Who calls, which the program on the operator's machine names; none as
-    the call leaves whoever makes it."""
+    """Who it's by, as the program on the operator's machine vouches from the
+    socket it came in on: none as it's sent."""
 
 
 class ServiceCalled(Model):
@@ -55,8 +56,8 @@ class ServiceCalled(Model):
     service: str
     given: JsonValue
     by: Caller | None = None
-    """Who calls, which the program on the operator's machine names; none as
-    the call leaves whoever makes it."""
+    """Who it's by, as the program on the operator's machine vouches from the
+    socket it came in on: none as it's sent."""
 
 
 class CommandCalled(Model):
@@ -68,8 +69,8 @@ class CommandCalled(Model):
     command: str
     given: JsonValue
     by: Caller | None = None
-    """Who calls, which the program on the operator's machine names; none as
-    the call leaves whoever makes it."""
+    """Who it's by, as the program on the operator's machine vouches from the
+    socket it came in on: none as it's sent."""
 
 
 class ViewCalled(Model):
@@ -81,8 +82,8 @@ class ViewCalled(Model):
     view: str
     given: JsonValue
     by: Caller | None = None
-    """Who calls, which the program on the operator's machine names; none as
-    the call leaves whoever makes it."""
+    """Who it's by, as the program on the operator's machine vouches from the
+    socket it came in on: none as it's sent."""
 
 
 type Call = Annotated[
@@ -90,6 +91,31 @@ type Call = Annotated[
     Field(discriminator="kind"),
 ]
 """A call through any door, as it crosses: the one of each kind it is."""
+
+
+class Offering(Model):
+    """Asking the program on the operator's machine what the caller may call: who they are, as the socket the question came in on says, and their project's plan."""
+
+    format: int = 1
+    kind: Literal["offering"] = "offering"
+    repository: str | None = None
+    """The project the operator asks about, where it's theirs: the one whose
+    repository their `lup` runs in. A container's project is its own,
+    whatever this says."""
+
+
+type Asking = Annotated[Call | Offering, Field(discriminator="kind")]
+"""What comes in on a socket of the program on the operator's machine: a call
+through a door, or a question of what the caller may call."""
+
+
+class Offer(Model):
+    """What the program on the operator's machine says a caller may call: who they are, from the socket they asked on, and the plan of their project, the machine's own parts' beside it."""
+
+    format: int = 1
+    kind: Literal["offer"] = "offer"
+    by: Caller
+    plan: Plan
 
 
 class Answered(Model):
@@ -157,15 +183,39 @@ class Start(Model):
     """The program's socket, through which it calls a service of a part
     running elsewhere."""
     secrets: Path | None = None
-    """The directory holding each secret its parts hold, a file named for
-    each; none where they hold none."""
+    """The directory in memory holding each secret its parts hold, a file
+    named for each, which the program reads and removes before any part
+    starts; none where they hold none."""
     data: Path | None = None
     """The directory each part keeping data keeps it under, a directory named
     `module.Part` each; none where none keeps any."""
+    runtime: Path | None = None
+    """The directory in memory each part keeping what lasts while it runs
+    keeps it under, a directory named `module.Part` each; none where none
+    keeps any."""
 
 
-type Asked = Annotated[Planning | Start, Field(discriminator="kind")]
-"""What a container's program is given to do, on its input: plan, or start."""
+class Host(Model):
+    """How the machine's own parts are started, on the operator's machine, from the home repository's approved commit: its tree, its declaration, and where lup keeps its state."""
+
+    format: int = 1
+    kind: Literal["host"] = "host"
+    root: Path
+    """The home repository's tree, at the commit the operator approved."""
+    declaration: Path
+    """Its declaration, relative to the root."""
+    repository: str
+    """The home repository, as lup names it."""
+    state: Path
+    """Where the machine's parts keep their data, a directory each."""
+    runtime: Path
+    """Where the machine's parts keep what lasts while it runs, in memory:
+    `$XDG_RUNTIME_DIR/lup`, a short path, since a socket's is limited to
+    108 bytes."""
+
+
+type Asked = Annotated[Planning | Start | Host, Field(discriminator="kind")]
+"""What the program is given to do: plan, start a container's parts, or host the machine's."""
 
 
 def read[M](text: bytes | str, kind: TypeAdapter[M], reads: int = 1) -> M:

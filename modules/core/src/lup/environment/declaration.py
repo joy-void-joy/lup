@@ -24,8 +24,9 @@ from lup.declaration.grammar import applied, listed, set_fields
 from lup.declaration.module import Module, Modules
 from lup.declaration.project import Project
 from lup.environment.doors import Doors
-from lup.environment.shell import Looks
 from lup.errors import LupError
+from lup.shell.looks import Looks
+from lup.store.records import Edge, Kinds, Node, Recorded
 from lup.types import Model
 
 if TYPE_CHECKING:
@@ -42,6 +43,8 @@ class Resolved(Model):
     looks: Looks
     """The tones, fold kinds and mark kinds the modules declare, which their
     views may name."""
+    kinds: Kinds
+    """The kinds of record the modules keep in the store, which it reads its records as."""
 
 
 def default() -> list[Module]:
@@ -175,7 +178,12 @@ def resolve(project: Project) -> Resolved:
         )
         about = [name for pair in unmet for name in pair]
         raise ProjectError(message, about=list(dict.fromkeys(about)))
-    return Resolved(modules=modules, doors=Doors.of(modules), looks=Looks.of(modules))
+    return Resolved(
+        modules=modules,
+        doors=Doors.of(modules),
+        looks=Looks.of(modules),
+        kinds=kept(modules),
+    )
 
 
 def cycle(module: type[Module], trail: list[type[Module]]) -> list[str] | None:
@@ -189,4 +197,30 @@ def cycle(module: type[Module], trail: list[type[Module]]) -> list[str] | None:
             if (found := cycle(required, [*trail, module])) is not None
         ),
         None,
+    )
+
+
+def kept(modules: list[Module]) -> Kinds:
+    """Return the kinds of record `modules` keep in the store; raise `ProjectError` where two modules declare one kind, naming both."""
+    held = {module.name: module.held(Recorded) for module in modules}
+    owners = {
+        kind: [name for name, kinds in held.items() if kind in kinds]
+        for kinds in held.values()
+        for kind in kinds
+    }
+    shared = {kind: names for kind, names in owners.items() if len(names) > 1}
+    if shared:
+        said = "; ".join(
+            f"`{kind.declared()}` by {listed(names)}" for kind, names in shared.items()
+        )
+        message = f"a kind of record is one module's, and two declare {said}"
+        raise ProjectError(
+            message,
+            about=list(
+                dict.fromkeys(name for names in shared.values() for name in names)
+            ),
+        )
+    return Kinds(
+        nodes=[kind for kind in owners if issubclass(kind, Node)],
+        edges=[kind for kind in owners if issubclass(kind, Edge)],
     )
