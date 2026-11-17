@@ -228,7 +228,7 @@ class Projects(Part, machine=True, shared=True):
         parts: list[str],
         secrets: dict[str, str] | None = None,
     ) -> Placement:
-        """Start one container of the project running `parts`, its sockets' directory from `Carrying`, given the secrets in `secrets` as files, and return where it runs."""
+        """Start one container of the project running `parts`, its sockets' directory from `Carrying`, in memory, given the secrets in `secrets` as files there, which it reads and removes as it starts, and return where it runs."""
         name = (
             f"lup-{opening.repository}-project"
             if part is None
@@ -243,6 +243,7 @@ class Projects(Part, machine=True, shared=True):
             listening=Path("/run/lup/listening.sock"),
             calling=Path("/run/lup/calling.sock"),
             secrets=None if not secrets else Path("/run/lup/secrets"),
+            runtime=Path("/run/lup/runtime"),
         )
         if secrets:
             kept = directory.path / "secrets"

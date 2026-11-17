@@ -204,6 +204,7 @@ class Doors(Model):
         only: list[str] | None = None,
         beyond: Carrier | None = None,
         data: Path | None = None,
+        runtime: Path | None = None,
         runs: Runs | None = None,
         machine: bool = False,
     ) -> Running:
@@ -214,7 +215,8 @@ class Doors(Model):
         `module.Part`, where the others run elsewhere, a call to one of their
         services carried by `beyond`; left out, every part is made here. Raise
         `ProjectError` where a part made here holds a secret not given. A part
-        keeping data is given a directory under `data`, named `module.Part`, and
+        keeping data is given a directory under `data`, named `module.Part`, one
+        keeping what lasts while it runs one under `runtime`, named so too, and
         a program a part declares is run by `runs`. Where `machine`, these are
         the machine's own parts, and a service their code calls is by `Machine`.
         """
@@ -229,6 +231,7 @@ class Doors(Model):
                         Given(
                             secrets=secrets,
                             data=None if data is None else data / each.named(),
+                            runtime=None if runtime is None else runtime / each.named(),
                             runs=runs,
                         ),
                     ),

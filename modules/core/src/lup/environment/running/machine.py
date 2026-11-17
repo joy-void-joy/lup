@@ -89,6 +89,7 @@ async def hosted_parts(host: Host, runs: Runs | None) -> Running:
         {},
         only=machine,
         data=host.state / "data",
+        runtime=host.runtime,
         runs=runs,
         machine=True,
     )

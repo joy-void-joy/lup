@@ -64,7 +64,7 @@ class Run(MutableModel, arbitrary_types_allowed=True):
     started: list[Running] = []
     """What the run started, stopped once the promise ends."""
     kept: list[tempfile.TemporaryDirectory[str]] = []
-    """Where what the run started keeps its data, removed once it's stopped."""
+    """Where what the run started keeps its data and what lasts while it runs, removed once it's stopped."""
 
     async def stopped(self) -> None:
         """Stop what the run started, the last first, and remove where it kept its data."""
@@ -446,11 +446,13 @@ class Harness(Testing, arbitrary_types_allowed=True):
             else {name: self.any(str) for name in dict.fromkeys(held)}
         )
         kept = tempfile.TemporaryDirectory(prefix="lup-data-")
-        self.run.kept.append(kept)
+        lasting = tempfile.TemporaryDirectory(prefix="lup-run-")
+        self.run.kept.extend([kept, lasting])
         running = await resolved.doors.started(
             repository,
             given,
             data=Path(kept.name),
+            runtime=Path(lasting.name),
             runs=runs or StandIn(heard=Heard()),
             machine=machine,
         )

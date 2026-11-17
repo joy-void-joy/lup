@@ -17,7 +17,6 @@ from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from lup.declaration.errors import ProjectError
 from lup.doors.door import Accepted, Answer, Method, Refused, RefusedError, Rejection
-from lup.doors.parties import Codebase
 from lup.doors.service import Carrier
 from lup.environment.declaration import load, resolve
 from lup.errors import LupError
@@ -59,8 +58,9 @@ def replied(answered: Accepted | Refused) -> Reply:
 async def answered(running: Running, text: bytes) -> bytes:
     """Answer one message that crossed to a container running `running`: the call it carries, through its door, or why it's refused.
 
-    A message of another version of its shape, or none, is refused in words;
-    nothing sent makes this raise.
+    A message of another version of its shape, or none, is refused in words,
+    as is a call no one vouched for, which carries no `by`: only the program on
+    the operator's machine sends one here. Nothing sent makes this raise.
     """
     try:
         call = read(text, CALLS)
@@ -68,15 +68,20 @@ async def answered(running: Running, text: bytes) -> bytes:
         return declined(str(other))
     except ValidationError as wrong:
         return declined(f"a message that crossed isn't a call through a door: {wrong}")
+    if call.by is None:
+        return declined(
+            "a call reaches a part only as the program on the operator's machine "
+            "vouched for it, saying who it's by: this one says no one"
+        )
     match call:
-        case ToolCalled(tool=tool, given=given, by=by):
-            outcome = await running.call(tool, given, by)
-        case ServiceCalled(service=service, given=given, by=by):
-            outcome = await running.serve(service, given, by)
-        case ActionCalled(module=module, action=action, given=given, by=by):
-            outcome = await running.act(module, action, given, by)
-        case CommandCalled(module=module, command=command, given=given, by=by):
-            outcome = await running.run(module, command, given, by)
+        case ToolCalled(tool=tool, given=given):
+            outcome = await running.call(tool, given, call.by)
+        case ServiceCalled(service=service, given=given):
+            outcome = await running.serve(service, given, call.by)
+        case ActionCalled(module=module, action=action, given=given):
+            outcome = await running.act(module, action, given, call.by)
+        case CommandCalled(module=module, command=command, given=given):
+            outcome = await running.run(module, command, given, call.by)
     return REPLIES.dump_json(replied(outcome))
 
 
@@ -126,10 +131,8 @@ class Outward(Model, Carrier):
     """What carries a service's call from a container to a part running elsewhere: the program on the operator's machine, through its socket."""
 
     calling: Path
-    """The program's socket, which this container calls out through."""
-    repository: str
-    """The repository whose code this container runs: who the program will
-    vouch the call is by, whatever it's sent."""
+    """The program's socket, which this container calls out through: the
+    program says who the call is by, from the socket, so it's sent without."""
 
     @override
     async def carried(self, method: Method, value: BaseModel) -> Answer | JsonValue:
@@ -138,9 +141,7 @@ class Outward(Model, Carrier):
         Raise `RefusedError` where it's refused there, or can't be sent.
         """
         call = ServiceCalled(
-            service=method.taken.name,
-            given=value.model_dump(mode="json"),
-            by=Codebase(repository=self.repository),
+            service=method.taken.name, given=value.model_dump(mode="json")
         )
         name = method.taken.qualified
         try:
@@ -157,12 +158,15 @@ class Outward(Model, Carrier):
 
 
 def secrets_in(directory: Path | None) -> dict[str, str]:
-    """Return each secret a file in `directory` holds, by the file's name; none where there's no directory."""
+    """Return each secret a file in `directory` holds, by the file's name, each file removed once read, and the directory with them, so a secret is handed over once; none where there's no directory."""
     if directory is None:
         return {}
-    return {
-        each.name: each.read_text() for each in directory.iterdir() if each.is_file()
-    }
+    files = [each for each in directory.iterdir() if each.is_file()]
+    secrets = {each.name: each.read_text() for each in files}
+    for each in files:
+        each.unlink()
+    directory.rmdir()
+    return secrets
 
 
 async def started(start: Start) -> Running:
@@ -192,8 +196,9 @@ async def started(start: Start) -> Running:
         start.repository,
         secrets_in(start.secrets),
         only=wanted,
-        beyond=Outward(calling=start.calling, repository=start.repository),
+        beyond=Outward(calling=start.calling),
         data=start.data,
+        runtime=start.runtime,
     )
 
 

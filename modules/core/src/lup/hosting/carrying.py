@@ -23,7 +23,7 @@ from pydantic import Field
 import lup
 from lup.doors.door import RefusedError
 from lup.doors.parties import Codebase, Machine, Operator
-from lup.doors.parts import Data, Part
+from lup.doors.parts import Part, Runtime
 from lup.running.plan import Name, Plan
 from lup.running.wire import (
     ActionCalled,
@@ -107,8 +107,9 @@ class Listens(ABC):
 class Carrying(Part, machine=True, shared=True):
     """The machine's part deciding where each call goes, and who it's by, from the socket it came in on."""
 
-    sockets: Data
-    """Every directory of sockets: one per container, and the operator's."""
+    sockets: Runtime
+    """Every directory of sockets, in memory: one per container, and the
+    operator's."""
     listens: Listens | None = Field(default=None, exclude=True, repr=False)
     """What listens on each directory's socket as it's made: the
     environment's, set where the machine's parts run; none where calls are

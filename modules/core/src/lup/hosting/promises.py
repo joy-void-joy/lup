@@ -330,8 +330,8 @@ class HostingPromises(Part):
 
     @lup.promise
     async def a_call_is_by_whom_its_socket_says(self, by: Testing) -> None:
-        """A call coming in on a container's socket is by that container's project, whatever the call says it's by; one coming in on a socket no container lup started has is refused."""
-        claimed = by.any(Agent)
+        """A call coming in on a container's socket is by that container's project, whatever the call says it's by, or where it says nothing; one coming in on a socket no container lup started has is refused."""
+        claimed = by.any(Agent) if by.any(bool) else None
         started = await by.started(HOME, programs={"podman": PODMAN}, machine=True)
         made = await started.serve("directory", {"container": "c"}, Machine())
         assert isinstance(made, Accepted)
@@ -357,7 +357,7 @@ class HostingPromises(Part):
             "kind": "tool",
             "tool": "note",
             "given": {},
-            "by": claimed.model_dump(mode="json"),
+            "by": None if claimed is None else claimed.model_dump(mode="json"),
         }
         route = await started.serve(
             "routed", {"directory": directory, "call": call}, Machine()
