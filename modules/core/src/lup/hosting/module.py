@@ -16,9 +16,9 @@ from lup.hosting.promises import (
     ApprovalsPromises,
     ClearingPromises,
     HostingPromises,
-    WithoutPromises,
     ProjectsPromises,
     TreesPromises,
+    WithoutPromises,
 )
 from lup.hosting.secrets import Secrets
 from lup.hosting.trees import Trees

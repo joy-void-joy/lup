@@ -464,6 +464,7 @@ class HostingPromises(Part):
                 Answering(when=["image", "exists"], status=0),
                 Answering(when=["run", "--interactive"], output=json.dumps(VAULT_PLAN)),
                 Answering(when=["run", "--detach"]),
+                Answering(when=["stop"]),
             ]
         )
         started = await started_approved(by, podman)
@@ -575,6 +576,7 @@ class HostingPromises(Part):
                 Answering(when=["image", "exists"], status=0),
                 Answering(when=["run", "--interactive"], output=json.dumps(VAULT_PLAN)),
                 Answering(when=["run", "--detach"]),
+                Answering(when=["stop"]),
             ]
         )
         started = await started_approved(by, podman)
@@ -1331,3 +1333,20 @@ class WithoutPromises(Part):
         assert isinstance(kept, Accepted)
         assert isinstance(run, Accepted) == (podman == "6.1.0")
         assert bool(podman_ran(started, "run")) == (podman == "6.1.0")
+
+    @lup.promise
+    async def the_machine_stopping_stops_its_projects(self, by: Testing) -> None:
+        """As the machine's parts stop, every container of every project they run is stopped: nothing would route calls to it."""
+        started = await started_approved(by, OPENING_PODMAN)
+        await started.run(
+            "hosting",
+            "keep",
+            {"project": "harmon", "name": "key", "value": "k"},
+            lup.Operator(),
+        )
+        opened = await started.serve("opened", Opens().given(), Machine())
+        assert isinstance(opened, Accepted)
+        containers: list[str] = json.loads(opened.answer())["containers"]
+        await started.stopped()
+        stopped = [each[-1] for each in podman_ran(started, "stop")]
+        assert stopped == containers
