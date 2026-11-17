@@ -8,7 +8,9 @@ this module.
 
 from lup.declaration.module import Module
 from lup.doors.parts import Parts
+from lup.hosting.carrying import Carrying
 from lup.hosting.containers import Containers
+from lup.hosting.projects import Projects
 from lup.hosting.promises import HostingPromises
 from lup.hosting.secrets import Secrets
 
@@ -17,4 +19,4 @@ class Hosting(Module):
     """What runs on the operator's machine: starting every container lup runs, and, as they're built, carrying calls, keeping approvals and secrets, and brokering credentials."""
 
     name = "hosting"
-    parts: Parts = Parts.of(Containers, Secrets, HostingPromises)
+    parts: Parts = Parts.of(Containers, Secrets, Carrying, Projects, HostingPromises)

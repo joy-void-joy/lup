@@ -25,6 +25,37 @@ project = Project(modules=Modules.default().add(Hosting()))
 modules and the machine's parts."""
 
 
+def plan_of(parts: list[JsonValue]) -> JsonValue:
+    """Return a plan's JSON holding `parts`."""
+    return {"format": 1, "parts": parts, "tools": [], "files": []}
+
+
+NOTES_PLAN = plan_of(
+    [
+        {
+            "module": "notes",
+            "part": "Notes",
+            "holds": {},
+            "doorways": [{"door": "tool", "name": "note", "parties": ["Agent"]}],
+        }
+    ]
+)
+"""A project's plan of one part holding nothing, serving a tool."""
+
+VAULT_PLAN = plan_of(
+    [
+        {"module": "notes", "part": "Notes", "holds": {}, "doorways": []},
+        {
+            "module": "vault",
+            "part": "Vault",
+            "holds": {"secrets": ["key"]},
+            "doorways": [],
+        },
+    ]
+)
+"""A project's plan of a part holding nothing and one holding a secret."""
+
+
 class Kept(Model):
     """A secret's value, as the operator gives one."""
 
@@ -198,3 +229,89 @@ class HostingPromises(Part):
         )
         assert isinstance(held, Refused)
         assert isinstance(given, Refused)
+
+    @lup.promise
+    async def a_call_is_by_whom_its_socket_says(self, by: Testing) -> None:
+        """A call coming in on a container's socket is by that container's project, whatever the call says it's by; one coming in on a socket no container lup started has is refused."""
+        claimed = by.any(Agent)
+        started = await by.started(HOME, programs={"podman": PODMAN}, machine=True)
+        made = await started.serve("directory", {"container": "c"}, Machine())
+        assert isinstance(made, Accepted)
+        directory: str = json.loads(made.answer())["path"]
+        await started.serve(
+            "placed",
+            {
+                "repository": "harmon",
+                "plan": NOTES_PLAN,
+                "placements": [
+                    {
+                        "repository": "harmon",
+                        "parts": ["notes.Notes"],
+                        "container": "c",
+                        "directory": directory,
+                    }
+                ],
+            },
+            Machine(),
+        )
+        call: JsonValue = {
+            "format": 1,
+            "kind": "tool",
+            "tool": "note",
+            "given": {},
+            "by": claimed.model_dump(mode="json"),
+        }
+        route = await started.serve(
+            "routed", {"directory": directory, "call": call}, Machine()
+        )
+        assert isinstance(route, Accepted)
+        carried = json.loads(route.answer())
+        assert carried["call"]["by"] == {"party": "code", "repository": "harmon"}
+        assert carried["to"].endswith("listening.sock")
+        stranger = await started.serve(
+            "routed", {"directory": "/srv/elsewhere", "call": call}, Machine()
+        )
+        assert isinstance(stranger, Refused)
+
+    @lup.promise
+    async def a_part_holding_a_secret_runs_apart_given_only_its_own(
+        self, by: Testing
+    ) -> None:
+        """Opening a project starts one container for its parts holding nothing, and one of its own for each part holding a secret, given that part's secrets alone; a part whose secret nothing kept waits, not started."""
+        kept = by.any(bool)
+        podman = Scripted(
+            answers=[
+                Answering(when=["image", "exists"], status=0),
+                Answering(when=["run", "--interactive"], output=json.dumps(VAULT_PLAN)),
+                Answering(when=["run", "--detach"]),
+            ]
+        )
+        started = await by.started(HOME, programs={"podman": podman}, machine=True)
+        if kept:
+            await started.run(
+                "hosting",
+                "keep",
+                {"project": "harmon", "name": "key", "value": "k"},
+                lup.Operator(),
+            )
+        opened = await started.serve(
+            "opened",
+            {
+                "repository": "harmon",
+                "root": "/srv/harmon",
+                "interpreters": "/srv/python",
+            },
+            Machine(),
+        )
+        assert isinstance(opened, Accepted)
+        result = json.loads(opened.answer())
+        assert ("vault.Vault" in result["waiting"]) != kept
+        detached = podman_ran(started, "run")
+        names = [
+            each
+            for command in detached
+            for each in command
+            if each.startswith("--name=")
+        ]
+        assert "--name=lup-harmon-project" in names
+        assert ("--name=lup-harmon-vault-Vault" in names) == kept

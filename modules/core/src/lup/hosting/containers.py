@@ -22,7 +22,7 @@ from pydantic import Field
 import lup
 from lup.doors.door import RefusedError
 from lup.doors.parties import Machine
-from lup.doors.parts import Part, Program
+from lup.doors.parts import Finished, Part, Program
 from lup.types import Model
 
 
@@ -121,8 +121,8 @@ def mount_option(fields: list[str]) -> str:
     return record.getvalue()
 
 
-def command_of(spec: Spec, walls: Walls) -> list[str]:
-    """Return the arguments that start `spec`'s container, detached, behind `walls`."""
+def command_of(spec: Spec, walls: Walls, *, detached: bool = True) -> list[str]:
+    """Return the arguments that start `spec`'s container behind `walls`: detached, or run to its end, its input given."""
     binds = [
         "--mount="
         + mount_option(
@@ -141,7 +141,7 @@ def command_of(spec: Spec, walls: Walls) -> list[str]:
     ]
     return [
         "run",
-        "--detach",
+        "--detach" if detached else "--interactive",
         *walls.options(),
         f"--name={spec.name}",
         f"--network={spec.network}",
@@ -153,6 +153,13 @@ def command_of(spec: Spec, walls: Walls) -> list[str]:
         spec.image.tag(),
         *spec.command,
     ]
+
+
+class Once(Model):
+    """A container run to its end: what it runs, and what's given on its input."""
+
+    spec: Spec
+    given: str | None = None
 
 
 class Named(Model):
@@ -228,6 +235,20 @@ class Containers(Part, machine=True, shared=True):
         run = Run(spec=spec, command=command)
         self.running = [*self.running, run]
         return run
+
+    @lup.service
+    async def ran(self, once: Once, by: Machine) -> Finished:
+        """Run `once`'s container to its end, behind the same walls, what it's given on its input, and say how it ended, as a declaration is planned.
+
+        Raise `ContainerError` where podman itself fails (status 125).
+        """
+        del by
+        command = command_of(once.spec, self.walls, detached=False)
+        finished = await self.podman.ran(*command, given=once.given)
+        if finished.status == 125:
+            message = f"podman couldn't run {once.spec.name}: {finished.error.strip()}"
+            raise ContainerError(message)
+        return finished
 
     @lup.service
     async def stopped(self, named: Named, by: Machine) -> None:
