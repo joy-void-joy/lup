@@ -36,7 +36,7 @@ Which demo templates `new` offers beside this skeleton is open, with room left f
 
 ## What they need
 
-`Setup` declares git and uv as programs (`Program`), with what lup runs each for and how to install it, and runs them through those fields, so a promise stands each in. Where either isn't there, both commands refuse before anything runs or is written, naming each with how to install it. Both also say which programs lup's other parts run aren't there (`missing`): podman, which runs a project's parts in containers, among them. None of those stops `init` or `new`.
+`Setup` declares git and uv as programs (`Program`), with what lup runs each for and how to install it, and runs them through those fields, so a promise stands each in. Both are optional, so a project's container without them still starts its other parts: where either isn't there, `Setup` isn't made, and `init` and `new` are refused before anything runs or is written, saying how to install it (`Program.checked`, before a part starts). Both also check the programs lup's other parts run, the core's and the machine's, and say which aren't there or aren't at a version they take (`missing`): podman, which runs a project's parts in containers, among them. None of those stops `init` or `new`.
 
 ## Promises
 

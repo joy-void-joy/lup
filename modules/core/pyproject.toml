@@ -19,6 +19,15 @@ dependencies = [
     # The store's database: its tables declared once in Python and its queries
     # built from them (`lup/store/README.md`), Core alone, not the ORM.
     "sqlalchemy>=2",
+    # The version a program a part declares reports, tested against the
+    # specifier its `Program` field says (`lup/doors/parts.py`).
+    "packaging>=26",
+    # Where the machine keeps its parts' data, its environments and what lasts
+    # while it runs, in each platform's own places (`lup/hosting/README.md`).
+    "platformdirs>=4",
+    # lup's one library for retrying what's transient: the loader waiting for
+    # the machine it started to answer (`lup/hosting/README.md`, *The loader*).
+    "tenacity>=9",
 ]
 
 [project.optional-dependencies]

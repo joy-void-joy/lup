@@ -41,11 +41,7 @@ class Local(Model, Runs):
         """
         pinned = [f"{name}={value}" for name, value in env.items()]
         words = [*(["env", *pinned] if env else []), program.name, *arguments]
-        missing = (
-            f"`{program.name}` isn't there"
-            + (f": lup runs it as it {program.why}" if program.why else "")
-            + (f"; install it from {program.install}" if program.install else "")
-        )
+        missing = program.missing()
         try:
             ran = await awaited(*words, stdin=given, checked=False, within=self.within)
         except ProgramMissingError as unfound:

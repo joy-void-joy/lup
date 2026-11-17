@@ -18,6 +18,7 @@ from lup.hosting.promises import (
     HostingPromises,
     ProjectsPromises,
     TreesPromises,
+    WithoutPromises,
 )
 from lup.hosting.secrets import Secrets
 from lup.hosting.trees import Trees
@@ -39,4 +40,5 @@ class Hosting(Module):
         ApprovalsPromises,
         ProjectsPromises,
         ClearingPromises,
+        WithoutPromises,
     )

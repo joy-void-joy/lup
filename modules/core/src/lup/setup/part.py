@@ -23,7 +23,7 @@ from lup.declaration.layout import RepositoryLayout
 from lup.declaration.module import Module
 from lup.doors.door import RefusedError
 from lup.doors.parties import Operator
-from lup.doors.parts import Finished, Part, Parts, Program
+from lup.doors.parts import Checked, Finished, Part, Parts, Program
 from lup.running.plan import CORE, typed
 from lup.setup.skeleton import Skeleton, declared
 from lup.types import Model
@@ -52,14 +52,6 @@ class Making(Model):
     """Where its directory is made: where `lup` is typed, unless given."""
 
 
-class Missing(Model):
-    """A program lup runs that isn't there: what lup runs it for, and how to install it."""
-
-    name: str
-    why: str = ""
-    install: str = ""
-
-
 class SetUp(Model):
     """What setting a repository up for lup did."""
 
@@ -74,9 +66,11 @@ class SetUp(Model):
     """The requirement the project depends on lup's core by, which uv added."""
     module: Path | None = None
     """The directory of the module of the project's own made, where one was."""
-    missing: list[Missing] = []
-    """The programs lup's other parts run that aren't there: none of them
-    stops a project working on this machine, but each stops what runs it."""
+    missing: list[Checked] = []
+    """The programs lup's other parts run that aren't there, or not at a
+    version they take, each saying why and how to install it: none of them
+    stops a project working on this machine, but each stops the part running
+    it."""
     registered: bool = False
     """Whether the operator's lup was told of the repository, and lists it."""
     unregistered: str = ""
@@ -109,11 +103,16 @@ class Setup(Part):
     module: Module
     git: Program = Program(
         name="git",
+        optional=True,
         why="finds the repository lup sets up, and makes a new one's",
         install="https://git-scm.com/downloads",
     )
+    """Optional, as uv is, so a project's container without them still starts
+    its other parts: missing, this part isn't made, and `init` and `new` are
+    refused, saying how to install it, before anything is written."""
     uv: Program = Program(
         name="uv",
+        optional=True,
         why="adds lup's core to a project, and makes a new one's workspace",
         install="https://docs.astral.sh/uv/getting-started/installation/",
     )
@@ -132,7 +131,6 @@ class Setup(Part):
         overwrites: nothing is written then.
         """
         del by
-        await self.needed()
         layout = await RepositoryLayout.located(self.git, initializing.directory)
         if layout is None:
             message = (
@@ -158,7 +156,6 @@ class Setup(Part):
         after, the directory it made is removed.
         """
         del by
-        await self.needed()
         try:
             own = Skeleton(name=making.name, requires=self.requires())
         except ValidationError as unnamed:
@@ -265,26 +262,8 @@ class Setup(Part):
         """
         return await self.uv.ran("--directory", str(root), "add", "--no-sync", *words)
 
-    async def needed(self) -> None:
-        """Refuse, naming each with what lup runs it for and how to install it, where git or uv isn't there."""
-        absent = [each for each in [self.git, self.uv] if not await self.found(each)]
-        if absent:
-            said = "; ".join(
-                f"`{each.name}`, which lup runs as it {each.why}: {each.install}"
-                for each in absent
-            )
-            message = f"lup needs programs that aren't there: {said}"
-            raise RefusedError(message, about=[each.name for each in absent])
-
-    async def found(self, program: Program) -> bool:
-        """Say whether `program` is there where this part runs, whichever part declares it."""
-        # lup: defer(issue=3, why="`Program.checked()` says whether a program is there, at a version its part takes, which this stands in for: it asks only whether it's there")
-        runs = self.git.runs
-        return runs is not None and await runs.found(program)
-
-    async def wanting(self) -> list[Missing]:
-        """List the programs lup's shipped parts run, beyond git and uv, that aren't there: podman, which runs a project's parts in containers, among them."""
-        # lup: defer(issue=3, why="#3's walk of the programs the core's parts declare replaces this one, over the core's and the machine's parts")
+    async def wanting(self) -> list[Checked]:
+        """Check the programs lup's shipped parts run, the core's and the machine's, beyond git and uv, where this part runs, and list those that aren't there or aren't at a version their part takes: podman, which runs a project's parts in containers, among them."""
         declared = {
             program.name: program
             for module in [self.module, Hosting()]
@@ -292,11 +271,12 @@ class Setup(Part):
             for program in part.programs().values()
             if program.name not in (self.git.name, self.uv.name)
         }
-        return [
-            Missing(name=each.name, why=each.why, install=each.install)
+        runs = self.git.runs
+        checked = [
+            await each.model_copy(update={"runs": runs}).checked()
             for each in declared.values()
-            if not await self.found(each)
         ]
+        return [each for each in checked if not each.fits]
 
     def named(self, own: Skeleton) -> None:
         """Refuse a name the project's module can't take: the core's, one `lup` types a command of the core's by, or one whose package Python finds already, which it would shadow."""

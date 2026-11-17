@@ -23,6 +23,7 @@ from pydantic import Field, TypeAdapter, ValidationError
 
 import lup
 from lup.doors.door import RefusedError
+from lup.doors.events import Stopping
 from lup.doors.parties import Machine, Operator
 from lup.doors.parts import Data, Part, Program
 from lup.errors import LupError
@@ -31,6 +32,7 @@ from lup.hosting.carrying import Carrying, Naming, Placement, Placing
 from lup.hosting.containers import (
     Bind,
     Clearing,
+    ContainerError,
     Containers,
     Image,
     Named,
@@ -261,6 +263,25 @@ class Projects(Part, machine=True, shared=True):
             else:
                 opened = [*opened, repository]
         return Resumed(opened=opened, refused=refused)
+
+    @lup.on(Stopping)
+    async def closed(self, stopping: Stopping) -> None:
+        """Stop each container of each project running, as the machine's parts stop: nothing would route calls to it.
+
+        Each is asked to stop, whichever another failed to; raise
+        `ContainerError` naming each that didn't.
+        """
+        del stopping
+        refusals: list[str] = []
+        for opened in self.projects.values():
+            for name in opened.containers:
+                try:
+                    await Containers.stopped(Named(name=name))
+                except RefusedError as refused:
+                    refusals = [*refusals, str(refused)]
+        self.projects = {}
+        if refusals:
+            raise ContainerError("; ".join(refusals))
 
     def kept(self) -> dict[str, Opening]:
         """Return each project opened, by its repository, as kept."""

@@ -224,7 +224,39 @@ class Doors(Model):
         keeping what lasts while it runs one under `runtime`, named so too, and
         a program a part declares is run by `runs`. Where `machine`, these are
         the machine's own parts, and a service their code calls is by `Machine`.
+
+        Where `runs` is given, each program a part declares is checked first
+        (`Program.checked`): one that isn't there, or isn't at a version the
+        part takes, keeps its part from being made where it's optional, said in
+        `Running.unrun`, and refuses the start with `ProjectError` where it
+        isn't.
         """
+        wanted = [each for each in self.served if only is None or each.named() in only]
+        checks = {
+            each.named(): [
+                await program.model_copy(update={"runs": runs}).checked()
+                for program in each.part.programs().values()
+            ]
+            for each in wanted
+            if runs is not None
+        }
+        unfit = {
+            name: [check for check in found if not check.fits]
+            for name, found in checks.items()
+        }
+        required = [
+            check
+            for each in wanted
+            for check, program in zip(
+                checks.get(each.named(), []),
+                each.part.programs().values(),
+                strict=True,
+            )
+            if not check.fits and not program.optional
+        ]
+        if required:
+            message = "; ".join(check.why for check in required)
+            raise ProjectError(message, about=[check.name for check in required])
         running = Running(
             doors=self,
             caller=Machine() if machine else Codebase(repository=repository),
@@ -241,13 +273,26 @@ class Doors(Model):
                         ),
                     ),
                 )
-                for each in self.served
-                if only is None or each.named() in only
+                for each in wanted
+                if not unfit.get(each.named())
             ],
             beyond=beyond,
+            unrun=[
+                Unrun(part=name, why="; ".join(check.why for check in found))
+                for name, found in unfit.items()
+                if found
+            ],
         )
         await running.at(Starting(), apart=True)
         return running
+
+
+class Unrun(Model):
+    """A part not made where it would run, and why: a program it declares, optional, isn't there or isn't at a version it takes."""
+
+    part: str
+    """The part, `module.Part`."""
+    why: str
 
 
 class Made(Model, arbitrary_types_allowed=True):
@@ -280,6 +325,9 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
     every part is made here."""
     started: list[asyncio.Task[None]] = []
     """What each class runs at `Starting`, going on as long as it runs."""
+    unrun: list[Unrun] = []
+    """Each part not made here for a program it declares that isn't there, or
+    isn't at a version it takes, the program being optional."""
 
     def instance(self, entry: Entry) -> Part | None:
         """Return the part `entry` belongs to, as it was made here; none where it runs elsewhere."""
@@ -370,6 +418,15 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
             reason = f"`{entry.name}` doesn't take what it was given: {wrong}"
             return refused(given, reason)
         instance = self.instance(entry)
+        unrun = next(
+            (each for each in self.unrun if each.part == entry.serves.named()), None
+        )
+        if instance is None and unrun is not None:
+            reason = (
+                f"`{method.taken.qualified}` of `{entry.serves.module.name}` isn't "
+                f"running: {unrun.why}"
+            )
+            return refused(given, reason)
         if instance is None:
             reason = (
                 f"`{method.taken.qualified}` of `{entry.serves.module.name}` runs "

@@ -183,8 +183,13 @@ export const placeholder: Extension = codeFolding({
             shown.textContent = "⋯";
             return shown;
         }
-        const comments = prepared.comments === 0 ? "" : ` · ${prepared.comments} ${prepared.comments === 1 ? "comment" : "comments"}`;
-        shown.textContent = `⋯ ${prepared.hidden} ${prepared.hidden === 1 ? "line" : "lines"}${comments}`;
+        shown.textContent = `⋯ ${prepared.hidden} ${prepared.hidden === 1 ? "line" : "lines"}`;
+        if (prepared.comments > 0) {
+            const counted = document.createElement("span");
+            counted.className = "lup-counted";
+            counted.textContent = ` · ${prepared.comments} ${prepared.comments === 1 ? "comment" : "comments"}`;
+            shown.append(counted);
+        }
         shown.style.color = `var(--lup-${prepared.colour})`;
         shown.addEventListener("mousedown", (event) => {
             event.preventDefault();

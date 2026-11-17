@@ -39,7 +39,7 @@ const keys = fc.constantFrom(
     ["u"],
     ["<C-r>"],
     [":w"],
-    ...["fn", "fb", "Fn", "Fb", "fz", "c"].map((typed) => ["<Space>", ...typed]),
+    ...["fn", "fb", "Fn", "Fb", "fz", "c", "x", "d"].map((typed) => ["<Space>", ...typed]),
 );
 
 /** The keys that leave insert mode: vim's own, and Ctrl+Enter, which ends the comment being written. */
@@ -70,7 +70,7 @@ interface Seen extends ShellState {
     readonly margin: readonly Beside[];
     /** The document's text as its tree lays it out. */
     readonly tree: string;
-    /** The editor's text with every comment taken out: what the views answered. */
+    /** The editor's text with every comment and the review of the draft taken out: what the views answered. */
     readonly outside: string;
     /** What the draft holds of each comment, by its node's key. */
     readonly drafted: Readonly<Record<string, string>>;
@@ -92,10 +92,13 @@ function seen(shell: Shell, memory: Memory): Seen {
             return { key: node.key, kind: foldKind(node) ?? "", first: doc.lineAt(start).number, last: doc.lineAt(start + node.size).number };
         });
     const text = doc.toString();
-    const cut = every(shell.document.root)
-        .filter((node) => node.kind === "comment")
-        .map((node) => ({ from: offsetOf(node) - 1, to: offsetOf(node) + node.size }))
-        .sort((one, other) => other.from - one.from);
+    const review = shell.review();
+    const cut = [
+        ...every(shell.document.root)
+            .filter((node) => node.kind === "comment")
+            .map((node) => ({ from: offsetOf(node) - 1, to: offsetOf(node) + node.size })),
+        ...(review === null ? [] : [{ from: offsetOf(review), to: offsetOf(review) + review.size + 1 }]),
+    ].sort((one, other) => other.from - one.from);
     const outside = cut.reduce((kept, range) => kept.slice(0, range.from) + kept.slice(range.to), text);
     const drafted = Object.fromEntries(memory.draft.comments.map((comment) => [`comment:${comment.id}`, comment.words]));
     return { ...shell.state(), folds, margin, tree: shell.document.text(), outside, drafted };
@@ -104,7 +107,7 @@ function seen(shell: Shell, memory: Memory): Seen {
 const shell: Machine<Running, Seen, Event> = {
     name: "the shell",
     start(by) {
-        const memory = new Memory();
+        const memory = new Memory(root);
         memory.set(root, answer(by.any(blocks(2, kinds))));
         const parent = document.createElement("div");
         document.body.append(parent);
@@ -225,6 +228,133 @@ law(shell, "A view answering again leaves what each comment it still shows says 
         return true;
     }
     return Object.entries(step.after.comments).every(([key, text]) => step.before.comments[key] === undefined || step.before.comments[key] === text);
+});
+
+scenario("A view answering again keeps what an open fold read under it, the fold naming no module but its view's", async (by) => {
+    const reads: Viewing = { module: null, view: "note", given: { number: 1 } };
+    const loading: Fold = {
+        block: "fold",
+        id: "n",
+        version: null,
+        offers: [],
+        reaches: null,
+        sighted: null,
+        kind: "note",
+        summary: [{ text: "note", tone: "plain", ticking: null, gauge: null, refers: null }],
+        open: true,
+        content: reads,
+    };
+    const memory = single(answer([loading]));
+    const under = by.any(blocks(1).filter((made) => made.length > 0));
+    memory.set({ ...reads, module: root.module }, answer(under));
+    const parent = document.createElement("div");
+    const opened = new Shell(parent, root, looks, memory);
+    try {
+        const read = opened.state().text;
+        expect(read.length).toBeGreaterThan("note".length);
+        memory.set(root, answer([loading, ...by.any(blocks(1))]));
+        expect(opened.state().text.startsWith(read)).toBe(true);
+    } finally {
+        opened.destroy();
+    }
+});
+
+/** Return a shell on `content`, its document's root answered from memory with the review at its top. */
+function shellOn(content: Blocks["blocks"]): { shell: Shell; memory: Memory; parent: HTMLElement } {
+    const memory = new Memory(root);
+    memory.set(root, answer(content));
+    const parent = document.createElement("div");
+    document.body.append(parent);
+    return { shell: new Shell(parent, root, looks, memory), memory, parent };
+}
+
+scenario("Ctrl+Enter goes to the review of what the draft sends, Esc goes back, and Ctrl+Enter in the review sends it", async (by) => {
+    const content = by.any(blocks(1, kinds).filter((made) => made.some((block) => block.block === "line")));
+    const { shell: opened, memory, parent } = shellOn(content);
+    try {
+        await press(opened, ["G", "o", "h", "i", "<Esc>", "g", "g"]);
+        // On the review closed at the document's top, where the page opens, Ctrl+Enter opens it rather than sends.
+        await press(opened, ["<C-CR>"]);
+        expect(memory.draft.comments.length).toBe(1);
+        await press(opened, ["<Esc>", "G"]);
+        const comment = memory.draft.comments[0];
+        expect(comment?.words).toBe("hi");
+        const before = opened.view.state.selection.main.head;
+        await press(opened, ["<C-CR>"]);
+        expect(opened.inReview()).toBe(true);
+        await press(opened, ["<Esc>"]);
+        expect(opened.inReview()).toBe(false);
+        expect(opened.view.state.selection.main.head).toBe(before);
+        await press(opened, ["<C-CR>", "<C-CR>"]);
+        expect(memory.draft.comments).toEqual([]);
+        expect(opened.review()).toBeNull();
+        expect(opened.state().said).toBe("sent 1");
+    } finally {
+        opened.destroy();
+        parent.remove();
+    }
+});
+
+scenario("Space x holds a comment back, so a send leaves it in the draft as it is, and Space d lets it go", async (by) => {
+    const content = by.any(blocks(1, kinds).filter((made) => made.some((block) => block.block === "line")));
+    const { shell: opened, memory, parent } = shellOn(content);
+    try {
+        await press(opened, ["G", "o", "k", "e", "e", "p", "<Esc>", "<Space>", "x"]);
+        expect(memory.draft.comments.map((each) => each.held)).toEqual([true]);
+        await press(opened, ["<C-CR>", "<C-CR>"]);
+        expect(memory.draft.comments.map((each) => [each.words, each.held])).toEqual([["keep", true]]);
+        await press(opened, ["<C-CR>"]);
+        const review = opened.review();
+        const part = review === null ? null : opened.document.node(`${review.key}/${memory.draft.comments[0]?.id ?? ""}`);
+        expect(part).not.toBeNull();
+        if (part === null) {
+            return;
+        }
+        // The review's line for the comment: vim's own motions there need the page laid out, which the harness isn't.
+        opened.go(offsetOf(part));
+        await press(opened, ["<Space>", "d"]);
+        expect(memory.draft.comments.map((each) => each.held)).toEqual([false]);
+        expect(opened.inReview()).toBe(true);
+        await press(opened, ["<C-CR>"]);
+        expect(memory.draft.comments).toEqual([]);
+    } finally {
+        opened.destroy();
+        parent.remove();
+    }
+});
+
+scenario("Space s on a comment sends it to the party chosen among those the document shows, as typing narrows them", async (by) => {
+    const name = by.any(fc.constantFrom("port-plan", "frictions"));
+    const party: Fold = {
+        block: "fold",
+        id: name,
+        version: null,
+        offers: [],
+        reaches: { party: "pile", repository: "harness", path: name },
+        sighted: null,
+        kind: "party",
+        summary: [{ text: name, tone: "strong", ticking: null, gauge: null, refers: null }],
+        open: null,
+        content: [{ block: "line", id: "said", version: null, offers: [], reaches: null, sighted: null, spans: [{ text: "said", tone: "plain", ticking: null, gauge: null, refers: null }] }],
+    };
+    const other: Fold = { ...party, id: "other", reaches: { party: "pile", repository: "harness", path: "other" }, summary: [{ text: "other", tone: "strong", ticking: null, gauge: null, refers: null }] };
+    const { shell: opened, memory, parent } = shellOn([other, party]);
+    try {
+        await press(opened, ["G", "o", "t", "o", "<Esc>", "<Space>", "s"]);
+        const field = parent.querySelector<HTMLInputElement>(".lup-picker-field");
+        expect(field).not.toBeNull();
+        if (field === null) {
+            return;
+        }
+        field.value = name.slice(0, 3);
+        field.dispatchEvent(new Event("input"));
+        field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+        expect(memory.draft.comments.map((each) => each.to)).toEqual([party.reaches]);
+        expect(parent.querySelector(".lup-picker-field")).toBeNull();
+    } finally {
+        opened.destroy();
+        parent.remove();
+    }
 });
 
 /** A source answering `root` with `blocks` alone. */

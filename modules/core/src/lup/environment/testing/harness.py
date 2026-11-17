@@ -542,6 +542,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
                     running=reached.running,
                     looks=reached.looks,
                     root=document_of(reached.modules),
+                    repository=repository,
                 )
             ),
         )

@@ -232,11 +232,12 @@ class SetupPromises(Part):
 
     @lup.promise
     async def init_says_which_optional_programs_are_missing(self, by: Testing) -> None:
-        """`lup init` says which programs lup's other parts run aren't there, podman among them, and none that is."""
+        """`lup init` says which programs lup's other parts run aren't there, podman among them, and none that is, at a version its part takes."""
         there = by.any(bool)
         with tempfile.TemporaryDirectory() as made:
             root = Path(made)
-            podman = {"podman": Scripted(answers=[Answering()])} if there else {}
+            fitting = Scripted(answers=[Answering(output="5.4.2\n")])
+            podman = {"podman": fitting} if there else {}
             programs = {**standing(root), **podman}
             started = await by.started(Project(), programs=programs)
             answered = await started.run(

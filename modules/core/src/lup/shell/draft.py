@@ -11,9 +11,8 @@ works"; `README.md` here, *The draft*).
 
 lazy from collections.abc import Iterator, Mapping
 
-from pydantic import BaseModel, SerializeAsAny
+from pydantic import BaseModel, JsonValue
 
-from lup.doors.parties import Party
 from lup.shell.blocks import Offer, Viewing
 from lup.types import Model
 
@@ -47,9 +46,11 @@ class Comment(Model):
     """The page's id for it, kept as it's edited."""
     on: Quote
     words: str
-    to: SerializeAsAny[Party] | None = None
-    """Whom it reaches, as the operator chose (Space s); none for whom what
-    it's on reaches."""
+    to: dict[str, JsonValue] | None = None
+    """Whom it reaches, as the operator chose (Space s), as the block naming
+    that party says it (`Shown.reaches`): kept as it came, since the page sends
+    it back, and any module may declare a party; none for whom what it's on
+    reaches."""
     reason: str | None = None
     """Why it stayed in the draft at the last send; none where it hasn't been
     sent, or nothing kept it."""
@@ -57,6 +58,9 @@ class Comment(Model):
     """Whether a send kept it back once for being on lines that changed since
     it was written: the next send sends it as it is. Writing it again starts
     over."""
+    held: bool = False
+    """Whether the operator holds it back from sends (Space x): it stays in the
+    draft, as it is, until they let it go (Space d)."""
 
 
 class Outcome(Model):
@@ -79,6 +83,9 @@ class Marked(Model):
     reason: str | None = None
     """Why it stayed in the draft at the last send; none where it hasn't been
     sent, or nothing kept it."""
+    held: bool = False
+    """Whether the operator holds it back from sends (Space x): it stays in the
+    draft, as it is, until they let it go (Space d)."""
 
 
 class Draft(Model):
