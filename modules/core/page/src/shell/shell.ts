@@ -55,6 +55,7 @@ export class Shell {
                 doc: "",
                 extensions: [
                     vim(),
+                    EditorView.lineWrapping,
                     EditorState.changeFilter.of((transaction) => transaction.annotation(fromCore) === true),
                     foldState,
                     drawing,
@@ -103,7 +104,7 @@ export class Shell {
             const range = foldRange(each, start);
             const open = this.isOpen(each);
             if (open && each.block?.block === "fold" && !Array.isArray(each.block.content) && !this.#watching.has(each.key)) {
-                this.#read(each.key, each.block.content);
+                this.#read(each.key, { ...each.block.content, module: each.block.content.module ?? moduleOf(each) });
             }
             if (range === null) {
                 continue;
@@ -204,6 +205,18 @@ export class Shell {
     }
 }
 
+/** Return the module whose view laid `node` out: the module of the nearest section above it that names one. */
+function moduleOf(node: Node): string | null {
+    let at: Node | null = node;
+    while (at !== null) {
+        if (at.viewing !== null && at.viewing.module !== null) {
+            return at.viewing.module;
+        }
+        at = at.parent;
+    }
+    return null;
+}
+
 /** The shell an editor shows, for the keymap's commands to find it by its editor. */
 export const shells = Facet.define<Shell, Shell | null>({ combine: (values) => values[0] ?? null });
 
@@ -253,7 +266,12 @@ const drawing = ViewPlugin.fromClass(
                     if (heading) {
                         classes.push("lup-summary");
                     }
-                    const colour = heading && kind !== null ? shell.kinds.folds.get(kind)?.colour : undefined;
+                    const colour =
+                        heading && kind !== null
+                            ? shell.kinds.folds.get(kind)?.colour
+                            : node.block?.block === "markdown"
+                              ? (shell.kinds.colour(node.block.tone) ?? undefined)
+                              : undefined;
                     ranges.push(
                         Decoration.line({
                             attributes: {
@@ -294,6 +312,8 @@ export const look = EditorView.theme(
         ".cm-content": { fontFamily: "ui-monospace, monospace" },
         ".lup-line": { paddingLeft: "calc(var(--lup-depth) * 2ch + 1ch)" },
         ".lup-summary": { color: "var(--lup-fold, var(--lup-fg))" },
+        ".lup-markdown": { color: "var(--lup-fold, var(--lup-fg))" },
+        ".lup-summary.lup-fold": { fontWeight: "bold" },
         ".lup-bold": { fontWeight: "bold" },
         ".lup-dim": { opacity: "0.6" },
     },

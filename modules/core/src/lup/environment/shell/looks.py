@@ -9,10 +9,7 @@ fails as it's answered rather than drawing wrong (`README.md` in `lup/shell/`,
 *Kinds*).
 """
 
-import json
-from typing import TYPE_CHECKING, Literal, override
-
-from pydantic.json_schema import GenerateJsonSchema
+from typing import TYPE_CHECKING, Literal
 
 from lup.core import Core
 from lup.declaration.errors import ProjectError
@@ -24,13 +21,6 @@ from lup.types import Model
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
-    from pydantic_core.core_schema import (
-        ComputedField,
-        CoreSchema,
-        DataclassField,
-        ModelField,
-        TypedDictField,
-    )
 
     from lup.declaration.module import Module
     from lup.doors.door import Accepted, Refused
@@ -194,39 +184,3 @@ async def viewed(
     if isinstance(output, Blocks):
         looks.checked(output, module)
     return answered
-
-
-class Read(Model):
-    """What the page reads from the core: a view's answer, and the kinds a project's modules declare for their views, the page's types generated from its description (`described`)."""
-
-    blocks: Blocks
-    looks: Looks
-
-
-class AsSent(GenerateJsonSchema):
-    """JSON Schema of a model as it's sent: every field there, a default one among them, since dumping a model writes each; and no field titled, so a type generated from it is named after its model alone."""
-
-    @override
-    def field_title_should_be_set(
-        self,
-        schema: CoreSchema
-        | ModelField
-        | DataclassField
-        | TypedDictField
-        | ComputedField,
-    ) -> bool:
-        return False
-
-    @override
-    def field_is_required(
-        self,
-        field: ModelField | DataclassField | TypedDictField,
-        total: bool,
-    ) -> bool:
-        return True
-
-
-def described() -> str:
-    """Describe what the page reads from the core, as JSON Schema of what's sent, which the page's types are generated from, so the two can't disagree."""
-    schema = Read.model_json_schema(mode="serialization", schema_generator=AsSent)
-    return json.dumps(schema, indent=2)
