@@ -1,0 +1,35 @@
+{
+    "name": "lup-shell-page",
+    "description": "lup's dashboard page: the shell, drawing what modules' views answer (`modules/core/src/lup/shell/README.md`).",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "types": "uv run --quiet python described.py > schema.json && json2ts --input schema.json --output src/generated/read.ts --additionalProperties false --unreachableDefinitions",
+        "check": "tsc --noEmit",
+        "test": "vitest run",
+        "build": "vite build",
+        "gate": "pnpm run --silent types && pnpm run --silent check && pnpm run --silent test && pnpm run --silent build"
+    },
+    "dependencies": {
+        "@codemirror/commands": "6.11.1",
+        "@codemirror/lang-markdown": "6.5.2",
+        "@codemirror/language": "6.13.1",
+        "@codemirror/state": "6.7.6",
+        "@codemirror/view": "6.43.15",
+        "@replit/codemirror-vim": "6.4.0",
+        "react": "19.3.1",
+        "react-dom": "19.3.1"
+    },
+    "devDependencies": {
+        "@types/react": "19.3.0",
+        "@types/react-dom": "19.3.0",
+        "@vitejs/plugin-react": "6.3.0",
+        "fast-check": "4.10.2",
+        "happy-dom": "21.0.4",
+        "json-schema-to-typescript": "16.0.0",
+        "playwright-core": "1.65.1",
+        "typescript": "7.0.2",
+        "vite": "8.3.8",
+        "vitest": "5.1.0"
+    }
+}
