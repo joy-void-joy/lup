@@ -16,6 +16,7 @@ tracked in, with its layers (`lup/command_line/README.md`).
 
 import asyncio
 import inspect
+import shutil
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
@@ -30,11 +31,13 @@ from lup.declaration.module import Modules
 from lup.declaration.project import Project
 from lup.doors.door import Rejection
 from lup.doors.parties import Operator
+from lup.doors.parts import variable
 from lup.environment.declaration import Resolved, read, resolve
 from lup.environment.doors import Running
 from lup.environment.layout import MachineLayout, RepositoryLayout
 from lup.environment.running.calling import Calling
 from lup.environment.running.container import REPLIES, answered
+from lup.environment.running.loader import Loader, LoaderError, Places
 from lup.environment.running.planning import plan_of
 from lup.environment.settings import LupSettings
 from lup.programs import ProgramFailedError, run
@@ -180,22 +183,36 @@ def machine() -> MachineLayout:
 
 
 def main() -> None:
-    """Run `lup` on the words it's given: through lup's program on the operator's machine where `LUP_CALLING` names its socket, which says who calls; else as the operator, over the declaration of the worktree it runs in, with its layers.
+    """Run `lup` on the words it's given, through lup's program on the operator's machine, which says who calls: over the socket `LUP_CALLING` names, as in a room, else over the machine's own, the machine started first where nothing answers there.
 
     Through the program, nothing of the project's code runs here: the command
-    line lists and parses the plan the program offers.
+    line lists and parses the plan the program offers. Where podman isn't
+    there, as in a room no lup started, no machine is started: `lup` answers
+    in this process, as the operator, over the declaration of the worktree it
+    runs in, and says so.
     """
     calling = LupSettings().lup_calling
     try:
         layout = RepositoryLayout.found(Path.cwd())
+        if calling is None and shutil.which("podman") is not None:
+            loader = Loader(
+                places=Places.found(),
+                machine=machine(),
+                interactive=sys.stdin.isatty(),
+            )
+            calling = asyncio.run(loader.ensured())
         if calling is not None:
             ran(
                 Calling(socket=calling, repository=layout.main.name),
                 "lup",
                 sys.argv[1:],
             )
+        sys.stderr.write(
+            "lup: podman isn't here, so no machine runs: this answers in this "
+            "process, over this worktree's declaration\n"
+        )
         resolved = resolve(read(layout, machine()).project)
-    except (ProgramFailedError, ProjectError) as failure:
+    except (ProgramFailedError, ProjectError, LoaderError) as failure:
         refused("lup", failure)
     answerer = InProcess(by=Operator(), resolved=resolved, repository=layout.main.name)
     ran(answerer, "lup", sys.argv[1:])
@@ -230,16 +247,6 @@ def developed(modules: list[Module]) -> Project | None:
 
 class Secrets(Settings):
     """Where a project's command reads the secrets its parts hold: the environment, and `.env` files, as pydantic's settings read them."""
-
-
-def variable(command: str, secret: str) -> str:
-    """Name the environment variable a project's command reads `secret` from: the command's name, then the secret's, in capitals, each `-` a `_`.
-
-    >>> variable("story-reader", "token")
-    'STORY_READER_TOKEN'
-    """
-    # lup: ignore("string-replace", why="an environment variable's name can't hold a `-`, which a command's may: `story-reader`'s token is `STORY_READER_TOKEN`")
-    return f"{command}_{secret}".upper().replace("-", "_")
 
 
 def secrets_of(name: str, held: list[str]) -> dict[str, str]:

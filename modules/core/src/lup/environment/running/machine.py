@@ -10,6 +10,7 @@ parts or forwarded to the container whose part answers it, its `by` the one
 """
 
 import asyncio
+import signal
 from pathlib import Path
 from typing import override
 
@@ -112,7 +113,9 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
 
     Each project the machine's parts ran before they last stopped is opened
     again, every container they left stopped first, since nothing routes
-    calls to it any more. Raise `ProjectError` where the home repository's
+    calls to it any more. Stopped (`SIGTERM`, as `lup stop` sends it), it
+    stops listening and runs its parts' `Stopping`, which stop the projects'
+    containers. Raise `ProjectError` where the home repository's
     declaration doesn't select `Hosting`, which carries calls, and
     `ContainerError` where podman can't stop those left.
     """
@@ -141,7 +144,9 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
         )
         if not isinstance(resumed, Accepted):
             raise ContainerError(resumed.rejection.reason)
-        await asyncio.Event().wait()
+        stopping = asyncio.Event()
+        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, stopping.set)
+        await stopping.wait()
     finally:
         binder.closed()
         await running.stopped()

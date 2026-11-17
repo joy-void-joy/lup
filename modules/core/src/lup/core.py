@@ -1,5 +1,7 @@
 """`Core`: the module every project holds, which packages what every project has, and lists its submodules' promises."""
 
+from pathlib import Path
+
 from lup.command_line.promises import CommandLinePromises
 from lup.declaration.module import Module
 from lup.declaration.profiles import DEFAULT, DirectoryName, Profile, Profiles
@@ -70,3 +72,8 @@ class Core(Module):
     profile: DirectoryName = DEFAULT
     """The profile the repository's sessions run on, by its name, where a session
     is started naming none."""
+    home: Path | None = None
+    """The home repository, a worktree of it, whose approved commit's machine
+    parts run on this machine: lup's own checkout, for whoever works on lup.
+    Set in the machine's layer; none to run the installed `lup`'s own parts,
+    as whoever only builds with lup does."""
