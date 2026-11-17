@@ -25,6 +25,7 @@ from lup.doors.serving import Serving
 from lup.doors.tool import ToolDoor, ToolSpec
 from lup.environment.declaration import load, resolve
 from lup.environment.doors import Doors, Entry, Serves
+from lup.environment.shell import Looks, viewed
 from lup.testing.harness import (
     Acted,
     Broken,
@@ -37,6 +38,7 @@ from lup.testing.harness import (
     Step,
     Testing,
     ToolCall,
+    Viewed,
 )
 from lup.testing.promise import PromiseDoor
 from lup.types import Model, MutableModel
@@ -212,6 +214,7 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
     project: Project
     modules: list[Module]
     doors: Doors
+    looks: Looks
     laws: list[Law]
     run: Run
 
@@ -252,6 +255,8 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
                 return await self.doors.act(module, action, given, by)
             case Ran(module=module, command=command, arguments=arguments, by=by):
                 return await self.doors.run(module, command, arguments, by)
+            case Viewed(module=module, view=view, given=given, by=by):
+                return await viewed(self.doors, self.looks, module, view, given, by)
 
     async def checked(self, module: str, promise: str | None) -> list[Kept | Broken]:
         """Check the promise named `promise` of the module named `module`, or every one where none is named, as the gate does, and say how each fared.
@@ -292,6 +297,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
             project=project,
             modules=resolved.modules,
             doors=resolved.doors,
+            looks=resolved.looks,
             laws=laws(resolved.doors),
             run=self.run,
         )
