@@ -9,13 +9,32 @@ in a container of its own (`README.md` here, *The plan*).
 """
 
 from collections import Counter
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 
 from pydantic import StringConstraints
 
 from lup.doors.parts import Holds
 from lup.doors.tool import ToolSpec
 from lup.types import JsonObject, Model
+
+CORE = "core"
+"""The core's name: the module every project holds, whose tools, commands and
+views `lup` types at its top level (`lup init`), since the core is lup itself,
+where every other module's go under its name (`lup hosting open`)."""
+
+type Offerable = Literal["tool", "command", "view"]
+"""The doors the command line offers a method behind: a service is code's."""
+
+
+def typed(name: str) -> str:
+    """Return a method's or a module's name as the command line types it: each `_` a `-`, lowered, typer's way.
+
+    >>> typed("concern_view"), typed("hosting")
+    ('concern-view', 'hosting')
+    """
+    # lup: ignore("string-replace", why="typer's own rule for a command's name (`typer.main.get_command_name`), said once here for the plan, the declaration's check and the command line, so a name the core takes and a module's are compared as both are typed")
+    return name.lower().replace("_", "-")
+
 
 type Name = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")]
 """A name the machine makes a directory's or a container's name from: a
@@ -37,6 +56,10 @@ class Doorway(Model):
     input_schema: JsonObject = {}
     """The JSON Schema of the model it takes, or of each where it takes a list
     of it: what the command line reads its arguments and options from."""
+
+    def typed(self) -> str:
+        """Name it as the command line types it (`typed`)."""
+        return typed(self.name)
 
     def said(self, module: str) -> str:
         """Name it as a refusal does, with its module where its name is the module's alone: a tool's or a service's name is the project's, a command's or a view's its module's.
@@ -116,6 +139,49 @@ class Plan(Model):
             way.said(each.module) for each in self.parts for way in each.doorways
         )
         return [said for said, count in served.items() if count > 1]
+
+    def shadowed(self) -> list[str]:
+        """Name each module whose name, as it's typed, one of the core's tools, commands or views takes: `lup` types those at its top level and every other module's under its name, so both would be typed alike.
+
+        The machine refuses a plan with one, as one with a tie; resolving the
+        declaration refuses it first.
+
+        >>> core = PartPlan(
+        ...     module=CORE,
+        ...     part="Inboxes",
+        ...     holds=Holds(),
+        ...     doorways=[Doorway(door="command", name="clear", parties=["Operator"])],
+        ... )
+        >>> Plan(modules=[ModulePlan(name="clear")], parts=[core]).shadowed()
+        ['clear']
+        """
+        top = {
+            way.typed(): way
+            for each in self.parts
+            if each.module == CORE
+            for way in each.doorways
+            if way.door in get_args(Offerable.__value__)
+        }
+        return [
+            each.name
+            for each in self.modules
+            if each.name != CORE and typed(each.name) in top
+        ]
+
+    def only(self, modules: list[str]) -> Plan:
+        """Return the plan of the modules named in `modules` alone: what a project's own command offers, of the modules it's given.
+
+        >>> Plan(modules=[ModulePlan(name="core"), ModulePlan(name="harmon")]).only(
+        ...     ["harmon"]
+        ... ).modules
+        [ModulePlan(name='harmon', description='')]
+        """
+        return self.model_copy(
+            update={
+                "modules": [each for each in self.modules if each.name in modules],
+                "parts": [each for each in self.parts if each.module in modules],
+            }
+        )
 
     def serving(
         self, door: str, name: str, module: str | None = None

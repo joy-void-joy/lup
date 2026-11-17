@@ -23,11 +23,11 @@ from typing import TYPE_CHECKING, override
 import pytest
 from pydantic import ValidationError
 
+from lup.declaration.layout import RepositoryLayout
 from lup.declaration.module import Module
 from lup.doors.door import served
 from lup.doors.parts import Part, Parts
 from lup.environment.declaration import load, resolve
-from lup.environment.layout import RepositoryLayout
 from lup.environment.testing.checking import Check, Exploring
 from lup.environment.testing.harness import promises, readers
 from lup.errors import LupError

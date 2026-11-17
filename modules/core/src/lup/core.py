@@ -12,7 +12,10 @@ from lup.inbox.part import Inboxes, Speaking
 from lup.inbox.promises import InboxPromises
 from lup.inbox.records import EDGES, NODES
 from lup.programs.promises import ProgramsPromises
+from lup.running.plan import CORE
 from lup.running.promises import RunningPromises
+from lup.setup.part import Setup
+from lup.setup.promises import SetupPromises
 from lup.shell.blocks import Viewing
 from lup.shell.kinds import SHELL_FOLDS, SHELL_TONES, FoldKind, Folds, Tones
 from lup.shell.promises import ShellPromises
@@ -23,7 +26,7 @@ from lup.told.promises import GuidancePromises
 
 
 class Core(Module):
-    """What every project has: loading the declaration and its layers, the doors its modules are reached through, checking their promises, running programs, the shell's kinds, the inbox, rendering guidance, the command line, and the profiles its sessions run on; the core's other submodules as they're built.
+    """What every project has: loading the declaration and its layers, the doors its modules are reached through, checking their promises, running programs, the shell's kinds, the inbox, rendering guidance, the command line, setting a repository up for lup, and the profiles its sessions run on; the core's other submodules as they're built.
 
     A project changes it with `.edit` as it would any module, or puts another in
     its place with `.replace`, but can't drop it: resolving a selection without a
@@ -33,7 +36,7 @@ class Core(Module):
     as any field, and the kinds of record the inbox keeps in the store.
     """
 
-    name = "core"
+    name = CORE
     parts: Parts = Parts.of(
         DeclarationPromises,
         ProfilesPromises,
@@ -49,6 +52,8 @@ class Core(Module):
         ProgramsPromises,
         GuidancePromises,
         CommandLinePromises,
+        Setup,
+        SetupPromises,
     )
     tones: Tones = Tones.of(*SHELL_TONES)
     """The shell's tones: plain, muted, strong, and the operator's own words."""

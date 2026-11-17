@@ -27,20 +27,22 @@ from pydantic_settings import DotEnvSettingsSource, EnvSettingsSource
 from lup.command_line.answering import Answerer, Offered
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import listed
+from lup.declaration.layout import MachineLayout, RepositoryLayout
 from lup.declaration.module import Modules
 from lup.declaration.project import Project
-from lup.doors.door import Rejection
+from lup.doors.door import Rejection, served
 from lup.doors.parties import Operator
-from lup.doors.parts import variable
+from lup.doors.parts import Runs, variable
 from lup.environment.declaration import Resolved, read, resolve
 from lup.environment.doors import Running
-from lup.environment.layout import MachineLayout, RepositoryLayout
 from lup.environment.running.calling import Calling
 from lup.environment.running.container import REPLIES, answered
 from lup.environment.running.loader import Loader, LoaderError, Places
 from lup.environment.running.planning import plan_of
+from lup.environment.running.programs import Local
 from lup.environment.settings import LupSettings
 from lup.programs import ProgramFailedError, run
+from lup.running.plan import CORE, typed
 from lup.running.wire import (
     Call,
     Caller,
@@ -54,8 +56,10 @@ from lup.running.wire import (
 from lup.running.wire import (
     read as read_reply,
 )
+from lup.setup.part import Setup
 from lup.types import MutableModel, Settings
-lazy from lup.command_line.line import typed
+lazy from lup.command_line import line
+lazy from lup.environment.setup import SettingUp
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -87,10 +91,21 @@ class InProcess(MutableModel, Answerer, arbitrary_types_allowed=True):
     environment, so a part holding one runs apart."""
     running: Running | None = None
     """The parts started here, once a call has come."""
+    runs: Runs | None = None
+    """What runs the programs the parts started here declare; none where
+    nothing does, and a part's program is refused."""
+    offering: list[str] | None = None
+    """The modules whose methods it offers, by name: those a project's own
+    command is given, never the core's, which are lup's development side; none
+    for every module the project resolves to, as `lup` offers them."""
 
     async def offered(self) -> Offered:
-        """Return who the calls are by, and the project's plan."""
-        return Offered(by=self.by, plan=plan_of(self.resolved, []))
+        """Return who the calls are by, and the project's plan, of the modules it offers alone."""
+        plan = plan_of(self.resolved, [])
+        offering = self.offering
+        return Offered(
+            by=self.by, plan=plan if offering is None else plan.only(offering)
+        )
 
     def startable(self) -> list[str]:
         """Name each part started here, `module.Part`: those holding nothing beyond secrets, every one of which is given."""
@@ -143,7 +158,7 @@ class InProcess(MutableModel, Answerer, arbitrary_types_allowed=True):
             return Declined(rejection=rejection)
         if self.running is None:
             self.running = await self.resolved.doors.started(
-                self.repository, self.secrets, only=self.startable()
+                self.repository, self.secrets, only=self.startable(), runs=self.runs
             )
         made = call.model_copy(update={"by": self.by})
         text = await answered(
@@ -158,12 +173,14 @@ class InProcess(MutableModel, Answerer, arbitrary_types_allowed=True):
             self.running = None
 
 
-def ran(answerer: Answerer, name: str, words: list[str]) -> NoReturn:
-    """Run the command line called `name` on `words` over `answerer`, printing what it prints, stop what it started in this process, and end with its status."""
+def ran(answerer: Answerer, name: str, words: list[str], top: str | None) -> NoReturn:
+    """Run the command line called `name` on `words` over `answerer`, the methods of the module named `top` typed at its top level, printing what it prints, stop what it started in this process, and end with its status."""
 
     async def running() -> int:
         try:
-            done = await typed(words, answerer, name, sys.stdout, sys.stderr)
+            done = await line.typed(
+                words, answerer, name, sys.stdout, sys.stderr, top=top
+            )
         finally:
             await answerer.stopped()
         return done.status
@@ -182,6 +199,19 @@ def machine() -> MachineLayout:
     return MachineLayout(configuration=LupSettings().xdg_config_home)
 
 
+def setting_up(words: list[str]) -> bool:
+    """Say whether `words` name one of lup's own commands setting a repository up, `lup init` or `lup new`.
+
+    >>> setting_up(["init"]), setting_up(["new", "--help"]), setting_up(["hosting"])
+    (True, True, False)
+    """
+    match line.reached(words):
+        case [first, *_]:
+            return first in [typed(name) for name in served(Setup)]
+        case _:
+            return False
+
+
 def main() -> None:
     """Run `lup` on the words it's given, through lup's program on the operator's machine, which says who calls: over the socket `LUP_CALLING` names, as in a room, else over the machine's own, the machine started first where nothing answers there.
 
@@ -190,7 +220,19 @@ def main() -> None:
     there, as in a room no lup started, no machine is started: `lup` answers
     in this process, as the operator, over the declaration of the worktree it
     runs in, and says so.
+
+    `lup init` and `lup new` come first: they're lup's own program acting on
+    the operator's machine, writing their files and running their git and uv,
+    never a project's code, so they're answered here, as the operator, over
+    lup's default modules alone, before any declaration is read, then register
+    the repository with the machine (`SettingUp`, `lup/setup/README.md`).
     """
+    words = sys.argv[1:]
+    if setting_up(words):
+        lups = SettingUp(
+            by=Operator(), resolved=resolve(Project()), repository="lup", runs=Local()
+        )
+        ran(lups, "lup", words, CORE)
     calling = LupSettings().lup_calling
     try:
         layout = RepositoryLayout.found(Path.cwd())
@@ -208,7 +250,8 @@ def main() -> None:
             ran(
                 Calling(socket=calling, repository=layout.main.name),
                 "lup",
-                sys.argv[1:],
+                words,
+                CORE,
             )
         sys.stderr.write(
             "lup: podman isn't here, so no machine runs: this answers in this "
@@ -217,8 +260,13 @@ def main() -> None:
         resolved = resolve(read(layout, machine()).project)
     except (ProgramFailedError, ProjectError, LoaderError) as failure:
         refused("lup", failure)
-    answerer = InProcess(by=Operator(), resolved=resolved, repository=layout.main.name)
-    ran(answerer, "lup", sys.argv[1:])
+    answerer = InProcess(
+        by=Operator(),
+        resolved=resolved,
+        repository=layout.main.name,
+        runs=Local(),
+    )
+    ran(answerer, "lup", words, CORE)
 
 
 def developed(modules: list[Module]) -> Project | None:
@@ -267,9 +315,12 @@ def secrets_of(name: str, held: list[str]) -> dict[str, str]:
 def command_line(name: str, *modules: Module) -> Callable[[], None]:
     """Return a project's own command, called `name`: the command line over lup's default modules and `modules`, run in this process by whoever runs it, for a project's `[project.scripts]` to name.
 
-    In development, where one of `modules` is code a worktree tracks and that
-    worktree holds a declaration, the declaration, with its layers, says the
-    modules instead (`developed`). Each secret a part holds is read from the
+    It offers the methods of `modules` alone, the first's at its top level and
+    the others' under their names, never the core's, which are lup's
+    development side: `harmon` isn't `lup`. In development, where one of
+    `modules` is code a worktree tracks and that worktree holds a declaration,
+    the declaration, with its layers, says the modules and their settings
+    instead (`developed`). Each secret a part holds is read from the
     environment (`secrets_of`).
     """
 
@@ -292,7 +343,9 @@ def command_line(name: str, *modules: Module) -> Callable[[], None]:
             repository=name,
             secrets=secrets_of(name, list(dict.fromkeys(held))),
             command=name,
+            runs=Local(),
+            offering=[each.name for each in modules],
         )
-        ran(answerer, name, sys.argv[1:])
+        ran(answerer, name, sys.argv[1:], modules[0].name if modules else None)
 
     return main
