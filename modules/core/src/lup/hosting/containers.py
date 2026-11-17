@@ -17,7 +17,7 @@ import io
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, Field
+from pydantic import Field, StringConstraints
 
 import lup
 from lup.doors.door import RefusedError
@@ -31,24 +31,15 @@ class ContainerError(RefusedError):
     """podman couldn't build, start or stop a container as it was asked: its call is refused, saying why."""
 
 
-def pinned(image: str) -> str:
-    """Return `image` where it's named by its digest, so what's fetched under its name can't change.
-
-    Raise `ValueError` otherwise.
-
-    >>> pinned("docker.io/library/archlinux@sha256:4bf3")
-    'docker.io/library/archlinux@sha256:4bf3'
-    """
-    if "@sha256:" not in image:
-        message = f"`{image}` isn't named by its digest, so what it is could change"
-        raise ValueError(message)
-    return image
+type Pinned = Annotated[str, StringConstraints(pattern=r"@sha256:[0-9a-f]{64}$")]
+"""An image named by its digest, so what's fetched under its name can't change:
+`docker.io/library/archlinux@sha256:4bf3…`."""
 
 
 class Image(Model):
     """An image lup builds: a Containerfile's text, from a base image named by its digest, for one project, tagged by its digest, so a changed definition is a new tag."""
 
-    base: Annotated[str, AfterValidator(pinned)]
+    base: Pinned
     """The image it's built from, which its definition names: fetched by its
     digest where it isn't there, so the build itself fetches nothing."""
     definition: str
@@ -59,9 +50,10 @@ class Image(Model):
     def tag(self) -> str:
         """Return its tag: the digest of its definition and its project.
 
+        >>> pinned = "docker.io/library/archlinux@sha256:" + "4b" * 32
         >>> Image(
-        ...     base="docker.io/library/archlinux@sha256:4bf3",
-        ...     definition="FROM docker.io/library/archlinux@sha256:4bf3",
+        ...     base=pinned,
+        ...     definition=f"FROM {pinned}",
         ...     project="harmon",
         ... ).tag().startswith("localhost/lup:")
         True
