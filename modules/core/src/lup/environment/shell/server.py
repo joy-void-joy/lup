@@ -33,8 +33,11 @@ from lup.doors.door import Accepted, Refused
 from lup.doors.parties import Operator
 from lup.environment.doors import Running
 from lup.environment.shell.layout import ShellLayout
+from lup.environment.shell.review import Going, reviewed, wrapped
 from lup.environment.shell.viewing import viewed
-from lup.shell.blocks import Block, BlockError, Blocks, Viewing
+from lup.inbox.records import NO_AGENT
+from lup.inbox.said import Pile, Reached
+from lup.shell.blocks import Block, BlockError, Blocks, Fold, Offer, Viewing
 from lup.shell.draft import Comment, Commenting, Draft, Marked, Outcome, Quote
 from lup.shell.looks import Looks
 from lup.shell.wire import (
@@ -54,6 +57,8 @@ from lup.shell.wire import (
     Write,
 )
 from lup.types import Model, MutableModel
+lazy from lup.core import Core
+lazy from lup.inbox.part import Inboxes
 
 if TYPE_CHECKING:
     from pydantic_core.core_schema import (
@@ -104,6 +109,9 @@ class Keeping(MutableModel, arbitrary_types_allowed=True):
     """Where the draft is kept across restarts of the server; none where it's
     kept in memory alone."""
     pages: list[Session] = []
+    review: Fold | None = None
+    """What the next send would do with the draft, as the review at the top
+    of the document shows it; none where the draft holds nothing."""
     sending: asyncio.Lock = Field(default_factory=asyncio.Lock)
     """Held while the draft is sent, so two pages sending at once send each
     part once."""
@@ -116,19 +124,19 @@ class Keeping(MutableModel, arbitrary_types_allowed=True):
         )
         return cls(draft=draft, path=path)
 
-    async def changed(self, draft: Draft, by: Session | None = None) -> None:
-        """Keep `draft` in place of the draft, and tell every page open but `by`, the page that wrote the change, which holds it already.
-
-        Told its own change back, a page would lay a copy older than what's
-        been typed since over a comment being written.
-        """
+    def keep(self, draft: Draft) -> None:
+        """Keep `draft` in place of the draft, where it's kept across restarts too."""
         self.draft = draft
         if self.path is not None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(draft.model_dump_json())
-        for page in self.pages:
-            if page is not by:
-                await page.tell(Drafted(draft=draft))
+
+
+class Taken(Model):
+    """What takes a comment at a send: the command it's given to, offered as its block offers one, and whom it reaches, as the review says it."""
+
+    offer: Offer
+    to: str
 
 
 class Dashboard(Model, arbitrary_types_allowed=True):
@@ -146,6 +154,74 @@ class Dashboard(Model, arbitrary_types_allowed=True):
     """What the page has to say before anything is answered: rooms reach every
     port on the operator's machine, so being on localhost keeps nothing out."""
     layout: ShellLayout = ShellLayout()
+    repository: str | None = None
+    """The repository the dashboard serves, whose No agent pile takes a comment
+    on what reaches no party; none where nothing takes one."""
+
+    async def changed(self, draft: Draft, by: Session | None = None) -> None:
+        """Keep `draft` in place of the draft, tell every page open but `by`, the page that wrote the change, which holds it already, and lay the review out again for every page.
+
+        Told its own change back, a page would lay a copy older than what's
+        been typed since over a comment being written.
+        """
+        self.kept.keep(draft)
+        self.kept.review = reviewed(draft, await self.going(draft))
+        for page in self.kept.pages:
+            if page is not by:
+                await page.tell(Drafted(draft=draft))
+            await page.reviewed()
+
+    async def going(self, draft: Draft) -> list[Going]:
+        """Say where each comment of `draft` not held back goes at the next send, or why it can't, each block read once."""
+        read: dict[str, Block | str] = {}
+        return [
+            await self.goes(comment, read)
+            for comment in draft.comments
+            if not comment.held
+        ]
+
+    async def goes(self, comment: Comment, read: dict[str, Block | str]) -> Going:
+        """Say where `comment` goes at the next send, or why it can't, its block read once for every comment on it (`read`)."""
+        key = comment.on.model_dump_json(include={"viewing": True, "block": True})
+        if key not in read:
+            read[key] = await self.block(comment.on)
+        block = read[key]
+        if isinstance(block, str):
+            return Going(part=comment.id, to="to what can't be read", stays=block)
+        taken = self.taking(comment, block)
+        if isinstance(taken, str):
+            return Going(part=comment.id, to="to no one", stays=taken)
+        return Going(part=comment.id, to=taken.to)
+
+    def taking(self, comment: Comment, block: Block) -> Taken | str:
+        """Return what takes `comment`, and whom it reaches: its block's own comment, unless the operator chose whom it reaches; else the inbox, telling the party chosen, the one its block reaches, or the No agent pile where it reaches none; why nothing does, where nothing does."""
+        offer = next((each for each in block.offers if each.verb == "comment"), None)
+        if comment.to is None and offer is not None:
+            reaches = block.reaches
+            to = (
+                f"on {comment.on.viewing.view}"
+                if reaches is None
+                else f"to {named(reaches.model_dump(mode='json'))}"
+            )
+            return Taken(offer=offer, to=to)
+        party = comment.to
+        if party is None and block.reaches is not None:
+            party = block.reaches.model_dump(mode="json")
+        if party is None and self.repository is not None:
+            party = Pile(repository=self.repository, path=NO_AGENT).model_dump(
+                mode="json"
+            )
+        if party is None:
+            return "it reaches no party, and no pile takes what reaches none"
+        said = named(party)
+        try:
+            reached = Reached.model_validate({"party": party})
+        except ValidationError:
+            return f"nothing tells {said} a comment"
+        offer = Offer.of(Inboxes.comment_to, reached).model_copy(
+            update={"module": Core.name}
+        )
+        return Taken(offer=offer, to=f"to {said}")
 
     def application(self) -> FastAPI:
         """Return the server's application: the page, its assets, and the socket."""
@@ -222,7 +298,7 @@ class Dashboard(Model, arbitrary_types_allowed=True):
                     if not mark.held
                 },
             }
-            await self.kept.changed(self.kept.draft.settled(draft, outcomes))
+            await self.changed(self.kept.draft.settled(draft, outcomes))
             said = [
                 *(
                     each.id
@@ -262,18 +338,10 @@ class Dashboard(Model, arbitrary_types_allowed=True):
                 reason="what it's on changed since you wrote it: send again to send it anyway",
                 outdated=True,
             )
-        if comment.to is not None:
-            # lup: defer(issue=8, why="a comment sent to a party the operator chose goes through the inbox's delivery, which #8 brings")
-            return Outcome(reason="nothing delivers a comment to a chosen party yet")
-        offer = next((each for each in block.offers if each.verb == "comment"), None)
-        if offer is None:
-            if block.reaches is not None:
-                # lup: defer(issue=8, why="a comment on a block that offers none reaches its party through the inbox's delivery, which #8 brings")
-                return Outcome(reason="nothing delivers a comment to a party yet")
-            # lup: defer(issue=8, why="a comment on what reaches no party goes to the No agent pile, which #8's piles bring")
-            return Outcome(
-                reason="nothing delivers a comment that reaches no party yet"
-            )
+        taken = self.taking(comment, block)
+        if isinstance(taken, str):
+            return Outcome(reason=taken)
+        offer = taken.offer
         commenting = Commenting(
             words=comment.words.strip(),
             lines=quote.lines,
@@ -349,6 +417,9 @@ class Session(Model, arbitrary_types_allowed=True):
     dashboard: Dashboard
     socket: Socket
     sending: asyncio.Lock = Field(default_factory=asyncio.Lock)
+    roots: dict[int, Blocks] = {}
+    """What the document's root view last answered, by each number the page
+    watches it under, laid out again with the review as the draft changes."""
 
     async def run(self) -> None:
         """Read the page's frames until it goes, each answered or refused alone, every view watched answered at once, so a slow one holds up no other."""
@@ -385,26 +456,43 @@ class Session(Model, arbitrary_types_allowed=True):
                     dashboard = self.dashboard
                     await self.tell(Opened(root=dashboard.root, looks=dashboard.looks))
                     dashboard.kept.pages = [*dashboard.kept.pages, self]
-                    await self.tell(Drafted(draft=dashboard.kept.draft))
+                    kept = dashboard.kept
+                    if kept.review is None and kept.draft.comments:
+                        kept.review = reviewed(
+                            kept.draft, await dashboard.going(kept.draft)
+                        )
+                    await self.tell(Drafted(draft=kept.draft))
                 case Watch(watch=watch, viewing=viewing):
                     answering.create_task(self.answered(watch, viewing))
-                case Unwatch():
-                    pass
+                case Unwatch(watch=watch):
+                    self.roots.pop(watch, None)
                 case Write(comment=comment):
                     kept = self.dashboard.kept
-                    await kept.changed(kept.draft.written(comment), by=self)
+                    await self.dashboard.changed(kept.draft.written(comment), by=self)
                 case Mark(marked=marked):
                     kept = self.dashboard.kept
-                    await kept.changed(kept.draft.marked(marked), by=self)
+                    await self.dashboard.changed(kept.draft.marked(marked), by=self)
                 case Erase(id=part):
                     kept = self.dashboard.kept
-                    await kept.changed(kept.draft.erased(part), by=self)
+                    await self.dashboard.changed(kept.draft.erased(part), by=self)
                 case Send():
                     await self.tell(await self.dashboard.sent())
 
     async def answered(self, watch: int, viewing: Viewing) -> None:
-        """Answer the view watched under `watch`, and tell the page."""
-        await self.tell(await self.dashboard.answer(watch, viewing))
+        """Answer the view watched under `watch`, and tell the page: the document's root with the review at its top."""
+        answer = await self.dashboard.answer(watch, viewing)
+        if isinstance(answer, Answered) and viewing == self.dashboard.root:
+            self.roots[watch] = answer.blocks
+            answer = Answered(
+                watch=watch, blocks=wrapped(answer.blocks, self.dashboard.kept.review)
+            )
+        await self.tell(answer)
+
+    async def reviewed(self) -> None:
+        """Tell the page the document's root again under each number it watches it under, with the review as the draft stands."""
+        review = self.dashboard.kept.review
+        for watch, blocks in list(self.roots.items()):
+            await self.tell(Answered(watch=watch, blocks=wrapped(blocks, review)))
 
     async def tell(
         self, told: Opened | Answered | Unanswered | Drafted | Delivered
@@ -412,6 +500,17 @@ class Session(Model, arbitrary_types_allowed=True):
         """Send the page one frame, one at a time whichever task sends it."""
         async with self.sending:
             await self.socket.send(told.model_dump_json())
+
+
+def named(party: JsonValue) -> str:
+    """Say a party as the review and a comment's line say whom it reaches: what identifies it, as its fields give it, but which of the core's parties it is.
+
+    >>> named({"party": "pile", "repository": "lup", "path": "no-agent"})
+    'lup no-agent'
+    """
+    if not isinstance(party, dict):
+        return str(party)
+    return " ".join(str(value) for key, value in party.items() if key != "party")
 
 
 async def serve(dashboard: Dashboard, port: int) -> None:
