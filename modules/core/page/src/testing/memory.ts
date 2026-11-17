@@ -1,6 +1,6 @@
 // Views read from memory, for the page's promises: what each answers is set by the promise, and pushed to whoever
 // watches it, as the core pushes a view answered again; and the draft, kept as the core keeps it, a send taking out
-// every comment that says something and dropping the rest.
+// every comment that says something and isn't held back, and dropping those that say nothing.
 
 import type { Blocks, Comment, Delivered, Draft, Looks, Viewing } from "../generated/read";
 import { viewKey } from "../document/tree";
@@ -52,11 +52,12 @@ export class Memory implements Source {
     }
 
     send(): void {
-        const went = this.draft.comments.filter((each) => each.words.trim() !== "").map((each) => each.id);
-        this.draft = { comments: [], marks: [] };
+        const held = this.draft.comments.filter((each) => each.held);
+        const went = this.draft.comments.filter((each) => !each.held && each.words.trim() !== "").map((each) => each.id);
+        this.draft = { comments: held, marks: this.draft.marks.filter((each) => each.held) };
         this.told(this.draft);
         for (const delivered of this.#delivered) {
-            delivered({ kind: "delivered", went, stayed: [] });
+            delivered({ kind: "delivered", went, stayed: [], held: held.map((each) => each.id) });
         }
     }
 

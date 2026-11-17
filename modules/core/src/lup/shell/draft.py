@@ -57,6 +57,9 @@ class Comment(Model):
     """Whether a send kept it back once for being on lines that changed since
     it was written: the next send sends it as it is. Writing it again starts
     over."""
+    held: bool = False
+    """Whether the operator holds it back from sends (Space x): it stays in the
+    draft, as it is, until they let it go (Space d)."""
 
 
 class Outcome(Model):
@@ -79,6 +82,9 @@ class Marked(Model):
     reason: str | None = None
     """Why it stayed in the draft at the last send; none where it hasn't been
     sent, or nothing kept it."""
+    held: bool = False
+    """Whether the operator holds it back from sends (Space x): it stays in the
+    draft, as it is, until they let it go (Space d)."""
 
 
 class Draft(Model):

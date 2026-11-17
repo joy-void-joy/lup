@@ -115,6 +115,8 @@ class Delivered(Model):
     """The ids of the comments and marks that went."""
     stayed: list[str]
     """The ids of those that stayed in the draft."""
+    held: list[str] = []
+    """The ids of those the operator holds back, which the send left as they are."""
 
 
 type Told = Annotated[

@@ -463,6 +463,35 @@ class ShellPromises(Part):
         await page.leave()
 
     @lup.promise
+    async def a_part_held_back_stays_through_sends_and_goes_once_let_go(
+        self, by: Testing
+    ) -> None:
+        """A comment the operator holds back stays in the draft as it is through every send, while the rest goes; let go, it goes at the next."""
+        words = f"said {by.any(Words).words}"
+        sends = by.any(Drawn).notes % 3 + 1
+        started = await by.started(noted(1))
+        page = await opened(started)
+        held = Comment(id="held", on=quoted("note-1"), words=words, held=True)
+        await page.say(Write(comment=held))
+        for _ in range(sends):
+            await page.say(Send())
+            drafted = await page.told()
+            delivered = await page.told()
+            assert isinstance(drafted, Drafted)
+            assert isinstance(delivered, Delivered)
+            assert delivered.held == ["held"]
+            assert drafted.draft.comments == [held]
+        assert await taken(started) == []
+        await page.say(Write(comment=held.model_copy(update={"held": False})))
+        await page.say(Send())
+        drafted = await page.told()
+        delivered = await page.told()
+        assert isinstance(delivered, Delivered)
+        assert delivered.went == ["held"]
+        assert await taken(started) == [words.strip()]
+        await page.leave()
+
+    @lup.promise
     async def every_block_answered_carries_a_version_of_what_it_shows(
         self, by: Testing
     ) -> None:

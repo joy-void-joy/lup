@@ -201,7 +201,8 @@ class Dashboard(Model, arbitrary_types_allowed=True):
         with why, in the draft as it stands once the send ends, so what's
         written or erased while it runs is kept as it is; every page is told
         the draft. A comment on what changed since it was written stays the
-        first time, saying so, and goes the next.
+        first time, saying so, and goes the next. A part the operator holds
+        back isn't sent, and stays as it is.
         """
         async with self.kept.sending:
             draft = self.kept.draft
@@ -213,20 +214,27 @@ class Dashboard(Model, arbitrary_types_allowed=True):
                         else Outcome()
                     )
                     for comment in draft.comments
+                    if not comment.held
                 },
                 **{
                     mark.id: Outcome(reason=await self.acted(mark))
                     for mark in draft.marks
+                    if not mark.held
                 },
             }
             await self.kept.changed(self.kept.draft.settled(draft, outcomes))
             said = [
-                *(each.id for each in draft.comments if each.words.strip()),
-                *(each.id for each in draft.marks),
+                *(
+                    each.id
+                    for each in draft.comments
+                    if each.words.strip() and not each.held
+                ),
+                *(each.id for each in draft.marks if not each.held),
             ]
             return Delivered(
                 went=[part for part in said if outcomes[part].reason is None],
                 stayed=[part for part in said if outcomes[part].reason is not None],
+                held=[each.id for each in [*draft.comments, *draft.marks] if each.held],
             )
 
     async def block(self, quote: Quote) -> Block | str:

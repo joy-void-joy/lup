@@ -477,7 +477,7 @@ export class Comments {
             start: on.start,
             end: on.end,
         };
-        const comment: Comment = { id, on: quote, words: "", to: null, reason: null, warned: false };
+        const comment: Comment = { id, on: quote, words: "", to: null, reason: null, warned: false, held: false };
         const node = remark(`comment:${id}`, "", on.whole ? 0 : on.last);
         const changes = this.#shell.document.remark(block.key, node);
         this.#held.set(id, { comment, key: node.key, written: false });
