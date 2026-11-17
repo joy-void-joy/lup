@@ -72,9 +72,11 @@ class SetUp(Model):
     stops a project working on this machine, but each stops the part running
     it."""
     registered: bool = False
-    """Whether the operator's lup was told of the repository, and lists it."""
+    """Whether the operator's lup was told of the repository, and lists it:
+    `lup` tells it once the command has set the repository up, where it's
+    typed (`lup.environment.setup`)."""
     unregistered: str = ""
-    """Why it wasn't, where it wasn't."""
+    """Why it wasn't, where `lup` tried."""
 
 
 class VcsInfo(Model):
@@ -240,17 +242,12 @@ class Setup(Part):
         if ignored:
             ended = kept if not kept or kept.endswith("\n") else f"{kept}\n"
             ignore.write_text(f"{ended}{ignoring}\n")
-        # lup: defer(issue=3, why="`init` registers the repository with the operator's lup through `hosting register` over the socket `LUP_CALLING` names, as `Opening(repository=layout.main.name, common=…, declaration=…)`, once a part's code can reach a command of the machine's parts")
         return SetUp(
             root=root,
             declaration=layout.declaration,
             ignored=ignored,
             dependency=dependency,
             missing=await self.wanting(),
-            unregistered=(
-                "lup's program on your machine isn't told of new repositories yet "
-                "(#3): `lup hosting register` will list it on your dashboard"
-            ),
         )
 
     async def added(self, root: Path, *words: str) -> Finished:

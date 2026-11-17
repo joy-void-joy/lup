@@ -6,7 +6,7 @@
 
 They're lup's own program acting on the operator's machine, writing their files and running their git and uv, never a project's code. So `lup` answers them in the process it's typed in, as the operator, over lup's default modules alone, before it reads any declaration or reaches lup's program on the machine (`lup.environment.command_line.main`), and they read nothing of a repository's declaration but whether its file is there.
 
-Each takes everything as arguments, where it's typed unless `--directory` says otherwise, and answers what it did as a model (`SetUp`), which the command line prints as JSON: the worktree's root, the declaration written, whether the gitignore line was added, the dependency on lup's core, the project's own module where one was made, the programs lup's other parts run that aren't there, and whether the operator's lup was told of the repository.
+Each takes everything as arguments, where it's typed unless `--directory` says otherwise, and answers what it did as a model (`SetUp`), which the command line prints as JSON: the worktree's root, the declaration written, whether the gitignore line was added, the dependency on lup's core, the project's own module where one was made, the programs lup's other parts run that aren't there, and whether the operator's lup was told of the repository, and why not.
 
 ## `lup init`
 
@@ -19,7 +19,7 @@ It makes no module of the project's own.
 
 Until lup's releases are published (#23), the dependency is the core from GitHub at the commit of the lup running `init`: the commit an install from git records (`direct_url.json`, PEP 610), or, where the core is installed from a directory, as lup's own workspace installs it, that checkout's `HEAD`, which git gives. An install from an index records no commit, and `init` refuses.
 
-The operator's lup isn't told of the repository yet, which `init`'s answer says (`unregistered`): registering it, so the dashboard lists it, is `lup hosting register`, which `init` will send through lup's program on the machine (#3).
+Once the repository is set up, `lup` registers it with the operator's lup, so the dashboard lists it: it sends `hosting register` (the repository named after its main worktree, its shared git directory, its declaration) to lup's program on the machine, over the socket `LUP_CALLING` names, else the machine's own, started first where nothing answers there (`lup.environment.setup`). That's `lup`'s, on the environment side, not the part's: a part's code reaches no command of the machine's. Without podman no machine runs, and nothing is registered; the answer says whether it was, and why not (`registered`, `unregistered`).
 
 ## `lup new <name>`
 

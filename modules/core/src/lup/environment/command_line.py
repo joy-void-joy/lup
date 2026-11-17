@@ -59,6 +59,7 @@ from lup.running.wire import (
 from lup.setup.part import Setup
 from lup.types import MutableModel, Settings
 lazy from lup.command_line import line
+lazy from lup.environment.setup import SettingUp
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -223,12 +224,12 @@ def main() -> None:
     `lup init` and `lup new` come first: they're lup's own program acting on
     the operator's machine, writing their files and running their git and uv,
     never a project's code, so they're answered here, as the operator, over
-    lup's default modules alone, before any declaration is read or the machine
-    reached (`lup/setup/README.md`).
+    lup's default modules alone, before any declaration is read, then register
+    the repository with the machine (`SettingUp`, `lup/setup/README.md`).
     """
     words = sys.argv[1:]
     if setting_up(words):
-        lups = InProcess(
+        lups = SettingUp(
             by=Operator(), resolved=resolve(Project()), repository="lup", runs=Local()
         )
         ran(lups, "lup", words, CORE)
