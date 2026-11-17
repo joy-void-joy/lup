@@ -126,7 +126,10 @@ class NotesPart(Part):
 
     def titles(self) -> list[str]:
         """Return the notes' titles, in order."""
-        return [f"note {number}" for number in range(1, self.module.notes + 1)]
+        return [
+            f"{self.module.titled} {number}"
+            for number in range(1, self.module.notes + 1)
+        ]
 
     @lup.command(verb="done", says="clear it")
     async def clear(self, clearing: Clearing, by: lup.Operator) -> str:
@@ -156,6 +159,8 @@ class Notes(Module):
     name = "notes"
     notes: int = 0
     """How many notes the pile holds, each titled by its number."""
+    titled: str = "note"
+    """What each note's title says before its number."""
     holding: bool = False
     """Whether a comment waits to be taken until the pile releases them
     (`release`): what keeps a send running while a promise writes beside it."""
@@ -171,8 +176,8 @@ class Echoes(Module):
     folds: Folds = Folds.of(FoldKind(name="echo", letter="n", called="echo"))
 
 
-def noted(notes: int, *, holding: bool = False) -> Project:
-    """Return a project of lup's default modules and a pile of `notes` notes, the dashboard's document its pile, holding the comments it takes until released where `holding`.
+def noted(notes: int, *, holding: bool = False, titled: str = "note") -> Project:
+    """Return a project of lup's default modules and a pile of `notes` notes titled `titled` and their number, the dashboard's document its pile, holding the comments it takes until released where `holding`.
 
     `lup.Core` is read as it's called, not imported with the module: the core
     lists these promises, so it's still being made as this module is.
@@ -181,7 +186,7 @@ def noted(notes: int, *, holding: bool = False) -> Project:
     return Project(
         modules=Modules.default()
         .edit(lup.Core(document=document))
-        .add(Notes(notes=notes, holding=holding))
+        .add(Notes(notes=notes, holding=holding, titled=titled))
     )
 
 
@@ -328,7 +333,7 @@ class ShellPromises(Part):
 
     @lup.promise
     async def every_page_shows_the_same_draft(self, by: Testing) -> None:
-        """Every page open on the dashboard is told the draft as it changes, so a comment written in one shows in the other, and a closed tab loses nothing."""
+        """Every other page open on the dashboard is told the draft as one changes it, so a comment written in one shows in the other, and a closed tab loses nothing; the page that wrote it holds it already, and isn't told it back over what's typed since."""
         words = f"said {by.any(Words).words}"
         started = await by.started(noted(1))
         first = await opened(started)
@@ -336,10 +341,9 @@ class ShellPromises(Part):
         await first.say(
             Write(comment=Comment(id="c1", on=quoted("note-1"), words=words))
         )
-        for page in [first, second]:
-            drafted = await page.told()
-            assert isinstance(drafted, Drafted)
-            assert [each.words for each in drafted.draft.comments] == [words]
+        drafted = await second.told()
+        assert isinstance(drafted, Drafted)
+        assert [each.words for each in drafted.draft.comments] == [words]
         await first.leave()
         third = await opened(started, drafted=False)
         drafted = await third.told()
@@ -358,7 +362,6 @@ class ShellPromises(Part):
         staying = Comment(id="staying", on=quoted("nowhere"), words=words)
         for comment in [going, staying]:
             await page.say(Write(comment=comment))
-            assert isinstance(await page.told(), Drafted)
         await page.say(Send())
         drafted = await page.told()
         delivered = await page.told()
@@ -382,7 +385,6 @@ class ShellPromises(Part):
             Comment(id="said", on=quoted("note-1"), words=words),
         ]:
             await page.say(Write(comment=comment))
-            assert isinstance(await page.told(), Drafted)
         await page.say(Send())
         drafted = await page.told()
         delivered = await page.told()
@@ -431,6 +433,49 @@ class ShellPromises(Part):
         assert drafted.draft.comments == []
         for page in [first, second, third]:
             await page.leave()
+
+    @lup.promise
+    async def a_comment_on_what_changed_goes_at_the_second_send(
+        self, by: Testing
+    ) -> None:
+        """A comment on a block whose version changed since it was written stays at the first send, saying so, while the rest goes; sent again as it is, it goes."""
+        words = f"said {by.any(Words).words}"
+        started = await by.started(noted(1))
+        page = await opened(started)
+        stale = quoted("note-1").model_copy(update={"version": "as it was"})
+        await page.say(Write(comment=Comment(id="stale", on=stale, words=words)))
+        await page.say(Send())
+        drafted = await page.told()
+        first = await page.told()
+        assert isinstance(drafted, Drafted)
+        assert isinstance(first, Delivered)
+        assert first.stayed == ["stale"]
+        assert [each.warned for each in drafted.draft.comments] == [True]
+        assert await taken(started) == []
+        await page.say(Send())
+        drafted = await page.told()
+        second = await page.told()
+        assert isinstance(drafted, Drafted)
+        assert isinstance(second, Delivered)
+        assert second.went == ["stale"]
+        assert drafted.draft.comments == []
+        assert await taken(started) == [words.strip()]
+        await page.leave()
+
+    @lup.promise
+    async def every_block_answered_carries_a_version_of_what_it_shows(
+        self, by: Testing
+    ) -> None:
+        """Every block a view answers carries a version, the core working one out where the module gives none: the same while the block shows the same, another once it shows something else."""
+        notes = by.any(Drawn).notes
+        started = await by.started(noted(notes))
+        renamed = await by.started(noted(notes, titled="memo"))
+        versions = [await versioned(each) for each in [started, started, renamed]]
+        assert all(version is not None for version in versions[0])
+        assert versions[0] == versions[1]
+        assert all(
+            one != other for one, other in zip(versions[0], versions[2], strict=True)
+        )
 
 
 class Picked(Model):
@@ -491,6 +536,14 @@ async def taken(started: Started) -> list[str]:
         for each in answered.output.blocks
         if isinstance(each, Line)
     ]
+
+
+async def versioned(started: Started) -> list[str | None]:
+    """Return the version of every block the pile's view answers, in the order they're shown."""
+    answered = await started.view("notes", "pile", PileOf(pile="p"), Operator())
+    assert isinstance(answered, Accepted)
+    assert isinstance(answered.output, Blocks)
+    return [block.version for block in answered.output.every()]
 
 
 def quoted(block: str) -> Quote:

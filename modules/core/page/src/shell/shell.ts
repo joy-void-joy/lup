@@ -3,28 +3,34 @@
 // cursor is) by each block's key, so a view answering again moves nothing they didn't move.
 
 import { foldEffect, foldedRanges, foldState, unfoldEffect } from "@codemirror/language";
-import { Annotation, EditorState, Facet, StateEffect, StateField, type ChangeSpec, type Extension, type Range } from "@codemirror/state";
+import { history } from "@codemirror/commands";
+import { EditorState, Facet, StateEffect, StateField, Transaction, type ChangeSpec, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, showPanel, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { getCM, vim } from "@replit/codemirror-vim";
 
-import type { Blocks, Looks, Viewing } from "../generated/read";
-import { depthOf, Document, every, foldKind, foldRange, nodeAt, offsetOf, section, viewKey, type Change, type Node } from "../document/tree";
+import type { Blocks, Comment, Delivered, Draft, Looks, Viewing } from "../generated/read";
+import { depthOf, Document, every, foldKind, foldRange, mountedOf, nodeAt, offsetOf, section, viewKey, type Change, type Node } from "../document/tree";
+import { fromCore, redrawn } from "./annotations";
+import { Comments } from "./comments";
 import { Kinds } from "./looks";
 
-/** Where views are read from: the core, through the server, or the harness. */
+/** Where views are read from and the draft is kept: the core, through the server, or the harness. */
 export interface Source {
     /** Read `viewing`, and again each time what it shows changes, handing each answer to `answered`; return what stops it. */
     watch(viewing: Viewing, answered: (blocks: Blocks) => void): () => void;
+    /** Keep `comment` in the draft, in place of the one of its id where there's one. */
+    write(comment: Comment): void;
+    /** Take the comment or mark of id `id` out of the draft. */
+    erase(id: string): void;
+    /** Send the draft. */
+    send(): void;
+    /**
+     * Hand the draft to `drafted` as it stands, then each time another page or a send changes it, and what each send
+     * delivered to `delivered`; return what stops it.
+     */
+    drafts(drafted: (draft: Draft) => void, delivered: (delivered: Delivered) => void): () => void;
 }
 
-/** Marks a transaction the shell makes as views answer, rather than one the operator's keys make. */
-export const fromCore = Annotation.define<boolean>();
-
-/**
- * Marks a transaction after which what the shell draws beside the text may have changed, though the text didn't: what's
- * open (a fold read as it opens, or holding nothing, has no range to fold) or what's chosen.
- */
-export const redrawn = StateEffect.define<null>();
 
 /** Sets what the shell says on its status line; none clears it. */
 const say = StateEffect.define<string | null>();
@@ -66,6 +72,10 @@ export interface ShellState {
     readonly chosen: readonly string[];
     /** What the shell last said on its status line. */
     readonly said: string | null;
+    /** Each comment laid out, by its node's key: what it says. */
+    readonly comments: Readonly<Record<string, string>>;
+    /** The key of the comment being written; none outside one. */
+    readonly writing: string | null;
     readonly text: string;
 }
 
@@ -74,7 +84,8 @@ export class Shell {
     readonly view: EditorView;
     readonly document: Document;
     readonly kinds: Kinds;
-    readonly #source: Source;
+    readonly source: Source;
+    readonly comments: Comments;
     /** Whether the operator opened or closed each fold, by its key: what they did, kept as views answer again. */
     readonly #opened = new Map<string, boolean>();
     /** What stops each fold's view from being watched, by the fold's key, while it's open. */
@@ -85,8 +96,9 @@ export class Shell {
 
     constructor(parent: Element, root: Viewing, looks: Looks, source: Source, extensions: Extension[] = []) {
         this.kinds = new Kinds(looks);
-        this.#source = source;
+        this.source = source;
         this.document = new Document(section("root", root, { blocks: [], summary: [], offers: [] }));
+        this.comments = new Comments(this);
         const shell = this;
         this.view = new EditorView({
             parent,
@@ -95,7 +107,13 @@ export class Shell {
                 extensions: [
                     vim(),
                     EditorView.lineWrapping,
-                    EditorState.changeFilter.of((transaction) => transaction.annotation(fromCore) === true),
+                    EditorState.changeFilter.of((transaction) => transaction.annotation(fromCore) === true || shell.comments.allows(transaction)),
+                    // vim's `u` and Ctrl+R undo and redo what the operator wrote, never what views answered.
+                    history(),
+                    EditorState.transactionExtender.of((transaction) => (transaction.annotation(fromCore) === true ? { annotations: Transaction.addToHistory.of(false) } : null)),
+                    EditorView.updateListener.of((update) => {
+                        shell.comments.changed(update);
+                    }),
                     foldState,
                     said,
                     drawing,
@@ -104,6 +122,10 @@ export class Shell {
                 ],
             }),
         });
+        this.comments.start();
+        getCM(this.view)?.on("vim-mode-change", (event: { mode: string }) => {
+            this.comments.moded(event.mode);
+        });
         this.#stop = source.watch(root, (blocks) => {
             this.answered("root", blocks);
         });
@@ -111,6 +133,7 @@ export class Shell {
 
     /** Stop reading every view, and leave the page. */
     destroy(): void {
+        this.comments.destroy();
         this.#stop();
         for (const stop of this.#watching.values()) {
             stop();
@@ -134,6 +157,7 @@ export class Shell {
         if (node !== null) {
             this.#settle([node]);
         }
+        this.comments.laid();
     }
 
     /**
@@ -182,8 +206,9 @@ export class Shell {
         this.#watching.set(key, () => {
             stop();
         });
-        stop = this.#source.watch(viewing, (blocks) => {
-            const mounted = this.document.node(key)?.children[0];
+        stop = this.source.watch(viewing, (blocks) => {
+            const fold = this.document.node(key);
+            const mounted = fold === null ? null : mountedOf(fold);
             if (mounted?.viewing !== undefined && mounted.viewing !== null && viewKey(mounted.viewing) === viewKey(viewing)) {
                 this.answered(mounted.key, blocks);
             } else {
@@ -276,6 +301,11 @@ export class Shell {
             closed,
             chosen: this.#chosen,
             said: this.view.state.field(said),
+            comments: Object.fromEntries(every(this.document.root).flatMap((node) => (node.kind === "comment" ? [[node.key, node.head.join("\n")]] : []))),
+            writing: (() => {
+                const id = this.comments.writing();
+                return id === null ? null : `comment:${id}`;
+            })(),
             text: this.view.state.doc.toString(),
         };
     }
@@ -339,6 +369,18 @@ const drawing = ViewPlugin.fromClass(
                     const start = offsetOf(node);
                     const heading = kind !== null && start === line.from;
                     const classes = ["lup-line", `lup-${node.kind}`];
+                    const attributes: Record<string, string> = {};
+                    if (node.kind === "comment" && start === line.from) {
+                        const told = shell.comments.said(node.key);
+                        if (told !== null) {
+                            classes.push("lup-comment-first");
+                            attributes["data-to"] = `to ${told.to}`;
+                            const said = told.reason ?? (told.outdated ? "outdated: the lines it quotes changed" : null);
+                            if (said !== null) {
+                                attributes["data-said"] = said;
+                            }
+                        }
+                    }
                     if (heading) {
                         classes.push("lup-summary", `lup-kind-${kind}`);
                     }
@@ -354,6 +396,7 @@ const drawing = ViewPlugin.fromClass(
                     ranges.push(
                         Decoration.line({
                             attributes: {
+                                ...attributes,
                                 class: classes.join(" "),
                                 style: `--lup-depth: ${depthOf(node)};${colour === undefined ? "" : ` --lup-fold: var(--lup-${colour});`}`,
                             },
@@ -377,6 +420,9 @@ const drawing = ViewPlugin.fromClass(
                     }
                     position = line.to + 1;
                 }
+            }
+            for (const quoted of shell.comments.quoted()) {
+                ranges.push(Decoration.mark({ class: "lup-quoted" }).range(quoted.from, quoted.to));
             }
             return Decoration.set(ranges, true);
         }
@@ -439,7 +485,21 @@ export const look = EditorView.theme(
             cursor: "pointer",
         },
         ".lup-letter.lup-closed": { boxShadow: "inset 0 0 0 1px currentColor" },
+        ".lup-letter.lup-drafted": { textDecoration: "underline 2px var(--lup-warn)", textUnderlineOffset: "2px" },
         ".lup-line.lup-chosen": { background: "var(--lup-selection)" },
+        ".lup-line.lup-comment": {
+            color: "var(--lup-warn)",
+            background: "var(--lup-float)",
+            boxShadow: "inset 2px 0 0 var(--lup-warn)",
+        },
+        ".lup-comment-first::before": { content: '"¶ "', color: "var(--lup-muted)" },
+        ".lup-quoted": { textDecoration: "underline 2px var(--lup-warn)", textUnderlineOffset: "3px" },
+        ".lup-comment-first::after": { content: '"  " attr(data-to)', color: "var(--lup-muted)", fontStyle: "italic" },
+        ".lup-comment-first[data-said]::after": {
+            content: '"  " attr(data-to) "  ◂ " attr(data-said)',
+            color: "var(--lup-err)",
+            fontStyle: "italic",
+        },
         ".lup-status": { padding: "0 1ch", borderTop: "1px solid var(--lup-border)", color: "var(--lup-fg)" },
         ".cm-panels": { background: "var(--lup-float)", color: "var(--lup-fg)" },
         ".cm-panels-bottom": { borderTop: "0" },

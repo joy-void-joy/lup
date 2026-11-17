@@ -11,8 +11,9 @@ works"; `README.md` here, *The draft*).
 
 lazy from collections.abc import Iterator, Mapping
 
-from pydantic import BaseModel
+from pydantic import BaseModel, SerializeAsAny
 
+from lup.doors.parties import Party
 from lup.shell.blocks import Offer, Viewing
 from lup.types import Model
 
@@ -28,7 +29,11 @@ class Quote(Model):
     """The block's version as the part was written: a part on a block whose
     version has changed since is on something the operator didn't see."""
     lines: list[str] = []
-    """The lines of the block it quotes, whole, as they read when it was written."""
+    """The lines of the block it quotes, whole, as they read when it was
+    written; none for the block whole."""
+    line: int = 0
+    """Where the lines it quotes start among the block's own, from 0, so the
+    page puts it back under the right one of two lines that read the same."""
     start: int = 0
     """Where the passage it's on starts in its lines, joined by newlines."""
     end: int | None = None
@@ -42,9 +47,26 @@ class Comment(Model):
     """The page's id for it, kept as it's edited."""
     on: Quote
     words: str
+    to: SerializeAsAny[Party] | None = None
+    """Whom it reaches, as the operator chose (Space s); none for whom what
+    it's on reaches."""
     reason: str | None = None
     """Why it stayed in the draft at the last send; none where it hasn't been
     sent, or nothing kept it."""
+    warned: bool = False
+    """Whether a send kept it back once for being on lines that changed since
+    it was written: the next send sends it as it is. Writing it again starts
+    over."""
+
+
+class Outcome(Model):
+    """What came of sending one part of the draft: why it stayed, where it did, and whether it stayed for being outdated, which the next send overrides."""
+
+    reason: str | None = None
+    """Why it stayed in the draft; none where it went."""
+    outdated: bool = False
+    """Whether it stayed for being on something that changed since it was
+    written."""
 
 
 class Marked(Model):
@@ -83,8 +105,8 @@ class Draft(Model):
             marks = [*self.marks, mark]
         return self.model_copy(update={"marks": marks})
 
-    def settled(self, sent: Draft, outcomes: Mapping[str, str | None]) -> Draft:
-        """Return this draft once `sent` was sent, each part's outcome by its id: one that went taken out, one that stayed given why (`outcomes`), where it's as it was sent; a part written again or erased while it was sent left as it is."""
+    def settled(self, sent: Draft, outcomes: Mapping[str, Outcome]) -> Draft:
+        """Return this draft once `sent` was sent, each part's outcome by its id: one that went taken out, one that stayed given why, a comment kept back for being outdated marked warned, where it's as it was sent; a part written again or erased while it was sent left as it is."""
 
         def kept[P: (Comment, Marked)](parts: list[P], was: list[P]) -> Iterator[P]:
             """Yield the parts of `parts`, those of `was` settled."""
@@ -93,9 +115,10 @@ class Draft(Model):
                 if before is None or before != each or each.id not in outcomes:
                     yield each
                     continue
-                reason = outcomes[each.id]
-                if reason is not None:
-                    yield each.model_copy(update={"reason": reason})
+                outcome = outcomes[each.id]
+                if outcome.reason is not None:
+                    warned = {"warned": True} if outcome.outdated else {}
+                    yield each.model_copy(update={"reason": outcome.reason, **warned})
 
         return Draft(
             comments=list(kept(self.comments, sent.comments)),

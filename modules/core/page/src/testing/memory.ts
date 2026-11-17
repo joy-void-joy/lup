@@ -1,7 +1,8 @@
 // Views read from memory, for the page's promises: what each answers is set by the promise, and pushed to whoever
-// watches it, as the core pushes a view answered again.
+// watches it, as the core pushes a view answered again; and the draft, kept as the core keeps it, a send taking out
+// every comment that says something and dropping the rest.
 
-import type { Blocks, Looks, Viewing } from "../generated/read";
+import type { Blocks, Comment, Delivered, Draft, Looks, Viewing } from "../generated/read";
 import { viewKey } from "../document/tree";
 import declared from "../generated/core-looks.json";
 import type { Source } from "../shell/shell";
@@ -10,6 +11,10 @@ import type { Source } from "../shell/shell";
 export class Memory implements Source {
     readonly #answers = new Map<string, Blocks>();
     readonly #watches = new Map<string, Set<(blocks: Blocks) => void>>();
+    readonly #drafted = new Set<(draft: Draft) => void>();
+    readonly #delivered = new Set<(delivered: Delivered) => void>();
+    /** The draft, as the core keeps it. */
+    draft: Draft = { comments: [], marks: [] };
 
     /** Set what `viewing` answers, and push it to every watch of it. */
     set(viewing: Viewing, blocks: Blocks): void {
@@ -32,6 +37,45 @@ export class Memory implements Source {
         return () => {
             watches.delete(answered);
         };
+    }
+
+    write(comment: Comment): void {
+        const kept = this.draft.comments.some((each) => each.id === comment.id);
+        this.draft = {
+            ...this.draft,
+            comments: kept ? this.draft.comments.map((each) => (each.id === comment.id ? comment : each)) : [...this.draft.comments, comment],
+        };
+    }
+
+    erase(id: string): void {
+        this.draft = { comments: this.draft.comments.filter((each) => each.id !== id), marks: this.draft.marks.filter((each) => each.id !== id) };
+    }
+
+    send(): void {
+        const went = this.draft.comments.filter((each) => each.words.trim() !== "").map((each) => each.id);
+        this.draft = { comments: [], marks: [] };
+        this.told(this.draft);
+        for (const delivered of this.#delivered) {
+            delivered({ kind: "delivered", went, stayed: [] });
+        }
+    }
+
+    drafts(drafted: (draft: Draft) => void, delivered: (delivered: Delivered) => void): () => void {
+        this.#drafted.add(drafted);
+        this.#delivered.add(delivered);
+        drafted(this.draft);
+        return () => {
+            this.#drafted.delete(drafted);
+            this.#delivered.delete(delivered);
+        };
+    }
+
+    /** Tell every page following the draft that it's now `draft`, as the core tells the other pages a page's change. */
+    told(draft: Draft): void {
+        this.draft = draft;
+        for (const drafted of this.#drafted) {
+            drafted(draft);
+        }
     }
 }
 

@@ -4,11 +4,11 @@
 
 import fc from "fast-check";
 import { expect } from "vitest";
-import { Vim, getCM } from "@replit/codemirror-vim";
 
 import type { Blocks, Fold, Viewing } from "../generated/read";
 import { every, foldKind, offsetOf, section } from "../document/tree";
 import { blocks, fold } from "../testing/blocks";
+import { press } from "../testing/keys";
 import { Memory, looks } from "../testing/memory";
 import { law, scenario, type Machine } from "../testing/promise";
 import { bindVim, vimBindings } from "./keymap";
@@ -27,31 +27,26 @@ const kinds = ["note", "body"];
 
 /**
  * What the operator types, each a whole command, as vim names its keys: moving, folding, choosing, entering and leaving
- * insert mode, and text.
+ * insert mode, commenting, sending, and text, which in insert mode each of a command's characters types.
  */
 const keys = fc.constantFrom(
-    ..."j k gg G za zo zc zr zm zR zM zfn zfb i a o x v".split(" ").map((typed) => [...typed]),
+    ..."j k gg G za zo zc zr zm zR zM zfn zfb i a A o O x e s S cw cc vls dd ]n [n".split(" ").map((typed) => [...typed]),
     ["<Esc>"],
     ["<C-[>"],
-    ...["fn", "fb", "Fn", "Fb", "fz"].map((typed) => ["<Space>", ...typed]),
+    ["<CR>"],
+    ["<BS>"],
+    ["<C-CR>"],
+    ["u"],
+    ["<C-r>"],
+    [":w"],
+    ...["fn", "fb", "Fn", "Fb", "fz", "c"].map((typed) => ["<Space>", ...typed]),
 );
 
-/** The keys that leave insert mode, as vim has them. */
-const leaving = ["<Esc>", "<C-[>", "<C-c>"];
+/** The keys that leave insert mode: vim's own, and Ctrl+Enter, which ends the comment being written. */
+const leaving = ["<Esc>", "<C-[>", "<C-c>", "<C-CR>"];
 
 function answer(content: Blocks["blocks"]): Blocks {
     return { blocks: content, summary: [], offers: [] };
-}
-
-/** Send `keys`, each as vim names it, to `shell`'s editor, as the keyboard does. */
-function press(shell: Shell, keys: readonly string[]): void {
-    const cm = getCM(shell.view);
-    if (cm === null) {
-        throw new Error("the shell's editor has no vim mode");
-    }
-    for (const each of keys) {
-        Vim.handleKey(cm, each, "user");
-    }
 }
 
 interface Running {
@@ -68,15 +63,21 @@ interface Spanned {
     readonly last: number;
 }
 
-/** The shell's state, with what its margin shows beside each line and where each fold is. */
+/** The shell's state, with what its margin shows beside each line, where each fold is, and what's written. */
 interface Seen extends ShellState {
     readonly folds: readonly Spanned[];
     /** Beside each line, the first first. */
     readonly margin: readonly Beside[];
+    /** The document's text as its tree lays it out. */
+    readonly tree: string;
+    /** The editor's text with every comment taken out: what the views answered. */
+    readonly outside: string;
+    /** What the draft holds of each comment, by its node's key. */
+    readonly drafted: Readonly<Record<string, string>>;
 }
 
-/** Return what `shell` shows, its margin and its folds among it. */
-function seen(shell: Shell): Seen {
+/** Return what `shell` shows, its margin, its folds and its comments among it, and what `memory`'s draft holds. */
+function seen(shell: Shell, memory: Memory): Seen {
     const doc = shell.view.state.doc;
     const bright = cursorFolds(shell, shell.view.state);
     const margin: Beside[] = [];
@@ -90,7 +91,14 @@ function seen(shell: Shell): Seen {
             const start = offsetOf(node);
             return { key: node.key, kind: foldKind(node) ?? "", first: doc.lineAt(start).number, last: doc.lineAt(start + node.size).number };
         });
-    return { ...shell.state(), folds, margin };
+    const text = doc.toString();
+    const cut = every(shell.document.root)
+        .filter((node) => node.kind === "comment")
+        .map((node) => ({ from: offsetOf(node) - 1, to: offsetOf(node) + node.size }))
+        .sort((one, other) => other.from - one.from);
+    const outside = cut.reduce((kept, range) => kept.slice(0, range.from) + kept.slice(range.to), text);
+    const drafted = Object.fromEntries(memory.draft.comments.map((comment) => [`comment:${comment.id}`, comment.words]));
+    return { ...shell.state(), folds, margin, tree: shell.document.text(), outside, drafted };
 }
 
 const shell: Machine<Running, Seen, Event> = {
@@ -106,15 +114,15 @@ const shell: Machine<Running, Seen, Event> = {
         { weight: 4, arbitrary: keys.map((typed): Event => ({ keys: typed })) },
         { weight: 1, arbitrary: blocks(1, kinds).map((content): Event => ({ answer: answer(content) })) },
     ),
-    apply(running, event) {
+    async apply(running, event) {
         if ("keys" in event) {
-            press(running.shell, event.keys);
+            await press(running.shell, event.keys);
         } else {
             running.memory.set(root, event.answer);
         }
     },
     state(running) {
-        return seen(running.shell);
+        return seen(running.shell, running.memory);
     },
     end(running) {
         running.shell.destroy();
@@ -199,6 +207,26 @@ law(shell, "What's chosen changes only as the operator chooses, acts on it or le
     return choosing || JSON.stringify(step.after.chosen) === JSON.stringify(step.before.chosen);
 });
 
+law(shell, "The editor's text is always the document's, whatever the operator types and however views answer", (step) => step.after.text === step.after.tree);
+
+law(shell, "The operator's keys change nothing but comments: what the views answered reads the same around them", (step) => "answer" in step.event || step.before.outside === step.after.outside);
+
+law(shell, "Insert mode is only ever in a comment, one opened where the operator went into it outside one", (step) => step.after.mode !== "insert" || "answer" in step.event || step.after.writing !== null);
+
+law(shell, "Out of insert mode, every comment shown says something, and the draft holds what it says", (step) => {
+    if (step.after.mode === "insert") {
+        return true;
+    }
+    return Object.entries(step.after.comments).every(([key, text]) => text.trim() !== "" && step.after.drafted[key] === text);
+});
+
+law(shell, "A view answering again leaves what each comment it still shows says as it was", (step) => {
+    if (!("answer" in step.event)) {
+        return true;
+    }
+    return Object.entries(step.after.comments).every(([key, text]) => step.before.comments[key] === undefined || step.before.comments[key] === text);
+});
+
 /** A source answering `root` with `blocks` alone. */
 function single(blocks: Blocks): Memory {
     const memory = new Memory();
@@ -215,9 +243,9 @@ scenario("A fold of a kind that starts closed shows its summary alone until it's
         const node = opened.document.node(key);
         expect(node === null ? null : foldKind(node)).toBe("note");
         expect(opened.state().closed).toContain(key);
-        press(opened, ["z", "f", "n"]);
+        await press(opened, ["z", "f", "n"]);
         expect(opened.state().closed).not.toContain(key);
-        press(opened, ["z", "f", "n"]);
+        await press(opened, ["z", "f", "n"]);
         expect(opened.state().closed).toContain(key);
     } finally {
         opened.destroy();
@@ -245,7 +273,7 @@ scenario("A fold read as it opens reads its view once opened, and shows its answ
     const opened = new Shell(document.createElement("div"), root, looks, memory);
     try {
         expect(opened.state().text).toBe(summary);
-        press(opened, ["z", "f", "n"]);
+        await press(opened, ["z", "f", "n"]);
         expect(opened.state().text.startsWith(`${summary}\n`)).toBe(true);
         expect(opened.state().text.length).toBeGreaterThan(summary.length);
     } finally {

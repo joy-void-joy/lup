@@ -12,9 +12,10 @@ module declares (`MarkKind`), and who a comment on a block reaches is a party
 (`Shown.reaches`).
 """
 
+import hashlib
 from datetime import datetime
 from difflib import SequenceMatcher
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
 from pydantic import BaseModel, Field, JsonValue, SerializeAsAny
 
@@ -217,8 +218,10 @@ class Shown(Model):
     id: str
     version: str | None = None
     """The version of what it shows, which a comment written on it records, so
-    its party is told what changed since: a file's as git names its content;
-    none where the page goes by its text."""
+    its party is told what changed since: a file's as git names its content.
+    Where a module gives none, the core works one out from what the block shows
+    itself as it answers (`Blocks.versioned`), so a comment or a mark on it can
+    always tell it changed."""
     offers: list[Offer] = []
     """What it offers the operator to do with what it shows, each under its
     verb's key."""
@@ -229,6 +232,15 @@ class Shown(Model):
     """What being seen does: a command the page runs once the block has been on
     the operator's screen long enough, as marking an item read; none where
     being seen does nothing."""
+    shows: ClassVar[dict[str, bool]] = {}
+    """The fields saying what the block shows itself, apart from what's under
+    it, each marked to include, which the version the core works out is a
+    digest of."""
+
+    def own_version(self) -> str:
+        """Return a version of what the block shows itself: a digest of the fields saying it, which changes as they do."""
+        said = self.model_dump_json(include=self.shows)
+        return hashlib.blake2b(said.encode(), digest_size=8).hexdigest()
 
 
 class Line(Shown):
@@ -236,6 +248,7 @@ class Line(Shown):
 
     block: Literal["line"] = "line"
     spans: list[Span] = []
+    shows: ClassVar[dict[str, bool]] = {"spans": True}
 
     @classmethod
     def of(cls, key: str, text: str, tone: str = "plain") -> Line:
@@ -257,6 +270,7 @@ class Markdown(Shown):
     block: Literal["markdown"] = "markdown"
     text: str
     tone: str = "plain"
+    shows: ClassVar[dict[str, bool]] = {"text": True}
 
 
 class Fold(Shown):
@@ -276,6 +290,7 @@ class Fold(Shown):
     content: list[Block] | Viewing = []
     """What's under it: given, or read from a view as it opens, so a long view
     sends only what's open."""
+    shows: ClassVar[dict[str, bool]] = {"kind": True, "summary": True}
 
     def said(self, indent: str = "", *, opened: bool) -> list[str]:
         """Say the fold as text, each line after `indent`: its summary, marked open or closed, then, open, its content, indented further.
@@ -376,6 +391,7 @@ class Code(Shown):
     marks: list[Mark] = []
     open: bool | None = None
     """Whether it's open under its header; none for as the `file` kind says."""
+    shows: ClassVar[dict[str, bool]] = {"path": True, "text": True}
 
     def said(self, indent: str = "", *, opened: bool) -> list[str]:
         r"""Say the file as text, each line after `indent`: its header, marked open or closed, then, open, each of its lines, what its marks say at their first line's end.
@@ -412,6 +428,7 @@ class Diff(Shown):
     marks: list[Mark] = []
     open: bool | None = None
     """Whether it's open under its header; none for as the `file` kind says."""
+    shows: ClassVar[dict[str, bool]] = {"path": True, "before": True, "after": True}
 
     def rows(self) -> list[Row]:
         r"""Return its lines as the page shows them: what it becomes, each line it removes in place before those replacing it.
@@ -559,6 +576,23 @@ class Blocks(Model):
         """
         summary = "".join(span.text for span in self.summary)
         return "\n".join([*([summary] if summary else []), *lines(self.blocks)])
+
+    def versioned(self) -> Blocks:
+        """Return the view with a version on every block that gives none, worked out from what it shows itself (`Shown.own_version`), a fold's given content among them."""
+
+        def given(block: Block) -> Block:
+            match block:
+                case Fold(content=list() as content):
+                    block = block.model_copy(
+                        update={"content": [given(each) for each in content]}
+                    )
+                case _:
+                    pass
+            if block.version is not None:
+                return block
+            return block.model_copy(update={"version": block.own_version()})
+
+        return self.model_copy(update={"blocks": [given(each) for each in self.blocks]})
 
     def every(self) -> list[Block]:
         """Return every block the view holds, a fold's given content among them, in the order they're shown."""
