@@ -10,6 +10,9 @@ requires-python = ">=3.15"
 dependencies = [
     "pydantic>=2.14",
     "pydantic-settings>=2.11",
+    # The store's database: its tables declared once in Python and its queries
+    # built from them (`lup/store/README.md`), Core alone, not the ORM.
+    "sqlalchemy>=2",
 ]
 
 [project.optional-dependencies]
