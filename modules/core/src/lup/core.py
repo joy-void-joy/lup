@@ -8,6 +8,7 @@ from lup.inbox.part import Inboxes, Speaking
 from lup.inbox.promises import InboxPromises
 from lup.inbox.records import EDGES, NODES
 from lup.running.promises import RunningPromises
+from lup.shell.blocks import Viewing
 from lup.shell.kinds import SHELL_FOLDS, SHELL_TONES, FoldKind, Folds, Tones
 from lup.shell.promises import ShellPromises
 from lup.store.promises import StorePromises
@@ -49,3 +50,8 @@ class Core(Module):
     unchanged lines; and the inbox's, a concern."""
     kinds: Recorded = Recorded.of(*NODES, *EDGES)
     """The kinds of record the core's submodules keep in the store: the inbox's."""
+    document: Viewing | None = None
+    """The view the dashboard's document is, its root: a view listing the
+    parties, each a fold of the `party` kind whose content reads what's shown of
+    it, of the module named; none where the home repository's declaration names
+    none, and the dashboard shows nothing."""

@@ -42,7 +42,7 @@ from lup.doors.door import (
 )
 from lup.doors.events import Event, Starting, Stopping
 from lup.doors.on import OnDoor
-from lup.doors.parties import Codebase, Party, said
+from lup.doors.parties import Codebase, Machine, Party, said
 from lup.doors.parts import Given, Part, Parts, Runs
 from lup.doors.service import CARRYING, Carrier, ServiceDoor
 from lup.doors.tool import ToolDoor, ToolSpec
@@ -210,7 +210,9 @@ class Doors(Model):
         only: list[str] | None = None,
         beyond: Carrier | None = None,
         data: Path | None = None,
+        runtime: Path | None = None,
         runs: Runs | None = None,
+        machine: bool = False,
     ) -> Running:
         """Make each part once, with its module and the value of each secret it holds, run what each runs at `Starting`, and return them running, as the project of `repository`'s code.
 
@@ -219,12 +221,14 @@ class Doors(Model):
         `module.Part`, where the others run elsewhere, a call to one of their
         services carried by `beyond`; left out, every part is made here. Raise
         `ProjectError` where a part made here holds a secret not given. A part
-        keeping data is given a directory under `data`, named `module.Part`, and
-        a program a part declares is run by `runs`.
+        keeping data is given a directory under `data`, named `module.Part`, one
+        keeping what lasts while it runs one under `runtime`, named so too, and
+        a program a part declares is run by `runs`. Where `machine`, these are
+        the machine's own parts, and a service their code calls is by `Machine`.
         """
         running = Running(
             doors=self,
-            caller=Codebase(repository=repository),
+            caller=Machine() if machine else Codebase(repository=repository),
             made=[
                 Made(
                     serves=each,
@@ -233,6 +237,7 @@ class Doors(Model):
                         Given(
                             secrets=secrets,
                             data=None if data is None else data / each.named(),
+                            runtime=None if runtime is None else runtime / each.named(),
                             runs=runs,
                         ),
                     ),
@@ -267,7 +272,7 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
     """
 
     doors: Doors
-    caller: Codebase
+    caller: Codebase | Machine
     """The project whose code this is: who a service's call made here is
     by."""
     made: list[Made]

@@ -23,8 +23,8 @@ from lup.declaration.grammar import listed
 from lup.declaration.module import Module
 from lup.declaration.project import Project
 from lup.environment.doors import Doors
-from lup.environment.shell import Looks
 from lup.errors import LupError
+from lup.shell.looks import Looks
 from lup.store.records import Edge, Kinds, Node, Recorded
 from lup.types import Model
 

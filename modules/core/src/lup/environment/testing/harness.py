@@ -12,10 +12,12 @@ from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar, copy_context
 from pathlib import Path
+from typing import override
 
 from hypothesis import strategies as st
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
+from lup.core import Core
 from lup.declaration.errors import ProjectError
 from lup.declaration.module import Module
 from lup.declaration.project import Project
@@ -27,7 +29,11 @@ from lup.environment.declaration import load, resolve
 from lup.environment.doors import Doors, Entry, Running, Serves
 from lup.environment.running.container import answered
 from lup.environment.running.planning import plan_of
-from lup.environment.shell import Looks, viewed
+from lup.environment.shell import viewed
+from lup.environment.shell.server import Dashboard, Session, Socket
+from lup.shell.blocks import Viewing
+from lup.shell.looks import Looks
+from lup.shell.wire import Answered, Hello, Opened, Told, Unanswered, Unwatch, Watch
 from lup.testing.harness import (
     Acted,
     Broken,
@@ -36,6 +42,8 @@ from lup.testing.harness import (
     Crossing,
     Heard,
     Kept,
+    Opening,
+    Page,
     ProgramRun,
     Ran,
     Reaching,
@@ -64,7 +72,7 @@ class Run(MutableModel, arbitrary_types_allowed=True):
     started: list[Running] = []
     """What the run started, stopped once the promise ends."""
     kept: list[tempfile.TemporaryDirectory[str]] = []
-    """Where what the run started keeps its data, removed once it's stopped."""
+    """Where what the run started keeps its data and what lasts while it runs, removed once it's stopped."""
 
     async def stopped(self) -> None:
         """Stop what the run started, the last first, and remove where it kept its data."""
@@ -386,6 +394,72 @@ class Crosser(Model, Crossing, arbitrary_types_allowed=True):
         return await answered(self.running, text)
 
 
+class Dashboards(Model, Opening, arbitrary_types_allowed=True):
+    """A started lup's dashboard, as the harness opens its pages."""
+
+    running: Running
+    looks: Looks
+    root: Viewing | None
+
+    @override
+    async def page(self) -> Page:
+        """Open a page of the dashboard, its socket in memory, served as the server serves one."""
+        dashboard = Dashboard(running=self.running, looks=self.looks, root=self.root)
+        inbound: asyncio.Queue[str | None] = asyncio.Queue()
+        outbound: asyncio.Queue[str | None] = asyncio.Queue()
+        socket = Queued(inbound=inbound, outbound=outbound)
+        session = Session(dashboard=dashboard, socket=socket)
+        serving = asyncio.get_running_loop().create_task(session.run())
+        return Paged(
+            token=dashboard.token, inbound=inbound, outbound=outbound, serving=serving
+        )
+
+
+class Queued(Socket, Model, arbitrary_types_allowed=True):
+    """A page's socket in memory: what the page says, and what it's told, each a queue."""
+
+    inbound: asyncio.Queue[str | None]
+    outbound: asyncio.Queue[str | None]
+
+    @override
+    async def received(self) -> str | None:
+        return await self.inbound.get()
+
+    @override
+    async def send(self, text: str) -> None:
+        await self.outbound.put(text)
+
+    @override
+    async def close(self, code: int, reason: str) -> None:
+        del code, reason
+        await self.outbound.put(None)
+
+
+class Paged(Page, arbitrary_types_allowed=True):
+    """A page of the dashboard as the harness opens it: its socket in memory, served as the server serves one."""
+
+    inbound: asyncio.Queue[str | None]
+    outbound: asyncio.Queue[str | None]
+    serving: asyncio.Task[None]
+    """The server's session reading the page's socket."""
+
+    @override
+    async def say(self, frame: Hello | Watch | Unwatch | str) -> None:
+        await self.inbound.put(
+            frame if isinstance(frame, str) else frame.model_dump_json()
+        )
+
+    @override
+    async def told(self) -> Opened | Answered | Unanswered | None:
+        text = await self.outbound.get()
+        return None if text is None else TypeAdapter[Told](Told).validate_json(text)
+
+    @override
+    async def leave(self) -> None:
+        await self.inbound.put(None)
+        await self.serving
+
+
 class Harness(Testing, arbitrary_types_allowed=True):
     """The harness as the gate runs it: lup started in this process, and values drawn by hypothesis."""
 
@@ -398,6 +472,8 @@ class Harness(Testing, arbitrary_types_allowed=True):
         secrets: Mapping[str, str] | None = None,
         repository: str = "harness",
         programs: Mapping[str, Scripted] | None = None,
+        *,
+        machine: bool = False,
     ) -> Started:
         """Start lup on a declaration: a `Project`, or the text of a declaration's file, loaded as lup loads one, each class made once and started.
 
@@ -408,7 +484,9 @@ class Harness(Testing, arbitrary_types_allowed=True):
         project = declared if isinstance(declared, Project) else loaded(declared)
         heard = Heard()
         stand = StandIn(scripts=dict(programs or {}), heard=heard)
-        reached = await self.reached(project, secrets, repository, stand)
+        reached = await self.reached(
+            project, secrets, repository, stand, machine=machine
+        )
         return Started(
             modules=reached.modules,
             specs=reached.tools(),
@@ -416,6 +494,11 @@ class Harness(Testing, arbitrary_types_allowed=True):
             doors=reached,
             crossing=Crosser(running=reached.running),
             heard=heard,
+            dashboards=Dashboards(
+                running=reached.running,
+                looks=reached.looks,
+                root=document_of(reached.modules),
+            ),
         )
 
     async def reached(
@@ -424,6 +507,8 @@ class Harness(Testing, arbitrary_types_allowed=True):
         secrets: Mapping[str, str] | None = None,
         repository: str = "harness",
         runs: Runs | None = None,
+        *,
+        machine: bool = False,
     ) -> Reached:
         """Start lup on `project`, as the code of `repository`, and return its doors as this harness reaches them, every law its modules hold checked over each call.
 
@@ -440,12 +525,15 @@ class Harness(Testing, arbitrary_types_allowed=True):
             else {name: self.any(str) for name in dict.fromkeys(held)}
         )
         kept = tempfile.TemporaryDirectory(prefix="lup-data-")
-        self.run.kept.append(kept)
+        lasting = tempfile.TemporaryDirectory(prefix="lup-run-")
+        self.run.kept.extend([kept, lasting])
         running = await resolved.doors.started(
             repository,
             given,
             data=Path(kept.name),
+            runtime=Path(lasting.name),
             runs=runs or StandIn(heard=Heard()),
+            machine=machine,
         )
         self.run.started.append(running)
         return Reached(
@@ -485,3 +573,10 @@ def promises(module: Module) -> list[Entry]:
         for entry in served.entries()
         if isinstance(entry.method.door, PromiseDoor)
     ]
+
+
+def document_of(modules: list[Module]) -> Viewing | None:
+    """Return the document's root view, as the core module among `modules` names it."""
+    return next(
+        (module.document for module in modules if isinstance(module, Core)), None
+    )

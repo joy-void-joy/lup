@@ -24,6 +24,14 @@ dependencies = [
 testing = [
     "hypothesis>=6.170",
 ]
+# The dashboard's server: the page, and one socket carrying what it watches.
+# Only what serves the dashboard needs it, never a module's code.
+dashboard = [
+    "fastapi>=0.120",
+    "uvicorn>=0.38",
+    # The socket's protocol, which uvicorn speaks only with it installed.
+    "websockets>=15",
+]
 
 # pytest runs lup's plugin wherever the core is installed, checking the promises
 # of the modules a project's declaration resolves to (`lup/testing/README.md`).
