@@ -10,10 +10,11 @@ from lup.running.promises import RunningPromises
 from lup.shell.kinds import SHELL_FOLDS, SHELL_TONES, Folds, Tones
 from lup.shell.promises import ShellPromises
 from lup.testing.promises import TestingPromises
+from lup.told.promises import GuidancePromises
 
 
 class Core(Module):
-    """What every project has: loading the declaration, the doors its modules are reached through, checking their promises, running programs, and the shell's kinds; the core's other submodules as they're built.
+    """What every project has: loading the declaration, the doors its modules are reached through, checking their promises, running programs, the shell's kinds, and rendering guidance; the core's other submodules as they're built.
 
     A project changes it with `.edit` as it would any module, or puts another in
     its place with `.replace`, but can't drop it: resolving a selection without a
@@ -32,6 +33,7 @@ class Core(Module):
         TestingPromises,
         ShellPromises,
         ProgramsPromises,
+        GuidancePromises,
     )
     tones: Tones = Tones.of(*SHELL_TONES)
     """The shell's tones: plain, muted, strong, and the operator's own words."""

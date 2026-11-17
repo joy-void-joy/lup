@@ -14,6 +14,7 @@ from annotationlib import Format, type_repr
 from collections.abc import Awaitable, Callable, Generator
 from contextlib import contextmanager
 from functools import partial
+from string.templatelib import Template
 from types import GenericAlias, UnionType
 from typing import ClassVar, Concatenate, Self, TypeIs, get_args, get_origin, overload
 
@@ -27,9 +28,10 @@ type Answer = BaseModel | str | None
 """What a method a party calls through a door answers: a model, words, or
 nothing, as its door allows."""
 
-type Returned = Answer | bool
-"""What a method behind any door returns: what a party's call answers, or a
-law's verdict (`lup.testing`), which no party calls."""
+type Returned = Answer | Template | bool
+"""What a method behind any door returns: what a party's call answers, a
+section of guidance's template (`lup.told`), or a law's verdict
+(`lup.testing`), neither of which a party calls."""
 
 type Function = Callable[..., Awaitable[Returned] | bool]
 """A method as a door takes it: async, or, where its door allows, a law's
@@ -66,7 +68,9 @@ def is_model(annotation: Annotation) -> TypeIs[type[BaseModel]]:
     return isinstance(annotation, type) and issubclass(annotation, BaseModel)
 
 
-def shaped(function: Function, *, by_alone: bool = False) -> None:
+def shaped(
+    function: Function, *, by_alone: bool = False, nothing: bool = False
+) -> None:
     """Raise `DoorError` where `function` can't be behind a door of the usual shape, whatever its types say.
 
     A method behind such a door is async, and takes what `taking` says.
@@ -74,23 +78,28 @@ def shaped(function: Function, *, by_alone: bool = False) -> None:
     if not inspect.iscoroutinefunction(function):
         message = f"`{function.__qualname__}` is reached through a door, so it's async"
         raise DoorError(message)
-    taking(function, by_alone=by_alone)
+    taking(function, by_alone=by_alone, nothing=nothing)
 
 
-def taking(function: Function, *, by_alone: bool = False) -> None:
+def taking(
+    function: Function, *, by_alone: bool = False, nothing: bool = False
+) -> None:
     """Raise `DoorError` where `function` doesn't take what a method behind a door takes, whatever its types say.
 
     It takes `self`, one model, then `by` where it needs who calls it, each
     annotated, says what it returns, and has a docstring; with `by_alone`, one
-    taking `by` and no model fits too, as a scenario does (`lup.testing`). Its
-    annotations aren't evaluated here: one may name a class defined further
-    down its file, which is read later (`Method.taken`).
+    taking `by` and no model fits too, as a scenario does (`lup.testing`), and
+    with `nothing`, one taking nothing at all, as a section of guidance may
+    (`lup.told`). Its annotations aren't evaluated here: one may name a class
+    defined further down its file, which is read later (`Method.taken`).
     """
     name = function.__qualname__
     signature = inspect.signature(function, annotation_format=Format.FORWARDREF)
     parameters = list(signature.parameters.values())
     match parameters:
         case [inspect.Parameter(name="self"), inspect.Parameter(name="by")] if by_alone:
+            pass
+        case [inspect.Parameter(name="self")] if nothing:
             pass
         case [inspect.Parameter(name="self"), inspect.Parameter(name=given)] if (
             given != "by"
@@ -383,18 +392,18 @@ class Method(property):
     ) -> Answer:
         """Run the method of `instance` on `value`, handing it `by` where it takes who calls it.
 
-        Raise `DoorError` where it answers a verdict, as only a law does: no
-        party calls a promise.
+        Raise `DoorError` where it answers a verdict or a template, as only a
+        law or a section of guidance does: no party calls either.
         """
         if self.taken.by is None:
             called = self.function(instance, value)
         else:
             called = self.function(instance, value, by=by)
         answered = called if isinstance(called, bool) else await called
-        if isinstance(answered, bool):
+        if isinstance(answered, bool | Template):
             message = (
-                f"`{self.taken.qualified}` answers a verdict, as a law does, which "
-                "no party calls"
+                f"`{self.taken.qualified}` answers a verdict or a template, as a "
+                "law or a section of guidance does, which no party calls"
             )
             raise DoorError(message)
         return answered

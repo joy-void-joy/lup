@@ -24,6 +24,8 @@ from lup.types import Model, MutableModel
 
 if TYPE_CHECKING:
     from lup.declaration.project import Project
+    from lup.doors.parties import Agent
+    from lup.told.guidance import Guidance
 
 type Sent = BaseModel | list[BaseModel] | Mapping[str, JsonValue] | JsonValue
 """What a party sends through a door: a model, or a list of it, sent as its JSON,
@@ -214,6 +216,14 @@ class Crossing(ABC):
         """Answer one message that crossed to the container running the parts, as it would: its call through a door answered, or why it's refused."""
 
 
+class Telling(ABC):
+    """A started lup's guidance, as a session's start renders it."""
+
+    @abstractmethod
+    async def guidance(self, by: Agent) -> Guidance:
+        """Render what the session `by` is told at its start of the modules: each section, on its part as made here."""
+
+
 class Started(Model, arbitrary_types_allowed=True):
     """lup started on a declaration: its modules, and its doors, called as a party calls them.
 
@@ -236,6 +246,8 @@ class Started(Model, arbitrary_types_allowed=True):
     heard: Heard
     """Each run of a program its parts asked for, in order, as the harness's
     stand-in heard it."""
+    telling: Telling
+    """Its guidance, as a session's start renders it."""
 
     async def crossed(self, text: bytes) -> bytes:
         """Answer one message as the container running its parts would: a call through a door, carrying the version of its shape (`lup.running.wire`)."""
@@ -258,6 +270,14 @@ class Started(Model, arbitrary_types_allowed=True):
     ) -> list[Kept | Broken]:
         """Check the promise named `promise` of the module named `module`, or every one where none is named, as the gate does, and say how each fared."""
         return await self.doors.checked(module, promise)
+
+    async def guidance(self, by: Agent) -> Guidance:
+        """Render what the session `by` is told at its start of its modules: each section they serve, in the declaration's order, on its part as started here.
+
+        Raise `GuidanceError`, naming its module, where a section doesn't
+        render.
+        """
+        return await self.telling.guidance(by)
 
     async def call(self, tool: str, arguments: Sent, by: Party) -> Accepted | Refused:
         """Call the tool named `tool` with `arguments`, as `by` does, and say what came of it."""
@@ -311,6 +331,10 @@ class Testing(Party, ABC):
         resolve, or where a secret a class holds isn't given, as lup's start
         does. What it started is stopped once the promise ends.
         """
+
+    @abstractmethod
+    def project(self) -> Project:
+        """Return the project whose gate checks this promise, as its gate loads its declaration: what a promise about every project checks (`@lup.promise(every_project=True)`)."""
 
     @abstractmethod
     def any[T](self, kind: type[T]) -> T:

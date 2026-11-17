@@ -3,10 +3,10 @@
 A promise imports this and `lup` alone, which an import contract holds: the
 harness (`Testing`, handed to a scenario as `by`), lup as it starts it
 (`Started`), the step a law reads (`Step`), what a call through a door answers,
-what checking a promise found (`Kept`, `Broken`), and `raises`, which says a
-block fails. `lup` re-exports the promise door, `lup.promise`. Checking
-promises is the environment's (`lup.environment.testing`). Its reasons are in
-`README.md` here.
+the guidance a started lup renders (`Guidance`), what checking a promise found
+(`Kept`, `Broken`), and `raises`, which says a block fails. `lup` re-exports the
+promise door, `lup.promise`. Checking promises is the environment's
+(`lup.environment.testing`). Its reasons are in `README.md` here.
 """
 
 from lup.doors.door import Accepted, Refused, Rejection
@@ -30,6 +30,7 @@ from lup.testing.harness import (
     Viewed,
 )
 from lup.testing.raising import Raised, raises
+from lup.told.guidance import Guidance, Section
 
 __all__ = [
     "Accepted",
@@ -37,6 +38,7 @@ __all__ = [
     "Broken",
     "BrokenLawError",
     "Call",
+    "Guidance",
     "Kept",
     "ProgramRun",
     "Raised",
@@ -45,6 +47,7 @@ __all__ = [
     "Rejection",
     "Repository",
     "Scripted",
+    "Section",
     "Sent",
     "Served",
     "Started",

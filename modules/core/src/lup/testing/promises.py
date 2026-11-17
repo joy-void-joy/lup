@@ -138,6 +138,12 @@ class CounterPromises(Part):
         """Every number is below ten, which ten breaks."""
         assert by.any(Small).number < 10
 
+    @lup.promise(every_project=True)
+    async def the_project_counts(self, by: Testing) -> None:
+        """Whichever project's gate checks this selects the counter."""
+        started = await by.started(by.project())
+        assert any(each.name == Counter.name for each in started.modules)
+
 
 class Counter(Module):
     """Counting: an example module the testing submodule's promises check the harness with."""
@@ -210,6 +216,15 @@ class TestingPromises(Part):
         [scenario] = await started.checked("counter", "counts_what_its_told")
         assert isinstance(law, Kept)
         assert isinstance(scenario, Kept)
+
+    @lup.promise
+    async def a_promise_about_every_project_is_checked_over_the_one_checking_it(
+        self, by: Testing
+    ) -> None:
+        """A promise about every project is checked over the project whose gate checks it, as that project declares it."""
+        started = await by.started(counter())
+        [kept] = await started.checked("counter", "the_project_counts")
+        assert isinstance(kept, Kept)
 
     @lup.promise
     async def a_broken_scenario_is_told_with_the_smallest_values_it_drew(
