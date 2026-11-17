@@ -79,6 +79,35 @@ class Exported(Model):
     path: Path
 
 
+class Comparing(Model):
+    """Two commits of a repository to compare: the one before, none for a first, and the one after."""
+
+    repository: Name
+    common: Path
+    """The repository's common git directory."""
+    before: Commit | None = None
+    after: Commit
+
+
+class Change(Model):
+    """A file two commits differ in, by its path from the root."""
+
+    path: PurePosixPath
+    how: Literal["added", "removed", "changed"]
+
+
+class Compared(Model):
+    """What two commits differ in: each file changed, in order of its path."""
+
+    changes: list[Change] = []
+
+
+class Diffed(Model):
+    """Two commits' whole diff, as git shows one, from their files written out."""
+
+    text: str
+
+
 def named_by(object_id: str, kind: Kind, content: bytes) -> bool:
     """Say whether `object_id` is the id git gives an object of `kind` holding `content`, in a repository of either hash: an id's length is its hash's.
 
@@ -191,6 +220,15 @@ def emptied(directory: Path) -> Path:
     return directory.resolve()
 
 
+def unconfigured() -> dict[str, str]:
+    """Return the variables that have git read no configuration at all, the machine's or the operator's: for git comparing files outside any repository."""
+    return {
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CEILING_DIRECTORIES": "/",
+    }
+
+
 def written(
     base: Path, commit: str, entries: list[Entry], contents: list[bytes]
 ) -> None:
@@ -266,6 +304,92 @@ class Trees(Part, machine=True, shared=True):
             written(partial, exporting.commit, entries, contents)
         partial.rename(into)
         return Exported(commit=exporting.commit, path=into)
+
+    @lup.service
+    async def compared(self, comparing: Comparing, by: Machine) -> Compared:
+        """Say which files two commits differ in, read from each object's own bytes: added, removed, or changed, a file whose object or mode differs.
+
+        Raise `TreeError` where an object can't be read or isn't what its id
+        says.
+        """
+        del by
+        after = {
+            str(each.path): each
+            for each in await self.held(comparing.common, comparing.after)
+        }
+        before = (
+            {}
+            if comparing.before is None
+            else {
+                str(each.path): each
+                for each in await self.held(comparing.common, comparing.before)
+            }
+        )
+
+        def how(path: str) -> Literal["added", "removed", "changed"] | None:
+            was, now = before.get(path), after.get(path)
+            if was is None:
+                return "added"
+            if now is None:
+                return "removed"
+            return None if was == now else "changed"
+
+        changes = [
+            Change(path=PurePosixPath(path), how=found)
+            for path in sorted(before.keys() | after.keys())
+            if (found := how(path)) is not None
+        ]
+        return Compared(changes=changes)
+
+    @lup.service
+    async def diffed(self, comparing: Comparing, by: Machine) -> Diffed:
+        """Return two commits' whole diff, as git shows one, from their files written out, each what its id says, so what's shown is what would run.
+
+        git compares the two exports alone (`--no-index`), reading no
+        repository and no configuration, so nothing a room writes has a say in
+        what the operator reads. Raise `TreeError` where either can't be
+        written out, or git fails.
+        """
+        del by
+        after = await self.exported(
+            Exporting(
+                repository=comparing.repository,
+                common=comparing.common,
+                commit=comparing.after,
+            ),
+            Machine(),
+        )
+        before = (
+            emptied(self.exports.path / comparing.repository / "nothing")
+            if comparing.before is None
+            else (
+                await self.exported(
+                    Exporting(
+                        repository=comparing.repository,
+                        common=comparing.common,
+                        commit=comparing.before,
+                    ),
+                    Machine(),
+                )
+            ).path
+        )
+        ran = await self.git.ran(
+            "-C",
+            str(self.exports.path / comparing.repository),
+            "diff",
+            "--no-index",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--",
+            before.name,
+            after.path.name,
+            env=unconfigured(),
+        )
+        if ran.status not in [0, 1]:
+            message = f"git couldn't compare the two commits: {ran.said()}"
+            raise TreeError(message)
+        return Diffed(text=ran.text())
 
     async def held(self, common: Path, commit: str) -> list[Entry]:
         """List every file of `commit`'s tree, its directories walked, read from each object's own bytes, a level at a time.

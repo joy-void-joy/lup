@@ -6,13 +6,13 @@ Its library side (`lup.running`) is what crosses: the plan (`plan.py`) and the m
 
 ## The plan
 
-A declaration is code, so it's loaded where running a branch's code is harmless, a container, which prints its plan (`Planning`). The plan is each part of each module, what it holds (`Holds`), and each method a party calls behind its door with who may call it (`Doorway`), the tools a session is told of, and the files loading the declaration imported, relative to the project's root.
+A declaration is code, so it's loaded where running a branch's code is harmless, a container, which prints its plan (`Planning`). The plan is each part of each module, what it holds (`Holds`), the file its class is defined in (what an approval calls out where it changes), and each method a party calls behind its door with who may call it (`Doorway`), the tools a session is told of, and the files loading the declaration imported, relative to the project's root.
 
 What a part holds says where it runs (`PartPlan.apart`):
 - **holding nothing,** it runs with every other such part in the project's own container, from the project's running commit;
 - **holding a secret, the machine, what only approved code may, or being the whole machine's** (`shared`), it runs apart, from a commit the operator approved: a container of its own, with what it holds alone, or the machine itself. A shared part runs once on the machine, from the home repository, and serves every project.
 
-The files are what an approval shows: the diff, since the commit approved before, of what a part's container runs.
+The files are what loading the declaration imported, which an approval may point at; what it approves is the commit whole, its diff read from git's objects on the machine (`lup/hosting/README.md`, *Approvals*).
 
 ## A container
 

@@ -8,10 +8,11 @@ this module.
 
 from lup.declaration.module import Module
 from lup.doors.parts import Parts
+from lup.hosting.approvals import Approvals
 from lup.hosting.carrying import Carrying
 from lup.hosting.containers import Containers
 from lup.hosting.projects import Projects
-from lup.hosting.promises import HostingPromises, TreesPromises
+from lup.hosting.promises import ApprovalsPromises, HostingPromises, TreesPromises
 from lup.hosting.secrets import Secrets
 from lup.hosting.trees import Trees
 
@@ -21,5 +22,13 @@ class Hosting(Module):
 
     name = "hosting"
     parts: Parts = Parts.of(
-        Containers, Secrets, Trees, Carrying, Projects, HostingPromises, TreesPromises
+        Containers,
+        Secrets,
+        Trees,
+        Approvals,
+        Carrying,
+        Projects,
+        HostingPromises,
+        TreesPromises,
+        ApprovalsPromises,
     )

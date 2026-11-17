@@ -36,33 +36,49 @@ project = Project(modules=Modules.default().add(Hosting()))
 modules and the machine's parts."""
 
 
-def plan_of(parts: list[JsonValue]) -> JsonValue:
-    """Return a plan's JSON holding `parts`."""
-    return {"format": 1, "parts": parts, "tools": [], "files": []}
+class Planned(Model):
+    """A part of a project's plan, as a promise writes one: its module and class, what it holds, the file it's defined in, and the tools and services it serves, each called by an agent."""
 
+    module: str
+    part: str
+    secrets: list[str] = []
+    shared: bool = False
+    source: str | None = None
+    tools: list[str] = []
+    services: list[str] = []
 
-NOTES_PLAN = plan_of(
-    [
-        {
-            "module": "notes",
-            "part": "Notes",
-            "holds": {},
-            "doorways": [{"door": "tool", "name": "note", "parties": ["Agent"]}],
+    def plan(self) -> JsonValue:
+        """Return it as a plan says it, as JSON: promises read lup's plan only through what crosses."""
+        doorways: list[JsonValue] = [
+            {"door": door, "name": name, "parties": ["Agent"]}
+            for door, names in [("tool", self.tools), ("service", self.services)]
+            for name in names
+        ]
+        return {
+            "module": self.module,
+            "part": self.part,
+            "holds": {"secrets": list[JsonValue](self.secrets), "shared": self.shared},
+            "source": self.source,
+            "doorways": doorways,
         }
-    ]
-)
+
+
+def plan_of(*parts: Planned) -> JsonValue:
+    """Return a project's plan holding `parts`, as JSON."""
+    return {
+        "format": 1,
+        "parts": [each.plan() for each in parts],
+        "tools": [],
+        "files": [],
+    }
+
+
+NOTES_PLAN = plan_of(Planned(module="notes", part="Notes", tools=["note"]))
 """A project's plan of one part holding nothing, serving a tool."""
 
 VAULT_PLAN = plan_of(
-    [
-        {"module": "notes", "part": "Notes", "holds": {}, "doorways": []},
-        {
-            "module": "vault",
-            "part": "Vault",
-            "holds": {"secrets": ["key"]},
-            "doorways": [],
-        },
-    ]
+    Planned(module="notes", part="Notes"),
+    Planned(module="vault", part="Vault", secrets=["key"]),
 )
 """A project's plan of a part holding nothing and one holding a secret."""
 
@@ -426,18 +442,9 @@ class HostingPromises(Part):
         started = await by.started(HOME, programs={"podman": PODMAN}, machine=True)
         own = await placed(started, "harmon", NOTES_PLAN, ["notes.Notes"])
         claimed = plan_of(
-            [
-                {
-                    "module": "notes",
-                    "part": "Notes",
-                    "holds": {"shared": True},
-                    "doorways": [
-                        {"door": "tool", "name": "note", "parties": ["Agent"]}
-                    ],
-                }
-            ]
+            Planned(module="notes", part="Notes", shared=True, tools=["note"])
         )
-        other = await placed(started, "story", claimed if claims else plan_of([]), [])
+        other = await placed(started, "story", claimed if claims else plan_of(), [])
         call: JsonValue = {
             "format": 1,
             "kind": "tool",
@@ -459,13 +466,12 @@ class HostingPromises(Part):
     @lup.promise
     async def a_plan_serving_a_name_twice_is_refused(self, by: Testing) -> None:
         """A project whose plan serves one name from two parts is refused before any of its containers starts, rather than a call going to whichever part comes first."""
-        door = by.any(Tied)
-        doorway: JsonValue = {"door": door.door, "name": "same", "parties": ["Agent"]}
-        parts: list[JsonValue] = [
-            {"module": "notes", "part": part, "holds": {}, "doorways": [doorway]}
-            for part in ["Notes", "Drafts"]
-        ]
-        tied = plan_of(parts)
+        door = by.any(Tied).door
+        tools, services = (["same"], []) if door == "tool" else ([], ["same"])
+        tied = plan_of(
+            Planned(module="notes", part="Notes", tools=tools, services=services),
+            Planned(module="notes", part="Drafts", tools=tools, services=services),
+        )
         podman = Scripted(
             answers=[
                 Answering(when=["image", "exists"], status=0),
@@ -485,9 +491,7 @@ class HostingPromises(Part):
         """A repository's, a module's or a part's name that could be read as more than one name in a path or on podman's command line is refused before any container starts."""
         unsafe = by.any(Unsafe)
         in_plan = by.any(bool)
-        plan = plan_of(
-            [{"module": unsafe.name, "part": "Notes", "holds": {}, "doorways": []}]
-        )
+        plan = plan_of(Planned(module=unsafe.name, part="Notes"))
         podman = Scripted(
             answers=[
                 Answering(when=["image", "exists"], status=0),
@@ -570,13 +574,19 @@ def tree_of(entries: list[Listed]) -> Stored:
     return Stored.of("tree", content)
 
 
+DIFF = "diff --git a/before/README.md b/after/README.md\n"
+"""What git's diff says, as the promises' store of git's objects stands it in."""
+
+
 class Store(Model, Responding):
     """git's object store as a promise stands it in: each object by its id, answering `git cat-file --batch=%(objectsize)` as git does, an object it lacks said missing."""
 
     objects: list[Stored] = []
 
     def answered(self, arguments: list[str], given: bytes | None) -> Answering | None:
-        """Answer a `cat-file` run, each object asked on its own line: its size on a line, its content, then a newline."""
+        """Answer a `cat-file` run, each object asked on its own line: its size on a line, its content, then a newline; and a `diff` run, as git's saying two directories differ."""
+        if "diff" in arguments:
+            return Answering(status=1, output=DIFF)
         if "cat-file" not in arguments or given is None:
             return None
         held = {each.id: each.content for each in self.objects}
@@ -791,3 +801,116 @@ class Abbreviated(Model):
     commit: Literal[
         "HEAD", "main", "e69de29", "E69DE29BB2D1D6434B8B29AE775AD8C2E48C5391"
     ]
+
+
+class Approved(Model):
+    """A commit a promise approves: one of two, by its whole id."""
+
+    commit: Literal[
+        "1111111111111111111111111111111111111111",
+        "2222222222222222222222222222222222222222",
+    ]
+    landing: bool = False
+    """Whether a landing's review approved it, rather than the operator
+    answering the question asked."""
+
+
+class ApprovalsPromises(Part):
+    """What the operator can count on of what runs: nothing they haven't approved, and what they're asked before it does."""
+
+    @lup.promise
+    async def what_runs_is_what_was_approved_last(self, by: Testing) -> None:
+        """A project runs the commit approved last, by a landing's review or by the operator answering the question asked, and nothing before its first approval."""
+        approvals = by.any(list[Approved])
+        started = await by.started(HOME, machine=True)
+        for each in approvals:
+            asked = {"project": "harmon", "commit": each.commit}
+            if each.landing:
+                await started.serve("landed", asked, Machine())
+            else:
+                await started.run("hosting", "approve", asked, lup.Operator())
+        approval = await started.serve("approval", {"project": "harmon"}, Machine())
+        assert isinstance(approval, Accepted)
+        last = approvals[-1].commit if approvals else None
+        assert json.loads(approval.answer()) == {"commit": last}
+
+    @lup.promise
+    async def only_the_operator_or_their_review_approves(self, by: Testing) -> None:
+        """Only the operator approves a commit to run, answering the question asked or reviewing a landing, which the machine records: an agent or a project's code asking to approve, record or read an approval is refused, and nothing is approved."""
+        caller = by.any(Agent) if by.any(bool) else Codebase(repository="harmon")
+        started = await by.started(HOME, machine=True)
+        asked = {"project": "harmon", "commit": by.any(Approved).commit}
+        approved = await started.run("hosting", "approve", asked, caller)
+        landed = await started.serve("landed", asked, caller)
+        read = await started.serve("approval", {"project": "harmon"}, caller)
+        assert isinstance(approved, Refused)
+        assert isinstance(landed, Refused)
+        assert isinstance(read, Refused)
+        approval = await started.serve("approval", {"project": "harmon"}, Machine())
+        assert isinstance(approval, Accepted)
+        assert json.loads(approval.answer()) == {"commit": None}
+
+    @lup.promise
+    async def the_question_shows_what_changed_what_holds_first(
+        self, by: Testing
+    ) -> None:
+        """Before a commit runs, the operator is asked with each file changed since the commit approved before, read from each object's own bytes, those in a directory holding a part that holds something called out, and whether the dependencies changed."""
+        was, now = by.any(Files), by.any(Files)
+        before, after = Committed.of(was), Committed.of(now)
+        store = Store(objects=[*before.store.objects, *after.store.objects])
+        started = await by.started(HOME, programs={"git": store}, machine=True)
+        await started.run(
+            "hosting",
+            "approve",
+            {"project": "harmon", "commit": before.commit},
+            lup.Operator(),
+        )
+        plan = plan_of(
+            Planned(module="chat", part="Bot", secrets=["token"], source="src/app.py")
+        )
+        asked = await started.serve(
+            "question",
+            {
+                "project": "harmon",
+                "common": "/srv/harmon.git",
+                "tip": after.commit,
+                "plan": plan,
+            },
+            Machine(),
+        )
+        assert isinstance(asked, Accepted)
+        question = json.loads(asked.answer())
+        old, new = was.expected(), now.expected()
+        changed = sorted(
+            path for path in old.keys() | new.keys() if old.get(path) != new.get(path)
+        )
+        assert [each["path"] for each in question["changes"]] == changed
+        holding = [path for path in changed if path.startswith("src/")]
+        assert [each["path"] for each in question["holding"]] == holding
+        assert question["dependencies"] == ("uv.lock" in changed)
+
+    @lup.promise
+    async def the_whole_diff_is_of_what_would_run(self, by: Testing) -> None:
+        """The whole diff the operator reads is git's comparison of the two commits written out, each file what its id says, with no repository, configuration or diff driver of anyone's having a say in it."""
+        was, now = by.any(Files), by.any(Files)
+        before, after = Committed.of(was), Committed.of(now)
+        store = Store(objects=[*before.store.objects, *after.store.objects])
+        started = await by.started(HOME, programs={"git": store}, machine=True)
+        diffed = await started.serve(
+            "diffed",
+            {
+                "repository": "harmon",
+                "common": "/srv/harmon.git",
+                "before": before.commit,
+                "after": after.commit,
+            },
+            Machine(),
+        )
+        assert isinstance(diffed, Accepted)
+        assert json.loads(diffed.answer()) == {"text": DIFF}
+        [diff] = [each for each in started.heard.runs if "diff" in each.arguments]
+        assert all(
+            each in diff.arguments
+            for each in ["--no-index", "--no-ext-diff", "--no-textconv"]
+        )
+        assert {"GIT_CONFIG_GLOBAL": os.devnull}.items() <= diff.env.items()
