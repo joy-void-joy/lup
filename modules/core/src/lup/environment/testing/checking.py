@@ -115,7 +115,7 @@ class Check(Model, arbitrary_types_allowed=True):
         door = method.door
         if not (isinstance(door, PromiseDoor) and door.law(method.taken)):
             serves = self.entry.serves
-            made = serves.serving.made(serves.module, {})
+            made = serves.part.made(serves.module, {})
             told = method.function(made, by=harness)
             if isinstance(told, bool):
                 message = f"the scenario `{self.said()}` answers a verdict"

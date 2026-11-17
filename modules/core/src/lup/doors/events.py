@@ -13,7 +13,7 @@ class Event(Model):
 
 
 class Starting(Event):
-    """A class of a module's methods made where it runs, as its container starts: what it keeps running, a bot's connection say, it starts here.
+    """A part made where it runs, as its container starts: what it keeps running, a bot's connection say, it starts here.
 
     A method run at it may go on as long as the class runs: lup stops it,
     cancelling it, once every method run at `Stopping` has ended.
@@ -21,7 +21,7 @@ class Starting(Event):
 
 
 class Stopping(Event):
-    """A class of a module's methods about to stop where it runs, as its container stops or its code is replaced: what it started, it ends here.
+    """A part about to stop where it runs, as its container stops or its code is replaced: what it started, it ends here.
 
     Each method run at it ends before lup cancels what the class started at
     `Starting`.

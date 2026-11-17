@@ -19,13 +19,13 @@ from lup import (
     Model,
     Module,
     Modules,
-    ModuleServing,
     MutableModel,
     Operator,
+    Part,
+    Parts,
     Project,
     ProjectError,
     Secret,
-    Serving,
     Starting,
     Stopping,
     UncarriedError,
@@ -58,7 +58,7 @@ class Greeting(Model):
     name: str
 
 
-class EchoServing(ModuleServing):
+class EchoPart(Part):
     """Echo's methods, one behind each door a party calls."""
 
     module: Echo
@@ -90,10 +90,10 @@ class Echo(Module):
 
     name = "echo"
     volume: int = 1
-    serving: Serving = Serving.of(EchoServing)
+    parts: Parts = Parts.of(EchoPart)
 
 
-class OtherServing(ModuleServing):
+class OtherPart(Part):
     """Another module's tool, named as echo's."""
 
     module: Other
@@ -108,14 +108,14 @@ class Other(Module):
     """Shouting too."""
 
     name = "other"
-    serving: Serving = Serving.of(OtherServing)
+    parts: Parts = Parts.of(OtherPart)
 
 
 class Borrowing(Module):
     """Listing another module's methods as its own."""
 
     name = "borrowing"
-    serving: Serving = Serving.of(EchoServing)
+    parts: Parts = Parts.of(EchoPart)
 
 
 def declared(*modules: Module) -> Project:
@@ -139,7 +139,7 @@ class Sending(Model):
 
 
 def loud(methods: str) -> str:
-    """Return a project's declaration whose module's class of methods holds `methods`."""
+    """Return a project's declaration whose module's part holds `methods`."""
     return f'''
 from typing import TYPE_CHECKING
 
@@ -155,7 +155,7 @@ class Said(lup.Model):
     text: str
 
 
-class LoudServing(lup.ModuleServing):
+class LoudPart(lup.Part):
     """Loud's methods."""
 
     module: Loud
@@ -165,7 +165,7 @@ class Loud(lup.Module):
     """Shouting."""
 
     name = "loud"
-    serving: lup.Serving = lup.Serving.of(LoudServing)
+    parts: lup.Parts = lup.Parts.of(LoudPart)
 
 
 project = lup.Project(modules=lup.Modules.default().add(Loud()))
@@ -264,7 +264,7 @@ class Misshapen(Model):
 
 
 class Holding(Model):
-    """A class of a module's methods holding what lup can't make it with."""
+    """A part holding what lup can't make it with."""
 
     held: Literal["a method named as a field", "a field with no default"]
 
@@ -284,7 +284,7 @@ class Holding(Model):
 """
 
 
-class DoorsPromises(ModuleServing):
+class DoorsPromises(Part):
     """What a module's code and its callers can count on of the doors its methods are reached through."""
 
     @lup.promise
@@ -368,14 +368,14 @@ class DoorsPromises(ModuleServing):
         self, by: Testing
     ) -> None:
         """A module's method, read through an instance of its class, is called as any method, typed as written."""
-        serving = EchoServing(module=Echo(volume=2))
-        shouted = await serving.shout(Said(text="a"), by=by.any(Agent))
+        part = EchoPart(module=Echo(volume=2))
+        shouted = await part.shout(Said(text="a"), by=by.any(Agent))
         assert shouted.text == "AA"
 
     @lup.promise
     async def a_class_of_methods_is_dropped_by_its_name(self, by: Testing) -> None:
-        """A project drops a class of a module's methods by its class's name, and nothing of it is served."""
-        quiet = Echo(serving=Serving().drop("EchoServing"))
+        """A project drops a part by its class's name, and nothing of it is served."""
+        quiet = Echo(parts=Parts().drop("EchoPart"))
         started = await by.started(declared(quiet))
         assert all(each.name != "shout" for each in started.tools())
 
@@ -387,7 +387,7 @@ class DoorsPromises(ModuleServing):
         with raises(ProjectError) as shared:
             await by.started(declared(Echo(), Other()))
         assert all(name in shared.raised().about for name in ["echo", "other"])
-        quiet = Other(serving=Serving().drop("OtherServing"))
+        quiet = Other(parts=Parts().drop("OtherPart"))
         started = await by.started(declared(Echo(), quiet))
         assert [each.name for each in started.tools()].count("shout") == 1
 
@@ -407,7 +407,7 @@ class DoorsPromises(ModuleServing):
         misshapen = by.any(Misshapen)
         with raises(ProjectError) as failed:
             await by.started(loud(misshapen.methods()))
-        assert "LoudServing.wrong" in failed.raised().about
+        assert "LoudPart.wrong" in failed.raised().about
 
     @lup.promise
     async def a_door_reads_a_class_defined_further_down_its_file(
@@ -433,7 +433,7 @@ class Heard(lup.Model):
     async def a_class_of_methods_is_made_with_its_module_alone(
         self, by: Testing
     ) -> None:
-        """lup makes a class of a module's methods with its module and its secrets alone: a field of its own with no default, or a method hiding its module, fails the load."""
+        """lup makes a part with its module and its secrets alone: a field of its own with no default, or a method hiding its module, fails the load."""
         holding = by.any(Holding)
         with raises(ProjectError):
             await by.started(loud(holding.methods()))
@@ -474,7 +474,7 @@ class Events(MutableModel):
     seen: list[str] = []
 
 
-class KeeperServing(ModuleServing):
+class KeeperPart(Part):
     """A keeper's class: it keeps a count while it runs, holds a token, serves code, and marks its own start and stop."""
 
     module: Keeper
@@ -526,18 +526,18 @@ class KeeperServing(ModuleServing):
         raise lup.RefusedError(message)
 
 
-class AskingServing(ModuleServing):
+class AskingPart(Part):
     """Another class, whose tools call the keeper's services as plain calls."""
 
     @lup.tool
     async def ask(self, asking: Asking) -> Tallied:
         """Ask the keeper for its count, as code."""
-        return await KeeperServing.tallied(asking)
+        return await KeeperPart.tallied(asking)
 
     @lup.tool
     async def ask_refused(self, asking: Asking) -> str:
         """Ask the keeper for what it refuses."""
-        await KeeperServing.refuse(asking)
+        await KeeperPart.refuse(asking)
         return "answered"
 
 
@@ -546,15 +546,15 @@ class Keeper(Module):
 
     name = "keeper"
     events: Events = Field(default_factory=Events)
-    serving: Serving = Serving.of(KeeperServing, AskingServing)
+    parts: Parts = Parts.of(KeeperPart, AskingPart)
 
 
-class RunningPromises(ModuleServing):
+class RunningPromises(Part):
     """What a module's code can count on of its classes made once where they run: what they keep, the services they serve, the secrets they hold, and their start and stop."""
 
     @lup.promise
     async def a_class_keeps_what_it_holds_between_calls(self, by: Testing) -> None:
-        """A class of a module's methods is made once where it runs, so what it keeps in its fields is there at its next call."""
+        """A part is made once where it runs, so what it keeps in its fields is there at its next call."""
         first, second = by.any(Adding), by.any(Adding)
         started = await by.started(declared(Keeper()))
         agent = by.any(Agent)
@@ -584,7 +584,7 @@ class RunningPromises(ModuleServing):
     async def a_service_runs_only_where_lup_carries_it(self, by: Testing) -> None:
         """A service called where lup runs no module's code, as from a promise's own body, raises `UncarriedError` rather than running somewhere it shouldn't."""
         with raises(UncarriedError):
-            await KeeperServing.tallied(Asking())
+            await KeeperPart.tallied(Asking())
 
     @lup.promise
     async def a_service_answers_only_who_its_for(self, by: Testing) -> None:
@@ -603,8 +603,8 @@ class RunningPromises(ModuleServing):
         revealed = await started.serve("reveal", Asking(), Code(repository="harness"))
         assert isinstance(revealed, Accepted)
         assert revealed.output == Revealed(value=value)
-        assert "token" in KeeperServing.holds().secrets
-        assert KeeperServing.holds().anything()
+        assert "token" in KeeperPart.holds().secrets
+        assert KeeperPart.holds().anything()
         with raises(ProjectError):
             await by.started(declared(Keeper()), secrets={})
 

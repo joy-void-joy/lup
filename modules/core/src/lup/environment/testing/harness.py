@@ -21,7 +21,7 @@ from lup.declaration.module import Module
 from lup.declaration.project import Project
 from lup.doors.door import Accepted, DoorError, Method, Refused
 from lup.doors.parties import Party
-from lup.doors.serving import Serving
+from lup.doors.parts import Parts
 from lup.doors.tool import ToolDoor, ToolSpec
 from lup.environment.declaration import load, resolve
 from lup.environment.doors import Doors, Entry, Running, Serves
@@ -360,9 +360,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
         """
         resolved = resolve(project)
         held = [
-            name
-            for each in resolved.doors.served
-            for name in each.serving.holds().secrets
+            name for each in resolved.doors.served for name in each.part.holds().secrets
         ]
         given = (
             dict(secrets)
@@ -400,7 +398,7 @@ def loaded(text: str) -> Project:
 def promises(module: Module) -> list[Entry]:
     """Return every promise `module` serves, in the order declared."""
     served = Doors(
-        served=[Serves(module=module, serving=each) for each in module.held(Serving)]
+        served=[Serves(module=module, part=each) for each in module.held(Parts)]
     )
     return [
         entry

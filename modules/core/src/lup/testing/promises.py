@@ -18,11 +18,11 @@ from lup import (
     Model,
     Module,
     Modules,
-    ModuleServing,
     MutableModel,
+    Part,
+    Parts,
     Project,
     ProjectError,
-    Serving,
 )
 from lup.testing import (
     Accepted,
@@ -70,7 +70,7 @@ class Small(Model):
     number: int = Field(ge=0)
 
 
-class CounterServing(ModuleServing):
+class CounterPart(Part):
     """The counter's tools: one moves the count, one reads it."""
 
     module: Counter
@@ -93,7 +93,7 @@ class CounterServing(ModuleServing):
         return Count(count=self.module.tally.count)
 
 
-class CounterPromises(ModuleServing):
+class CounterPromises(Part):
     """The counter's promises: laws it keeps and laws it breaks, alone or only where bumps overlap, and a scenario of each."""
 
     @lup.promise
@@ -144,7 +144,7 @@ class Counter(Module):
 
     name = "counter"
     tally: Tally = Field(default_factory=Tally)
-    serving: Serving = Serving.of(CounterServing, CounterPromises)
+    parts: Parts = Parts.of(CounterPart, CounterPromises)
 
 
 def counter() -> Project:
@@ -152,7 +152,7 @@ def counter() -> Project:
     return Project(modules=Modules.default().add(Counter()))
 
 
-class TestingPromises(ModuleServing):
+class TestingPromises(Part):
     """What a module's author can count on of how their promises are checked."""
 
     @lup.promise
@@ -230,7 +230,7 @@ class TestingPromises(ModuleServing):
         class Unread(Counter):
             """A counter whose count can't be read."""
 
-            serving: Serving = Serving.of(CounterPromises)
+            parts: Parts = Parts.of(CounterPromises)
 
         with raises(ProjectError):
             await by.started(Project(modules=Modules.default().add(Unread())))

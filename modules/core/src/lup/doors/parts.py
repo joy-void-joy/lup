@@ -1,15 +1,15 @@
-"""What a module serves: its methods, grouped in `ModuleServing` classes it lists in its `serving` field.
+"""A module's parts: the classes it lists in its `parts` field, each grouping methods behind lup's doors.
 
-A class groups methods behind any of lup's doors, and is made once where it
-runs, as its container starts, so it may keep what it holds between calls: a
-connection, a cache, a count (`README.md` here, *What a module serves*). What
-must outlast it, or be read by others, it keeps in the core's store.
+A part is made once where it runs, as its container starts, so it may keep what
+it holds between calls: a connection, a cache, a count (`README.md` here,
+*Parts*). What must outlast it, or be read by others, it keeps in the core's
+store.
 
-Where it runs follows from what it holds. A class holding nothing runs in its
+Where it runs follows from what it holds. A part holding nothing runs in its
 project's container. One holding a secret (a field typed `Secret`), the
 operator's machine (`machine=True`) or anything else only approved code may
 hold (`approved=True`) runs in a container of its own, from a commit the
-operator approved, with what it holds alone.
+operator approved, with what it holds alone, or on the machine.
 """
 
 from typing import ClassVar, Unpack, override
@@ -39,7 +39,7 @@ class Secret(Model):
 
 
 class Holds(Model):
-    """What a class of a module's methods holds, which only code the operator approved may: where it runs follows from it."""
+    """What a part holds, which only code the operator approved may: where it runs follows from it."""
 
     secrets: list[str] = []
     """The secrets it holds, by their names: its fields typed `Secret`."""
@@ -54,8 +54,8 @@ class Holds(Model):
         return bool(self.secrets) or self.machine or self.approved
 
 
-class ModuleServing(MutableModel, arbitrary_types_allowed=True):
-    """A class of a module's methods, each behind one of lup's doors, made once where it runs.
+class Part(MutableModel, arbitrary_types_allowed=True):
+    """A part of a module: its methods, each behind one of lup's doors, made once where it runs.
 
     A subclass that reads its module's settings declares `module`, typed as its
     module's class (`module: Echo`), and lup hands it the module, every layer
@@ -64,8 +64,8 @@ class ModuleServing(MutableModel, arbitrary_types_allowed=True):
     (`holds`).
 
     It says in its header what it holds beyond its secrets:
-    `class Notices(ModuleServing, machine=True)` runs on the operator's machine,
-    `class Store(ModuleServing, approved=True)` holds what only approved code may.
+    `class Notices(Part, machine=True)` runs on the operator's machine,
+    `class Store(Part, approved=True)` holds what only approved code may.
     """
 
     machine: ClassVar[bool] = False
@@ -112,7 +112,7 @@ class ModuleServing(MutableModel, arbitrary_types_allowed=True):
         if bare:
             message = (
                 f"`{cls.__name__}` holds {', '.join(bare)} with no default: lup "
-                "makes a class of a module's methods with its module and its "
+                "makes a part with its module and its "
                 "secrets alone, so what it keeps starts from a default"
             )
             raise ProjectError(message, about=[cls.__name__])
@@ -131,7 +131,7 @@ class ModuleServing(MutableModel, arbitrary_types_allowed=True):
         )
 
     @classmethod
-    def made(cls, module: Module, secrets: dict[str, str]) -> ModuleServing:
+    def made(cls, module: Module, secrets: dict[str, str]) -> Part:
         """Make the class where it runs, with its module and the value of each secret it holds.
 
         Raise `ProjectError` where a secret it holds isn't given.
@@ -164,14 +164,15 @@ class ModuleServing(MutableModel, arbitrary_types_allowed=True):
         return True
 
 
-class Serving(Named[type[ModuleServing]]):
-    """The classes of a module's methods, each named by its class's name.
+class Parts(Named[type[Part]]):
+    """A module's parts, each named by its class's name.
 
-    `Serving.of(EchoServing)`; a module may hold several, and a project drops
-    one by its class's name, `Serving().drop("EchoServing")`. Each is made with
-    the module holding it, so its class narrows `module` to that module's class.
+    `Parts.of(EchoPart)`; a module may hold several, and a project drops one by
+    its class's name, `Parts().drop("EchoPart")`. Each is made with the module
+    holding it, so a part reading its module types `module` as that module's
+    class.
     """
 
     @override
-    def named(self, entry: type[ModuleServing]) -> str:
+    def named(self, entry: type[Part]) -> str:
         return entry.__name__

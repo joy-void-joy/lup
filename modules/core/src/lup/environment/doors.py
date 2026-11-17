@@ -1,6 +1,6 @@
 """Serving a module's methods, and calling them through their doors: the doors' environment side.
 
-Resolving a declaration lists every class of methods each module serves
+Resolving a declaration lists every part each module serves
 (`Doors.of`), refusing a class that can't be made with the module listing it, a
 method that can't be behind its door, and what two methods would share: a
 tool's or a service's name across the project's modules, an action's or a
@@ -42,8 +42,8 @@ from lup.doors.door import (
 from lup.doors.events import Event, Starting, Stopping
 from lup.doors.on import OnDoor
 from lup.doors.parties import Code, Party, said
+from lup.doors.parts import Part, Parts
 from lup.doors.service import CARRYING, Carrier, ServiceDoor
-from lup.doors.serving import ModuleServing, Serving
 from lup.doors.tool import ToolDoor, ToolSpec
 from lup.types import Model, MutableModel
 
@@ -54,14 +54,14 @@ def refused(given: JsonValue, reason: str) -> Refused:
 
 
 class Serves(Model):
-    """One class of a module's methods, with the module listing it."""
+    """One part of a module, with the module listing it."""
 
     module: Module
-    serving: type[ModuleServing]
+    part: type[Part]
 
     def said(self) -> str:
         """Name the class and its module, as a refusal does."""
-        return f"`{self.serving.__name__}` of `{self.module.name}`"
+        return f"`{self.part.__name__}` of `{self.module.name}`"
 
 
 class Entry(Model, arbitrary_types_allowed=True):
@@ -106,7 +106,7 @@ def distinct(what: str, keyed: list[Keyed]) -> None:
 def made_with(serves: Serves) -> None:
     """Raise `ProjectError` where the class can't be made with the module listing it: the `module` it declares is typed as another module's class, or names a class that isn't defined."""
     try:
-        admitted = serves.serving.admits(serves.module)
+        admitted = serves.part.admits(serves.module)
     except PydanticUserError as undefined:
         message = (
             f"{serves.said()} names a class that isn't defined where it's made: "
@@ -122,7 +122,7 @@ def made_with(serves: Serves) -> None:
 
 
 class Doors(Model):
-    """Every class of methods a project's modules serve, each with its module: what's started, and called through their doors."""
+    """Every part a project's modules serve, each with its module: what's started, and called through their doors."""
 
     served: list[Serves] = []
 
@@ -138,9 +138,9 @@ class Doors(Model):
         """
         doors = cls(
             served=[
-                Serves(module=module, serving=serving)
+                Serves(module=module, part=part)
                 for module in modules
-                for serving in module.held(Serving)
+                for part in module.held(Parts)
             ]
         )
         for each in doors.served:
@@ -163,7 +163,7 @@ class Doors(Model):
         return [
             Entry(serves=each, name=name, method=method)
             for each in self.served
-            for name, method in served(each.serving).items()
+            for name, method in served(each.part).items()
         ]
 
     def through(self, door: type[Door]) -> list[Entry]:
@@ -202,7 +202,7 @@ class Doors(Model):
             doors=self,
             caller=Code(repository=repository),
             made=[
-                Made(serves=each, made=each.serving.made(each.module, secrets))
+                Made(serves=each, made=each.part.made(each.module, secrets))
                 for each in self.served
             ],
         )
@@ -211,10 +211,10 @@ class Doors(Model):
 
 
 class Made(Model, arbitrary_types_allowed=True):
-    """One class of a module's methods, made once where it runs."""
+    """One part of a module, made once where it runs."""
 
     serves: Serves
-    made: ModuleServing
+    made: Part
 
 
 CALLER = ContextVar[Party | None]("caller", default=None)
@@ -238,7 +238,7 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
     started: list[asyncio.Task[None]] = []
     """What each class runs at `Starting`, going on as long as it runs."""
 
-    def instance(self, entry: Entry) -> ModuleServing:
+    def instance(self, entry: Entry) -> Part:
         """Return the class `entry` belongs to, as it was made here."""
         return next(each.made for each in self.made if each.serves == entry.serves)
 
@@ -273,7 +273,7 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
     async def ran(
         self,
         method: Method,
-        instance: ModuleServing,
+        instance: Part,
         value: BaseModel | list[BaseModel],
         by: Party,
     ) -> Answer:
