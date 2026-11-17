@@ -19,13 +19,20 @@ from lup.doors.parties import Agent, Codebase, Operator
 from lup.doors.parts import Data, Part
 from lup.inbox import views
 from lup.inbox.inbox import Inbox, InboxError, first_line
-from lup.inbox.records import KINDS, Concern, Item, PileRecord, Question
+from lup.inbox.records import (
+    KINDS,
+    AgentRecord,
+    Concern,
+    Item,
+    PartyRecord,
+    PileRecord,
+    Question,
+)
 from lup.inbox.said import (
     Addressing,
     Answering,
     AskSaid,
     Clearing,
-    Commenting,
     ConcernOf,
     ConcernSaid,
     Declining,
@@ -36,9 +43,12 @@ from lup.inbox.said import (
     Naming,
     NoteSaid,
     Nothing,
+    OnItem,
     PartiesOf,
     PartyOf,
+    Pile,
     Piling,
+    Reached,
     Reading,
     SendSaid,
     Showing,
@@ -51,6 +61,7 @@ from lup.inbox.said import (
 )
 from lup.inbox.views import Shows
 from lup.shell.blocks import Blocks
+from lup.shell.draft import Commented, Commenting
 from lup.store.database import Database
 from lup.store.errors import StoreError
 
@@ -289,17 +300,23 @@ class Inboxes(Part, approved=True, shared=True):
             answer = inbox.answered(question, answering.rulings, answering.text)
         return f"Answered @{question.number}, @{answer.number}."
 
-    @lup.command
-    async def comment(self, commenting: Commenting, by: Operator) -> str:
-        """Comment on an item, or a part of it: it reaches whoever wrote it, and each party it was for."""
-        del by
+    @lup.action(verb="comment", says="comment on it")
+    async def comment(self, commented: Commented[OnItem]) -> str:
+        """Keep your comment on an item, or a part of it: it reaches whoever wrote it, and each party it was for."""
         with refusing():
-            item = self.numbered(commenting.item, Item)
+            item = self.numbered(commented.on.item, Item)
             inbox = self.inbox(item.repository)
-            comment = inbox.commented(
-                item, commenting.text, commenting.part, commenting.quote
-            )
+            comment = inbox.commented(item, commented, commented.on.part)
         return f"Commented, @{comment.number}."
+
+    @lup.action(verb="comment", says="comment to them")
+    async def comment_to(self, commented: Commented[Reached]) -> str:
+        """Keep your comment on a block that offers none of its own, for the party it reaches: an agent, or a pile, where it opens a concern."""
+        with refusing():
+            found = self.reached(commented.on.party)
+            inbox = self.inbox(found.repository)
+            comment = inbox.told_party(found, commented)
+        return f"Sent to {inbox.called(found)}, @{comment.number}."
 
     @lup.command
     async def tell(self, addressing: Addressing, by: Operator) -> str:
@@ -308,23 +325,21 @@ class Inboxes(Part, approved=True, shared=True):
         inbox = self.inbox(addressing.repository)
         with refusing():
             party = inbox.party(addressing.to)
-            comment = inbox.told_party(party, addressing.text)
+            comment = inbox.told_party(party, Commenting(words=addressing.text))
         return f"Sent to {inbox.called(party)}, @{comment.number}."
 
-    @lup.command
-    async def clear(self, clearing: Clearing, by: Operator) -> str:
+    @lup.action(verb="done", says="clear it")
+    async def clear(self, clearing: Clearing) -> str:
         """Clear an item, a concern, or a party's buffer whole, until something new happens there."""
-        del by
         inbox = self.inbox(clearing.repository)
         with refusing():
             node = inbox.cited(clearing.what)
             inbox.cleared(node)
         return f"Cleared {clearing.what}."
 
-    @lup.command
-    async def decline(self, declining: Declining, by: Operator) -> str:
+    @lup.action(verb="decline", says="decline it")
+    async def decline(self, declining: Declining) -> str:
         """Decline a concern, saying why: nothing more will be done about it."""
-        del by
         with refusing():
             concern = self.numbered(declining.concern, Concern)
             self.inbox(concern.repository).declined(concern, declining.why)
@@ -339,10 +354,9 @@ class Inboxes(Part, approved=True, shared=True):
             made = inbox.pile(piling.path, inbox.operator())
         return f"Made {inbox.called(made)}."
 
-    @lup.command
-    async def shown(self, showing: Showing, by: Operator) -> str:
+    @lup.action(verb="seen", says="seen")
+    async def shown(self, showing: Showing) -> str:
         """Say what's been on your screen: each isn't new to you after, and stays where it is until you clear it."""
-        del by
         with refusing():
             items = [self.numbered(each, Item) for each in showing.items]
         for repository in dict.fromkeys(each.repository for each in items):
@@ -355,7 +369,14 @@ class Inboxes(Part, approved=True, shared=True):
 
     def shows(self) -> Shows:
         """Return the inbox's views a block opens."""
-        return Shows(party=Inboxes.party, concern=Inboxes.concern_view)
+        return Shows(
+            party=Inboxes.party,
+            concern=Inboxes.concern_view,
+            comment=Inboxes.comment,
+            clear=Inboxes.clear,
+            decline=Inboxes.decline,
+            seen=Inboxes.shown,
+        )
 
     @lup.view
     async def parties(self, of: PartiesOf) -> Blocks:
@@ -381,6 +402,21 @@ class Inboxes(Part, approved=True, shared=True):
     async def waiting(self, of: PartiesOf) -> Blocks:
         """Show what waits on you: each item you're to answer, then each concern its agent says is done."""
         return views.waiting(self.inbox(of.repository), self.shows())
+
+    def reached(self, party: Agent | Pile) -> PartyRecord:
+        """Return the record of the party a block's comment reaches: the pile at its path in its repository, or the agent lup knows by its id, in whichever repository they're of; raise `InboxError` where none is."""
+        database = self.opened()
+        match party:
+            case Pile(repository=repository, path=path):
+                return self.inbox(repository).pile(path)
+            case Agent(id=known_as):
+                found = [
+                    each for each in database.every(AgentRecord) if each.id == known_as
+                ]
+                if not found:
+                    message = f"no agent is known by `{known_as}`"
+                    raise InboxError(message, about=[known_as])
+                return found[0]
 
     def numbered[N: Item | Concern](self, number: int, kind: type[N]) -> N:
         """Return the node cited `@number`, as `kind`; raise `InboxError` where none is."""

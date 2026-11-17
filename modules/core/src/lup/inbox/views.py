@@ -11,17 +11,29 @@ whoever wrote an item, whoever holds a concern, the party a buffer is
 from lup.doors.door import Method
 from lup.doors.parties import Agent, Party
 from lup.inbox.records import AgentRecord, Concern, Item, PartyRecord, PileRecord
-from lup.inbox.said import ConcernOf, PartyOf, Pile
-from lup.shell.blocks import Block, Blocks, Fold, Line, Markdown, Span, Viewing
+from lup.inbox.said import (
+    Clearing,
+    ConcernOf,
+    Declining,
+    OnItem,
+    PartyOf,
+    Pile,
+    Showing,
+)
+from lup.shell.blocks import Block, Blocks, Fold, Line, Markdown, Offer, Span, Viewing
 from lup.types import Model
 lazy from lup.inbox.inbox import Inbox
 
 
 class Shows(Model, arbitrary_types_allowed=True):
-    """The inbox's views a block opens: a party's buffer, and a concern."""
+    """The inbox's views a block opens, and the actions its blocks offer: commenting on an item, clearing, declining, and saying what's been seen."""
 
     party: Method
     concern: Method
+    comment: Method
+    clear: Method
+    decline: Method
+    seen: Method
 
 
 def reached(inbox: Inbox, party: PartyRecord) -> Party | None:
@@ -82,16 +94,24 @@ def concern_fold(inbox: Inbox, concern: Concern, shows: Shows) -> Fold:
         ],
         content=Viewing.of(shows.concern, ConcernOf(number=concern.number or 0)),
         reaches=reached(inbox, standing.holder),
+        offers=[
+            Offer.of(
+                shows.clear,
+                Clearing(repository=inbox.repository, what=str(concern.number)),
+            ),
+            Offer.of(shows.decline, Declining(concern=concern.number or 0)),
+        ],
     )
 
 
-def item_blocks(inbox: Inbox, item: Item) -> list[Block]:
+def item_blocks(inbox: Inbox, item: Item, shows: Shows) -> list[Block]:
     """Return `item` as its heading, who wrote it, of what kind, its number, whether it's new or waits, then its words."""
     new = item in inbox.new_to_operator()
     waits = item in inbox.waits_on_operator()
     marks = ["new" if new else "", "waits on you" if waits else ""]
     said = ", ".join(each for each in marks if each)
     writer = inbox.by(item)
+    number = item.number or 0
     return [
         Line(
             id=f"item-{item.number}",
@@ -103,13 +123,14 @@ def item_blocks(inbox: Inbox, item: Item) -> list[Block]:
                 ),
                 Span(text=f"  {said}" if said else "", tone="strong"),
             ],
-            reaches=reached(inbox, writer),
+            offers=[Offer.of(shows.comment, OnItem(item=number))],
+            sighted=Offer.of(shows.seen, Showing(items=[number])),
         ),
         Markdown(
             id=f"item-{item.number}-text",
             text=item.text,
             tone="operator" if writer.key == inbox.operator().key else "plain",
-            reaches=reached(inbox, writer),
+            offers=[Offer.of(shows.comment, OnItem(item=number))],
         ),
     ]
 
@@ -124,7 +145,11 @@ def buffer(inbox: Inbox, party: PartyRecord, shows: Shows) -> Blocks:
     return Blocks.of(
         *(concern_fold(inbox, each, shows) for each in inbox.holding(party)),
         *(party_fold(inbox, each, shows) for each in inbox.beneath(party)),
-        *(block for item in inbox.loose(party) for block in item_blocks(inbox, item)),
+        *(
+            block
+            for item in inbox.loose(party)
+            for block in item_blocks(inbox, item, shows)
+        ),
     )
 
 
@@ -141,7 +166,7 @@ def concern(inbox: Inbox, concern: Concern, shows: Shows) -> Blocks:
         *(
             block
             for item in inbox.said_in(concern)
-            for block in item_blocks(inbox, item)
+            for block in item_blocks(inbox, item, shows)
         ),
     )
 
@@ -152,7 +177,7 @@ def waiting(inbox: Inbox, shows: Shows) -> Blocks:
         block
         for each in inbox.waits_on_operator()
         if isinstance(each, Item)
-        for block in item_blocks(inbox, each)
+        for block in item_blocks(inbox, each, shows)
     ]
     concerns = [
         concern_fold(inbox, each, shows)

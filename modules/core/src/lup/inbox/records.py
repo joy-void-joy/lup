@@ -198,8 +198,14 @@ class Comment(Item):
     """The key of the item it's on; none for words to a party alone."""
     part: int | None = None
     """The part of that item it's on, from 1; none for the item whole."""
-    quote: str = ""
-    """The passage it's on, as the operator selected it."""
+    lines: list[str] = []
+    """The block's lines it quotes, whole, as they read when it was written."""
+    start: int = 0
+    """Where the passage it's on starts in its lines, joined by newlines."""
+    end: int | None = None
+    """Where the passage ends; none for the lines whole."""
+    version: str | None = None
+    """The block's version as it was written."""
 
 
 # Edges

@@ -6,12 +6,22 @@ its services, as #5's sessions will (`README.md` here).
 """
 
 import lup
-from lup import Agent, Blocks, Codebase, Fold, Model, Modules, Operator, Part, Project
+from lup import (
+    Agent,
+    Blocks,
+    Codebase,
+    Commented,
+    Fold,
+    Model,
+    Modules,
+    Operator,
+    Part,
+    Project,
+)
 from lup.inbox.said import (
     Answering,
     AskSaid,
     Clearing,
-    Commenting,
     ConcernOf,
     ConcernSaid,
     Ending,
@@ -21,10 +31,12 @@ from lup.inbox.said import (
     Naming,
     NoteSaid,
     Nothing,
+    OnItem,
     PartiesOf,
     PartyOf,
     Pile,
     Placed,
+    Reached,
     SendSaid,
     Told,
     WithdrawSaid,
@@ -214,7 +226,7 @@ class InboxPromises(Part):
         state = await inboxed(started)
         assert state.new
         concern = placed(state, "a direction")
-        cleared = await started.run(
+        cleared = await started.act(
             "core",
             "clear",
             Clearing(repository="harness", what=str(concern.number)),
@@ -243,8 +255,11 @@ class InboxPromises(Part):
         await started.serve("agent_named", Naming(agent=reader.id, name="reader"), HERE)
         await said(started, "send", SendSaid(to="reader", text="over to you"), writer)
         message = max((await inboxed(started)).new)
-        commented = await started.run(
-            "core", "comment", Commenting(item=message, text="noted"), Operator()
+        commented = await started.act(
+            "core",
+            "comment",
+            Commented[OnItem](on=OnItem(item=message), words="noted"),
+            Operator(),
         )
         assert isinstance(commented, Accepted)
         for agent in [writer, reader]:
@@ -341,3 +356,25 @@ class InboxPromises(Part):
         found = placed(await inboxed(started), "lup's keys lag")
         assert found.holder == "@frictions/keys"
         assert found.kind == "inbox:friction"
+
+    @lup.promise
+    async def a_comment_on_a_pile_opens_a_concern_there(self, by: Testing) -> None:
+        """A comment the operator writes on a block whose party is a pile opens a concern in that pile, holding their words."""
+        started = await by.started(project())
+        agent = by.any(Agent)
+        await said(
+            started,
+            "friction",
+            FrictionSaid(text="first sighting", under="frictions/keys"),
+            agent,
+        )
+        pile = Pile(repository="harness", path="frictions/keys")
+        commented = await started.act(
+            "core",
+            "comment_to",
+            Commented[Reached](on=Reached(party=pile), words="group these"),
+            Operator(),
+        )
+        assert isinstance(commented, Accepted), commented
+        found = placed(await inboxed(started), "group these")
+        assert found.holder == "@frictions/keys"
