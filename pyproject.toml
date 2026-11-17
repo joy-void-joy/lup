@@ -139,6 +139,8 @@ runtime-evaluated-decorators = [
     "lup.doors.command.command",
     "lup.promise",
     "lup.testing.promise.promise",
+    "lup.view",
+    "lup.shell.view.view",
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -161,6 +163,10 @@ pythonVersion = "3.15"
 enableTypeIgnoreComments = false
 # The modules; scratch work under `tmp/` stays out of the gate.
 include = ["modules"]
+# The second lup's declaration of this repository imports `lup_dev`, which only
+# the second lup's own copy has (`lup_project.py`).
+# lup: defer(issue=13, why="the second lup's declaration goes at the switch, and the third lup's takes its name, which pyright then checks")
+ignore = ["lup_project.py"]
 
 [tool.pytest]
 # lup's own declaration, whose modules' promises lup's plugin checks, and the
@@ -193,6 +199,7 @@ source_modules = [
     "lup.core",
     "lup.declaration",
     "lup.doors",
+    "lup.shell",
     "lup.testing",
 ]
 forbidden_modules = ["lup.environment"]
@@ -212,6 +219,7 @@ forbidden_modules = [
     "lup.errors",
     "lup.declaration.*",
     "lup.doors.*",
+    "lup.shell.*",
     "lup.testing.*",
 ]
 allow_indirect_imports = true

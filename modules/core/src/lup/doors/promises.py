@@ -15,7 +15,7 @@ from pydantic import Field
 import lup
 from lup import (
     Agent,
-    Code,
+    Codebase,
     Model,
     Module,
     Modules,
@@ -507,7 +507,7 @@ class KeeperPart(Part):
         return Tally(count=self.count)
 
     @lup.service
-    async def tallied(self, asking: Asking, by: Code) -> Tallied:
+    async def tallied(self, asking: Asking, by: Codebase) -> Tallied:
         """Say the count, and whose code asked."""
         del asking
         return Tallied(count=self.count, repository=by.repository)
@@ -600,7 +600,9 @@ class PartsPromises(Part):
         """A class holding a field typed `Secret` is filled, where it runs, with the value stored under the field's name, and says it holds it; a class whose secret nothing stored fails to start."""
         value = by.any(str)
         started = await by.started(declared(Keeper()), secrets={"token": value})
-        revealed = await started.serve("reveal", Asking(), Code(repository="harness"))
+        revealed = await started.serve(
+            "reveal", Asking(), Codebase(repository="harness")
+        )
         assert isinstance(revealed, Accepted)
         assert revealed.output == Revealed(value=value)
         assert "token" in KeeperPart.holds().secrets

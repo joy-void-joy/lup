@@ -37,7 +37,7 @@ class Operator(Party):
     """Which of the core's parties it is, as a call across containers names it."""
 
 
-class Code(Party):
+class Codebase(Party):
     """A project's own code, calling a service of a module's as a plain call: a method of one of its classes, or a program of its own.
 
     Identified by its repository, which whoever carries the call vouches for

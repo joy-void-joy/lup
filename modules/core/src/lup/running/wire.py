@@ -13,11 +13,11 @@ from typing import Annotated, Literal
 from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 
 from lup.doors.door import Rejection
-from lup.doors.parties import Agent, Code, Operator
+from lup.doors.parties import Agent, Codebase, Operator
 from lup.errors import LupError
 from lup.types import Model
 
-type Caller = Annotated[Agent | Operator | Code, Field(discriminator="party")]
+type Caller = Annotated[Agent | Operator | Codebase, Field(discriminator="party")]
 """Who calls, as a call across containers names them: one of the core's
 parties, which the program on the operator's machine vouches for."""
 
@@ -43,7 +43,7 @@ class ToolCalled(Model):
 
 
 class ServiceCalled(Model):
-    """Code's call to a service, by its name."""
+    """A codebase's call to a service, by its name."""
 
     format: int = 1
     kind: Literal["service"] = "service"

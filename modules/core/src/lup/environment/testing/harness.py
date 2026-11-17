@@ -27,6 +27,7 @@ from lup.environment.declaration import load, resolve
 from lup.environment.doors import Doors, Entry, Running, Serves
 from lup.environment.running.container import answered
 from lup.environment.running.planning import plan_of
+from lup.environment.shell import Looks, viewed
 from lup.testing.harness import (
     Acted,
     Broken,
@@ -41,6 +42,7 @@ from lup.testing.harness import (
     Step,
     Testing,
     ToolCall,
+    Viewed,
 )
 from lup.testing.promise import PromiseDoor
 from lup.types import Model, MutableModel
@@ -262,6 +264,7 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
     project: Project
     modules: list[Module]
     running: Running
+    looks: Looks
     laws: list[Law]
     run: Run
 
@@ -309,6 +312,8 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
                 return await self.running.run(module, command, arguments, by)
             case Served(service=service, given=given, by=by):
                 return await self.running.serve(service, given, by)
+            case Viewed(module=module, view=view, given=given, by=by):
+                return await viewed(self.running, self.looks, module, view, given, by)
 
     async def stopped(self) -> None:
         """Stop the lup this harness started, rather than once the promise ends."""
@@ -399,6 +404,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
             project=project,
             modules=resolved.modules,
             running=running,
+            looks=resolved.looks,
             laws=laws(running),
             run=self.run,
         )

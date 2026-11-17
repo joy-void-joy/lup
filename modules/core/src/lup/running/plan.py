@@ -22,7 +22,7 @@ class Doorway(Model):
     door: Literal["tool", "service", "action", "command"]
     name: str
     parties: list[str]
-    """Who may call it, by each party's class name: `Agent`, `Code`."""
+    """Who may call it, by each party's class name: `Agent`, `Codebase`."""
 
 
 class PartPlan(Model):
