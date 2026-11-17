@@ -18,7 +18,7 @@ time, it's stopped, and the last commit that came up starts again, saying why
 (`lup/hosting/README.md`, *The loader*).
 """
 
-import asyncio
+import operator
 import os
 import signal
 import sys
@@ -27,6 +27,13 @@ from pathlib import Path
 
 import platformdirs
 import typer
+from tenacity import (
+    AsyncRetrying,
+    RetryCallState,
+    retry_if_result,
+    stop_after_delay,
+    wait_fixed,
+)
 
 import lup.hosting.installed
 from lup.core import Core
@@ -389,15 +396,19 @@ class Loader(Model):
         )
 
     async def up(self, socket: Path) -> bool:
-        """Wait for the machine to answer on `socket`, for `within` at most, and say whether it did."""
-        # lup: defer(issue=3, why="the wait through `tenacity`, the one library for retries, once the operator answers whether it joins lup-core's dependencies")
-        try:
-            async with asyncio.timeout(self.within.total_seconds()):
-                while not await answering(socket):
-                    await asyncio.sleep(0.5)
-        except TimeoutError:
+        """Wait for the machine to answer on `socket`, asking every half second for `within` at most, and say whether it did."""
+
+        def gave_up(state: RetryCallState) -> bool:
+            del state
             return False
-        return True
+
+        waiting = AsyncRetrying(
+            stop=stop_after_delay(self.within.total_seconds()),
+            wait=wait_fixed(0.5),
+            retry=retry_if_result(operator.not_),
+            retry_error_callback=gave_up,
+        )
+        return await waiting(answering, socket)
 
     def stop(self) -> bool:
         """Stop the machine that came up last, asked to end, and say whether one was running."""

@@ -25,6 +25,9 @@ dependencies = [
     # Where the machine keeps its parts' data, its environments and what lasts
     # while it runs, in each platform's own places (`lup/hosting/README.md`).
     "platformdirs>=4",
+    # lup's one library for retrying what's transient: the loader waiting for
+    # the machine it started to answer (`lup/hosting/README.md`, *The loader*).
+    "tenacity>=9",
 ]
 
 [project.optional-dependencies]
