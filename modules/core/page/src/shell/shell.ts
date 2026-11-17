@@ -8,7 +8,7 @@ import { Decoration, EditorView, ViewPlugin, showPanel, type DecorationSet, type
 import { getCM, vim } from "@replit/codemirror-vim";
 
 import type { Blocks, Looks, Viewing } from "../generated/read";
-import { depthOf, Document, every, foldKind, foldRange, nodeAt, offsetOf, section, viewKey, type Change, type Node } from "../document/tree";
+import { depthOf, Document, every, foldKind, foldRange, mountedOf, nodeAt, offsetOf, section, viewKey, type Change, type Node } from "../document/tree";
 import { Kinds } from "./looks";
 
 /** Where views are read from: the core, through the server, or the harness. */
@@ -183,7 +183,8 @@ export class Shell {
             stop();
         });
         stop = this.#source.watch(viewing, (blocks) => {
-            const mounted = this.document.node(key)?.children[0];
+            const fold = this.document.node(key);
+            const mounted = fold === null ? null : mountedOf(fold);
             if (mounted?.viewing !== undefined && mounted.viewing !== null && viewKey(mounted.viewing) === viewKey(viewing)) {
                 this.answered(mounted.key, blocks);
             } else {
