@@ -11,7 +11,8 @@ import { type EditorState, type Extension } from "@codemirror/state";
 import { EditorView, GutterMarker, gutter, type ViewUpdate } from "@codemirror/view";
 
 import { depthOf, foldKind, foldRange, nodeAt, offsetOf, type Node as Laid } from "../document/tree";
-import { redrawn, shells, type Shell } from "./shell";
+import { redrawn } from "./annotations";
+import { shells, type Shell } from "./shell";
 
 /** A fold's letter, on the line its summary is on. */
 export interface Lettered {
@@ -20,6 +21,8 @@ export interface Lettered {
     readonly colour: string;
     readonly column: number;
     readonly closed: boolean;
+    /** Whether a comment is written under it, its own or one of what it holds. */
+    readonly drafted: boolean;
 }
 
 /** A bar beside a line under an open fold, in the fold's column. */
@@ -52,7 +55,7 @@ export function beside(shell: Shell, from: number, to: number, bright: ReadonlyS
             const column = depthOf(node);
             const start = offsetOf(node);
             if (start === from) {
-                letters.push({ key: node.key, letter: declared?.letter ?? "?", colour, column, closed: !shell.isOpen(node) });
+                letters.push({ key: node.key, letter: declared?.letter ?? "?", colour, column, closed: !shell.isOpen(node), drafted: shell.comments.within(node) > 0 });
             } else {
                 const end = start + node.size;
                 bars.push({ key: node.key, colour, column, bright: bright.has(node.key), last: end >= from && end <= to });
@@ -106,7 +109,7 @@ class Marked extends GutterMarker {
         }
         for (const letter of this.shown.letters) {
             const drawn = document.createElement("span");
-            drawn.className = `lup-letter${letter.closed ? " lup-closed" : ""}`;
+            drawn.className = `lup-letter${letter.closed ? " lup-closed" : ""}${letter.drafted ? " lup-drafted" : ""}`;
             drawn.dataset.key = letter.key;
             drawn.textContent = letter.letter;
             drawn.title = letter.closed ? "open" : "close";
@@ -170,9 +173,9 @@ export const placeholder: Extension = codeFolding({
         if (shell === null || node === null || kind === null || foldRange(node, offsetOf(node))?.to !== range.to) {
             return null;
         }
-        return { key: node.key, colour: shell.kinds.folds.get(kind)?.colour ?? "muted", hidden: node.lines - 1 };
+        return { key: node.key, colour: shell.kinds.folds.get(kind)?.colour ?? "muted", hidden: node.lines - 1, comments: shell.comments.within(node) };
     },
-    placeholderDOM(view, _onclick, prepared: { key: string; colour: string; hidden: number } | null) {
+    placeholderDOM(view, _onclick, prepared: { key: string; colour: string; hidden: number; comments: number } | null) {
         const shown = document.createElement("span");
         shown.className = "lup-placeholder";
         shown.title = "open";
@@ -180,7 +183,8 @@ export const placeholder: Extension = codeFolding({
             shown.textContent = "⋯";
             return shown;
         }
-        shown.textContent = `⋯ ${prepared.hidden} ${prepared.hidden === 1 ? "line" : "lines"}`;
+        const comments = prepared.comments === 0 ? "" : ` · ${prepared.comments} ${prepared.comments === 1 ? "comment" : "comments"}`;
+        shown.textContent = `⋯ ${prepared.hidden} ${prepared.hidden === 1 ? "line" : "lines"}${comments}`;
         shown.style.color = `var(--lup-${prepared.colour})`;
         shown.addEventListener("mousedown", (event) => {
             event.preventDefault();

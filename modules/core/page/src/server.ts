@@ -1,8 +1,8 @@
 // The page's side of the server's socket: one socket carrying every view the page watches, each under a number the
-// page picks, answered and answered again; the token said first, read from the page's address's fragment, which no
-// request carries.
+// page picks, answered and answered again, and the draft, written a comment at a time and told as it changes; the
+// token said first, read from the page's address's fragment, which no request carries.
 
-import type { Blocks, Opened, Sent, Told, Unanswered, Viewing } from "./generated/read";
+import type { Blocks, Comment, Delivered, Draft, Opened, Sent, Told, Unanswered, Viewing } from "./generated/read";
 import type { Source } from "./shell/shell";
 
 /** The server's socket, as a source of views. */
@@ -10,6 +10,10 @@ export class Server implements Source {
     readonly #socket: WebSocket;
     readonly #watches = new Map<number, (blocks: Blocks) => void>();
     readonly #waiting: Sent[] = [];
+    readonly #drafted = new Set<(draft: Draft) => void>();
+    readonly #delivered = new Set<(delivered: Delivered) => void>();
+    /** The draft as the server last told it, handed to whoever follows the draft from then on. */
+    #draft: Draft | null = null;
     #next = 1;
     #open = false;
 
@@ -35,6 +39,17 @@ export class Server implements Source {
                 case "unanswered":
                     refused(told);
                     break;
+                case "drafted":
+                    this.#draft = told.draft;
+                    for (const drafted of this.#drafted) {
+                        drafted(told.draft);
+                    }
+                    break;
+                case "delivered":
+                    for (const delivered of this.#delivered) {
+                        delivered(told);
+                    }
+                    break;
             }
         });
     }
@@ -47,6 +62,30 @@ export class Server implements Source {
         return () => {
             this.#watches.delete(watch);
             this.#send({ kind: "unwatch", watch });
+        };
+    }
+
+    write(comment: Comment): void {
+        this.#send({ kind: "write", comment });
+    }
+
+    erase(id: string): void {
+        this.#send({ kind: "erase", id });
+    }
+
+    send(): void {
+        this.#send({ kind: "send" });
+    }
+
+    drafts(drafted: (draft: Draft) => void, delivered: (delivered: Delivered) => void): () => void {
+        this.#drafted.add(drafted);
+        this.#delivered.add(delivered);
+        if (this.#draft !== null) {
+            drafted(this.#draft);
+        }
+        return () => {
+            this.#drafted.delete(drafted);
+            this.#delivered.delete(delivered);
         };
     }
 

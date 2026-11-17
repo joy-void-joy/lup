@@ -292,6 +292,31 @@ export function textOf(node: Node): string {
         .join("\n");
 }
 
+/** Where one of a node's own lines is in the document: from its start to its end, a newline not counted. */
+export interface Placed {
+    readonly from: number;
+    readonly to: number;
+}
+
+/** Return where each of `node`'s own lines is in the document, in order, the comments under them skipped. */
+export function ownLines(node: Node): Placed[] {
+    const placed: Placed[] = [];
+    let offset = offsetOf(node);
+    let any = false;
+    for (const unit of unitsOf(node)) {
+        const count = linesIn(unit);
+        const start = any && count > 0 ? offset + 1 : offset;
+        if ("line" in unit) {
+            placed.push({ from: start, to: start + unit.line.length });
+        }
+        if (count > 0) {
+            offset = start + sizeOf(unit);
+            any = true;
+        }
+    }
+    return placed;
+}
+
 /** Return the innermost node holding `position`, from `root` down. */
 export function nodeAt(root: Node, position: number): Node {
     let node = root;

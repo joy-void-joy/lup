@@ -101,7 +101,7 @@ class Unanswered(Model):
 
 
 class Drafted(Model):
-    """The draft as it stands, told every page at its opening and whenever it changes, so each shows the same."""
+    """The draft as it stands, told every page at its opening, every other page whenever one changes it, and every page after a send, so each shows the same."""
 
     kind: Literal["drafted"] = "drafted"
     draft: Draft

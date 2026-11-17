@@ -8,7 +8,7 @@
 import { Vim, getCM } from "@replit/codemirror-vim";
 
 import type { FoldKind } from "../generated/read";
-import { counted, every, foldKind } from "../document/tree";
+import { counted, every, foldKind, offsetOf } from "../document/tree";
 import { shells, type Shell } from "./shell";
 
 /** A mode a binding works in. */
@@ -133,6 +133,32 @@ export const commands: Readonly<Record<string, (shell: Shell, given: Given) => v
         shell.choose([]);
         shell.say(null);
     },
+    /** End the comment being written, as leaving insert mode does; outside one, send the draft: Ctrl+Enter. */
+    send: (shell) => {
+        const cm = getCM(shell.view);
+        if (shell.comments.writing() !== null && cm !== null) {
+            Vim.handleKey(cm, "<Esc>", "mapping");
+            return;
+        }
+        shell.comments.send();
+    },
+    /** Comment on the innermost block at the cursor whole, rather than on one of its lines: Space `c`. */
+    "comment-whole": (shell) => {
+        shell.comments.commentWhole();
+    },
+    /** Go to the next comment after the cursor, opening what folds over it: `]n`. */
+    "comment-next": (shell) => {
+        jumped(shell, true);
+    },
+    /** Go to the comment before the cursor, opening what folds over it: `[n`. */
+    "comment-previous": (shell) => {
+        jumped(shell, false);
+    },
+    /** Write every comment changed since it was last written to the draft at once: `:w`. */
+    "draft-write": (shell) => {
+        shell.comments.flush();
+        shell.say("draft written");
+    },
 /** Open every fold, as `zR` does. */
     "open-all": (shell) => {
         shell.level(true);
@@ -157,6 +183,30 @@ export const commands: Readonly<Record<string, (shell: Shell, given: Given) => v
     },
 };
 
+/** Move the cursor to the start of the next comment after it, or the last before it, opening every fold over it. */
+function jumped(shell: Shell, forward: boolean): void {
+    const head = shell.view.state.selection.main.head;
+    const comments = every(shell.document.root).filter((node) => node.kind === "comment");
+    const starts = comments.map((node) => ({ node, at: offsetOf(node) }));
+    const found = forward ? starts.find((each) => each.at > head) : starts.filter((each) => each.at < head).at(-1);
+    if (found === undefined) {
+        shell.say(`no comment ${forward ? "after" : "before"} the cursor`);
+        return;
+    }
+    const over: string[] = [];
+    let at = found.node.parent;
+    while (at !== null) {
+        if (foldKind(at) !== null && !shell.isOpen(at)) {
+            over.push(at.key);
+        }
+        at = at.parent;
+    }
+    if (over.length > 0) {
+        shell.fold(over, true);
+    }
+    shell.view.dispatch({ selection: { anchor: offsetOf(found.node) }, scrollIntoView: true });
+}
+
 /** Return the levels of the folds open, or closed, in the shell's document. */
 function levels(shell: Shell, open: boolean): number[] {
     return every(shell.document.root).flatMap((node) => {
@@ -175,6 +225,11 @@ export const vimBindings: readonly Bind[] = [
     { keys: "<Space>f{kind}", command: "choose-nearest", modes: ["normal"] },
     { keys: "<Space>F{kind}", command: "choose-every", modes: ["normal"] },
     { keys: "<Esc>", command: "choose-none", modes: ["normal"] },
+    { keys: "<C-CR>", command: "send", modes: ["normal", "insert"] },
+    { keys: "<Space>c", command: "comment-whole", modes: ["normal"] },
+    { keys: "]n", command: "comment-next", modes: ["normal"] },
+    { keys: "[n", command: "comment-previous", modes: ["normal"] },
+    { keys: ":w", command: "draft-write", modes: ["normal"] },
     { keys: "zR", command: "open-all", modes: ["normal"] },
     { keys: "zM", command: "close-all", modes: ["normal"] },
     { keys: "zr", command: "open-more", modes: ["normal"] },
@@ -206,6 +261,17 @@ export function bindVim(bindings: readonly Bind[]): void {
                 run(shell, { kind: args.selectedCharacter ?? null });
             }
         });
+        if (bind.keys.startsWith(":")) {
+            // An ex command, as vim's own `:w` is: its name after the colon, run however it's abbreviated.
+            const name = bind.keys.slice(1);
+            Vim.defineEx(name, name, (cm: { cm6: { state: { facet: (facet: typeof shells) => Shell | null } } }) => {
+                const shell = cm.cm6.state.facet(shells);
+                if (shell !== null) {
+                    run(shell, { kind: null });
+                }
+            });
+            continue;
+        }
         const keys = bind.keys.replace("{kind}", "<character>");
         for (const mode of bind.modes) {
             Vim.mapCommand(keys, "action", action, {}, { context: mode });
