@@ -7,21 +7,25 @@ name = "lup-core"
 version = "0.0.0"
 description = "lup's core: the declaration's grammar, the doors a module is reached through, and the submodules every project has."
 requires-python = ">=3.15"
+# typer is lup's command line, which a shipped project's own command runs too
+# (`lup/command_line/README.md`).
 dependencies = [
     # Bounds on a field's value, which pydantic checks and hypothesis draws
     # within wherever the field's type nests them: pydantic's own dependency.
     "annotated-types>=0.7",
     "pydantic>=2.14",
     "pydantic-settings>=2.11",
+    "typer>=0.29",
     # The store's database: its tables declared once in Python and its queries
     # built from them (`lup/store/README.md`), Core alone, not the ORM.
     "sqlalchemy>=2",
 ]
 
 [project.optional-dependencies]
-# Checking promises: hypothesis draws and shrinks what they explore. A project's
-# gate installs it; what runs a project's modules doesn't need it.
-testing = [
+# What the environment side needs beyond running a project's modules: checking
+# promises, where hypothesis draws and shrinks what they explore. lup's own
+# workspace and a project's gate install it; a shipped project's command doesn't.
+environment = [
     "hypothesis>=6.170",
 ]
 # The dashboard's server: the page, and one socket carrying what it watches.
@@ -32,6 +36,11 @@ dashboard = [
     # The socket's protocol, which uvicorn speaks only with it installed.
     "websockets>=15",
 ]
+
+# `lup`, the command line for developing with lup, over the declaration of the
+# worktree it runs in (`lup/command_line/README.md`).
+[project.scripts]
+lup = "lup.environment.command_line:main"
 
 # pytest runs lup's plugin wherever the core is installed, checking the promises
 # of the modules a project's declaration resolves to (`lup/testing/README.md`).

@@ -32,6 +32,7 @@ from lup.running.wire import (
     Offer,
     ServiceCalled,
     ToolCalled,
+    ViewCalled,
 )
 from lup.types import Model
 
@@ -268,3 +269,5 @@ def way_of(call: Call) -> Way:
             return Way(door="service", name=service)
         case CommandCalled(module=module, command=command):
             return Way(door="command", name=command, module=module)
+        case ViewCalled(module=module, view=view):
+            return Way(door="view", name=view, module=module)

@@ -437,6 +437,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "sqlalchemy" },
+    { name = "typer" },
 ]
 
 [package.optional-dependencies]
@@ -445,7 +446,7 @@ dashboard = [
     { name = "uvicorn" },
     { name = "websockets" },
 ]
-testing = [
+environment = [
     { name = "hypothesis" },
 ]
 
@@ -453,14 +454,15 @@ testing = [
 requires-dist = [
     { name = "annotated-types", specifier = ">=0.7" },
     { name = "fastapi", marker = "extra == 'dashboard'", specifier = ">=0.120" },
-    { name = "hypothesis", marker = "extra == 'testing'", specifier = ">=6.170" },
+    { name = "hypothesis", marker = "extra == 'environment'", specifier = ">=6.170" },
     { name = "pydantic", specifier = ">=2.14" },
     { name = "pydantic-settings", specifier = ">=2.11" },
     { name = "sqlalchemy", specifier = ">=2" },
+    { name = "typer", specifier = ">=0.29" },
     { name = "uvicorn", marker = "extra == 'dashboard'", specifier = ">=0.38" },
     { name = "websockets", marker = "extra == 'dashboard'", specifier = ">=15" },
 ]
-provides-extras = ["testing", "dashboard"]
+provides-extras = ["environment", "dashboard"]
 
 [[package]]
 name = "lup-dev"
@@ -496,7 +498,7 @@ name = "lup-next"
 version = "0.0.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "lup-core", extra = ["dashboard", "testing"] },
+    { name = "lup-core", extra = ["dashboard", "environment"] },
 ]
 
 [package.dev-dependencies]
@@ -512,7 +514,7 @@ second-lup = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "lup-core", extras = ["testing", "dashboard"], editable = "modules/core" }]
+requires-dist = [{ name = "lup-core", extras = ["environment", "dashboard"], editable = "modules/core" }]
 
 [package.metadata.requires-dev]
 dev = [

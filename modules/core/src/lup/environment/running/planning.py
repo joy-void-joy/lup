@@ -1,8 +1,9 @@
 """Planning a declaration: loading it where its code may run, and saying what the program on the operator's machine reads of it.
 
-The plan is each part of each module with what it holds and the doors it
-serves, the tools a session is told of, and the files loading the declaration
-imported, relative to the project's root (`lup/running/README.md`, *The plan*).
+The plan is each module with its one sentence, each part of each module with
+what it holds and the doors it serves, each with what it takes, the tools a
+session is told of, and the files loading the declaration imported, relative
+to the project's root (`lup/running/README.md`, *The plan*).
 """
 
 import inspect
@@ -11,10 +12,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lup.doors.command import CommandDoor
+from lup.doors.door import is_model
 from lup.doors.service import ServiceDoor
 from lup.doors.tool import ToolDoor
 from lup.environment.declaration import Resolved, load, resolve
-from lup.running.plan import Doorway, PartPlan, Plan
+from lup.running.plan import Doorway, ModulePlan, PartPlan, Plan
+from lup.shell.view import ViewDoor
 
 if TYPE_CHECKING:
     from lup.environment.doors import Entry, Serves
@@ -34,6 +37,10 @@ def plan_of(resolved: Resolved, loaded: list[str], root: Path | None = None) -> 
     """Return the plan of a declaration resolved, which loading imported `loaded`, each part's source read relative to `root`, where one is given."""
     entries = resolved.doors.entries()
     return Plan(
+        modules=[
+            ModulePlan(name=each.name, description=each.sentence())
+            for each in resolved.modules
+        ],
         parts=[part_plan(each, entries, root) for each in resolved.doors.served],
         tools=resolved.doors.tools(),
         files=loaded,
@@ -77,12 +84,18 @@ def doorway(entry: Entry) -> Doorway | None:
             door = "service"
         case CommandDoor():
             door = "command"
+        case ViewDoor():
+            door = "view"
         case _:
             return None
+    taken = entry.method.taken
+    model = taken.one()
     return Doorway(
         door=door,
         name=entry.name,
         parties=[each.__name__ for each in entry.method.parties()],
+        description=taken.description,
+        input_schema=model.model_json_schema() if is_model(model) else {},
     )
 
 

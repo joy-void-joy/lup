@@ -73,7 +73,7 @@ A door exists only where the contract differs: who calls a method, what it takes
 
 ## A method behind a door
 
-A method is async, takes `self`, one model, then `by` where it needs who calls it, says what it returns, and has a docstring, which describes it to whoever its door brings. One taking `by` alone takes no model, and only a door of that shape takes it, as a promise's scenario is. It's behind one door. Each door is a decorator typed with its contract, so pyright holds the method to it, and it checks the method again as it's put on, for code pyright doesn't hold: a failure names the method, and fails the declaration's load.
+A method is async, takes `self`, one model, then `by` where it needs who calls it, says what it returns, and has a docstring, which describes it to whoever its door brings. One taking `by` alone, or nothing, takes no model, and only a door of that shape takes it, as a promise's scenario and a section of guidance are. It's behind one door. Each door is a decorator typed with its contract, so pyright holds the method to it, and it checks the method again as it's put on, for code pyright doesn't hold: a failure names the method, and fails the declaration's load.
 
 A door reads the method's annotations at run time. Where one names a class defined further down its file, as Python allows, what needs that type is checked once the declaration resolves, which reads every method its modules serve. A name imported under `TYPE_CHECKING` alone is never defined where a door reads it, so ruff is told the doors are runtime-evaluated decorators (`pyproject.toml`), and steers such an import out of that block.
 

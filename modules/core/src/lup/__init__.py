@@ -11,7 +11,8 @@ and the parts a module is made of (`Part`, listed in its `Parts`, holding its
 view door (`lup.view`), the blocks a
 view answers, and the kinds a module declares for them (`Tones`, `Folds`,
 `Marks`); and the records a module keeps in the store (`Node`, `Edge`, listed
-in its `Recorded`). The core's environment side
+in its `Recorded`); and the guidance door (`lup.guidance`), a module's section of
+what a session is told at its start. The core's environment side
 (`lup.environment`) isn't among it, and nothing here imports it.
 
 Running a program is `lup.programs` (`lup.programs.run`), kept under its own
@@ -74,6 +75,8 @@ from lup.shell.kinds import FoldKind, Folds, MarkKind, Marks, Tone, Tones
 from lup.shell.view import view
 from lup.store.records import Edge, Node, Recorded
 from lup.testing.promise import promise
+from lup.told.door import guidance
+from lup.told.guidance import GuidanceError
 from lup.types import JsonObject, Model, MutableModel, Settings
 lazy from lup import programs
 lazy from lup.core import Core
@@ -100,6 +103,7 @@ __all__ = [
     "FoldKind",
     "Folds",
     "Gauge",
+    "GuidanceError",
     "JsonObject",
     "Layer",
     "Lend",
@@ -145,6 +149,7 @@ __all__ = [
     "Viewing",
     "chosen",
     "command",
+    "guidance",
     "on",
     "programs",
     "promise",

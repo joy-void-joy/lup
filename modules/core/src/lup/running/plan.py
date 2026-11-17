@@ -15,7 +15,7 @@ from pydantic import StringConstraints
 
 from lup.doors.parts import Holds
 from lup.doors.tool import ToolSpec
-from lup.types import Model
+from lup.types import JsonObject, Model
 
 type Name = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")]
 """A name the machine makes a directory's or a container's name from: a
@@ -26,15 +26,20 @@ path or podman's command line as anything but one name: never `../operator`,
 
 
 class Doorway(Model):
-    """One method a part serves behind a door, as calls to it are routed: its door, its name, and who may call it."""
+    """One method a part serves behind a door, as calls to it are routed and the command line offers it: its door, its name, who may call it, and what it takes."""
 
-    door: Literal["tool", "service", "command"]
+    door: Literal["tool", "service", "command", "view"]
     name: str
     parties: list[str]
     """Who may call it, by each party's class name: `Agent`, `Codebase`."""
+    description: str = ""
+    """Its docstring, which describes it: a command's help."""
+    input_schema: JsonObject = {}
+    """The JSON Schema of the model it takes, or of each where it takes a list
+    of it: what the command line reads its arguments and options from."""
 
     def said(self, module: str) -> str:
-        """Name it as a refusal does, with its module where its name is the module's alone: a tool's or a service's name is the project's, a command's or an action's its module's.
+        """Name it as a refusal does, with its module where its name is the module's alone: a tool's or a service's name is the project's, a command's or a view's its module's.
 
         >>> Doorway(door="command", name="keep", parties=[]).said("hosting")
         'the command `keep` of `hosting`'
@@ -42,8 +47,15 @@ class Doorway(Model):
         match self.door:
             case "tool" | "service":
                 return f"the {self.door} `{self.name}`"
-            case "command":
+            case "command" | "view":
                 return f"the {self.door} `{self.name}` of `{module}`"
+
+
+class ModulePlan(Model):
+    """One of the project's modules, as the command line names it: its name, and its one sentence."""
+
+    name: str
+    description: str = ""
 
 
 class PartPlan(Model):
@@ -75,6 +87,8 @@ class Plan(Model):
     format: int = 1
     """The version of the plan's shape, which a program reading another
     refuses in words, saying how to update (`Versioned`)."""
+    modules: list[ModulePlan] = []
+    """The project's modules, in order."""
     parts: list[PartPlan] = []
     tools: list[ToolSpec] = []
     """What a session is told of each tool the project's modules serve."""

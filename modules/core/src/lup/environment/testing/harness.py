@@ -22,7 +22,7 @@ from lup.declaration.errors import ProjectError
 from lup.declaration.module import Module
 from lup.declaration.project import Project
 from lup.doors.door import Accepted, DoorError, Method, Refused
-from lup.doors.parties import Party
+from lup.doors.parties import Agent, Party
 from lup.doors.parts import Finished, Parts, Program, Runs, UnrunError
 from lup.doors.tool import ToolDoor, ToolSpec
 from lup.environment.declaration import read, resolve
@@ -32,6 +32,7 @@ from lup.environment.running.container import answered
 from lup.environment.running.planning import plan_of
 from lup.environment.shell import viewed
 from lup.environment.shell.server import Dashboard, Session, Socket
+from lup.environment.told import rendered
 from lup.shell.looks import Looks
 from lup.shell.wire import Sent as Frame
 from lup.shell.wire import Told
@@ -53,6 +54,7 @@ from lup.testing.harness import (
     Served,
     Started,
     Step,
+    Telling,
     Testing,
     ToolCall,
     Viewed,
@@ -60,6 +62,7 @@ from lup.testing.harness import (
 from lup.testing.promise import PromiseDoor
 from lup.types import Model, MutableModel
 lazy from lup.shell.blocks import Viewing
+lazy from lup.told.guidance import Guidance
 
 
 class Run(MutableModel, arbitrary_types_allowed=True):
@@ -405,10 +408,22 @@ class Crosser(Model, Crossing, arbitrary_types_allowed=True):
     """A started lup's parts, a message crossing to them answered as their container answers it."""
 
     running: Running
+    looks: Looks
+    """The kinds the parts' modules declare, which their views may name."""
 
     async def crossed(self, text: bytes) -> bytes:
         """Answer one message as the container running these parts would."""
-        return await answered(self.running, text)
+        return await answered(self.running, text, looks=self.looks)
+
+
+class Teller(Model, Telling, arbitrary_types_allowed=True):
+    """A started lup's guidance, rendered on its parts as made in this process."""
+
+    running: Running
+
+    async def guidance(self, by: Agent) -> Guidance:
+        """Render what the session `by` is told at its start of the modules started here."""
+        return await rendered(self.running, by)
 
 
 class Dashboards(Model, Opening, arbitrary_types_allowed=True):
@@ -482,6 +497,12 @@ class Harness(Testing, arbitrary_types_allowed=True):
 
     data: st.DataObject
     run: Run
+    gated: Project
+    """The project whose gate checks the promise, as its gate loads it."""
+
+    def project(self) -> Project:
+        """Return the project whose gate checks this promise, as its gate loads it."""
+        return self.gated
 
     async def started(
         self,
@@ -509,8 +530,9 @@ class Harness(Testing, arbitrary_types_allowed=True):
             specs=reached.tools(),
             plan=plan_of(resolve(project), []),
             doors=reached,
-            crossing=Crosser(running=reached.running),
+            crossing=Crosser(running=reached.running, looks=reached.looks),
             heard=heard,
+            telling=Teller(running=reached.running),
             dashboards=Dashboards(
                 dashboard=Dashboard(
                     running=reached.running,
