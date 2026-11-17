@@ -14,6 +14,7 @@ from lup.hosting.containers import Containers
 from lup.hosting.projects import Projects
 from lup.hosting.promises import (
     ApprovalsPromises,
+    ClearingPromises,
     HostingPromises,
     ProjectsPromises,
     TreesPromises,
@@ -37,4 +38,5 @@ class Hosting(Module):
         TreesPromises,
         ApprovalsPromises,
         ProjectsPromises,
+        ClearingPromises,
     )

@@ -9,6 +9,7 @@ otherwise sent to the program, which carries it to the part's container
 """
 
 import asyncio
+import signal
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 lazy from collections.abc import Awaitable, Callable
@@ -203,15 +204,24 @@ async def started(start: Start) -> Running:
 
 
 async def served(start: Start, *, limit: int = 16 * 2**20) -> None:
-    """Start the parts `start` names, and answer each call that comes in on its socket until the container is stopped, a message past `limit` bytes refused, the parts' `Stopping` run before it ends."""
+    """Start the parts `start` names, and answer each call that comes in on its socket until the container is stopped, a message past `limit` bytes refused.
+
+    Stopped (podman sends `SIGTERM`), it takes no new call, finishes each it's
+    answering, then runs the parts' `Stopping` before it ends: the machine
+    starts a project's next containers and routes calls to them before
+    stopping these, so a restart cuts no call.
+    """
     running = await started(start)
 
     async def answer(text: bytes) -> bytes:
         return await answered(running, text)
 
     server = await listening(start.listening, answer, limit=limit)
+    stopping = asyncio.Event()
+    asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, stopping.set)
     try:
-        async with server:
-            await server.serve_forever()
+        await stopping.wait()
+        server.close()
+        await server.wait_closed()
     finally:
         await running.stopped()

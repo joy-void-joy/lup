@@ -23,7 +23,7 @@ from lup.declaration.module import Module
 from lup.declaration.project import Project
 from lup.doors.door import Accepted, DoorError, Method, Refused
 from lup.doors.parties import Party
-from lup.doors.parts import Finished, Parts, Program, ProgramError, Runs
+from lup.doors.parts import Finished, Parts, Program, Runs, UnrunError
 from lup.doors.tool import ToolDoor, ToolSpec
 from lup.environment.declaration import load, resolve
 from lup.environment.doors import Doors, Entry, Running, Serves
@@ -366,7 +366,7 @@ class StandIn(Model, Runs, arbitrary_types_allowed=True):
     ) -> Finished:
         """Hear the run, and answer it as its program's script says.
 
-        Raise `ProgramError` where no answer of its script fits, as for a
+        Raise `UnrunError` where no answer of its script fits, as for a
         program that isn't there.
         """
         self.heard.runs.append(
@@ -389,7 +389,7 @@ class StandIn(Model, Runs, arbitrary_types_allowed=True):
                 f"`{program.name} {' '.join(arguments)}` has no answer in the "
                 "promise's script, so it's run as a program that isn't there"
             )
-            raise ProgramError(message, about=[program.name])
+            raise UnrunError(message, about=[program.name])
         return Finished(
             status=answer.status,
             output=bytes_of(answer.output),

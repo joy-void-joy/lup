@@ -97,11 +97,11 @@ class Runs(ABC):
     ) -> Finished:
         """Run `program` with `arguments`, `given` on its input, `env` set beside the variables it runs with, and say how it ended, whatever its status.
 
-        Raise `ProgramError` where it can't be run at all.
+        Raise `UnrunError` where it can't be run at all.
         """
 
 
-class ProgramError(RefusedError):
+class UnrunError(RefusedError):
     """A program a part declares can't be run: it isn't there, isn't at a version the part takes, or nothing runs programs where the part does; the call needing it is refused, saying why."""
 
 
@@ -137,14 +137,14 @@ class Program(Model, arbitrary_types_allowed=True):
     ) -> Finished:
         """Run it with `arguments`, `given` on its input, text as UTF-8, `env` set beside the variables it runs with, and say how it ended, whatever its status.
 
-        Raise `ProgramError` where it can't be run.
+        Raise `UnrunError` where it can't be run.
         """
         if self.runs is None:
             message = (
                 f"`{self.name}` is run where its part runs, which gives it what "
                 "runs programs; nothing does here"
             )
-            raise ProgramError(message, about=[self.name])
+            raise UnrunError(message, about=[self.name])
         sent = given.encode() if isinstance(given, str) else given
         return await self.runs.ran(self, list(arguments), sent, dict(env or {}))
 

@@ -24,13 +24,13 @@ from lup import (
     Part,
     Parts,
     Program,
-    ProgramError,
     Project,
     ProjectError,
     Secret,
     Starting,
     Stopping,
     UncarriedError,
+    UnrunError,
 )
 from lup.testing import Accepted, Answering, Refused, Scripted, Testing, raises
 
@@ -575,7 +575,7 @@ class ListerPart(Part):
         del asking
         try:
             await self.ls.ran("-a")
-        except ProgramError as missing:
+        except UnrunError as missing:
             raise lup.RefusedError(str(missing)) from missing
         return Listed(names=[])
 

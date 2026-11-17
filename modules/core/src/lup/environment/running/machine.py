@@ -22,6 +22,8 @@ from lup.environment.declaration import load, resolve
 from lup.environment.running.container import answered, asked, declined, listening
 from lup.environment.running.planning import plan_of
 from lup.hosting.carrying import Arrival, Carrying, Listens, Route, Visiting
+from lup.hosting.containers import ContainerError
+from lup.hosting.projects import Resuming
 from lup.running.plan import Plan
 from lup.running.wire import Asking, FormatError, Host, Offer, Offering, read
 from lup.types import MutableModel
@@ -108,8 +110,11 @@ async def hosted_parts(host: Host, runs: Runs | None) -> Running:
 async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> None:
     """Host the machine's own parts, and carry every call coming in on a socket of theirs until stopped: the operator's, and each container's as `Carrying` makes its directory, a message past `limit` bytes refused.
 
-    Raise `ProjectError` where the home repository's declaration doesn't
-    select `Hosting`, which carries calls.
+    Each project the machine's parts ran before they last stopped is opened
+    again, every container they left stopped first, since nothing routes
+    calls to it any more. Raise `ProjectError` where the home repository's
+    declaration doesn't select `Hosting`, which carries calls, and
+    `ContainerError` where podman can't stop those left.
     """
     running = await hosted_parts(host, runs)
     carrying = next(
@@ -131,6 +136,11 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
     carrying.hosted = Plan(parts=machine, tools=hosting.tools)
     try:
         await binder.listened(carrying.operator())
+        resumed = await running.serve(
+            "resumed", Resuming().model_dump(mode="json"), Machine()
+        )
+        if not isinstance(resumed, Accepted):
+            raise ContainerError(resumed.rejection.reason)
         await asyncio.Event().wait()
     finally:
         binder.closed()
