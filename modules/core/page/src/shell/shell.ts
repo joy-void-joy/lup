@@ -3,12 +3,12 @@
 // cursor is) by each block's key, so a view answering again moves nothing they didn't move.
 
 import { foldEffect, foldedRanges, foldState, unfoldEffect } from "@codemirror/language";
-import { Annotation, EditorState, Facet, type ChangeSpec, type Extension, type Range } from "@codemirror/state";
+import { Annotation, EditorState, Facet, StateEffect, type ChangeSpec, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { getCM, vim } from "@replit/codemirror-vim";
 
 import type { Blocks, Looks, Viewing } from "../generated/read";
-import { Document, every, foldKind, foldRange, nodeAt, offsetOf, section, viewKey, type Change, type Node } from "../document/tree";
+import { depthOf, Document, every, foldKind, foldRange, nodeAt, offsetOf, section, viewKey, type Change, type Node } from "../document/tree";
 import { Kinds } from "./looks";
 
 /** Where views are read from: the core, through the server, or the harness. */
@@ -19,6 +19,9 @@ export interface Source {
 
 /** Marks a transaction the shell makes as views answer, rather than one the operator's keys make. */
 export const fromCore = Annotation.define<boolean>();
+
+/** Marks a transaction after which what's open may have changed, though no fold's range did: a fold read as it opens, or holding nothing. */
+export const settled = StateEffect.define<null>();
 
 /** The shell's state, as its laws read it: a value of its own, which later events don't change. */
 export interface ShellState {
@@ -116,9 +119,7 @@ export class Shell {
                 effects.push(foldEffect.of({ from: range.from, to: range.to }));
             }
         }
-        if (effects.length > 0) {
-            this.view.dispatch({ effects, annotations: fromCore.of(true) });
-        }
+        this.view.dispatch({ effects: [...effects, settled.of(null)], annotations: fromCore.of(true) });
     }
 
     /** Say whether the fold `node` is open: as the operator left it, else as its view says, else as its kind says. */
@@ -220,19 +221,6 @@ function moduleOf(node: Node): string | null {
 /** The shell an editor shows, for the keymap's commands to find it by its editor. */
 export const shells = Facet.define<Shell, Shell | null>({ combine: (values) => values[0] ?? null });
 
-/** How deep a node sits: the folds and sections above it, the root's own not counted. */
-function depthOf(node: Node): number {
-    let depth = 0;
-    let at = node.parent;
-    while (at !== null && at.parent !== null) {
-        if (at.kind === "fold") {
-            depth += 1;
-        }
-        at = at.parent;
-    }
-    return depth;
-}
-
 /** Draws what the text doesn't say: how deep each line sits, a fold's summary in its kind's colour, each span in its tone. */
 const drawing = ViewPlugin.fromClass(
     class {
@@ -264,7 +252,7 @@ const drawing = ViewPlugin.fromClass(
                     const heading = kind !== null && start === line.from;
                     const classes = ["lup-line", `lup-${node.kind}`];
                     if (heading) {
-                        classes.push("lup-summary");
+                        classes.push("lup-summary", `lup-kind-${kind}`);
                     }
                     const colour =
                         heading && kind !== null
@@ -305,17 +293,62 @@ const drawing = ViewPlugin.fromClass(
     { decorations: (plugin) => plugin.decorations },
 );
 
-/** The editor's look: the shell's palette, each line set in by how deep it sits. */
+/** The editor's look, the second lup's: Normal mode's cursor a block in the focus colour, Insert mode's a bar in the
+ * text's; the selection lightening what's under it; each line set in by how deep it sits; a fold's summary in its kind's
+ * colour, a party's a band across in it; the margin's letters and bars in their columns. */
 export const look = EditorView.theme(
     {
-        "&": { height: "100%", backgroundColor: "#000", color: "var(--lup-fg)" },
-        ".cm-content": { fontFamily: "ui-monospace, monospace" },
+        "&": { height: "100%", backgroundColor: "var(--lup-bg)", color: "var(--lup-fg)", fontSize: "var(--lup-fs)" },
+        "&.cm-focused": { outline: "none" },
+        ".cm-scroller": { fontFamily: "var(--lup-mono)", lineHeight: "var(--lup-lh)" },
+        ".cm-content": { padding: "0", caretColor: "var(--lup-focus)" },
+        ".cm-cursor": { borderLeft: "2px solid var(--lup-fg)" },
+        ".cm-fat-cursor": { background: "var(--lup-focus) !important", color: "var(--lup-bg) !important" },
+        "&.cm-focused .cm-fat-cursor": { outline: "none" },
+        ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, .cm-selectionLayer .cm-selectionBackground": {
+            background: "var(--lup-selection) !important",
+        },
+        ".cm-selectionLayer": { zIndex: "1 !important", mixBlendMode: "lighten", pointerEvents: "none" },
+        ".cm-content ::selection": { color: "currentColor" },
         ".lup-line": { paddingLeft: "calc(var(--lup-depth) * 2ch + 1ch)" },
-        ".lup-summary": { color: "var(--lup-fold, var(--lup-fg))" },
+        ".lup-summary": { color: "var(--lup-fold, var(--lup-fg))", fontWeight: "700" },
         ".lup-markdown": { color: "var(--lup-fold, var(--lup-fg))" },
-        ".lup-summary.lup-fold": { fontWeight: "bold" },
-        ".lup-bold": { fontWeight: "bold" },
-        ".lup-dim": { opacity: "0.6" },
+        ".lup-summary.lup-kind-party": {
+            background: "color-mix(in srgb, var(--lup-fold) 14%, var(--lup-bg))",
+            borderTop: "1px solid var(--lup-fold)",
+            boxShadow: "inset 4px 0 0 var(--lup-fold)",
+        },
+        ".lup-bold": { fontWeight: "700" },
+        ".lup-dim": { opacity: "0.7" },
+        ".cm-gutters": { background: "var(--lup-bg)", border: "0" },
+        ".lup-margin": { width: "calc(2px + var(--lup-columns) * var(--lup-column))", borderRight: "1px solid var(--lup-rule)" },
+        ".lup-margin .cm-gutterElement": { position: "relative", padding: "0" },
+        ".lup-rails": { position: "absolute", inset: "0" },
+        ".lup-rail, .lup-letter": { "--lup-left": "calc(1px + var(--lup-at) * var(--lup-column))" },
+        ".lup-rail": {
+            position: "absolute",
+            top: "0",
+            bottom: "0",
+            left: "calc(var(--lup-left) + var(--lup-column) / 2 - 1px)",
+            width: "2px",
+            background: "currentColor",
+            opacity: "0.4",
+        },
+        ".lup-rail.lup-bright": { opacity: "1" },
+        ".lup-rail.lup-last": { bottom: "3px" },
+        ".lup-letter": {
+            position: "absolute",
+            top: "1px",
+            left: "var(--lup-left)",
+            width: "var(--lup-column)",
+            height: "calc(var(--lup-lh) - 2px)",
+            lineHeight: "calc(var(--lup-lh) - 2px)",
+            textAlign: "center",
+            fontWeight: "700",
+            cursor: "pointer",
+        },
+        ".lup-letter.lup-closed": { boxShadow: "inset 0 0 0 1px currentColor" },
+        ".lup-placeholder": { border: "1px solid currentColor", padding: "0 0.5ch", marginLeft: "1ch", cursor: "pointer" },
     },
     { dark: true },
 );

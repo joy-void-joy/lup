@@ -7,11 +7,12 @@ import { expect } from "vitest";
 import { Vim, getCM } from "@replit/codemirror-vim";
 
 import type { Blocks, Fold, Viewing } from "../generated/read";
-import { every, foldKind, section } from "../document/tree";
+import { every, foldKind, offsetOf, section } from "../document/tree";
 import { blocks, fold } from "../testing/blocks";
 import { Memory, looks } from "../testing/memory";
 import { law, scenario, type Machine } from "../testing/promise";
 import { bindVim, vimBindings } from "./keymap";
+import { beside, cursorFolds, type Beside } from "./margin";
 import { Shell, type ShellState } from "./shell";
 
 bindVim(vimBindings);
@@ -49,7 +50,39 @@ interface Running {
     readonly parent: HTMLElement;
 }
 
-const shell: Machine<Running, ShellState, Event> = {
+/** One fold the document shows: its key, and the lines its summary and its end are on, from 1. */
+interface Spanned {
+    readonly key: string;
+    readonly first: number;
+    readonly last: number;
+}
+
+/** The shell's state, with what its margin shows beside each line and where each fold is. */
+interface Seen extends ShellState {
+    readonly folds: readonly Spanned[];
+    /** Beside each line, the first first. */
+    readonly margin: readonly Beside[];
+}
+
+/** Return what `shell` shows, its margin and its folds among it. */
+function seen(shell: Shell): Seen {
+    const doc = shell.view.state.doc;
+    const bright = cursorFolds(shell, shell.view.state);
+    const margin: Beside[] = [];
+    for (let number = 1; number <= doc.lines; number++) {
+        const line = doc.line(number);
+        margin.push(beside(shell, line.from, line.to, bright));
+    }
+    const folds = every(shell.document.root)
+        .filter((node) => foldKind(node) !== null && node.lines > 0)
+        .map((node) => {
+            const start = offsetOf(node);
+            return { key: node.key, first: doc.lineAt(start).number, last: doc.lineAt(start + node.size).number };
+        });
+    return { ...shell.state(), folds, margin };
+}
+
+const shell: Machine<Running, Seen, Event> = {
     name: "the shell",
     start(by) {
         const memory = new Memory();
@@ -70,7 +103,7 @@ const shell: Machine<Running, ShellState, Event> = {
         }
     },
     state(running) {
-        return running.shell.state();
+        return seen(running.shell);
     },
     end(running) {
         running.shell.destroy();
@@ -96,6 +129,34 @@ law(shell, "A view answering again leaves open what the operator opened and clos
             .map((node) => node.key),
     );
     return step.before.closed.every((key) => !still.has(key) || kept.has(key));
+});
+
+law(shell, "The margin shows each fold's letter once, beside its summary, outlined exactly when it's closed, and a bar beside each line under it, bright exactly while the cursor's in it", (step) => {
+    const after = step.after;
+    const known = new Map(after.folds.map((fold) => [fold.key, fold]));
+    for (const [at, shown] of after.margin.entries()) {
+        const line = at + 1;
+        for (const letter of shown.letters) {
+            const fold = known.get(letter.key);
+            if (fold === undefined || fold.first !== line || letter.closed !== after.closed.includes(letter.key)) {
+                return false;
+            }
+        }
+        for (const bar of shown.bars) {
+            const fold = known.get(bar.key);
+            if (fold === undefined || line <= fold.first || line > fold.last) {
+                return false;
+            }
+            if (bar.bright !== (after.line >= fold.first && after.line <= fold.last) || bar.last !== (line === fold.last)) {
+                return false;
+            }
+        }
+    }
+    return after.folds.every(
+        (fold) =>
+            after.margin[fold.first - 1]?.letters.some((letter) => letter.key === fold.key) === true &&
+            after.margin.slice(fold.first, fold.last).every((shown) => shown.bars.some((bar) => bar.key === fold.key)),
+    );
 });
 
 /** A source answering `root` with `blocks` alone. */
