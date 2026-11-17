@@ -28,13 +28,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import Field, TypeAdapter, ValidationError
 from pydantic.json_schema import GenerateJsonSchema
 
-from lup.core import Core
 from lup.doors.door import Accepted
 from lup.doors.parties import Operator
-from lup.environment.declaration import Resolved
+from lup.environment.doors import Running
 from lup.environment.shell.layout import ShellLayout
 from lup.environment.shell.viewing import viewed
 from lup.shell.blocks import BlockError, Blocks, Viewing
+from lup.shell.looks import Looks
 from lup.shell.wire import (
     Answered,
     Hello,
@@ -89,9 +89,14 @@ def described() -> str:
 
 
 class Dashboard(Model, arbitrary_types_allowed=True):
-    """The dashboard of a resolved declaration: its page, and what its views answer the operator."""
+    """The dashboard of a running project: its page, and what its views answer the operator."""
 
-    resolved: Resolved
+    running: Running
+    """The project's parts, made and running: what answers its views."""
+    looks: Looks
+    """The kinds its modules declare, which their views may name."""
+    root: Viewing | None
+    """The document's root view, as the core module names it (`Core.document`)."""
     token: str = Field(default_factory=lambda: secrets.token_urlsafe(32))
     """What the page has to say before anything is answered: rooms reach every
     port on the operator's machine, so being on localhost keeps nothing out."""
@@ -119,25 +124,14 @@ class Dashboard(Model, arbitrary_types_allowed=True):
             )
         return application
 
-    def root(self) -> Viewing | None:
-        """Return the document's root view, as the core module of the declaration names it."""
-        return next(
-            (
-                module.document
-                for module in self.resolved.modules
-                if isinstance(module, Core)
-            ),
-            None,
-        )
-
     async def answer(self, watch: int, viewing: Viewing) -> Answered | Unanswered:
         """Answer `viewing`, watched under `watch`, as the operator reads it."""
         if viewing.module is None:
             return Unanswered(watch=watch, reason=f"`{viewing.view}` names no module")
         try:
             answered = await viewed(
-                self.resolved.doors,
-                self.resolved.looks,
+                self.running,
+                self.looks,
                 viewing.module,
                 viewing.view,
                 viewing.given,
@@ -228,8 +222,8 @@ class Session(Model, arbitrary_types_allowed=True):
                         await self.socket.close(4401, "not the dashboard's token")
                         return
                     opened = True
-                    looks = self.dashboard.resolved.looks
-                    await self.tell(Opened(root=self.dashboard.root(), looks=looks))
+                    dashboard = self.dashboard
+                    await self.tell(Opened(root=dashboard.root, looks=dashboard.looks))
                 case Watch(watch=watch, viewing=viewing):
                     answering.create_task(self.answered(watch, viewing))
                 case Unwatch():

@@ -2,8 +2,9 @@
 
 from lup.declaration.module import Module
 from lup.declaration.promises import DeclarationPromises
-from lup.doors.promises import DoorsPromises
-from lup.doors.serving import Serving
+from lup.doors.parts import Parts
+from lup.doors.promises import DoorsPromises, PartsPromises
+from lup.running.promises import RunningPromises
 from lup.shell.blocks import Viewing
 from lup.shell.kinds import SHELL_FOLDS, SHELL_TONES, Folds, Tones
 from lup.shell.promises import ShellPromises
@@ -21,8 +22,13 @@ class Core(Module):
     """
 
     name = "core"
-    serving: Serving = Serving.of(
-        DeclarationPromises, DoorsPromises, TestingPromises, ShellPromises
+    parts: Parts = Parts.of(
+        DeclarationPromises,
+        DoorsPromises,
+        PartsPromises,
+        RunningPromises,
+        TestingPromises,
+        ShellPromises,
     )
     tones: Tones = Tones.of(*SHELL_TONES)
     """The shell's tones: plain, muted, strong, and the operator's own words."""

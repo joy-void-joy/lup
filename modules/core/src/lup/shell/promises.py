@@ -20,12 +20,12 @@ from lup import (
     Model,
     Module,
     Modules,
-    ModuleServing,
     Offer,
     Operator,
+    Part,
+    Parts,
     Project,
     ProjectError,
-    Serving,
     Span,
     Tone,
     Tones,
@@ -62,7 +62,7 @@ class Clearing(Model):
     number: int
 
 
-class NotesServing(ModuleServing):
+class NotesPart(Part):
     """A pile of notes, each a fold under its title, its text read as it opens."""
 
     module: Notes
@@ -76,8 +76,8 @@ class NotesServing(ModuleServing):
                     id=f"note-{number}",
                     kind="note",
                     summary=[Span(text=title, tone="title")],
-                    content=Viewing.of(NotesServing.note, NoteOf(number=number)),
-                    offers=[Offer.of(NotesServing.clear, Clearing(number=number))],
+                    content=Viewing.of(NotesPart.note, NoteOf(number=number)),
+                    offers=[Offer.of(NotesPart.clear, Clearing(number=number))],
                 )
                 for number, title in enumerate(self.titles(), start=1)
             ),
@@ -112,7 +112,7 @@ class Notes(Module):
     """How many notes the pile holds, each titled by its number."""
     folds: Folds = Folds.of(FoldKind(name="note", letter="n", called="note", level=1))
     tones: Tones = Tones.of(Tone(name="title", like="strong"))
-    serving: Serving = Serving.of(NotesServing)
+    parts: Parts = Parts.of(NotesPart)
 
 
 class Echoes(Module):
@@ -142,7 +142,7 @@ class Drawn(Model):
     notes: int = Field(ge=0, le=20)
 
 
-class ShellPromises(ModuleServing):
+class ShellPromises(Part):
     """What a module's views and their readers can count on of the shell's Python side."""
 
     @lup.promise
@@ -209,11 +209,11 @@ class ShellPromises(ModuleServing):
         """A block offering a method that isn't an action, or reading a method that isn't a view, fails as it's laid out, naming the method."""
         del by
         with raises(lup.BlockError) as offered:
-            Offer.of(NotesServing.pile, PileOf(pile="p"))
-        assert "NotesServing.pile" in offered.raised().about
+            Offer.of(NotesPart.pile, PileOf(pile="p"))
+        assert "NotesPart.pile" in offered.raised().about
         with raises(lup.BlockError) as read:
-            Viewing.of(NotesServing.clear, Clearing(number=1))
-        assert "NotesServing.clear" in read.raised().about
+            Viewing.of(NotesPart.clear, Clearing(number=1))
+        assert "NotesPart.clear" in read.raised().about
 
     @lup.promise
     async def the_dashboard_answers_nothing_before_its_token(self, by: Testing) -> None:

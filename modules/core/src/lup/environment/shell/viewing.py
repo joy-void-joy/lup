@@ -10,12 +10,12 @@ if TYPE_CHECKING:
 
     from lup.doors.door import Accepted, Refused
     from lup.doors.parties import Party
-    from lup.environment.doors import Doors
+    from lup.environment.doors import Running
     from lup.shell.looks import Looks
 
 
 async def viewed(
-    doors: Doors,
+    doors: Running,
     looks: Looks,
     module: str,
     view: str,
