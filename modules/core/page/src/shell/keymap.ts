@@ -222,11 +222,35 @@ export const commands: Readonly<Record<string, Command>> = {
             }
         },
     },
-    /** Enter pane mode, to move between the outline, the document and the window: Space w. */
+    /** Enter pane mode, to move between the outline, the document and the window: Space w w, or Esc twice. */
     "panes": {
-        says: "move between the outline, the document and the window",
+        says: "move between the outline, the document and the window, in pane mode",
         run: (shell) => {
             (shell.owner ?? shell).panes?.enter();
+        },
+    },
+    "pane-left": {
+        says: "go to the pane on the left",
+        run: (shell) => {
+            (shell.owner ?? shell).panes?.go(shell, "h");
+        },
+    },
+    "pane-down": {
+        says: "go to the pane below",
+        run: (shell) => {
+            (shell.owner ?? shell).panes?.go(shell, "j");
+        },
+    },
+    "pane-up": {
+        says: "go to the pane above",
+        run: (shell) => {
+            (shell.owner ?? shell).panes?.go(shell, "k");
+        },
+    },
+    "pane-right": {
+        says: "go to the pane on the right",
+        run: (shell) => {
+            (shell.owner ?? shell).panes?.go(shell, "l");
         },
     },
     /** Choose whom the comment at the cursor, or on its line in the review, reaches, or write one to whom's chosen: Space s. */
@@ -389,7 +413,11 @@ export const vimBindings: readonly Bind[] = [
     { keys: "<Space>d", command: "let-go", modes: ["normal"] },
     { keys: "<Space>s", command: "address", modes: ["normal"] },
     { keys: "<CR>", command: "enter", modes: ["normal"] },
-    { keys: "<Space>w", command: "panes", modes: ["normal"] },
+    { keys: "<Space>wh", command: "pane-left", modes: ["normal"] },
+    { keys: "<Space>wj", command: "pane-down", modes: ["normal"] },
+    { keys: "<Space>wk", command: "pane-up", modes: ["normal"] },
+    { keys: "<Space>wl", command: "pane-right", modes: ["normal"] },
+    { keys: "<Space>ww", command: "panes", modes: ["normal"] },
     { keys: "<C-k>", command: "palette", modes: ["normal"] },
     { keys: "]n", command: "comment-next", modes: ["normal"] },
     { keys: "[n", command: "comment-previous", modes: ["normal"] },

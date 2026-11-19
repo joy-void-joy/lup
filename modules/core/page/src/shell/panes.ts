@@ -1,7 +1,8 @@
 // Pane mode: moving between the page's panes, the outline, the document and the window under it, as vim's `Ctrl+W`
-// moves between windows. Entered by Space w, or by Esc twice in Normal mode: an Esc pressed out of insert or visual
-// mode doesn't count, so from insert mode it takes three, and pressing Esc to be sure never lands there. In pane mode,
-// h, j, k and l choose the pane to their side, and Enter or Esc goes into it; no key reaches a pane until then.
+// moves between windows. Space w and h, j, k or l go straight to the pane to that side. Pane mode is entered by Space w
+// w, or by Esc twice in Normal mode: an Esc pressed out of insert or visual mode doesn't count, so from insert mode it
+// takes three, and pressing Esc to be sure never lands there. In pane mode, h, j, k and l choose the pane to their
+// side, and Enter or Esc goes into it; no key reaches a pane until then.
 
 import { getCM } from "@replit/codemirror-vim";
 
@@ -55,6 +56,19 @@ export class Panes {
         this.#escaped = false;
         this.#drawn();
         this.#owner.say("PANES  ·  h, j, k and l choose the outline, the document or the window  ·  Enter or Esc goes into it");
+    }
+
+    /** Go from the pane `from` draws to the pane beside it that `key` (h, j, k or l) points at, as Space w and it do. */
+    go(from: Shell, key: string): void {
+        const panes: Pane[] = ["window", "outline", "document"];
+        const here = panes.find((pane) => this.#shellOf(pane) === from) ?? "document";
+        const next = beside[here][key];
+        const shell = next === undefined ? null : this.#shellOf(next);
+        if (shell === null) {
+            this.#owner.say("no pane there");
+            return;
+        }
+        shell.view.focus();
     }
 
     /** Leave pane mode into the pane chosen. */

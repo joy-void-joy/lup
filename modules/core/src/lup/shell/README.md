@@ -75,9 +75,9 @@ It's drawn as the second lup's page was (`page/src/shell/palette.ts`, `page/src/
 
 ### The outline and the panes
 
-The document is shown beside its outline (`page/src/shell/outline.ts`), as the second lup's overview was: each fold the document lays out, under its summary, nested and open as the document has them, its text taken out, drawn by a shell of its own as the document is. Each moves with the other: the document's cursor marks the fold it's in there, and moving there takes the document to that fold, opening what folds over it; Enter there goes into the document.
+The document is shown beside its outline (`page/src/shell/outline.ts`), as the second lup's overview was: each fold of a kind that says it's outlined (`FoldKind.outlined`: the core's party, concern and file; a module's items), under its summary, nested and open as the document has them, its text taken out, drawn by a shell of its own as the document is. A cursor shows only in the pane the keys are in; elsewhere the line it's on is marked. Each moves with the other: the document's cursor marks the fold it's in there, and moving there takes the document to that fold, opening what folds over it; Enter there goes into the document.
 
-Pane mode moves between the outline, the document and the window under it, as vim's `Ctrl+W` moves between windows (`page/src/shell/panes.ts`): entered by Space w, or by Esc twice in Normal mode, an Esc pressed out of insert or visual mode not counted, so pressing Esc to be sure never lands there. There h, j, k and l choose the pane to their side, and Enter or Esc goes into it.
+Space w and h, j, k or l go straight to the pane to that side, as vim's `Ctrl+W` and a direction do. Pane mode moves between the outline, the document and the window under it (`page/src/shell/panes.ts`): entered by Space w w, or by Esc twice in Normal mode, an Esc pressed out of insert or visual mode not counted, so pressing Esc to be sure never lands there. There h, j, k and l choose the pane to their side, and Enter or Esc goes into it.
 
 ### The window
 

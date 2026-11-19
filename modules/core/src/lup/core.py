@@ -54,7 +54,14 @@ class Core(Module):
     """The shell's tones: plain, muted, strong, and the operator's own words."""
     folds: Folds = Folds.of(
         *SHELL_FOLDS,
-        FoldKind(name="concern", letter="c", called="concern", level=1, colour="cyan"),
+        FoldKind(
+            name="concern",
+            letter="c",
+            called="concern",
+            level=1,
+            colour="cyan",
+            outlined=True,
+        ),
     )
     """The shell's fold kinds: a party's section, a file, a body, a run of
     unchanged lines; and the inbox's, a concern."""

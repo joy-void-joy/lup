@@ -72,6 +72,10 @@ class FoldKind(Model):
     """Whether its folds start open, before the operator opens or closes one."""
     colour: Colour = "muted"
     """The colour its summary's marker and its bar are drawn in."""
+    outlined: bool = False
+    """Whether its folds show in the outline beside the document, each under
+    its summary: what's worth finding from there, as a party, a concern or an
+    item, and not what's fine-grained, as a function's body or a call."""
 
 
 class Folds(Named[FoldKind]):
@@ -90,9 +94,16 @@ SHELL_FOLDS = [
         level=0,
         starts_open=True,
         colour="cyan",
+        outlined=True,
     ),
     FoldKind(
-        name="file", letter="f", called="file", level=2, starts_open=True, colour="link"
+        name="file",
+        letter="f",
+        called="file",
+        level=2,
+        starts_open=True,
+        colour="link",
+        outlined=True,
     ),
     FoldKind(
         name="body",

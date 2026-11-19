@@ -5,7 +5,7 @@
 import { foldEffect, foldedRanges, foldState, unfoldEffect } from "@codemirror/language";
 import { history } from "@codemirror/commands";
 import { EditorState, Facet, StateEffect, StateField, Transaction, type ChangeSpec, type Extension, type Range } from "@codemirror/state";
-import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { Decoration, EditorView, ViewPlugin, highlightActiveLine, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { getCM, vim } from "@replit/codemirror-vim";
 
 import type { Blocks, Comment, Delivered, Draft, Looks, Viewing } from "../generated/read";
@@ -143,6 +143,7 @@ export class Shell {
                     ...(this.window === null ? [] : [this.window.extension]),
                     drawing,
                     shells.of(shell),
+                    ...(this.owner === null ? [] : [highlightActiveLine()]),
                     ...extensions,
                 ],
             }),
@@ -504,6 +505,10 @@ export const look = EditorView.theme(
         ".cm-cursor": { borderLeft: "2px solid var(--lup-fg)" },
         ".cm-fat-cursor": { background: "var(--lup-focus) !important", color: "var(--lup-bg) !important" },
         "&.cm-focused .cm-fat-cursor": { outline: "none" },
+        // A cursor shows only where the keys go: the outline's and the window's, the document's too, hide once the
+        // keys are elsewhere, the line their cursor is on marked in their stead.
+        "&:not(.cm-focused) .cm-cursorLayer, &:not(.cm-focused) .cm-vimCursorLayer": { visibility: "hidden" },
+        ".cm-activeLine": { background: "color-mix(in srgb, var(--lup-selection) 60%, transparent)" },
         ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, .cm-selectionLayer .cm-selectionBackground": {
             background: "var(--lup-selection) !important",
         },
