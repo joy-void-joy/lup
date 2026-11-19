@@ -1,0 +1,21 @@
+[project]
+name = "lup-code-rules"
+version = "0.0.0"
+description = "lup's code rules: patterns that are rarely the right choice, told to an agent as they write them, and `# lup:` comments, read with pyright's own tree."
+requires-python = ">=3.15"
+dependencies = [
+    "lup-core",
+    # ruff's findings are told beside lup's and pyright's, and kept by the same
+    # `# lup: ignore`, so a project selecting the code rules has the ruff they run.
+    "ruff>=0.17.5",
+]
+
+[tool.uv.sources]
+lup-core = { workspace = true }
+
+[tool.uv.build-backend]
+module-name = "lup_code_rules"
+
+[build-system]
+requires = ["uv_build>=0.9,<1"]
+build-backend = "uv_build"

@@ -1,0 +1,191 @@
+// What travels between the engine and its Python client
+// (`lup_code_rules/environment/engine.py`), one JSON object per line.
+//
+// The reports mirror the client's models field for field
+// (`lup_code_rules/environment/reports.py`, `lup_code_rules/directives.py`): the
+// client validates every answer into them, so a field renamed here fails there at
+// once.
+
+export interface Position {
+    line: number;
+    column: number;
+}
+
+export interface Span {
+    start: Position;
+    end: Position;
+}
+
+// A finding made whole: for lup's rules, what the check saw followed by the rule's
+// mistake, and the rule's steer; for pyright's, its message, which may run over
+// several lines, and no steer.
+// - `detail`: for lup's rules, what the check saw alone, which a report tells in
+//   place of the message once it has told the rule's mistake and steer; empty for
+//   pyright's.
+export interface Finding {
+    path: string;
+    span: Span;
+    owner: 'lup' | 'pyright';
+    rule: string;
+    message: string;
+    steer: string;
+    detail: string;
+}
+
+// Where one name of the surface is written: an export by its entry in `__all__` or
+// its binding, a class by its `class`, a function or method by its `def`, the line
+// its name is on, counted from 1.
+export interface Placed {
+    kind: 'export' | 'class' | 'function';
+    name: string;
+    line: number;
+}
+
+// What other code can depend on in one file (`surface.ts`): a package root's
+// names, and the public classes, functions and methods the module defines, each
+// by its dotted name inside it (`Outer.Inner`, `Agent.ask`).
+export interface Surface {
+    exported: string[];
+    classes: string[];
+    functions: string[];
+    places: Placed[];
+}
+
+export interface Ignore {
+    kind: 'ignore';
+    line: number;
+    covers: number;
+    rule: string;
+    why: string;
+    issue: number | string | null;
+}
+
+export interface Defer {
+    kind: 'defer';
+    line: number;
+    why: string;
+    issue: number | string | null;
+    when: string | null;
+}
+
+export interface Note {
+    kind: 'note';
+    line: number;
+    text: string;
+}
+
+export interface Malformed {
+    kind: 'malformed';
+    line: number;
+    text: string;
+    problem: string;
+}
+
+export type Directive = Ignore | Defer | Note | Malformed;
+
+export interface FileReport {
+    path: string;
+    findings: Finding[];
+    directives: Directive[];
+    surface: Surface;
+    imports: string[];
+}
+
+// When a rule is told, and whether the gate fails on it (`catalog.ts`, `Rule.category`).
+export type Category = 'design' | 'spelling' | 'heuristic';
+
+export interface RuleExamples {
+    flags: { code: string; rewritten: string }[];
+    passes: string[];
+}
+
+// A rule as the engine lists it, for the client to resolve a project's selection and
+// check `ignore`s against, and to show a rule whole.
+export interface RuleInfo {
+    id: string;
+    mistake: string;
+    steer: string;
+    category: Category;
+    examples: RuleExamples;
+}
+
+export interface EngineStatus {
+    root: string;
+    pid: number;
+    idle_seconds: number;
+    files: number;
+    rss_bytes: number;
+    peak_rss_bytes: number;
+}
+
+export interface SourceRequest {
+    path: string;
+    // The would-be content; null means the file as it stands on disk.
+    content: string | null;
+}
+
+// A file the `parse` command reads from its parse alone (`parsed.ts`), with no
+// project loaded: its path, which its report names it by and which tells a package
+// root, and its content.
+export interface ParsedSource {
+    path: string;
+    content: string;
+}
+
+// Where the engine reads the worktree's environment: the virtual environment's
+// directory, from the root or absolute, null for none, and the files, from the
+// root, whose change means another environment.
+export interface Environment {
+    venv: string | null;
+    files: string[];
+}
+
+// Every request names the build the client expects, and the environment it was
+// told of, so an engine left running from another build, or started with another
+// runner, stops instead of answering with other rules or another environment.
+interface RequestBase {
+    build: string;
+    environment: Environment;
+}
+
+export interface CheckRequest extends RequestBase {
+    op: 'check';
+    root: string;
+    // The rules to run, by name, as the declaration resolves them; a name the table
+    // doesn't hold refuses the request.
+    rules: string[];
+    sources: SourceRequest[];
+}
+
+export interface ImportersRequest extends RequestBase {
+    op: 'importers';
+    root: string;
+    changed: string[];
+}
+
+export interface RulesRequest extends RequestBase {
+    op: 'rules';
+}
+
+export interface StatusRequest extends RequestBase {
+    op: 'status';
+}
+
+export interface StopRequest extends RequestBase {
+    op: 'stop';
+}
+
+export type Request = CheckRequest | ImportersRequest | RulesRequest | StatusRequest | StopRequest;
+
+// One answer per request.
+// - `stale`: the engine is from another build than the client expects, or was
+//   started with another environment, and stops;
+// - `error`: the request was refused or failed, with why.
+export interface Answer {
+    build: string;
+    stale: boolean;
+    error: string | null;
+    reports: FileReport[] | null;
+    rules: RuleInfo[] | null;
+    status: EngineStatus | null;
+}
