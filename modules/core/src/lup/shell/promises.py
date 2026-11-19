@@ -46,11 +46,14 @@ from lup.testing import (
     Page,
     Quote,
     Refused,
+    Reviewed,
     Send,
     Started,
     Testing,
+    Told,
     Unanswered,
     Watch,
+    Within,
     Write,
     raises,
 )
@@ -94,6 +97,7 @@ class NotesPart(Part):
                     kind="note",
                     summary=[Span(text=title, tone="title")],
                     content=Viewing.of(NotesPart.note, NoteOf(number=number)),
+                    reaches=Pile(repository="harness", path=f"notes/note-{number}"),
                     offers=[
                         Offer.of(NotesPart.clear, Clearing(number=number)),
                         Offer.of(NotesPart.comment, NoteOf(number=number)),
@@ -295,11 +299,11 @@ class ShellPromises(Part):
                 viewing=Viewing(module="notes", view="pile", given={"pile": "p"}),
             )
         )
-        refused = await page.told()
+        refused = await heard(page)
         assert isinstance(refused, Unanswered)
         assert refused.watch is None
         await page.say(Hello(token=f"not-{page.token}"))
-        assert await page.told() is None
+        assert await heard(page) is None
 
     @lup.promise
     async def a_page_watching_a_view_is_told_its_blocks(self, by: Testing) -> None:
@@ -309,13 +313,13 @@ class ShellPromises(Part):
         started = await by.started(noted(notes))
         page = await started.dashboard()
         await page.say(Hello(token=page.token))
-        opened = await page.told()
+        opened = await heard(page)
         assert isinstance(opened, Opened)
         assert opened.root is not None
         assert any(each.kind.name == "note" for each in opened.looks.folds)
-        assert isinstance(await page.told(), Drafted)
+        assert isinstance(await heard(page), Drafted)
         await page.say(Watch(watch=watch, viewing=opened.root))
-        answered = await page.told()
+        answered = await heard(page)
         assert isinstance(answered, Answered)
         assert answered.watch == watch
         assert len(answered.blocks.blocks) == notes
@@ -328,10 +332,10 @@ class ShellPromises(Part):
         started = await by.started(noted(1))
         page = await started.dashboard()
         await page.say(Hello(token=page.token))
-        assert isinstance(await page.told(), Opened)
-        assert isinstance(await page.told(), Drafted)
+        assert isinstance(await heard(page), Opened)
+        assert isinstance(await heard(page), Drafted)
         await page.say(f"not a frame: {garbage}")
-        refused = await page.told()
+        refused = await heard(page)
         assert isinstance(refused, Unanswered)
         await page.say(
             Watch(
@@ -339,7 +343,7 @@ class ShellPromises(Part):
                 viewing=Viewing(module="notes", view="pile", given={"pile": "p"}),
             )
         )
-        answered = await page.told()
+        answered = await heard(page)
         assert isinstance(answered, Answered)
         assert answered.watch == 7
         await page.leave()
@@ -354,12 +358,12 @@ class ShellPromises(Part):
         await first.say(
             Write(comment=Comment(id="c1", on=quoted("note-1"), words=words))
         )
-        drafted = await second.told()
+        drafted = await heard(second)
         assert isinstance(drafted, Drafted)
         assert [each.words for each in drafted.draft.comments] == [words]
         await first.leave()
         third = await opened(started, drafted=False)
-        drafted = await third.told()
+        drafted = await heard(third)
         assert isinstance(drafted, Drafted)
         assert [each.id for each in drafted.draft.comments] == ["c1"]
         await second.leave()
@@ -376,8 +380,8 @@ class ShellPromises(Part):
         for comment in [going, staying]:
             await page.say(Write(comment=comment))
         await page.say(Send())
-        drafted = await page.told()
-        delivered = await page.told()
+        drafted = await heard(page)
+        delivered = await heard(page)
         assert isinstance(drafted, Drafted)
         assert isinstance(delivered, Delivered)
         assert "going" in delivered.went
@@ -399,8 +403,8 @@ class ShellPromises(Part):
         ]:
             await page.say(Write(comment=comment))
         await page.say(Send())
-        drafted = await page.told()
-        delivered = await page.told()
+        drafted = await heard(page)
+        delivered = await heard(page)
         assert isinstance(drafted, Drafted)
         assert isinstance(delivered, Delivered)
         assert delivered.went == ["said"]
@@ -441,7 +445,7 @@ class ShellPromises(Part):
             [f"first {words}".strip(), f"second {words}".strip()]
         )
         third = await opened(started, drafted=False)
-        drafted = await third.told()
+        drafted = await heard(third)
         assert isinstance(drafted, Drafted)
         assert drafted.draft.comments == []
         for page in [first, second, third]:
@@ -458,16 +462,16 @@ class ShellPromises(Part):
         stale = quoted("note-1").model_copy(update={"version": "as it was"})
         await page.say(Write(comment=Comment(id="stale", on=stale, words=words)))
         await page.say(Send())
-        drafted = await page.told()
-        first = await page.told()
+        drafted = await heard(page)
+        first = await heard(page)
         assert isinstance(drafted, Drafted)
         assert isinstance(first, Delivered)
         assert first.stayed == ["stale"]
         assert [each.warned for each in drafted.draft.comments] == [True]
         assert await taken(started) == []
         await page.say(Send())
-        drafted = await page.told()
-        second = await page.told()
+        drafted = await heard(page)
+        second = await heard(page)
         assert isinstance(drafted, Drafted)
         assert isinstance(second, Delivered)
         assert second.went == ["stale"]
@@ -488,8 +492,8 @@ class ShellPromises(Part):
         await page.say(Write(comment=held))
         for _ in range(sends):
             await page.say(Send())
-            drafted = await page.told()
-            delivered = await page.told()
+            drafted = await heard(page)
+            delivered = await heard(page)
             assert isinstance(drafted, Drafted)
             assert isinstance(delivered, Delivered)
             assert delivered.held == ["held"]
@@ -497,8 +501,8 @@ class ShellPromises(Part):
         assert await taken(started) == []
         await page.say(Write(comment=held.model_copy(update={"held": False})))
         await page.say(Send())
-        drafted = await page.told()
-        delivered = await page.told()
+        drafted = await heard(page)
+        delivered = await heard(page)
         assert isinstance(delivered, Delivered)
         assert delivered.went == ["held"]
         assert await taken(started) == [words.strip()]
@@ -521,7 +525,7 @@ class ShellPromises(Part):
 
     @lup.promise
     async def a_comment_reaches_its_party_whoever_takes_it(self, by: Testing) -> None:
-        """A comment on a block offering none of its own goes through the inbox to the party the block reaches, or to the No agent pile where it reaches none; one the operator sent elsewhere goes there instead of to what its block offers."""
+        """A comment on a block offering none of its own goes through the inbox to the party the block reaches, or the fold its view was read under does, or to the No agent pile where none does; one the operator sent elsewhere goes there instead of to what its block offers."""
         words = f"said {by.any(Words).words}".strip()
         started = await by.started(noted(1))
         page = await opened(started)
@@ -540,6 +544,16 @@ class ShellPromises(Part):
                 words=f"{words} 2",
             ),
             Comment(
+                id="under",
+                on=Quote(
+                    viewing=Viewing(module="notes", view="note", given={"number": 1}),
+                    block="text-1",
+                    lines=["note 1"],
+                    within=[Within(viewing=pile_of("p"), block="note-1")],
+                ),
+                words=f"{words} 4",
+            ),
+            Comment(
                 id="chosen",
                 on=quoted("note-1"),
                 words=f"{words} 3",
@@ -550,9 +564,14 @@ class ShellPromises(Part):
             await page.say(Write(comment=comment))
         await page.say(Send())
         sent = await delivered(page)
-        assert sorted(sent.went) == ["alone", "chosen", "reaches"]
+        assert sorted(sent.went) == ["alone", "chosen", "reaches", "under"]
         assert await taken(started) == []
-        for pile, said in [("notes/p", "1"), ("no-agent", "2"), ("chosen", "3")]:
+        for pile, said in [
+            ("notes/p", "1"),
+            ("no-agent", "2"),
+            ("chosen", "3"),
+            ("notes/note-1", "4"),
+        ]:
             answered = await started.view(
                 "core", "party", PartyOf(repository="harness", name=pile), Operator()
             )
@@ -565,26 +584,25 @@ class ShellPromises(Part):
         await page.leave()
 
     @lup.promise
-    async def the_review_tops_the_document_saying_where_each_part_goes(
+    async def every_page_is_told_the_review_as_the_draft_changes(
         self, by: Testing
     ) -> None:
-        """While the draft holds something, the document's root opens with the review, a fold for each place its parts go and one for those held back, laid out again for the page as the draft changes."""
+        """Every page open, the one that changed the draft among them, is told the review as the draft changes: a fold for each place its parts go, and one for those held back."""
         words = f"said {by.any(Words).words}".strip()
         started = await by.started(noted(1))
-        page = await opened(started)
-        pile = Viewing(module="notes", view="pile", given={"pile": "p"})
-        await page.say(Watch(watch=1, viewing=pile))
-        first = await page.told()
-        assert isinstance(first, Answered)
-        assert all(each.id != "draft" for each in first.blocks.blocks)
+        first = await opened(started)
+        second = await opened(started)
         comment = Comment(id="c", on=quoted("note-1"), words=words)
-        await page.say(Write(comment=comment))
-        review = await reviewed_in(page)
-        assert list(parts_in(review).values()) == [["c"]]
-        await page.say(Write(comment=comment.model_copy(update={"held": True})))
-        held = await reviewed_in(page)
-        assert parts_in(held) == {"held": ["c"]}
-        await page.leave()
+        await first.say(Write(comment=comment))
+        for page in [first, second]:
+            review = await reviewed(page)
+            assert list(parts_in(review).values()) == [["c"]]
+        await first.say(Write(comment=comment.model_copy(update={"held": True})))
+        for page in [first, second]:
+            review = await reviewed(page)
+            assert parts_in(review) == {"held": ["c"]}
+        await first.leave()
+        await second.leave()
 
 
 class Picked(Model):
@@ -617,29 +635,33 @@ class Blank(Model):
 
 
 async def opened(started: Started, *, drafted: bool = True) -> Page:
-    """Open a page of `started`'s dashboard, its token said, told it's opened, and, where `drafted`, the draft too."""
+    """Open a page of `started`'s dashboard, its token said, told it's opened, and, where `drafted`, the draft and its review too."""
     page = await started.dashboard()
     await page.say(Hello(token=page.token))
-    assert isinstance(await page.told(), Opened)
+    assert isinstance(await heard(page), Opened)
     if drafted:
         assert isinstance(await page.told(), Drafted)
+        assert isinstance(await page.told(), Reviewed)
     return page
 
 
-async def reviewed_in(page: Page) -> Fold:
-    """Read what `page` is told until the document's root comes with the review at its top, and return the review."""
-    while True:
-        told = await page.told()
+async def heard(page: Page) -> Told | None:
+    """Return what `page` is told next but a review, which every change of the draft tells it; none once it's gone."""
+    while isinstance(told := await page.told(), Reviewed):
+        pass
+    return told
+
+
+async def reviewed(page: Page) -> Blocks:
+    """Read what `page` is told until it's told the review, and return it."""
+    while not isinstance(told := await page.told(), Reviewed):
         assert told is not None, "the page was told nothing more before the review"
-        if isinstance(told, Answered):
-            top = told.blocks.blocks[0] if told.blocks.blocks else None
-            if isinstance(top, Fold) and top.kind == "draft":
-                return top
+    return told.review
 
 
-def parts_in(review: Fold) -> dict[str, list[str]]:
+def parts_in(review: Blocks) -> dict[str, list[str]]:
     """Return the parts a review shows, by the id of the fold of where they go: each part's id, in order."""
-    places = review.content if isinstance(review.content, list) else []
+    places = review.blocks
     return {
         place.id: [
             each.id
@@ -652,7 +674,7 @@ def parts_in(review: Fold) -> dict[str, list[str]]:
 
 async def delivered(page: Page) -> Delivered:
     """Read what `page` is told until its send is delivered, and return what was."""
-    while not isinstance(told := await page.told(), Delivered):
+    while not isinstance(told := await heard(page), Delivered):
         assert told is not None, (
             "the page was told nothing more before its send was delivered"
         )
@@ -677,6 +699,11 @@ async def versioned(started: Started) -> list[str | None]:
     assert isinstance(answered, Accepted)
     assert isinstance(answered.output, Blocks)
     return [block.version for block in answered.output.every()]
+
+
+def pile_of(pile: str) -> Viewing:
+    """Return the view of the pile `pile`, the dashboard's document."""
+    return Viewing(module="notes", view="pile", given={"pile": pile})
 
 
 def quoted(block: str) -> Quote:

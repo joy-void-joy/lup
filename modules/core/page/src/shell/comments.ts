@@ -16,11 +16,11 @@ import { EditorSelection, type Text, type Transaction } from "@codemirror/state"
 import type { ViewUpdate } from "@codemirror/view";
 import { getCM, Vim } from "@replit/codemirror-vim";
 
-import type { Comment, Delivered, Draft, Party, Quote } from "../generated/read";
+import type { Comment, Delivered, Draft, Party, Quote, Within } from "../generated/read";
 import { comment as remark, every, nodeAt, offsetOf, ownLines, viewKey, type Node } from "../document/tree";
 import { fromCore, redrawn } from "./annotations";
-import { open, parties } from "./picker";
 import type { Shell } from "./shell";
+import type { Choice } from "./window";
 
 /** A comment as the page holds it: what it says and is on, where it's laid out, and whether the draft holds it as it stands. */
 interface Held {
@@ -192,6 +192,16 @@ export class Comments {
             if (this.#writing !== null && this.#held.has(this.#writing)) {
                 return;
             }
+            if (this.#shell.owner !== null) {
+                this.#shell.say("the window takes no comment");
+                queueMicrotask(() => {
+                    const cm = getCM(this.#shell.view);
+                    if (cm !== null) {
+                        Vim.handleKey(cm, "<Esc>", "mapping");
+                    }
+                });
+                return;
+            }
             this.#open(refused, head);
             return;
         }
@@ -205,26 +215,24 @@ export class Comments {
     }
 
     /**
-     * Return the part of the draft at the cursor: the comment it's in, or the one a line of the review at the top of the
-     * document stands for, that line's block having the comment's id; none where it's on neither.
+     * Return the part of the draft of id `id`, as its line in the review in the window names it, else the comment the
+     * cursor is in; none where there's neither.
      */
-    partAt(): Comment | null {
+    partAt(id: string | null = null): Comment | null {
+        if (id !== null) {
+            return this.#held.get(id)?.comment ?? null;
+        }
         const head = this.#shell.view.state.selection.main.head;
         const around = this.#around(head, head);
-        if (around !== null) {
-            return this.#heldBy(around.key)?.comment ?? null;
-        }
-        let node: Node | null = nodeAt(this.#shell.document.root, head);
-        const id = node.block?.block === "line" ? node.block.id : null;
-        while (node !== null && !(node.block?.block === "fold" && node.block.kind === "draft")) {
-            node = node.parent;
-        }
-        return node === null || id === null ? null : (this.#held.get(id)?.comment ?? null);
+        return around === null ? null : (this.#heldBy(around.key)?.comment ?? null);
     }
 
-    /** Hold back the part of the draft at the cursor from sends, or let it go, as Space x and Space d do there. */
-    hold(held: boolean): void {
-        const part = this.partAt();
+    /**
+     * Hold back from sends the part of the draft of id `id`, as its line in the review names it, else the comment at the
+     * cursor, or let it go, as Space x and Space d do there.
+     */
+    hold(held: boolean, id: string | null = null): void {
+        const part = this.partAt(id);
         if (part === null) {
             this.#shell.say("no part of the draft here: a comment, or a line of the review");
             return;
@@ -237,17 +245,22 @@ export class Comments {
      * Choose whom the comment at the cursor reaches, from the parties the document shows, as Space s does; outside a
      * comment, choose first, then write a new one under the cursor's line, reaching whom was chosen.
      */
-    address(): void {
-        const part = this.partAt();
+    address(id: string | null = null): void {
+        const part = this.partAt(id);
         const choices = parties(this.#shell);
-        if (choices.length === 0) {
+        const window = this.#shell.window;
+        if (choices.length === 0 || window === null) {
             this.#shell.say("the document shows no party to send a comment to");
             return;
         }
-        open(this.#shell.view, part === null ? "Write a comment to…" : "Send this comment to…", choices, (choice) => {
+        const reviewing = window.role() === "review";
+        window.pick(part === null ? "Write a comment to…" : "Send this comment to…", choices, (choice) => {
             if (part !== null) {
                 this.#rewritten(part.id, { ...part, to: choice.party });
                 this.#shell.say(`to ${choice.name}`);
+                if (reviewing) {
+                    window.review(this.#shell.review());
+                }
                 return;
             }
             const head = this.#shell.view.state.selection.main.head;
@@ -560,6 +573,7 @@ export class Comments {
             line: on.whole ? 0 : on.first,
             start: on.start,
             end: on.end,
+            within: within(section),
         };
         const comment: Comment = { id, on: quote, words: "", to: null, reason: null, warned: false, held: false };
         const node = remark(`comment:${id}`, "", on.whole ? 0 : on.last);
@@ -676,6 +690,23 @@ export class Comments {
     }
 }
 
+/** Return the parties `shell`'s document shows, each once, in the order it shows them, called by their summary. */
+function parties(shell: Shell): Choice[] {
+    const seen = new Set<string>();
+    return every(shell.document.root).flatMap((node) => {
+        const reaches = node.block?.reaches ?? null;
+        if (node.block?.block !== "fold" || node.block.kind !== "party" || reaches === null) {
+            return [];
+        }
+        const key = JSON.stringify(reaches);
+        if (seen.has(key)) {
+            return [];
+        }
+        seen.add(key);
+        return [{ name: node.block.summary[0]?.text.trim() ?? key, party: reaches as Choice["party"] }];
+    });
+}
+
 /** Return which of a block's own lines a comment on `quote` goes under: the last it quotes, found again by what the quoted lines say where they moved. */
 function seat(head: readonly string[], quote: Quote): number {
     const count = quote.lines.length;
@@ -712,6 +743,23 @@ function sectionOf(node: Node): Node | null {
         at = at.parent;
     }
     return at;
+}
+
+/**
+ * Return the folds `section`'s view was read under, innermost first, each as the view whose block it is and its id, so
+ * the core finds whom a comment in the section reaches where its own blocks name none.
+ */
+function within(section: Node): Within[] {
+    const folds: Within[] = [];
+    let at = section.parent;
+    while (at !== null) {
+        const outer = sectionOf(at);
+        if (at.block !== null && outer?.viewing !== undefined && outer.viewing !== null) {
+            folds.push({ viewing: outer.viewing, block: at.block.id });
+        }
+        at = outer?.parent ?? null;
+    }
+    return folds;
 }
 
 /** Return the block of id `id` in `section`, its folds' given content among it, but not what a fold under it reads as it opens. */

@@ -3,6 +3,8 @@
 // token said first, read from the page's address's fragment, which no request carries.
 
 import type { Blocks, Comment, Delivered, Draft, Opened, Sent, Told, Unanswered, Viewing } from "./generated/read";
+
+const nothing: Blocks = { blocks: [], summary: [], offers: [] };
 import type { Source } from "./shell/shell";
 
 /** The server's socket, as a source of views. */
@@ -12,6 +14,9 @@ export class Server implements Source {
     readonly #waiting: Sent[] = [];
     readonly #drafted = new Set<(draft: Draft) => void>();
     readonly #delivered = new Set<(delivered: Delivered) => void>();
+    readonly #reviewed = new Set<(review: Blocks) => void>();
+    /** The review as the server last told it, handed to whoever follows it from then on. */
+    #review: Blocks = nothing;
     /** The draft as the server last told it, handed to whoever follows the draft from then on. */
     #draft: Draft | null = null;
     #next = 1;
@@ -50,6 +55,12 @@ export class Server implements Source {
                         delivered(told);
                     }
                     break;
+                case "reviewed":
+                    this.#review = told.review;
+                    for (const reviewed of this.#reviewed) {
+                        reviewed(told.review);
+                    }
+                    break;
             }
         });
     }
@@ -86,6 +97,14 @@ export class Server implements Source {
         return () => {
             this.#drafted.delete(drafted);
             this.#delivered.delete(delivered);
+        };
+    }
+
+    reviews(reviewed: (review: Blocks) => void): () => void {
+        this.#reviewed.add(reviewed);
+        reviewed(this.#review);
+        return () => {
+            this.#reviewed.delete(reviewed);
         };
     }
 

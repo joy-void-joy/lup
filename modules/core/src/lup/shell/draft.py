@@ -17,6 +17,13 @@ from lup.shell.blocks import Offer, Viewing
 from lup.types import Model
 
 
+class Within(Model):
+    """A fold the view of a quoted block was read under: the view whose block the fold is, and the fold's id."""
+
+    viewing: Viewing
+    block: str
+
+
 class Quote(Model):
     """What a part of the draft is on: a block of a view, the block's version as the part was written, and the lines of it quoted, whole, with where the passage starts and ends in them."""
 
@@ -37,6 +44,11 @@ class Quote(Model):
     """Where the passage it's on starts in its lines, joined by newlines."""
     end: int | None = None
     """Where the passage ends; none for the lines whole."""
+    within: list[Within] = []
+    """The folds the view of the block it's on was read under, innermost
+    first, as the page laid them out: where the block and those holding it in
+    its view name no party, the first of these that does, or that a block
+    holding it does, is whom a comment on it reaches."""
 
 
 class Comment(Model):

@@ -5,7 +5,7 @@
 import { foldEffect, foldedRanges, foldState, unfoldEffect } from "@codemirror/language";
 import { history } from "@codemirror/commands";
 import { EditorState, Facet, StateEffect, StateField, Transaction, type ChangeSpec, type Extension, type Range } from "@codemirror/state";
-import { Decoration, EditorView, ViewPlugin, showPanel, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { getCM, vim } from "@replit/codemirror-vim";
 
 import type { Blocks, Comment, Delivered, Draft, Looks, Viewing } from "../generated/read";
@@ -13,7 +13,7 @@ import { depthOf, Document, every, foldKind, foldRange, mountedOf, nodeAt, offse
 import { fromCore, redrawn } from "./annotations";
 import { Comments } from "./comments";
 import { Kinds } from "./looks";
-import { picking } from "./picker";
+import { said, say, Window } from "./window";
 
 /** Where views are read from and the draft is kept: the core, through the server, or the harness. */
 export interface Source {
@@ -30,35 +30,18 @@ export interface Source {
      * delivered to `delivered`; return what stops it.
      */
     drafts(drafted: (draft: Draft) => void, delivered: (delivered: Delivered) => void): () => void;
+    /** Hand the review of what the draft sends where to `reviewed` as it stands, then each time it changes; return what stops it. */
+    reviews(reviewed: (review: Blocks) => void): () => void;
 }
 
+/** Where a shell is: the page's document's, or its window's, beside what else is drawn with it. */
+export interface Placing {
+    /** More of the editor: the page's look, its margin, its folds' placeholders, a window's own too. */
+    readonly extensions?: readonly Extension[];
+    /** The document's shell, where this one draws its window; none for the document's own, which takes comments. */
+    readonly owner?: Shell | null;
+}
 
-/** Sets what the shell says on its status line; none clears it. */
-const say = StateEffect.define<string | null>();
-
-/** What the shell last said on its status line: a command that found nothing to act on saying why. */
-const said = StateField.define<string | null>({
-    create: () => null,
-    update(value, transaction) {
-        for (const effect of transaction.effects) {
-            if (effect.is(say)) {
-                return effect.value;
-            }
-        }
-        return value;
-    },
-    provide: (field) =>
-        showPanel.from(field, (text) =>
-            text === null
-                ? null
-                : () => {
-                      const dom = document.createElement("div");
-                      dom.className = "lup-status";
-                      dom.textContent = text;
-                      return { dom, top: false };
-                  },
-        ),
-});
 
 /** The shell's state, as its laws read it: a value of its own, which later events don't change. */
 export interface ShellState {
@@ -87,6 +70,13 @@ export class Shell {
     readonly kinds: Kinds;
     readonly source: Source;
     readonly comments: Comments;
+    /** The document's shell, where this one draws its window; none for the document's own. */
+    readonly owner: Shell | null;
+    /** The page's window, under the document: none for a window's own shell. */
+    readonly window: Window | null;
+    /** The review of what the draft sends where, as the core last told it. */
+    #review: Blocks = { blocks: [], summary: [], offers: [] };
+    #stopReviews: () => void = () => {};
     /** Whether the operator opened or closed each fold, by its key: what they did, kept as views answer again. */
     readonly #opened = new Map<string, boolean>();
     /** Each fold's view watched while it's open, by the fold's key: which view, whether it's answered yet, and what stops it. */
@@ -97,11 +87,17 @@ export class Shell {
     #reviewing: number | null = null;
     readonly #stop: () => void;
 
-    constructor(parent: Element, root: Viewing, looks: Looks, source: Source, extensions: Extension[] = []) {
+    constructor(parent: Element, root: Viewing, looks: Looks, source: Source, placing: Placing = {}) {
         this.kinds = new Kinds(looks);
         this.source = source;
+        this.owner = placing.owner ?? null;
         this.document = new Document(section("root", root, { blocks: [], summary: [], offers: [] }));
         this.comments = new Comments(this);
+        const extensions = placing.extensions ?? [];
+        this.window =
+            this.owner === null
+                ? new Window(this, (body, given) => new Shell(body, { module: null, view: "window", given: {} }, looks, given, { extensions, owner: this }))
+                : null;
         const shell = this;
         this.view = new EditorView({
             parent,
@@ -119,7 +115,7 @@ export class Shell {
                     }),
                     foldState,
                     said,
-                    picking,
+                    ...(this.window === null ? [] : [this.window.extension]),
                     drawing,
                     shells.of(shell),
                     ...extensions,
@@ -130,6 +126,13 @@ export class Shell {
         getCM(this.view)?.on("vim-mode-change", (event: { mode: string }) => {
             this.comments.moded(event.mode);
         });
+        if (this.window !== null) {
+            const window = this.window;
+            this.#stopReviews = source.reviews((review) => {
+                this.#review = review;
+                window.reviewed(review);
+            });
+        }
         this.#stop = source.watch(root, (blocks) => {
             this.answered("root", blocks);
         });
@@ -137,6 +140,8 @@ export class Shell {
 
     /** Stop reading every view, and leave the page. */
     destroy(): void {
+        this.window?.close();
+        this.#stopReviews();
         this.comments.destroy();
         this.#stop();
         for (const watched of this.#watching.values()) {
@@ -270,21 +275,6 @@ export class Shell {
         this.view.dispatch({ effects: say.of(text) });
     }
 
-    /** Return the review of the draft at the top of the document; none while the draft holds nothing. */
-    review(): Node | null {
-        return this.document.root.children.find((node) => node.block?.block === "fold" && node.block.kind === "draft") ?? null;
-    }
-
-    /**
-     * Say whether the cursor is in the review, open: where a send is one key away. On the review closed, as the cursor
-     * is where the page opens, Ctrl+Enter opens it rather than sends.
-     */
-    inReview(): boolean {
-        const review = this.review();
-        const head = this.view.state.selection.main.head;
-        return review !== null && this.isOpen(review) && head >= offsetOf(review) && head <= offsetOf(review) + review.size;
-    }
-
     /**
      * Put the cursor at `position` and bring it into view, through vim's own cursor where vim runs, which a key's
      * command otherwise puts back where vim last left it once the command is done.
@@ -300,29 +290,15 @@ export class Shell {
         this.view.dispatch({ effects: EditorView.scrollIntoView(at) });
     }
 
-    /** Open the review and go to it, as the first Ctrl+Enter does, to come back to where the cursor is as it's left. */
-    toReview(): boolean {
-        const review = this.review();
-        if (review === null) {
-            return false;
-        }
-        this.#reviewing = this.view.state.selection.main.head;
-        this.fold([review.key], true);
-        this.go(offsetOf(review));
-        return true;
+    /** Return the review of what the draft sends where, as the core last told it. */
+    review(): Blocks {
+        return this.#review;
     }
 
-    /** Leave the review: close it, and go back to where the cursor was as it was opened; say whether it was open. */
-    leaveReview(): boolean {
-        const back = this.#reviewing;
-        this.#reviewing = null;
-        const review = this.review();
-        if (back === null || review === null) {
-            return false;
-        }
-        this.fold([review.key], false);
-        this.go(back);
-        return true;
+    /** Return the id of the line block the cursor is on; none where it's on another kind of block. */
+    lineId(): string | null {
+        const node = nodeAt(this.document.root, this.view.state.selection.main.head);
+        return node.block?.block === "line" ? node.block.id : null;
     }
 
     /** Return the innermost fold the cursor is in, of the kind named `kind` where one is named. */
@@ -559,18 +535,19 @@ export const look = EditorView.theme(
             fontStyle: "italic",
         },
         ".lup-status": { padding: "0 1ch", borderTop: "1px solid var(--lup-border)", color: "var(--lup-fg)" },
-        ".lup-picker": { padding: "0 1ch", borderTop: "1px solid var(--lup-border)", background: "var(--lup-float)" },
-        ".lup-picker-asking": { color: "var(--lup-muted)" },
-        ".lup-picker-field": {
-            width: "100%",
+        ".lup-window": { borderTop: "1px solid var(--lup-border)", display: "flex", flexDirection: "column", height: "40vh" },
+        ".lup-window-title": { padding: "0 1ch", background: "var(--lup-float)", color: "var(--lup-muted)" },
+        ".lup-window-filter": {
+            margin: "0 1ch",
             background: "var(--lup-bg)",
             color: "var(--lup-fg)",
             border: "1px solid var(--lup-border)",
             fontFamily: "var(--lup-mono)",
             fontSize: "var(--lup-fs)",
+            outline: "none",
         },
-        ".lup-picker-list": { listStyle: "none", margin: "0", padding: "0", maxHeight: "12em", overflowY: "auto" },
-        ".lup-picker-at": { background: "var(--lup-selection)" },
+        ".lup-window-filter:focus": { borderColor: "var(--lup-focus)" },
+        ".lup-window-body": { flex: "1", minHeight: "0" },
         ".cm-panels": { background: "var(--lup-float)", color: "var(--lup-fg)" },
         ".cm-panels-bottom": { borderTop: "0" },
         ".lup-placeholder": { border: "1px solid currentColor", padding: "0 0.5ch", marginLeft: "1ch", cursor: "pointer" },

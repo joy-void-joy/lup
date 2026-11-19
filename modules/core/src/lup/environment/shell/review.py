@@ -1,10 +1,10 @@
-"""The review: what the next send would do with the draft, laid out as a fold at the top of the dashboard's document.
+"""The review: what the next send would do with the draft, as the page's window shows it.
 
 The core decides where each part goes (`Dashboard.taking`); the review shows it,
-grouped by where each goes, then what's held back, each part a line under the
-words it says and what it's on. The page opens it at the first Ctrl+Enter and
-sends at the second; Space x and Space d on a part hold it back and let it go
-(`README.md` in `lup/shell/`, *The draft*).
+grouped by where each goes, then what's held back, each part a line saying the
+words it says and what it's on. The page opens it in its window at the first
+Ctrl+Enter and sends at the second; Space x and Space d on a part hold it back
+and let it go (`README.md` in `lup/shell/`, *The draft*).
 """
 
 from typing import TYPE_CHECKING
@@ -41,21 +41,20 @@ def said(comment: Comment) -> list[Span]:
     return [Span(text=words, tone="strong"), Span(text=where, tone="muted")]
 
 
-def reviewed(draft: Draft, going: list[Going]) -> Fold | None:
-    """Return the review of `draft`, each part going where `going` says: a fold for each place parts go, in the order they were written, and one of those held back; none where the draft holds nothing.
+def reviewed(draft: Draft, going: list[Going]) -> Blocks:
+    """Return the review of `draft`, each part going where `going` says: a fold for each place parts go, in the order they were written, then one of those held back, said in its summary as how many go; nothing where the draft holds nothing.
 
     >>> from lup.shell.blocks import Viewing
     >>> from lup.shell.draft import Comment, Draft, Quote
     >>> quote = Quote(viewing=Viewing(view="pile"), block="1", lines=["note 1"])
     >>> draft = Draft(comments=[Comment(id="c", on=quote, words="looks good")])
-    >>> review = reviewed(draft, [Going(part="c", to="to notes")])
-    >>> print(Blocks.of(review).text())
-    ▾ draft · 1 to send  [Ctrl+Enter sends, Space x holds one back]
-      ▾ to notes: 1
-        looks good  on “note 1”
+    >>> print(reviewed(draft, [Going(part="c", to="to notes")]).text())
+    draft · 1 to send
+    ▾ to notes: 1
+      looks good  on “note 1”
     """
     if not draft.comments:
-        return None
+        return Blocks()
     where = {each.part: each for each in going}
 
     def place(comment: Comment) -> str:
@@ -75,7 +74,7 @@ def reviewed(draft: Draft, going: list[Going]) -> Fold | None:
 
     sending = [each for each in draft.comments if not each.held]
     held: list[Block] = [line(each) for each in draft.comments if each.held]
-    content: list[Block] = [
+    places: list[Block] = [
         Fold(
             id=f"to {to}",
             kind="sent-to",
@@ -89,28 +88,19 @@ def reviewed(draft: Draft, going: list[Going]) -> Fold | None:
         )
         for to in dict.fromkeys(place(each) for each in sending)
     ]
-    if held:
-        content.append(
+    kept: list[Block] = (
+        [
             Fold(
                 id="held",
                 kind="sent-to",
                 summary=[Span(text=f"held back: {len(held)}", tone="muted")],
                 content=held,
             )
-        )
-    return Fold(
-        id="draft",
-        kind="draft",
-        summary=[
-            Span(text=f"draft · {len(sending)} to send", tone="strong"),
-            Span(text="  [Ctrl+Enter sends, Space x holds one back]", tone="muted"),
-        ],
-        content=content,
+        ]
+        if held
+        else []
     )
-
-
-def wrapped(blocks: Blocks, review: Fold | None) -> Blocks:
-    """Return the document's root answer with the review at its top, where there's one."""
-    if review is None:
-        return blocks
-    return blocks.model_copy(update={"blocks": [review, *blocks.blocks]})
+    return Blocks(
+        blocks=[*places, *kept],
+        summary=[Span(text=f"draft · {len(sending)} to send", tone="strong")],
+    )

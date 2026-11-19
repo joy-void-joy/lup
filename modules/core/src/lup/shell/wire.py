@@ -119,8 +119,18 @@ class Delivered(Model):
     """The ids of those the operator holds back, which the send left as they are."""
 
 
+class Reviewed(Model):
+    """What the next send would do with the draft, as the review in the page's window shows it, told every page at its opening and whenever the draft changes, the page that changed it among them."""
+
+    kind: Literal["reviewed"] = "reviewed"
+    review: Blocks
+    """Where each part goes, and those held back: none where the draft holds
+    nothing (`lup.environment.shell.review`)."""
+
+
 type Told = Annotated[
-    Opened | Answered | Unanswered | Drafted | Delivered, Field(discriminator="kind")
+    Opened | Answered | Unanswered | Drafted | Delivered | Reviewed,
+    Field(discriminator="kind"),
 ]
 """What the server tells the page."""
 

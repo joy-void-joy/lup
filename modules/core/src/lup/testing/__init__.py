@@ -12,7 +12,7 @@ promise door, `lup.promise`. Checking promises is the environment's
 from lup.command_line.answering import Typed
 from lup.doors.door import Accepted, Refused, Rejection
 from lup.doors.tool import ToolSpec
-from lup.shell.draft import Comment, Draft, Marked, Quote
+from lup.shell.draft import Comment, Draft, Marked, Quote, Within
 from lup.shell.wire import (
     Answered,
     Delivered,
@@ -21,7 +21,9 @@ from lup.shell.wire import (
     Hello,
     Mark,
     Opened,
+    Reviewed,
     Send,
+    Told,
     Unanswered,
     Unwatch,
     Watch,
@@ -77,6 +79,7 @@ __all__ = [
     "Rejection",
     "Repository",
     "Responding",
+    "Reviewed",
     "Scripted",
     "Section",
     "Send",
@@ -85,6 +88,7 @@ __all__ = [
     "Started",
     "Step",
     "Testing",
+    "Told",
     "ToolCall",
     "ToolSpec",
     "Typed",
@@ -92,6 +96,7 @@ __all__ = [
     "Unwatch",
     "Viewed",
     "Watch",
+    "Within",
     "Write",
     "raises",
 ]

@@ -1,8 +1,7 @@
 // Views read from memory, for the page's promises: what each answers is set by the promise, and pushed to whoever
 // watches it, as the core pushes a view answered again; and the draft, kept as the core keeps it, a send taking out
-// every comment that says something and isn't held back, and dropping those that say nothing. The document's root, where
-// one is named, answers with the review at its top as the server's does (`lup.environment.shell.review`), each part a
-// line of its id, without the server's grouping by where each goes.
+// every comment that says something and isn't held back, and dropping those that say nothing; and its review, as the
+// server's (`lup.environment.shell.review`), each part a line of its id.
 
 import type { Block, Blocks, Comment, Delivered, Draft, Looks, Viewing } from "../generated/read";
 import { viewKey } from "../document/tree";
@@ -15,27 +14,22 @@ export class Memory implements Source {
     readonly #watches = new Map<string, Set<(blocks: Blocks) => void>>();
     readonly #drafted = new Set<(draft: Draft) => void>();
     readonly #delivered = new Set<(delivered: Delivered) => void>();
+    readonly #reviews = new Set<(review: Blocks) => void>();
     /** The draft, as the core keeps it. */
     draft: Draft = { comments: [], marks: [] };
-
-    /** Keep views answered by the promise, the document's root, where one is named, answering with the review at its top. */
-    constructor(readonly root: Viewing | null = null) {}
 
     /** Set what `viewing` answers, and push it to every watch of it. */
     set(viewing: Viewing, blocks: Blocks): void {
         const key = viewKey(viewing);
         this.#answers.set(key, blocks);
         for (const answered of this.#watches.get(key) ?? []) {
-            answered(this.#topped(key, blocks));
+            answered(blocks);
         }
     }
 
-    /** Return what the view keyed `key` answers as a watch is told it: the root with the review at its top. */
-    #topped(key: string, blocks: Blocks): Blocks {
-        if (this.root === null || key !== viewKey(this.root) || this.draft.comments.length === 0) {
-            return blocks;
-        }
-        const parts: Block[] = this.draft.comments.map((comment) => ({
+    /** Return the review of the draft as the server lays it out, but each place a part goes said by whom it's chosen to reach alone. */
+    review(): Blocks {
+        const line = (comment: Comment): Block => ({
             block: "line",
             id: comment.id,
             version: null,
@@ -43,31 +37,36 @@ export class Memory implements Source {
             reaches: null,
             sighted: null,
             spans: [{ text: comment.words.split("\n")[0] ?? "", tone: "strong", ticking: null, gauge: null, refers: null }],
-        }));
-        const review: Block = {
+        });
+        const place = (id: string, summary: string, comments: readonly Comment[]): Block => ({
             block: "fold",
-            id: "draft",
+            id,
             version: null,
             offers: [],
             reaches: null,
             sighted: null,
-            kind: "draft",
-            summary: [{ text: `draft · ${parts.length}`, tone: "strong", ticking: null, gauge: null, refers: null }],
+            kind: "sent-to",
+            summary: [{ text: summary, tone: "strong", ticking: null, gauge: null, refers: null }],
             open: null,
-            content: parts,
+            content: comments.map(line),
+        });
+        const sending = this.draft.comments.filter((each) => !each.held);
+        const held = this.draft.comments.filter((each) => each.held);
+        const where = (comment: Comment): string => (comment.to === null ? "to what it's on" : `to ${JSON.stringify(comment.to)}`);
+        const places = [...new Set(sending.map(where))].map((to) =>
+            place(`to ${to}`, to, sending.filter((each) => where(each) === to)),
+        );
+        return {
+            blocks: [...places, ...(held.length > 0 ? [place("held", "held back", held)] : [])],
+            summary: this.draft.comments.length > 0 ? [{ text: `draft · ${sending.length} to send`, tone: "strong", ticking: null, gauge: null, refers: null }] : [],
+            offers: [],
         };
-        return { ...blocks, blocks: [review, ...blocks.blocks] };
     }
 
-    /** Answer the root again for every watch of it, the review as the draft stands. */
     #reviewed(): void {
-        if (this.root === null) {
-            return;
-        }
-        const key = viewKey(this.root);
-        const blocks = this.#answers.get(key);
-        if (blocks !== undefined) {
-            this.set(this.root, blocks);
+        const review = this.review();
+        for (const reviewed of this.#reviews) {
+            reviewed(review);
         }
     }
 
@@ -78,7 +77,7 @@ export class Memory implements Source {
         this.#watches.set(key, watches);
         const answer = this.#answers.get(key);
         if (answer !== undefined) {
-            answered(this.#topped(key, answer));
+            answered(answer);
         }
         return () => {
             watches.delete(answered);
@@ -107,6 +106,14 @@ export class Memory implements Source {
         for (const delivered of this.#delivered) {
             delivered({ kind: "delivered", went, stayed: [], held: held.map((each) => each.id) });
         }
+    }
+
+    reviews(reviewed: (review: Blocks) => void): () => void {
+        this.#reviews.add(reviewed);
+        reviewed(this.review());
+        return () => {
+            this.#reviews.delete(reviewed);
+        };
     }
 
     drafts(drafted: (draft: Draft) => void, delivered: (delivered: Delivered) => void): () => void {

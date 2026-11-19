@@ -26,7 +26,7 @@ const server: Server = new Server(
             said.textContent = "The home repository's declaration names no document.";
             return;
         }
-        const shell = new Shell(parent, opened.root, opened.looks, server, [look, margin(), placeholder]);
+        const shell = new Shell(parent, opened.root, opened.looks, server, { extensions: [look, margin(), placeholder] });
         shell.view.focus();
     },
     (refused) => {
