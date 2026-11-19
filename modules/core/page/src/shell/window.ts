@@ -12,14 +12,14 @@
 import { StateEffect, StateField, type Extension } from "@codemirror/state";
 import { showPanel, type EditorView, type Panel } from "@codemirror/view";
 
-import type { Blocks, JsonValue } from "../generated/read";
+import type { Blocks } from "../generated/read";
 import { Given } from "./given";
 import type { Shell, Source } from "./shell";
 
 /** One of what a picker offers: what it's called, and what it stands for. */
-export interface Choice {
+export interface Choice<T> {
     readonly name: string;
-    readonly party: { [key: string]: JsonValue };
+    readonly value: T;
 }
 
 /** What the window is for: the review of the draft, or a picker. */
@@ -35,8 +35,10 @@ interface Showing {
 }
 
 interface Picking {
-    readonly choices: readonly Choice[];
-    readonly chosen: (choice: Choice) => void;
+    /** What each line says, in order. */
+    readonly names: readonly string[];
+    /** Hand on what the line at `at` stands for. */
+    readonly choose: (at: number) => void;
 }
 
 /** Makes a shell drawing the window's document, in `parent`, from `source`. */
@@ -72,17 +74,17 @@ export const said = StateField.define<string | null>({
         ),
 });
 
-/** Return the lines a picker shows of `choices`: one each, keyed by where it is among them, so what's chosen is found again. */
-function listed(choices: readonly Choice[], asking: string): Blocks {
+/** Return the lines a picker shows of `names`: one each, keyed by where it is among them, so what's chosen is found again. */
+function listed(names: readonly string[], asking: string): Blocks {
     return {
-        blocks: choices.map((choice, at) => ({
+        blocks: names.map((name, at) => ({
             block: "line",
             id: String(at),
             version: null,
             offers: [],
             reaches: null,
             sighted: null,
-            spans: [{ text: choice.name, tone: "strong", ticking: null, gauge: null, refers: null }],
+            spans: [{ text: name, tone: "strong", ticking: null, gauge: null, refers: null }],
         })),
         summary: [{ text: asking, tone: "plain", ticking: null, gauge: null, refers: null }],
         offers: [],
@@ -142,14 +144,21 @@ export class Window {
         }
     }
 
-    /** Open the window on a picker asking `asking` among `choices`, handing the one chosen to `chosen` once it's closed. */
-    pick(asking: string, choices: readonly Choice[], chosen: (choice: Choice) => void): void {
+    /** Open the window on a picker asking `asking` among `choices`, handing what the one chosen stands for to `chosen` once it's closed. */
+    pick<T>(asking: string, choices: readonly Choice<T>[], chosen: (value: T) => void): void {
+        const names = choices.map((choice) => choice.name);
+        const choose = (at: number): void => {
+            const choice = choices[at];
+            if (choice !== undefined) {
+                chosen(choice.value);
+            }
+        };
         this.#owner.view.dispatch({
             effects: shown.of({
                 role: "pick",
                 title: `${asking}  ·  Enter chooses, / searches, Esc closes`,
-                source: new Given(listed(choices, asking)),
-                picking: { choices, chosen },
+                source: new Given(listed(names, asking)),
+                picking: { names, choose },
             }),
         });
     }
@@ -157,12 +166,12 @@ export class Window {
     /** Choose what the line of id `id` stands for, where the window is a picker: close it, and hand it what it was asked for. */
     choose(id: string | null): boolean {
         const picking = this.#owner.view.state.field(this.extension as StateField<Showing | null>, false)?.picking ?? null;
-        const choice = picking === null || id === null ? undefined : new Map(picking.choices.map((each, at) => [String(at), each])).get(id);
-        if (picking === null || choice === undefined) {
+        const at = picking === null || id === null ? undefined : new Map(picking.names.map((_, index) => [String(index), index])).get(id);
+        if (picking === null || at === undefined) {
             return false;
         }
         this.close();
-        picking.chosen(choice);
+        picking.choose(at);
         return true;
     }
 

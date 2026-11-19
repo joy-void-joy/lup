@@ -16,11 +16,14 @@ import { EditorSelection, type Text, type Transaction } from "@codemirror/state"
 import type { ViewUpdate } from "@codemirror/view";
 import { getCM, Vim } from "@replit/codemirror-vim";
 
-import type { Comment, Delivered, Draft, Party, Quote, Within } from "../generated/read";
+import type { Comment, Delivered, Draft, JsonValue, Party, Quote, Within } from "../generated/read";
 import { comment as remark, every, nodeAt, offsetOf, ownLines, viewKey, type Node } from "../document/tree";
 import { fromCore, redrawn } from "./annotations";
 import type { Shell } from "./shell";
 import type { Choice } from "./window";
+
+/** A party a comment can reach, as the block naming it says it, its fields as they came. */
+type Reached = { [key: string]: JsonValue };
 
 /** A comment as the page holds it: what it says and is on, where it's laid out, and whether the draft holds it as it stands. */
 interface Held {
@@ -254,10 +257,10 @@ export class Comments {
             return;
         }
         const reviewing = window.role() === "review";
-        window.pick(part === null ? "Write a comment to…" : "Send this comment to…", choices, (choice) => {
+        window.pick(part === null ? "Write a comment to…" : "Send this comment to…", choices, (party) => {
             if (part !== null) {
-                this.#rewritten(part.id, { ...part, to: choice.party });
-                this.#shell.say(`to ${choice.name}`);
+                this.#rewritten(part.id, { ...part, to: party });
+                this.#shell.say(`to ${named(party)}`);
                 if (reviewing) {
                     window.review(this.#shell.review());
                 }
@@ -278,7 +281,7 @@ export class Comments {
             if (written === null || held === undefined) {
                 return;
             }
-            held.comment = { ...held.comment, to: choice.party };
+            held.comment = { ...held.comment, to: party };
             this.#shell.view.dispatch({ selection: EditorSelection.cursor(offsetOf(written)), annotations: fromCore.of(true) });
             const cm = getCM(this.#shell.view);
             if (cm !== null) {
@@ -691,7 +694,7 @@ export class Comments {
 }
 
 /** Return the parties `shell`'s document shows, each once, in the order it shows them, called by their summary. */
-function parties(shell: Shell): Choice[] {
+function parties(shell: Shell): Choice<Reached>[] {
     const seen = new Set<string>();
     return every(shell.document.root).flatMap((node) => {
         const reaches = node.block?.reaches ?? null;
@@ -703,7 +706,7 @@ function parties(shell: Shell): Choice[] {
             return [];
         }
         seen.add(key);
-        return [{ name: node.block.summary[0]?.text.trim() ?? key, party: reaches as Choice["party"] }];
+        return [{ name: node.block.summary[0]?.text.trim() ?? key, value: reaches as Reached }];
     });
 }
 

@@ -74,163 +74,272 @@ function nearest(shell: Shell, kind: FoldKind): boolean {
     return true;
 }
 
+/** One of the shell's commands: what it does, as the palette of commands says it, and what runs it. */
+export interface Command {
+    readonly says: string;
+    readonly run: (shell: Shell, given: Given) => void;
+}
+
 /** The shell's named commands, each doing the same wherever a binding reaches it. */
-export const commands: Readonly<Record<string, (shell: Shell, given: Given) => void>> = {
+export const commands: Readonly<Record<string, Command>> = {
     /** Open or close what's chosen, or the innermost fold the cursor is in, as `za` does. */
-    "fold-toggle": (shell) => {
-        folded(shell, reached(shell));
+    "fold-toggle": {
+        says: "open or close the fold the cursor is in, or every fold chosen",
+        run: (shell) => {
+            folded(shell, reached(shell));
+        },
     },
     /** Open what's chosen, or the innermost fold the cursor is in. */
-    "fold-open": (shell) => {
-        folded(shell, reached(shell), true);
+    "fold-open": {
+        says: "open the fold the cursor is in, or every fold chosen",
+        run: (shell) => {
+            folded(shell, reached(shell), true);
+        },
     },
     /** Close what's chosen, or the innermost fold the cursor is in. */
-    "fold-close": (shell) => {
-        folded(shell, reached(shell), false);
+    "fold-close": {
+        says: "close the fold the cursor is in, or every fold chosen",
+        run: (shell) => {
+            folded(shell, reached(shell), false);
+        },
     },
     /** Choose the nearest fold of the kind typed after the key, then open or close it: `zf` and its letter. */
-    "fold-nearest": (shell, given) => {
-        const kind = typed(shell, given);
-        if (kind !== null && nearest(shell, kind)) {
-            folded(shell, shell.chosen());
-            shell.say(null);
-        }
+    "fold-nearest": {
+        says: "open or close the nearest fold of a kind",
+        run: (shell, given) => {
+            const kind = typed(shell, given);
+            if (kind !== null && nearest(shell, kind)) {
+                folded(shell, shell.chosen());
+                shell.say(null);
+            }
+        },
     },
     /** Choose the nearest fold of the kind typed after the key around the cursor, in place of what was chosen. */
-    "choose-nearest": (shell, given) => {
-        const kind = typed(shell, given);
-        if (kind !== null) {
-            nearest(shell, kind);
-        }
+    "choose-nearest": {
+        says: "choose the nearest fold of a kind",
+        run: (shell, given) => {
+            const kind = typed(shell, given);
+            if (kind !== null) {
+                nearest(shell, kind);
+            }
+        },
     },
     /**
      * Choose every fold of the kind typed after the key within what's chosen, or everywhere where nothing is; where
      * there's none, say so and leave what's chosen.
      */
-    "choose-every": (shell, given) => {
-        const kind = typed(shell, given);
-        if (kind === null) {
-            return;
-        }
-        const chosen = shell.chosen();
-        const under =
-            chosen.length === 0
-                ? every(shell.document.root)
-                : chosen.flatMap((key) => {
-                      const node = shell.document.node(key);
-                      return node === null ? [] : every(node).slice(1);
-                  });
-        const found = under.filter((node) => foldKind(node) === kind.name).map((node) => node.key);
-        if (found.length === 0) {
-            shell.say(`no ${kind.called} ${chosen.length === 0 ? "anywhere" : "in what's chosen"}`);
-            return;
-        }
-        shell.choose(found);
-        shell.say(`${kind.called}: ${new Set(found).size} chosen`);
+    "choose-every": {
+        says: "choose every fold of a kind within what's chosen, or everywhere",
+        run: (shell, given) => {
+            const kind = typed(shell, given);
+            if (kind === null) {
+                return;
+            }
+            const chosen = shell.chosen();
+            const under =
+                chosen.length === 0
+                    ? every(shell.document.root)
+                    : chosen.flatMap((key) => {
+                          const node = shell.document.node(key);
+                          return node === null ? [] : every(node).slice(1);
+                      });
+            const found = under.filter((node) => foldKind(node) === kind.name).map((node) => node.key);
+            if (found.length === 0) {
+                shell.say(`no ${kind.called} ${chosen.length === 0 ? "anywhere" : "in what's chosen"}`);
+                return;
+            }
+            shell.choose(found);
+            shell.say(`${kind.called}: ${new Set(found).size} chosen`);
+        },
     },
     /** Choose nothing and clear what the status line says; in the window, close it: Esc. */
-    "choose-none": (shell) => {
-        if (shell.owner !== null) {
-            if (shell.owner.window?.shell() === shell) {
-                shell.owner.window.close();
+    "choose-none": {
+        says: "choose nothing; in the window, close it",
+        run: (shell) => {
+            if (shell.owner !== null) {
+                if (shell.owner.window?.shell() === shell) {
+                    shell.owner.window.close();
+                }
+                return;
             }
-            return;
-        }
-        shell.choose([]);
-        shell.say(null);
+            shell.choose([]);
+            shell.say(null);
+        },
     },
     /**
      * End the comment being written, as leaving insert mode does; outside one, open the window on the review of what
      * the draft sends where; in the review, send the draft: Ctrl+Enter.
      */
-    send: (shell) => {
-        const cm = getCM(shell.view);
-        if (shell.comments.writing() !== null && cm !== null) {
-            Vim.handleKey(cm, "<Esc>", "mapping");
-            return;
-        }
-        if (shell.owner !== null) {
-            shell.owner.window?.close();
-            shell.owner.comments.send();
-            return;
-        }
-        shell.comments.flush();
-        if (shell.review().blocks.length === 0) {
-            shell.say("the draft holds nothing to send");
-            return;
-        }
-        shell.window?.review(shell.review());
+    "send": {
+        says: "end the comment written; open the review; in the review, send the draft",
+        run: (shell) => {
+            const cm = getCM(shell.view);
+            if (shell.comments.writing() !== null && cm !== null) {
+                Vim.handleKey(cm, "<Esc>", "mapping");
+                return;
+            }
+            if (shell.owner !== null) {
+                shell.owner.window?.close();
+                shell.owner.comments.send();
+                return;
+            }
+            shell.comments.flush();
+            if (shell.review().blocks.length === 0) {
+                shell.say("the draft holds nothing to send");
+                return;
+            }
+            shell.window?.review(shell.review());
+        },
     },
     /** Hold the part of the draft at the cursor back from sends: Space x on a comment, or on its line in the review. */
-    hold: (shell) => {
-        (shell.owner ?? shell).comments.hold(true, shell.owner === null ? null : shell.lineId());
+    "hold": {
+        says: "hold a part of the draft back from sends",
+        run: (shell) => {
+            (shell.owner ?? shell).comments.hold(true, shell.owner === null ? null : shell.lineId());
+        },
     },
     /** Let the part of the draft at the cursor go at the next send: Space d. */
-    "let-go": (shell) => {
-        (shell.owner ?? shell).comments.hold(false, shell.owner === null ? null : shell.lineId());
+    "let-go": {
+        says: "let a part of the draft go at the next send",
+        run: (shell) => {
+            (shell.owner ?? shell).comments.hold(false, shell.owner === null ? null : shell.lineId());
+        },
     },
     /** In a picker, choose the line the cursor is on; elsewhere go down a line to its first character, as vim's Enter does. */
-    enter: (shell) => {
-        if (shell.owner?.window?.choose(shell.lineId()) === true) {
-            return;
-        }
-        if (shell.owner !== null && shell.owner.outline?.shell === shell) {
-            shell.owner.view.focus();
-            return;
-        }
-        const cm = getCM(shell.view);
-        if (cm !== null) {
-            Vim.handleKey(cm, "+", "mapping");
-        }
+    "enter": {
+        says: "in a picker, choose the line; elsewhere go down a line",
+        run: (shell) => {
+            if (shell.owner?.window?.choose(shell.lineId()) === true) {
+                return;
+            }
+            if (shell.owner !== null && shell.owner.outline?.shell === shell) {
+                shell.owner.view.focus();
+                return;
+            }
+            const cm = getCM(shell.view);
+            if (cm !== null) {
+                Vim.handleKey(cm, "+", "mapping");
+            }
+        },
     },
     /** Enter pane mode, to move between the outline, the document and the window: Space w. */
-    panes: (shell) => {
-        (shell.owner ?? shell).panes?.enter();
+    "panes": {
+        says: "move between the outline, the document and the window",
+        run: (shell) => {
+            (shell.owner ?? shell).panes?.enter();
+        },
     },
     /** Choose whom the comment at the cursor, or on its line in the review, reaches, or write one to whom's chosen: Space s. */
-    address: (shell) => {
-        (shell.owner ?? shell).comments.address(shell.owner === null ? null : shell.lineId());
+    "address": {
+        says: "choose whom a comment reaches",
+        run: (shell) => {
+            (shell.owner ?? shell).comments.address(shell.owner === null ? null : shell.lineId());
+        },
     },
     /** Comment on the innermost block at the cursor whole, rather than on one of its lines: Space `c`. */
-    "comment-whole": (shell) => {
-        shell.comments.commentWhole();
+    "comment-whole": {
+        says: "comment on the block the cursor is in, whole",
+        run: (shell) => {
+            shell.comments.commentWhole();
+        },
     },
     /** Go to the next comment after the cursor, opening what folds over it: `]n`. */
-    "comment-next": (shell) => {
-        jumped(shell, true);
+    "comment-next": {
+        says: "go to the next comment",
+        run: (shell) => {
+            jumped(shell, true);
+        },
     },
     /** Go to the comment before the cursor, opening what folds over it: `[n`. */
-    "comment-previous": (shell) => {
-        jumped(shell, false);
+    "comment-previous": {
+        says: "go to the comment before",
+        run: (shell) => {
+            jumped(shell, false);
+        },
     },
     /** Write every comment changed since it was last written to the draft at once: `:w`. */
-    "draft-write": (shell) => {
-        shell.comments.flush();
-        shell.say("draft written");
+    "draft-write": {
+        says: "write the draft now",
+        run: (shell) => {
+            shell.comments.flush();
+            shell.say("draft written");
+        },
     },
 /** Open every fold, as `zR` does. */
-    "open-all": (shell) => {
-        shell.level(true);
+    palette: {
+        says: "list every command with its keys, to run one",
+        run: (shell) => {
+            const owner = shell.owner ?? shell;
+            const window = owner.window;
+            if (window === null) {
+                return;
+            }
+            const choices = vimBindings
+                .filter((bind) => bind.command !== "palette")
+                .map((bind) => ({ name: `${said(bind.keys).padEnd(14)} ${commands[bind.command]?.says ?? ""}`, value: bind }));
+            window.pick("Run a command…", choices, (bind) => {
+                const command = commands[bind.command];
+                if (command === undefined) {
+                    return;
+                }
+                if (!bind.keys.includes("{kind}")) {
+                    command.run(owner, { kind: null });
+                    return;
+                }
+                const kinds = [...owner.kinds.folds.values()].map((kind) => ({ name: `${kind.letter}  ${kind.called}`, value: kind.letter }));
+                window.pick(`${command.says}: which kind?`, kinds, (letter) => {
+                    command.run(owner, { kind: letter });
+                });
+            });
+        },
+    },
+    "open-all": {
+        says: "open every fold",
+        run: (shell) => {
+            shell.level(true);
+        },
     },
     /** Close every fold, as `zM` does. */
-    "close-all": (shell) => {
-        shell.level(false);
+    "close-all": {
+        says: "close every fold",
+        run: (shell) => {
+            shell.level(false);
+        },
     },
     /** Open the next level of folds, as `zr` does: every fold whose kind's level is the shallowest still closed. */
-    "open-more": (shell) => {
-        const closed = levels(shell, false);
-        if (closed.length > 0) {
-            shell.level(true, Math.min(...closed));
-        }
+    "open-more": {
+        says: "open the next level of folds",
+        run: (shell) => {
+            const closed = levels(shell, false);
+            if (closed.length > 0) {
+                shell.level(true, Math.min(...closed));
+            }
+        },
     },
     /** Close the deepest level of folds open, as `zm` does. */
-    "close-more": (shell) => {
-        const open = levels(shell, true);
-        if (open.length > 0) {
-            shell.level(false, Math.max(...open));
-        }
+    "close-more": {
+        says: "close the deepest level of folds open",
+        run: (shell) => {
+            const open = levels(shell, true);
+            if (open.length > 0) {
+                shell.level(false, Math.max(...open));
+            }
+        },
     },
 };
+
+/** Say `keys` as the palette of commands shows them: Space, Ctrl, Enter and Esc by name, a kind's letter as `‹kind›`. */
+function said(keys: string): string {
+    const named: readonly (readonly [string, string])[] = [
+        ["<Space>", "Space "],
+        ["<C-CR>", "Ctrl+Enter"],
+        ["<C-k>", "Ctrl+K"],
+        ["<CR>", "Enter"],
+        ["<Esc>", "Esc"],
+        ["{kind}", "‹kind›"],
+    ];
+    return named.reduce((text, [vim, shown]) => text.replaceAll(vim, shown), keys);
+}
 
 /** Move the cursor to the start of the next comment after it, or the last before it, opening every fold over it. */
 function jumped(shell: Shell, forward: boolean): void {
@@ -281,6 +390,7 @@ export const vimBindings: readonly Bind[] = [
     { keys: "<Space>s", command: "address", modes: ["normal"] },
     { keys: "<CR>", command: "enter", modes: ["normal"] },
     { keys: "<Space>w", command: "panes", modes: ["normal"] },
+    { keys: "<C-k>", command: "palette", modes: ["normal"] },
     { keys: "]n", command: "comment-next", modes: ["normal"] },
     { keys: "[n", command: "comment-previous", modes: ["normal"] },
     { keys: ":w", command: "draft-write", modes: ["normal"] },
@@ -304,7 +414,7 @@ export function bindVim(bindings: readonly Bind[]): void {
         (Vim.unmap as (keys: string, mode?: string) => unknown)("<Space>");
     }
     for (const bind of bindings) {
-        const run = commands[bind.command];
+        const run = commands[bind.command]?.run;
         if (run === undefined) {
             throw new Error(`a binding names \`${bind.command}\`, which isn't one of the shell's commands`);
         }
