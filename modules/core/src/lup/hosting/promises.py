@@ -452,6 +452,53 @@ class HostingPromises(Part):
         assert isinstance(stranger, Refused)
 
     @lup.promise
+    async def a_call_from_a_room_is_by_its_session(self, by: Testing) -> None:
+        """A call coming in on a session's room's socket is by that session's agent, or by the conversation of that session it names, a subagent's, whatever it says it's by; a conversation named from a project's container is refused, and so is a call from a room once it has stopped."""
+        session, conversation = by.any(str), by.any(str) if by.any(bool) else None
+        claimed = by.any(Agent) if by.any(bool) else None
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": PODMAN},
+            machine=True,
+        )
+        container = await placed(started, "harmon", NOTES_PLAN, ["notes.Notes"])
+        made = await started.serve("directory", {"container": "room"}, Machine())
+        assert isinstance(made, Accepted)
+        room: str = json.loads(made.answer())["path"]
+        room_of: JsonValue = {
+            "repository": "harmon",
+            "session": session,
+            "container": "room",
+            "directory": room,
+        }
+        await started.serve("seated", room_of, Machine())
+        call: JsonValue = {
+            "format": 1,
+            "kind": "tool",
+            "tool": "note",
+            "given": {},
+            "by": None if claimed is None else claimed.model_dump(mode="json"),
+            "conversation": conversation,
+        }
+        route = await started.serve(
+            "routed", {"directory": room, "call": call}, Machine()
+        )
+        assert isinstance(route, Accepted)
+        carried = json.loads(route.answer())["call"]
+        assert carried["by"] == Agent.of(session, conversation).model_dump(mode="json")
+        assert carried["conversation"] is None
+        named: JsonValue = {**call, "conversation": by.any(str)}
+        from_code = await started.serve(
+            "routed", {"directory": container, "call": named}, Machine()
+        )
+        assert isinstance(from_code, Refused)
+        await started.serve("left", {"session": session}, Machine())
+        gone = await started.serve(
+            "routed", {"directory": room, "call": call}, Machine()
+        )
+        assert isinstance(gone, Refused)
+
+    @lup.promise
     async def a_part_holding_a_secret_runs_apart_given_only_its_own(
         self, by: Testing
     ) -> None:

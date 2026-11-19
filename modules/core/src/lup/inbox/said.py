@@ -1,7 +1,7 @@
 """What a party says or does through the inbox's doors: each tool's, service's and command's model.
 
 An agent's tool takes what they say (`ConcernSaid`, `SendSaid`…), which their
-project's part hands `Inboxes` as `Spoken`, with lup's id for them; the
+project's part hands `Inboxes` as `Spoken`, with who they are; the
 operator's commands take what they do (`Answering`, `Clearing`…).
 """
 
@@ -20,9 +20,9 @@ type Cited = Annotated[int, Ge(1), Lt(2**63)]
 
 
 class Spoken[S: Model](Model):
-    """What an agent said through one of their tools, for `Inboxes` to keep: the agent, by lup's id for them, and what they said."""
+    """What an agent said through one of their tools, for `Inboxes` to keep: the agent, as the doors handed them to the tool, and what they said."""
 
-    agent: str
+    agent: Agent
     said: S
 
 
@@ -186,17 +186,17 @@ class Piling(Model):
 
 
 class Naming(Model):
-    """An agent named, as their session says its name, under the agent who spawned them where one did, each by lup's id for them."""
+    """An agent named, as their session says its name, under the agent who spawned them where one did."""
 
-    agent: str
+    agent: Agent
     name: str
-    spawner: str | None = None
+    spawner: Agent | None = None
 
 
 class Ending(Model):
-    """An agent whose session ended, or started again, by lup's id for them."""
+    """An agent whose session ended, or started again."""
 
-    agent: str
+    agent: Agent
 
 
 # What stands, as data

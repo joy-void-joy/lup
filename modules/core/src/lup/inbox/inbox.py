@@ -51,6 +51,7 @@ from lup.store.database import Database
 from lup.store.errors import StoreError
 from lup.store.records import Edge, Node, named
 from lup.types import Model
+lazy from lup.doors.parties import Agent
 lazy from lup.shell.draft import Commenting
 
 if TYPE_CHECKING:
@@ -87,7 +88,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
 
     >>> from lup.inbox.records import KINDS
     >>> inbox = Inbox(database=Database.opened(":memory:", KINDS), repository="lup")
-    >>> agent = inbox.agent("a1", "builder")
+    >>> agent = inbox.agent(Agent.of("s1"), "builder")
     >>> concern = inbox.opened(agent, "the gate hangs", "It hung twice today.", agent)
     >>> inbox.standing(concern).holder == agent, [each.text for each in inbox.said_in(concern)]
     (True, ['It hung twice today.'])
@@ -135,11 +136,11 @@ class Inbox(Model, arbitrary_types_allowed=True):
 
     def agent(
         self,
-        known_as: str,
+        agent: Agent,
         name: str | None = None,
         spawner: AgentRecord | None = None,
     ) -> AgentRecord:
-        """Return the agent lup knows by the id `known_as`, under `spawner` where they have one: made the first time, and named `name` where a name is given, renamed where it changed.
+        """Return the record of `agent`, lup knowing them by their id, under `spawner` where they have one: made the first time, and named `name` where a name is given, renamed where it changed.
 
         An agent lup hasn't named yet, as one whose session hasn't said its
         name, has none, and is found by their id. Raise `InboxError` where
@@ -154,7 +155,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
             (
                 each
                 for each in self.database.nodes(self.repository, AgentRecord)
-                if each.id == known_as
+                if each.id == agent.id
             ),
             None,
         )
@@ -170,7 +171,8 @@ class Inbox(Model, arbitrary_types_allowed=True):
                 by=None,
                 at=self.now(),
                 name=name,
-                id=known_as,
+                id=agent.id,
+                session=agent.session,
             )
         )
         if spawner is not None:

@@ -40,7 +40,7 @@ def reached(inbox: Inbox, party: PartyRecord) -> Party | None:
     """Return the party a comment on `party`'s blocks reaches: the agent, or the pile, which keeps it; none for the operator, whose own they are."""
     match party:
         case AgentRecord():
-            return Agent(id=party.id)
+            return Agent(id=party.id, session=party.session)
         case PileRecord():
             return Pile(repository=inbox.repository, path=party.name or "")
         case _:
