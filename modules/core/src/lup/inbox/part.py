@@ -447,7 +447,7 @@ class Speaking(Part):
         it, `join` works in it, `hold` takes it, `hand` passes it on, `move`
         puts items in it, `done` says it's done for the operator to clear.
         """
-        return await Inboxes.concern(Spoken(agent=by.id, said=said))
+        return await Inboxes.concern(Spoken(agent=by, said=said))
 
     @lup.tool
     async def friction(self, said: FrictionSaid, by: Agent) -> str:
@@ -457,7 +457,7 @@ class Speaking(Part):
         your own words. It's feedback, kept as a friction where you send it:
         `frictions` unless you name a pile or an agent.
         """
-        return await Inboxes.friction(Spoken(agent=by.id, said=said))
+        return await Inboxes.friction(Spoken(agent=by, said=said))
 
     @lup.tool
     async def note(self, said: NoteSaid, by: Agent) -> str:
@@ -466,7 +466,7 @@ class Speaking(Part):
         An assumption your work rests on, a doubt, or a counterargument: news
         they read when they come to it.
         """
-        return await Inboxes.note(Spoken(agent=by.id, said=said))
+        return await Inboxes.note(Spoken(agent=by, said=said))
 
     @lup.tool
     async def send(self, said: SendSaid, by: Agent) -> str:
@@ -476,7 +476,7 @@ class Speaking(Part):
         concern. A note is news; a problem, a disagreement or a question wants
         its reader's answer. The operator reads every message.
         """
-        return await Inboxes.send(Spoken(agent=by.id, said=said))
+        return await Inboxes.send(Spoken(agent=by, said=said))
 
     @lup.tool
     async def ask(self, said: AskSaid, by: Agent) -> str:
@@ -485,7 +485,7 @@ class Speaking(Part):
         Each decision with your lean; or a question answered in words. It waits
         on them until they answer it.
         """
-        return await Inboxes.ask(Spoken(agent=by.id, said=said))
+        return await Inboxes.ask(Spoken(agent=by, said=said))
 
     @lup.tool
     async def how_it_felt(self, said: Words, by: Agent) -> str:
@@ -495,7 +495,7 @@ class Speaking(Part):
         of work, in your own words.
         """
         return await Inboxes.spoke(
-            Spoken(agent=by.id, said=Uttered(kind="how it felt", text=said.text))
+            Spoken(agent=by, said=Uttered(kind="how it felt", text=said.text))
         )
 
     @lup.tool
@@ -505,14 +505,14 @@ class Speaking(Part):
         It waits on the operator until they answer it.
         """
         return await Inboxes.spoke(
-            Spoken(agent=by.id, said=Uttered(kind="blocked", text=said.text))
+            Spoken(agent=by, said=Uttered(kind="blocked", text=said.text))
         )
 
     @lup.tool
     async def stop(self, said: Words, by: Agent) -> str:
         """End your work by your own choice, saying why."""
         return await Inboxes.spoke(
-            Spoken(agent=by.id, said=Uttered(kind="stop", text=said.text))
+            Spoken(agent=by, said=Uttered(kind="stop", text=said.text))
         )
 
     @lup.tool
@@ -521,7 +521,7 @@ class Speaking(Part):
 
         A message or a question you sent that needn't take their time, with why.
         """
-        return await Inboxes.withdraw(Spoken(agent=by.id, said=said))
+        return await Inboxes.withdraw(Spoken(agent=by, said=said))
 
     @lup.tool(reads=True)
     async def inbox(self, said: Reading, by: Agent) -> str:
@@ -530,7 +530,7 @@ class Speaking(Part):
         With `number`, one item or concern whole; without, what waits on the
         operator and the concerns you hold.
         """
-        return await Inboxes.read(Spoken(agent=by.id, said=said))
+        return await Inboxes.read(Spoken(agent=by, said=said))
 
 
 @contextmanager
