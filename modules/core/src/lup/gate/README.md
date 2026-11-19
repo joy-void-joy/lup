@@ -25,7 +25,8 @@ Any module declares its own as a field of `Steps`, and the gate runs every modul
 `Gate`'s own steps check what every project lup sets up has:
 - `format`: ruff's formatter, which its fix runs;
 - `promises`: pytest, the promises of the modules the declaration resolves to and the examples in docstrings (`lup/testing/README.md`);
-- `imports`: the project's import contracts, through import-linter.
+- `imports`: the project's import contracts, through import-linter;
+- `declaration`: loading the declaration, which every hook does, imports nothing beyond the standard library, lup and what it needs, and the project's own code (`lup.environment.weighing`). A module counts by where its file is: a heavy one is among the files of an installed distribution lup's core doesn't need, its extras left out, outside the worktree. Each is named with the chain of imports from the declaration to it, so it's imported where it's used instead (`lazy from`).
 
 ## `lup gate check`
 
