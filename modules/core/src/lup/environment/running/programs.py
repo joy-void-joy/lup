@@ -9,11 +9,14 @@ environment whole where it's given one, which would drop `PATH` and `HOME`.
 
 import shutil
 from datetime import timedelta
-from typing import override
+from typing import TYPE_CHECKING, override
 
 from lup.doors.parts import Finished, Program, Runs, UnrunError
 from lup.programs import ProgramMissingError, ProgramOverdueError, awaited
 from lup.types import Model
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class Local(Model, Runs):
@@ -34,8 +37,9 @@ class Local(Model, Runs):
         arguments: list[str],
         given: bytes | None,
         env: dict[str, str],
+        cwd: Path | None,
     ) -> Finished:
-        """Run `program` with `arguments`, `given` on its input, `env` set beside the variables this process runs with, and say how it ended, whatever its status.
+        """Run `program` with `arguments`, `given` on its input, `env` set beside the variables this process runs with, from `cwd` or where this process runs, and say how it ended, whatever its status.
 
         Raise `UnrunError` where it isn't there, or runs past `within`.
         """
@@ -43,7 +47,9 @@ class Local(Model, Runs):
         words = [*(["env", *pinned] if env else []), program.name, *arguments]
         missing = program.missing()
         try:
-            ran = await awaited(*words, stdin=given, checked=False, within=self.within)
+            ran = await awaited(
+                *words, cwd=cwd, stdin=given, checked=False, within=self.within
+            )
         except ProgramMissingError as unfound:
             raise UnrunError(missing, about=[program.name]) from unfound
         except ProgramOverdueError as late:

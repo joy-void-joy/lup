@@ -127,6 +127,38 @@ class Stamp(Module):
     name = "stamp"
 
 
+class Tallied(Model):
+    """Which lup answered a tally, and who it was for."""
+
+    where: str
+    by: str
+
+
+class Tallying(Part):
+    """Tallies, one run where it's typed and one carried to where the project runs."""
+
+    module: Tally
+
+    @lup.command(here=True)
+    async def tally(self, _asking: Asking, by: Agent | Operator) -> Tallied:
+        """Tally the worktree it's typed in."""
+        return Tallied(where=self.module.where, by=type(by).__name__)
+
+    @lup.command
+    async def peek(self, _asking: Asking, by: Agent | Operator) -> Tallied:
+        """Peek at the tally where the project runs."""
+        return Tallied(where=self.module.where, by=type(by).__name__)
+
+
+class Tally(Module):
+    """Tallying: a module with a command run where it's typed, saying which lup answers."""
+
+    name = "tally"
+    where: str = "machine"
+    """Which lup this is, as its tallies say."""
+    parts: Parts = Parts.of(Tallying)
+
+
 def jotting() -> Project:
     """Return a project of lup's default modules, the jots and the seal."""
     return Project(modules=Modules.default().add(Jot(), Seal()))
@@ -261,6 +293,25 @@ class CommandLinePromises(Part):
         with raises(ProjectError) as refused:
             await by.started(Project(modules=shadowing))
         assert "stamp" in refused.raised().about
+
+    @lup.promise
+    async def a_command_marked_here_runs_in_the_worktree_typed_in(
+        self, by: Testing
+    ) -> None:
+        """A command marked to run where it's typed is answered over the declaration of the worktree it's typed in, by the party lup's program on the operator's machine names, while every other call still goes through that program."""
+        machine = await by.started(Project(modules=Modules.default().add(Tally())))
+        worktree = await by.started(
+            Project(modules=Modules.default().add(Tally(where="worktree")))
+        )
+        party = by.any(Agent) if by.any(bool) else Operator()
+        here = await machine.typed(["tally", "tally"], party, here=worktree)
+        through = await machine.typed(["tally", "peek"], party, here=worktree)
+        assert here.status == 0
+        assert through.status == 0
+        tallied = Tallied.model_validate_json(here.output)
+        peeked = Tallied.model_validate_json(through.output)
+        assert tallied == Tallied(where="worktree", by=type(party).__name__)
+        assert peeked == Tallied(where="machine", by=type(party).__name__)
 
     @lup.promise
     async def a_projects_command_offers_its_modules_alone(self, by: Testing) -> None:
